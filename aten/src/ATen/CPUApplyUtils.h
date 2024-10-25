@@ -64,11 +64,15 @@ struct strided_tensor_iter_fixed {
   int64_t strides_[N] = {0};
 
   strided_tensor_iter_fixed(strided_tensor_iter_fixed const&) = delete;
-  void operator=(strided_tensor_iter_fixed const& x) = delete;
-  strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
+  strided_tensor_iter_fixed& operator=(strided_tensor_iter_fixed const& x) =
+      delete;
+  strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) noexcept = default;
+  strided_tensor_iter_fixed& operator=(strided_tensor_iter_fixed&& x) noexcept =
+      default;
+  ~strided_tensor_iter_fixed() noexcept = default;
   strided_tensor_iter_fixed(
       Tensor& tensor,
-      C10_UNUSED bool sort_strides = false)
+      [[maybe_unused]] bool sort_strides = false)
       : data_(tensor.data_ptr<T>()) {
     std::memset(counter_, 0, sizeof(int64_t) * N);
     if (tensor.dim() > 0) {
@@ -93,8 +97,10 @@ struct strided_tensor_iter {
   std::vector<int64_t> strides_;
 
   strided_tensor_iter(strided_tensor_iter const&) = delete;
-  void operator=(strided_tensor_iter const& x) = delete;
-  strided_tensor_iter(strided_tensor_iter&&) = default;
+  strided_tensor_iter& operator=(strided_tensor_iter const& x) = delete;
+  strided_tensor_iter(strided_tensor_iter&&) noexcept = default;
+  strided_tensor_iter& operator=(strided_tensor_iter&&) noexcept = default;
+  ~strided_tensor_iter() noexcept = default;
   strided_tensor_iter(Tensor& tensor)
       : data_(tensor.data_ptr<T>()),
         dim_(tensor.ndimension()),
@@ -136,7 +142,7 @@ inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
   checkDeviceType("CPU_tensor_apply", tensors, kCPU);
   checkLayout("CPU_tensor_apply", tensors, kStrided);
   if (!_all_equal_numel(tensors))
-    AT_ERROR(_all_equal_numel_error(tensors));
+    TORCH_CHECK(false, _all_equal_numel_error(tensors));
   // An empty tensor has no elements
   for (auto& t : tensors)
     if (t.numel() == 0)

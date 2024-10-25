@@ -21,6 +21,33 @@ class ResultFileEntry:
     metric_name: str
     actual_value: int
 
+def replace_with_zeros(num):
+    """
+    Keeps the first three digits of an integer and replaces the rest with zeros.
+
+    Args:
+        num (int): The number to modify.
+
+    Returns:
+        int: The modified number.
+
+    Raises:
+        ValueError: If the input is not an integer.
+    """
+    # Check if input is an integer
+    if not isinstance(num, int):
+        raise ValueError("Input must be an integer")
+
+    # Calculate the number of digits to remove
+    digits_to_remove = len(str(abs(num))) - 3
+
+    # Replace digits with zeros
+    if digits_to_remove > 0:
+        modified_num = (num // 10**digits_to_remove) * 10**digits_to_remove
+    else:
+        modified_num = num
+
+    return modified_num
 
 def main():
     # Expected file is the file that have the results that we are comparing against.
@@ -101,7 +128,8 @@ def main():
             )
 
         new_entry = copy.deepcopy(entry)
-        new_entry.expected_value = result
+
+        new_entry.expected_value = replace_with_zeros (result)
         new_expected[key] = new_entry
 
         if result > high:

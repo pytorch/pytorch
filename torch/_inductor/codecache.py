@@ -69,6 +69,8 @@ from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassTy
 from torch._utils_internal import log_cache_bypass
 
 from .remote_cache import create_cache
+from .runtime import autotune_cache
+from .runtime.autotune_cache import AutotuneCacheBundler
 from .utils import _align
 
 
@@ -78,7 +80,9 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
+    from .compile_fx import _CompileFxKwargs
     from .remote_cache import JsonDataTy, RemoteCache
+    from .utils import InputType
 
 
 """
@@ -194,6 +198,15 @@ def get_cpp_wrapper_cubin_path_name() -> str:
     return "cubin_path" if torch.version.hip is None else "hsaco_path"
 
 
+@functools.lru_cache(None)
+def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
+    return (
+        Path(os.path.join(global_cache_dir, CacheBase.get_system()["hash"]))
+        if global_cache_dir is not None
+        else None
+    )
+
+
 class CacheBase:
     @staticmethod
     @functools.lru_cache(None)
@@ -240,13 +253,8 @@ class CacheBase:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
 
     @staticmethod
-    @functools.lru_cache(None)
     def get_global_cache_path() -> Optional[Path]:
-        return (
-            Path(os.path.join(config.global_cache_dir, CacheBase.get_system()["hash"]))
-            if config.global_cache_dir is not None
-            else None
-        )
+        return get_global_cache_path_impl(config.global_cache_dir)
 
     def __init__(self) -> None:
         self.system = CacheBase.get_system()
@@ -470,7 +478,17 @@ def write_atomic(
     write_mode = "w" if isinstance(content, str) else "wb"
     with tmp_path.open(write_mode, encoding="utf-8" if encode_utf_8 else None) as f:
         f.write(content)
-    tmp_path.rename(path)
+    try:
+        tmp_path.rename(target=path)
+    except FileExistsError as e_file_exist:
+        if not _IS_WINDOWS:
+            raise
+        # On Windows file exist is expected: https://docs.python.org/3/library/pathlib.html#pathlib.Path.rename
+        # Below two lines code is equal to `tmp_path.rename(path)` on non-Windows OS.
+        # 1. Copy tmp_file to Target(Dst) file.
+        shutil.copy2(src=tmp_path, dst=path)
+        # 2. Delete tmp_file.
+        os.remove(tmp_path)
 
 
 @dataclasses.dataclass
@@ -676,34 +694,35 @@ def torch_key() -> bytes:
     """
     Compute a key that contains relevant information about torch source files
     """
-    if not config.is_fbcode():
+    with dynamo_timed("inductor_codecache_torch_key"):
+        if not config.is_fbcode():
 
-        def get_code_hash(root: str) -> bytes:
-            # This function isn't meant to be used outside of torch_key, just a
-            # helper for clarity. Instead, use torch_key() directly when you need
-            # a hash representing the state of the source code.
-            extra_files = (
-                "codegen/aoti_runtime/interface.cpp",
-                "codegen/aoti_runtime/implementation.cpp",
-                "codegen/cpp_prefix.h",
-                "script.ld",
-            )
-            inductor_root = os.path.dirname(__file__)
-            extra_files = [os.path.join(inductor_root, x) for x in extra_files]
-            hasher = hashlib.sha256()
-            hasher.update(torch.__version__.encode("utf-8"))
-            build_code_hash([root], "", hasher)
-            for path in extra_files:
-                if os.path.exists(path):
-                    with open(path, "rb") as f:
-                        hasher.update(f.read())
-            return hasher.digest()
+            def get_code_hash(root: str) -> bytes:
+                # This function isn't meant to be used outside of torch_key, just a
+                # helper for clarity. Instead, use torch_key() directly when you need
+                # a hash representing the state of the source code.
+                extra_files = (
+                    "codegen/aoti_runtime/interface.cpp",
+                    "codegen/aoti_runtime/implementation.cpp",
+                    "codegen/cpp_prefix.h",
+                    "script.ld",
+                )
+                inductor_root = os.path.dirname(__file__)
+                extra_files = [os.path.join(inductor_root, x) for x in extra_files]
+                hasher = hashlib.sha256()
+                hasher.update(torch.__version__.encode("utf-8"))
+                build_code_hash([root], "", hasher)
+                for path in extra_files:
+                    if os.path.exists(path):
+                        with open(path, "rb") as f:
+                            hasher.update(f.read())
+                return hasher.digest()
 
-        return get_code_hash(_TORCH_PATH)
+            return get_code_hash(_TORCH_PATH)
 
-    from libfb.py import parutil
+        from libfb.py import parutil
 
-    return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
+        return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
 def get_inductor_root() -> str:
@@ -738,23 +757,25 @@ class FxGraphHashDetails:
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        example_inputs: List[torch.Tensor],
-        fx_kwargs: Dict[str, Any],
+        example_inputs: Sequence[InputType],
+        fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
     ) -> None:
         self.gm = gm
         self.example_inputs = example_inputs
 
-        # Order kwargs so hashing is stable to changes in kwarg order.
-        self.fx_kwargs = {}
-        for k in sorted(fx_kwargs):
+        # Order kwargs so hashing is stable to changes in kwarg order. Although
+        # it's technically a _CompileFxKwargs we don't actually need it typed as
+        # such since we're just using it to generate a hash.
+        self.fx_kwargs: Dict[str, object] = {}
+        for k, v in sorted(fx_kwargs.items()):
             if k not in self.EXCLUDED_KWARGS:
-                if type(fx_kwargs[k]) is set:
+                if type(v) is set:
                     # Special case to handle set params. Python sets can't be
                     # ordered, so sort the elements and store them in a proxy.
-                    self.fx_kwargs[k] = OrderedSetHolder(sorted(fx_kwargs[k]))
+                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))
                 else:
-                    self.fx_kwargs[k] = fx_kwargs[k]
+                    self.fx_kwargs[k] = v
 
         # Alignment checks
         self.inputs_to_check = inputs_to_check
@@ -805,8 +826,8 @@ class FxGraphHashDetails:
 
 def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
-    fx_kwargs: Dict[str, Any],
+    example_inputs: Sequence[InputType],
+    fx_kwargs: _CompileFxKwargs,
     inputs_to_check: Sequence[int],
 ) -> Tuple[str, List[str]]:
     """
@@ -823,7 +844,7 @@ def compiled_fx_graph_hash(
 
 
 def cudagraph_post_compile(
-    example_inputs: List[Any],
+    example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
 ) -> None:
@@ -866,7 +887,7 @@ def cudagraph_post_compile(
         assert current_callable is not None
         compiled_graph.current_callable = cudagraphify(
             current_callable,
-            static_input_idxs=static_input_idxs,
+            static_input_idxs=static_input_idxs or (),
             device_index=next(iter(compiled_graph.device_idxs)),
             stack_traces=stack_traces,
             is_backward=is_backward,
@@ -1005,7 +1026,7 @@ class FxGraphCache:
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
-    def _filter_backed_symints(inputs: List[Any]) -> List[torch.SymInt]:
+    def _filter_backed_symints(inputs: Sequence[InputType]) -> List[torch.SymInt]:
         """
         Get the backed SymInt objects from the input list. Note that we can never
         have guards that depend on unbacked symint.
@@ -1025,7 +1046,7 @@ class FxGraphCache:
     @staticmethod
     def _lookup_graph(
         key: str,
-        example_inputs: List[torch.Tensor],
+        example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
     ) -> Optional[CompiledFxGraph]:
@@ -1116,6 +1137,9 @@ class FxGraphCache:
 
             write_atomic(artifact_path, code, make_dirs=True)
 
+        inductor_meta = autotune_cache.inductor_meta_from_config()
+        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
@@ -1161,7 +1185,7 @@ class FxGraphCache:
     @staticmethod
     def post_compile(
         compiled_graph: CompiledFxGraph,
-        example_inputs: List[torch.Tensor],
+        example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
     ) -> CompiledFxGraph:
         """
@@ -1208,7 +1232,7 @@ class FxGraphCache:
     def _save_graph(
         key: str,
         compiled_graph: CompiledFxGraph,
-        example_inputs: List[torch.Tensor],
+        example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
     ) -> None:
@@ -1317,8 +1341,8 @@ class FxGraphCache:
     @staticmethod
     def prepare_key(
         gm: torch.fx.GraphModule,
-        example_inputs: List[torch.Tensor],
-        fx_kwargs: Dict[str, Any],
+        example_inputs: Sequence[InputType],
+        fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         remote: bool,
     ) -> Tuple[Optional[Tuple[str, List[str]]], Dict[str, Any]]:
@@ -1368,7 +1392,7 @@ class FxGraphCache:
     def load_with_key(
         key: str,
         debug_lines: List[str],
-        example_inputs: List[torch.Tensor],
+        example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         is_backward: bool,
@@ -1387,7 +1411,7 @@ class FxGraphCache:
             "cache_event_time": time_ns(),
         }
         if compiled_graph is not None:
-            log.debug("fx graph cache hit for key %s", key)
+            log.info("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
 
@@ -1401,7 +1425,7 @@ class FxGraphCache:
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
-            log.debug("fx graph cache miss for key %s", key)
+            log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
             cache_info["cache_state"] = "miss"
 
@@ -1411,8 +1435,8 @@ class FxGraphCache:
     def load(  # type: ignore[no-untyped-def]
         compile_fx_fn: Callable[..., Any],
         gm: torch.fx.GraphModule,
-        example_inputs: List[torch.Tensor],
-        fx_kwargs: Dict[str, Any],
+        example_inputs: Sequence[InputType],
+        fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         local: bool,
         remote: bool,
@@ -1488,6 +1512,18 @@ class FxGraphCache:
             cache_info["cache_event_time"],
             metadata=cache_info,
         )
+        # Add event data about cache hits/miss
+        # TODO: add remote cache get/put timings here too
+        chromium_log.add_event_data(
+            "inductor_compile",
+            cache_state=cache_state,
+            cache_event_time=cache_info["cache_event_time"],
+            key=cache_info.get("key"),
+            components=cache_info.get("components"),
+            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+            remote_cache_enabled=remote,
+            local_cache_enabled=local,
+        )
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
@@ -1498,7 +1534,7 @@ class FxGraphCache:
         )
         # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
         FxGraphCache.post_compile(
-            compiled_graph, example_inputs, fx_kwargs["cudagraphs"]
+            compiled_graph, example_inputs, fx_kwargs["cudagraphs"]  # type: ignore[arg-type]
         )
         return compiled_graph
 
@@ -1545,7 +1581,7 @@ class CompiledFxGraph:
     guards_expr: Optional[str]
 
     cudagraph_info: Optional[CudagraphCachedInfo]
-    fx_kwargs: Dict[str, Any]
+    fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
@@ -1585,9 +1621,12 @@ class CompiledFxGraph:
         self.inputs_to_check = ()
         self.boxed_forward_device_index = None
 
-    def __call__(self, inputs: List[Any]) -> Any:
+    def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
-        return self.current_callable(inputs)
+        try:
+            return self.current_callable(inputs)
+        finally:
+            AutotuneCacheBundler.end_compile()
 
 
 def run_command_and_check(cmd_: str) -> None:
