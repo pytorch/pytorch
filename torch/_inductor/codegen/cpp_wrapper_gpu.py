@@ -226,6 +226,7 @@ class CppWrapperGpu(CppWrapperCpu):
         configs,
         triton_meta,
         constexprs,
+        equal_to_1=None,
     ):
         # in C++ wrapper, we don't pass constexpr args, as they don't
         # get added as parameters to the PTX code compiled from the
@@ -248,6 +249,7 @@ class CppWrapperGpu(CppWrapperCpu):
             triton=True,
             triton_meta=triton_meta,
             autotune_configs=configs,
+            equal_to_1=equal_to_1,
         )
 
     def generate_tma_descriptor(self, desc):
@@ -370,6 +372,7 @@ class CppWrapperGpu(CppWrapperCpu):
         triton_meta=None,
         autotune_configs=None,
         grid_extra_kwargs="",
+        equal_to_1=None,
     ):
         assert arg_types is not None and len(call_args) == len(
             arg_types
@@ -416,7 +419,8 @@ class CppWrapperGpu(CppWrapperCpu):
                 and triton_meta.get("configs")
                 and triton_meta.get("signature")
             ):
-                equal_to_1 = triton_meta["configs"][0].equal_to_1
+                if not equal_to_1:
+                    equal_to_1 = triton_meta["configs"][0].equal_to_1
                 call_args = [
                     arg for i, arg in enumerate(call_args) if i not in equal_to_1
                 ]

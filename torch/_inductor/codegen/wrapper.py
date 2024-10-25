@@ -821,6 +821,7 @@ class PythonWrapperCodegen(CodeGen):
         configs,
         triton_meta,
         constexprs,
+        equal_to_1,
     ):
         grid_fn, code = user_defined_kernel_grid_fn_code(
             kernel_name, configs, grid, wrapper=self
@@ -1737,6 +1738,7 @@ class PythonWrapperCodegen(CodeGen):
         triton_meta=None,
         autotune_configs=None,
         grid_extra_kwargs="",
+        equal_to_1=None,
     ):
         """
         Generates kernel call code.
