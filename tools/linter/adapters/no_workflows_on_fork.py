@@ -107,10 +107,10 @@ def check_file(filename: str) -> List[LintMessage]:
         else:
             if_statement = str(if_statement)
             valid_checks = [
-                "github.repository == 'pytorch/pytorch'",
-                "github.repository_owner == 'pytorch'",
+                lambda x: "github.repository == 'pytorch/pytorch'" in x and not "github.event_name != 'schedule' || github.repository == 'pytorch/pytorch'" in x,
+                lambda x: "github.repository_owner == 'pytorch'" in x
             ]
-            if not any(s in if_statement for s in valid_checks):
+            if not any(f(if_statement) for f in valid_checks):
                 bad_jobs[job] = if_statement
 
     with open(filename) as f:
