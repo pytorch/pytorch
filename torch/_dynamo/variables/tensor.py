@@ -1007,7 +1007,7 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
 
         if not self.source:
-            if not compiled_autograd.compiled_autograd_enabled:
+            if not compiled_autograd.enabled():
                 # TODO(voz):
                 # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
                 # python state.
@@ -1146,11 +1146,11 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
-    def as_tensor(self, tx):
+    def as_tensor(self, tx, dtype):
         if self._tensor_var is None:
             self._tensor_var = VariableTracker.build(
                 tx, torch.scalar_tensor
-            ).call_function(tx, [self], {})
+            ).call_function(tx, [self], {"dtype": VariableTracker.build(tx, dtype)})
         return self._tensor_var
 
     def evaluate_expr(self, output_graph=None):

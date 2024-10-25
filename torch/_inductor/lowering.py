@@ -3162,6 +3162,7 @@ def index_output_size_and_inner_fn(
     indexed_size,
     x_loader,
     check,
+    wrap_neg=True,
 ):
     # Note that behavior of indexing differs when there are non consecutive
     # tensors. In this case, the tensor index is pulled to the beginning.
@@ -3213,6 +3214,7 @@ def index_output_size_and_inner_fn(
                         loader(idx[start_offset : start_offset + rank]),
                         size,
                         check=check,
+                        wrap_neg=wrap_neg,
                     )
                 )
         new_index = [
@@ -3235,7 +3237,7 @@ def index_impl(x, indices, check):
     )
 
 
-def index_impl_helper(x, indices, check):
+def index_impl_helper(x, indices, check, wrap_neg=True):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
     indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
@@ -3263,6 +3265,7 @@ def index_impl_helper(x, indices, check):
         indexed_size,
         None,
         check=check,
+        wrap_neg=wrap_neg,
     )
 
     def inner_fn(idx):
@@ -3442,7 +3445,9 @@ fallback__unsafe_masked_index_put_accumulate = fallback_handler(
 
 @register_lowering(aten._unsafe_masked_index, type_promotion_kind=None)
 def _unsafe_masked_index(self, mask, indices, fill):
-    ranges, _, _unsafe_index_fn = index_impl_helper(self, indices, check=False)
+    ranges, _, _unsafe_index_fn = index_impl_helper(
+        self, indices, check=False, wrap_neg=False
+    )
     mask_loader = mask.make_loader()
     self_loader = self.make_loader()
 
@@ -6238,6 +6243,11 @@ for method, func in magic_methods.items():
     register_lowering(method_to_operator(method))(func)
 
 
+@register_lowering(torch.sym_sum)
+def sym_sum(args):
+    return sympy.Add(*args)
+
+
 @register_lowering(aten._foobar)
 def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
@@ -6389,6 +6399,12 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    return list(map(TensorBox.create, result))
+
+
+@register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
+def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
+    result = ir.InvokeSubgraph.create(subgraph_fn, operands)
     return list(map(TensorBox.create, result))
 
 
