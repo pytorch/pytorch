@@ -1635,6 +1635,11 @@ def compile_fx(
                     "dynamo_flat_name_to_original_fqn"
                 ]
 
+            if "dynamo_compile_context" in model_.meta:
+                unlifted_gm.meta["dynamo_compile_context"] = model_.meta[
+                    "dynamo_compile_context"
+                ]
+
             # Disable amp as in aot_dispatch_autograd (https://github.com/pytorch/pytorch/pull/86515)
             # In inference_compiler (fw_compiler_base), _recursive_joint_graph_passes will call into
             # _sfdp_init() to register patterns.

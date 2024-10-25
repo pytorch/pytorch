@@ -541,23 +541,24 @@ class ConvertFrameAssert:
             info = f"{code.co_name} {code.co_filename}:{code.co_firstlineno}"
             dynamo_tls.traced_frame_infos.append(info)
 
-        return _compile(
-            frame.f_code,
-            frame.f_globals,
-            frame.f_locals,
-            frame.f_builtins,
-            self._torchdynamo_orig_callable,
-            self._one_graph,
-            self._export,
-            self._export_constraints,
-            hooks,
-            cache_entry,
-            cache_size,
-            frame,
-            frame_state=frame_state,
-            compile_id=compile_id,
-            skip=skip + 1,
-        )
+        with compile_context(CompileContext(compile_id)):
+            return _compile(
+                frame.f_code,
+                frame.f_globals,
+                frame.f_locals,
+                frame.f_builtins,
+                self._torchdynamo_orig_callable,
+                self._one_graph,
+                self._export,
+                self._export_constraints,
+                hooks,
+                cache_entry,
+                cache_size,
+                frame,
+                frame_state=frame_state,
+                compile_id=compile_id,
+                skip=skip + 1,
+            )
 
 
 def convert_frame_assert(

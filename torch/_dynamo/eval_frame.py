@@ -1071,6 +1071,10 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
                 "dynamo_flat_name_to_original_fqn"
             ]
+        if "dynamo_compile_context" in self.module.meta:
+            result_gm.meta["dynamo_compile_context"] = self.module.meta[
+                "dynamo_compile_context"
+            ]
         return result_gm
 
 

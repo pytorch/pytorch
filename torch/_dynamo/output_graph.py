@@ -23,7 +23,12 @@ import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
-from torch._guards import GlobalContextCheckpointState, Source, TracingContext
+from torch._guards import (
+    CompileContext,
+    GlobalContextCheckpointState,
+    Source,
+    TracingContext,
+)
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
@@ -313,6 +318,7 @@ class OutputGraph:
                 export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.compile_context: Optional[CompileContext] = CompileContext.try_get()
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -1368,6 +1374,7 @@ class OutputGraph:
             gm.meta[
                 "dynamo_flat_name_to_original_fqn"
             ] = self.dynamo_flat_name_to_original_fqn.copy()
+            gm.meta["dynamo_compile_context"] = self.compile_context
 
             graph_code_log.debug(
                 "%s",
