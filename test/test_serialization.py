@@ -4526,6 +4526,14 @@ class TestSubclassSerialization(TestCase):
         finally:
             torch.serialization.clear_safe_globals()
 
+    def test_sets_are_loadable_with_weights_only(self):
+        s = {1, 2, 3}
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(s, f)
+            f.seek(0)
+            l_s = torch.load(f, weights_only=True)
+            self.assertEqual(l_s, s)
+
     @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
     def test_tensor_subclass_map_location(self):
         t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
