@@ -412,6 +412,46 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x, scale)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, "FP8 requires H100+ and MI300+")
+    def test_fp8_pattern_2(self):
+        """
+        This test repros the fp8 fusion relation issue here:
+            https://github.com/pytorch/pytorch/issues/133242
+        """
+        ref_dtype = torch.bfloat16
+        M, K = 4096, 4096
+
+        input_tensor = torch.randn(
+            M, K, device="cuda", dtype=ref_dtype, requires_grad=False
+        )
+        scale = torch.Tensor([10.0]).to("cuda")
+
+        E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
+        E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
+
+        def test_pattern2(tensor_x_inp, scale_x):
+            tensor_x = tensor_x_inp * scale_x
+            tensor_x = tensor_x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
+            tensor_fp8 = tensor_x.to(torch.float8_e4m3fn)
+
+            tensor_x_t = (tensor_x_inp * scale_x).t()
+            tensor_x_t = tensor_x_t.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
+            tensor_fp8_t = tensor_x_t.to(torch.float8_e4m3fn)
+
+            tensor_fp8_t = tensor_fp8_t.contiguous().t()
+
+            return (tensor_fp8, tensor_fp8_t)
+
+        test_pattern = torch.compile(test_pattern2)
+        tensor_fp8, tensor_fp8_t = test_pattern(input_tensor, scale)
+
+        self.assertEqual(1, metrics.generated_kernel_count)
+
+        expected_numbytes = scale.nbytes  # scalar
+        expected_numbytes += input_tensor.nbytes  # input
+        expected_numbytes += tensor_fp8.nbytes + tensor_fp8_t.nbytes  # output
+        self.assertEqual(expected_numbytes, metrics.num_bytes_accessed)
+
 
 if __name__ == "__main__":
     if HAS_GPU:
