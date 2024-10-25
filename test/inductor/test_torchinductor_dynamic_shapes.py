@@ -986,8 +986,16 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(specialize_float=False)
     def test_unspecialized_float_fallback_specialization(self):
         def fn(x, y, z):
-            a = torch.exp(torch.tensor(z))
-            return a * (x * y)
+            return (
+                torch.tensor(z),
+                torch.exp(torch.tensor(z)) * (x * y),
+                x.size(0),
+                math.sqrt(x.size(0)),
+                math.floor(math.sqrt(x.size(0))),
+                math.floor(math.sqrt(x.numel())),
+                math.floor(math.sqrt(x.dim())),
+                math.floor(math.sqrt(z)),
+            )
 
         cnt = CompileCounterWithBackend("inductor")
         fn_opt = torch._dynamo.optimize(cnt)(fn)

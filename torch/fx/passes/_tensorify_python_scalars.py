@@ -272,10 +272,10 @@ def tensorify_python_scalars(
                     and isinstance(zf := a.meta["val"], torch.SymFloat)
                     and zf.node.hint is not None
                     and all(
-                        (node := expr_to_sym_proxy.get(s)) is not None
-                        and node.node is not None
-                        and "val" in node.node.meta
-                        and isinstance(node.node.meta["val"], torch.SymFloat)
+                        (p := expr_to_sym_proxy.get(s)) is not None
+                        and p.node is not None
+                        and "val" in p.node.meta
+                        and isinstance(p.node.meta["val"], torch.SymFloat)
                         for s in zf.node.expr.free_symbols
                     )
                 ):
@@ -291,10 +291,10 @@ def tensorify_python_scalars(
                     and isinstance(zf := v.meta["val"], torch.SymFloat)
                     and zf.node.hint is not None
                     and all(
-                        (node := expr_to_sym_proxy.get(s)) is not None
-                        and node.node is not None
-                        and "val" in node.node.meta
-                        and isinstance(node.node.meta["val"], torch.SymFloat)
+                        (p := expr_to_sym_proxy.get(s)) is not None
+                        and p.node is not None
+                        and "val" in p.node.meta
+                        and isinstance(p.node.meta["val"], torch.SymFloat)
                         for s in zf.node.expr.free_symbols
                     )
                 ):
