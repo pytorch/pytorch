@@ -258,6 +258,12 @@ def expectedFailureRetraceability(fn):
     return fn
 
 
+# Controls tests generated in test/export/test_retraceability.py
+def expectedFailureRetraceabilityNonStrict(fn):
+    fn._expected_failure_retrace_non_strict = True
+    return fn
+
+
 # Controls tests generated in test/export/test_serdes.py
 def expectedFailureSerDer(fn):
     fn._expected_failure_serdes = True

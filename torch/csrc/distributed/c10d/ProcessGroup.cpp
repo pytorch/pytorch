@@ -12,6 +12,10 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
+#include <utility>
+
+using WorkPtr = c10::intrusive_ptr<c10d::Work>;
+using WeakWorkPtr = c10::weak_intrusive_ptr<c10d::Work>;
 
 namespace c10d {
 
@@ -102,10 +106,10 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
 }
 
 ProcessGroup::ProcessGroup(
-    const c10::intrusive_ptr<::c10d::Store>& store,
+    c10::intrusive_ptr<::c10d::Store> store,
     int rank,
     int size)
-    : store_(store),
+    : store_(std::move(store)),
       rank_(rank),
       size_(size),
       backendType_(BackendType::UNDEFINED),
@@ -164,90 +168,107 @@ namespace {
 
 class WorkRegistry {
  public:
+  template<typename PtrType>
   void register_work(
-      const at::Tensor& tensor,
-      const c10::intrusive_ptr<c10d::Work>& work) {
+    const at::Tensor& tensor,
+    const c10::intrusive_ptr<c10d::Work>& work) {
     if (!tensor.has_storage()) {
-      TORCH_WARN_ONCE(
-          "Registering collective work for tensor without storage is not supported. "
-          "Calling c10d_functional.wait_tensor() on this tensor will not wait for the collective to complete. "
-          "Unsupported tensor type: " +
-          tensor.toString());
-      return;
+        TORCH_WARN_ONCE(
+            "Registering collective work for tensor without storage is not supported. "
+            "Calling c10d_functional.wait_tensor() on this tensor will not wait for the collective to complete. "
+            "Unsupported tensor type: " +
+            tensor.toString());
+        return;
     }
     auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
 
-    auto it = registry_.find(storage);
-    if (it == registry_.end()) {
-      registry_.emplace(
-          std::move(storage),
-          std::vector<c10::intrusive_ptr<c10d::Work>>{work});
+    if constexpr (std::is_same_v<PtrType, WeakWorkPtr>) {
+      std::cout << "Registering weak work" << std::endl;
+        auto it = weak_registry_.find(storage);
+        if (it == weak_registry_.end()) {
+            weak_registry_.emplace(
+                std::move(storage),
+                std::vector<WeakWorkPtr>{WeakWorkPtr(work)});
+        } else {
+            it->second.push_back(WeakWorkPtr(work));
+        }
     } else {
-      // There is no guarantee that the previous work object for this
-      // tensor storage is completed before the new work object is registered.
-      // Therefore we need to maintain a list of work objects for each tensor
-      // storage.
-      it->second.push_back(work);
+      std::cout << "Registering strong work" << std::endl;
+      auto it = registry_.find(storage);
+      if (it == registry_.end()) {
+          registry_.emplace(
+              std::move(storage),
+              std::vector<WorkPtr>{work});
+      } else {
+          it->second.push_back(work);
+      }
     }
   }
 
-  std::vector<c10::intrusive_ptr<c10d::Work>> pop_works(
-      const at::Tensor& tensor) {
+  template<typename PtrType>
+  void wait_works(const at::Tensor& tensor) {
     const auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
-    auto it = registry_.find(storage);
-    if (it == registry_.end()) {
-      return {};
-    }
-    auto works = it->second;
-    registry_.erase(it);
-    return works;
-  }
 
-  void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
-    std::unique_lock lock(lock_);
-    for (auto it = registry_.begin(); it != registry_.end();) {
-      std::vector<c10::intrusive_ptr<c10d::Work>> nonmatching_works;
-      for (const auto& _work : it->second) {
-        if (_work != work) {
-          nonmatching_works.push_back(_work);
+    if constexpr (std::is_same_v<PtrType, WeakWorkPtr>) {
+        auto it = weak_registry_.find(storage);
+        if (it == weak_registry_.end()) {
+            return;
         }
-      }
-      if (nonmatching_works.empty()) {
-        it = registry_.erase(it);
-      } else {
-        it->second = std::move(nonmatching_works);
-        ++it;
-      }
+        auto works = it->second;
+        weak_registry_.erase(it);
+        for (const auto& work : works) {
+            if (!work.expired()) {
+                std::cout << "Waiting for weak work" << std::endl;
+                work.lock()->wait();
+            }
+        }
+    } else {
+        auto it = registry_.find(storage);
+        if (it == registry_.end()) {
+            return;
+        }
+        auto works = it->second;
+        registry_.erase(it);
+        for (const auto& work : works) {
+            work->wait();
+        }
     }
   }
 
+  template<typename PtrType>
   size_t get_work_registry_size() {
     std::unique_lock lock(lock_);
     size_t total_size = 0;
-    for (const auto& [storage, works] : registry_) {
-      total_size += works.size();
+    if constexpr (std::is_same_v<PtrType, WeakWorkPtr>) {
+      for (const auto& [storage, works] : weak_registry_) {
+        total_size += works.size();
+      }
+    } else {
+      for (const auto& [storage, works] : registry_) {
+        total_size += works.size();
+      }
     }
     return total_size;
   }
 
   ~WorkRegistry() {
-    // If there are still unwaited work objects, their corresponding process
+    // If there are still unwaited functional collective work objects, their corresponding process
     // groups should have already been destroyed at this stage. Any attempts to
     // wait for these work objects or to destroy them will only result in
     // confusing errors. Therefore, we simply issue a warning and intentionally
     // allow the unwaited work objects to leak.
-    size_t registry_size = get_work_registry_size();
+    size_t registry_size = get_work_registry_size<WorkPtr>();
     if (registry_size > 0) {
       TORCH_WARN(
           "At the time of process termination, there are still ",
           registry_size,
-          " unwaited collective calls. "
-          "Please review your program to ensure that:\n"
-          "1. c10d_functional.wait_tensor() is invoked on all tensors returned from c10d_functional collective,\n"
-          "2. work.wait() is invoked on work object returned from torch.distributed collective with async_op=True,\n"
-          "before the output tensors of the collective are used.");
+          " unwaited c10d_functional collective calls. "
+          "Please review your program to ensure c10d_functional.wait_tensor() "
+          "is invoked on all tensors returned from c10d_functional collective "
+          "ops before they are used."
+      );
     }
     for (auto& it : registry_) {
       for (auto& work : it.second) {
@@ -259,8 +280,12 @@ class WorkRegistry {
  private:
   std::unordered_map<
       c10::weak_intrusive_ptr<c10::StorageImpl>,
-      std::vector<c10::intrusive_ptr<c10d::Work>>>
+      std::vector<WorkPtr>>
       registry_;
+  std::unordered_map<
+      c10::weak_intrusive_ptr<c10::StorageImpl>,
+      std::vector<WeakWorkPtr>>
+      weak_registry_;
   std::mutex lock_;
 };
 
@@ -273,23 +298,27 @@ namespace c10d {
 void register_work(
     const at::Tensor& tensor,
     const c10::intrusive_ptr<c10d::Work>& work) {
-  RankLocal<WorkRegistry>::get().register_work(tensor, work);
+  RankLocal<WorkRegistry>::get().register_work<WorkPtr>(tensor, work);
+}
+
+void register_work_weakref(
+    const at::Tensor& tensor,
+    const c10::intrusive_ptr<c10d::Work>& work) {
+  // RankLocal<WorkRegistry>::get().register_work<WeakWorkPtr>(tensor, work);
 }
 
 at::Tensor wait_tensor(const at::Tensor& tensor) {
-  auto works = RankLocal<WorkRegistry>::get().pop_works(tensor);
-  for (const auto& work : works) {
-    work->wait();
-  }
+  RankLocal<WorkRegistry>::get().wait_works<WorkPtr>(tensor);
+  RankLocal<WorkRegistry>::get().wait_works<WeakWorkPtr>(tensor);
   return tensor;
 }
 
-void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
-  RankLocal<WorkRegistry>::get().unregister_work(work);
-}
-
-size_t get_work_registry_size() {
-  return RankLocal<WorkRegistry>::get().get_work_registry_size();
+size_t get_work_registry_size(bool is_weakref) {
+  if (is_weakref) {
+    return RankLocal<WorkRegistry>::get().get_work_registry_size<WeakWorkPtr>();
+  } else {
+    return RankLocal<WorkRegistry>::get().get_work_registry_size<WorkPtr>();
+  }
 }
 
 } // namespace c10d
