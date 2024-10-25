@@ -1038,12 +1038,13 @@ class _DebugFxCompile(FxCompile):
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> Union[CompiledFxGraph, str]:
         from .compile_worker.subproc_pool import _SubprocPickler, _SubprocUnpickler
+
         data = (gm, example_inputs)
         pickled_data = _SubprocPickler.dumps(data)
 
-        from torch.fx.experimental.symbolic_shapes import ShapeEnv
-        from torch._subclasses.fake_tensor import FakeTensorMode
         from torch._guards import TracingContext
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
         shape_env = ShapeEnv()
         fake_mode = FakeTensorMode(shape_env=shape_env)
@@ -1051,8 +1052,11 @@ class _DebugFxCompile(FxCompile):
             with fake_mode:
                 unpickled_data = _SubprocUnpickler.loads(pickled_data)
             from torch._guards import detect_fake_mode
+
             x = detect_fake_mode(unpickled_data[1])
-            return await _InProcessFxCompile().codegen_and_compile(*unpickled_data, **kwargs)
+            return await _InProcessFxCompile().codegen_and_compile(
+                *unpickled_data, **kwargs
+            )
 
 
 class _SubprocessFxCompile(FxCompile):
@@ -1119,6 +1123,7 @@ class _SubprocessFxCompile(FxCompile):
             return graph
 
         finally:
+            pass
 
     @staticmethod
     def _subproc_codegen_and_compile(

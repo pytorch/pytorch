@@ -1,4 +1,3 @@
-import copyreg
 import functools
 import io
 import itertools
@@ -15,8 +14,19 @@ import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
-from typing import Any, BinaryIO, Callable, Dict, Tuple, TypeVar, Union, TYPE_CHECKING, Type, Optional
-from typing_extensions import Never, ParamSpec, override
+from typing import (
+    Any,
+    BinaryIO,
+    Callable,
+    Dict,
+    Optional,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
+from typing_extensions import Never, override, ParamSpec
 
 import torch
 
@@ -29,12 +39,12 @@ from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
-    FakeTensorMode,
     Tensor,
     TensorMetadata,
 )
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
 
 if TYPE_CHECKING:
     import sympy
@@ -105,9 +115,11 @@ class SubprocException(Exception):
     def __init__(self, details: str) -> None:
         super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
 
+
 @dataclass
 class _ShapeEnvPickleData:
     pass
+
 
 @dataclass
 class _SymNodePickleData:
@@ -118,6 +130,7 @@ class _SymNodePickleData:
 
     def to_sym_node(self) -> SymNode:
         from torch.fx.experimental.sym_node import SymNode
+
         assert self.shape_env is not None
         return SymNode(self.expr, self.shape_env, self.pytype, self.hint)
 
@@ -134,7 +147,9 @@ class _SubprocPickler(pickle.Pickler):
         super().__init__(file, protocol=pickle.HIGHEST_PROTOCOL)
 
     @override
-    def reducer_override(self, obj: object) -> Tuple[Callable[..., Any], Tuple[Any, ...]]:
+    def reducer_override(
+        self, obj: object
+    ) -> Tuple[Callable[..., Any], Tuple[Any, ...]]:
         if isinstance(obj, FakeTensor):
             return self._pickle_fake_tensor(obj)
         elif isinstance(obj, torch.SymInt):
@@ -159,14 +174,18 @@ class _SubprocPickler(pickle.Pickler):
     def _pickle_fake_tensor(
         self,
         t: FakeTensor,
-       ) -> Tuple[Callable[[_TensorPickleData], Tensor], Tuple[_TensorPickleData]]:
+    ) -> Tuple[Callable[[_TensorPickleData], Tensor], Tuple[_TensorPickleData]]:
         # THINGS TO WORRY ABOUT:
         # 1. Need to make sure that two tensors with the same id end up with the
         #    same id on the other side of the wire.
         # 2. SymExpr - need to transfer ShapeEnv?
         data = extract_tensor_metadata(t)
         _SubprocPickler._TODO_check_tensor_data(data)
-        print(f"{os.getpid()}: ***   pickle data for ({id(t)}):", repr(data), file=sys.stderr)
+        print(
+            f"{os.getpid()}: ***   pickle data for ({id(t)}):",
+            repr(data),
+            file=sys.stderr,
+        )
         return (_SubprocPickler._unpickle_fake_tensor, (data,))
 
     @staticmethod
@@ -182,7 +201,6 @@ class _SubprocPickler(pickle.Pickler):
         _SubprocPickler._TODO_check_tensor_data(data)
         print(f"{os.getpid()}: *** unpickle data:", repr(data), file=sys.stderr)
 
-        print(f"*** calling torch.empty_strided({data.shape}, {data.stride}, dtype={data.dtype}, layout={data.layout}, device={data.device}, requires_grad={data.requires_grad}", file=sys.stderr)
         empty = torch.empty_strided(
             data.shape,  # type: ignore[arg-type]
             data.stride,  # type: ignore[arg-type]
@@ -196,18 +214,26 @@ class _SubprocPickler(pickle.Pickler):
 
         return empty
 
-    def _pickle_sym_int(self, s: torch.SymInt) -> Tuple[Callable[[_SymNodePickleData], torch.SymInt], Tuple[_SymNodePickleData]]:
-        print(f"*** _pickle_sym_int: {s!r}, shape_env={s.node.shape_env}", file=sys.stderr)
+    def _pickle_sym_int(
+        self, s: torch.SymInt
+    ) -> Tuple[Callable[[_SymNodePickleData], torch.SymInt], Tuple[_SymNodePickleData]]:
+        print(
+            f"*** _pickle_sym_int: {s!r}, shape_env={s.node.shape_env}", file=sys.stderr
+        )
         data = _SymNodePickleData.from_sym_node(s.node)
         return (_SubprocPickler._unpickle_sym_int, (data,))
 
     @staticmethod
     def _unpickle_sym_int(data: _SymNodePickleData) -> torch.SymInt:
         s = torch.SymInt(data.to_sym_node())
-        print(f"*** _pickle_sym_int: {s!r}, shape_env={s.node.shape_env}", file=sys.stderr)
+        print(
+            f"*** _pickle_sym_int: {s!r}, shape_env={s.node.shape_env}", file=sys.stderr
+        )
         return s
 
-    def _pickle_shape_env(self, s: ShapeEnv) -> Tuple[Callable[[_ShapeEnvPickleData], ShapeEnv], Tuple[_ShapeEnvPickleData]]:
+    def _pickle_shape_env(
+        self, s: ShapeEnv
+    ) -> Tuple[Callable[[_ShapeEnvPickleData], ShapeEnv], Tuple[_ShapeEnvPickleData]]:
         # In theory pickle should recognize that a given ShapeEnv was already
         # pickled and reuse the resulting _ShapeEnvPickleData (so two objects
         # pointing at the same ShapeEnv get the same ShapeEnv out).
@@ -257,6 +283,7 @@ class _SubprocPickler(pickle.Pickler):
     @staticmethod
     def _unpickle_shape_env(data: _ShapeEnvPickleData) -> ShapeEnv:
         from torch._guards import detect_fake_mode
+
         mode = detect_fake_mode()
         assert mode
         s = mode.shape_env
@@ -297,7 +324,7 @@ class _SubprocPickler(pickle.Pickler):
         s.unbacked_alloc_order = data.unbacked_alloc_order
         s._translation_validation_enabled = data._translation_validation_enabled
         assert not s._translation_validation_enabled
-        #if s._translation_validation_enabled
+        # if s._translation_validation_enabled
         #    s.validator
         #    s.graph
         #    s.name_to_node
