@@ -8,8 +8,8 @@ void initModule(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   m.def("_accelerator_getAccelerator", []() {
-    // If no accelerator is currently available, return CPU.
-    return c10::Device(at::getAccelerator(false).value_or(c10::kCPU));
+    // If no accelerator is currently available, raise an exception.
+    return c10::Device(at::getAccelerator(true).value());
   });
 
   m.def("_accelerator_deviceCount", []() {
