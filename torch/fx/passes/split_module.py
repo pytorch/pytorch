@@ -423,12 +423,20 @@ def split_module(
             orig_node = orig_nodes[inp]
             # We don't pass in get_attr nodes as inputs to the partition, but
             # instead set them as targets and use getattr within the module
+
             if orig_node.op == "get_attr":
                 assert isinstance(orig_node.target, str)
-                placeholder = partition.graph.get_attr(orig_node.target)
-                partition.targets[orig_node.target] = _get_attr_from_qualname(
-                    m, orig_node.target
-                )
+
+                orig_attr = _get_attr_from_qualname(m, orig_node.target)
+                if isinstance(orig_attr, torch.nn.Module):
+                    placeholder = partition.graph.get_attr(orig_node.target)
+                    partition.targets[orig_node.target] = orig_attr
+                else:
+                    placeholder = partition.graph.placeholder(
+                        inp,
+                        type_expr=orig_nodes[inp].type,
+                    )
+                    new_inputs[inp] = None
             else:
                 placeholder = partition.graph.placeholder(
                     inp,
