@@ -156,7 +156,10 @@ class ExtensionBackendTests(BaseExtensionBackendTests):
                 metrics.reset()
                 opt_fn = torch.compile()(fn)
                 _, code = run_and_get_cpp_code(opt_fn, x, y, z)
-                if cpu_vec_isa.valid_vec_isa_list():
+                if (
+                    cpu_vec_isa.valid_vec_isa_list()
+                    and os.getenv("ATEN_CPU_CAPABILITY") != "default"
+                ):
                     load_expr = "loadu"
                 else:
                     load_expr = " = in_ptr0[static_cast<long>(i0)];"

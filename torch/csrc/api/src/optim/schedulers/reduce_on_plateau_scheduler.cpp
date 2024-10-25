@@ -2,8 +2,7 @@
 
 #include <iomanip>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 ReduceLROnPlateauScheduler::ReduceLROnPlateauScheduler(
     Optimizer& optimizer,
@@ -74,7 +73,7 @@ void ReduceLROnPlateauScheduler::reduce_lr(int epoch) {
       if (verbose) {
         std::cout << std::setprecision(4) << "Epoch " << epoch
                   << ": reducing learning rate of group " << i << " to "
-                  << new_lr << std::endl;
+                  << new_lr << '\n';
       }
     }
   }
@@ -87,7 +86,7 @@ void ReduceLROnPlateauScheduler::reset() {
   this->best = mode_worse;
 }
 
-bool ReduceLROnPlateauScheduler::in_cooldown() {
+bool ReduceLROnPlateauScheduler::in_cooldown() const {
   return cooldown_counter > 0;
 }
 
@@ -119,5 +118,4 @@ void ReduceLROnPlateauScheduler::init_is_better(
   this->threshold_mode = threshold_mode;
   this->threshold = threshold;
 }
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

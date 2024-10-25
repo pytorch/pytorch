@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import dataclasses
 import functools
 import itertools
 import logging
@@ -3018,7 +3019,7 @@ def empty_strided(
     pointwise.realize()
     buffer = pointwise.data.data
     # explicitly set ranges to zeros in order to make a NopKernelSchedulerNode
-    buffer.data.ranges = [0] * len(size)
+    buffer.data = dataclasses.replace(buffer.data, ranges=[0] * len(size))
     assert isinstance(buffer, ir.ComputedBuffer)
     size = [sympy.expand(s) for s in size]
     stride = (
@@ -6092,14 +6093,17 @@ foreach_add_scalar = register_foreach_pointwise(
 )
 register_foreach_pointwise(aten._foreach_add.Tensor, add, allow_alpha=True)
 foreach_mul_list = register_foreach_pointwise(aten._foreach_mul.List, mul)
+register_foreach_pointwise(aten._foreach_mul.Tensor, mul)
 foreach_mul_scalar = register_foreach_pointwise(aten._foreach_mul.Scalar, mul)
 register_foreach_pointwise(aten._foreach_sub.List, sub)
 register_foreach_pointwise(aten._foreach_sub.Scalar, sub)
 register_foreach_pointwise(aten._foreach_neg.default, neg)
 register_foreach_pointwise(aten._foreach_abs.default, abs)
 register_foreach_pointwise(aten._foreach_pow.Scalar, pow)
+register_foreach_pointwise(aten._foreach_pow.List, pow)
 register_foreach_pointwise(aten._foreach_pow.ScalarAndTensor, pow)
 foreach_div_list = register_foreach_pointwise(aten._foreach_div.List, div)
+register_foreach_pointwise(aten._foreach_div.Tensor, div)
 foreach_div_scalar = register_foreach_pointwise(aten._foreach_div.Scalar, div)
 register_foreach_pointwise(aten._foreach_sqrt, sqrt)
 register_foreach_pointwise(aten._foreach_maximum.List, maximum)
@@ -6234,6 +6238,11 @@ for method, func in magic_methods.items():
     register_lowering(method_to_operator(method))(func)
 
 
+@register_lowering(torch.sym_sum)
+def sym_sum(args):
+    return sympy.Add(*args)
+
+
 @register_lowering(aten._foobar)
 def foobar(self, *args, **kwargs):
     raise NotImplementedError("Helpful for debugging")
@@ -6358,6 +6367,7 @@ def triton_kernel_wrap_(
     ir.UserDefinedTritonKernel(
         kernel_idx=kernel_idx,
         grid=grid,
+        tma_descriptor_metadata=tma_descriptor_metadata,
         kernel_args={**kwargs, **constant_args},
     )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
@@ -6384,6 +6394,12 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    return list(map(TensorBox.create, result))
+
+
+@register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
+def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
+    result = ir.InvokeSubgraph.create(subgraph_fn, operands)
     return list(map(TensorBox.create, result))
 
 
@@ -6465,6 +6481,7 @@ try:
 
     @register_lowering(_c10d_functional.all_reduce_)
     def _all_reduce_(inp, reduce_op, group_name):
+        inp = ir.ExternKernel.require_contiguous(inp)
         ir._CollectiveKernel.create_inplace(
             _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
         )

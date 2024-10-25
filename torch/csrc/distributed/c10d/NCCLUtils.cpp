@@ -30,25 +30,20 @@ ncclComm_t NCCLComm::getNcclComm() {
             ". ",
             commFailureMsg));
   }
-  if (!initialized_) {
-    waitUntilInitialized();
-  }
-
-  return ncclComm_;
-}
-
-void NCCLComm::waitUntilInitialized() {
-  // Wait for initialization to complete if in nonblocking mode.
-  // If timeout is reached, throw an exception.
+  // In non-blocking mode, ensure comm is ready.
   if (nccl_use_nonblocking()) {
+    // If timeout is reached, throw an exception.
     C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
     // ncclComm_ should be initialized by now
   }
-  // In blocking mode, this function is nothing but setting initialized_ to
-  // true.
-  initialized_ = true;
-  LOG(INFO) << "Rank " << rank_ << ": NCCL communicator " << repr()
-            << " is initialized.";
+  if (!initialized_) {
+    // TODO: see if we can consolidate other `initialized_` flipping here.
+    // Maintaining it elsewhere is some work.
+    initialized_ = true;
+    LOG(INFO) << "Rank " << rank_ << ": NCCL communicator " << repr()
+              << " is initialized.";
+  }
+  return ncclComm_;
 }
 
 // TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
@@ -61,6 +56,14 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     int rank,
     ncclConfig_t& config,
     std::vector<uint64_t>& ranks_ull) {
+  TORCH_CHECK(
+      color_id >= NCCL_SPLIT_NOCOLOR,
+      "Color must be a non-negative value or NCCL_SPLIT_NOCOLOR (-1)"
+      ", but got ",
+      color_id);
+  LOG(INFO) << "Rank " << source->rank_ << ": split from parent comm "
+            << source->repr() << " with color_id " << color_id << " and rank "
+            << rank;
   auto comm = std::make_shared<NCCLComm>();
   // This call will block until the source communicator is initialized
   auto sourceComm = source->getNcclComm();
@@ -82,12 +85,24 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
       ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
       sourceComm, // wait on parent comm
       std::nullopt);
+  if (color_id >= 0) {
+    // Waiting for parent comm above still does not seem to guarantee the child
+    // comm ptr is valid. Therefore we add a manual wait here for safety.
+    // TODO: remove this wait after NCCL fix the semantics.
+    auto startTime = std::chrono::steady_clock::now();
+    auto timeout = nccl_nonblocking_timeout();
+    while (!comm->ncclComm_) {
+      C10D_CHECK_TIMEOUT(startTime, timeout);
+      C10D_SCHED_SLEEP();
+    }
+  }
   // comm->ncclComm_ should have valid ptr by now, but not necessarily
-  // initialized. Rely on getNcclComm() -> waitUntilInitialized() to wait for
-  // its initialization.
+  // initialized. Rely on getNcclComm() to wait for its initialization.
 #endif
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
+  LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
+            << comm->repr() << " with color_id " << color_id;
   return comm;
 }
 #endif
@@ -157,23 +172,18 @@ bool nccl_use_nonblocking() {
   return nccl_use_nonblocking_;
 }
 
-int _parse_nccl_nonblocking_timeout() {
-  const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-  int timeout = -1;
-  if (val) {
-    const std::string config(val);
-    timeout = std::stoi(config);
-    if (!nccl_use_nonblocking() && timeout > 0) {
-      TORCH_WARN(
-          "TORCH_NCCL_NONBLOCKING_TIMEOUT has no effect when TORCH_NCCL_USE_COMM_NONBLOCKING is false.");
-      timeout = -1;
+// Default value: 30 minutes
+int nccl_nonblocking_timeout() {
+  static int timeout = -2; // -2 means not initialized
+  if (timeout == -2) {
+    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val && strlen(val) > 0) {
+      timeout = strtol(val, nullptr, 0);
+    } else {
+      // Default value consistent with kBackendDefaultTimeout
+      timeout = 30 * 60;
     }
   }
-  return timeout;
-}
-
-int nccl_nonblocking_timeout() {
-  static int timeout = _parse_nccl_nonblocking_timeout();
   return timeout;
 }
 
@@ -597,7 +607,7 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
       auto sizes = new_list();
       for (auto dim : dims) {
         auto arg_sizes = new_list();
-        for (C10_UNUSED auto i : c10::irange(dim)) {
+        for ([[maybe_unused]] auto i : c10::irange(dim)) {
           arg_sizes.push_back(*it++);
         }
         sizes.push_back(arg_sizes);
