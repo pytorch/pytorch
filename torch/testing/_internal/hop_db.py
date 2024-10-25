@@ -102,6 +102,17 @@ def simple_cond(x):
     return torch.cond(x.sum() > 2, lambda x: (x.cos(),), lambda x: (x.sin(),), [x])
 
 
+def sample_inputs_invoke_subgraph(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2))
+
+def simple_invoke_subgraph(x):
+    def fn(x):
+        return (torch.sin(x),)
+    return torch._higher_order_ops.invoke_subgraph(fn, None, (x,))
+
 def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=False
@@ -151,6 +162,21 @@ def simple_while_loop(iter_t, x):
 
 
 hop_db = [
+    OpInfo(
+        name="invoke_subgraph",
+        variant_test_name="simple",
+        op=simple_invoke_subgraph,
+        sample_inputs_func=sample_inputs_invoke_subgraph,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=True,
+        # "torch.compile with aot_autograd does not currently support double backward."
+        supports_gradgrad=False,
+    ),
     OpInfo(
         name="map",
         variant_test_name="simple",

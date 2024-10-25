@@ -1,12 +1,21 @@
 # mypy: allow-untyped-defs
 import traceback
 from contextlib import contextmanager
-from typing import List, Any, Dict
+from typing import Any, Dict, List
+
 from ._compatibility import compatibility
 
-__all__ = ['preserve_node_meta', 'has_preserved_node_meta',
-           'set_stack_trace', 'set_grad_fn_seq_nr', 'reset_grad_fn_seq_nr',
-           'format_stack', 'set_current_meta', 'get_current_meta']
+
+__all__ = [
+    "preserve_node_meta",
+    "has_preserved_node_meta",
+    "set_stack_trace",
+    "set_grad_fn_seq_nr",
+    "reset_grad_fn_seq_nr",
+    "format_stack",
+    "set_current_meta",
+    "get_current_meta",
+]
 
 current_meta: Dict[str, Any] = {}
 should_preserve_node_meta = False
@@ -30,7 +39,7 @@ def preserve_node_meta():
 
 
 @compatibility(is_backward_compatible=False)
-def set_stack_trace(stack : List[str]):
+def set_stack_trace(stack: List[str]):
     global current_meta
 
     if should_preserve_node_meta and stack:
@@ -43,7 +52,9 @@ def set_grad_fn_seq_nr(seq_nr):
 
     if should_preserve_node_meta:
         # The seq_nr is captured by eager mode in the grad_fn during forward
-        current_meta["grad_fn_seq_nr"] = current_meta.get("grad_fn_seq_nr", []) + [seq_nr]
+        current_meta["grad_fn_seq_nr"] = current_meta.get("grad_fn_seq_nr", []) + [
+            seq_nr
+        ]
         current_meta["in_grad_fn"] = current_meta.get("in_grad_fn", 0) + 1
 
 
@@ -90,7 +101,9 @@ def set_current_meta(node):
             if "from_node" not in current_meta:
                 current_meta["from_node"] = [(node.name, node.target)]
             elif current_meta["from_node"][-1][0] != node.name:
-                current_meta["from_node"] = current_meta["from_node"] + [(node.name, node.target)]
+                current_meta["from_node"] = current_meta["from_node"] + [
+                    (node.name, node.target)
+                ]
 
             yield
         finally:
