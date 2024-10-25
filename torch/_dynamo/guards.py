@@ -16,6 +16,7 @@ import math
 import re
 import sys
 import textwrap
+import time
 import types
 import weakref
 from contextlib import contextmanager
@@ -2202,6 +2203,9 @@ class CheckFunctionManager:
                 )
                 raise AssertionError(f"Guard check failed: {reasons}")
 
+            if guards_log.isEnabledFor(logging.DEBUG):
+                self.profile_guard_eval(output_graph.local_scope)
+
         # NB - We have to very careful of cleaning up here. Because of the
         # invalidate function, we can create a weakref finalizer that keeps
         # `self` alive for very long. Sometimes by mistake, we can run
@@ -2212,6 +2216,18 @@ class CheckFunctionManager:
         # e.g., not setting output_graph = None can keep hold of nn_modules.
         self._weakrefs.clear()
         self.output_graph = None
+
+    def profile_guard_eval(self, f_locals):
+        start_time = time.time()
+        iterations = 0
+        profile_duration = 1  # unit is seconds
+
+        while time.time() - start_time < profile_duration:
+            self.guard_manager.check(f_locals)
+            iterations += 1
+
+        guard_latency = 10**6 / iterations  # us
+        guards_log.debug("Guard eval latency = %s us", f"{guard_latency:.2f}")
 
     def compile_check_fn(self, builder, guards_out, guard_fail_fn):
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
