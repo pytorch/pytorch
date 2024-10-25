@@ -454,6 +454,7 @@ if TEST_HPU:
 
 
 # allows you to check for multiple accelerator irrespective of device type
+#to add new device types to this check simply follow the same format and append an elif with the conditional and appropriate device count function for your new device
 def exit_if_lt_x_accelerators(x):
     if TEST_CUDA:
         if torch.cuda.device_count() < x:
@@ -461,8 +462,6 @@ def exit_if_lt_x_accelerators(x):
     elif TEST_HPU:
         if torch.hpu.device_count() < x:
             sys.exit(TEST_SKIPS[f"multi-hpu-{x}"].exit_code)
-    else:
-        sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
 
 
 def with_comms(func=None):
