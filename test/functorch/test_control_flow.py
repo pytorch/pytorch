@@ -1665,7 +1665,7 @@ def forward(self, pred_1, x_1):
                 reverse=reverse_associative_scan,
                 combine_mode=combine_mode,
             )
-            return x + vyal, x + val
+            return x + y, x + val
 
         result = scan_fct(body, init, inp, dim=0, reverse=reverse)
         expected_result = _fake_scan(
