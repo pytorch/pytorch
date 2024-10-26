@@ -628,6 +628,7 @@ def _create_aot_dispatcher_function(
                         keep_input_mutations=aot_config.keep_inference_input_mutations,
                         is_train=needs_autograd,
                         pre_dispatch=aot_config.pre_dispatch,
+                        is_export=aot_config.is_export,
                     )(*_dup_fake_script_obj(fake_flat_args))
 
                 req_subclass_dispatch = requires_subclass_dispatch(
@@ -1454,6 +1455,7 @@ def _aot_export_function(
     flat_fn, out_spec = create_tree_flattened_fn(func, args, kwargs)
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
+    fake_mode = None
     if dynamic_shapes is None:
         # Try to infer `dynamic_shapes from inputs and graph nodes
         fake_mode = detect_fake_mode(flat_args)
@@ -1491,7 +1493,10 @@ def _aot_export_function(
         no_tangents=no_tangents,
         pre_dispatch=pre_dispatch,
     )
-    fake_mode, shape_env = construct_fake_mode(flat_args, aot_config)
+    if fake_mode is None:
+        fake_mode, shape_env = construct_fake_mode(flat_args, aot_config)
+    else:
+        shape_env = fake_mode.shape_env
     fake_flat_args = process_inputs(flat_args, aot_config, fake_mode, shape_env)
 
     fx_g, meta = create_aot_dispatcher_function(
