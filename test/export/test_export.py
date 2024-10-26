@@ -6562,6 +6562,51 @@ graph():
 
         test(export(M(), inp))
 
+    def test_set_grad_unflatten(self):
+        class M1(torch.nn.Module):
+            def forward(self, a, b):
+                with torch.no_grad():
+                    return a + b
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, a, b):
+                return self.m1(a, b)
+
+        inp = (torch.ones(3, 3), torch.ones(3, 3))
+        ep = export(M(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
+
+    def test_cond_unflatten(self):
+        class M1(torch.nn.Module):
+            def forward(self, p, a, b):
+                def true_fn(x, y):
+                    return x + y
+
+                def false_fn(x, y):
+                    return x - y
+
+                return torch.cond(p, true_fn, false_fn, [a, b])
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, p, a, b):
+                return self.m1(p, a, b)
+
+        inp = (torch.tensor(False), torch.ones(3, 3), torch.ones(3, 3))
+        ep = export(M(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
+
     def test_unflatten_multiple_graphs_shared_submodule(self):
         class N(torch.nn.Module):
             def forward(self, x, b):
