@@ -131,8 +131,8 @@ void computeRepeatIndices(const index_t* repeat_ptr,
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
-      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      id<MTLComputePipelineState> pipelineState = lib.getPipelineStateForFunc(fmt::format("repeat_interleave_{}", scalar_type));
+      auto computeEncoder = mpsStream->commandEncoder();
+      auto pipelineState = lib.getPipelineStateForFunc(fmt::format("repeat_interleave_{}", scalar_type));
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(pipelineState, "repeat_interleave:" + scalar_type, false);
