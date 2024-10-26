@@ -470,6 +470,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         self._validate(fn, backend, x, skip_check=True)
 
     @torch._functorch.config.patch(recompute_views=True)
+    @torch._dynamo.config.patch(skip_nnmodule_hook_guards=False)
     @torch._inductor.config.patch(fx_graph_cache=False)
     def test_tags_must_save_tensor_that_has_backward_hook(self):
         def my_post_forward_hook(submod, args, output):
