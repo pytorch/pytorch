@@ -12,9 +12,9 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
+    first_slice_copy,
     reenter_make_fx,
     unique_graph_id,
-    first_slice_copy
 )
 from torch._inductor.utils import is_pointwise_use
 from torch._ops import HigherOrderOperator
@@ -185,7 +185,13 @@ def associative_scan(
         raise RuntimeError(
             "The number of leaves of the pytree of the output of the operator needs to match the length of the pytree of the input"
         )
-    if any(x.shape != sliced_shape or x.dtype != x_sliced.dtype or x.device != x_sliced.device or x.stride() != x_sliced.stride() for x, x_sliced in zip(out_leaves, sliced_leaves)):
+    if any(
+        x.shape != sliced_shape
+        or x.dtype != x_sliced.dtype
+        or x.device != x_sliced.device
+        or x.stride() != x_sliced.stride()
+        for x, x_sliced in zip(out_leaves, sliced_leaves)
+    ):
         raise RuntimeError(
             "The pytree of the output of the operator needs to match the xs pytree"
         )
@@ -194,18 +200,24 @@ def associative_scan(
         # The generic_associative_scan implementation calls the combine_fn with a batch long the scan dimension
         # Therefore, the paralellization is realized with vmap on `dim`
         combine_fn = functools.partial(
-            wrap_combine_fn_flat, combine_fn=torch.vmap(combine_fn, dim, dim), spec=spec, num_leaves=len(leaves)
+            wrap_combine_fn_flat,
+            combine_fn=torch.vmap(combine_fn, dim, dim),
+            spec=spec,
+            num_leaves=len(leaves),
         )
         result_flat = generic_associative_scan(combine_fn, leaves, dim)
     else:
         combine_fn = functools.partial(
-            wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
+            wrap_combine_fn_flat,
+            combine_fn=combine_fn,
+            spec=spec,
+            num_leaves=len(leaves),
         )
         result_flat = associative_scan_op(combine_fn, leaves, dim)
 
     if reverse:
         result_flat = [torch.flip(elem, [dim]) for elem in result_flat]
-        
+
     return pytree.tree_unflatten(result_flat, spec)
 
 
@@ -299,7 +311,7 @@ def generic_associative_scan(operator, leaves, dim=0):
         return list(
             safe_map(functools.partial(_interleave, dim=dim), even_elems, odd_elems)
         )
-        
+
     scans = _scan(leaves)
 
     return scans

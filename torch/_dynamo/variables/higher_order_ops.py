@@ -1052,6 +1052,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         from torch._higher_order_ops.utils import first_slice_copy
+
         from .builder import wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
