@@ -113,6 +113,18 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclUint8;
     case at::kBool:
       return ncclDataType_t::ncclUint8;
+#if defined(USE_ROCM)
+    case at::kFloat8_e4m3fnuz:
+      return ncclDataType_t::ncclUint8;
+    case at::kFloat8_e5m2fnuz:
+      return ncclDataType_t::ncclUint8;
+#else
+    case at::kFloat8_e4m3fn:
+      return ncclDataType_t::ncclUint8;
+    case at::kFloat8_e5m2:
+      return ncclDataType_t::ncclUint8;
+#endif
+
 #if HAS_NCCL_BF16_DATATYPE
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
