@@ -8,7 +8,6 @@ import subprocess
 import sys
 import tempfile
 import locale
-import codecs
 import unittest
 import warnings
 
@@ -531,7 +530,7 @@ class TestCppExtensionJIT(common.TestCase):
         module = compile("int f() { return 789; }")
         self.assertEqual(module.f(), 789)
 
-    @unittest.skipIf(codecs.lookup(locale.getencoding()).name != "utf-8", "Only test in UTF-8 locale")
+    @unittest.skipIf('utf' not in locale.getlocale()[1].lower(), "Only test in UTF-8 locale")
     def test_load_with_non_platform_default_encoding(self):
         # Assume the code is saved in UTF-8, but the locale is set to a different encoding.
         # You might encounter decoding errors in ExtensionVersioner.
