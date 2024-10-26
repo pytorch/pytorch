@@ -1707,6 +1707,7 @@ class TestCommon(TestCase):
         "test_meta_consistency_out_dtype_mismatch",
         meta_consistency_out_dtype_mismatch_xfails,
     )
+    @skipIfTorchDynamo("meta device runs only on eager")
     def test_meta_consistency_out_dtype_mismatch(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 
@@ -1755,8 +1756,6 @@ class TestCommon(TestCase):
                     op(input_, *args_, **kwargs_, out=out)
                 except Exception as e:
                     return e
-                else:
-                    print(f"[{dev}] {input_=} {args_=} {kwargs_=} {out=}")
 
             # Run the operation with the sample arguments on both CPU and meta devices, capturing
             # the raised error, if any.
