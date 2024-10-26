@@ -1512,6 +1512,18 @@ class FxGraphCache:
             cache_info["cache_event_time"],
             metadata=cache_info,
         )
+        # Add event data about cache hits/miss
+        # TODO: add remote cache get/put timings here too
+        chromium_log.add_event_data(
+            "inductor_compile",
+            cache_state=cache_state,
+            cache_event_time=cache_info["cache_event_time"],
+            key=cache_info.get("key"),
+            components=cache_info.get("components"),
+            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+            remote_cache_enabled=remote,
+            local_cache_enabled=local,
+        )
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {

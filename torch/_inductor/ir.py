@@ -599,8 +599,11 @@ class Loops(IRNode):
             self.inner_fn, *self.inner_fn_args()
         )
 
-    def has_large_inner_fn(self):
-        return self.inner_fn_opcount().num_ops > config.realize_opcount_threshold
+    def has_large_inner_fn(self, threshold=None):
+        if threshold is None:
+            threshold = 0
+        threshold = max(threshold, config.realize_opcount_threshold)
+        return self.inner_fn_opcount().num_ops > threshold
 
     def inner_fn_free_unbacked_symbols(self):
         index = self._index(self.ranges)
@@ -5352,7 +5355,12 @@ class TMADescriptor(ExternKernel):
             # link back to the underlying tensor in terms of ownership
             # to avoid getting the underlying tensor deleted *before*
             # the TMADescriptor node can be deleted.
-            NonOwningLayout(ReinterpretView(tensor, tensor.get_layout())),
+            NonOwningLayout(
+                ReinterpretView(
+                    data=tensor,
+                    layout=tensor.get_layout(),
+                )
+            ),
             inputs,
             tuple(constant_args),
             None,
