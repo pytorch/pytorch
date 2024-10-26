@@ -47,7 +47,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias, TypeGuard
+from typing_extensions import TypeAlias, TypeIs
 
 import torch
 import torch.fx
@@ -696,7 +696,7 @@ def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
     return False
 
 
-def is_nested_int(s: Union[int, SymInt]) -> TypeGuard[SymInt]:
+def is_nested_int(s: Union[int, SymInt]) -> TypeIs[SymInt]:
     return isinstance(s, torch.SymInt) and s.node.is_nested_int()
 
 
@@ -1556,7 +1556,7 @@ class EqualityConstraint(Constraint):
         return self._rewrite(src) == fn(self._rewrite(symbol_src))
 
 
-def _assert_symbol_context(symbolic_context: object) -> TypeGuard[SymbolicContext]:
+def _assert_symbol_context(symbolic_context: object) -> TypeIs[SymbolicContext]:
     assert isinstance(
         symbolic_context, SymbolicContext
     ), "Invalid symbolic_context object"
@@ -1718,7 +1718,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
 
 def is_symbolic(
     val: Union[int, SymInt, float, SymFloat, bool, SymBool]
-) -> TypeGuard[Union[SymInt, SymFloat, SymBool]]:
+) -> TypeIs[Union[SymInt, SymFloat, SymBool]]:
     if isinstance(val, (int, float, bool)):
         return False
     return val.node.is_symbolic()
@@ -2515,10 +2515,10 @@ class DimConstraints:
 
     def _is_derived_dim(
         self, dim: object
-    ) -> TypeGuard[torch.export.dynamic_shapes._DerivedDim]:
+    ) -> TypeIs[torch.export.dynamic_shapes._DerivedDim]:
         return isinstance(dim, torch.export.dynamic_shapes._DerivedDim)
 
-    def _is_dim(self, dim: object) -> TypeGuard[torch.export.dynamic_shapes._Dim]:
+    def _is_dim(self, dim: object) -> TypeIs[torch.export.dynamic_shapes._Dim]:
         return isinstance(dim, torch.export.dynamic_shapes._Dim) and not isinstance(
             dim, torch.export.dynamic_shapes._DerivedDim
         )
@@ -4499,7 +4499,7 @@ class ShapeEnv:
                 (warn_only, debug_name, lambda: f"{msg}{hint()}" if hint else msg)
             )
 
-        def is_dim(src: object) -> TypeGuard[TensorPropertySource]:
+        def is_dim(src: object) -> TypeIs[TensorPropertySource]:
             return (
                 isinstance(src, TensorPropertySource)
                 and src.prop is TensorProperty.SIZE
