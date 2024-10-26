@@ -833,6 +833,7 @@ def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
         torch.ops.c10d_functional.wait_tensor(y)
         return y * y
 
+    x = torch.ones(1280, 1280, device="cuda") + self.rank
     # the context manager ensures that `wait_tensor(y)` will wait on the correct work object
     with allow_inflight_collective_as_graph_input_ctx():
         y = all_reduce_eager(x)
