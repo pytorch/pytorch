@@ -1382,7 +1382,7 @@ class TritonKernel(SIMDKernel):
         optimize_mask=True,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
-        if pid_cache or override_persistent_reduction:
+        if pid_cache:
             # foreach kernels don't work with cooperative reductions
             override_cooperative_reduction = False
         super().__init__(
