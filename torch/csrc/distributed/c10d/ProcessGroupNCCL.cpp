@@ -87,6 +87,7 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
 
 bool complexViewAsRealAllowed(const ReduceOp& reduceOp) {
   switch (reduceOp) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case ReduceOp::SUM:
       return true;
     case ReduceOp::AVG:
@@ -119,6 +120,7 @@ ncclRedOpRAII unpackPreMulSum(
       &preMulSum,
       // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/ops.html#ncclredopcreatepremulsum
       // tells us that the scalar input is strictly a multiplier.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       /*scalar=*/has_tensor ? const_cast<T*>(ptr_factor) : &scalar_factor,
       dataType,
       residence,
@@ -318,6 +320,7 @@ static void cacheAllocatorRegisterHook(
     auto& ncclComm = it.first;
     auto& devIdx = it.second;
     if (te.device_ == devIdx) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
     }
   }
@@ -336,6 +339,7 @@ static void cacheAllocatorDeregisterHook(
     auto& ncclComm = it.first;
     auto& devIdx = it.second;
     if (te.device_ == devIdx) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
     }
   }
@@ -869,7 +873,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       store_(std::move(store)),
       options_(std::move(options)),
-
       traceKeyStart_(getTraceStartKey("NCCL", rank)),
       traceKeyEnd_(getTraceEndKey("NCCL", rank)),
       terminateProcessGroup_(false),
@@ -888,7 +891,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // other threads and cause segfaults.
   const auto ncclVersion = getNcclVersion();
   this->setGroupUid(options_->group_name);
-  this->localDeviceCount_ = at::cuda::getNumGPUs();
+  this->localDeviceCount_ = static_cast<int>(at::cuda::getNumGPUs());
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
@@ -1013,8 +1016,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     this->globalRankStride = 0;
   } else {
     bool ranksAreStrided = true;
-    int startRank = options_->global_ranks_in_group[0];
-    int stride =
+    auto startRank = options_->global_ranks_in_group[0];
+    auto stride =
         options_->global_ranks_in_group[1] - options_->global_ranks_in_group[0];
     for (std::vector<uint64_t>::size_type i = 0;
          i < options_->global_ranks_in_group.size();
@@ -1377,6 +1380,7 @@ void ProcessGroupNCCL::shutdown() {
   this->abort();
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
