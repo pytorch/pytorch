@@ -79,7 +79,9 @@ def aoti_compile_and_package(
     if not isinstance(exported_program, ExportedProgram):
         raise ValueError("Only ExportedProgram is supported")
 
-    assert package_path is None or package_path.endswith(".pt2")
+    assert package_path is None or package_path.endswith(
+        ".pt2"
+    ), f"Expect package path to end with .pt2, got {package_path}"
 
     inductor_configs = inductor_configs or {}
 
@@ -263,7 +265,7 @@ def list_options() -> List[str]:
 
     from torch._inductor import config
 
-    current_config: Dict[str, Any] = config.shallow_copy_dict()
+    current_config: Dict[str, Any] = config.get_config_copy()
 
     return list(current_config.keys())
 
