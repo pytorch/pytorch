@@ -31,7 +31,7 @@ ncclComm_t NCCLComm::getNcclComm() {
             commFailureMsg));
   }
   // In non-blocking mode, ensure comm is ready.
-  if (nccl_use_nonblocking()) {
+  if (nonBlocking_) {
     // If timeout is reached, throw an exception.
     C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
     // ncclComm_ should be initialized by now
@@ -101,6 +101,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
 #endif
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
+  comm->nonBlocking_ = config.blocking == 0;
   LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
             << comm->repr() << " with color_id " << color_id;
   return comm;
@@ -162,15 +163,6 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
   return hash;
 }
 #endif
-
-bool nccl_use_nonblocking() {
-  static bool nccl_use_nonblocking_ =
-      c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
-  if (nccl_use_nonblocking_) {
-    TORCH_WARN_ONCE("Using experimental non-blocking NCCL communicator.");
-  }
-  return nccl_use_nonblocking_;
-}
 
 // Default value: 30 minutes
 int nccl_nonblocking_timeout() {
