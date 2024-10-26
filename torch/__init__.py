@@ -133,6 +133,7 @@ __all__ = [
     "sym_max",
     "sym_min",
     "sym_not",
+    "sym_sum",
     "typename",
     "unravel_index",
     "use_deterministic_algorithms",
@@ -308,7 +309,6 @@ def _load_global_deps() -> None:
             "cuda_runtime": "libcudart.so.*[0-9]",
             "cuda_cupti": "libcupti.so.*[0-9]",
             "cufft": "libcufft.so.*[0-9]",
-            "cufile": "libcufile.so.*[0-9]",
             "curand": "libcurand.so.*[0-9]",
             "nvjitlink": "libnvJitLink.so.*[0-9]",
             "cusparse": "libcusparse.so.*[0-9]",
@@ -478,6 +478,12 @@ class SymInt:
     def __add__(self, other) -> "SymInt":
         raise TypeError("type stub not overridden")
 
+    def __radd__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __rmul__(self, other) -> "SymInt":
+        raise TypeError("type stub not overridden")
+
     def __mod__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
@@ -515,6 +521,9 @@ class SymInt:
         raise TypeError("type stub not overridden")
 
     def __sub__(self, other: "IntLikeType") -> "SymInt":
+        raise TypeError("type stub not overridden")
+
+    def __rsub__(self, other: "IntLikeType") -> "SymInt":
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
@@ -838,6 +847,28 @@ def sym_min(a, b):
         return builtins.float(builtins.min(a, b))
     else:
         return builtins.min(a, b)
+
+
+def sym_sum(args):
+    """
+    N-ary add which is faster to compute for long lists than iterated binary
+    addition.  Only does something special for integers.
+    """
+    if overrides.has_torch_function(args):
+        return overrides.handle_torch_function(sym_sum, args, args)
+
+    found = None
+    for a in args:
+        if not isinstance(a, (SymInt, builtins.int)):
+            return builtins.sum(args)
+        if isinstance(a, SymInt):
+            found = a.node
+    if found is None:
+        return builtins.sum(args)
+
+    from torch.fx.experimental.sym_node import to_node, wrap_node
+
+    return wrap_node(found.sym_sum(tuple(to_node(found, a) for a in args)))
 
 
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
@@ -1235,6 +1266,7 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
+        * :func:`torch.cumsum` when called on a CUDA tensor
         * :func:`torch.gather` when called on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
@@ -1281,7 +1313,6 @@ def use_deterministic_algorithms(
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
@@ -2208,12 +2239,20 @@ class _TorchCompileInductorWrapper:
             )
 
     def apply_options(self, options: _Optional[_Dict[str, _Any]]):
+        from torch._inductor.bisect_helper import BisectionManager
+
+        if bisect_changes := BisectionManager.get_config_change("inductor"):
+            options = {} if options is None else options
+            options = (
+                {**bisect_changes} if options is None else {**options, **bisect_changes}  # type: ignore[dict-item]
+            )
+
         if not options:
             return
 
         from torch._inductor import config
 
-        current_config: _Dict[str, _Any] = config.shallow_copy_dict()
+        current_config: _Dict[str, _Any] = config.get_config_copy()
 
         for key, val in options.items():
             attr_name = key.replace("-", "_")
@@ -2440,6 +2479,12 @@ def compile(
         )
     if mode is None and options is None:
         mode = "default"
+
+    from torch._inductor.bisect_helper import BisectionManager
+
+    if bisect_backend := BisectionManager.get_backend():
+        backend = bisect_backend
+
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
@@ -2494,6 +2539,7 @@ if "TORCH_CUDA_SANITIZER" in os.environ:
 
 # Populate magic methods on SymInt and SymFloat
 import torch.fx.experimental.sym_node
+from torch import fx as fx
 
 
 # Register MPS specific decomps

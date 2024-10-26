@@ -62,11 +62,12 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
     auto* result_data_bytes = data[0];
     const auto* self_data_bytes = data[1];
 
-    for (const auto i C10_UNUSED : c10::irange(n)) {
-      f(
-        (scalar_t*)result_data_bytes, result_dim_stride,
-        (scalar_t*)self_data_bytes, self_dim_stride, init_val
-      );
+    for ([[maybe_unused]] const auto i : c10::irange(n)) {
+      f((scalar_t*)result_data_bytes,
+        result_dim_stride,
+        (scalar_t*)self_data_bytes,
+        self_dim_stride,
+        init_val);
       result_data_bytes += strides[0];
       self_data_bytes += strides[1];
     }
@@ -239,38 +240,22 @@ static void norm_kernel_tensor_iterator_impl(
 
           using Vec = Vectorized<scalar_t>;
           using fVec = Vectorized<acc_t>;
+          fVec acc_vec{acc_t(0)};
           acc_t buffer[fVec::size()];
-          auto inner_reduction = [&buffer](scalar_t* inner_self_data, int64_t inner_size) -> acc_t {
-            fVec acc_vec{acc_t(0)};
-            int64_t d = 0;
-            for (; d < inner_size - (inner_size % Vec::size()); d += Vec::size()) {
-              Vec data_vec = Vec::loadu(inner_self_data + d);
-              norm_two_reduce_step(acc_vec, data_vec);
-            }
-            acc_vec.store(buffer);
-            for (int j = 1; j < fVec::size(); j++) {
-              buffer[0] = buffer[0] + buffer[j];
-            }
-            for (; d < inner_size; d++) {
-              acc_t data_val = acc_t(inner_self_data[d]);
-              buffer[0] += data_val * data_val;
-            }
-            return buffer[0];
-          };
-
-          // Use group reduction to avoid overflow.
-          // See https://github.com/pytorch/pytorch/pull/123416
-          int64_t group_size = 32768L;
-          int64_t group_n = (size + group_size - 1) / group_size;
-          scalar_t* inner_self_data = self_data;
-          int64_t inner_size = group_size;
-          double result = 0;
-          for (int64_t g = 0; g < group_n; g++) {
-            inner_size = (g * inner_size + group_size) > size ? (size - g * inner_size) : group_size;
-            result += inner_reduction(inner_self_data, inner_size);
-            inner_self_data += inner_size;
+          int64_t d = 0;
+          for (; d < size - (size % Vec::size()); d += Vec::size()) {
+            Vec data_vec = Vec::loadu(self_data + d);
+            norm_two_reduce_step(acc_vec, data_vec);
           }
-          result_data[0] = scalar_t(std::sqrt(result));
+          acc_vec.store(buffer);
+          for (int j = 1; j < fVec::size(); j++) {
+            buffer[0] = buffer[0] + buffer[j];
+          }
+          for (; d < size; d++) {
+            acc_t data_val = acc_t(self_data[d]);
+            buffer[0] += data_val * data_val;
+          }
+          result_data[0] = scalar_t(std::sqrt(buffer[0]));
         });
       });
   } else {
