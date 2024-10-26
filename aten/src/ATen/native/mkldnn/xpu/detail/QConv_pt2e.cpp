@@ -106,8 +106,6 @@ at::Tensor quantized_convolution_pt2(
   // input tensors config
   dnnl::memory::dims src_dims = act.sizes().vec();
   dnnl::memory::dims weight_dims = weight.sizes().vec();
-  auto src_data_t = get_onednn_dtype_include_double(act);
-  auto dst_data_t = get_onednn_dtype_include_double(output);
   // conv config
   dnnl::memory::dims _stride = stride.vec();
   dnnl::memory::dims _padding_front_top_left = padding.vec();
@@ -131,7 +129,6 @@ at::Tensor quantized_convolution_pt2(
   dnnl::primitive_attr pattr;
 
   bool src_need_zp = (act_scale != 0);
-  bool weight_is_per_channel = (weight_scales.numel() > 0);
 
   dnnl::convolution_forward conv_forward;
 
@@ -204,7 +201,7 @@ at::Tensor quantized_convolution_pt2(
   // dst scale is no need for setting, since it is fused in postop via linear
   size_t scratchpad_size = conv_fwd_pd.scratchpad_desc().get_size();
   Tensor scratchpad_tensor = at::empty(
-      {scratchpad_size}, act.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)}, act.options().dtype(at::kByte), c10::nullopt);
   auto scratchpad_m = make_onednn_memory(
       conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
