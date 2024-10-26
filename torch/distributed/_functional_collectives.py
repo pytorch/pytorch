@@ -820,7 +820,7 @@ def _maybe_wrap_tensor(self) -> torch.Tensor:
 @contextlib.contextmanager
 def allow_inflight_collective_as_graph_input_ctx(value: bool = True):
     """
-    Context manager to temporarily set whether inflight collectives are allowed as graph inputs.
+    Context manager to temporarily set whether inflight collectives are allowed as torch.compile graph inputs.
     Common use case is when the collective is issued in eager (with `async_op=True`) but waited in compiled region:
     ```
     def all_reduce_eager(x):

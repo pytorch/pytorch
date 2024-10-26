@@ -269,7 +269,8 @@ class WorkRegistry {
           " unwaited collective calls. "
           "Please review your program to ensure that:\n"
           "1. c10d_functional.wait_tensor() is invoked on all tensors returned from c10d_functional collective,\n"
-          "2. c10d_functional.wait_tensor() is invoked on all output tensors of async_op=True torch.distributed collective called under `allow_inflight_collective_as_graph_input()`,\n"
+          "2. c10d_functional.wait_tensor() is invoked on all output tensors of async_op=True torch.distributed collective "
+          "called under `with allow_inflight_collective_as_graph_input():`,\n"
           "before the output tensors of the collective are used.");
     }
     for (auto& it : registry_) {
