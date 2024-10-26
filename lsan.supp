@@ -3,7 +3,6 @@ leak:PyMem_RawMalloc
 leak:unicode_resize
 leak:PyObject_Malloc
 leak:PyByteArray_Resize
-leak:optree/_C.cpython-310-x86_64-linux-gnu.so
 leak:numpy
 leak:list_append
 leak:unicodeobject
@@ -24,6 +23,7 @@ leak:unknown module
 leak:g++
 leak:conda-linux-gnu-ld
 leak:crypto
-leak:c10::detail::intrusive_target_default_null_type
 leak:torch::detail::(anonymous namespace)::get_set_cached_attr
 leak:torch::jit::tensorexpr::TensorExprKernel::preAllocIntermediateBufs
+leak:optree
+leak:torch::tensors::initialize_aten_types
