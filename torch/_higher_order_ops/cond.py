@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import logging
@@ -62,7 +63,7 @@ class CondOp(HigherOrderOperator):
 cond_op = CondOp()
 
 
-@exposed_in("torch")  # type: ignore[misc]
+@exposed_in("torch")
 def cond(
     pred: Union[bool, int, float, torch.Tensor],
     true_fn: Callable,
