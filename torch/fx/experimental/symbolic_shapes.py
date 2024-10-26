@@ -3538,11 +3538,20 @@ class ShapeEnv:
 
     @record_shapeenv_event()
     def _suppress_guards_enter(self) -> None:
+        if not hasattr(TLS, "suppress_guards_stack"):
+            TLS.suppress_guards_stack = []
+        old = self._suppress_guards_tls()
+        TLS.suppress_guards_stack.append(old)
         TLS.suppress_guards = True
 
     @record_shapeenv_event()
     def _suppress_guards_exit(self) -> None:
-        TLS.suppress_guards = False
+        old = (
+            TLS.suppress_guards_stack.pop()
+            if len(TLS.suppress_guards_stack) > 0
+            else False
+        )
+        TLS.suppress_guards = old
 
     @contextmanager
     def suppress_guards(self) -> Iterator[None]:

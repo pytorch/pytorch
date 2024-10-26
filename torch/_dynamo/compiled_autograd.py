@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
+import operator
 import threading
 from dataclasses import dataclass
 from logging import Logger
@@ -227,6 +228,9 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.fake_tensor_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
+        # Needed to make sure we don't accidentally specialize any symbols
+        assert self.fake_tensor_mode.shape_env is not None
+        self.fake_tensor_mode.shape_env._suppress_guards_enter()
         return inputs, sizes, scalars
 
     def proxy_call_backward(
@@ -374,6 +378,27 @@ class AutogradCompilerInstance:
 
         return []
 
+    def is_sym_node(self, node):
+        return (
+            isinstance(node, torch.fx.Node)
+            and node.op == "call_function"
+            and node.target
+            in [torch.ops.aten.sym_size.int, torch.ops.aten.sym_numel.default]
+        )
+
+    def remove_dead_sym_nodes(self):
+        for node in reversed(list(self.fx_tracer.graph.nodes)):
+            if (
+                node.op == "call_function"
+                and node.target == operator.eq
+                and self.is_sym_node(node.args[1])
+            ):
+                if len(node.users) == 0:
+                    self.fx_tracer.graph.erase_node(node)
+            if self.is_sym_node(node):
+                if len(node.users) == 0:
+                    self.fx_tracer.graph.erase_node(node)
+
     def end_capture(self, outputs):
         self.fx_tracer.create_proxy(
             "call_function",
@@ -382,6 +407,9 @@ class AutogradCompilerInstance:
             {},
         )
         self.stack.close()
+        # Needed to make sure we don't accidentally specialize any symbols
+        assert self.fake_tensor_mode.shape_env is not None
+        self.fake_tensor_mode.shape_env._suppress_guards_exit()
         self.fx_tracer.create_node(
             "output",
             "output",
@@ -390,6 +418,17 @@ class AutogradCompilerInstance:
         )
         self.rename_aot_dispatcher_nodes()
         self.reorder_accumulate_grad_nodes()
+        # TODO(yf225): work around: remove dead codes like `sym_size` and `sym_numel` which are not used downstream. e.g.
+        # ```
+        # sym_numel_default = torch.ops.aten.sym_numel.default(sum_109);  sum_109 = None
+        # eq_115 = 16 == sym_numel_default;  sym_numel_default = eq_115 = None
+        # sym_size_int_39 = torch.ops.aten.sym_size.int(getitem_112, 1);  getitem_112 = None
+        # eq_116 = 16 == sym_size_int_39;  eq_116 = None
+        # eq_117 = 16 == sym_size_int_39;  sym_size_int_39 = eq_117 = None
+        # ```
+        # Proper fix is Richard's Python compiled autograd effort which will avoid calling make_fx and
+        # should prevent these ops from going into the CA graph.
+        self.remove_dead_sym_nodes()
         runtime_inputs_to_move: List[int] = []
         if torch._inductor.config.triton.cudagraphs:
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
