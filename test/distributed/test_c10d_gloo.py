@@ -21,37 +21,23 @@ if not c10d.is_available() or not c10d.is_gloo_available():
     sys.exit(0)
 
 import test_c10d_common
-from test_c10d_common import (
-    gpus_for_rank,
-    LOOPBACK,
-    ModuleForDdpCommHook,
-    SparseGradientModule,
-    Task,
-)
+from test_c10d_common import LOOPBACK, ModuleForDdpCommHook, SparseGradientModule, Task
 
 import torch.distributed as dist
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
-from torch.distributed._shard.sharded_tensor import (
-    init_from_local_shards,
-    Shard,
-    ShardedTensor,
-    ShardMetadata,
-)
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     create_device,
     MultiProcessTestCase,
     requires_gloo,
     simple_sparse_reduce_tests,
-    skip_if_lt_x_gpu,
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     run_tests,
-    skip_but_pass_in_sandcastle,
     TestCase,
 )
 
@@ -358,11 +344,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_broadcast_basics(self):
         self._test_broadcast_basics(lambda t: t.clone())
 
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_broadcast_basics_cuda(self):
-        self._test_broadcast_basics(lambda t: t.clone().cuda())
-
     def _test_broadcast_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
@@ -383,14 +364,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_broadcast_stress(self):
         inputs = [torch.tensor([i * self.world_size + self.rank]) for i in range(1000)]
-        self._test_broadcast_stress(inputs)
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_broadcast_stress_cuda(self):
-        inputs = [
-            torch.tensor([i * self.world_size + self.rank]).cuda() for i in range(1000)
-        ]
         self._test_broadcast_stress(inputs)
 
     @requires_gloo()
@@ -459,11 +432,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_allreduce_basics(self):
         self._test_allreduce_basics(lambda t: t.clone())
 
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_allreduce_basics_cuda(self):
-        self._test_allreduce_basics(lambda t: t.clone().cuda())
-
     def _test_allreduce_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
@@ -488,12 +456,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_allreduce_stress(self):
         inputs = [torch.tensor([i + self.rank]) for i in range(1000)]
-        self._test_allreduce_stress(inputs)
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_allreduce_stress_cuda(self):
-        inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_allreduce_stress(inputs)
 
     @requires_gloo()
@@ -524,20 +486,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "unsupported layout"):
             opts = c10d.AllreduceCoalescedOptions()
             pg.allreduce_coalesced([t3, t3.clone()], opts)
-
-    @skip_if_lt_x_gpu(1)
-    @requires_gloo()
-    def test_allreduce_coalesced_checks_cuda(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts()
-        )
-
-        t1 = torch.zeros(1, dtype=torch.float32)
-
-        with self.assertRaisesRegex(RuntimeError, "unsupported device type"):
-            opts = c10d.AllreduceCoalescedOptions()
-            pg.allreduce_coalesced([t1.cuda(), t1.cuda()], opts)
 
     def _test_allreduce_coalesced_basics(self, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -656,25 +604,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_sparse_allreduce_basics(self):
         self._test_sparse_allreduce_basics(lambda t: t)
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_sparse_allreduce_basics_cuda(self):
-        self._test_sparse_allreduce_basics(lambda t: t.clone().cuda())
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_sparse_allreduce_cuda_dispatched(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
-        )
-        tests = simple_sparse_reduce_tests(self.rank, self.world_size, num_inputs=1)
-        for inputs, outputs in tests:
-            tensors = inputs[-1].clone().cuda()
-            work = dist.all_reduce(tensors, async_op=True)
-            work.wait()
-            self.assertEqual([tensors], outputs)
 
     @requires_gloo()
     def test_allgather_into_tensor_coalesced(self):
@@ -861,11 +790,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_scatter_basics(self):
         self._test_scatter_basics(lambda t: t.clone())
 
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_scatter_basics_cuda(self):
-        self._test_scatter_basics(lambda t: t.clone().cuda())
-
     def _test_scatter_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
@@ -918,18 +842,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             for i in range(1000)
         ]
         self._test_scatter_stress(inputs, lambda t: t.clone())
-
-    @skip_but_pass_in_sandcastle(
-        "Test is flaky, see https://github.com/pytorch/pytorch/issues/15963"
-    )
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_scatter_stress_cuda(self):
-        inputs = [
-            [torch.tensor([i + self.rank]) for _ in range(self.world_size)]
-            for i in range(1000)
-        ]
-        self._test_scatter_stress(inputs, lambda t: t.clone().cuda())
 
     @requires_gloo()
     def test_gather_checks(self):
@@ -1045,11 +957,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_gather_basics(self):
         self._test_gather_basics(lambda t: t.clone())
 
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_gather_basics_cuda(self):
-        self._test_gather_basics(lambda t: t.clone().cuda())
-
     @requires_gloo()
     def test_gather_noncontiguous_input(self):
         # Take a column of 2D tensor, such that memory is not dense
@@ -1095,12 +1002,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_gather_stress(self):
         inputs = [torch.tensor([i + self.rank]) for i in range(1000)]
         self._test_gather_stress(inputs, lambda t: t.clone())
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_gather_stress_cuda(self):
-        inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
-        self._test_gather_stress(inputs, lambda t: t.clone().cuda())
 
     @requires_gloo()
     def test_allgather_checks(self):
@@ -1178,11 +1079,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_allgather_basics(self):
         self._test_allgather_basics(lambda t: t.clone())
 
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_allgather_basics_cuda(self):
-        self._test_allgather_basics(lambda t: t.clone().cuda())
-
     @requires_gloo()
     def test_allgather_noncontiguous_input(self):
         # Take a column of 2D tensor, such that memory is not dense
@@ -1225,12 +1121,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_allgather_stress(self):
         inputs = [torch.tensor([i + self.rank]) for i in range(1000)]
         self._test_allgather_stress(inputs, lambda t: t.clone())
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_allgather_stress_cuda(self):
-        inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
-        self._test_allgather_stress(inputs, lambda t: t.clone().cuda())
 
     @requires_gloo()
     def test_allgather_coalesced_checks(self):
@@ -1369,11 +1259,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_reduce_basics(self):
         self._test_reduce_basics(lambda t: t.clone())
 
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_reduce_basics_cuda(self):
-        self._test_reduce_basics(lambda t: t.clone().cuda())
-
     def _test_reduce_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
@@ -1410,12 +1295,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_reduce_stress(self):
         inputs = [torch.tensor([i + self.rank]) for i in range(1000)]
-        self._test_reduce_stress(inputs)
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_reduce_stress_cuda(self):
-        inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
         self._test_reduce_stress(inputs)
 
     @requires_gloo()
@@ -1520,34 +1399,6 @@ class DistributedDataParallelTest(
             [torch.device("cpu")], None, gradient_as_bucket_view=True
         )
 
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_gloo_backend_1gpu_module_device_ids_integer_list(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_gloo_backend(devices, int_devices)
-
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_gloo_backend_1gpu_module_device_ids_torch_device_list(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_gloo_backend(devices, devices)
-
-    @requires_gloo()
-    @skip_if_lt_x_gpu(4)
-    def test_gloo_backend_2gpu_module(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_gloo_backend(devices, None, multi_device=True)
-
-    @requires_gloo()
-    @skip_if_lt_x_gpu(8)
-    def test_gloo_backend_4gpu_module(self):
-        int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
-        self._test_gloo_backend(devices, None, multi_device=True)
-
     def _test_global_local_unused_params_grad(
         self, gradient_as_bucket_view=False, static_graph=False
     ):
@@ -1601,35 +1452,19 @@ class DistributedDataParallelTest(
         )
         run_and_verify_grad(cpu_model)
 
-        # Test on GPU
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
-        gpu_model = DistributedDataParallel(
-            GlobalLocalUnusedParamModule().to(device_id),
-            device_ids=[device_id],
-            process_group=process_group,
-            find_unused_parameters=True,
-            gradient_as_bucket_view=gradient_as_bucket_view,
-            static_graph=static_graph,
-        )
-        run_and_verify_grad(gpu_model)
-
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
     def test_global_local_unused_params_grad(self):
         self._test_global_local_unused_params_grad()
 
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
     def test_global_local_unused_params_grad_with_grad_is_view(self):
         self._test_global_local_unused_params_grad(gradient_as_bucket_view=True)
 
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
     def test_global_local_unused_params_grad_with_static_graph(self):
         self._test_global_local_unused_params_grad(static_graph=True)
 
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
     def test_find_unused_parameters_when_unused_parameters_empty(self):
         """
         An empty unused_parameters array does not imply find_unused_parameters =
@@ -1673,16 +1508,6 @@ class DistributedDataParallelTest(
             find_unused_parameters=True,
         )
         run_and_verify_grad(cpu_model)
-
-        # Test on GPU
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
-        gpu_model = DistributedDataParallel(
-            FindUnusedParamModule().to(device_id),
-            device_ids=[device_id],
-            process_group=process_group,
-            find_unused_parameters=True,
-        )
-        run_and_verify_grad(gpu_model)
 
     @requires_gloo()
     def test_ignored_output(self):
@@ -1769,48 +1594,6 @@ class DistributedDataParallelTest(
             loss = criterion(output, target)
             loss.backward()
 
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_ignored_sharded_tensor(self):
-        class MyModule(nn.Module):
-            def __init__(self, shard_tensor: ShardedTensor) -> None:
-                super().__init__()
-                self.fc1 = nn.Linear(2, 10, bias=False)
-                self.st = nn.Parameter(shard_tensor)
-                self.relu = nn.ReLU()
-
-            def forward(self, x):
-                x = self.relu(self.fc1(x))
-                return F.softmax(x, dim=1)
-
-        pg = dist.init_process_group(
-            "gloo",
-            init_method=f"file://{self.file_name}",
-            world_size=self.world_size,
-            rank=self.rank,
-        )
-        device = torch.device(f"cuda:{self.rank}")
-        local_shard_metadata = ShardMetadata(
-            shard_offsets=[(self.rank % 2) * 5, 0],
-            shard_sizes=[5, 10],
-            placement=f"rank:{self.rank}/cuda:{self.rank}",
-        )
-        local_shards = [Shard(torch.randn(5, 10, device=device), local_shard_metadata)]
-        st = init_from_local_shards(local_shards, [10, 10])
-        m = MyModule(st)
-        DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
-            module=m, params_and_buffers_to_ignore={"st"}
-        )
-        # test to make DDP constructor will not fail when module includes a ShardedTensor when ignored
-        DistributedDataParallel(
-            m,
-            device_ids=[device] if device.type == "gpu" else None,
-            process_group=pg,
-            gradient_as_bucket_view=True,
-            broadcast_buffers=False,
-            static_graph=True,
-        )
-
     def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
         batch_size = mult * self.world_size
@@ -1832,112 +1615,6 @@ class DistributedDataParallelTest(
         self.assertEqual(
             vanilla_parameter.grad.coalesce(), ddp_parameter.grad.coalesce()
         )
-
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_save_load_checkpoint(self):
-        dist.init_process_group(
-            "gloo",
-            init_method=f"file://{self.file_name}",
-            world_size=self.world_size,
-            rank=self.rank,
-        )
-
-        class TestModel(nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.fc1 = nn.Linear(2, 10, bias=False)
-                self.fc2 = nn.Linear(10, 4, bias=False)
-                self.relu = nn.ReLU()
-
-            def forward(self, x):
-                x = self.relu(self.fc1(x))
-                x = self.relu(self.fc2(x))
-                return F.softmax(x, dim=1)
-
-        def train_loop(model, optimizer, iterations):
-            for _ in range(iterations):
-                optimizer.zero_grad()
-                output = model(input)
-                loss = criterion(output, target)
-                loss.backward()
-                optimizer.step()
-
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
-
-        model_withload = TestModel().float().to(device_id)
-        model_withoutload = TestModel().float().to(device_id)
-
-        ddp_withload = DistributedDataParallel(
-            model_withload,
-            device_ids=[device_id],
-        )
-        ddp_withoutload = DistributedDataParallel(
-            model_withoutload,
-            device_ids=[device_id],
-        )
-
-        # ensure that all the three models start with the same set of parameters. By default they are randomized on construction
-        for p in ddp_withload.parameters():
-            with torch.no_grad():
-                p.zero_()
-        for p in model_withload.parameters():
-            with torch.no_grad():
-                p.zero_()
-        for p in ddp_withoutload.parameters():
-            with torch.no_grad():
-                p.zero_()
-
-        batch_size = 4
-        criterion = nn.CrossEntropyLoss()
-
-        optimizer_withload = torch.optim.SGD(ddp_withload.parameters(), lr=0.001)
-        optimizer_non_ddp_withload = torch.optim.SGD(
-            model_withload.parameters(), lr=0.001
-        )
-        optimizer_withoutload = torch.optim.SGD(ddp_withoutload.parameters(), lr=0.001)
-
-        input = torch.rand([batch_size, 2], dtype=torch.float).to(device_id)
-        target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)]).to(
-            device_id
-        )
-
-        # run the model for 6 iterations, with a checkpoint in the middle
-        train_loop(ddp_withload, optimizer_withload, 3)
-
-        # zero out parameters of both DDP and non-DDP models and reload them from the DDP state dict
-        checkpoint_path = tempfile.gettempdir() + "/model.checkpoint"
-        if self.rank == 0:
-            torch.save(ddp_withload.state_dict(), checkpoint_path)
-
-        dist.barrier()
-        map_location = {"cuda:%d" % 0: "cuda:%d" % self.rank}
-        ddp_state_dict = torch.load(checkpoint_path, map_location=map_location)
-
-        for model in [ddp_withload, model_withload]:
-            for p in ddp_withload.parameters():
-                with torch.no_grad():
-                    p.zero_()
-        ddp_withload.load_state_dict(ddp_state_dict)
-        # the non-DDP model needs to first remove the prefix of "module." from the DDP state dict
-        torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
-            ddp_state_dict, "module."
-        )
-        model_withload.load_state_dict(ddp_state_dict)
-
-        train_loop(ddp_withload, optimizer_withload, 3)
-        train_loop(model_withload, optimizer_non_ddp_withload, 3)
-
-        # re-run the model with the same inputs for 6 iterations with no checkpoint
-        train_loop(ddp_withoutload, optimizer_withoutload, 6)
-
-        for p_withload, p_withoutload, p_non_ddp_withload in zip(
-            ddp_withload.parameters(),
-            ddp_withoutload.parameters(),
-            model_withload.parameters(),
-        ):
-            self.assertEqual(p_withload, p_withoutload)
-            self.assertEqual(p_non_ddp_withload, p_withoutload)
 
     def _test_sparse_gradients(self, gradient_as_bucket_view=False):
         process_group = self._get_process_group()
@@ -1982,39 +1659,6 @@ class DistributedDataParallelTest(
         # check whether the grads are equal to what then callback returns.
         # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
         self._run_and_verify_hook(cpu_model, 8, 2 * torch.ones(2, 2))
-
-    def _gpu_model_with_ddp_comm_hook(
-        self, process_group, hook=None, gradient_as_bucket_view=False, state=None
-    ):
-        device_id = gpus_for_rank(self.world_size)[self.rank][0]
-        gpu_model = DistributedDataParallel(
-            ModuleForDdpCommHook().to(device_id),
-            device_ids=[device_id],
-            process_group=process_group,
-            gradient_as_bucket_view=gradient_as_bucket_view,
-        )
-
-        # Register a DDP communication hook if any.
-        if hook is not None:
-            gpu_model.register_comm_hook(state, hook)
-
-        return gpu_model
-
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_future_passing_gpu_gloo(self):
-        """
-        This unit test verifies whether the Future object is passed properly using gloo backend.
-        The hook callback function creates a Future object and sets a value to it.
-        """
-        process_group = self._get_process_group()
-
-        # Get GPU model with simple_hook registered.
-        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, self._simple_hook)
-
-        # check whether the grads are equal to what simple_hook's then callback returns.
-        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
-        self._run_and_verify_hook(gpu_model, 8, 2 * torch.ones(2, 2))
 
     @requires_gloo()
     def test_ddp_invalid_comm_hook_init(self):
@@ -2347,21 +1991,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
             self.assertEqual(tensors, target)
 
     @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_broadcast_coalesced_gloo_cuda(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        c10d.init_process_group(
-            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
-        )
-        process_group = c10d.distributed_c10d._get_default_group()
-        device = torch.device("cuda:%d" % self.rank)
-        backend = process_group._get_backend(device)
-        backend.create_device(interface=LOOPBACK)
-        ranks = list(range(self.world_size))
-        for root_rank in ranks:
-            self._test_broadcast_coalesced(process_group, device, root_rank)
-
-    @requires_gloo()
     def test_broadcast_coalesced_gloo_cpu(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
@@ -2374,48 +2003,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         ranks = list(range(self.world_size))
         for root_rank in ranks:
             self._test_broadcast_coalesced(process_group, device, root_rank)
-
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_default_pg_gloo(self):
-        self._test_sequence_num_set_default_pg(backend="gloo")
-
-    @requires_gloo()
-    @skip_if_lt_x_gpu(2)
-    def test_sequence_num_set_gloo_new_group(self):
-        self._test_sequence_num_set_new_group(backend="gloo")
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_sequence_num_incremented_gloo_default(self):
-        self._test_sequence_num_incremented_default_group("gloo")
-
-    @skip_if_lt_x_gpu(4)
-    @requires_gloo()
-    def test_sequence_num_incremented_gloo_subgroup(self):
-        if self.world_size < 4:
-            return skip_but_pass_in_sandcastle("Test requires world_size of at least 4")
-        self._test_sequence_num_incremented_subgroup("gloo")
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_gloo_warn_not_in_group(self):
-        self._test_warn_not_in_group(backend="gloo")
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_gloo_rank_membership(self):
-        self._test_rank_membership(backend="gloo")
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_tensor_dtype_mismatch(self):
-        self._test_tensor_dtype_mismatch(backend="gloo")
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_tensor_dtype_complex(self):
-        self._test_tensor_dtype_complex(backend="gloo")
 
     @requires_gloo()
     def test_bool_tensors(self):
