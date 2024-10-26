@@ -411,13 +411,35 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
       const auto& src_tensor = iter.tensor(1);      
       auto src_sizes = src_tensor.sizes();
       auto src_strides = src_tensor.strides();
-      
-      auto height = iter.ndim() == 1 ? 1 : src_sizes[0];
-      auto width_in_bytes = iter.ndim() == 1 ? nbytes : src_sizes[1] * src_tensor.element_size();
+      auto dst_strides = dst_tensor.strides();
+      size_t element_size = src_tensor.element_size();
 
-      // Ensure pitch is at least width_in_bytes
-      size_t src_pitch = std::max(src_strides[0] * src_tensor.element_size(), width_in_bytes);
-      size_t dst_pitch = std::max(src_strides[0] * dst_tensor.element_size(), width_in_bytes);
+      // Set dimensions and strides for 1D or 2D cases
+      int64_t dim0 = src_sizes[0];
+      int64_t dim1 = iter.ndim() == 1 ? 1 : src_sizes[1];
+      int64_t stride0 = src_strides[0];
+      int64_t stride1 = iter.ndim() == 1 ? 1 : src_strides[1];
+      int64_t dst_stride0 = dst_strides[0];
+      int64_t dst_stride1 = iter.ndim() == 1 ? 1 : dst_strides[1];
+
+      bool is_column_major = (stride0 == 1 && stride1 >= dim0);
+
+      size_t src_pitch, dst_pitch, width_in_bytes, height;
+      if (is_column_major) {
+          src_pitch = stride1 * element_size;
+          dst_pitch = dst_stride1 * element_size;
+          width_in_bytes = dim0 * element_size;
+          height = dim1;
+      } else {
+          src_pitch = stride0 * element_size;
+          dst_pitch = dst_stride0 * element_size;
+          width_in_bytes = dim1 * element_size;
+          height = dim0;
+      }
+      
+      // Ensure pitch is valid
+      TORCH_CHECK(src_pitch >= width_in_bytes, "Source pitch must be >= width_in_bytes");
+      TORCH_CHECK(dst_pitch >= width_in_bytes, "Destination pitch must be >= width_in_bytes");
 
       at::cuda::memcpy2d_and_sync(
           dst,        
