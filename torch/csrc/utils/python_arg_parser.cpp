@@ -1447,6 +1447,8 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   PyObject* value = nullptr;
   Py_ssize_t pos = 0;
 
+  // Note that this dict traversal is NoGil safe as the kwargs dict is only
+  // accessible within this thread.
   while (PyDict_Next(kwargs, &pos, &key, &value)) {
     if (!THPUtils_checkString(key)) {
       throw TypeError("keywords must be strings");
@@ -1518,6 +1520,8 @@ bool FunctionSignature::parse(
       }
       obj = PyTuple_GET_ITEM(args, arg_pos);
     } else if (kwargs) {
+      // Note that this call is NoGil safe as it works on kwargs which are local
+      // to the current function call.
       obj = PyDict_GetItem(kwargs, param.python_name);
       for (PyObject* numpy_name : param.numpy_python_names) {
         if (obj) {

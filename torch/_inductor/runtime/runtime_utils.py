@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import getpass
 import operator
-import os
-import re
-import tempfile
 
 import torch
+from torch._inductor.runtime.cache_dir_utils import (  # noqa: F401
+    cache_dir,
+    default_cache_dir,
+)
 
 
 def conditional_product(*args):
@@ -84,22 +84,6 @@ def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix="", color=
 
 def get_max_y_grid():
     return 65535
-
-
-def cache_dir() -> str:
-    cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
-    if cache_dir is None:
-        os.environ["TORCHINDUCTOR_CACHE_DIR"] = cache_dir = default_cache_dir()
-    os.makedirs(cache_dir, exist_ok=True)
-    return cache_dir
-
-
-def default_cache_dir():
-    sanitized_username = re.sub(r'[\\/:*?"<>|]', "_", getpass.getuser())
-    return os.path.join(
-        tempfile.gettempdir(),
-        "torchinductor_" + sanitized_username,
-    )
 
 
 try:

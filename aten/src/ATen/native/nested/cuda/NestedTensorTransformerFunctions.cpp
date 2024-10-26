@@ -13,7 +13,6 @@
 #include <ATen/ops/narrow_native.h>
 #endif
 
-#include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorTransformerUtils.h>
 #include <ATen/native/nested/NestedTensorMath.h>
@@ -111,7 +110,7 @@ Tensor nested_from_padded_cuda(
             padded_contiguous.sizes()[0]);
       }
     } else {
-      AT_ERROR("Only support fp32/fp16 for padded input");
+      TORCH_CHECK(false, "Only support fp32/fp16 for padded input");
     }
     return at::detail::make_tensor<NestedTensorImpl>(std::move(output), sizes);
   } else {

@@ -6,7 +6,8 @@ import platform
 import re
 import subprocess
 import sys
-from typing import Any, Callable, Dict, List
+import warnings
+from typing import Any, Callable, Dict, List, Union
 
 import torch
 from torch._inductor import config
@@ -52,7 +53,7 @@ class VecISA:
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -137,10 +138,13 @@ cdll.LoadLibrary("__lib_path__")
 
             return True
 
-    @functools.lru_cache(None)  # noqa: B019
     def __bool__(self) -> bool:
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
+        return self.__bool__impl(config.cpp.vec_isa_ok)
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__impl(self, vec_isa_ok) -> bool:
+        if vec_isa_ok is not None:
+            return vec_isa_ok
 
         if config.is_fbcode():
             return True
@@ -157,6 +161,24 @@ class VecNEON(VecISA):
 
     def __str__(self) -> str:
         return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
+class VecSVE(VecISA):
+    # this function can be repurposed for SVE with variable vec length
+    _bit_width = 256
+    _macro = [
+        "CPU_CAPABILITY_SVE",
+        "CPU_CAPABILITY_SVE256",
+        "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+    ]
+    _arch_flags = "-march=armv8-a+sve -msve-vector-bits=256"
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+
+    def __str__(self) -> str:
+        return "asimd"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -306,7 +328,36 @@ def x86_isa_checker() -> List[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON()]
+supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE()]
+
+
+def get_isa_from_cpu_capability(
+    capability: Union[str, None],
+    vec_isa_list: List[VecISA],
+    invalid_vec_isa: InvalidVecISA,
+):
+    # AMX setting is not supported in eager
+    # VecAMX will be prioritized for selection when setting ATEN_CPU_CAPABILITY to avx512
+    # TODO add sve256 support
+    capability_to_isa_str = {
+        "default": "INVALID_VEC_ISA",
+        "zvector": "zvector",
+        "vsx": "vsx",
+        "avx2": "avx2",
+        "avx512": "avx512",
+    }
+    if capability in capability_to_isa_str.keys():
+        isa_str = capability_to_isa_str[capability]
+        if isa_str == "INVALID_VEC_ISA":
+            return invalid_vec_isa
+        for vec_isa in vec_isa_list:
+            if isa_str in str(vec_isa):
+                return vec_isa
+
+    if capability:
+        warnings.warn(f"ignoring invalid value for ATEN_CPU_CAPABILITY {capability}")
+
+    return vec_isa_list[0]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -338,7 +389,10 @@ def valid_vec_isa_list() -> List[VecISA]:
     elif arch == "ppc64le":
         isa_list.append(VecVSX())
     elif arch == "aarch64":
-        isa_list.append(VecNEON())
+        if torch.cpu._is_arm_sve_supported():
+            isa_list.append(VecSVE())
+        else:
+            isa_list.append(VecNEON())
     elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
@@ -359,10 +413,12 @@ def pick_vec_isa() -> VecISA:
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    # If the simdlen is None, it indicates determine the vectorization length automatically
+    # If the simdlen is None, set simdlen based on the environment ATEN_CPU_CAPABILITY
+    # to control CPU vec ISA
     if config.cpp.simdlen is None:
-        assert _valid_vec_isa_list
-        return _valid_vec_isa_list[0]
+        return get_isa_from_cpu_capability(
+            os.getenv("ATEN_CPU_CAPABILITY"), _valid_vec_isa_list, invalid_vec_isa
+        )
 
     for isa in _valid_vec_isa_list:
         if config.cpp.simdlen == isa.bit_width():
