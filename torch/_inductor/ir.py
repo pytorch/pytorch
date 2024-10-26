@@ -879,7 +879,7 @@ class Reduction(Loops):
         reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
-        should_split = (
+        should_split = reduction_type == "scan" or (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
             and reduction_type
             not in (
@@ -1963,7 +1963,7 @@ class Scan(Loops):
             inner_fn=wrapper_fn,
             ranges=pointwise_ranges,
             reduction_ranges=scan_ranges,
-            reduction_type="sum",
+            reduction_type="scan",
             reduction_numel=scan_numel,
         )
 
