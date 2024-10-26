@@ -6435,7 +6435,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 x, y = y, x
             if non_contig_type != 0:
                 y = y * 2
-            x_int8 = torch.randint(-10, 10, (x, y), dtype=torch.int8, device=device)
+            x_int8 = torch.randint(-128, 127, (x, y), dtype=torch.int8, device=device)
             x_float = x_int8.to(torch.float32)
             if non_contig_type == 1:
                 x_int8 = x_int8[:, : y // 2]

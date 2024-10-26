@@ -779,7 +779,7 @@ def _get_torch_related_args(
         if not aot_mode:
             libraries.append("torch_python")
 
-    if _IS_WINDOWS:
+    if _IS_WINDOWS and platform.machine().lower() != "arm64":
         libraries.append("sleef")
 
     return include_dirs, libraries_dirs, libraries
