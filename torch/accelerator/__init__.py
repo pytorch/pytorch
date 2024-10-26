@@ -1,6 +1,7 @@
 r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
+
 import torch
 
 from ._utils import _device_t, _get_device_index
