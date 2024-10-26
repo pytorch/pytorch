@@ -444,6 +444,14 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
+        if true_out is None or false_out is None:
+            if true_out is None and false_out is None:
+                continue
+            raise torch._dynamo.exc.CondOpArgsMismatchError(
+                f"Expected both branches to return None:"
+                f"\n  {true_fn.__name__} returns {true_out}"
+                f"\n  {false_fn.__name__} returns {false_out}"
+            )
         true_meta = _extract_tensor_metadata(true_out)
         false_meta = _extract_tensor_metadata(false_out)
         if true_meta != false_meta:
@@ -468,14 +476,17 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
                 branch, unwrapped_inputs, pre_dispatch=pre_dispatch
             ):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be modifying the input!"
+                    "One of torch.cond branch might be modifying the input! "
+                    "Consider cloning the input before modifying it. "
                 )
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_alias(
                 branch, unwrapped_inputs, pre_dispatch=pre_dispatch
             ):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be aliasing the input!"
+                    "One of torch.cond branch might be aliasing the input! "
+                    "If you are returning a view of the input, please make sure "
+                    "to clone it. "
                 )
 
         cond_return = cond_op(
