@@ -32,7 +32,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self, TypeIs
+from typing_extensions import Self, TypeGuard, TypeIs
 from weakref import ReferenceType
 
 import torch
@@ -1214,7 +1214,7 @@ class FakeTensorMode(TorchDispatchMode):
     # In this case, it's insufficient to test only one FakeTensor: you need
     # to distinguish between our fake tensor and other fake tensors.  That's
     # what this function does.
-    def is_our_fake(self, t: object) -> TypeIs[FakeTensor]:
+    def is_our_fake(self, t: object) -> TypeGuard[FakeTensor]:
         return isinstance(t, FakeTensor) and t.fake_mode is self
 
     # If we should avoid device init. This changes the behavior of various APIs:
