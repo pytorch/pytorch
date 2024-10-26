@@ -14,6 +14,7 @@ from torch._higher_order_ops.utils import (
     autograd_not_implemented,
     reenter_make_fx,
     unique_graph_id,
+    first_slice_copy
 )
 from torch._inductor.utils import is_pointwise_use
 from torch._ops import HigherOrderOperator
@@ -26,12 +27,6 @@ from torch.fx.experimental.proxy_tensor import (
 
 
 aten = torch._ops.ops.aten
-
-
-# TODO: These functions can be merged with the corresponding functions from scan
-# once it is merged
-def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
-    return torch.select_copy(t, dim, 0)
 
 
 def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
@@ -130,11 +125,11 @@ def associative_scan(
 
     """
     if not callable(combine_fn):
-        raise RuntimeError("Combine_fn must be a callable, but got {combine_fn}")
+        raise ValueError("Combine_fn must be a callable, but got {combine_fn}")
     if not isinstance(dim, int):
-        raise RuntimeError("Dim must be an int, but got " + str(type(dim)))
+        raise ValueError("Dim must be an int, but got " + str(type(dim)))
     if combine_mode not in ["pointwise", "generic"]:
-        raise RuntimeError(
+        raise ValueError(
             "Combine_mode must either 'pointwise' or 'generic', but got {combine_mode}"
         )
 
@@ -152,17 +147,17 @@ def associative_scan(
         )
 
     if len(leaves) == 0:
-        raise RuntimeError("Expected at least 1 xs leaf")
+        raise ValueError("Expected at least 1 xs leaf")
     if any(not isinstance(x, torch.Tensor) for x in leaves):
-        raise RuntimeError("xs leaves must be a Tensor")
+        raise ValueError("xs leaves must be a Tensor")
     if any(x.is_sparse for x in leaves):
-        raise RuntimeError("xs leaves must dense Tensors, consider using `to_dense()`")
+        raise ValueError("xs leaves must dense Tensors, consider using `to_dense()`")
     if any(x.ndim < dim for x in leaves):
-        raise RuntimeError(
+        raise ValueError(
             "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
         )
     if any(x.shape[dim] == 0 for x in leaves):
-        raise RuntimeError(
+        raise ValueError(
             "All xs leaves must at least have 'dim' number of dimensions and scan dimension > 0"
         )
 
@@ -190,12 +185,14 @@ def associative_scan(
         raise RuntimeError(
             "The number of leaves of the pytree of the output of the operator needs to match the length of the pytree of the input"
         )
-    if any(x.shape != sliced_shape for x in out_leaves):
+    if any(x.shape != sliced_shape or x.dtype != x_sliced.dtype or x.device != x_sliced.device or x.stride() != x_sliced.stride() for x, x_sliced in zip(out_leaves, sliced_leaves)):
         raise RuntimeError(
             "The pytree of the output of the operator needs to match the xs pytree"
         )
 
     if combine_mode == "generic":
+        # The generic_associative_scan implementation calls the combine_fn with a batch long the scan dimension
+        # Therefore, the paralellization is realized with vmap on `dim`
         combine_fn = functools.partial(
             wrap_combine_fn_flat, combine_fn=torch.vmap(combine_fn, dim, dim), spec=spec, num_leaves=len(leaves)
         )
@@ -357,7 +354,7 @@ def trace_associative_scan(
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def associative_scan_op_dense(combine_fn, xs, dim):
-    raise NotImplementedError("associative_scan is not implemented for eager")
+    return generic_associative_scan(combine_fn, xs, dim)
 
 
 associative_scan_op.py_impl(DispatchKey.Autograd)(
