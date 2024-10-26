@@ -9,6 +9,7 @@ import torch._prims_common as utils
 from torch._dynamo.test_case import TestCase
 from torch._inductor import config
 from torch._inductor.bisect_helper import BisectionManager
+from torch.library import _scoped_library, Library
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
@@ -23,6 +24,23 @@ i32 = torch.int32
 
 @requires_cuda
 class TestCompilerBisector(TestCase):
+    test_ns = "_test_bisector"
+
+    def tearDown(self):
+        if hasattr(torch.ops, self.test_ns):
+            delattr(torch.ops, self.test_ns)
+        if hasattr(self, "lib"):
+            del self.lib.m
+            del self.lib
+
+    def get_op(self, name):
+        return getattr(getattr(torch.ops, self.test_ns), name).default
+
+    def get_lib(self):
+        lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
+        self.lib = lib
+        return lib
+
     def test_bad_decomp(self):
         mod = import_module("torch._inductor.compile_fx")
 
@@ -77,6 +95,52 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.subsystem, "decomposition")
         self.assertEqual(out.bisect_number, 1)
         self.assertTrue("aten.exponential" in out.debug_info)
+
+    def test_crossref(self):
+        test_ns = "bisect_ops"
+        with _scoped_library(self.test_ns, "FRAGMENT") as lib:
+            lib.define("foo(Tensor x) -> Tensor")
+            op = self.get_op("foo")
+
+            class Foo(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    # Emulate AutoDispatchBelowADInplaceOrView, which is not bound into python
+                    with torch._C._AutoDispatchBelowAutograd():
+                        with torch._C._ExcludeDispatchKeyGuard(
+                            torch._C.DispatchKeySet(
+                                torch._C.DispatchKey.ADInplaceOrView
+                            )
+                        ):
+                            return op(x)
+
+                @staticmethod
+                def backward(ctx, gx):
+                    return gx
+
+            def foo_impl(x):
+                return x.view_as(x).clone()
+
+            def foo_meta(x):
+                return x.view_as(x)
+
+            lib.impl("foo", Foo.apply, "Autograd")
+            lib.impl("foo", foo_impl, "CPU")
+            lib.impl("foo", foo_meta, "Meta")
+
+            x = torch.tensor(3.14159 / 3, requires_grad=True)
+
+            def test_fn():
+                torch._dynamo.reset()
+
+                try:
+                    torch.testing.assert_allclose(torch.compile(op)(x), op(x))
+                except Exception:
+                    return False
+                return True
+
+            out = BisectionManager.do_bisect(test_fn)
+            self.assertEqual(out.backend, "aot_eager_decomp_partition_crossref")
 
     def test_emulate_precision_casts(self):
         def test_fn():
