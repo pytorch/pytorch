@@ -274,10 +274,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                             # Cell has not yet been assigned
                             contents_var = variables.DeletedVariable()
 
-                        if (
-                            closure_cell_contents.name()
-                            not in tx.mutated_closure_cell_contents
-                        ):
+                        if id(cell) not in tx.mutated_closure_cell_ids:
                             # Optimistically don't allocate the cell, to
                             # reduce the number of side effects.  This is
                             # important for cond, as without it, any accesses
@@ -287,6 +284,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                             # the analysis with this cell's name in the
                             # mutated list here
                             result[name] = contents_var
+                            # Map the variable to the original cell so we can
+                            # look it up later, see
+                            # `InliningInstructionTranslator.STORE_DEREF`.
+                            tx.contents_var_to_mutated_cell[contents_var] = cell
                             continue
 
                         # cells are written to with "cell_contents",
