@@ -1367,7 +1367,7 @@ class SIMDScheduling(BaseScheduling):
 
         # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
         # so taking the hit of non-coalesced loads is okay
-        if has_sort := schedule_contains_op(node_schedule, "sort"):
+        if schedule_contains_op(node_schedule, "sort"):
             kernel_kwargs["override_persistent_reduction"] = True
 
         kernel = kernel_type(
