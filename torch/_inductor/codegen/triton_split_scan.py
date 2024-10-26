@@ -49,6 +49,9 @@ class TritonSplitScanKernel(TritonKernel):
     def should_use_persistent_reduction(self) -> bool:
         return False
 
+    def should_use_cooperative_reduction(self) -> bool:
+        return False
+
     def initialize_range_tree(self, pid_cache):
         prefixes = "yxr"
         assert len(self.numels) <= len(
