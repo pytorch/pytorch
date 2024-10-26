@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import locale
+import codecs
 import unittest
 import warnings
 
@@ -528,6 +530,38 @@ class TestCppExtensionJIT(common.TestCase):
 
         module = compile("int f() { return 789; }")
         self.assertEqual(module.f(), 789)
+
+    @unittest.skipIf(codecs.lookup(locale.getencoding()).name != "utf-8", "Only test in UTF-8 locale")
+    def test_load_with_non_platform_default_encoding(self):
+        # Assume the code is saved in UTF-8, but the locale is set to a different encoding.
+        # You might encounter decoding errors in ExtensionVersioner.
+        # But this case is quite hard to cover because CI environments may not in non-latin locale.
+        # So the following code just test source file in gbk and locale in utf-8.
+
+        cpp_source = """
+        #include <torch/extension.h>
+
+        // Non-latin1 character test: 字符.
+        // It will cause utf-8 decoding error.
+
+        int f() { return 123; }
+        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+            m.def("f", &f, "f");
+        }
+        """
+
+        build_dir = tempfile.mkdtemp()
+        src_path = os.path.join(build_dir, "main.cpp")
+
+        with open(src_path, encoding="gbk", mode="wt") as f:
+            f.write(cpp_source)
+
+        module = torch.utils.cpp_extension.load(
+            name="non_default_encoding",
+            sources=src_path,
+            verbose=True,
+        )
+        self.assertEqual(module.f(), 123)
 
     def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
