@@ -3777,7 +3777,7 @@ class ShapeEnv:
             candidates = {
                 ex_size[i] * ex_stride[i]: size[i] * stride[i]
                 for i in range(len(size))
-                if stride[i] is not None and ex_stride[i] >= 0
+                if stride[i] is not None
             }
 
             # iterate over unbound strides in sorted order
