@@ -212,13 +212,16 @@ MetricTable.register_table(
 MetricTable.register_table(
     "persistent_red_perf",
     [
-        "kernel1_name",
-        "kernel2_name",
+        "kernel0_path",
+        "kernel1_path",
+        "kernel2_path",
+        "kernel3_path",
+        "kernel0_latency",
         "kernel1_latency",
         "kernel2_latency",
+        "kernel3_latency",
         "size_hints",
         "reduction_hint",
-        "speedup",
     ],
 )
 

@@ -417,23 +417,9 @@ class MultiKernelCall:
                 k0.inductor_meta.get("reduction_hint"),
                 timings,
             )
-
-            def get_kernel_path(k):
-                return k.fn.fn.__code__.co_filename
-
-            # TODO(jansel): need to update metrics table handling
             get_metric_table("persistent_red_perf").add_row(
-                lambda: {
-                    "kernel1_name": get_kernel_path(self.kernels[0]),
-                    "kernel2_name": get_kernel_path(self.kernels[1]),
-                    "kernel1_latency": timings[0],
-                    "kernel2_latency": timings[1],
-                    "size_hints": k0.size_hints,
-                    "reduction_hint": k0.inductor_meta.get("reduction_hint"),
-                    "speedup": timings[1] / timings[0],
-                }
+                functools.partial(self._metrics_table_row, timings)
             )
-
             if not self.disable_cache:
                 self.store_cache()
 
@@ -442,3 +428,23 @@ class MultiKernelCall:
             self.record_choice(self.multi_kernel_name, self.picked_kernel)
         self.run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
         self.run(*args, **kwargs)
+
+    def _metrics_table_row(self, timings):
+        def get_kernel_path(k):
+            return k.fn.fn.__code__.co_filename
+
+        k0 = self.kernels[0]
+        row = {
+            "size_hints": k0.size_hints,
+            "reduction_hint": k0.inductor_meta.get("reduction_hint"),
+        }
+        max_kernels = 4
+        assert len(timings) <= max_kernels
+        for i in range(max_kernels):
+            if i < len(self.kernels):
+                row[f"kernel{i}_path"] = get_kernel_path(self.kernels[i])
+                row[f"kernel{i}_latency"] = timings[i]
+            else:
+                row[f"kernel{i}_path"] = ""
+                row[f"kernel{i}_latency"] = ""
+        return row
