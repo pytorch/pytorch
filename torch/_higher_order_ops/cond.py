@@ -1,6 +1,8 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import logging
+from typing import Any, Callable, List, Tuple, Union
 
 import torch
 import torch._subclasses.functional_tensor
@@ -62,7 +64,12 @@ cond_op = CondOp()
 
 
 @exposed_in("torch")
-def cond(pred, true_fn, false_fn, operands):
+def cond(
+    pred: Union[bool, int, float, torch.Tensor],
+    true_fn: Callable,
+    false_fn: Callable,
+    operands: Union[Tuple, List] = (),
+) -> Any:
     r"""
     Conditionally applies `true_fn` or `false_fn`.
 
@@ -95,7 +102,8 @@ def cond(pred, true_fn, false_fn, operands):
           have consistent input and outputs, meaning the inputs have to be
           the same, and the outputs have to be the same type and shape.
 
-        operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the true/false functions.
+        operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the
+          true/false functions. It can be empty if true_fn/false_fn doesn't require input. Defaults to ().
 
     Example::
 
@@ -156,7 +164,7 @@ def cond(pred, true_fn, false_fn, operands):
             )
 
         if not callable(true_fn) or not callable(false_fn):
-            raise RuntimeError("Expect both branches to be callbale.")
+            raise RuntimeError("Expect both branches to be callable.")
 
         if not isinstance(operands, (tuple, list)) or pytree.tree_any(
             lambda t: not isinstance(t, torch.Tensor), operands
