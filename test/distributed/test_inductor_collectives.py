@@ -252,6 +252,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skipIfRocm
     def test_eager_async_allreduce_inductor_wait(self):
         import torch.distributed as dist
+        from torch._inductor.utils import run_and_get_code
 
         def all_reduce_non_functional_eager(x):
             y = x * x
@@ -314,6 +315,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                         torch._C._distributed_c10d._get_work_registry_size(), 0
                     )
             self.assertEqual(out_ref, out_compiled)
+            # Check that `wait_tensor()` is in the Inductor generated code
+            _, triton_codes = run_and_get_code(all_reduce_wait_compiled, work, y)
+            FileCheck().check("torch.ops._c10d_functional.wait_tensor.default(").run(
+                triton_codes[0]
+            )
 
             # Failure Case: issue comm in eager -> wait for comm in compile. Doesn't use the context manager.
             for _ in range(10):
