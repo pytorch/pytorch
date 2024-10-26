@@ -5,8 +5,7 @@
 #include <torch/csrc/jit/backends/backend_interface.h>
 #include <torch/custom_class.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 inline c10::FunctionSchema getIsAvailableSchema() {
@@ -115,5 +114,4 @@ class backend {
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
