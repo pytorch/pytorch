@@ -387,7 +387,14 @@ function(torch_compile_options libname)
       list(APPEND private_compile_options -Wunused-but-set-variable)
     endif()
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-      list(APPEND private_compile_options -Wunused-private-field)
+      list(PREPEND private_compile_options -Weverything)
+      list(APPEND private_compile_options
+        -Wno-c++98-compat
+        -Wno-c++98-compat-pedantic
+        -Wno-reserved-id-macro
+        -Wno-reserved-identifier
+        -Wno-padded
+        -Wunused-private-field)
     endif()
     if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       list(APPEND private_compile_options
