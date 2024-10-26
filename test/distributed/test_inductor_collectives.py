@@ -330,7 +330,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                     torch._C._distributed_c10d._get_work_registry_size(), 0
                 )
             # In this case `.wait_tensor(y)` in compiled region will not be able to find the corresponding work object
-            # and thus not actually doing the wait, thus the result will not match eager.
+            # to invoke the wait, thus the result will not match eager.
             self.assertNotEqual(out_ref, out_compiled)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
