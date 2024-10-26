@@ -3,12 +3,11 @@
 #ifdef USE_C10D_NCCL
 
 #include <sched.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstdlib>
 
 #include <memory>
 #include <mutex>
-#include <thread>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAEvent.h>
@@ -120,32 +119,24 @@ constexpr int64_t kCommInitBusyWaitMillis = 2;
 
 // Macro to throw on a non-successful NCCL return value, non-blocking.
 #define C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, yield_fn)      \
-  ncclResult_t result = cmd;                                                  \
-  auto startTimepoint = std::chrono::steady_clock::now();                     \
-  while (result == ncclInProgress) {                                          \
-    if (nccl_nonblocking_timeout() > 0) {                                     \
-      auto currentTimepoint = std::chrono::steady_clock::now();               \
-      auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(    \
-                             currentTimepoint - startTimepoint)               \
-                             .count();                                        \
-      if (timeElapsed > nccl_nonblocking_timeout()) {                         \
-        std::string err = "NCCL timeout in: " + std::string(__FILE__) + ":" + \
-            std::to_string(__LINE__) + ", " +                                 \
-            ncclGetErrorWithVersion(result) + "\n" +                          \
-            getNcclErrorDetailStr(result, failureReason);                     \
-        TORCH_CHECK_WITH(DistBackendError, false, err);                       \
-      }                                                                       \
+  do {                                                                        \
+    ncclResult_t result = cmd;                                                \
+    auto startTimepoint = std::chrono::steady_clock::now();                   \
+    auto timeout = nccl_nonblocking_timeout();                                \
+    while (result == ncclInProgress) {                                        \
+      C10D_CHECK_TIMEOUT(startTimepoint, timeout);                            \
+      yield_fn;                                                               \
+      ncclCommGetAsyncError(comm, &result);                                   \
     }                                                                         \
-    yield_fn;                                                                 \
-    ncclCommGetAsyncError(comm, &result);                                     \
-  }                                                                           \
-  if (result != ncclSuccess) {                                                \
-    std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +       \
-        std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) +   \
-        "\n" + getNcclErrorDetailStr(result, failureReason);                  \
-    TORCH_CHECK_WITH(DistBackendError, false, err);                           \
-  }
+    if (result != ncclSuccess) {                                              \
+      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
+          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) + \
+          "\n" + getNcclErrorDetailStr(result, failureReason);                \
+      TORCH_CHECK_WITH(DistBackendError, false, err);                         \
+    }                                                                         \
+  } while (0)
 
+// Sleep for kCommInitBusyWaitMillis milliseconds.
 #define C10D_SCHED_SLEEP()     \
   std::this_thread::sleep_for( \
       std::chrono::milliseconds(kCommInitBusyWaitMillis))
@@ -165,33 +156,24 @@ constexpr int64_t kCommInitBusyWaitMillis = 2;
   C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, C10D_SCHED_SLEEP())
 
 #define C10D_NCCL_CHECK_TIMEOUT_GROUPEND(cmd, comm, failureReason)           \
-  ncclResult_t state = cmd;                                                  \
-  auto startTimepoint = std::chrono::steady_clock::now();                    \
-  if (state == ncclInProgress) {                                             \
-    do {                                                                     \
-      if (nccl_nonblocking_timeout() > 0) {                                  \
-        auto currentTimepoint = std::chrono::steady_clock::now();            \
-        auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>( \
-                               currentTimepoint - startTimepoint)            \
-                               .count();                                     \
-        if (timeElapsed > nccl_nonblocking_timeout()) {                      \
-          std::string err = "NCCL timeout in: " + std::string(__FILE__) +    \
-              ":" + std::to_string(__LINE__) + ", " +                        \
-              ncclGetErrorWithVersion(state) + "\n" +                        \
-              getNcclErrorDetailStr(state, failureReason);                   \
-          TORCH_CHECK_WITH(DistBackendError, false, err);                    \
-        }                                                                    \
-      }                                                                      \
-      sched_yield();                                                         \
-      ncclCommGetAsyncError(comm->getNcclComm(), &state);                    \
-    } while (state == ncclInProgress);                                       \
-  }                                                                          \
-  if (state != ncclSuccess) {                                                \
-    std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +      \
-        std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(state) +   \
-        "\n" + getNcclErrorDetailStr(state, failureReason);                  \
-    TORCH_CHECK_WITH(DistBackendError, false, err);                          \
-  }
+  do {                                                                       \
+    ncclResult_t state = cmd;                                                \
+    auto startTimepoint = std::chrono::steady_clock::now();                  \
+    auto timeout = nccl_nonblocking_timeout();                               \
+    if (state == ncclInProgress) {                                           \
+      do {                                                                   \
+        C10D_CHECK_TIMEOUT(startTimepoint, timeout);                         \
+        sched_yield();                                                       \
+        ncclCommGetAsyncError(comm->getNcclComm(), &state);                  \
+      } while (state == ncclInProgress);                                     \
+    }                                                                        \
+    if (state != ncclSuccess) {                                              \
+      std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +    \
+          std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(state) + \
+          "\n" + getNcclErrorDetailStr(state, failureReason);                \
+      TORCH_CHECK_WITH(DistBackendError, false, err);                        \
+    }                                                                        \
+  } while (0)
 
 // Macro to print and abort on a non-successful NCCL return value.
 #define C10D_NCCL_ASSERT(cmd)                            \
@@ -282,7 +264,7 @@ class TORCH_API DebugInfoWriter {
   }
 
  protected:
-  DebugInfoWriter(std::string namePrefix, int rank) {
+  DebugInfoWriter(const std::string& namePrefix, int rank) {
     filename_ = c10::str(namePrefix, rank);
   }
   std::string filename_;
@@ -295,14 +277,9 @@ class TORCH_API DebugInfoWriter {
 // RAII wrapper for NCCL communicator
 class NCCLComm {
  public:
-  explicit NCCLComm(ncclComm_t ncclComm)
-      : aborted_(false),
-        ncclAsyncErr_(ncclSuccess),
-        commFailureReason_(std::nullopt),
-        initialized_(false),
-        ncclComm_(ncclComm) {}
+  explicit NCCLComm(ncclComm_t ncclComm) : ncclComm_(ncclComm) {}
 
-  NCCLComm() : NCCLComm(nullptr) {}
+  NCCLComm() = default;
 
   ~NCCLComm() noexcept {
     // Add lock in this destructor, as aborted_ needs to be read after memory
@@ -396,6 +373,7 @@ class NCCLComm {
   NCCLComm& operator=(NCCLComm&& other) = delete;
 
   // Move constructable
+  // NOLINTNEXTLINE(.*-noexcept-move-.*)
   NCCLComm(NCCLComm&& other) {
     // Using other's lock, as it reads other's states
     // Can not use this.mutex_, as this object is being constructed.
@@ -462,6 +440,11 @@ class NCCLComm {
 #endif
   }
 
+  bool isInitialized() const {
+    std::unique_lock<std::mutex> lock(mutex_);
+    return initialized_;
+  }
+
   bool isAborted() const {
     std::unique_lock<std::mutex> lock(mutex_);
     return aborted_;
@@ -500,7 +483,7 @@ class NCCLComm {
         " has already been registered on ncclComm_ ",
         ncclComm_);
 
-    void* handle;
+    void* handle = nullptr;
     // Use getNcclComm to make sure comm is ready before calling nccl APIs
     auto comm = getNcclComm();
     C10D_NCCL_CHECK(
@@ -556,16 +539,16 @@ class NCCLComm {
 
  protected:
   // Unique nccl_id for this communicator.
-  ncclUniqueId ncclId_;
-  bool aborted_;
+  ncclUniqueId ncclId_{};
+  bool aborted_{false};
   uint64_t ncclCommSplitCounter_{0};
-  ncclResult_t ncclAsyncErr_;
+  ncclResult_t ncclAsyncErr_{ncclSuccess};
   mutable std::mutex mutex_;
   // Rank that this communicator corresponds to.
-  int rank_;
+  int rank_{};
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
-  std::optional<std::string> commFailureReason_;
+  std::optional<std::string> commFailureReason_{};
   bool initialized_{false};
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL
@@ -574,8 +557,6 @@ class NCCLComm {
 
  private:
   ncclComm_t ncclComm_{nullptr};
-  // a helper function to wait until the communicator is initialized;
-  void waitUntilInitialized();
 };
 
 // Helper that automatically cleans up premul sums.
@@ -586,7 +567,7 @@ struct ncclRedOpRAII {
       : op_(op), comm_(comm), premul_sum_(true) {}
   ncclRedOpRAII(const ncclRedOpRAII&) = delete;
   ncclRedOpRAII& operator=(const ncclRedOpRAII&) = delete;
-  ncclRedOpRAII(ncclRedOpRAII&& tmp) : ncclRedOpRAII() {
+  ncclRedOpRAII(ncclRedOpRAII&& tmp) noexcept : ncclRedOpRAII() {
     std::swap(tmp.op_, this->op_);
     std::swap(tmp.comm_, this->comm_);
     std::swap(tmp.premul_sum_, this->premul_sum_);
@@ -601,8 +582,8 @@ struct ncclRedOpRAII {
   operator ncclRedOp_t() const {
     return op_;
   }
-  ncclRedOp_t op_;
-  ncclComm_t comm_;
+  ncclRedOp_t op_{};
+  ncclComm_t comm_{};
   bool premul_sum_ = false;
 };
 

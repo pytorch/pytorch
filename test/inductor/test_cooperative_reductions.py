@@ -2,11 +2,11 @@
 import torch
 import torch._inductor
 from torch._inductor import config
+from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -50,12 +50,13 @@ class CooperativeReductionTests(TestCase):
             "softmax",
         ],
     )
-    def test_reduction_fns(self, name):
+    @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
+    def test_reduction_fns(self, name, dtype):
         def fn(x, y):
             return reduction_fn(x + y, dim=-1)
 
         reduction_fn = getattr(torch, name)
-        args = [torch.randn(1, 1024**2, device="cuda") for _ in range(2)]
+        args = [torch.randn(1, 1024**2, device="cuda", dtype=dtype) for _ in range(2)]
         self.run_and_check(fn, args)
 
     def test_bool_reduction_fns(self):
