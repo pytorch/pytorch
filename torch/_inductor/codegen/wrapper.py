@@ -557,6 +557,7 @@ class PythonWrapperCodegen(CodeGen):
                 {aot_config_comment}
                 from ctypes import c_void_p, c_long, c_int
                 import torch
+                import time
                 import math
                 import random
                 import os
@@ -701,10 +702,18 @@ class PythonWrapperCodegen(CodeGen):
             self.codegen_input_size_and_nan_asserts()
 
     def codegen_input_size_and_nan_asserts(self) -> None:
+        # self.prefix.writeline('assert_start_time = time.perf_counter()')
         if config.size_asserts:
             self.codegen_input_size_asserts()
         if config.nan_asserts:
             self.codegen_input_nan_asserts()
+        # self.prefix.writeline('assert_end_time = time.perf_counter()')
+        # self.prefix.writeline('assert_execution_time = (assert_end_time - assert_start_time) * 1_000_000')
+        # self.prefix.writeline('print(f"runtime asserts: {assert_execution_time:.2f} us")')
+
+        # self.prefix.writeline('end_time = time.perf_counter()')
+        # self.prefix.writeline('execution_time = (end_time - torch._functorch.aot_autograd.bwd_start_time) * 1_000_000')
+        # self.prefix.writeline('print(f"until bwd kernel launch: {execution_time:.2f} us")')
 
     # this function (and below) takes a graph as input so
     # that stream caching happens per graph instance. this

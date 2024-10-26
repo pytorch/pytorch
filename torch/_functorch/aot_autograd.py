@@ -5,6 +5,7 @@ from contextlib import contextmanager, nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, NewType, Optional, Tuple
 from unittest.mock import patch
+import time
 
 import torch
 import torch._dynamo.logging
@@ -936,6 +937,9 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     return AOTModule()
 
 
+start_time = time.perf_counter()
+bwd_start_time = time.perf_counter()
+
 def aot_module_simplified(
     mod: nn.Module,
     args,
@@ -1092,6 +1096,10 @@ def aot_module_simplified(
         # For overhead reasons, this is not the default wrapper, see comment:
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
         def boxed_forward(runtime_args: List[Any]):
+            # global bwd_start_time
+            # end_time = time.perf_counter()
+            # execution_time = (end_time - bwd_start_time) * 1_000_000
+            # print(f"until bwd aot runtime wrapper: {execution_time:.2f} us")
             flat_args = []
             flat_args.extend(params_flat)
             flat_args.extend(runtime_args)
@@ -1110,6 +1118,10 @@ def aot_module_simplified(
     # convention.  This should get fixed...
     # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
     def forward(*runtime_args: Tuple[Any]):
+        # global start_time
+        # end_time = time.perf_counter()
+        # execution_time = (end_time - start_time) * 1_000_000
+        # print(f"until aot runtime wrapper: {execution_time:.2f} us")
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)

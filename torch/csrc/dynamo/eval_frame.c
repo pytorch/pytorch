@@ -268,12 +268,14 @@ static inline PyObject* call_callback(
 #endif
 
   PyObject* cache_entry_pyobj = CacheEntry_to_obj(cache_entry);
+  // printf("Start call_callback\n");
   PyObject* res = PyObject_CallFunction(
     callable,
     "OOO",
     frame,
     cache_entry_pyobj,
     frame_state);
+  // printf("Done call_callback\n");
   Py_DECREF(frame);
   Py_DECREF(cache_entry_pyobj);
   return res;
@@ -535,6 +537,7 @@ static PyObject* _custom_eval_frame(
     int throw_flag,
     PyObject* callback,
     int* should_clear_frame) {
+  // printf("_custom_eval_frame start\n");
 #if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
       "begin %s %s %i %i",
@@ -682,6 +685,7 @@ static PyObject* _custom_eval_frame(
   PyObject* result =
       call_callback(callback, frame, locals, cache_entry, frame_state);
   Py_DECREF(locals);
+  // printf("_custom_eval_frame done\n");
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of

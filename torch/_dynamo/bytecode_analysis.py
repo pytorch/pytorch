@@ -35,9 +35,12 @@ def get_indexof(insts):
     Additionally checks that each instruction only appears once in the list.
     """
     indexof = {}
-    for i, inst in enumerate(insts):
-        assert inst not in indexof
-        indexof[inst] = i
+    try:
+        for i, inst in enumerate(insts):
+            assert inst not in indexof
+            indexof[inst] = i
+    except:
+        breakpoint()
     return indexof
 
 

@@ -55,6 +55,37 @@ typedef struct {
 
 namespace torch::dynamo {
 
+// #define PROFILE
+#ifdef PROFILE
+// Global variable to track indentation level
+int profiling_indent_level = 0;
+
+// Helper macro to increase the indentation level
+#define INCREASE_INDENT() profiling_indent_level++
+
+// Helper macro to decrease the indentation level
+#define DECREASE_INDENT() profiling_indent_level--
+
+// Macro to generate indentation spaces based on the current indent level
+#define INDENT() std::cout << std::string(profiling_indent_level * 2, ' ')
+
+#define START_PROFILING(name) \
+    auto start_time_##name##_var = std::chrono::high_resolution_clock::now(); \
+    INDENT() << #name << " start" << std::endl; \
+    INCREASE_INDENT()
+
+#define END_PROFILING(name) \
+    DECREASE_INDENT(); \
+    auto end_time_##name##_var = std::chrono::high_resolution_clock::now(); \
+    auto duration_##name##_var = std::chrono::duration_cast<std::chrono::microseconds>(end_time_##name##_var - start_time_##name##_var).count(); \
+    INDENT() << #name << " end (" << duration_##name##_var << " us)" << std::endl;
+
+#else
+// If profiling is not enabled, define empty macros
+#define START_PROFILING(name)
+#define END_PROFILING(name)
+#endif
+
 // Macro to skip addition of duplicate guards like EQUALS_MATCH
 #define SKIP_IF_GUARD_ALREADY_PRESENT(name) \
   if (self.is_leaf_guard_present(name)) {   \
@@ -1547,7 +1578,7 @@ class GuardAccessor {
     return _accessor_key.equal(key);
   }
 
-  std::string get_source() {
+  std::string get_source() const {
     return _source;
   }
 
@@ -1693,12 +1724,23 @@ class GuardManager {
   // guards and does not change the fail count. For simplicity, we duplicate
   // the code here.
   virtual bool check_nopybind(PyObject* value) { // borrowed ref
+#ifdef PROFILE
+    std::cout << "check_nopybind from GuardManager source=" << get_source() << std::endl;
+#endif
 
     if (!this->check_leaf_guards_nopybind(value)) {
       return false;
     }
 
     return this->check_accessors_nopybind(value);
+  }
+
+  size_t leaf_guard_count() const {
+    return _leaf_guards.size();
+  }
+
+  size_t accessor_guard_count() const {
+    return _accessors.size();
   }
 
   bool check_leaf_guards_nopybind(PyObject* value) {
@@ -1947,6 +1989,10 @@ class RootGuardManager : public GuardManager {
     Py_UNBLOCK_THREADS; // ; is added to avoid clang-formatting
     std::lock_guard<std::mutex> lock_guard(_lock);
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
+#ifdef PROFILE
+    START_PROFILING(guards_hot_path);
+    std::cout << "RootGuardManager: starting guard checks" << std::endl;
+#endif
 
     // Get the local state. This will be used for TENSOR_MATCH guards.
     if (_init_local_state) {
@@ -1954,6 +2000,9 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
+#ifdef PROFILE
+    std::cout << "RootGuardManager: checking " << leaf_guard_count() << " leaf guards" << std::endl;
+#endif
     if (!GuardManager::check_leaf_guards_nopybind(value)) {
       _reset_relational_guard_state();
       return false;
@@ -1968,6 +2017,9 @@ class RootGuardManager : public GuardManager {
     at::impl::PythonTorchFunctionTLS::set_disabled_state(
         at::impl::TorchFunctionDisabledState::ALL_DISABLED);
 
+#ifdef PROFILE
+    std::cout << "RootGuardManager: checking " << accessor_guard_count() << " accessor guards" << std::endl;
+#endif
     if (!GuardManager::check_accessors_nopybind(value)) {
       at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
@@ -1975,6 +2027,9 @@ class RootGuardManager : public GuardManager {
     }
 
     // Iterate over epilogue leaf guards.
+#ifdef PROFILE
+    std::cout << "RootGuardManager checking " << _epilogue_lambda_guards.size() << " epilogue guards" << std::endl;
+#endif
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
         at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
@@ -1985,6 +2040,10 @@ class RootGuardManager : public GuardManager {
 
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
+#ifdef PROFILE
+    std::cout << "RootGuardManager: finished guard checks" << std::endl;
+    END_PROFILING(guards_hot_path);
+#endif
     return true;
   }
 

@@ -36,6 +36,7 @@ from .backends.registry import CompiledFn, CompilerFn
 from .bytecode_transformation import (
     create_call_function,
     create_instruction,
+    add_push_null,
     Instruction,
     unique_id,
 )
@@ -965,20 +966,36 @@ class OutputGraph:
                         f"{list_name}_ref"
                     )  # self.new_var already adds unique id suffix
 
-                    visited[list_idx] = alias_name
-                    # bytecode of `alias_name = list_name[list_idx]`
-                    alias_insts.extend(
-                        [
-                            create_instruction("LOAD_FAST", argval=list_name),
-                            create_instruction("LOAD_CONST", argval=list_idx),
-                            create_instruction("BINARY_SUBSCR"),
-                            create_instruction("STORE_FAST", argval=alias_name),
-                        ]
-                    )
+                    if list_name not in visited:
+                        visited[list_name] = {}
+                    visited[list_name][list_idx] = (alias_name, x.source)
+
+        list_names = list(visited.keys())
+        for list_name in list_names:
+            current_visited = visited[list_name]
+            global_name = self.install_global_by_id("compiled_autograd_unpack_weak_ref", torch._C._dynamo.compiled_autograd.unpack_weak_ref)
+            indices = list(current_visited.keys())
+
+            # equivalent to: global_name(list_name, indices)
+            insts = [
+                create_instruction("LOAD_GLOBAL", argval=global_name),
+                create_instruction("LOAD_FAST", argval=list_name),
+            ]
+            insts = add_push_null(insts)
+            insts.append(create_instruction("LOAD_CONST", argval=indices))
+            insts.extend(create_call_function(2, False))
+            alias_insts.extend(insts)
+            alias_insts.append(create_instruction("UNPACK_SEQUENCE", arg=len(indices)))
+
+            for idx in indices:
+                # equivalent to: alias_name1, alias_name2, alias_name3, ... = global_name(list_name, indices)
+                alias_name, old_source = current_visited[idx]
+                alias_insts.append(
+                    create_instruction("STORE_FAST", argval=alias_name),
+                )
 
                 # operate on alias, handled by suffix codegen
-                old_source = x.source
-                overridden_sources[old_source] = LocalSource(visited[list_idx])
+                overridden_sources[old_source] = LocalSource(alias_name)
 
         # NOTE: we need `overridden_sources` because (1) we want to codegen for
         # these list items to use the new local source, but (2) we want to avoid

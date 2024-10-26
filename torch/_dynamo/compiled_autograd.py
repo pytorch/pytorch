@@ -5,6 +5,7 @@ import threading
 from dataclasses import dataclass
 from logging import Logger
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+import time
 
 import torch
 from torch._dynamo.external_utils import (
@@ -413,6 +414,8 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
+            # print(f"compiled autograd runtime_wrapper inputs={len(inputs)}, sizes={len(sizes)}")
+            # torch._functorch.aot_autograd.bwd_start_time = time.perf_counter()
             try:
                 exit_compiled_region = local.enter_compiled_region()
                 for i in runtime_inputs_to_move:

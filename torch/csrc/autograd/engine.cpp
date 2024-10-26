@@ -1192,6 +1192,7 @@ auto Engine::execute(
     bool create_graph,
     bool accumulate_grad,
     const edge_list& outputs) -> variable_list {
+  // auto start_time = std::chrono::high_resolution_clock::now();
   validate_outputs(
       root_edges,
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
@@ -1254,6 +1255,9 @@ auto Engine::execute(
   }
 
   if (compiled_autograd != nullptr) {
+    // auto end_time =  std::chrono::high_resolution_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+    // std::cout << "Engine::execute took " << duration << " us" << std::endl;
     // see [Note: Compiled Autograd]
     TORCH_CHECK(
         !create_graph, "compiled_autograd does not support create_graph");

@@ -1979,6 +1979,7 @@ class GraphLowering(torch.fx.Interpreter):
         assert mod.__file__ is not None
 
         log_module_code(mod.__file__)
+        print("Output code written to: %s", mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:

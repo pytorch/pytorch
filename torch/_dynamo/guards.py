@@ -2313,6 +2313,7 @@ class CheckFunctionManager:
 
         if config.enable_cpp_guard_manager:
             # TODO: don't do the string rep, do something more structured here
+            self.guard_manager.code_parts.clear()
             torch._logging.trace_structured(
                 "dynamo_cpp_guards_str", payload_fn=lambda: str(self.guard_manager)
             )

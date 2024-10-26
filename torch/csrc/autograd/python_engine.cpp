@@ -180,12 +180,15 @@ inline static Edge parseGradientEdge(PyObject* obj, int64_t index) {
   return Edge(grad_fn_sp, output_nr);
 }
 
+// static auto start_time =  std::chrono::high_resolution_clock::now();
+
 // Implementation of torch._C._EngineBase.run_backward
 PyObject* THPEngine_run_backward(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
+  // start_time =  std::chrono::high_resolution_clock::now();
   PyObject* tensors = nullptr;
   PyObject* grad_tensors = nullptr;
   unsigned char keep_graph = 0;
@@ -371,6 +374,9 @@ PyObject* THPEngine_run_backward(
   {
     pybind11::gil_scoped_release no_gil;
     auto& engine = python::PythonEngine::get_python_engine();
+    // auto end_time = std::chrono::high_resolution_clock::now();
+    // auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+    // std::cout << "THPEngine_run_backward took " << duration << " us" << std::endl;
     outputs = engine.execute(
         roots, grads, keep_graph, create_graph, accumulate_grad, output_edges);
   }

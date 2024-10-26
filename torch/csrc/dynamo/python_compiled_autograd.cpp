@@ -52,7 +52,7 @@ Notes:
 namespace torch::dynamo::autograd {
 using c10::SymInt;
 
-#define PROFILE
+// #define PROFILE
 #ifdef PROFILE
 // Global variable to track indentation level
 int profiling_indent_level = 0;
@@ -428,11 +428,45 @@ static PyObject* is_cache_empty(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+static PyObject* unpack_weak_ref(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  // Used by Dynamo pre-graph bytecode to keep references to stolen parameters
+  // that are needed in post-graph bytecode to be assigned gradients
+  // this is the equivalent of this python code:
+  //   inputs_ref_0 = inputs[0]
+  //   inputs_ref_1 = inputs[1]
+  //   ...
+  PyObject* py_tensors = nullptr;
+  PyObject* py_indices = nullptr;
+  if (!PyArg_ParseTuple(args, "OO", &py_tensors, &py_indices)) {
+    throw_python_error();
+  }
+  TORCH_CHECK(PyList_Check(py_tensors) && PyList_Check(py_indices));
+  Py_ssize_t py_tensors_size = PyList_Size(py_tensors);
+  Py_ssize_t py_indices_size = PyList_Size(py_indices);
+  TORCH_CHECK(py_tensors_size >= py_indices_size);
+
+  // Borrowed references
+  PyObject* refs = check(PyList_New(py_indices_size));
+  for (auto i=0; i < py_indices_size; i++) {
+    PyObject* py_get_index = PyList_GET_ITEM(py_indices, i);
+    TORCH_CHECK(PyLong_Check(py_get_index));
+    Py_ssize_t get_index = PyLong_AsSsize_t(py_get_index);
+    TORCH_CHECK(get_index < py_tensors_size);
+    PyObject* ref = PyList_GET_ITEM(py_tensors, get_index);
+    Py_INCREF(ref); // why is this needed actually
+    PyList_SET_ITEM(refs, i, ref);
+  }
+  return refs;
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef _methods[] = {
     {"notify_autograd_engine", notify_autograd_engine, METH_NOARGS, nullptr},
     {"clear_cache", clear_cache, METH_NOARGS, nullptr},
     {"is_cache_empty", is_cache_empty, METH_NOARGS, nullptr},
+    {"unpack_weak_ref", unpack_weak_ref, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -590,9 +624,9 @@ CacheNode* _compiled_autograd_impl(
     THPObjectPtr* graph_arg_sizes,
     THPObjectPtr* graph_arg_ivalue_args,
     THPObjectPtr* graph_arg_hooks) {
-  START_PROFILING(_compiled_autograd_impl);
-  START_PROFILING(hot_path);
-  START_PROFILING(setup_worklist);
+  // START_PROFILING(_compiled_autograd_impl);
+  START_PROFILING(ca_hot_path);
+  // START_PROFILING(setup_worklist);
   std::unordered_map<Node*, int>& dependencies = graph_task.dependencies_;
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call(PyTLSWrapper::create());
@@ -612,20 +646,16 @@ CacheNode* _compiled_autograd_impl(
   int i = 0;
   std::optional<VerboseLogger> vlogger =
       VerboseLogger::maybe_create(compiler_call.state.get("vlogger"));
-  END_PROFILING(setup_worklist);
+  // END_PROFILING(setup_worklist);
   while (!worklist.empty()) {
-    START_PROFILING(process_worklist_item);
-    START_PROFILING(lookup_node_call);
+    // START_PROFILING(process_worklist_item);
     std::shared_ptr<Node> fn = std::move(worklist.back());
     worklist.pop_back();
     NodeCall& call = compiler_call.node_calls.lookup(fn);
     calls.emplace_back(&call);
-    END_PROFILING(lookup_node_call);
 
     { // update cache and gather args into `compiler_call`
-      START_PROFILING(collect_node);
       CompiledNodeArgs node_args(compiler_call, call);
-      std::cout << "node: " << fn->name() << std::endl;
       node_args.collect(call);
       if (vlogger.has_value()) {
         compiler_call.set_active_node_call_idx(i);
@@ -648,10 +678,8 @@ CacheNode* _compiled_autograd_impl(
             i);
       }
       cache = cache->lookup(key);
-      END_PROFILING(collect_node);
     }
 
-    START_PROFILING(collect_edges);
     for (const auto& edge : fn->next_edges()) {
       if (!edge.is_valid()) {
         continue;
@@ -672,14 +700,12 @@ CacheNode* _compiled_autograd_impl(
         worklist.emplace_back(edge.function);
       }
     }
-    END_PROFILING(collect_edges);
     i++;
-    END_PROFILING(process_worklist_item);
+    // END_PROFILING(process_worklist_item);
   }
 
   // TODO(jansel): some dynamic sizes seem to be ints not symints
   if (!cache->check_dynamic_sizes(compiler_call, vlogger)) {
-    END_PROFILING(hot_path);
 
     // cache miss, need to capture FX graph
     PyObject* the_autograd_compiler = compiler_call.state.get("compiler");
@@ -808,7 +834,7 @@ CacheNode* _compiled_autograd_impl(
     state.debug_asserts();
     // End cache miss region
   } else {
-    END_PROFILING(hot_path);
+    END_PROFILING(ca_hot_path);
   }
 
   // TODO(jansel): clear grads we will overwrite below
@@ -823,7 +849,7 @@ CacheNode* _compiled_autograd_impl(
   *graph_arg_ivalue_args =
       wrap_lifted_ivalue_args(compiler_call.lifted_ivalue_args.args);
   *graph_arg_hooks = convert_hook_list(compiler_call.hooks);
-  END_PROFILING(_compiled_autograd_impl);
+  // END_PROFILING(_compiled_autograd_impl);
   return cache;
 }
 
@@ -852,8 +878,8 @@ variable_list compiled_autograd(
     GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
-  std::cout << "compiled_autograd call id: " << call_count++ << std::endl;
-  START_PROFILING(compiled_autograd);
+  // std::cout << "compiled_autograd call id: " << call_count++ << std::endl;
+  // START_PROFILING(compiled_autograd);
   TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
@@ -886,7 +912,7 @@ variable_list compiled_autograd(
       NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
-  END_PROFILING(compiled_autograd);
+  // END_PROFILING(compiled_autograd);
   return outputs;
 }
 
