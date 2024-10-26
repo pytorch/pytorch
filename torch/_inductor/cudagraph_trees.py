@@ -1936,8 +1936,18 @@ class CUDAGraphTreeManager:
             )
         )
 
+        # when multithreading, we expect 1:1 mapping across thread <> CUDAGraphTreeManager <> memory pool
+        # we use this to check that we are not reusing a memory pool across threads
+        self.thread_id = threading.get_native_id()
+
     def run(self, new_inputs: List[InputType], function_id: FunctionID) -> OutputType:
         assert self.graph is not None, "Running CUDAGraph after shutdown"
+        assert self.thread_id == threading.get_native_id(), (
+            f"Expect a cudagraph tree manager is used in the same thread as where it is allocated, "
+            f"but got current thread id={threading.get_native_id()} and recorded thread id={self.thread_id}. "
+            f"Please compile your model within each threads."
+        )
+
         self.mode = self.id_to_mode[function_id]
         out = self._run(new_inputs, function_id)
 
