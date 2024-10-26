@@ -1,5 +1,8 @@
 #pragma once
 
+#ifdef Q_SLOT
+#undef slots
+
 #include <condition_variable>
 #include <memory>
 #include <optional>
@@ -2551,3 +2554,6 @@ TypePtr IValue::type() const {
 }
 
 } // namespace c10
+
+#ifdef Q_SLOT
+#define slots Q_SLOTS
