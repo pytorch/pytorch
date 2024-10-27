@@ -1679,7 +1679,8 @@ TORCH_IMPL_FUNC(silu_out_mps)(const Tensor& self, const Tensor& result) {
     });
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, nil, executeGatherOp);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, executeGatherOp ? result_ : result, nil, false);
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor_, executeGatherOp ? result_ : result, nil, false);
 
     auto feeds = dictionaryFromPlaceholders(selfPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
