@@ -69,6 +69,7 @@
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/functorch/init.h>
 #include <torch/csrc/fx/node.h>
+#include <torch/csrc/inductor/aoti_package/pybind.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
 #include <torch/csrc/instruction_counter/Module.h>
 #include <torch/csrc/jit/python/init.h>
@@ -177,11 +178,11 @@ static PyObject* THPModule_initExtension(
       if (torch::get_symbolize_mode() == torch::unwind::Mode::addr2line) {
         LOG(WARNING)
             << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
-            << std::endl;
+            << '\n';
       }
       auto s_tbs = torch::symbolize({tb.get()});
       std::stringstream oss;
-      oss << "C++ CapturedTraceback:" << std::endl;
+      oss << "C++ CapturedTraceback:" << '\n';
       const auto& s_tb = s_tbs.tracebacks.at(0);
       for (auto idx : c10::irange(s_tb.size())) {
         // Skip the first few frames:
@@ -194,7 +195,7 @@ static PyObject* THPModule_initExtension(
         auto frame_id = s_tb[idx];
         const auto& frame = s_tbs.all_frames.at(frame_id);
         oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
-            << ":" << frame.lineno << std::endl;
+            << ":" << frame.lineno << '\n';
       }
       return oss.str();
     });
@@ -733,6 +734,27 @@ PyObject* THPModule_setSDPUseMath(PyObject* _unused, PyObject* arg) {
 }
 PyObject* THPModule_userEnabledMathSDP(PyObject* _unused, PyObject* noargs) {
   if (at::globalContext().userEnabledMathSDP())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+PyObject* THPModule_setAllowFP16BF16ReductionMathSDP(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_sdp_use_math expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowFP16BF16ReductionMathSDP(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+PyObject* THPModule_allowFP16BF16ReductionMathSDP(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().allowFP16BF16ReductionMathSDP())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -1361,6 +1383,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"_set_sdp_use_math", THPModule_setSDPUseMath, METH_O, nullptr},
+    {"_get_math_sdp_allow_fp16_bf16_reduction",
+     THPModule_allowFP16BF16ReductionMathSDP,
+     METH_NOARGS,
+     nullptr},
+    {"_set_math_sdp_allow_fp16_bf16_reduction",
+     THPModule_setAllowFP16BF16ReductionMathSDP,
+     METH_O,
+     nullptr},
     {"_get_overrideable_sdp_enabled",
      THPModule_userEnabledOverrideableSDP,
      METH_NOARGS,
@@ -1648,6 +1678,10 @@ PyObject* initModule() {
       PyModuleDef_HEAD_INIT, "torch._C", nullptr, -1, methods.data()};
   module = PyModule_Create(&torchmodule);
   ASSERT_TRUE(module);
+#ifdef Py_GIL_DISABLED
+  PyUnstable_Module_SetGIL(module, Py_MOD_GIL_NOT_USED);
+#endif
+
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);
@@ -1687,6 +1721,7 @@ PyObject* initModule() {
   torch::python::init_bindings(module);
   torch::lazy::initLazyBindings(module);
   torch::inductor::initAOTIRunnerBindings(module);
+  torch::inductor::initAOTIPackageBindings(module);
 #ifdef USE_ITT
   torch::profiler::initIttBindings(module);
 #endif
@@ -2044,7 +2079,8 @@ Call this whenever a new thread is created in order to propagate values from
 
   py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
       .value("Cublas", at::BlasBackend::Cublas)
-      .value("Cublaslt", at::BlasBackend::Cublaslt);
+      .value("Cublaslt", at::BlasBackend::Cublaslt)
+      .value("Ck", at::BlasBackend::Ck);
 
   py_module.def("_set_blas_preferred_backend", [](at::BlasBackend b) {
     at::globalContext().setBlasPreferredBackend(b);
@@ -2085,7 +2121,7 @@ Call this whenever a new thread is created in order to propagate values from
     auto device_type = at::getAccelerator();
     if (device_type.has_value()) {
       return at::globalContext()
-          .getAcceleratorHooksInterface(device_type.value())
+          .getAcceleratorHooksInterface(device_type)
           .deviceCount();
     }
     return c10::DeviceIndex(-1);
@@ -2097,7 +2133,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .setCurrentDevice(device_index);
         }
       });
@@ -2106,7 +2142,7 @@ Call this whenever a new thread is created in order to propagate values from
     auto device_type = at::getAccelerator();
     if (device_type.has_value()) {
       return at::globalContext()
-          .getAcceleratorHooksInterface(device_type.value())
+          .getAcceleratorHooksInterface(device_type)
           .getCurrentDevice();
     }
     return c10::DeviceIndex(-1);
@@ -2117,7 +2153,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           return at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .exchangeDevice(device_index);
         }
         return c10::DeviceIndex(-1);
@@ -2129,7 +2165,7 @@ Call this whenever a new thread is created in order to propagate values from
         auto device_type = at::getAccelerator();
         if (device_type.has_value()) {
           return at::globalContext()
-              .getAcceleratorHooksInterface(device_type.value())
+              .getAcceleratorHooksInterface(device_type)
               .maybeExchangeDevice(device_index);
         }
         return c10::DeviceIndex(-1);
@@ -2331,6 +2367,23 @@ Call this whenever a new thread is created in order to propagate values from
       "DisableTorchFunction",
       (PyObject*)THPModule_DisableTorchFunctionType(),
       /* incref= */ false));
+  py::enum_<at::impl::TorchFunctionDisabledState>(
+      py_module, "_TorchFunctionState")
+      .value("ENABLED", at::impl::TorchFunctionDisabledState::ENABLED)
+      .value(
+          "SUBCLASSES_DISABLED",
+          at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED)
+      .value(
+          "ALL_DISABLED", at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+
+  py_module.def(
+      "_set_torch_function_state",
+      [](at::impl::TorchFunctionDisabledState state) {
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(state);
+      });
+  py_module.def("_get_torch_function_state", []() {
+    return at::impl::PythonTorchFunctionTLS::get_disabled_state();
+  });
   torch::set_disabled_torch_function_impl(
       PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);

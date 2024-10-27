@@ -602,16 +602,21 @@ class TestFancyIndexingCast(TestCase):
         zero_array[bool_index] = np.array([1])
         assert_equal(zero_array[0, 1], 1)
 
+        # np.ComplexWarning moved to np.exceptions in numpy>=2.0.0
+        # np.exceptions only available in numpy>=1.25.0
+        has_exceptions_ns = hasattr(np, "exceptions")
+        ComplexWarning = (
+            np.exceptions.ComplexWarning if has_exceptions_ns else np.ComplexWarning
+        )
+
         # Fancy indexing works, although we get a cast warning.
         assert_warns(
-            np.ComplexWarning, zero_array.__setitem__, ([0], [1]), np.array([2 + 1j])
+            ComplexWarning, zero_array.__setitem__, ([0], [1]), np.array([2 + 1j])
         )
         assert_equal(zero_array[0, 1], 2)  # No complex part
 
         # Cast complex to float, throwing away the imaginary portion.
-        assert_warns(
-            np.ComplexWarning, zero_array.__setitem__, bool_index, np.array([1j])
-        )
+        assert_warns(ComplexWarning, zero_array.__setitem__, bool_index, np.array([1j]))
         assert_equal(zero_array[0, 1], 0)
 
 
@@ -1012,6 +1017,14 @@ class TestMultiIndexingAutomated(TestCase):
             # This is so that np.array(True) is not accepted in a full integer
             # index, when running the file separately.
             warnings.filterwarnings("error", "", DeprecationWarning)
+            # np.VisibleDeprecationWarning moved to np.exceptions in numpy>=2.0.0
+            # np.exceptions only available in numpy>=1.25.0
+            has_exceptions_ns = hasattr(np, "exceptions")
+            VisibleDeprecationWarning = (
+                np.exceptions.VisibleDeprecationWarning
+                if has_exceptions_ns
+                else np.VisibleDeprecationWarning
+            )
             warnings.filterwarnings("error", "", np.VisibleDeprecationWarning)
 
             def isskip(idx):

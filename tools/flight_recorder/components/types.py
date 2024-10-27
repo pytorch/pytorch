@@ -4,7 +4,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from enum import Enum
+import math
+from enum import auto, Enum
 from typing import (  # type: ignore[attr-defined]
     _eval_type,
     Any,
@@ -12,6 +13,7 @@ from typing import (  # type: ignore[attr-defined]
     Generic,
     List,
     NamedTuple,
+    Optional,
     Set,
     Tuple,
     Type,
@@ -66,13 +68,13 @@ NCCLOp:
 
 
 class Group(NamedTuple):
-    id: int
+    id: str
     desc: str
     size: int
 
 
 class Membership(NamedTuple):
-    group_id: Ref[Group]
+    group_id: str
     global_rank: int
 
 
@@ -83,13 +85,13 @@ class Traceback(NamedTuple):
 
 class Collective(NamedTuple):
     id: int
-    group_id: Ref[Group]
+    group_id: str
 
 
 class NCCLCall(NamedTuple):
     id: int
     collective_id: Ref[Collective]
-    group_id: Ref[Group]
+    group_id: str
     global_rank: int  # technically Ref[Process] once we have it
     traceback_id: Ref[Traceback]
     collective_type: str
@@ -156,34 +158,26 @@ class MatchState(Enum):
     - SIZE_OR_SYNTAX_MISMATCH: There is a mismatch in input/output sizes or violation of collective syntax.
     - COLLECTIVE_STATE_MISMATCH:
         The states of the collective not same, such as one finished while another just started or scheduled.
+    - COLLECTIVE_DTYPE_MISMATCH: The data types of the collective input/output differ.
     - UNDECIDED:
-        The match status is ambiguous or cannot be determined, e.g., we might need to check all ranks for all_to_all.
+        The match status is ambiguous or cannot be determined, e.g., we might need to check all ranks for alltoall_base.
     """
 
-    FULLY_MATCHED = 1
-    COLLECTIVE_TYPE_MISMATCH = 2
-    SIZE_OR_SYNTAX_MISMATCH = 3
-    COLLECTIVE_STATE_MISMATCH = 4
-    UNDECIDED = 5
+    FULLY_MATCHED = auto()
+    COLLECTIVE_TYPE_MISMATCH = auto()
+    SIZE_OR_SYNTAX_MISMATCH = auto()
+    COLLECTIVE_STATE_MISMATCH = auto()
+    COLLECTIVE_DTYPE_MISMATCH = auto()
+    UNDECIDED = auto()
 
+    def __call__(self, culprit: Optional[str] = None) -> "MatchState":
+        # Make the enum instance callable to add culprit.
+        self.culprit = culprit
+        return self
 
-def check_size_evenly_broadcasting(
-    list1: List[Any], list2: List[Any], size: int
-) -> bool:
-    if len(list1) != len(list2):
-        return False
-    ratio = None
-    for a, b in zip(list1, list2):
-        current_ratio = int(a) / int(b)
-        if current_ratio == 1:
-            continue
-        if current_ratio != size:
-            return False
-        elif ratio is None:
-            ratio = current_ratio
-        else:
-            return False
-    return True
+    def __str__(self) -> str:
+        details = f", {self.culprit}" if self.culprit else ""
+        return f"Error type: {self.name}{details}"
 
 
 class Op:
@@ -195,7 +189,9 @@ class Op:
         nccl:recv 3<-0
     """
 
-    def __init__(self, event: Dict[Any, Any], memberships: Dict[str, Set[Any]]):
+    def __init__(
+        self, event: Dict[Any, Any], memberships: Dict[str, Set[Any]], pg_name: str
+    ):
         profiling_name = event["profiling_name"]
         nccl, name = profiling_name.split(":")
         assert nccl == "nccl", f"name formatting error? {nccl} != 'nccl'"
@@ -203,9 +199,7 @@ class Op:
         type = parts[0]
         meta = parts[1] if len(parts) == 2 else None
         self.state = event["state"]
-
         self.pg_name, _ = event["process_group"]
-
         assert type in COLLECTIVES | P2P | {
             "coalesced"
         }, f"{type} is not a supported operation"
@@ -218,10 +212,9 @@ class Op:
             self._dst, self._src = int(d), int(s)
         else:
             self._src, self._dst = -1, -1
-        pg_name, pg_desc = event["process_group"]
+        _, pg_desc = event["process_group"]
         self._init_global_src_dst(memberships[pg_name])
         self.pg_size = len(memberships[pg_name])
-
         if type in P2P | COLLECTIVES:
             self.input_sizes = event["input_sizes"]
             self.output_sizes = event["output_sizes"]
@@ -229,6 +222,8 @@ class Op:
             self.input_sizes, self.output_sizes = None, None
         self.collective_seq_id = event["collective_seq_id"]
         self.p2p_seq_id = event["p2p_seq_id"]
+        self.input_dtypes = event["input_dtypes"]
+        self.output_dtypes = event["output_dtypes"]
 
     def _init_global_src_dst(self, pg_ranks: Set[Any]) -> None:
         pg_ranks = sorted(pg_ranks)
@@ -247,10 +242,8 @@ class Op:
 
     def __repr__(self) -> str:
         if self.type in P2P:
-            return (
-                f"{self.type}(s={self._src_g} d={self._dst_g}, sz={self.input_sizes})"
-            )
-        return f"{self.type}(input_sizes={self.input_sizes}, {self.state})"
+            return f"{self.type}(s={self._src_g} d={self._dst_g}, sz={self.input_sizes}, state={self.state})"
+        return f"{self.type}(input_sizes={self.input_sizes}, state={self.state})"
 
     def match(self, other: "Op") -> MatchState:
         # TODO: I think this can validly not match,
@@ -283,34 +276,63 @@ class Op:
             )
         elif self.type in COLLECTIVES:
             if self.type != other.type:
-                return MatchState.COLLECTIVE_TYPE_MISMATCH
+                return MatchState.COLLECTIVE_TYPE_MISMATCH(
+                    f"Expected collective type: '{self.type}' does not match found collective type: '{other.type}'"
+                )
+            if self.state != other.state:
+                # MatchState()
+                return MatchState.COLLECTIVE_STATE_MISMATCH(
+                    f"Expected state: '{self.state}' does not match found state: '{other.state}'"
+                )
+            if (
+                other.input_dtypes != other.output_dtypes
+                or self.input_dtypes != other.input_dtypes
+                or self.output_dtypes != other.output_dtypes
+            ):
+                return MatchState.COLLECTIVE_DTYPE_MISMATCH(
+                    f"Expected dtypes: '{self.input_dtypes}/{other.input_dtypes}' does not "
+                    f"match found dtype: '{self.output_dtypes}/{other.output_dtypes}'",
+                )
             if self.type == "all_to_all":
                 return MatchState.UNDECIDED
             if self.type != "scatter" and self.input_sizes != other.input_sizes:
-                return MatchState.SIZE_OR_SYNTAX_MISMATCH
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
+                    f"Expected input sizes: '{self.input_sizes}' does not match found input sizes: "
+                    f"'{other.input_sizes}'",
+                )
             if self.type != "gather" and self.output_sizes != other.output_sizes:
-                return MatchState.SIZE_OR_SYNTAX_MISMATCH
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
+                    f"Expected output sizes: '{self.output_sizes}' does not match found output sizes: "
+                    f"'{other.output_sizes}'"
+                )
             if self.type == "all_reduce" and self.input_sizes != other.output_sizes:
-                return MatchState.SIZE_OR_SYNTAX_MISMATCH
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
+                    f"Expected input sizes: '{self.input_sizes}' does not match found output sizes: '{other.output_sizes}'"
+                )
             # TODO: need to consider uneven sharding for all-gather.
             # TODO: need to consider all_gather_into_tensor_coalesced (coalesced related)
             if self.type in [
                 "all_gather",
                 "all_gather_base",
-            ] and not check_size_evenly_broadcasting(
-                other.output_sizes[0], self.input_sizes[0], self.pg_size
+            ] and not (
+                math.prod(other.output_sizes[0])
+                == math.prod(self.input_sizes[0]) * self.pg_size
             ):
-                return MatchState.SIZE_OR_SYNTAX_MISMATCH
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
+                    f"Found input numel '{math.prod(other.input_sizes[0])} * pg size {self.pg_size}' "
+                    f"does not match output numel '{math.prod(other.output_sizes[0])}'",
+                )
             if self.type in [
                 "reduce_scatter",
                 "_reduce_scatter_base",
-            ] and not check_size_evenly_broadcasting(
-                other.input_sizes[0], self.output_sizes[0], self.pg_size
+            ] and not (
+                math.prod(other.input_sizes[0])
+                == math.prod(self.output_sizes[0]) * self.pg_size
             ):
-                return MatchState.SIZE_OR_SYNTAX_MISMATCH
-            # TODO: need to add more checks for gather and scatter.
-            if self.state != other.state:
-                return MatchState.COLLECTIVE_STATE_MISMATCH
+                return MatchState.SIZE_OR_SYNTAX_MISMATCH(
+                    f"Found input numel '{math.prod(other.input_sizes[0])}' does not match output numel "
+                    f"'{math.prod(other.output_sizes[0])} * pg size {self.pg_size}'",
+                )
         elif self.type == "coalesced":
             return (
                 MatchState.FULLY_MATCHED

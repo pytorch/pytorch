@@ -43,7 +43,7 @@ _SCALAR_TYPE_TENSOR_DTYPE_MAP: Mapping[type, torch.dtype] = {
 def _try_getclosurevars(func):
     try:
         return inspect.getclosurevars(func)
-    except TypeError as e:
+    except TypeError:
         return None
 
 
@@ -555,6 +555,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         "aten", "digamma_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
     ),
     ElementwiseTypePromotionRule(
+        "aten", "dot", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
         "aten", "elu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
@@ -870,10 +873,7 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         "aten", "nll_loss", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
-        "aten", "normal", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
-    ),
-    ElementwiseTypePromotionRule(
-        "aten", "normal_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        "aten", "normal", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "pdist", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -923,9 +923,6 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     ),
     ElementwiseTypePromotionRule(
         "aten", "rsqrt_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-    ),
-    ElementwiseTypePromotionRule(
-        "aten", "rsub", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "selu", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
@@ -1029,6 +1026,9 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
     ),
     ElementwiseTypePromotionRule(
         "aten", "trunc_", [0], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+    ),
+    ElementwiseTypePromotionRule(
+        "aten", "vdot", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
         "aten", "where", [1, 2], [], ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH

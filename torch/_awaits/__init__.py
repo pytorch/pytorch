@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast, Callable, Generic, Type, TypeVar
+from typing import Generic, TypeVar
 
 import torch
 

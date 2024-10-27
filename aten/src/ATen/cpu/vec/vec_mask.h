@@ -2,7 +2,6 @@
 
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec_n.h>
-
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
@@ -69,7 +68,7 @@ struct VecMaskTo {
   }
 };
 
-template <typename dst_t, int dst_n, typename src_t, int src_n>
+template <typename dst_t, int dst_n, typename src_t, int src_n, typename Enabled = void>
 struct VecMaskCast {
   static inline VecMask<dst_t, dst_n> apply(
       const VecMask<src_t, src_n>& vec_mask) {
@@ -81,6 +80,29 @@ template <typename T, int N>
 struct VecMaskCast<T, N, T, N> {
   static inline VecMask<T, N> apply(const VecMask<T, N>& vec_mask) {
     return vec_mask;
+  }
+};
+
+template <typename T, int N>
+struct VecMaskCheck {
+  static inline bool all_zero(const VectorizedN<T, N>& vec_mask) {
+    __at_align__ T mask[VectorizedN<T, N>::size()];
+    vec_mask.store(mask);
+    return std::all_of(
+        mask, mask + VectorizedN<T, N>::size(), [](T m) { return m == static_cast<T>(0); });
+  }
+
+  static inline bool all_masked(const VectorizedN<T, N>& vec_mask) {
+    __at_align__ T mask[VectorizedN<T, N>::size()];
+    vec_mask.store(mask);
+    return std::all_of(
+        mask, mask + VectorizedN<T, N>::size(), [](T m) { return m != static_cast<T>(0); });
+  }
+
+  static inline bool is_masked(const VectorizedN<T, N>& vec_mask, int i) {
+    __at_align__ T mask[VectorizedN<T, N>::size()];
+    vec_mask.store(mask);
+    return mask[i] != static_cast<T>(0);
   }
 };
 
@@ -147,6 +169,17 @@ class VecMask {
     return result;
   }
 
+  static VecMask<T, N> set(
+      const VecMask<T, N>& a,
+      const VecMask<T, N>& b,
+      int64_t count = size()) {
+    VectorizedN<T, N> result = VectorizedN<T, N>::set(
+      VectorizedN<T, N>(a),
+      VectorizedN<T, N>(b),
+      count);
+    return result;
+  }
+
   void store(bool* b, int count = size()) {
     constexpr int L = (VectorizedN<T, N>::size() + Vectorized<bool>::size() - 1)/ Vectorized<bool>::size();
     auto res = this->to<bool, L>();
@@ -170,23 +203,15 @@ class VecMask {
   }
 
   inline bool all_zero() const {
-    __at_align__ T mask[size()];
-    mask_.store(mask);
-    return std::all_of(
-        mask, mask + size(), [](T m) { return m == static_cast<T>(0); });
+    return VecMaskCheck<T, N>::all_zero(mask_);
   }
 
   inline bool all_masked() const {
-    __at_align__ T mask[size()];
-    mask_.store(mask);
-    return std::all_of(
-        mask, mask + size(), [](T m) { return m != static_cast<T>(0); });
+    return VecMaskCheck<T, N>::all_masked(mask_);
   }
 
   inline bool is_masked(int i) const {
-    __at_align__ T mask[size()];
-    mask_.store(mask);
-    return mask[i] != static_cast<T>(0);
+    return VecMaskCheck<T, N>::is_masked(mask_, i);
   }
 
   inline operator VectorizedN<T, N>() const {
@@ -254,6 +279,7 @@ VEC_MASK_DEFINE_UNARY_OP_GLOBAL(operator~)
 VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator&)
 VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator|)
 VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator^)
+VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator*)
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator>, a & ~b)
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<, ~a& b)
 VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator==, ~(a ^ b))

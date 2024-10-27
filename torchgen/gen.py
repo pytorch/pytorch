@@ -59,6 +59,7 @@ from torchgen.model import (
     is_cuda_dispatch_key,
     is_generic_dispatch_key,
     is_ufunc_dispatch_key,
+    is_xpu_dispatch_key,
     Location,
     NativeFunction,
     NativeFunctionsGroup,
@@ -184,7 +185,7 @@ def parse_native_yaml_struct(
             use_out_as_primary=True,
             external=False,
             # Only cuda-like devices in tree require device guards
-            device_guard=is_cuda_dispatch_key(k),
+            device_guard=is_cuda_dispatch_key(k) or is_xpu_dispatch_key(k),
             index=v,
         )
     return ParsedYaml(rs, indices)
@@ -599,19 +600,15 @@ struct TORCH_API {name} {{
   using schema = {sig.type()};
   using ptr_schema = schema*;
   // See Note [static constexpr char* members for windows NVCC]
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::{f.func.name.name}")
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(overload_name, "{f.func.name.overload_name}")
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(schema_str, {cpp_string(str(f.func))})
+  static constexpr const char* name = "aten::{f.func.name.name}";
+  static constexpr const char* overload_name = "{f.func.name.overload_name}";
+  static constexpr const char* schema_str = {cpp_string(str(f.func))};
   static {sig.defn(name="call", is_redispatching_fn=False)};
   static {sig.defn(name="redispatch", is_redispatching_fn=True)};
 }};"""
 
         elif self.target is Target.DEFINITION:
             defns = f"""
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{f.func.name.name}")
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, overload_name, "{f.func.name.overload_name}")
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})
-
 // aten::{f.func}
 static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed_handle() {{
   return c10::Dispatcher::singleton()
@@ -694,7 +691,7 @@ inline {sig.decl()} {{
             if has_symint:
                 result += f"""
 namespace symint {{
-  template <typename T, typename = std::enable_if_t<std::is_same<T, {intlike_t}>::value>>
+  template <typename T, typename = std::enable_if_t<std::is_same_v<T, {intlike_t}>>>
   {sig.decl(suppress_symint_suffix=True)} {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
   }}
@@ -1361,7 +1358,7 @@ def get_grouped_by_view_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[NativeFunction | NativeFunctionsViewGroup]:
     def maybe_create_view_group(
-        d: dict[ViewSchemaKind | SchemaKind, NativeFunction]
+        d: dict[ViewSchemaKind | SchemaKind, NativeFunction],
     ) -> list[NativeFunction | NativeFunctionsViewGroup]:
         funcs: list[NativeFunction | NativeFunctionsViewGroup] = []
         if ViewSchemaKind.aliasing in d:
@@ -1408,7 +1405,7 @@ def get_grouped_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[NativeFunction | NativeFunctionsGroup]:
     def flatten_pre_group(
-        d: dict[SchemaKind, NativeFunction]
+        d: dict[SchemaKind, NativeFunction],
     ) -> Sequence[NativeFunction | NativeFunctionsGroup]:
         r = NativeFunctionsGroup.from_dict(d)
         if r is None:
@@ -1475,9 +1472,7 @@ def get_native_function_declarations_from_ns_grouped_kernels(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -1670,9 +1665,7 @@ def get_namespaced_declaration(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -2385,9 +2378,7 @@ def gen_source_files(
                         os.path.join(aoti_fm.install_dir, header_file_name)
                     ) as old_file:
                         old_header = old_file.read()
-                        assert (
-                            old_header == new_header
-                        ), """
+                        assert old_header == new_header, """
 
 WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
 indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!

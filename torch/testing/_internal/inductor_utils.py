@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import logging
 import torch
 import re
 import unittest
@@ -22,6 +23,8 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
 )
 
+log: logging.Logger = logging.getLogger(__name__)
+
 def test_cpu():
     try:
         CppCodeCache.load("")
@@ -36,9 +39,11 @@ def test_cpu():
 
 HAS_CPU = LazyVal(test_cpu)
 
-HAS_CUDA = torch.cuda.is_available() and has_triton()
+HAS_TRITON = has_triton()
 
-HAS_XPU = torch.xpu.is_available() and has_triton()
+HAS_CUDA = torch.cuda.is_available() and HAS_TRITON
+
+HAS_XPU = torch.xpu.is_available() and HAS_TRITON
 
 HAS_GPU = HAS_CUDA or HAS_XPU
 
@@ -71,7 +76,13 @@ def _check_has_dynamic_shape(
 def skipDeviceIf(cond, msg, *, device):
     if cond:
         def decorate_fn(fn):
+            @functools.wraps(fn)
             def inner(self, *args, **kwargs):
+                if not hasattr(self, "device"):
+                    warn_msg = "Expect the test class to have attribute device but not found. "
+                    if hasattr(self, "device_type"):
+                        warn_msg += "Consider using the skip device decorators in common_device_type.py"
+                    log.warning(warn_msg)
                 if self.device == device:
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)
@@ -93,6 +104,7 @@ def skip_windows_ci(name: str, file: str) -> None:
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
+requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")

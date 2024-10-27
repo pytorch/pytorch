@@ -578,9 +578,9 @@ inline std::tuple<dim3, dim3, StackArray<int64_t>> check_shape_and_partition_(
   const dim3 blocks(
       div_round_up(static_cast<int32_t>(outer_dense_size * jagged_folded_size), threads_y));
 
-  StackArray<int64_t> jagged_dims_tensor;
-  const auto num_jagged_dim = dense_tensor.dim() - 2;
-  TORCH_CHECK(static_cast<size_t>(num_jagged_dim) <= kStackArrayMaxDims);
+  StackArray<int64_t> jagged_dims_tensor{};
+  const int num_jagged_dim = dense_tensor.dim() - 2;
+  TORCH_CHECK(num_jagged_dim <= static_cast<int>(kStackArrayMaxDims));
   jagged_dims_tensor.ndim = num_jagged_dim;
   std::memcpy(
       &(jagged_dims_tensor.vals[0]),
@@ -843,9 +843,9 @@ __launch_bounds__(kMaxThreads) void jagged_dense_dense_elementwise_jagged_output
       truncated = true;
     }
     if (!truncated) {
-      const auto oidx = offset_temp;
-      unsigned int iidx = 0;
-      for (iidx = threadIdx.x; iidx * 2 + 1 < static_cast<unsigned int>(inner_dense_size);
+      const int oidx = offset_temp;
+      int iidx = 0;
+      for (iidx = threadIdx.x; iidx * 2 + 1 < inner_dense_size;
            iidx += blockDim.x) {
         output_values[offset][2 * iidx] =
             f(x_values[offset][2 * iidx],
@@ -1219,7 +1219,7 @@ inline bool jagged_dense_dense_elementwise_jagged_output_matches_opt(
   // MI100 has independent shared mem and L1
   int used_shared_kb = shared_kb;
 #endif
-  int used_shared_bytes = used_shared_kb << 10;
+  auto used_shared_bytes = static_cast<size_t>(used_shared_kb << 10);
   AT_DISPATCH_INDEX_TYPES(
       x_offsets[0].scalar_type(), "check_shared_memory", [&] {
         auto B = y_0_reshaped.size(0);
