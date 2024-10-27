@@ -838,7 +838,7 @@ def save(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """save(obj, f, pickle_module=pickle, pickle_protocol=2, _use_new_zipfile_serialization=True)
+    """save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True, _disable_byteorder_record=False)
 
     Saves an object to a disk file.
 
@@ -850,6 +850,8 @@ def save(
            os.PathLike object containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
+        _use_new_zipfile_serialization: determines if new zip method (introduced in version 1.6) is applied
+        _disable_byteorder_record: determines whether to save byte-order marker for handling endianness
 
     .. note::
         A common PyTorch convention is to save tensors using .pt file extension.
