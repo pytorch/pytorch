@@ -56,7 +56,7 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Literal, TypeGuard
+from typing_extensions import Literal, TypeIs
 
 import torch
 import torch._functorch.config
@@ -120,6 +120,8 @@ except ImportError:
 T = TypeVar("T")
 
 unpatched_nn_module_getattr = torch.nn.Module.__getattr__
+unpatched_nn_module_call = torch.nn.Module.__call__
+unpatched_nn_module_call_impl = torch.nn.Module._call_impl
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
@@ -341,10 +343,18 @@ def dynamo_timed(
                                 remote_cache_time_saved = frame_phase_timing[
                                     compile_id
                                 ].get("remote_cache_time_saved", None)
+                                remote_fx_graph_cache_get_time = frame_phase_timing[
+                                    compile_id
+                                ].get("remote_fx_graph_cache_get", None)
+                                remote_fx_graph_cache_put_time = frame_phase_timing[
+                                    compile_id
+                                ].get("remote_fx_graph_cache_put", None)
                             else:
                                 inductor_compile_time = None
                                 code_gen_time = None
                                 remote_cache_time_saved = None
+                                remote_fx_graph_cache_get_time = None
+                                remote_fx_graph_cache_put_time = None
                             structured_logging_overhead_s = (
                                 torch._logging.get_structured_logging_overhead()
                             )
@@ -357,6 +367,8 @@ def dynamo_timed(
                                 remote_cache_time_saved,
                                 structured_logging_overhead_s,
                                 False,  # is_forward
+                                to_int_ms(remote_fx_graph_cache_get_time),
+                                to_int_ms(remote_fx_graph_cache_put_time),
                             )
                             record_compilation_metrics(metrics)
 
@@ -570,14 +582,14 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: Type[T]) -> TypeGuard[T]:
+def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
     ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
-) -> TypeGuard[T]:
+) -> TypeIs[T]:
     ...
 
 
@@ -763,6 +775,10 @@ def proxy_args_kwargs(args, kwargs):
         )
 
 
+def to_int_ms(v: Optional[float]) -> Optional[int]:
+    return None if v is None else int(v * 1000)
+
+
 @dataclasses.dataclass
 class CompilationMetrics:
     compile_id: str
@@ -802,6 +818,8 @@ class CompilationMetrics:
     specialize_float: Optional[bool]
     dynamo_config: Optional[str]
     is_forward: Optional[bool]
+    remote_fx_graph_cache_get_time_ms: Optional[int]
+    remote_fx_graph_cache_put_time_ms: Optional[int]
 
 
 @dataclasses.dataclass
@@ -814,6 +832,8 @@ class BwdCompilationMetrics:
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
     is_forward: Optional[bool]
+    remote_fx_graph_cache_get_time_ms: Optional[int]
+    remote_fx_graph_cache_put_time_ms: Optional[int]
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -1508,6 +1528,7 @@ dict_keys: Type[KeysView[Any]] = type({}.keys())
 dict_values: Type[ValuesView[Any]] = type({}.values())
 odict_values: Type[ValuesView[Any]] = type(collections.OrderedDict().values())
 tuple_iterator: Type[Iterator[Any]] = type(iter(()))
+range_iterator: Type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
 
