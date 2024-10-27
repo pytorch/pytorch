@@ -27,11 +27,7 @@ class TORCH_API LTCTensorImpl final : public c10::TensorImpl {
   }
 
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override;
-
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      c10::VariableVersion&& version_counter,
+      c10::VariableVersion version_counter,
       bool allow_tensor_metadata_change) const override;
 
   void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override;

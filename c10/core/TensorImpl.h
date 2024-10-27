@@ -2080,17 +2080,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const;
-
-  /**
-   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
-   *
-   * For usage of `version_counter` and `allow_tensor_metadata_change`,
-   * see NOTE [ TensorImpl Shallow-Copying ].
-   */
-  virtual c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      c10::VariableVersion&& version_counter,
+      c10::VariableVersion version_counter,
       bool allow_tensor_metadata_change) const;
 
   /**

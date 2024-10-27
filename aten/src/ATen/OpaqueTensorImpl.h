@@ -71,31 +71,7 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override {
-    auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
-        key_set(),
-        dtype(),
-        device(),
-        opaque_handle_,
-        sizes_and_strides_.sizes_arrayref());
-    copy_tensor_metadata(
-        /*src_opaque_impl=*/this,
-        /*dest_opaque_impl=*/impl.get(),
-        /*version_counter=*/version_counter,
-        /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-    impl->refresh_numel();
-    return impl;
-  }
-
-  /**
-   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
-   *
-   * For usage of `version_counter` and `allow_tensor_metadata_change`,
-   * see NOTE [ TensorImpl Shallow-Copying ].
-   */
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      c10::VariableVersion&& version_counter,
+      c10::VariableVersion version_counter,
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<OpaqueTensorImpl<OpaqueHandle>>(
         key_set(),

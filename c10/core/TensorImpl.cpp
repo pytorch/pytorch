@@ -524,14 +524,7 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
 }
 
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
-    const c10::VariableVersion& version_counter,
-    bool allow_tensor_metadata_change) const {
-  return shallow_copy_and_detach_core(
-      version_counter, allow_tensor_metadata_change);
-}
-
-c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
-    c10::VariableVersion&& version_counter,
+    c10::VariableVersion version_counter,
     bool allow_tensor_metadata_change) const {
   return shallow_copy_and_detach_core(
       std::move(version_counter), allow_tensor_metadata_change);

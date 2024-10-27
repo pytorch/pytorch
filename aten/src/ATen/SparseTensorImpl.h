@@ -346,20 +346,7 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
    * see NOTE [ TensorImpl Shallow-Copying ].
    */
   c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change) const override {
-    return shallow_copy_and_detach_core(
-        version_counter, allow_tensor_metadata_change);
-  }
-
-  /**
-   * Return a TensorImpl that is a shallow-copy of this TensorImpl.
-   *
-   * For usage of `version_counter` and `allow_tensor_metadata_change`,
-   * see NOTE [ TensorImpl Shallow-Copying ].
-   */
-  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
-      c10::VariableVersion&& version_counter,
+      c10::VariableVersion version_counter,
       bool allow_tensor_metadata_change) const override {
     return shallow_copy_and_detach_core(
         std::move(version_counter), allow_tensor_metadata_change);
