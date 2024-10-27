@@ -69,7 +69,7 @@ struct AlignedDeleter {
   void operator()(T* p) const { AllocAligned<T>::release(p); }
 };
 
-// make_unique that guarantees alignment
+// std::make_unique that guarantees alignment
 template <typename T>
 struct MakeAligned {
   template <typename... Args>
