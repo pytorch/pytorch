@@ -1,0 +1,12 @@
+Wheel-Version: 1.0
+Generator: skbuild 0.17.6
+Root-Is-Purelib: false
+
+Tag: py2-none-macosx_10_9_universal2
+Tag: py2-none-macosx_10_9_x86_64
+Tag: py2-none-macosx_11_0_arm64
+Tag: py2-none-macosx_11_0_universal2
+Tag: py3-none-macosx_10_9_universal2
+Tag: py3-none-macosx_10_9_x86_64
+Tag: py3-none-macosx_11_0_arm64
+Tag: py3-none-macosx_11_0_universal2

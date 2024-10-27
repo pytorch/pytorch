@@ -1,0 +1,7 @@
+VARIABLES X,Y
+CONSTANTS A,B,R
+EQN[1] = A*X^3+B*Y^2-R
+EQN[2] = A*SIN(X)^2 + B*COS(2*Y) - R^2
+INPUT A=2.0, B=3.0, R=1.0
+INPUT X = 30 DEG, Y = 3.14
+CODE NONLINEAR(EQN,X,Y) some_filename.c

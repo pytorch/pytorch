@@ -1,0 +1,2 @@
+class LaTeXParsingError(Exception):
+    pass

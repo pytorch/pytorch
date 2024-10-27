@@ -1,0 +1,278 @@
+Metadata-Version: 2.3
+Name: fsspec
+Version: 2024.9.0
+Summary: File-system specification
+Project-URL: Changelog, https://filesystem-spec.readthedocs.io/en/latest/changelog.html
+Project-URL: Documentation, https://filesystem-spec.readthedocs.io/en/latest/
+Project-URL: Homepage, https://github.com/fsspec/filesystem_spec
+Maintainer-email: Martin Durant <mdurant@anaconda.com>
+License: BSD 3-Clause License
+        
+        Copyright (c) 2018, Martin Durant
+        All rights reserved.
+        
+        Redistribution and use in source and binary forms, with or without
+        modification, are permitted provided that the following conditions are met:
+        
+        * Redistributions of source code must retain the above copyright notice, this
+          list of conditions and the following disclaimer.
+        
+        * Redistributions in binary form must reproduce the above copyright notice,
+          this list of conditions and the following disclaimer in the documentation
+          and/or other materials provided with the distribution.
+        
+        * Neither the name of the copyright holder nor the names of its
+          contributors may be used to endorse or promote products derived from
+          this software without specific prior written permission.
+        
+        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+        AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+        IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+        DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+        FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+        DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+        SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+        CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+        OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+        OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+License-File: LICENSE
+Keywords: file
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: BSD License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Python: >=3.8
+Provides-Extra: abfs
+Requires-Dist: adlfs; extra == 'abfs'
+Provides-Extra: adl
+Requires-Dist: adlfs; extra == 'adl'
+Provides-Extra: arrow
+Requires-Dist: pyarrow>=1; extra == 'arrow'
+Provides-Extra: dask
+Requires-Dist: dask; extra == 'dask'
+Requires-Dist: distributed; extra == 'dask'
+Provides-Extra: dev
+Requires-Dist: pre-commit; extra == 'dev'
+Requires-Dist: ruff; extra == 'dev'
+Provides-Extra: doc
+Requires-Dist: numpydoc; extra == 'doc'
+Requires-Dist: sphinx; extra == 'doc'
+Requires-Dist: sphinx-design; extra == 'doc'
+Requires-Dist: sphinx-rtd-theme; extra == 'doc'
+Requires-Dist: yarl; extra == 'doc'
+Provides-Extra: dropbox
+Requires-Dist: dropbox; extra == 'dropbox'
+Requires-Dist: dropboxdrivefs; extra == 'dropbox'
+Requires-Dist: requests; extra == 'dropbox'
+Provides-Extra: entrypoints
+Provides-Extra: full
+Requires-Dist: adlfs; extra == 'full'
+Requires-Dist: aiohttp!=4.0.0a0,!=4.0.0a1; extra == 'full'
+Requires-Dist: dask; extra == 'full'
+Requires-Dist: distributed; extra == 'full'
+Requires-Dist: dropbox; extra == 'full'
+Requires-Dist: dropboxdrivefs; extra == 'full'
+Requires-Dist: fusepy; extra == 'full'
+Requires-Dist: gcsfs; extra == 'full'
+Requires-Dist: libarchive-c; extra == 'full'
+Requires-Dist: ocifs; extra == 'full'
+Requires-Dist: panel; extra == 'full'
+Requires-Dist: paramiko; extra == 'full'
+Requires-Dist: pyarrow>=1; extra == 'full'
+Requires-Dist: pygit2; extra == 'full'
+Requires-Dist: requests; extra == 'full'
+Requires-Dist: s3fs; extra == 'full'
+Requires-Dist: smbprotocol; extra == 'full'
+Requires-Dist: tqdm; extra == 'full'
+Provides-Extra: fuse
+Requires-Dist: fusepy; extra == 'fuse'
+Provides-Extra: gcs
+Requires-Dist: gcsfs; extra == 'gcs'
+Provides-Extra: git
+Requires-Dist: pygit2; extra == 'git'
+Provides-Extra: github
+Requires-Dist: requests; extra == 'github'
+Provides-Extra: gs
+Requires-Dist: gcsfs; extra == 'gs'
+Provides-Extra: gui
+Requires-Dist: panel; extra == 'gui'
+Provides-Extra: hdfs
+Requires-Dist: pyarrow>=1; extra == 'hdfs'
+Provides-Extra: http
+Requires-Dist: aiohttp!=4.0.0a0,!=4.0.0a1; extra == 'http'
+Provides-Extra: libarchive
+Requires-Dist: libarchive-c; extra == 'libarchive'
+Provides-Extra: oci
+Requires-Dist: ocifs; extra == 'oci'
+Provides-Extra: s3
+Requires-Dist: s3fs; extra == 's3'
+Provides-Extra: sftp
+Requires-Dist: paramiko; extra == 'sftp'
+Provides-Extra: smb
+Requires-Dist: smbprotocol; extra == 'smb'
+Provides-Extra: ssh
+Requires-Dist: paramiko; extra == 'ssh'
+Provides-Extra: test
+Requires-Dist: aiohttp!=4.0.0a0,!=4.0.0a1; extra == 'test'
+Requires-Dist: numpy; extra == 'test'
+Requires-Dist: pytest; extra == 'test'
+Requires-Dist: pytest-asyncio!=0.22.0; extra == 'test'
+Requires-Dist: pytest-benchmark; extra == 'test'
+Requires-Dist: pytest-cov; extra == 'test'
+Requires-Dist: pytest-mock; extra == 'test'
+Requires-Dist: pytest-recording; extra == 'test'
+Requires-Dist: pytest-rerunfailures; extra == 'test'
+Requires-Dist: requests; extra == 'test'
+Provides-Extra: test-downstream
+Requires-Dist: aiobotocore<3.0.0,>=2.5.4; extra == 'test-downstream'
+Requires-Dist: dask-expr; extra == 'test-downstream'
+Requires-Dist: dask[dataframe,test]; extra == 'test-downstream'
+Requires-Dist: moto[server]<5,>4; extra == 'test-downstream'
+Requires-Dist: pytest-timeout; extra == 'test-downstream'
+Requires-Dist: xarray; extra == 'test-downstream'
+Provides-Extra: test-full
+Requires-Dist: adlfs; extra == 'test-full'
+Requires-Dist: aiohttp!=4.0.0a0,!=4.0.0a1; extra == 'test-full'
+Requires-Dist: cloudpickle; extra == 'test-full'
+Requires-Dist: dask; extra == 'test-full'
+Requires-Dist: distributed; extra == 'test-full'
+Requires-Dist: dropbox; extra == 'test-full'
+Requires-Dist: dropboxdrivefs; extra == 'test-full'
+Requires-Dist: fastparquet; extra == 'test-full'
+Requires-Dist: fusepy; extra == 'test-full'
+Requires-Dist: gcsfs; extra == 'test-full'
+Requires-Dist: jinja2; extra == 'test-full'
+Requires-Dist: kerchunk; extra == 'test-full'
+Requires-Dist: libarchive-c; extra == 'test-full'
+Requires-Dist: lz4; extra == 'test-full'
+Requires-Dist: notebook; extra == 'test-full'
+Requires-Dist: numpy; extra == 'test-full'
+Requires-Dist: ocifs; extra == 'test-full'
+Requires-Dist: pandas; extra == 'test-full'
+Requires-Dist: panel; extra == 'test-full'
+Requires-Dist: paramiko; extra == 'test-full'
+Requires-Dist: pyarrow; extra == 'test-full'
+Requires-Dist: pyarrow>=1; extra == 'test-full'
+Requires-Dist: pyftpdlib; extra == 'test-full'
+Requires-Dist: pygit2; extra == 'test-full'
+Requires-Dist: pytest; extra == 'test-full'
+Requires-Dist: pytest-asyncio!=0.22.0; extra == 'test-full'
+Requires-Dist: pytest-benchmark; extra == 'test-full'
+Requires-Dist: pytest-cov; extra == 'test-full'
+Requires-Dist: pytest-mock; extra == 'test-full'
+Requires-Dist: pytest-recording; extra == 'test-full'
+Requires-Dist: pytest-rerunfailures; extra == 'test-full'
+Requires-Dist: python-snappy; extra == 'test-full'
+Requires-Dist: requests; extra == 'test-full'
+Requires-Dist: smbprotocol; extra == 'test-full'
+Requires-Dist: tqdm; extra == 'test-full'
+Requires-Dist: urllib3; extra == 'test-full'
+Requires-Dist: zarr; extra == 'test-full'
+Requires-Dist: zstandard; extra == 'test-full'
+Provides-Extra: tqdm
+Requires-Dist: tqdm; extra == 'tqdm'
+Description-Content-Type: text/markdown
+
+# filesystem_spec
+
+[![PyPI version](https://badge.fury.io/py/fsspec.svg)](https://pypi.python.org/pypi/fsspec/)
+[![Anaconda-Server Badge](https://anaconda.org/conda-forge/fsspec/badges/version.svg)](https://anaconda.org/conda-forge/fsspec)
+![Build](https://github.com/fsspec/filesystem_spec/workflows/CI/badge.svg)
+[![Docs](https://readthedocs.org/projects/filesystem-spec/badge/?version=latest)](https://filesystem-spec.readthedocs.io/en/latest/?badge=latest)
+
+A specification for pythonic filesystems.
+
+## Install
+
+```bash
+pip install fsspec
+```
+
+would install the base fsspec. Various optionally supported features might require specification of custom
+extra require, e.g. `pip install fsspec[ssh]` will install dependencies for `ssh` backends support.
+Use `pip install fsspec[full]` for installation of all known extra dependencies.
+
+Up-to-date package also provided through conda-forge distribution:
+
+```bash
+conda install -c conda-forge fsspec
+```
+
+
+## Purpose
+
+To produce a template or specification for a file-system interface, that specific implementations should follow,
+so that applications making use of them can rely on a common behaviour and not have to worry about the specific
+internal implementation decisions with any given backend. Many such implementations are included in this package,
+or in sister projects such as `s3fs` and `gcsfs`.
+
+In addition, if this is well-designed, then additional functionality, such as a key-value store or FUSE
+mounting of the file-system implementation may be available for all implementations "for free".
+
+## Documentation
+
+Please refer to [RTD](https://filesystem-spec.readthedocs.io/en/latest/?badge=latest)
+
+## Develop
+
+fsspec uses GitHub Actions for CI. Environment files can be found
+in the "ci/" directory. Note that the main environment is called "py38",
+but it is expected that the version of python installed be adjustable at
+CI runtime. For local use, pick a version suitable for you.
+
+```bash
+# For a new environment (mamba / conda).
+mamba create -n fsspec -c conda-forge  python=3.9 -y
+conda activate fsspec
+
+# Standard dev install with docs and tests.
+pip install -e ".[dev,doc,test]"
+
+# Full tests except for downstream
+pip install s3fs
+pip uninstall s3fs
+pip install -e .[dev,doc,test_full]
+pip install s3fs --no-deps
+pytest -v
+
+# Downstream tests.
+sh install_s3fs.sh
+# Windows powershell.
+install_s3fs.sh
+```
+
+### Testing
+
+Tests can be run in the dev environment, if activated, via ``pytest fsspec``.
+
+The full fsspec suite requires a system-level docker, docker-compose, and fuse
+installation. If only making changes to one backend implementation, it is
+not generally necessary to run all tests locally.
+
+It is expected that contributors ensure that any change to fsspec does not
+cause issues or regressions for either other fsspec-related packages such
+as gcsfs and s3fs, nor for downstream users of fsspec. The "downstream" CI
+run and corresponding environment file run a set of tests from the dask
+test suite, and very minimal tests against pandas and zarr from the
+test_downstream.py module in this repo.
+
+### Code Formatting
+
+fsspec uses [Black](https://black.readthedocs.io/en/stable) to ensure
+a consistent code format throughout the project.
+Run ``black fsspec`` from the root of the filesystem_spec repository to
+auto-format your code. Additionally, many editors have plugins that will apply
+``black`` as you edit files. ``black`` is included in the ``tox`` environments.
+
+Optionally, you may wish to setup [pre-commit hooks](https://pre-commit.com) to
+automatically run ``black`` when you make a git commit.
+Run ``pre-commit install --install-hooks`` from the root of the
+filesystem_spec repository to setup pre-commit hooks. ``black`` will now be run
+before you commit, reformatting any changed files. You can format without
+committing via ``pre-commit run`` or skip these checks with ``git commit
+--no-verify``.
