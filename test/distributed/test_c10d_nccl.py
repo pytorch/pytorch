@@ -321,30 +321,25 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("eager_init", [True, False])
-    def test_close_pg(self, eager_init: bool):
+    def test_close_pg(self):
         # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
         # abort the process group.
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
 
         store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
-        c10d.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-            device_id=device if eager_init else None,
-        )
+        pg = self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
 
         t = torch.rand(10, 10, device=device)
         # First allreduce to initialize state.
-        dist.all_reduce(t)
+        pg.allreduce(t)
 
         # Destroy pg and validate pg is no longer valid
         dist.destroy_process_group()
-        with self.assertRaises(ValueError):
-            dist.all_reduce(t)
+        with self.assertRaises(dist.DistBackendError):
+            pg.allreduce([t])
+
+        del pg
 
     CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
         torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
@@ -808,24 +803,27 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("eager_init", [True, False])
-    def test_new_group(self, eager_init: bool):
+    def test_comm_lazy_init_split(self):
         # Test the optimization of new groups that contain all world
         # ranks use the "transparent" `ncclCommSplit` optimization.
         store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
-        c10d.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-            device_id=device if eager_init else None,
-        )
-        ng = c10d.new_group()
-        tensor = torch.tensor([self.rank], device=device)
-        dist.broadcast(tensor, 0)
-        dist.broadcast(tensor, 0, group=ng)
-        dist.destroy_process_group()
+        pg = self._create_process_group_nccl(store, self.opts())
+
+        # Test lazy splitting behavior across each per-device backend.
+        for device in self.rank_to_GPU[self.rank]:
+            backend = pg._get_backend(torch.device(device))
+
+            # split doesn't happen unless the original process group has lazily
+            # created communicators, so first verify we haven't split even when
+            # making the new group and running an operation on the original pg.
+            ng = c10d.new_group()
+            tensor = torch.tensor([self.rank]).cuda(device)
+            pg.broadcast(tensor, 0)
+            self.assertEqual(backend.comm_split_count(), 0)
+
+            # The new group will not force a split because it is a lazy init.
+            ng.broadcast(tensor, 0)
+            self.assertEqual(backend.comm_split_count(), 0)
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -865,11 +863,15 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         pg = self._create_process_group_nccl(store, self.opts())
         backend = pg._get_backend(torch.device(device))
         self.assertEqual(backend._is_initialized(), False)
-        # create a subgroup eagerly
-        new_group = c10d.new_group([0, 1], device_id=device)
+
         tensor = torch.full((1,), self.rank).cuda(device)
+        new_group = c10d.new_group([0, 1], device_id=device)
+        self.assertEqual(backend.comm_split_count(), 0)
+
+        new_backend = new_group._get_backend(torch.device(device))
+        self.assertEqual(new_backend._is_initialized(), True)
         dist.broadcast(tensor, 0, group=new_group)
-        # the default group should stay lazy
+        self.assertEqual(new_backend.comm_split_count(), 0)
         self.assertEqual(backend._is_initialized(), False)
         torch.cuda.synchronize()
         dist.destroy_process_group()
