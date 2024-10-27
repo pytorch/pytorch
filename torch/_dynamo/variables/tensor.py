@@ -1161,13 +1161,13 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
-    def as_tensor(self, tx, dtype):
+    def as_tensor(self, tx):
         if self._tensor_var is None:
             from .builder import SourcelessBuilder
 
             self._tensor_var = SourcelessBuilder.create(
                 tx, torch.scalar_tensor
-            ).call_function(tx, [self], {"dtype": VariableTracker.build(tx, dtype)})
+            ).call_function(tx, [self], {})
         return self._tensor_var
 
     def evaluate_expr(self, output_graph=None):
