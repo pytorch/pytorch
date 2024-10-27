@@ -83,7 +83,7 @@ class QConvoneDNNXPU final {
     //     (act.scalar_type() == c10::ScalarType::Byte) ? c10::kByte : c10::kChar;
     Tensor output = at::empty(
         dst_tz, device(c10::kXPU).dtype(output_dtype).memory_format(mfmt));
-    
+
     return quantized_convolution_pt2(
         act,
         act_scale,
