@@ -916,7 +916,7 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics):
 def record_compilation_metrics(compilation_metrics: CompilationMetrics):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)
-    if isinstance(compilation_metrics, CompilationMetrics):
+    if compilation_metrics.is_forward:
         name = "compilation_metrics"
         add_compilation_metrics_to_chromium(compilation_metrics)
     else:
@@ -993,7 +993,8 @@ class ChromiumEventLogger:
         """
         if event_name not in self.get_stack():
             raise RuntimeError(
-                "Cannot add metadata to events that aren't in progress."
+                f"Event {repr(event_name)} not in {self.get_stack()}. "
+                "Cannot add metadata to events that aren't in progress. "
                 "Please make sure the event has started and hasn't ended."
             )
         event_data = self.get_event_data()
