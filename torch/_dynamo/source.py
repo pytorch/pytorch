@@ -306,11 +306,15 @@ class TensorPropertySource(ChainedSource):
             assert self.idx is not None
 
     def reconstruct(self, codegen):
+        codegen.append_output(codegen.create_load_global("torch", add=True))
+        codegen.append_output(codegen.create_load_attr("_dynamo"))
+        codegen.append_output(codegen.create_load_attr("disable"))
         codegen.add_push_null(
             lambda: codegen.load_import_from(
                 utils.__name__, f"call_{self.prop.method_name()}"
             )
         )
+        codegen.extend_output(create_call_function(1, False))
         self.base.reconstruct(codegen)
 
         if self.idx is not None:
