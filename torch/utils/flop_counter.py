@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # mypy: allow-untyped-decorators
 import torch
+from torch._C import DispatchKey
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
 from typing import List, Any, Dict, Optional, Union, Tuple, Iterator
@@ -723,10 +724,22 @@ class FlopCounterMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
-        if func._can_decompose():
+
+        dk = DispatchKey.CompositeImplicitAutograd
+        try:
+            can_dispatch = torch._C._dispatch_has_kernel_for_dispatch_key(func.name(), dk)
+        except RuntimeError:
+            # unknown op; we can't handle this
+            # e.g. for nested tensor, which implement custom aten::dim & aten::sym_size
+            # returning NotImplemented lets the dispatch mechanism continue with the __torch_dispatch__
+            return NotImplemented
+
+        if can_dispatch:
+            # func can be decomposed; redispatch
             with self.decomposed_counter:
-                return func.decompose(*args, **kwargs)
+                return func._op_dk(dk, *args, **kwargs)
         else:
+            # no further decomposition; execute & count flops
             out = func(*args, **kwargs)
             return self._count_flops(func._overloadpacket, out, args, kwargs)
 
