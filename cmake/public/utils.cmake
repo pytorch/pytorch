@@ -387,13 +387,28 @@ function(torch_compile_options libname)
       list(APPEND private_compile_options -Wunused-but-set-variable)
     endif()
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-      list(PREPEND private_compile_options -Weverything)
+      # list(PREPEND private_compile_options -Weverything)
       list(APPEND private_compile_options
+        -Wextra-semi
         -Wno-c++98-compat
         -Wno-c++98-compat-pedantic
         -Wno-reserved-id-macro
         -Wno-reserved-identifier
         -Wno-padded
+        -Wno-gnu-zero-variadic-macro-arguments
+        -Wno-unsafe-buffer-usage
+        -Wno-float-equal
+        -Wno-double-promotion
+        -Wno-extra-semi-stmt
+        -Wno-shadow-field-in-constructor
+        -Wno-sign-conversion
+        -Wno-shadow-field
+        -Wno-old-style-cast
+        -Wno-switch-enum
+        -Wno-weak-vtables
+        -Wno-shorten-64-to-32
+        -Wno-undefined-func-template
+        -Wno-implicit-int-float-conversion
         -Wunused-private-field)
     endif()
     if(NOT "${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
