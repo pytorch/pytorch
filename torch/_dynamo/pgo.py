@@ -4,12 +4,16 @@ import copy
 import dataclasses
 import enum
 import logging
+import os
+import pickle
 import time
 from collections import defaultdict
 from typing import DefaultDict, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
 
+import torch.compiler.config
 from torch._dynamo.utils import get_chromium_event_logger
+from torch._logging._internal import trace_structured_artifact
 
 
 if TYPE_CHECKING:
@@ -20,6 +24,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+LOCK_TIMEOUT = 10
+
 # How does in memory representation work?  Concretely, this module is
 # responsible for holding GLOBAL state representing the state it holds, no
 # other copies permitted.  So we retire frame_state entirely and store it
@@ -27,6 +33,45 @@ log = logging.getLogger(__name__)
 # (similar to how the filesystem doesn't get cleaned up except by tmp
 # cleaner), so the expectation is the information is relatively cheap and we
 # don't mind leaking it.
+
+
+# How does the filesystem/remote cache work?  Here are the extra knobs:
+#
+# - WORKFLOW_ID: Do we have a unique identifier for the "training run"  (such that it
+#   stays the same if we're running the same code, and changes if we're
+#   running something different).
+#
+# - RANK_SHARING: Are we sharing the cache across ranks, or does each rank get
+#   an individual cache?
+#
+# With no WORKFLOW_ID, we don't enable PGO cache by default.  This is to prevent
+# situations where unrelated invocations of PyTorch unpredictably cause
+# changes to each other's behavior.  With a WORKFLOW_ID, at least you know there
+# is some "state" associated with it.  (State dict might be another way to
+# tell if a run is related or not.)  You can opt-in to YOLO everything
+# aliases everything by passing a shared WORKFLOW_ID for all your invocations.
+#
+# So cache is per WORKFLOW_ID.  With no RANK_SHARING, there is never contention
+# between runs, so we can leisurely update a bundle with information we need.
+# Because we are grouped by WORKFLOW_ID, we can have a single consolidated bundle
+# for everything (or not; maybe worry about O(n^2) IO if we updated every
+# compile--let's just instrument this.)  Can even take a filelock for extra
+# safety (expect no contention); expect 50ns overhead from uncontended filelock.
+#
+# With RANK_SHARING, everyone is storming to modify the same cache files.
+# We can do this by having folks atomic write to a CAS-store and then having
+# readers do on-the-fly merging (this can be implemented in remote using
+# prefix iteration).  As an optional optimization, one rank can be elected to
+# handling bundling post facto (ideally, this is done async, after quiescence,
+# without compiler collective need to wait for everyone to finish writing
+# their bits.) Not sure how you can avoid a listdir because if some rank shows
+# up with some new entries we need to pull them in ASAP (unless you want to
+# delay bundling).
+#
+# With compiler collective, life is easier.  Compiler chat with each other so
+# rank 0 has collected everything.  So elect rank 0 only to write the bundle.
+# Don't even need CAS-store atomic write; just one rank writing an updating
+# bundles.  So maybe don't bother with RANK_SHARING in that case.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -47,7 +92,8 @@ class CodeState:
     )
 
 
-CODE_STATE: DefaultDict[CodeId, CodeState] = defaultdict(CodeState)
+_INIT_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
+_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -195,7 +241,7 @@ def update_automatic_dynamic(
     is_unspecialized_nn_module: bool = False,
 ) -> FrameStateSizeEntry:
     code_id = CodeId.make(tx.f_code)
-    frame_state = CODE_STATE[code_id]
+    frame_state = get_code_state()[code_id]
     is_update = name in frame_state.automatic_dynamic
     mut_entry = frame_state.automatic_dynamic[name]
     old_entry = copy.copy(mut_entry)
@@ -330,3 +376,86 @@ def process_automatic_dynamic(
                 )
         assert res is not None
         return res
+
+
+def code_state_path() -> Optional[str]:
+    workflow_id = torch.compiler.config.workflow_id
+    if workflow_id is None:
+        return None
+
+    from torch._inductor.runtime.runtime_utils import cache_dir
+
+    return os.path.join(cache_dir(), "dynamo", f"code_state_{workflow_id}.pkl")
+
+
+def get_code_state() -> DefaultDict[CodeId, CodeState]:
+    global _CODE_STATE, _INIT_CODE_STATE
+    if _CODE_STATE is None:
+        path = code_state_path()
+
+        _CODE_STATE = defaultdict(CodeState)
+
+        if path is not None and os.path.exists(path):
+            # Read lock not necessary as we always write atomically write to
+            # the actual location
+            with open(path, "rb") as f:
+                try:
+                    _CODE_STATE = pickle.load(f)
+                except Exception:
+                    log.warning("get_code_state failed while reading %s", path)
+                else:
+                    assert isinstance(_CODE_STATE, defaultdict)
+                    log.info(
+                        "get_code_state %s hit, %d entries", path, len(_CODE_STATE)
+                    )
+                    trace_structured_artifact(
+                        "get_code_state",
+                        "string",
+                        lambda: repr(_CODE_STATE),
+                    )
+                    _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
+        else:
+            log.info("get_code_state %s not found", path)
+
+    assert _CODE_STATE is not None
+
+    return _CODE_STATE
+
+
+def put_code_state() -> None:
+    path = code_state_path()
+    if path is None:
+        log.info("put_code_state: no workflow_id, disabled")
+        return
+
+    if _CODE_STATE is None:
+        log.info("put_code_state: never initialized, will not write")
+        return
+
+    if _CODE_STATE == _INIT_CODE_STATE:
+        log.info("put_code_state: no change, skipping")
+        return
+
+    tmp_path = path + ".tmp"
+    lock_path = path + ".lock"
+    # We /mostly/ don't need the lock but the tmp file could be clobbered
+    # TODO: use a safe tempfile create to eliminate lock
+    from filelock import FileLock
+
+    with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+        with open(tmp_path, "wb") as f:
+            pickle.dump(_CODE_STATE, f)
+        os.rename(tmp_path, path)
+        log.info("put_code_state: wrote %s, %d entries", path, len(_CODE_STATE))
+        trace_structured_artifact(
+            "put_code_state",
+            "string",
+            lambda: repr(_CODE_STATE),
+        )
+
+
+# NB: this does NOT reset the cached code state on disk
+def reset_code_state() -> None:
+    global _CODE_STATE, _INIT_CODE_STATE
+    _CODE_STATE = None
+    _INIT_CODE_STATE = None
