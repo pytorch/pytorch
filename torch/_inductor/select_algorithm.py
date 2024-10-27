@@ -12,6 +12,7 @@ import os
 import sys
 import textwrap
 import time
+from dataclasses import dataclass
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
@@ -80,6 +81,19 @@ class KernelNamespace:
 # these objects are imported from the generated wrapper code
 extern_kernels = KernelNamespace()
 
+@dataclass
+class AutotuneInputs:
+    """During autotuning, we need to pass the same inputs to all choices."""
+    # Example inputs for non external inputs
+    example_inputs: List[torch.Tensor]
+    example_inputs_extern: List[torch.Tensor]
+    # The output tensor
+    out: torch.Tensor
+    out_extern: torch.Tensor
+    # We we are doing verification we use this arg as to compare against
+    expected: Optional[torch.Tensor]
+    # Some external kernels need a workspace tensor
+    workspace: Optional[torch.Tensor]
 
 class PartialRender:
     """
@@ -1457,7 +1471,7 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is None:
             input_gen_fns = {}
 
-        def get_inputs(choices: List[ChoiceCaller]):
+        def get_inputs(choices: List[ChoiceCaller]) -> AutotuneInputs:
             # de-duplicate args
             unique_example_inputs = {
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
@@ -1497,6 +1511,7 @@ class AlgorithmSelectorCache(PersistentCache):
             needs_workspace = any(
                 choice.workspace_arg is not None for choice in triton_templates_choices
             )
+            workspace_tensor = None
             if needs_workspace:
                 # TODO right now we only support the same workspace arg for all choices
                 assert (
@@ -1517,14 +1532,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
                 if zero_mode == WorkspaceZeroMode.ZERO_ON_CALL:
                     workspace_tensor.zero_()
-                example_inputs.append(workspace_tensor)
 
             expected = None
             if VERIFY:
                 choices[0].benchmark(*example_inputs_extern, out=out_extern)
                 expected = out_extern.clone()
 
-            return example_inputs, example_inputs_extern, out, out_extern, expected
+            return AutotuneInputs(example_inputs, example_inputs_extern, out, out_extern, expected, workspace_tensor)
 
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
@@ -1543,30 +1557,34 @@ class AlgorithmSelectorCache(PersistentCache):
                 lines.append(f"    {tensor_repr(x)},")
             lines += ["]", f"out = {tensor_repr(out)}", ""]
             return "\n".join(lines)
-
-        def benchmark_choice_in_current_process(
-            choice, example_inputs, example_inputs_extern, out, out_extern, expected
-        ):
-            out.zero_()
+        
+        def benchmark_choice_in_current_process(choice, autotune_inputs: AutotuneInputs):
+            autotune_inputs.out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
+                example_inputs_extern = autotune_inputs.example_inputs_extern
+                out_extern = autotune_inputs.out_extern
                 result = choice.benchmark(*example_inputs_extern, out=out_extern)
             else:
                 # triton templates want the base pointer for sliced tensors
+                example_inputs = autotune_inputs.example_inputs
+                out = autotune_inputs.out
+                example_inputs = autotune_inputs.example_inputs
+                if autotune_inputs.workspace is not None:
+                    example_inputs = [*example_inputs, autotune_inputs.workspace]
                 result = choice.benchmark(*example_inputs, out=out)
             if VERIFY and expected is not None:
-                torch.testing.assert_close(out_extern, expected, **VERIFY)
+                torch.testing.assert_close(autotune_inputs.out_extern, autotune_inputs.expected, **VERIFY)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()  # shake out any CUDA errors
             return result
 
         def benchmark_in_current_process(choices):
             inputs = get_inputs(choices)
-            example_inputs, _, out, _, _ = inputs
             timings = {}
             for choice in choices:
                 try:
-                    timing = benchmark_choice_in_current_process(choice, *inputs)
+                    timing = benchmark_choice_in_current_process(choice, inputs)
                 except CUDACompileError as e:
                     log.error(
                         "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
