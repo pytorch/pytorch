@@ -37,9 +37,9 @@ def current_accelerator() -> torch.device:
         torch.device: return the current accelerator as :class:`torch.device`.
 
     .. note:: The index of the returned :class:`torch.device` will be ``None``, please use
-    :func:`torch.accelerator.current_device_idx` to know the current index being used.
-    And ensure to use :func:`torch.accelerator.is_available` to check if there is an available
-    accelerator. If there is no available accelerator, this function will raise an exception.
+        :func:`torch.accelerator.current_device_idx` to know the current index being used.
+        And ensure to use :func:`torch.accelerator.is_available` to check if there is an available
+        accelerator. If there is no available accelerator, this function will raise an exception.
 
     Example::
 
