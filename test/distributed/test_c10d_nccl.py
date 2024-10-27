@@ -1020,6 +1020,28 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self.assertEqual(send_tensor, recv_tensor)
         dist.destroy_process_group()
 
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("eager_init", [True, False])
+    def test_subgroup_p2p(self, eager_init: bool):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            device_id=device if eager_init else None,
+        )
+        send_tensor = torch.ones(10, 10, device=device)
+        group = dist.new_group()
+        if self.rank == 0:
+            dist.send(send_tensor, 1, group=group)
+        if self.rank == 1:
+            recv_tensor = torch.rand(10, 10, device=device)
+            dist.recv(recv_tensor, 0, group=group)
+            self.assertEqual(send_tensor, recv_tensor)
+        dist.destroy_process_group()
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_get_uid(self):
