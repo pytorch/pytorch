@@ -1,13 +1,13 @@
 # Owner(s): ["module: cpp-extensions"]
 
 import glob
+import locale
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-import locale
 import unittest
 import warnings
 
@@ -530,7 +530,9 @@ class TestCppExtensionJIT(common.TestCase):
         module = compile("int f() { return 789; }")
         self.assertEqual(module.f(), 789)
 
-    @unittest.skipIf('utf' not in locale.getlocale()[1].lower(), "Only test in UTF-8 locale")
+    @unittest.skipIf(
+        "utf" not in locale.getlocale()[1].lower(), "Only test in UTF-8 locale"
+    )
     def test_load_with_non_platform_default_encoding(self):
         # Assume the code is saved in UTF-8, but the locale is set to a different encoding.
         # You might encounter decoding errors in ExtensionVersioner.
@@ -552,7 +554,7 @@ class TestCppExtensionJIT(common.TestCase):
         build_dir = tempfile.mkdtemp()
         src_path = os.path.join(build_dir, "main.cpp")
 
-        with open(src_path, encoding="gbk", mode="wt") as f:
+        with open(src_path, encoding="gbk", mode="w") as f:
             f.write(cpp_source)
 
         module = torch.utils.cpp_extension.load(
