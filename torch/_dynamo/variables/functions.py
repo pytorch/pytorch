@@ -1,9 +1,5 @@
 # mypy: ignore-errors
 
-from torch._higher_order_ops.triton_kernel_wrap import (
-    TMADescriptorMetadata,
-    TritonHOPifier,
-)
 import builtins
 import collections
 import functools
@@ -24,6 +20,10 @@ from typing import (
 from typing_extensions import Never
 
 import torch
+from torch._higher_order_ops.triton_kernel_wrap import (
+    TMADescriptorMetadata,
+    TritonHOPifier,
+)
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
@@ -1068,6 +1068,7 @@ class PolyfilledFunctionVariable(VariableTracker):
             )
 
         from torch._dynamo.variables.builder import SourcelessBuilder
+
         traceable_function_variable = SourcelessBuilder.create(tx, self.traceable_fn)
 
         return traceable_function_variable.call_function(tx, args, kwargs)

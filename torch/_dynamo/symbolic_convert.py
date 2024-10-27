@@ -809,7 +809,7 @@ class InstructionTranslatorBase(
 
         cur_offset = self.current_instruction.offset
         assert self.instruction_pointer is not None
-        for inst in self.instructions[self.instruction_pointer:]:
+        for inst in self.instructions[self.instruction_pointer :]:
             if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
                 return False
             if inst.opname in JUMP_OPNAMES:
@@ -1818,7 +1818,7 @@ class InstructionTranslatorBase(
         fn = self.pop()
         assert isinstance(argnames, TupleVariable) and argnames.is_python_constant()
         argnames = argnames.as_python_constant()
-        args, kwargs_list = args[: -len(argnames)], args[-len(argnames):]
+        args, kwargs_list = args[: -len(argnames)], args[-len(argnames) :]
         kwargs = dict(zip(argnames, kwargs_list))
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
@@ -1942,7 +1942,7 @@ class InstructionTranslatorBase(
     def BUILD_TUPLE(self, inst):
         name_tuple = None
         if sys.version_info >= (3, 13):
-            name_tuple = tuple(self.name_stack[-inst.argval:])
+            name_tuple = tuple(self.name_stack[-inst.argval :])
         items = self.popn(inst.argval)
         self.push(TupleVariable(items), name=name_tuple)
 
@@ -2112,8 +2112,8 @@ class InstructionTranslatorBase(
             vals = list(seq.force_unpack_var_sequence(self))
             assert len(vals) >= prefix + suffix
             vals_prefix = vals[:prefix]
-            vals_list = vals[prefix: len(vals) - suffix]
-            vals_suffix = vals[len(vals) - suffix:]
+            vals_list = vals[prefix : len(vals) - suffix]
+            vals_suffix = vals[len(vals) - suffix :]
             for item in reversed(vals_suffix):
                 self.push(item)
             self.push(TupleVariable(vals_list))
@@ -2395,8 +2395,8 @@ class InstructionTranslatorBase(
                 args = [contents[1]]
 
         if kw_names:
-            args = args + contents[2: -len(kw_names)]
-            kwargs_list = contents[-len(kw_names):]
+            args = args + contents[2 : -len(kw_names)]
+            kwargs_list = contents[-len(kw_names) :]
             kwargs = dict(zip(kw_names, kwargs_list))
             assert len(kwargs) == len(kw_names)
         else:
@@ -3413,7 +3413,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             module_source = self.import_source(module_name)
             if "torch_package" in module_name:
                 # type: ignore[assignment]
-                fglobals_value = torch.package.package_importer._package_imported_modules[module_name]
+                fglobals_value = (
+                    torch.package.package_importer._package_imported_modules[
+                        module_name
+                    ]
+                )
             else:
                 fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
             fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
