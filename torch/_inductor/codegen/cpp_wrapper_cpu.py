@@ -146,13 +146,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
 
         if V.graph.aot_mode:
-            for header_cpp_file in ("interface.cpp", "implementation.cpp"):
-                with open(
-                    os.path.join(
-                        os.path.dirname(__file__), "aoti_runtime", header_cpp_file
-                    )
-                ) as f:
-                    self.header.splice(f.read())
+            self.header.splice(
+                """
+                #include <torch/csrc/inductor/aoti_runtime/interface.h>
+                #include <torch/csrc/inductor/aoti_runtime/model.h>
+                """
+            )
+            with open(
+                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
+            ) as f:
+                self.header.splice(f.read())
         else:
             self.header.splice(
                 """
@@ -161,44 +164,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
                 cpp_wrapper_src = (
                 '''
-                """
-            )
-
-        self.header.splice(
-            f"#include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>"
-        )
-        self.header.splice(
-            """
-            #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
-            #include <torch/csrc/inductor/aoti_runtime/thread_local.h>
-            #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
-            """
-        )
-        if V.graph.aot_mode:
-            self.header.splice(
-                """
-                #include <torch/csrc/inductor/aoti_runtime/model.h>
-                """
-            )
-
-        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
-            "linux",
-            "win32",
-        ]
-        if config.profiler_mark_wrapper_call or enable_kernel_profile:
-            self.header.splice("#include <ATen/record_function.h>")
-
-        self.header.splice("typedef at::Half half;")
-        self.header.splice("typedef at::BFloat16 bfloat16;")
-        self.header.splice("#include <c10/util/generic_math.h>")
-
-        if not V.graph.aot_mode:
-            self.header.splice(
-                """
                 #include <pybind11/pybind11.h>
-
                 namespace py = pybind11;
-                using namespace torch::aot_inductor;
 
                 class RAIIPyObject {
                 public:
@@ -224,18 +191,39 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 private:
                     PyObject* obj_;
                 };
+
+                #include <torch/csrc/inductor/aoti_runtime/device_utils.h>
+                #include <torch/csrc/inductor/aoti_runtime/utils.h>
+                using namespace torch::aot_inductor;
                 """
             )
 
-        # Round up to the nearest multiple of ALIGN_BYTES
-        # ALIGN_BYTES must be a power of 2
         self.header.splice(
             f"""
+            #include <torch/csrc/inductor/aoti_runtime/arrayref_tensor.h>
+            #include <torch/csrc/inductor/aoti_runtime/thread_local.h>
+            #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
+            #include <torch/csrc/inductor/aoti_torch/generated/c_shim_{self.device}.h>
+
+            #include <c10/util/generic_math.h>
+            typedef at::Half half;
+            typedef at::BFloat16 bfloat16;
+
+            // Round up to the nearest multiple of {ALIGN_BYTES}
             [[maybe_unused]] static int64_t align(int64_t nbytes) {{
               return (nbytes + {ALIGN_BYTES} - 1) & -{ALIGN_BYTES};
             }}
             """
         )
+
+        enable_kernel_profile = config.cpp.enable_kernel_profile and sys.platform in [
+            "linux",
+            "win32",
+        ]
+        if config.profiler_mark_wrapper_call or enable_kernel_profile:
+            # No C shim for profiling APIs, assuming profiling is a debugging feature which
+            # does not provide any ABI compatibility promise.
+            self.header.splice("#include <ATen/record_function.h>")
 
     @functools.lru_cache(None)  # noqa: B019
     def include_extra_header(self, header: str):
@@ -259,10 +247,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if V.graph.is_const_graph:
             # We do not write prefix for constant graph, it will be written by main module.
             return
-
         if V.graph.aot_mode:
-            self.prefix.writeline("namespace torch {")
-            self.prefix.writeline("namespace aot_inductor {")
+            self.prefix.writeline("namespace torch::aot_inductor {")
 
     def write_input_output_info(
         self,
@@ -945,14 +931,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if V.graph.is_const_graph:
                 result.writeline("} // AOTInductorModel::_const_run_impl")
             else:
-                result.writeline("} // namespace aot_inductor")
-                result.writeline("} // namespace torch")
+                result.writeline("} // namespace torch::aot_inductor\n\n\n")
             return
 
         # cpp entry function for JIT with cpp wrapper
-        result.writeline("'''\n)")
         result.splice(
             f"""
+            '''
+            )
             inductor_entry = CppWrapperCodeCache.load_pybinding(
                 ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, "{self.device}", {len(V.graph.graph_outputs)})
             """
@@ -1211,9 +1197,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         if len(node.keypath) == 0:
             self.writeline(f"auto {node.sym} = {node.sym}_raw;")
-        elif len(node.keypath == 1) and isinstance(node.keypath[0], ConvertIntKey):
+        elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
             self.writeline(f"int64_t {node.sym} = {node.sym}_raw ? 1 : 0;")
-        elif len(node.keypath == 1) and isinstance(node.keypath[0], DivideByKey):
+        elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):
             # TODO: assert divisibility here
             self.writeline(
                 f"int64_t {node.sym} = {node.sym}_raw / {node.keypath[0].divisor};"
@@ -1537,6 +1523,11 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # before (e.g., in the while_loop codegen)
             self.writeline(f"{outer_output}.reset();")
             self.writeline(f"{outer_output} = {src}{self.ending}")
+
+    def codegen_invoke_subgraph(self, invoke_subgraph):
+        raise NotImplementedError(
+            "codegen invoke_subgraph is not implemented for cpp wrapper"
+        )
 
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
