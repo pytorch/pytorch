@@ -2745,6 +2745,7 @@ class TritonKernel(SIMDKernel):
             if mutation in self.args.output_buffers:
                 mutated_args.add(self.args.output_buffers[mutation])
 
+        # Note: [Workspace Mutation]
         # workspace arguments are mutated, but are not marked as mutations in self.mutations
         # because their buffers are added during codegen, and aren't tracked during
         # lowering/scheduling. So we add them as mutated_args explicitly below.
