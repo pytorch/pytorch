@@ -859,12 +859,9 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
-  Intrinsics(
-      IntrinsicsOp op_type,
-      Dtype dtype,
-      const std::vector<ExprPtr>& params)
+  Intrinsics(IntrinsicsOp op_type, Dtype dtype, std::vector<ExprPtr> params)
       : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
-        params_(params),
+        params_(std::move(params)),
         op_type_(op_type) {
     if (OpArgCount(op_type) != nparams()) {
       throw malformed_input("bad arg count in Intrinsics");
