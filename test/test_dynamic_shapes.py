@@ -541,7 +541,8 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[1][0]), """Eq(TruncToInt(OpaqueUnaryFn_sqrt(ToFloat(s0))), 2)"""
+            str(shape_env.guards[1][0]),
+            """Eq(TruncToInt(OpaqueUnaryFn_sqrt(ToFloat(s0))), 2)""",
         )
 
     def test_sym_ceil(self):
