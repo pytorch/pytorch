@@ -843,19 +843,9 @@ class PythonWrapperCodegen(CodeGen):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
-            dims = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    d,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for d in dims
-            )
+            dims = tuple(V.graph.sizevars.atomically_apply_size_hint(d) for d in dims)
             block_dims = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    d,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for d in block_dims
+                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_dims
             )
 
         ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
