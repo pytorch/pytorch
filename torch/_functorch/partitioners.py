@@ -899,6 +899,9 @@ def solve_min_cut(
             return False
         if node.target == operator.getitem:
             return False
+        if hasattr(torch.ops.fsdp, "copy_"):
+            if node.op == "call_function" and node.target in [torch.ops.fsdp.copy_.default, torch.ops.inductor.resize_storage_bytes_.default]:
+                return False
         if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
             return True
         if config.recompute_views and op_types.is_view(node):
@@ -999,6 +1002,9 @@ def solve_min_cut(
         nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
         return True
 
+    for i, node in enumerate(joint_graph.nodes):
+        node.meta["id_in_joint_graph"] = i
+    
     for node in joint_graph.nodes:
         if node.op == "output":
             continue
@@ -1038,6 +1044,34 @@ def solve_min_cut(
         is_non_tensor_node = (
             "val" not in node.meta and "tensor_meta" not in node.meta
         ) or ("val" in node.meta and not isinstance(node.meta["val"], torch.Tensor))
+
+        if hasattr(torch.ops.fsdp, "copy_"):
+            if node.op == "call_function" and node.target in [torch.ops.fsdp.copy_.default, torch.ops.inductor.resize_storage_bytes_.default]:
+                mutation_node = node
+                assert len(mutation_node.users) == 0, f"Expected FSDP mutation nodes to have no users (downstream should depend on the mutated arg instead), but got {len(mutation_node.users)} users: {mutation_node.users}"
+
+                # We never want to save the output of FSDP mutation nodes (they are meaningless to save)
+                nx_graph.add_edge(mutation_node.name + "_in", mutation_node.name + "_out", capacity=math.inf)
+
+                # The mutated arg's next use node after an FSDP mutation node (fsdp.copy_ or resize_) should strongly depend on the mutation node (they cannot be reordered)
+                mutated_node = mutation_node.args[0]
+                sorted_users = sorted(mutated_node.users, key=lambda user: user.meta["id_in_joint_graph"])
+                mutation_node_idx = next(i for i, user in enumerate(sorted_users) if user == mutation_node)
+                if mutation_node_idx < len(sorted_users) - 1:  # Get the next user after mutation_node, if it exists
+                    next_use = sorted_users[mutation_node_idx + 1]
+                    nx_graph.add_edge(
+                        mutation_node.name + "_out", next_use.name + "_in", capacity=math.inf
+                    )
+                # All downstream use nodes (mutation or not) of the resized-to-full arg must strongly depend on the resize_ node
+                if mutation_node.target == torch.ops.inductor.resize_storage_bytes_.default and mutation_node.args[1] > 0:
+                    resize_node = mutation_node
+                    resized_to_full_arg = resize_node.args[0]
+                    for user in resized_to_full_arg.users:
+                        if user.meta["id_in_joint_graph"] > resize_node.meta["id_in_joint_graph"]:
+                            nx_graph.add_edge(
+                                resize_node.name + "_out", user.name + "_in", capacity=math.inf
+                            )
+                continue
 
         if is_sym_node(node):
             weight = float(sym_node_size(node))
