@@ -71,7 +71,7 @@ from .utils import (
     proxy_args_kwargs,
 )
 from .variables.base import MutableLocal, typestr, VariableTracker
-from .variables.builder import FrameStateSizeEntry, wrap_fx_proxy
+from .variables.builder import FrameStateSizeEntry, VariableBuilder, wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
@@ -809,7 +809,7 @@ class InstructionTranslatorBase(
 
         cur_offset = self.current_instruction.offset
         assert self.instruction_pointer is not None
-        for inst in self.instructions[self.instruction_pointer :]:
+        for inst in self.instructions[self.instruction_pointer:]:
             if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
                 return False
             if inst.opname in JUMP_OPNAMES:
@@ -1244,14 +1244,15 @@ class InstructionTranslatorBase(
         except KeyError:
             return self.load_builtin(inst)
 
-        self.push(VariableTracker.build(self, value, GlobalSource(name)))
+        source = GlobalSource(name)
+        self.push(VariableBuilder(self, source)(value))
 
     @functools.cached_property
     def nn_modules_globals_vt(self):
         module_name = "torch.nn.modules.module"
         module_source = self.import_source(module_name)
         fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
-        return VariableTracker.build(self, fglobals_value, module_source)
+        return VariableBuilder(self, module_source)(fglobals_value)
 
     def LOAD_GLOBAL(self, inst):
         if sys.version_info >= (3, 11) and sys.version_info < (3, 13) and inst.arg % 2:
@@ -1393,7 +1394,7 @@ class InstructionTranslatorBase(
                 self.output.name_of_builtins_dict_key_in_fglobals
             )
             var_source = GetItemSource(builtins_source, argval)
-            self.push(VariableTracker.build(self, val, var_source))
+            self.push(VariableBuilder(self, var_source)(val))
         else:
             assert is_builtin_constant(val)
             self.push(ConstantVariable.create(value=val))
@@ -1817,7 +1818,7 @@ class InstructionTranslatorBase(
         fn = self.pop()
         assert isinstance(argnames, TupleVariable) and argnames.is_python_constant()
         argnames = argnames.as_python_constant()
-        args, kwargs_list = args[: -len(argnames)], args[-len(argnames) :]
+        args, kwargs_list = args[: -len(argnames)], args[-len(argnames):]
         kwargs = dict(zip(argnames, kwargs_list))
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
@@ -1941,7 +1942,7 @@ class InstructionTranslatorBase(
     def BUILD_TUPLE(self, inst):
         name_tuple = None
         if sys.version_info >= (3, 13):
-            name_tuple = tuple(self.name_stack[-inst.argval :])
+            name_tuple = tuple(self.name_stack[-inst.argval:])
         items = self.popn(inst.argval)
         self.push(TupleVariable(items), name=name_tuple)
 
@@ -2111,8 +2112,8 @@ class InstructionTranslatorBase(
             vals = list(seq.force_unpack_var_sequence(self))
             assert len(vals) >= prefix + suffix
             vals_prefix = vals[:prefix]
-            vals_list = vals[prefix : len(vals) - suffix]
-            vals_suffix = vals[len(vals) - suffix :]
+            vals_list = vals[prefix: len(vals) - suffix]
+            vals_suffix = vals[len(vals) - suffix:]
             for item in reversed(vals_suffix):
                 self.push(item)
             self.push(TupleVariable(vals_list))
@@ -2394,8 +2395,8 @@ class InstructionTranslatorBase(
                 args = [contents[1]]
 
         if kw_names:
-            args = args + contents[2 : -len(kw_names)]
-            kwargs_list = contents[-len(kw_names) :]
+            args = args + contents[2: -len(kw_names)]
+            kwargs_list = contents[-len(kw_names):]
             kwargs = dict(zip(kw_names, kwargs_list))
             assert len(kwargs) == len(kw_names)
         else:
@@ -3411,10 +3412,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             module_name = self.f_globals["__name__"]
             module_source = self.import_source(module_name)
             if "torch_package" in module_name:
-                fglobals_value = torch.package.package_importer._package_imported_modules[module_name]  # type: ignore[assignment]
+                # type: ignore[assignment]
+                fglobals_value = torch.package.package_importer._package_imported_modules[module_name]
             else:
                 fglobals_value = importlib.import_module(module_name)  # type: ignore[assignment]
-            fglobals_vt = VariableTracker.build(self, fglobals_value, module_source)
+            fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
             global_source = AttrSource(module_source, name)
         else:
             globals_name = self.output.install_global_by_id(
@@ -3422,7 +3424,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
-            fglobals_vt = VariableTracker.build(self, fglobals_value, globals_source)
+            fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
             global_source = GetItemSource(globals_source, name)  # type: ignore[assignment]
         return fglobals_value, fglobals_vt, global_source
 
@@ -3441,7 +3443,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 except KeyError:
                     return self.load_builtin(inst)
 
-                self.push(VariableTracker.build(self, value, global_source))
+                self.push(VariableBuilder(self, global_source)(value))
 
     def STORE_GLOBAL(self, inst):
         if self.f_globals is self.parent.f_globals:

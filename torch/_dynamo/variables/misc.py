@@ -207,10 +207,12 @@ class SuperVariable(VariableTracker):
             and len(kwargs) == 0
             and args[0].is_python_constant()
         ):
+            from .builder import VariableBuilder
+
             key = args[0].as_python_constant()
-            value = collections.OrderedDict.__getitem__(self.objvar.value, key)
-            source = ODictGetItemSource(self.objvar.source, key)
-            return VariableTracker.build(tx, value, source)
+            return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
+                collections.OrderedDict.__getitem__(self.objvar.value, key)
+            )
         elif inner_fn in (
             collections.OrderedDict.__setitem__,
             object.__setattr__,
@@ -465,10 +467,15 @@ class InspectParameterVariable(VariableTracker):
         self.value = value
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+        from .builder import SourcelessBuilder, VariableBuilder
+
         try:
             attr_value = getattr(self.value, name)
-            source = self.source and AttrSource(self.source, name)
-            return VariableTracker.build(tx, attr_value, source)
+            if self.source:
+                attr_source = AttrSource(self.source, name)
+                return VariableBuilder(tx, attr_source)(attr_value)
+            else:
+                return SourcelessBuilder.create(tx, attr_value)
         except AttributeError:
             unimplemented(f"getattr({self.value}, {name})")
 
@@ -902,9 +909,11 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if self.needs_input_grad is not None:
                 return variables.ConstantVariable.create(self.needs_input_grad)
             if self.source:
-                source = AttrSource(self.source, "needs_input_grad")
-                return VariableTracker.build(tx, self.value.needs_input_grad, source)
+                from .builder import VariableBuilder
 
+                return VariableBuilder(tx, AttrSource(self.source, "needs_input_grad"))(
+                    self.value.needs_input_grad
+                )
         return super().var_getattr(tx, name)
 
 
@@ -1109,8 +1118,11 @@ class GetSetDescriptorVariable(VariableTracker):
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         if name == "__get__" and self.source:
-            source = AttrSource(self.source, "__get__")
-            return VariableTracker.build(tx, self.desc.__get__, source)
+            from .builder import VariableBuilder
+
+            return VariableBuilder(tx, AttrSource(self.source, "__get__"))(
+                self.desc.__get__
+            )
         else:
             return super().var_getattr(tx, name)
 
@@ -1150,13 +1162,18 @@ class PythonModuleVariable(VariableTracker):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
+        from .builder import SourcelessBuilder, VariableBuilder
+
         if self.is_torch or name not in self.value.__dict__:
             attr_value = getattr(self.value, name)
         else:
             attr_value = self.value.__dict__[name]
 
-        source = self.source and AttrSource(self.source, name)
-        return VariableTracker.build(tx, attr_value, source)
+        if self.source:
+            new_source = AttrSource(self.source, name)
+            return VariableBuilder(tx, new_source)(attr_value)
+        else:
+            return SourcelessBuilder.create(tx, attr_value)
 
 
 class TypingVariable(VariableTracker):

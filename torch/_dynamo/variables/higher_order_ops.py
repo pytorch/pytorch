@@ -14,6 +14,7 @@ import torch.fx
 import torch.nn
 from torch._dynamo.utils import get_fake_value
 from torch._dynamo.variables import ConstantVariable
+from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
@@ -32,7 +33,6 @@ from ..exc import (
 )
 from ..source import AttrSource
 from ..utils import proxy_args_kwargs
-from .base import VariableTracker
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
 from .lists import ListVariable, TupleVariable
@@ -1051,7 +1051,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
-        from .builder import wrap_fx_proxy
+        from .builder import SourcelessBuilder, wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
@@ -1073,7 +1073,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 tx,
                 "new_empty",
                 args=(
-                    VariableTracker.build(
+                    SourcelessBuilder.create(
                         tx,
                         (
                             leaf.size
@@ -1087,8 +1087,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ),
                 ),
                 kwargs={
-                    "dtype": VariableTracker.build(tx, leaf.dtype),
-                    "requires_grad": VariableTracker.build(tx, leaf.requires_grad),
+                    "dtype": SourcelessBuilder.create(tx, leaf.dtype),
+                    "requires_grad": SourcelessBuilder.create(tx, leaf.requires_grad),
                 },
             )
             for leaf in itertools.chain(xs.items, xs.items)
@@ -2087,6 +2087,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn_name: str,
     ):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
+        from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
 
@@ -2094,9 +2095,9 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             return query.call_method(
                 tx,
                 "new_empty",
-                (VariableTracker.build(tx, []),),
+                (SourcelessBuilder.create(tx, []),),
                 {
-                    "dtype": VariableTracker.build(tx, torch.int32),
+                    "dtype": SourcelessBuilder.create(tx, torch.int32),
                 },
             )
 
@@ -2106,8 +2107,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             score = query.call_method(
                 tx,
                 "new_empty",
-                (VariableTracker.build(tx, []),),
-                {"requires_grad": VariableTracker.build(tx, scores_require_grad)},
+                (SourcelessBuilder.create(tx, []),),
+                {"requires_grad": SourcelessBuilder.create(tx, scores_require_grad)},
             )
             new_args = [score, *bhmn]
         else:
