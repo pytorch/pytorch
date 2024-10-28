@@ -6435,7 +6435,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 x, y = y, x
             if non_contig_type != 0:
                 y = y * 2
-            x_int8 = torch.randint(-10, 10, (x, y), dtype=torch.int8, device=device)
+            x_int8 = torch.randint(-128, 127, (x, y), dtype=torch.int8, device=device)
             x_float = x_int8.to(torch.float32)
             if non_contig_type == 1:
                 x_int8 = x_int8[:, : y // 2]
@@ -8486,6 +8486,22 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         self.assertEqual(out1, out2)
         self.assertEqual(out_ref, out2.cpu())
+
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
+    def test_ck_blas_library(self):
+        m1 = torch.randint(2, 5, (7168, 8192), device='cuda', dtype=torch.float)
+        m2 = torch.randint(2, 5, (1280, 8192), device='cuda', dtype=torch.float)
+
+        torch.backends.cuda.preferred_blas_library('ck')
+        ck_out = torch.nn.functional.linear(m1, m2)
+
+        cpu_out = torch.nn.functional.linear(m1.cpu(), m2.cpu())
+
+        self.assertEqual(ck_out, cpu_out)
+
+
 
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
