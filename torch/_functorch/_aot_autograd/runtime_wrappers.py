@@ -1440,6 +1440,11 @@ class AutogradLazyBackwardCompileInfo:
 class AOTDispatchAutograd:
     @staticmethod
     def process_runtime_tangent(x, meta: Union[PlainTensorMeta, SubclassCreationMeta]):
+        def maybe_coerce_to_memory_format(t, memory_format):
+            if not t.is_contiguous(memory_format=meta.memory_format):
+                return t.contiguous(memory_format=meta.memory_format)
+            return t
+
         if not isinstance(x, torch.Tensor):
             return x, [x]
 
@@ -1451,43 +1456,45 @@ class AOTDispatchAutograd:
             if hasattr(x, "__coerce_same_metadata_as_tangent__"):
                 x = x.__coerce_same_metadata_as_tangent__(None, torch.Tensor)
                 is_subclass = False
-
-        mem_format = meta.memory_format
-
-        if not x.is_contiguous(memory_format=meta.memory_format):
-            x = x.contiguous(memory_format=meta.memory_format)
+            else:
+                raise RuntimeError(
+                    "Runtime tangent is subclass, where this tangent was a plain Tensor during tracing"
+                )
 
         if not is_subclass:
             assert isinstance(meta, PlainTensorMeta)
+            x = maybe_coerce_to_memory_format(x, meta.memory_format)
             return x, [x]
 
-        assert isinstance(
-            meta, SubclassCreationMeta
-        ), "Runtime tangent is subclass, where this tangent was a plain Tensor during tracing"
-        assert meta.original_subclass_type == type(x)
+        assert isinstance(meta, SubclassCreationMeta)
 
         x_inner_keys, x_meta = x.__tensor_flatten__()  # type: ignore[attr-defined]
+        same_type: bool = meta.original_subclass_type == type(x)
+        same_meta: bool = x_meta == meta.meta
 
-        assert len(meta.attrs) == len(x_inner_keys)
-
-        if x_meta != meta.meta:
+        if not same_type or not same_meta:
             if hasattr(x, "__coerce_same_metadata_as_tangent__"):
-                x = x.__coerce_same_metadata_as_tangent__(meta.meta)
+                if same_type:
+                    # Backward Compatibility, as some Subclass impls can have original 1-arg function.
+                    x = x.__coerce_same_metadata_as_tangent__(meta.meta)
+                else:
+                    x = x.__coerce_same_metadata_as_tangent__(meta.meta, type(x))
             else:
                 raise RuntimeError(
                     f"""
     During the backward, we encountered a tensor subclass where we guessed its
     metadata incorrectly.
 
-    Expected metadata: {str(meta.meta)}
+    Expected metadata: {str(meta.meta)}, expected type: {meta.original_subclass_type}
 
-    Runtime metadata: {str(x_meta)}
+    Runtime metadata: {str(x_meta)}, runtime type: {type(x)}
 
     shape: {str(x.shape)}
     To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
     """
                 )
 
+        assert len(meta.attrs) == len(x_inner_keys)
         flat_items_list = []
         for i, (attr, attr_meta) in enumerate(meta.attrs.items()):
             elem = getattr(x, attr)
