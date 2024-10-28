@@ -88,7 +88,6 @@ public:
 
   ListElementReference(const ListElementReference&) = delete;
   ListElementReference& operator=(const ListElementReference&) = delete;
-  ~ListElementReference() = default;
 
 private:
   ListElementReference(Iterator iter)
@@ -274,9 +273,6 @@ public:
 
   List(const List&) = default;
   List& operator=(const List&) = default;
-  List(List&&) = default;
-  List& operator=(List&&) = default;
-  ~List() = default;
 
   /**
    * Create a new List pointing to a deep copy of the same data.
