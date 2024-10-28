@@ -2,8 +2,7 @@
 
 #include <stack>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 std::atomic<DebugHandleType> BackendDebugInfoRecorder::unique_debug_handle_{0};
 
@@ -33,5 +32,4 @@ BackendDebugInfoMapType BackendDebugInfoRecorder::stopRecording() {
   return handles_to_inlined_callstack_ptrs_;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
