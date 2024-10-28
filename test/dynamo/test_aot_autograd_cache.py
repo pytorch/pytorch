@@ -26,10 +26,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfWindows,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU
-
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 @instantiate_parametrized_tests
@@ -90,9 +87,7 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
-    @requires_cuda
     @inductor_config.patch("fx_graph_remote_cache", False)
-    # TODO - Enable this when fx_graph_cache support HOPs
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
     def test_activation_checkpointing(self):
@@ -108,8 +103,8 @@ class AOTAutogradCacheTests(InductorTestCase):
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        a = torch.randn(4, 4, device="cuda")
-        b = torch.randn(4, 4, device="cuda")
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
 
         compiled_fn = torch.compile(fn, backend="inductor")
 
