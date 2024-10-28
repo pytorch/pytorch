@@ -14,7 +14,6 @@ import textwrap
 import time
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
-from dataclasses import dataclass
 from io import StringIO
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest.mock import patch
@@ -29,6 +28,7 @@ from torch._dynamo.utils import counters, identity, preserve_rng_state
 
 from . import config, ir
 from .autotune_process import (
+    AutotuneInputs,
     TensorMeta,
     TritonBenchmarkRequest,
     TritonCPUBenchmarkRequest,
@@ -80,37 +80,6 @@ class KernelNamespace:
 
 # these objects are imported from the generated wrapper code
 extern_kernels = KernelNamespace()
-
-
-@dataclass
-class AutotuneInputs:
-    """During autotuning, we need to pass the same inputs to all choices."""
-
-    # Example inputs for non external inputs
-    example_inputs: List[torch.Tensor]
-    example_inputs_extern: List[torch.Tensor]
-    # The output tensor
-    out: torch.Tensor
-    out_extern: torch.Tensor
-    # We we are doing verification we use this arg as to compare against
-    expected: Optional[torch.Tensor]
-    # Some external kernels need a workspace tensor
-    workspace: Optional[torch.Tensor]
-
-    def get_inputs_outputs(
-        self, extern=False
-    ) -> Tuple[List[torch.Tensor], torch.Tensor]:
-        """Returns the inputs and output tensors for a given choice."""
-        if extern:
-            inpts = self.example_inputs_extern
-            if self.workspace is not None:
-                inpts += [self.workspace]
-            return inpts, self.out_extern
-
-        inpts = self.example_inputs
-        if self.workspace is not None:
-            inpts += [self.workspace]
-        return inpts, self.out
 
 
 class PartialRender:
@@ -1489,7 +1458,9 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is None:
             input_gen_fns = {}
 
-        def get_inputs(choices: List[ChoiceCaller]) -> AutotuneInputs:
+        def get_inputs(
+            choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]]
+        ) -> AutotuneInputs:
             # de-duplicate args
             unique_example_inputs = {
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
@@ -1556,7 +1527,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 choices[0].benchmark(*example_inputs_extern, out=out_extern)
                 expected = out_extern.clone()
 
-            return AutotuneInputs(
+            return AutotuneInputs.from_separate_inputs(
                 example_inputs,
                 example_inputs_extern,
                 out,
@@ -1584,21 +1555,22 @@ class AlgorithmSelectorCache(PersistentCache):
             return "\n".join(lines)
 
         def benchmark_choice_in_current_process(
-            choice, autotune_inputs: AutotuneInputs
-        ):
-            autotune_inputs.out.zero_()
+            choice: ChoiceCaller, autotune_inputs: AutotuneInputs
+        ) -> float:
             is_extern = isinstance(choice, ExternKernelCaller)
-            inpts, output = autotune_inputs.get_inputs_outputs(is_extern)
+            input_set = autotune_inputs.get_input_set(is_extern)
+            inpts, output = input_set.get_bench_args()
+            output.zero_()
             result = choice.benchmark(*inpts, out=output)
             if VERIFY and autotune_inputs.expected is not None:
-                torch.testing.assert_close(
-                    autotune_inputs.out_extern, autotune_inputs.expected, **VERIFY
-                )
+                autotune_inputs.verify(**VERIFY)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()  # shake out any CUDA errors
             return result
 
-        def benchmark_in_current_process(choices):
+        def benchmark_in_current_process(
+            choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]],
+        ) -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
             inputs = get_inputs(choices)
             timings = {}
             for choice in choices:
@@ -1645,7 +1617,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
             return timings
 
-        def benchmark_in_sub_process(choices):
+        def benchmark_in_sub_process(
+            choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]]
+        ):
             from . import autotune_process
 
             # only benchmark triton kernel in sub process for now.
@@ -1654,7 +1628,7 @@ class AlgorithmSelectorCache(PersistentCache):
             triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
 
             timings = benchmark_in_current_process(extern)
-            timings.update(autotune_process.benchmark_in_sub_process(triton))
+            timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
             return timings
 
         benchmark = (
