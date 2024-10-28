@@ -234,6 +234,14 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
+def get_fill_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[int]:
+    """
+    Convert strides to fill order (argsort)
+    """
+    sorted_idx: Sequence[int] = argsort(seq)
+    return sorted_idx
+
+
 def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[int]:
     """
     Convert stride order to fill order
@@ -250,7 +258,7 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
     """
     Convert strides to stride order
     """
-    sorted_idx: List[int] = argsort(seq)
+    sorted_idx: Sequence[int] = get_fill_order(seq)
     out = [0 for _ in range(len(seq))]
     for i, elem in enumerate(sorted_idx):
         out[elem] = i
@@ -591,8 +599,11 @@ class Loops(IRNode):
             self.inner_fn, *self.inner_fn_args()
         )
 
-    def has_large_inner_fn(self):
-        return self.inner_fn_opcount().num_ops > config.realize_opcount_threshold
+    def has_large_inner_fn(self, threshold=None):
+        if threshold is None:
+            threshold = 0
+        threshold = max(threshold, config.realize_opcount_threshold)
+        return self.inner_fn_opcount().num_ops > threshold
 
     def inner_fn_free_unbacked_symbols(self):
         index = self._index(self.ranges)
@@ -5344,7 +5355,12 @@ class TMADescriptor(ExternKernel):
             # link back to the underlying tensor in terms of ownership
             # to avoid getting the underlying tensor deleted *before*
             # the TMADescriptor node can be deleted.
-            NonOwningLayout(ReinterpretView(tensor, tensor.get_layout())),
+            NonOwningLayout(
+                ReinterpretView(
+                    data=tensor,
+                    layout=tensor.get_layout(),
+                )
+            ),
             inputs,
             tuple(constant_args),
             None,
@@ -6591,6 +6607,85 @@ def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
     ]
     # assuming the same buffer is represented by the same IRNode object
     return len(OrderedSet(id(buffer) for buffer in buffers)) < len(buffers)
+
+
+@ir_dataclass(frozen=False)
+class InvokeSubgraph(ExternKernel):
+    subgraph: Optional[Subgraph] = None
+    operands: Optional[List[TensorBox]] = None
+    outputs: Optional[List[MultiOutput]] = None
+
+    def __init__(
+        self, subgraph: Subgraph, operands: List[TensorBox], layout: MultiOutputLayout
+    ):
+        super().__init__(
+            name=None,
+            layout=layout,
+            inputs=operands,
+        )
+        self.subgraph = subgraph
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    @classmethod
+    def create(cls, subgraph: Subgraph, operands):
+        # TODO(anijain2305) - Support sym expr as operands in future.
+        fx_operands = V.graph.current_node.args[-1]
+        fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+
+        # Realize the inputs. Also intermediates can have different strides than
+        # the inputs of the subgraph. So, force the intermediates to have same
+        # strides as that of subgraph inputs.
+        operands = [cls.realize_input(x) for x in operands]
+
+        def handle_sym_expr(stride):
+            return [s.node.expr if isinstance(s, torch.SymInt) else s for s in stride]
+
+        fake_strides = [fake_operand.stride() for fake_operand in fake_operands]
+        fake_strides = [handle_sym_expr(stride) for stride in fake_strides]
+        operands = [
+            cls.require_exact_strides(x, fake_strides[idx])
+            for idx, x in enumerate(operands)
+        ]
+
+        if subgraph.graph is None:
+            # create and lower subgraphs
+            subgraph.graph = V.graph.make_subgraph(
+                gm=subgraph.graph_module,
+                example_inputs=fake_operands,
+                subgraph_name=subgraph.name,
+            )
+            with V.set_graph_handler(subgraph.graph):
+                subgraph.graph.run(*fake_operands)
+
+        outputs = subgraph.graph.graph_outputs  # type: ignore[union-attr]
+        device = operands[0].get_device()
+        invoke_subgraph = InvokeSubgraph(
+            subgraph=subgraph,
+            operands=operands,
+            layout=MultiOutputLayout(device=device),
+        )
+
+        outputs = [
+            MultiOutput(
+                FixedLayout(
+                    device=output.get_device(),
+                    dtype=output.get_dtype(),
+                    size=output.get_size(),
+                    stride=output.get_stride(),
+                    offset=output.get_layout().offset,
+                ),
+                invoke_subgraph,
+                [(list, i)],
+            )
+            for i, output in enumerate(outputs)
+        ]
+
+        invoke_subgraph.outputs = outputs
+        return outputs
+
+    def codegen(self, wrapper):
+        wrapper.codegen_invoke_subgraph(self)
 
 
 @ir_dataclass(frozen=False)

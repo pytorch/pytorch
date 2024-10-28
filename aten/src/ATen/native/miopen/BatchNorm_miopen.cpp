@@ -64,8 +64,8 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
   const Tensor& bias_t = *bias_t_maybe_owned;
-  const Tensor& running_mean_t = c10::value_or_else(running_mean_t_opt, [] {return Tensor();});
-  const Tensor& running_var_t = c10::value_or_else(running_var_t_opt, [] {return Tensor();});
+  const Tensor& running_mean_t = running_mean_t_opt.value_or(Tensor());
+  const Tensor& running_var_t = running_var_t_opt.value_or(Tensor());
 
   TensorArg input{ input_t, "input", 1 },
             weight{ weight_t, "weight", 2 },
@@ -169,13 +169,13 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     double epsilon) {
   // See [Note: hacky wrapper removal for optional tensor]
   const Tensor& running_mean =
-      c10::value_or_else(running_mean_opt, [] { return Tensor(); });
+      running_mean_opt.value_or(Tensor());
   const Tensor& running_var =
-      c10::value_or_else(running_var_opt, [] { return Tensor(); });
+      running_var_opt.value_or(Tensor());
   const Tensor& save_mean_t =
-      c10::value_or_else(save_mean_t_opt, [] { return Tensor(); });
+      save_mean_t_opt.value_or(Tensor());
   const Tensor& save_var_t =
-      c10::value_or_else(save_var_t_opt, [] { return Tensor(); });
+      save_var_t_opt.value_or(Tensor());
 
   TensorArg input{ input_t, "input", 1 },
             grad_output{ grad_output_t, "grad_output", 2 },
