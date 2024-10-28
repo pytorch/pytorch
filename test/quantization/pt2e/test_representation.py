@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 from torch._higher_order_ops.out_dtype import out_dtype  # noqa: F401
@@ -28,7 +28,7 @@ class TestPT2ERepresentation(QuantizationTestCase):
         quantizer: Quantizer,
         ref_node_occurrence: Dict[ns, int],
         non_ref_node_occurrence: Dict[ns, int],
-        fixed_output_tol: float = None,
+        fixed_output_tol: Optional[float] = None,
         output_scale_idx: int = 2,
     ) -> torch.nn.Module:
         # resetting dynamo cache

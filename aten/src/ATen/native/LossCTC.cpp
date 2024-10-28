@@ -130,7 +130,7 @@ std::tuple<Tensor, Tensor> ctc_loss_cpu_template(const Tensor& log_probs, const 
   // log_probs: input_len x batch_size x num_labels
   // targets [int64]: batch_size x target_length OR sum(target_lengths)
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
-  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
+  using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
 
   Tensor neg_log_likelihood, log_alpha;
   size_t tg_target_stride;
@@ -233,7 +233,7 @@ template<typename scalar_t, ScalarType target_scalar_type>
 Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths,
                                       const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK, bool zero_infinity) {
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
-  using target_t = typename std::conditional<target_scalar_type == kInt, int, int64_t>::type;
+  using target_t = typename std::conditional_t<target_scalar_type == kInt, int, int64_t>;
   int64_t max_input_length = log_probs.size(0);
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
