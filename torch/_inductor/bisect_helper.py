@@ -53,6 +53,8 @@ BACKENDS: Dict[str, List[Subsystem]] = {
             "decomposition"
         ),  # number of decompositions we apply in tracing
     ],  # TODO - add cse ?
+    # applies CrossRefFakeMode on invocation
+    "aot_eager_decomp_partition_crossref": [],
     "inductor": [
         BisectSubsystem(
             "post_grad_passes"
