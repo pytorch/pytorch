@@ -1842,7 +1842,7 @@ class GuardBuilder(GuardBuilderBase):
                 # skip_no_tensor_aliasing_guards_on_parameters bring
                 # unsoundness. If you compile a function with two different
                 # parameters, but later on you pass on same tensor as two
-                # different outputs (aliasiing), Dynamo will not detect this.
+                # different outputs (aliasing), Dynamo will not detect this.
                 # But we deliberately take this soundness hit because this
                 # usecase is quite rare and there is substantial reduction in
                 # guard overhead.
