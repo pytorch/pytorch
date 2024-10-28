@@ -321,12 +321,19 @@ class AOTInductorModelContainer {
           device_idx,
           &tensor_handle));
 #else // USE_CUDA
-      AtenTensorHandle tensor_handle = it->second;
+      AtenTensorHandle original_tensor_handle;
+      AtenTensorHandle tensor_handle;
+      if (_should_skip_update(idx) && use_inactive) {
+        original_tensor_handle = original_constants_map->find(constant_name)->second.get();
+      } else {
+        original_tensor_handle = it->second;
+      }
+      aoti_torch_clone(original_tensor_handle, &tensor_handle);
 #endif // USE_CUDA
 
       // Now place the tensor to constants_map. Note at this point the ownership
       // of the tensor_handle will be taken over.
-      constants_map_to_update->emplace(constant_name, tensor_handle);
+      constants_map_to_update->insert_or_assign(constant_name, tensor_handle);
     }
     // Update the inactive constant array.
     update_array_from_map(
