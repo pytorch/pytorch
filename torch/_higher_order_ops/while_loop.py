@@ -129,7 +129,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     def _validate_input(cond_fn, body_fn, carried_inputs):
         if not callable(cond_fn) or not callable(body_fn):
-            raise RuntimeError("Expect cond_fn and body_fn to be callbale.")
+            raise RuntimeError("Expect cond_fn and body_fn to be callable.")
 
         if not isinstance(carried_inputs, (tuple, list)) or pytree.tree_any(
             lambda t: not isinstance(t, torch.Tensor), carried_inputs

@@ -216,7 +216,7 @@ class TORCH_API Pickler {
   // the left of a '::', its type cannot be deduced by the compiler so one must
   // explicitly instantiate the template, i.e. push<int>(int) works, push(int)
   // does not)
-  static CONSTEXPR_EXCEPT_WIN_CUDA size_t kBufferSize = 256;
+  static constexpr size_t kBufferSize = 256;
   template <typename T>
   void push(std::common_type_t<T> value) {
     const char* begin = reinterpret_cast<const char*>(&value);
