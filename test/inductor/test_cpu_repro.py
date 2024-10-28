@@ -4170,6 +4170,47 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
+    @parametrize("is_inference", (True, False))
+    def test_disabled_amp(self, is_inference):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.all_head_size = 12 * 64
+                self.dense = nn.Linear(self.all_head_size, self.all_head_size)
+
+            def forward(self, q, k, v):
+                context_layer = F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=None, dropout_p=0.2
+                )
+                context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+                new_context_layer_shape = context_layer.size()[:-2] + (
+                    self.all_head_size,
+                )
+                context_layer = context_layer.view(new_context_layer_shape)
+                return self.dense(context_layer)
+
+        mod = M().to(torch.bfloat16).eval()
+
+        q = torch.randn((4, 12, 512, 64), dtype=torch.bfloat16) / 10.0
+        k = torch.randn((4, 12, 512, 64), dtype=torch.bfloat16) / 10.0
+        v = torch.randn((4, 12, 512, 64), dtype=torch.bfloat16) / 10.0
+        inputs = (
+            q,
+            k,
+            v,
+        )
+        compiler_mode = torch.compile(mod)
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        context = contextlib.nullcontext if not is_inference else torch.no_grad
+        with config.patch(
+            {"fallback_random": True}
+        ), torch.cpu.amp.autocast(), context(), sdpa_kernel(SDPBackend.MATH):
+            torch.manual_seed(0)
+            eager = mod(*inputs)
+            torch.manual_seed(0)
+            self.assertEqual(compiler_mode(*inputs), eager)
+
     @requires_vectorization
     def test_vec_indirect_load_cse_cache(self):
         # https://github.com/pytorch/pytorch/issues/123502
