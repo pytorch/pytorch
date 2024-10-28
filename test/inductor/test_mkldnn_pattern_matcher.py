@@ -383,7 +383,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(mod, (v,), matcher_count, matcher_nodes)
 
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
-    def test_linear_bmm(self):
+    def test_linear_input_non_contiguous_3D_wo_bias(self):
+        # Activation is 3D, non-contiguous and without Bias
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
