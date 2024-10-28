@@ -557,8 +557,8 @@ class GuardBuilder(GuardBuilderBase):
 
         # Collect the guard managers and debug info to insert no tensor aliasing
         # guards.
-        self.not_aliasing_tensor_names: List[str] = []
-        self.not_aliasing_tensor_guard_managers: List[GuardManagerWrapper] = []
+        self.no_tensor_aliasing_names: List[str] = []
+        self.no_tensor_aliasing_guard_managers: List[GuardManagerWrapper] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
@@ -1852,8 +1852,8 @@ class GuardBuilder(GuardBuilderBase):
                 ):
                     # Keep track of all the tensor guard managers to insert
                     # NoAliasing check at the end.
-                    self.not_aliasing_tensor_names.append(tensor_name)
-                    self.not_aliasing_tensor_guard_managers.append(guard_manager)
+                    self.no_tensor_aliasing_names.append(tensor_name)
+                    self.no_tensor_aliasing_guard_managers.append(guard_manager)
 
                 output_graph = self.check_fn_manager.output_graph
                 metadata = output_graph.input_source_to_sizes_strides[
@@ -2296,17 +2296,17 @@ class CheckFunctionManager:
                     add_code_part(code, gcl.guard, True)
                     seen.add(code)
 
-        not_aliasing_tensor_names = builder.not_aliasing_tensor_names
+        no_tensor_aliasing_names = builder.no_tensor_aliasing_names
         check_tensors_fn = None
         check_tensors_verbose_fn = None
 
-        if len(not_aliasing_tensor_names) > 1:
+        if len(no_tensor_aliasing_names) > 1:
             # Install tensor aliasing guard. TENSOR_MATCH guards are already
             # installed for cpp guard manager.
             install_no_tensor_aliasing_guard(
-                builder.not_aliasing_tensor_guard_managers,
-                not_aliasing_tensor_names,
-                ["check_no_aliasing(" + ", ".join(not_aliasing_tensor_names) + ")"],
+                builder.no_tensor_aliasing_guard_managers,
+                no_tensor_aliasing_names,
+                ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
             )
 
         aotautograd_guards: List[GuardEnvExpr] = (
@@ -2375,7 +2375,7 @@ class CheckFunctionManager:
         # when the CacheEntry is constructed
         self.guard_manager.cache_entry = None
         self.guard_manager.extra_state = None
-        self.guard_manager.no_tensor_aliasing_sources = not_aliasing_tensor_names
+        self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
 
     def invalidate(self):
         # Some tests reveal that CheckFunctionManager has no attribute
