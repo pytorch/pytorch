@@ -2322,7 +2322,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Check it here statically - otherwise TypeMeta would throw the runtime
     // error in attempt to invoke TypeMeta::ctor()
     static_assert(
-        std::is_default_constructible<T>::value,
+        std::is_default_constructible_v<T>,
         "Tensor can't hold non-default-constructable types");
     return static_cast<T*>(raw_mutable_data(caffe2::TypeMeta::Make<T>()));
   }

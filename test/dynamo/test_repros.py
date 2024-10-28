@@ -1702,10 +1702,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(inp)
         opt_model(inp)
         self.assertEqual(cnt.frame_count, 1)
-
-        self.assertEqual(
-            15 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
-        )
+        self.assertEqual(12, cnt.op_count)
 
     def test_exec_import(self):
         def fn1():
@@ -4171,7 +4168,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):
-            for _ in range(1000):
+            for _ in range(10000):
                 x = 1.0 * x
             return x
 
