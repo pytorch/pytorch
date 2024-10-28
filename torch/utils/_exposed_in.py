@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Allows one to expose an API in a private submodule publicly as per the definition
 # in PyTorch's public api policy.
 #
@@ -7,8 +6,15 @@
 # may not be very robust because it's not clear what __module__ is used for.
 # However, both numpy and jax overwrite the __module__ attribute of their APIs
 # without problem, so it seems fine.
-def exposed_in(module):
-    def wrapper(fn):
+
+from typing import Any, Callable, TypeVar
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def exposed_in(module: str) -> Callable[[_F], _F]:
+    def wrapper(fn: _F) -> _F:
         fn.__module__ = module
         return fn
 

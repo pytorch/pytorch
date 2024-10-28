@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+from typing import Callable, List, Tuple, Union
+
 import torch
 import torch._subclasses.functional_tensor
 import torch.utils._pytree as pytree
@@ -19,7 +21,7 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 
 
 @exposed_in("torch")
-def strict_mode(callable, operands):
+def strict_mode(callable: Callable, operands: Union[List, Tuple]):
     from torch._dynamo.backends.debugging import (
         make_eager_backend_with_torch_function_modes,
     )
