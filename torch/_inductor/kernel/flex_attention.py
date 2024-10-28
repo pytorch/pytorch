@@ -735,7 +735,6 @@ def flex_attention(
     )
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
-    kernel_options.setdefault("FORCE_USE_FLEX_ATTENTION", True)
     if _use_flex_decoding(query, kernel_options):
         return create_flex_decoding_kernel(
             query,
