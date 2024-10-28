@@ -32,6 +32,10 @@
         <script async src="https://cse.google.com/cse.js?cx=e65585f8c3ea1440e"></script>
         <div class="gcse-search"></div>
      </div>
+     <!--temporarily add a link to survey -->
+     <div class="survey-link">
+       <p><i class="fas fa-poll" aria-hidden="true">&nbsp </i><a href="https://forms.gle/tdrnwJhaQ9tUePxz9">Share Your Feedback</a> about our new search</p>
+     </div>
 {% endblock %}
 
 {%- block content %}
@@ -56,10 +60,4 @@ if (url)
 </script>
 
 <img height="1" width="1" style="border-style:none;" alt="" src="https://www.googleadservices.com/pagead/conversion/795629140/?label=txkmCPmdtosBENSssfsC&amp;guid=ON&amp;script=0"/>
-
-//temporarily add a link to survey
-<script>
-    var survey = '<div class="survey-banner"><p><i class="fas fa-poll" aria-hidden="true">&nbsp </i><a href="https://forms.gle/hQH2c7fNj9zVuR7Q6">Share Your Feedback</a> on our new search experience.</p></div>'
-    $("#pytorch-article").prepend(survey);
-</script>
 {% endblock %}

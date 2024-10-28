@@ -25,23 +25,22 @@
 
 /* End of Google Search button styles */
 
-/* Classes needed for the survey banner*/
+/* Classes needed for the survey link*/
 
-.survey-banner {
-  margin-top: 10px;
-  background-color: #f3f4f7;
-  padding-top: 15px;
-  padding-left: 10px;
-  padding-bottom: 1px;
+.pytorch-left-menu-search { /* This is needed so the distance between the search and menu is not too big */
+  margin-bottom: 0px;
 }
 
-@media screen and (max-width: 600px) {
-  .survey-banner {
-    padding-top: 5px;
-    padding-left: 5px;
-    padding-bottom: -1px;
-    font-size: 12px;
-    margin-bottom: 5px;
-  }
+.survey-link {
+  padding-top: 10px;
+  color: #262626;
+  text-align: center
 }
+
+.pytorch-left-menu-search .survey-link a {
+  color: #262626;
+  text-decoration: underline;
+  font-weight: 500;
+}
+
 /* End of classes needed for the survey banner*/
