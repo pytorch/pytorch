@@ -956,15 +956,17 @@ if torch._C._has_mkldnn:
                 return False
 
             # Check tensor storage of bmm is same along dim 0
-            # TODO: Here only allow fake tensor dispatch, how to get the slice of wgt
-            # and check the content?
-            # bmm_wgt = getattr(match.graph.owning_module, linear_node.args[weight_idx].name)
-            # from torch._dynamo.utils import detect_fake_mode
-            # from unittest import mock
-            # fake_mode = detect_fake_mode()
-            # with mock.patch.object(fake_mode, "allow_non_fake_inputs", True):
-            #     ref_val = bmm_wgt[0:1, :, :]
-            #     print("ref_val is: {}".format(ref_val), flush=True)
+            bmm_wgt = getattr(
+                match.graph.owning_module, linear_node.args[weight_idx].name
+            )
+            with torch.utils._python_dispatch._disable_current_modes():
+                dim_0_size = bmm_wgt.size(0)
+                slice_0_val = bmm_wgt[0:1, :, :]
+                if not all(
+                    torch.allclose(bmm_wgt[i : (i + 1), :, :], slice_0_val)
+                    for i in range(dim_0_size)
+                ):
+                    return False
 
         batch_size = input_meta_value.shape[0]
         if (
