@@ -634,7 +634,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "invoke_subgraph":
             return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ in ("invoke_quant_tracer", "invoke_quant"):
+        elif value.__name__ == "invoke_quant_tracer":
             return InvokeQuantHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
