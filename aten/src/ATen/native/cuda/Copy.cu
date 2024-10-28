@@ -32,13 +32,13 @@ void conj_kernel_cuda(TensorIteratorBase &iter);
 
 void float16_copy_kernel_cuda(TensorIteratorBase &iter) {
     gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
-	return static_cast<at::Half>(value);
+        return static_cast<at::Half>(value);
     });
 }
 
 void bfloat16_copy_kernel_cuda(TensorIteratorBase &iter) {
     gpu_kernel_nocast(iter, [] GPU_LAMBDA(float value) {
-	return static_cast<at::BFloat16>(value);
+        return static_cast<at::BFloat16>(value);
     });
 }
 
