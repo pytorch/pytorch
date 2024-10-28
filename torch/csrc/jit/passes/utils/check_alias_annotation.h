@@ -6,8 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Verify that alias annotations are correct. See impl for definition of
 // "correct".
@@ -18,5 +17,4 @@ TORCH_API void checkAliasAnnotation(
     const std::shared_ptr<Graph>& graph,
     std::vector<IValue> pythonInputs,
     const std::string& unqualifiedOpName);
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
