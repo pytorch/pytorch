@@ -32,7 +32,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self, TypeGuard, TypeIs
+from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
@@ -170,7 +170,7 @@ def get_plain_tensors(
     return plain_tensors
 
 
-def is_fake(x: object) -> TypeIs[Tensor]:
+def is_fake(x: object) -> TypeGuard[Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
