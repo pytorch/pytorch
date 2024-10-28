@@ -153,22 +153,21 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 
 def get_plain_tensors(
-    subclass: Tensor, out_append_list: Optional[List[Tensor]] = None
-) -> List[Tensor]:
+    subclass: Tensor, *, out: List[Union[Tensor, int, SymInt]]
+) -> List[Union[Tensor, int, SymInt]]:
     # This function is used in Runtime, do not add redundant asserts
-    plain_tensors: List[Tensor] = [] if out_append_list is None else out_append_list
     todo = [subclass]
     while todo:
         curr = todo.pop()
         if not is_traceable_wrapper_subclass(curr):
-            plain_tensors.append(curr)
+            out.append(curr)
             continue
 
         inner_keys, _ = curr.__tensor_flatten__()
         for key in reversed(inner_keys):
             todo.append(getattr(curr, key))
 
-    return plain_tensors
+    return out
 
 
 def is_fake(x: object) -> TypeGuard[Tensor]:
