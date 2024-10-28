@@ -38,6 +38,27 @@ from torch.testing._internal.common_utils import (
 )
 
 
+# NOTE: Instructions for adding new device types to this test file
+#
+# This test file contains two types of tests:
+# 1. Tests that run on both CPUs and accelerators
+# 2. Tests that run only on accelerators
+#
+# We use two variables to manage device types:
+# - `devices`: A list containing device types for both CPU and accelerator tests
+# - `DEVICE`: A string containing only the accelerator type for accelerator-only tests
+#
+# To add a new device type:
+# 1. Add a new `elif` statement in the if-else ladder below
+# 2. Check for the presence of your device (e.g., TEST_NEW_DEVICE)
+# 3. Append your device type to the `devices` list
+# 4. Assign your device type string to `DEVICE`
+#
+# Example:
+# elif TEST_NEW_DEVICE:
+#     devices.append("new_device")
+#     DEVICE = "new_device"
+
 DEVICE = "cuda"
 devices = ["cpu"]
 if TEST_HPU:
@@ -375,7 +396,6 @@ class TestTraceableCollectives(MultiThreadedTestCase):
         self.assertEqual(torch.tensor([8], device=device), res[1])
 
 
-
 class TestMetaCollectives(TestCase):
     def test_all_reduce(self):
         x = torch.rand((2, 3, 4), device="meta")
@@ -454,7 +474,7 @@ if TEST_HPU:
 
 
 # allows you to check for multiple accelerator irrespective of device type
-#to add new device types to this check simply follow the same format and append an elif with the conditional and appropriate device count function for your new device
+# to add new device types to this check simply follow the same format and append an elif with the conditional and appropriate device count function for your new device
 def exit_if_lt_x_accelerators(x):
     if TEST_CUDA:
         if torch.cuda.device_count() < x:

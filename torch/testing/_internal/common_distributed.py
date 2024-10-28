@@ -889,7 +889,7 @@ class MultiProcessTestCase(TestCase):
     def is_master(self) -> bool:
         return self.rank == 0
 
-# Utility base class for DDP based Multi Process Test cases
+# Utility base class for distributed Multi Process Test cases
 # This abstracts the PG creation and deletion, the backends are selected based
 # on device type. The tests functions can be instantiated per device type using
 # common_device_type.instantiate_device_type_tests
@@ -915,6 +915,27 @@ class DistributedTestBase(MultiProcessTestCase):
             return "gloo"
 
     def device_handle(self, device) :
+        """
+        Get the torch module for the given device type.
+
+        This method is used to handle different device types in distributed testing.
+        It extracts the device name from the input string and returns the corresponding
+        torch module if available.
+
+        Args:
+            device (str): A string representing the device, e.g., "cuda:0", "cpu", "hpu".
+
+        Returns:
+            Union[torch.device, None]: The corresponding torch module if available,
+                                       or None if the device is not found but is an attribute of torch.
+
+        Raises:
+            RuntimeError: If the device library is not found in torch.
+
+        Example:
+            >>> self.device_handle("cuda:0")
+            <module 'torch.cuda' from '...'>
+        """
         device_name = device.split(":")[0]
         if hasattr(torch, device_name):
             return getattr(torch, device_name, None)
