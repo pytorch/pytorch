@@ -233,6 +233,16 @@ class SymIntEqByExpr:
         return hash(self._extract())
 
 
+def _nested_int_aware_sort(tup: Tuple[Union[SymInt, int], int]) -> Tuple[int, int, int]:
+    return (
+        # Order nested ints by their coefficients.
+        # 1 here to order nested ints after non-nested-ints.
+        (1, tup[0].node.nested_int_coeff(), tup[1])
+        if is_nested_int(tup[0])
+        else (0, *tup)
+    )
+
+
 # Wrapper on lru_cache that reports statistics at process end
 def lru_cache(
     maxsize: Optional[int],
@@ -1014,11 +1024,10 @@ def definitely_true(a: BoolLikeType) -> bool:
     that would cause the expression to return True.
 
     When is it appropriate to use definitely_true?  First, if you can use
-    a higher level combinator like parallel_or/parallel_and, prefer using
-    those instead, they are definitely safe (modulo short-circuiting).
+    a higher level combinator prefer using those instead, they are definitely
+    safe (modulo short-circuiting).
     Second, it can be used if the program would behave equivalently if
-    definitely_true always returned False (parallel_or/parallel_and are
-    examples of this pattern, modulo short-circuiting).  Finally, it even
+    definitely_true always returned False. Finally, it even
     be OK if the program wouldn't behave equivalently, so long as the
     change is semantics preserving.  It can be semantics preserving if
     the program errors in more cases than it did previously (but otherwise
@@ -1072,30 +1081,6 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
         return False
     assert isinstance(x, bool)
     return x
-
-
-def parallel_or(*args: BoolLikeType) -> BoolLikeType:
-    """
-    Evaluate the logical OR of several arguments, avoiding guarding on
-    unbacked SymInts if another argument is definitely True.
-    """
-    if any(statically_known_true(a) for a in args):
-        return True
-    if any(definitely_true(a) for a in args):
-        return True
-    return any(args)
-
-
-def parallel_and(*args: BoolLikeType) -> BoolLikeType:
-    """
-    Evaluate the logical FALSE of several arguments, avoiding guarding on
-    unbacked SymInts if another argument is definitely False.
-    """
-    if any(statically_known_true(torch.sym_not(a)) for a in args):
-        return False
-    if any(definitely_false(a) for a in args):
-        return False
-    return all(args)
 
 
 def sym_eq(x: _T, y: _T) -> Union[bool, SymBool]:
@@ -3792,21 +3777,10 @@ class ShapeEnv:
             candidates = {
                 ex_size[i] * ex_stride[i]: size[i] * stride[i]
                 for i in range(len(size))
-                if stride[i] is not None and ex_stride[i] >= 0
+                if stride[i] is not None
             }
 
             # iterate over unbound strides in sorted order
-            def _nested_int_aware_sort(
-                tup: Tuple[Union[SymInt, int], int]
-            ) -> Tuple[int, int, int]:
-                return (
-                    # Order nested ints by their coefficients.
-                    # 1 here to order nested ints after non-nested-ints.
-                    (1, tup[0].node.nested_int_coeff(), tup[1])
-                    if is_nested_int(tup[0])
-                    else (0, *tup)
-                )
-
             val_list = sorted(
                 [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
                 key=_nested_int_aware_sort,
