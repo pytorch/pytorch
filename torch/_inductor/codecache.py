@@ -198,6 +198,15 @@ def get_cpp_wrapper_cubin_path_name() -> str:
     return "cubin_path" if torch.version.hip is None else "hsaco_path"
 
 
+@functools.lru_cache(None)
+def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
+    return (
+        Path(os.path.join(global_cache_dir, CacheBase.get_system()["hash"]))
+        if global_cache_dir is not None
+        else None
+    )
+
+
 class CacheBase:
     @staticmethod
     @functools.lru_cache(None)
@@ -244,13 +253,8 @@ class CacheBase:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
 
     @staticmethod
-    @functools.lru_cache(None)
     def get_global_cache_path() -> Optional[Path]:
-        return (
-            Path(os.path.join(config.global_cache_dir, CacheBase.get_system()["hash"]))
-            if config.global_cache_dir is not None
-            else None
-        )
+        return get_global_cache_path_impl(config.global_cache_dir)
 
     def __init__(self) -> None:
         self.system = CacheBase.get_system()
@@ -1508,6 +1512,18 @@ class FxGraphCache:
             cache_info["cache_event_time"],
             metadata=cache_info,
         )
+        # Add event data about cache hits/miss
+        # TODO: add remote cache get/put timings here too
+        chromium_log.add_event_data(
+            "inductor_compile",
+            cache_state=cache_state,
+            cache_event_time=cache_info["cache_event_time"],
+            key=cache_info.get("key"),
+            components=cache_info.get("components"),
+            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+            remote_cache_enabled=remote,
+            local_cache_enabled=local,
+        )
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
@@ -2379,7 +2395,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
 
         template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
-            static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
+            static_assert(std::is_pointer_v<T>, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
         }
         template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {
