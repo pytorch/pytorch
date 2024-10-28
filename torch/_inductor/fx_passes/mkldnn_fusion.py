@@ -978,9 +978,8 @@ if torch._C._has_mkldnn:
                 meta_value is None
                 or meta_value.device.type != "cpu"
                 or (
-                    meta_value.dim() != 3
-                    if linear_node.target == aten.bmm.default
-                    else 2
+                    meta_value.dim()
+                    != (3 if linear_node.target == aten.bmm.default else 2)
                 )
             ):
                 return False

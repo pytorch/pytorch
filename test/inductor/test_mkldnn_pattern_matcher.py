@@ -396,14 +396,26 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         mod = M().eval()
         v = torch.randn(4, 32, 1, 128)
-        with torch.no_grad(), torch.autocast(device_type="cpu"):
-            expected = mod(v)
-            actual, (source_code,) = run_and_get_code(
-                torch.compile(mod, fullgraph=True),
-                v,
+
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        for dtype in dtypes:
+            autocast_enabled = (
+                True if dtype in [torch.bfloat16, torch.float16] else False
             )
-            self.assertIn("torch.ops.mkldnn._linear_pointwise.default", source_code)
-            torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+            with torch.no_grad(), torch.autocast(
+                device_type="cpu", enabled=autocast_enabled, dtype=dtype
+            ):
+                expected = mod(v)
+                actual, (source_code,) = run_and_get_code(
+                    torch.compile(mod, fullgraph=True),
+                    v,
+                )
+                self.assertIn("torch.ops.mkldnn._linear_pointwise.default", source_code)
+                torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
     def test_linear_add_bias(self):
         class M(torch.nn.Module):
