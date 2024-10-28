@@ -2829,20 +2829,9 @@ class DeviceCachingAllocator {
       mempool_id = active_mempool->id();
     }
 
-    if (mempool_id.first != 0 || mempool_id.second != 0) {
-      auto it = graph_pools_freeable.find(mempool_id);
-      if (it != graph_pools_freeable.end()) {
-        synchronize_and_free_events(context, it->second);
-        TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
-        release_blocks(it->second->small_blocks, context);
-        release_blocks(it->second->large_blocks, context);
-        if (it->second->cudaMalloc_count == 0) {
-          auto erase_count = graph_pools.erase(it->first);
-          TORCH_INTERNAL_ASSERT(erase_count == 1);
-          graph_pools_freeable.erase(it);
-        }
-      }
-    } else {
+    if (mempool_id.first == 0 && mempool_id.second == 0) {
+      // If there is no active mempool, we work on releasing *all* blocks.
+
       // First ensure that all blocks that can't currently be allocated due to
       // outstanding events are returned to the pool.
       synchronize_and_free_events(context);
@@ -2850,20 +2839,31 @@ class DeviceCachingAllocator {
       // Free all non-split cached blocks to system allocator
       release_blocks(large_blocks, context);
       release_blocks(small_blocks, context);
+    }
 
-      for (auto it = graph_pools_freeable.begin();
-           it != graph_pools_freeable.end();) {
-        // See notifyCaptureDestroy for the strategy here.
-        TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
-        release_blocks(it->second->small_blocks, context);
-        release_blocks(it->second->large_blocks, context);
-        if (it->second->cudaMalloc_count == 0) {
-          auto erase_count = graph_pools.erase(it->first);
-          TORCH_INTERNAL_ASSERT(erase_count == 1);
-          it = graph_pools_freeable.erase(it);
+    for (auto it = graph_pools_freeable.begin();
+         it != graph_pools_freeable.end();) {
+      if (mempool_id.first != 0 || mempool_id.second != 0) {
+        if (it->first == mempool_id) {
+          // If there is an active mempool, we sync only the events
+          // associated with the pool
+          synchronize_and_free_events(context, it->second);
         } else {
+          // otherwise we move on
           ++it;
+          continue;
         }
+      }
+      // See notifyCaptureDestroy for the strategy here.
+      TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
+      release_blocks(it->second->small_blocks, context);
+      release_blocks(it->second->large_blocks, context);
+      if (it->second->cudaMalloc_count == 0) {
+        auto erase_count = graph_pools.erase(it->first);
+        TORCH_INTERNAL_ASSERT(erase_count == 1);
+        it = graph_pools_freeable.erase(it);
+      } else {
+        ++it;
       }
     }
 
@@ -2902,6 +2902,8 @@ class DeviceCachingAllocator {
     auto* pool = block->pool;
     auto active_pool = MemPoolContext::getActiveMemPool();
     if (active_pool && active_pool->allocator() && pool->owner_PrivatePool) {
+      // If there is an active mempool with a given allocator,
+      // we use the given allocator's delete function.
       active_pool->allocator()->raw_delete((void*)block->ptr);
     } else {
       C10_CUDA_CHECK(cudaFree((void*)block->ptr));
@@ -3044,35 +3046,32 @@ class DeviceCachingAllocator {
     // make sure capture-deferred end of life events get processed too.
     TORCH_INTERNAL_ASSERT(captures_underway.empty());
     insert_events_deferred_until_no_capture(context);
+
     for (auto it = cuda_events.begin(); it != cuda_events.end();) {
       for (auto e = it->second.begin(); e != it->second.end();) {
-        EventPool::Event event;
         Block* block = e->second;
-        if (pool) {
-          if (block->pool->owner_PrivatePool == pool) {
-            event = std::move(e->first);
-            C10_CUDA_CHECK(cudaEventSynchronize(*event));
 
-            block->event_count--;
-            if (block->event_count == 0) {
-              free_block(block, context);
-            }
-            e = it->second.erase(e);
-          } else {
-            ++e;
-          }
+        // If a pool was passed, only synchronize the events
+        // that are associated with the pool, otherwise move on
+        if (pool && block->pool->owner_PrivatePool != pool) {
+          ++e;
           continue;
         }
-        event = std::move(e->first);
+
+        EventPool::Event event = std::move(e->first);
+
         C10_CUDA_CHECK(cudaEventSynchronize(*event));
 
         block->event_count--;
         if (block->event_count == 0) {
           free_block(block, context);
         }
+        // We are done with the event, so erase it from the deque
         e = it->second.erase(e);
       }
 
+      // If the events deque is empty, only then erase the
+      // cuda event from the events map
       if (it->second.empty()) {
         it = cuda_events.erase(it);
       } else {

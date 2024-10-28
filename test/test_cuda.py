@@ -590,10 +590,8 @@ class TestCuda(TestCase):
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
     def test_specify_improper_device_name(self):
-        import os
-
-        fname = "tempfile.pt"
-        try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fname = os.path.join(tmpdir, "tempfile.pt")
             with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
                 torch.save(
                     [torch.nn.Parameter(torch.randn(10, 10))],
@@ -601,9 +599,6 @@ class TestCuda(TestCase):
                     _use_new_zipfile_serialization=True,
                 )
                 torch.load(fname, "cuda0")
-        finally:
-            if os.path.exists(fname):
-                os.remove(fname)
 
     def test_get_device_index(self):
         from torch.cuda._utils import _get_device_index
@@ -4586,9 +4581,6 @@ class TestMemPool(TestCase):
             self.assertEqual(len(pool.snapshot()), 2)
 
         del out_0, out_1, out_2, pool
-        # pool now should have 0 segments if del pool reclaimed all the
-        # memory
-        self.assertEqual(len(pool.snapshot()), 0)
 
         # called_dummy_free should be 321 if dummy_free was used to deallocate
         # out tensor
