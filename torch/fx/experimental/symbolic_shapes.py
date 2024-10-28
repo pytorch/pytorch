@@ -4236,11 +4236,13 @@ class ShapeEnv:
             maybe_more_info = ""
             if (
                 not is_debug
-                and os.getenv("TORCH_DISABLE_EXTENDED_DEBUG_INFO") is not None
+                and os.getenv("TORCHDYNAMO_EXTENDED_ADVICE=0") is not None
             ):
                 maybe_more_info = (
                     ", for more info run with "
-                    f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}"'
+                    f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}" '
+                    "or suppress this message by setting the environment "
+                    'variable "TORCHDYNAMO_EXTENDED_ADVICE=0"'
                 )
             sloc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
