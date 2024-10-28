@@ -96,7 +96,7 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.count
-@substitute_in_graph(itertools.count, is_embedded_type=True)
+@substitute_in_graph(itertools.count, is_embedded_type=True)  # type: ignore[arg-type]
 def count(start: int = 0, step: int = 1) -> Iterator[int]:
     n = start
     while True:
