@@ -2,9 +2,8 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
-#include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
-#include <algorithm>
+#include <fstream>
 
 #ifdef USE_C10D_NCCL
 #include <vector>
@@ -13,10 +12,6 @@
 #include <mutex>
 
 #include <nlohmann/json.hpp>
-
-namespace {
-constexpr int64_t kCommInitBusyWaitMillis = 10;
-} // namespace
 
 namespace c10d {
 
@@ -35,39 +30,23 @@ ncclComm_t NCCLComm::getNcclComm() {
             ". ",
             commFailureMsg));
   }
-  // only wait for initialization if nonblocking mode is enabled
-  if (!initialized_ && nccl_use_nonblocking()) {
-    waitUntilInitialized(nccl_nonblocking_timeout());
+  // In non-blocking mode, ensure comm is ready.
+  if (nccl_use_nonblocking()) {
+    // If timeout is reached, throw an exception.
+    C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
+    // ncclComm_ should be initialized by now
   }
-
+  if (!initialized_) {
+    // TODO: see if we can consolidate other `initialized_` flipping here.
+    // Maintaining it elsewhere is some work.
+    initialized_ = true;
+    LOG(INFO) << "Rank " << rank_ << ": NCCL communicator " << repr()
+              << " is initialized.";
+  }
   return ncclComm_;
 }
 
-void NCCLComm::waitUntilInitialized(int timeoutSecs) {
-  auto startTimepoint = std::chrono::steady_clock::now();
-  while (!initialized_) {
-    if (ncclComm_) {
-      ncclResult_t result;
-      ncclCommGetAsyncError(ncclComm_, &result);
-      if (result == ncclSuccess) {
-        LOG(INFO) << "Rank " << rank_ << ": NCCL communicator is initialized.";
-        initialized_ = true;
-        break;
-      }
-    }
-    auto currentTimepoint = std::chrono::steady_clock::now();
-    auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                           currentTimepoint - startTimepoint)
-                           .count();
-    if (timeElapsed > timeoutSecs) {
-      std::string err = "NCCL timeout in communicator initialization.";
-      TORCH_CHECK_WITH(DistBackendError, false, err);
-    }
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(kCommInitBusyWaitMillis));
-  }
-}
-
+// TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
 #if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
 // last argument to split() API is not used to support
 // multiple implementations
@@ -77,16 +56,53 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     int rank,
     ncclConfig_t& config,
     std::vector<uint64_t>& ranks_ull) {
+  TORCH_CHECK(
+      color_id >= NCCL_SPLIT_NOCOLOR,
+      "Color must be a non-negative value or NCCL_SPLIT_NOCOLOR (-1)"
+      ", but got ",
+      color_id);
+  LOG(INFO) << "Rank " << source->rank_ << ": split from parent comm "
+            << source->repr() << " with color_id " << color_id << " and rank "
+            << rank;
   auto comm = std::make_shared<NCCLComm>();
+  // This call will block until the source communicator is initialized
+  auto sourceComm = source->getNcclComm();
+#ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(
-      ncclCommSplit(
-          source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
+      ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
       std::nullopt);
+#else
+  // After calling ncclCommSplit in non-blocking mode, we should wait for the
+  // source communicator to be out of ncclInProgress state.
+  // Reason 1:
+  //   it's unsafe to call new operations on the parent comm while it's in
+  //   ncclInProgress state.
+  // Reason 2:
+  //   as of NCCL 2.23, the ptr value of child comm will not be filled until the
+  //   state of parent comm is ncclSuccess. This may change in the future. See:
+  //   https://github.com/NVIDIA/nccl/issues/1472
+  C10D_NCCL_CHECK_TIMEOUT_SLEEP(
+      ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
+      sourceComm, // wait on parent comm
+      std::nullopt);
+  if (color_id >= 0) {
+    // Waiting for parent comm above still does not seem to guarantee the child
+    // comm ptr is valid. Therefore we add a manual wait here for safety.
+    // TODO: remove this wait after NCCL fix the semantics.
+    auto startTime = std::chrono::steady_clock::now();
+    auto timeout = nccl_nonblocking_timeout();
+    while (!comm->ncclComm_) {
+      C10D_CHECK_TIMEOUT(startTime, timeout);
+      C10D_SCHED_SLEEP();
+    }
+  }
+  // comm->ncclComm_ should have valid ptr by now, but not necessarily
+  // initialized. Rely on getNcclComm() to wait for its initialization.
+#endif
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
-  if (!nccl_use_nonblocking()) {
-    comm->initialized_ = true;
-  }
+  LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
+            << comm->repr() << " with color_id " << color_id;
   return comm;
 }
 #endif
@@ -96,7 +112,7 @@ std::string getNcclVersion() {
   static std::string versionString;
 
   c10::call_once(ncclGetVersionFlag, []() {
-    int version;
+    int version = 0;
     ncclResult_t status = ncclGetVersion(&version);
     // can't compute the version if call did not return successfully or version
     // code < 100 (corresponding to 0.1.0)
@@ -114,7 +130,7 @@ std::string getNcclVersion() {
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
 #ifdef NCCL_SUFFIX
       const auto ncclSuffix = std::string(NCCL_SUFFIX);
-      if (ncclSuffix.length()) {
+      if (!ncclSuffix.empty()) {
         versionString += "." + ncclSuffix;
       }
 #endif
@@ -132,16 +148,14 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
       size_t data_size = tensor.storage().nbytes();
       if (data_size > 0 && tensor.storage().data_ptr()) {
         auto src = static_cast<const char*>(tensor.storage().data_ptr().get());
-        char* dst = (char*)std::calloc(data_size, sizeof(char));
+        std::vector<char> dst(data_size);
         // This is needed so that we trigger a device synchronization so we can
         // get the collective finished if launched on GPU and hash its output.
-        cudaMemcpy(dst, src, data_size, cudaMemcpyDeviceToHost);
+        cudaMemcpy(dst.data(), src, data_size, cudaMemcpyDeviceToHost);
         for (size_t i = 0; i < data_size; ++i) {
           // Update the hash for each byte in the tensor
-          hash = c10::hash_combine(
-              hash, c10::get_hash(((char*)dst)[i], data_size));
+          hash = c10::hash_combine(hash, c10::get_hash(dst[i], data_size));
         }
-        free(dst);
       }
     }
   }
@@ -158,23 +172,18 @@ bool nccl_use_nonblocking() {
   return nccl_use_nonblocking_;
 }
 
-int _parse_nccl_nonblocking_timeout() {
-  const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-  int timeout = -1;
-  if (val) {
-    const std::string config(val);
-    timeout = std::stoi(config);
-    if (!nccl_use_nonblocking() && timeout > 0) {
-      TORCH_WARN(
-          "TORCH_NCCL_NONBLOCKING_TIMEOUT has no effect when TORCH_NCCL_USE_COMM_NONBLOCKING is false.");
-      timeout = -1;
+// Default value: 30 minutes
+int nccl_nonblocking_timeout() {
+  static int timeout = -2; // -2 means not initialized
+  if (timeout == -2) {
+    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val && strlen(val) > 0) {
+      timeout = strtol(val, nullptr, 0);
+    } else {
+      // Default value consistent with kBackendDefaultTimeout
+      timeout = 30 * 60;
     }
   }
-  return timeout;
-}
-
-int nccl_nonblocking_timeout() {
-  static int timeout = _parse_nccl_nonblocking_timeout();
   return timeout;
 }
 
@@ -197,7 +206,7 @@ std::string getNcclErrorDetailStr(
   std::string interpret;
   std::string err;
 #ifdef ENABLE_NCCL_GET_LAST_ERROR
-  auto ret = ncclGetLastError(NULL);
+  auto ret = ncclGetLastError(nullptr);
   if (ret) {
     err = "\nLast error:\n" + std::string(ret);
   } else {
@@ -242,7 +251,7 @@ std::string getNcclErrorDetailStr(
 control_plane::RegisterHandler dumpHandler{
     "dump_nccl_trace_pickle",
     [](const control_plane::Request& req, control_plane::Response& res) {
-      const auto params = req.params();
+      const auto& params = req.params();
       size_t validParamCount = 0;
 
       // valid params
@@ -290,7 +299,7 @@ control_plane::RegisterHandler dumpHandler{
 control_plane::RegisterHandler jsonDumpHandler{
     "dump_nccl_trace_json",
     [](const control_plane::Request& req, control_plane::Response& res) {
-      const auto params = req.params();
+      const auto& params = req.params();
       size_t validParamCount = 0;
 
       // valid params
@@ -345,6 +354,11 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
   }
 
   file.write(ncclTrace.data(), ncclTrace.size());
+  if (!file) {
+    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
+               << filename_;
+    return;
+  }
   LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
 }
 
@@ -389,7 +403,7 @@ std::optional<size_t> NCCLTraceBuffer::record(
   }
   if (all_pg_status_.find(pg_id) == all_pg_status_.end()) {
     // Current pg_status is not in FR.
-    all_pg_status_[pg_id] = pg_status;
+    all_pg_status_[pg_id] = std::move(pg_status);
   }
   auto traceback =
       torch::CapturedTraceback::gather(true, true, capture_cpp_stack_);
@@ -404,8 +418,8 @@ std::optional<size_t> NCCLTraceBuffer::record(
       op_id,
       std::move(profiling_name),
       std::move(traceback),
-      std::move(start),
-      std::move(end),
+      start,
+      end,
       c10::getTime(),
       timeout_ms.count(),
       isP2P,
@@ -422,14 +436,14 @@ std::optional<size_t> NCCLTraceBuffer::record(
   for (const auto& input : inputs) {
     c10::IntArrayRef sizes = input.sizes();
     te.input_dtypes_.push_back(input.dtype().toScalarType());
-    te.input_dims_.push_back(sizes.size());
+    te.input_dims_.push_back(static_cast<int64_t>(sizes.size()));
     te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
   }
 
   for (const auto& output : outputs) {
     c10::IntArrayRef sizes = output.sizes();
     te.output_dtypes_.push_back(output.dtype().toScalarType());
-    te.output_dims_.push_back(sizes.size());
+    te.output_dims_.push_back(static_cast<int64_t>(sizes.size()));
     te.sizes_.insert(te.sizes_.end(), sizes.begin(), sizes.end());
   }
 
@@ -451,7 +465,7 @@ void NCCLTraceBuffer::record_pg_ranks(
     return;
   }
   std::lock_guard<std::mutex> guard(mutex_);
-  pg_name_to_ranks_[pg_name] = ranks;
+  pg_name_to_ranks_[pg_name] = std::move(ranks);
 }
 
 void NCCLTraceBuffer::update_state(Entry& r) {
@@ -473,8 +487,14 @@ std::vector<NCCLTraceBuffer::Entry> NCCLTraceBuffer::dump_entries() {
   std::lock_guard<std::mutex> guard(mutex_);
   std::vector<Entry> result;
   result.reserve(entries_.size());
-  result.insert(result.end(), entries_.begin() + next_, entries_.end());
-  result.insert(result.end(), entries_.begin(), entries_.begin() + next_);
+  result.insert(
+      result.end(),
+      entries_.begin() + static_cast<std::ptrdiff_t>(next_),
+      entries_.end());
+  result.insert(
+      result.end(),
+      entries_.begin(),
+      entries_.begin() + static_cast<std::ptrdiff_t>(next_));
   // query any remaining events
   for (auto& r : result) {
     update_state(r);
@@ -564,7 +584,7 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
     if (includeStacktraces) {
       auto& tb = stracebacks.tracebacks.at(i);
       auto frames = new_list();
-      for (int64_t frame : tb) {
+      for (auto frame : tb) {
         frames.push_back(all_frames.at(frame));
       }
       dict.insert(frames_key, frames);
@@ -583,11 +603,11 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
     }
 
     auto it = e.sizes_.begin();
-    auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
+    auto read_sizes = [&](const c10::SmallVector<int64_t, 4>& dims) {
       auto sizes = new_list();
       for (auto dim : dims) {
         auto arg_sizes = new_list();
-        for (C10_UNUSED auto i : c10::irange(dim)) {
+        for ([[maybe_unused]] auto i : c10::irange(dim)) {
           arg_sizes.push_back(*it++);
         }
         sizes.push_back(arg_sizes);
@@ -599,14 +619,14 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
     std::vector<std::string> input_dtypes_strs;
     input_dtypes_strs.reserve(e.input_dtypes_.size());
     for (const auto& input_dtype : e.input_dtypes_) {
-      input_dtypes_strs.push_back(c10::toString(input_dtype));
+      input_dtypes_strs.emplace_back(c10::toString(input_dtype));
     }
     dict.insert(input_dtypes_key, input_dtypes_strs);
     dict.insert(output_sizes_key, read_sizes(e.output_dims_));
     std::vector<std::string> output_dtypes_strs;
     output_dtypes_strs.reserve(e.output_dtypes_.size());
     for (const auto& output_dtype : e.output_dtypes_) {
-      output_dtypes_strs.push_back(c10::toString(output_dtype));
+      output_dtypes_strs.emplace_back(c10::toString(output_dtype));
     }
     dict.insert(output_dtypes_key, output_dtypes_strs);
     if (e.time_discovered_completed_.has_value()) {
@@ -721,10 +741,10 @@ std::string NCCLTraceBuffer::dump_json(
         j[duration_key_str] = *e.duration_;
       }
       auto it = e.sizes_.begin();
-      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
-        auto sizes = std::list<std::list<int>>();
+      auto read_sizes = [&](const c10::SmallVector<int64_t, 4>& dims) {
+        auto sizes = std::list<std::list<int64_t>>();
         for (auto dim : dims) {
-          auto arg_sizes = std::list<int>();
+          auto arg_sizes = std::list<int64_t>();
           for (auto i : c10::irange(dim)) {
             (void)i;
             arg_sizes.push_back(*it++);
@@ -737,14 +757,14 @@ std::string NCCLTraceBuffer::dump_json(
       std::vector<std::string> input_dtypes_strs;
       input_dtypes_strs.reserve(e.input_dtypes_.size());
       for (const auto& input_dtype : e.input_dtypes_) {
-        input_dtypes_strs.push_back(c10::toString(input_dtype));
+        input_dtypes_strs.emplace_back(c10::toString(input_dtype));
       }
       j[input_dtypes_key_str] = input_dtypes_strs;
       j[output_sizes_key_str] = read_sizes(e.output_dims_);
       std::vector<std::string> output_dtypes_strs;
       output_dtypes_strs.reserve(e.output_dtypes_.size());
       for (const auto& output_dtype : e.output_dtypes_) {
-        output_dtypes_strs.push_back(c10::toString(output_dtype));
+        output_dtypes_strs.emplace_back(c10::toString(output_dtype));
       }
       j[output_dtypes_key_str] = output_dtypes_strs;
       if (e.time_discovered_completed_.has_value()) {
@@ -768,7 +788,7 @@ std::string NCCLTraceBuffer::dump_json(
       entries.emplace_back(j);
     }
 
-    if (entries.size() > 0) {
+    if (!entries.empty()) {
       result[entries_key_str] = entries;
     }
   }
@@ -809,7 +829,7 @@ std::string NCCLTraceBuffer::dump(
       per_comm_dict.insert(ncclId, inner_dict);
     }
   }
-  if (per_comm_dict.size() > 0) {
+  if (!per_comm_dict.empty()) {
     result.insert(nccl_comm_key, per_comm_dict);
   }
   return pickle_str(result);

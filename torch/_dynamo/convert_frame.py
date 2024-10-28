@@ -7,6 +7,7 @@ import cProfile
 import dis
 import functools
 import itertools
+import json
 import logging
 import os
 import pstats
@@ -66,7 +67,12 @@ from .cache_size import (
     exceeds_cache_size_limit,
     is_recompilation,
 )
-from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
+from .eval_frame import (
+    always_optimize_code_objects,
+    dynamo_tls,
+    skip_code,
+    TorchPatcher,
+)
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
@@ -87,6 +93,7 @@ from .guards import (
 )
 from .hooks import Hooks
 from .replay_record import ExecutionRecord
+from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
     DistributedState,
     InstructionTranslator,
@@ -114,6 +121,7 @@ from .utils import (
     troubleshooting_url,
     write_record_to_file,
 )
+from .variables.torch_function import torch_function_mode_stack_state_mgr
 
 
 np: Optional[ModuleType]
@@ -212,15 +220,18 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_fwd_from_src = torch.fx.graph_module._forward_from_src
             torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
             cleanup = setup_compile_debug()
-
             exit_stack = contextlib.ExitStack()
             exit_stack.enter_context(
                 torch.fx._symbolic_trace._maybe_revert_all_patches()
             )
+            exit_stack.enter_context(torch_function_mode_stack_state_mgr)
             try:
                 return fn(*args, **kwargs)
             finally:
                 cleanup.close()
+                assert (
+                    torch._C._len_torch_function_stack() == 0
+                ), "Torch function mode stack state changed while dynamo tracing, please report a bug"
                 exit_stack.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
                 torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
@@ -525,6 +536,11 @@ class ConvertFrameAssert:
             },
         )
 
+        # Record traced frames, skipping Dynamo generated ones.
+        if not code.co_name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX):
+            info = f"{code.co_name} {code.co_filename}:{code.co_firstlineno}"
+            dynamo_tls.traced_frame_infos.append(info)
+
         return _compile(
             frame.f_code,
             frame.f_globals,
@@ -827,6 +843,11 @@ def _compile(
 
         return guarded_code
 
+    chromium_event_log = get_chromium_event_logger()
+
+    chromium_event_log.reset()
+    chromium_start_time = time.time_ns()
+    chromium_event_log.log_event_start("dynamo", chromium_start_time, {})
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
         CompileContext(compile_id)
     ):
@@ -910,8 +931,6 @@ def _compile(
         # torch/_dynamo/convert_frame.py:780 in <lambda>
         convert_frame_intern = structured.intern_string(__file__)
         # Initialize the ChromiumEventLogger on start
-        chromium_event_log = get_chromium_event_logger()
-        chromium_event_log.reset()
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {
@@ -1059,6 +1078,18 @@ def _compile(
                 torch._logging.get_structured_logging_overhead()
             )
 
+            def handle_sets(d: Dict[str, Any]) -> Dict[str, Any]:
+                # Remove entries that have set values which are functions
+                del d["reorderable_logging_functions"]
+                # Remove entries that have set values which are _TensorMeta
+                del d["traceable_tensor_subclasses"]
+
+                return {
+                    key: list(value) if isinstance(value, set) else value
+                    for key, value in d.items()
+                }
+
+            config_dict = handle_sets(config.get_config_copy())
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1090,9 +1121,16 @@ def _compile(
                 remote_cache_time_saved,
                 structured_logging_overhead_s,
                 config.suppress_errors,
+                config.inline_inbuilt_nn_modules,
+                config.specialize_float,
+                json.dumps(config_dict),
+                True,  # is_forward
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
+            chromium_event_log.log_event_end(
+                "dynamo", time.time_ns(), {}, chromium_start_time
+            )
 
 
 class ConvertFrame:

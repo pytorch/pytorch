@@ -5,9 +5,7 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/autograd_metadata.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-namespace torch {
-namespace distributed {
-namespace autograd {
+namespace torch::distributed::autograd {
 
 // Forward declarations.
 class DistAutogradContext;
@@ -44,6 +42,4 @@ class TORCH_API RecvRpcBackward : public torch::autograd::Node {
   const rpc::DeviceMap deviceMap_;
 };
 
-} // namespace autograd
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::autograd

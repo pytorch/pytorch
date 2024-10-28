@@ -194,6 +194,25 @@ def _trig2(score, b, h, m, n):
     return z
 
 
+# --------- Useful mask mod functions for testing ---------
+def _causal_mask(
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    return token_q >= token_kv
+
+
+def _inverse_causal_mask(
+    batch: Tensor,
+    head: Tensor,
+    token_q: Tensor,
+    token_kv: Tensor,
+) -> Tensor:
+    return token_q <= token_kv
+
+
 test_score_mods = [
     _identity,
     _times_two,
@@ -204,6 +223,17 @@ test_score_mods = [
     _rel_causal,
     _generate_alibi_bias(8),
 ]
+
+test_score_mask_mod_map = {
+    _identity: noop_mask,
+    _times_two: noop_mask,
+    _squared: noop_mask,
+    _causal: _causal_mask,
+    _inverse_causal: _inverse_causal_mask,
+    _rel_bias: noop_mask,
+    _rel_causal: _causal_mask,
+    _generate_alibi_bias(8): noop_mask,
+}
 
 captured_buffers_map = {
     "_head_offset": _head_offset,
@@ -423,17 +453,18 @@ class TestFlexAttention(InductorTestCase):
 
     def run_dynamic_test(
         self,
-        score_mod: Callable,
+        score_mask_mod: Tuple[Callable, Callable],
         dtype: torch.dtype = torch.float16,
         B: int = B,
         H: int = H,
         S: int = S,
         D: int = D,
     ):
+        score_mod, mask_mod = score_mask_mod
         # If the seqlen becomes smaller than the seqlen of the previous batch,
         # we can still reuse the block_mask created from a larger seqlen.
         MAX_S = S
-        block_mask = create_block_mask(noop_mask, 1, 1, MAX_S, MAX_S)
+        block_mask = create_block_mask(mask_mod, 1, 1, MAX_S, MAX_S)
         sdpa_partial = create_attention(score_mod, block_mask=block_mask)
         # The first eager batch, shape (B, H, S, D)
         q1 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
@@ -465,6 +496,21 @@ class TestFlexAttention(InductorTestCase):
         golden_out2.backward(backward_grad2.to(torch.float64))
         ref_out2.backward(backward_grad2)
 
+        # The third eager batch, shape (B * 2, H, S / 4, D)
+        S = int(S / 2)
+        q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        q3_ref, k3_ref, v3_ref = query_key_value_clones(q3, k3, v3)
+        q3_gold, k3_gold, v3_gold = query_key_value_clones(q3, k3, v3, torch.float64)
+        ref_out3 = sdpa_partial(q3_ref, k3_ref, v3_ref)
+        golden_out3 = sdpa_partial(q3_gold, k3_gold, v3_gold)
+
+        backward_grad3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+
+        golden_out3.backward(backward_grad3.to(torch.float64))
+        ref_out3.backward(backward_grad3)
+
         # Need to clear dynamo counters, since flex attention eager mode also uses dynamo tracing.
         # We check dynamo counters["frames"]["ok"] to ensure there is no re-compilation.
         torch._dynamo.reset()
@@ -489,7 +535,8 @@ class TestFlexAttention(InductorTestCase):
         )
         self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
 
-        # No re-compilation, use the compiled dynamic shape version.
+        # Since current q_seqlen (MAX_S/2) is smaller than the seqlen from block_mask (MAX_S),
+        # recompile to include the BlockMask._adjust part.
         compiled_out2 = compiled_sdpa(q2, k2, v2)
         compiled_out2.backward(backward_grad2)
         self._check_out_and_grad(
@@ -506,11 +553,32 @@ class TestFlexAttention(InductorTestCase):
             v2_ref,
             v2,
         )
-        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
 
-        # The third iteration, shape (B * 2, H, S * 2, D)
+        # No re-compilation, use the compiled dynamic shape version.
+        # The current q_seqlen (MAX_S/4) is still smaller than the seqlen from block_mask (MAX_S),
+        # we don't recompile since we can reuse the compiled graph, which already includes the BlockMask._adjust part.
+        compiled_out3 = compiled_sdpa(q3, k3, v3)
+        compiled_out3.backward(backward_grad3)
+        self._check_out_and_grad(
+            golden_out3,
+            ref_out3,
+            compiled_out3,
+            q3_gold,
+            q3_ref,
+            q3,
+            k3_gold,
+            k3_ref,
+            k3,
+            v3_gold,
+            v3_ref,
+            v3,
+        )
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+
+        # The forth iteration, shape (B * 2, H, S * 2, D)
         # Since seqlen is larger than the seqlen in block_mask, throw errors.
-        S = int(S * 4)
+        S = int(S * 8)
         q3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         k3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
         v3 = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
@@ -632,14 +700,16 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    @common_utils.parametrize("score_mod", test_score_mods)
-    def test_builtin_score_mods_dynamic(self, dtype: torch.dtype, score_mod: Callable):
-        if score_mod.__name__ == "_alibi_bias":
+    @common_utils.parametrize("score_mask_mod", test_score_mask_mod_map.items())
+    def test_builtin_score_mods_dynamic(
+        self, dtype: torch.dtype, score_mask_mod: Tuple[Callable, Callable]
+    ):
+        if score_mask_mod[0].__name__ == "_alibi_bias":
             # TODO
             self.skipTest(
                 "Alibi bias broken with dynamic shapes since we don't support capturing dynamic shapes"
             )
-        self.run_dynamic_test(score_mod, dtype)
+        self.run_dynamic_test(score_mask_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -919,14 +989,15 @@ class TestFlexAttention(InductorTestCase):
         self.run_test(composed_score_mod, dtype)
 
     @supported_platform
+    @expectedFailure  # TODO: Remove this after supporting compiled flex attention with training bias
     @common_utils.parametrize("dtype", test_dtypes)
-    def test_captured_buffers(self, dtype: torch.dtype):
-        head_offset = torch.rand(H, device="cuda", dtype=dtype)
+    def test_captured_buffers_req_grad(self, dtype: torch.dtype):
+        head_offset = torch.rand(8, device="cuda", dtype=dtype, requires_grad=True)
 
         def score_mod(score, b, h, m, n):
             return score + head_offset[h]
 
-        self.run_test(score_mod, dtype)
+        self.run_test(score_mod, dtype, 4, 8, 128, 128)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -973,6 +1044,53 @@ class TestFlexAttention(InductorTestCase):
             return score + bias[b, q, kv]
 
         self.run_test(bias_mod, dtype)
+
+    @supported_platform
+    def test_load_from_view_buffer(self):
+        dtype = torch.float16
+        device = "cuda"
+        W = 8
+
+        class SimpleAttention(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rel_pos_h = torch.randn(2 * H - 1, D, device=device, dtype=dtype)
+
+            def forward(self, q, k, v):
+                q = q.view(B * H, H * W, -1)
+                score_mod = self.generate_score_mod(q)
+                q = q.view(B, H, H * W, -1)
+                return flex_attention(q, k, v, score_mod=score_mod)
+
+            def generate_score_mod(self, q):
+                rel_h = self.add_decomposed_rel_pos(q)
+                rel_h = rel_h.view(
+                    B, H, rel_h.size(1), rel_h.size(2), rel_h.size(3)
+                ).squeeze(-1)
+
+                def score_mod(score, batch, head, q_idx, k_idx):
+                    h_idx = k_idx // W
+                    return score + rel_h[batch, head, q_idx, h_idx]
+
+                return score_mod
+
+            @torch.no_grad()
+            def add_decomposed_rel_pos(self, q):
+                q_coords = torch.arange(H, device=self.rel_pos_h.device)[:, None]
+                k_coords = torch.arange(H, device=self.rel_pos_h.device)[None, :]
+                relative_coords = (q_coords - k_coords) + (H - 1)
+                Rh = self.rel_pos_h[relative_coords.long()]
+                r_q = q.reshape(B * H, H, W, D)
+                rel_h = torch.einsum("bhwc,hkc->bhwk", r_q, Rh)
+                return rel_h.reshape(B * H, H * W, H, 1)
+
+        m = SimpleAttention().to(device).eval()
+        m = torch.compile(m, mode="max-autotune", fullgraph=True)
+        q = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        k = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        v = torch.randn(B, H, H * W, D, device=device, dtype=dtype, requires_grad=True)
+        out = m(q, k, v)
+        out.sum().backward()
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -1228,8 +1346,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask_a = create_block_mask(causal_mask, 1, 1, 512, 512, _compile=True)
-        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512, _compile=False)
+        block_mask_a = torch.compile(create_block_mask)(causal_mask, 1, 1, 512, 512)
+        block_mask_b = create_block_mask(causal_mask, 1, 1, 512, 512)
         self.assertEqual(block_mask_a.kv_num_blocks, block_mask_b.kv_num_blocks)
         self.assertEqual(block_mask_a.kv_indices, block_mask_b.kv_indices)
         self.assertEqual(block_mask_a.q_num_blocks, block_mask_b.q_num_blocks)
@@ -1633,6 +1751,66 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             v_grad, v_grad2, atol=tolerance.atol, rtol=tolerance.rtol
         )
 
+    # Use weird mask to test reusing block_mask does work well.
+    @supported_platform
+    def test_block_mask_reuse_with_weird_mask(self):
+        def mask(b, h, q, kv):
+            return (kv < 256) | (kv >= 2048)
+
+        make_tensor = functools.partial(
+            torch.randn,
+            (4, 4, 4096, 64),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+
+        block_mask = create_block_mask(mask, None, None, 4096, 4096)
+        # Compile 1st version with q/k/v(seqlen=4096) and block_mask(seqlen=4096)
+        torch.compile(flex_attention, dynamic=True)(
+            make_tensor(), make_tensor(), make_tensor(), block_mask=block_mask
+        )
+
+        make_tensor2 = functools.partial(
+            torch.randn,
+            (4, 4, 2048, 64),
+            device="cuda",
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        q, k, v = make_tensor2(), make_tensor2(), make_tensor2()
+
+        # Compile 2st version with q/k/v(seqlen=2048) and block_mask(seqlen=4096),
+        # The graph includes the BlockMask._adjust part.
+        out = torch.compile(flex_attention, dynamic=True)(
+            q, k, v, block_mask=block_mask
+        )
+        out.sum().backward()
+        q_grad, k_grad, v_grad = q.grad, k.grad, v.grad
+        q.grad = None
+        k.grad = None
+        v.grad = None
+
+        block_mask2 = create_block_mask(mask, None, None, 2048, 2048)
+        # Reuse the 1st version with q/k/v(seqlen=2048) and block_mask(seqlen=2048)
+        out2 = torch.compile(flex_attention, dynamic=True)(
+            q, k, v, block_mask=block_mask2
+        )
+        out2.sum().backward()
+        q_grad2, k_grad2, v_grad2 = q.grad, k.grad, v.grad
+        tolerance = Tolerances(atol=1e-3, rtol=1e-3)
+
+        torch.testing.assert_close(out, out2, atol=tolerance.atol, rtol=tolerance.rtol)
+        torch.testing.assert_close(
+            q_grad, q_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            k_grad, k_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+        torch.testing.assert_close(
+            v_grad, v_grad2, atol=tolerance.atol, rtol=tolerance.rtol
+        )
+
     @supported_platform
     def test_float32_matmul_precision(self):
         make_tensor = functools.partial(
@@ -1890,6 +2068,257 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     ref_error * 1.2 > flex_error,
                     f"Ref error: {ref_error}, Flex Error: {flex_error}",
                 )
+
+    @supported_platform
+    def test_block_mask_non_divisible(self):
+        seq = torch.arange(1023, device="cuda") // 128
+
+        def mod(b, h, q, kv):
+            return seq[q] == seq[kv]
+
+        block_mask = create_block_mask(mod, None, None, 1023, 1023, device="cuda")
+        torch.compile(create_block_mask)(mod, None, None, 1023, 1023, device="cuda")
+        self.run_test_with_call(
+            lambda q, k, v: flex_attention(q, k, v, block_mask=block_mask),
+            Q_S=1023,
+            KV_S=1023,
+        )
+
+    @supported_platform
+    def test_head_bias_req_grad(self):
+        B, H, S, D = 1, 4, 256, 64
+        bias = torch.randn(H, device="cuda", dtype=torch.float16, requires_grad=True)
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def head_bias(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[h]
+
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref
+        implicit_bias_sdpa_ref = implicit_bias_sdpa_ref.view(H, 1, 1).expand(H, S, S)
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_sdpa_gold = bias_sdpa_gold
+        implicit_bias_sdpa_gold = implicit_bias_sdpa_gold.view(H, 1, 1).expand(H, S, S)
+
+        self._test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            head_bias,
+            bias_flex,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
+        )
+
+    @supported_platform
+    def test_comparison_vs_sdpa_with_learnable_bias(self):
+        # 1-dimensional bias:
+        B, H, S, D = 1, 1, 256, 64
+        bias = torch.randn(
+            2 * S, device="cuda", dtype=torch.float16, requires_grad=True
+        )
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def rel_pos_1d(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[q_idx + kv_idx]
+
+        bias_indices = torch.arange(S)[:, None] + torch.arange(S)
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref[bias_indices]
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_sdpa_gold = bias_sdpa_gold[bias_indices]
+
+        self._test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            rel_pos_1d,
+            bias_flex,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
+        )
+
+        # 2-dimensional bias:
+        B, H, S, D = 1, 1, 256, 64
+        bias = torch.randn(S, S, device="cuda", dtype=torch.float16, requires_grad=True)
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def rel_pos_2d(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[q_idx, kv_idx]
+
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_sdpa_gold = bias_sdpa_gold
+
+        self._test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            rel_pos_2d,
+            bias_flex,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
+        )
+
+        # 2-dimensional bias + index multiple
+        B, H, S, D = 1, 1, 256, 64
+        bias = torch.randn(S, S, device="cuda", dtype=torch.float16, requires_grad=True)
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def rel_pos_2d(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[q_idx][kv_idx]
+
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_sdpa_gold = bias_sdpa_gold
+
+        self._test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            rel_pos_2d,
+            bias_flex,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
+        )
+
+        # 2-dimensional bias + transposed:
+        B, H, S, D = 1, 1, 256, 64
+        bias = torch.randn(S, S, device="cuda", dtype=torch.float16, requires_grad=True)
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def rel_pos_2d_transposed(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[kv_idx, q_idx]
+
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref.transpose(-1, -2)
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_sdpa_gold = bias_sdpa_gold.transpose(-1, -2)
+
+        self._test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            rel_pos_2d_transposed,
+            bias_flex,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
+        )
+
+        # 3-dimensional bias + transposed
+        B, H, S, D = 4, 8, 256, 64
+        bias = torch.randn(
+            H, S, S, device="cuda", dtype=torch.float16, requires_grad=True
+        )
+
+        bias_flex = bias.detach().clone().requires_grad_(True)
+
+        def rel_pos_3d_transposed(score, b, h, q_idx, kv_idx):
+            return score + bias_flex[h, kv_idx, q_idx]
+
+        bias_sdpa_ref = bias.detach().clone().requires_grad_(True)
+        implicit_bias_sdpa_ref = bias_sdpa_ref.transpose(-1, -2)
+        bias_sdpa_gold = (
+            bias.detach().clone().to(dtype=torch.float64).requires_grad_(True)
+        )
+        implicit_bias_sdpa_gold = bias_sdpa_gold.transpose(-1, -2)
+
+        self._test_learnable_bias_inner(
+            B,
+            H,
+            S,
+            D,
+            rel_pos_3d_transposed,
+            bias_flex,
+            implicit_bias_sdpa_ref,
+            bias_sdpa_ref,
+            implicit_bias_sdpa_gold,
+            bias_sdpa_gold,
+        )
+
+    def _test_learnable_bias_inner(
+        self,
+        B,
+        H,
+        S,
+        D,
+        score_mod,
+        bias_flex,
+        implicit_bias_sdpa_ref,
+        bias_sdpa_ref,
+        implicit_bias_sdpa_gold,
+        bias_sdpa_gold,
+    ):
+        make_tensor = functools.partial(
+            torch.ones,
+            (B, H, S, D),
+            device="cuda",
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        q_ref, k_ref, v_ref = make_tensor(), make_tensor(), make_tensor()
+        q_gold, k_gold, v_gold = query_key_value_clones(
+            q_ref, k_ref, v_ref, torch.float64
+        )
+        q_flex, k_flex, v_flex = query_key_value_clones(q_ref, k_ref, v_ref)
+
+        out_ref = torch.nn.functional.scaled_dot_product_attention(
+            q_ref, k_ref, v_ref, attn_mask=implicit_bias_sdpa_ref
+        )
+        out_ref.sum().backward()
+        out_gold = torch.nn.functional.scaled_dot_product_attention(
+            q_gold, k_gold, v_gold, attn_mask=implicit_bias_sdpa_gold
+        )
+        out_gold.sum().backward()
+        out_flex = flex_attention(q_flex, k_flex, v_flex, score_mod=score_mod)
+        out_flex.sum().backward()
+
+        name = score_mod.__name__
+        for ref, flex, gold in [
+            (out_ref, out_flex, out_gold),
+            (q_ref.grad, q_flex.grad, q_gold.grad),
+            (k_ref.grad, k_flex.grad, k_gold.grad),
+            (v_ref.grad, v_flex.grad, v_gold.grad),
+            (bias_sdpa_ref.grad, bias_flex.grad, bias_sdpa_gold.grad),
+        ]:
+            ref_error = rmse(ref, gold)
+            flex_error = rmse(flex, gold)
+            self.assertTrue(
+                ref_error * 1.2 >= flex_error,
+                f"{name} -> Ref error: {ref_error}, Flex eager Error: {flex_error}",
+            )
 
     @supported_platform
     def test_causal_block_non_divisible(self):
@@ -2385,13 +2814,43 @@ class TestBlockMask(InductorTestCase):
 
     @supported_platform
     def test_compiling_create_block_mask(self):
-        def mask_mod(b, h, q, kv):
-            return q >= kv
+        seq = torch.arange(512, device="cuda") // 127
 
-        block_mask = create_block_mask(mask_mod, 1, 1, 512, 512, _compile=True)
+        def mask_mod(b, h, q, kv):
+            return (q >= kv) & (seq[q] == seq[kv])
+
+        block_mask = torch.compile(create_block_mask, fullgraph=True)(
+            mask_mod, 1, 1, 512, 512
+        )
         self.assertIsInstance(block_mask, BlockMask)
         self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((1, 1, 4)))
         self.assertEqual(block_mask.kv_indices.shape, torch.Size((1, 1, 4, 4)))
+
+    @supported_platform
+    def test_compiling_create_block_mask_no_recompile(self):
+        def mask_mod(b, h, q, kv):
+            return q >= kv
+
+        torch._dynamo.reset()
+        block_mask = torch.compile(create_block_mask)(mask_mod, 2, 4, 1024, 1024)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((2, 4, 8)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((2, 4, 8, 8)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 1)
+
+        # automatic dynamic shapes triggered and recompilation.
+        block_mask = torch.compile(create_block_mask)(mask_mod, 4, 8, 2048, 2048)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((4, 8, 16)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((4, 8, 16, 16)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+        # no recompilation.
+        block_mask = torch.compile(create_block_mask)(mask_mod, 6, 16, 3072, 3072)
+        self.assertIsInstance(block_mask, BlockMask)
+        self.assertEqual(block_mask.kv_num_blocks.shape, torch.Size((6, 16, 24)))
+        self.assertEqual(block_mask.kv_indices.shape, torch.Size((6, 16, 24, 24)))
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
     @supported_platform
     def test_block_mask_viz(self):
@@ -2664,23 +3123,21 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
         offsets = length_to_offsets(lengths, device)
 
         document_causal_mask = generate_doc_mask_mod(offsets)
-        block_mask_compiled = create_block_mask(
+        block_mask_compiled = torch.compile(create_block_mask)(
             document_causal_mask,
             1,
             1,
             SEQ_LEN,
             SEQ_LEN,
             device=device,
-            _compile=True,
         )
-        block_mask = create_block_mask(
+        block_mask = torch.compile(create_block_mask)(
             document_causal_mask,
             1,
             1,
             SEQ_LEN,
             SEQ_LEN,
             device=device,
-            _compile=True,
         )
         self.assertEqual(block_mask_compiled.kv_indices, block_mask.kv_indices)
         self.assertEqual(

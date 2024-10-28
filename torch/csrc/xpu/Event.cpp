@@ -127,7 +127,8 @@ static PyMethodDef THXPEvent_methods[] = {
     {nullptr}};
 
 PyTypeObject THXPEventType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._XpuEventBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._XpuEventBase", /* tp_name */
     sizeof(THXPEvent), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THXPEvent_dealloc, /* tp_dealloc */
