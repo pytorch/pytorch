@@ -120,6 +120,7 @@ from .utils import (
     reset_graph_break_dup_checker,
     setup_compile_debug,
     to_int_ms,
+    to_int_us,
     troubleshooting_url,
     write_record_to_file,
 )
@@ -964,7 +965,7 @@ def _compile(
                 ]
             },
         )
-        start_time = time.time()
+        start_time_ns = time.time_ns()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
         fail_user_frame_filename: Optional[str] = None
@@ -1020,6 +1021,8 @@ def _compile(
         finally:
             if tracer:
                 tracer.output.local_scope = {}
+
+            duration_ns = time.time_ns() - start_time_ns
 
             from .utils import curr_frame
 
@@ -1089,7 +1092,7 @@ def _compile(
                 compliant_custom_ops = set({})
                 restart_reasons = set()
                 # If compilation failed, the entire time is wasted
-                dynamo_time_before_restart = time.time() - start_time
+                dynamo_time_before_restart = duration_ns / 1e9
                 possibly_missed_reinplacing_opportunities = None
                 remote_cache_time_saved = None
                 remote_fx_graph_cache_get_time = None
@@ -1124,7 +1127,7 @@ def _compile(
                 graph_op_count,
                 graph_node_count,
                 graph_input_count,
-                start_time,
+                start_time_ns / 1e9,
                 entire_frame_compile_time,
                 backend_compile_time,
                 inductor_compile_time,
@@ -1148,6 +1151,29 @@ def _compile(
                 True,  # is_forward
                 to_int_ms(remote_fx_graph_cache_get_time),
                 to_int_ms(remote_fx_graph_cache_put_time),
+                start_time_us=start_time_ns // 1000,
+                duration_us=duration_ns // 1000,
+                dynamo_cumulative_compile_time_us=to_int_us(entire_frame_compile_time),
+                aot_autograd_cumulative_compile_time_us=to_int_us(backend_compile_time),
+                inductor_cumulative_compile_time_us=to_int_us(inductor_compile_time),
+                inductor_code_gen_cumulative_compile_time_us=to_int_us(code_gen_time),
+                triton_compile_time_us=None,  # TODO: instrument
+                runtime_cudagraphify_time_us=None,  # TODO: instrument in separate event
+                runtime_triton_autotune_time_us=None,  # TODO: instrument in separate event
+                dynamo_compile_time_before_restart_us=to_int_us(
+                    dynamo_time_before_restart
+                ),
+                cuda_synchronize_time_us=None,  # TODO: instrument
+                distributed_ephemeral_timeout_us=to_int_us(
+                    remote_cache_time_saved
+                ),  # TODO: instrument more accurately
+                structured_logging_overhead_us=to_int_us(structured_logging_overhead_s),
+                remote_fx_graph_cache_get_time_us=to_int_us(
+                    remote_fx_graph_cache_get_time
+                ),
+                remote_fx_graph_cache_put_time_us=to_int_us(
+                    remote_fx_graph_cache_put_time
+                ),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
