@@ -676,14 +676,16 @@ class _PipelineStageBase(ABC):
                     "full", bwd_kwargs
                 )
             else:
-                # perform the partial backwards for the inputs with a custom backward function
-                # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
-                if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
-                    bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
-
                 grads_input = []
                 param_groups = []
+                # Skip the backward for the first stage since we will perform the weight update with
+                # autograd.backward in backward_weight_one_chunk
                 if not self.is_first:
+                    if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
+                        bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
+
+                    # perform the partial backwards for the inputs with a custom backward function
+                    # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
                     grads_input, param_groups = self.backward_maybe_with_nosync(
                         "input", bwd_kwargs
                     )

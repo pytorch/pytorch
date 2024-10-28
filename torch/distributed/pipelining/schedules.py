@@ -1069,10 +1069,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
         stage_index_to_group_rank: Optional[Dict[int, int]] = None,
         use_full_backward: bool = True,
     ):
-        if len(stages) <= 1:
-            raise ValueError(
-                f"Multi-stage schedule expects at least two stages but got {len(stages)}"
-            )
         # Init parent
         super().__init__(
             n_microbatches=n_microbatches,
