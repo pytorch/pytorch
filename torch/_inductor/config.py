@@ -882,6 +882,7 @@ class cpp:
     # Whether to enable concat linear for cpu device
     enable_concat_linear = False
 
+
 # config specific to codegen/triton.py
 class triton:
     # Use cudagraphs on output code
