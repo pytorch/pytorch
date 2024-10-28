@@ -760,17 +760,17 @@ void softshrink_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
     auto lambd_val = lambd.to<scalar_t>();
     auto lambdVec = Vectorized<scalar_t>(lambd_val);
     cpu_kernel_vec(
-        iter,
-        [=](scalar_t a) -> scalar_t {
-          return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : a * scalar_t(0));
-        },
-        [=](Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
+      iter,
+      [=](scalar_t a) -> scalar_t {
+        return a > lambd_val ? a - lambd_val : (a < -lambd_val ? a + lambd_val : a * scalar_t(0));
+      },
+      [=](Vectorized<scalar_t> self_val) -> Vectorized<scalar_t> {
           Vectorized<scalar_t> self_val_t0, self_val_t1;
           self_val_t0 = ((self_val > lambdVec) | (self_val.isnan())) & (self_val - lambdVec);
           self_val_t1 = ((self_val < -lambd_val) | (self_val.isnan())) & (self_val + lambdVec);
           return (self_val_t0 | self_val_t1);
-        });
-    });
+      });
+  });
   }
 }
 
