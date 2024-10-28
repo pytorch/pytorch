@@ -87,7 +87,7 @@ class FlexAttentionHOP(HigherOrderOperator):
             isinstance(buf, torch.Tensor)
             for buf in score_mod_other_buffers + mask_mod_other_buffers
         ):
-            raise RuntimeError("Other buffers must be tensors.")
+            raise RuntimeError(f"Other buffers must be tensors, got {[f'{type(buf)}:{buf}' for buf in (score_mod_other_buffers + mask_mod_other_buffers) if not isinstance(buf, torch.Tensor)]}")
         return super().__call__(
             query,
             key,
