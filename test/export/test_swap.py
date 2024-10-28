@@ -104,7 +104,7 @@ class TestSwap(TestCase):
 
         swapped_gm = _swap_modules(
             ep,
-            {"foo.nested": NestedChild(), "bar": Child2()},
+            {"foo.nested": lambda _: NestedChild(), "bar": lambda _: Child2()},
         )
 
         self.assertTrue(torch.allclose(ep.module()(*inps), swapped_gm(*inps)))
@@ -132,7 +132,7 @@ class TestSwap(TestCase):
 
         swapped_gm = _swap_modules(
             ep,
-            {"m1": M1()},
+            {"m1": lambda _: M1()},
         )
 
         inps = (torch.randn(2), torch.randn(5))
@@ -168,7 +168,7 @@ class TestSwap(TestCase):
 
         swapped_gm = _swap_modules(
             ep,
-            {"nested": Nested()},
+            {"nested": lambda _: Nested()},
         )
 
         inps = (torch.randn(3),)
@@ -215,7 +215,7 @@ class TestSwap(TestCase):
 
         swapped_gm = _swap_modules(
             ep,
-            {"m1": M1()},
+            {"m1": lambda _: M1()},
         )
 
         inps = (torch.randn(10), torch.randn(10))
@@ -266,7 +266,7 @@ class TestSwap(TestCase):
 
         swapped_gm = _swap_modules(
             ep,
-            {"foo": Child1(), "bar": Child2()},
+            {"foo": lambda _: Child1(), "bar": lambda _: Child2()},
         )
 
         self.assertTrue(torch.allclose(ep.module()(*inps), swapped_gm(*inps)))
@@ -343,7 +343,7 @@ def forward(self, x, y):
 
         swapped_gm = _swap_modules(
             ep,
-            {"foo": Child1(), "bar": Child2()},
+            {"foo": lambda _: Child1(), "bar": lambda _: Child2()},
         )
 
         self.assertTrue(torch.allclose(ep.module()(*inps), swapped_gm(*inps)))
@@ -436,7 +436,7 @@ def forward(self, x, y):
             def forward(self, a, b):
                 return (CustomOutput(a * a, b * b), CustomOutput(a * b.T, a + b.T))
 
-        ep = export(Foo(), (torch.randn(2, 3), torch.randn(3, 2)))
+        ep = export(Foo(), (torch.randn(2, 3), torch.randn(3, 2)), strict=self.strict)
         swapped = _swap_modules(ep, {})
         inp = (torch.randn(2, 3), torch.randn(3, 2))
         res1 = torch.fx.Interpreter(swapped).run(*inp)
@@ -446,6 +446,39 @@ def forward(self, x, y):
         self.assertTrue(torch.allclose(res1[1].a, res2[1].a))
         self.assertTrue(torch.allclose(res1[1].b, res2[1].b))
 
+    def test_swap_same(self):
+        class Child(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x):
+                return x * x
+
+        class MyModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.foo = Child()
+                self.register_parameter(
+                    "rootparam", torch.nn.Parameter(torch.ones(2, 3))
+                )
+
+            def forward(self, x):
+                x = x + self.rootparam
+                x = self.foo(x)
+                return x
+
+        inps = (torch.randn(2, 3),)
+        ep = export(
+            MyModule(),
+            inps,
+            strict=self.strict,
+            preserve_module_call_signature=("foo",),
+        )
+        swapped_gm = _swap_modules(
+            ep,
+            {"foo": lambda a: a},
+        )
+        self.assertTrue(torch.allclose(ep.module()(*inps), swapped_gm(*inps)))
 
 if __name__ == "__main__":
     run_tests()

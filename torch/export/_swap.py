@@ -2,7 +2,7 @@ import logging
 import operator
 import types
 from collections import defaultdict
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -244,11 +244,14 @@ def _deconstruct_outputs(
         node_name_map[orig_output.name] = proxy_out
 
 
-def _swap_module_helper(
+def _swap_modules_gm(
     gm: torch.fx.GraphModule,
-    modules_to_swap: Dict[str, torch.nn.Module],
+    modules_to_swap: Dict[str, Callable[[torch.nn.Module], torch.nn.Module]],
     module_call_graph: Dict[str, ModuleCallSignature],
 ) -> torch.fx.GraphModule:
+    if len(modules_to_swap) == 0:
+        return gm
+
     log.debug("Starting graph:")
     log.debug(gm.graph)
 
@@ -323,7 +326,7 @@ def _swap_module_helper(
 
         args_nodes, kwargs_nodes = _construct_inputs(gm, signature, node_name_map)
         module_node = _insert_call_module(
-            gm, args_nodes, kwargs_nodes, modules_to_swap[name], name
+            gm, args_nodes, kwargs_nodes, modules_to_swap[name](sub_gm), name
         )
         _deconstruct_outputs(gm, signature, module_node, node_name_map, orig_outputs)
 
@@ -388,7 +391,8 @@ def _fix_input_output_signature(
 
 
 def _swap_modules(
-    ep: ExportedProgram, modules_to_swap: Dict[str, torch.nn.Module]
+    ep: ExportedProgram,
+    modules_to_swap: Dict[str, Callable[[torch.nn.Module], torch.nn.Module]],
 ) -> torch.fx.GraphModule:
     """
     Unlifts the given ExportedProgram into a fx.GraphModule, and then swaps
@@ -397,11 +401,12 @@ def _swap_modules(
 
     Args:
         ep (ExportedProgram): Exported program to modify
-        modules_to_swap (Dict[str, torch.nn.Module]): Mapping from module fqn to
-            eager module to swap with. The specified module fqn should have also
-            been specified in the `preserve_module_call_signature` argument to
-            torch.export so that we know how to restore the calling convention
-            to this argument.
+        modules_to_swap (Dict[str, Callable[[torch.nn.Module], torch.nn.Module]]]):
+            Mapping from module fqn to a function that takes in the partitioned
+            submodule and returns a module to swap with. The specified module
+            fqn should have also been specified in the
+            `preserve_module_call_signature` argument to torch.export so that we
+            know how to restore the calling convention to this argument.
         run_with_interpreter: Whether or not to run the graph using
             fx.Interpreter. Setting to true will help result in better error
             messages and easier debugging, but it has found to result in a QPS
@@ -422,6 +427,6 @@ def _swap_modules(
     gm.eval = types.MethodType(type(gm).eval, gm)  # type: ignore[assignment]
 
     assert isinstance(gm, torch.fx.GraphModule)
-    gm = _swap_module_helper(gm, modules_to_swap, module_call_graph)
+    gm = _swap_modules_gm(gm, modules_to_swap, module_call_graph)
 
     return gm
