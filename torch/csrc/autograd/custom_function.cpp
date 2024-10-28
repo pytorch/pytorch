@@ -530,9 +530,16 @@ variable_list AutogradContext::get_saved_variables() const {
   variable_list saved;
   saved.reserve(saved_variables_.size());
   auto ptr = grad_fn_.lock();
-  TORCH_INTERNAL_ASSERT(ptr);
-  for (auto& var : saved_variables_) {
-    saved.push_back(var.unpack(ptr));
+  // TORCH_INTERNAL_ASSERT(ptr);
+  // TODO(rzou): hacky, can do this in a more legit way
+  if (ptr) {
+    for (auto& var : saved_variables_) {
+      saved.push_back(var.unpack(ptr));
+    }
+  } else {
+    for (auto& var : saved_variables_) {
+      saved.push_back(var.unpack());
+    }
   }
   return saved;
 }
@@ -543,6 +550,7 @@ bool AutogradContext::needs_input_grad(size_t output_edge_index) const {
   return ptr->task_should_compute_output(output_edge_index);
 }
 
+// TODO(rzou): might segfault, need to make this functional
 bool AutogradContext::needs_input_grad(
     std::initializer_list<IndexRange> idxs) const {
   auto ptr = grad_fn_.lock();

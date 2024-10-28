@@ -369,8 +369,18 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
           }
         case TypeKind::BoolType:
           return IValue(py::cast<std::vector<bool>>(obj));
-        case TypeKind::TensorType:
-          return IValue(py::cast<std::vector<at::Tensor>>(obj));
+        case TypeKind::TensorType: {
+          auto thing = py::cast<std::vector<std::optional<at::Tensor>>>(obj);
+          auto thing2 = std::vector<at::Tensor>();
+          for (const auto& inp : thing) {
+            if (inp.has_value()) {
+              thing2.emplace_back(*inp);
+            } else {
+              thing2.emplace_back();
+            }
+          }
+          return IValue(thing2);
+        }
         default:
           return createGenericList(obj, elem_type);
       }
