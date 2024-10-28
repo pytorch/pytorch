@@ -3,6 +3,11 @@ name: Check whether the workflow owner can use ARC runners
 on:
   workflow_call:
     inputs:
+      check_experiments:
+        required: false
+        type: string
+        description: |
+          List of experiments for this workfow. If not defined, all default experiments are included.
       triggering_actor:
         required: true
         type: string
@@ -35,6 +40,8 @@ on:
 
 jobs:
   runner-determinator:
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     outputs:
       label-type: ${{ steps.set-condition.outputs.label-type }}
@@ -43,6 +50,7 @@ jobs:
       ISSUE_NUMBER: ${{ inputs.issue_number }}
       TRIGGERING_ACTOR: ${{ inputs.triggering_actor }}
       ISSUE_OWNER: ${{ inputs.issue_owner }}
+      CHECK_EXPERIMENTS: ${{ inputs.check_experiments }}
     steps:
       # - name: Checkout PyTorch
       #   uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -98,7 +106,8 @@ jobs:
               experiments:
                 lf:
                   rollout_percent: 25
-
+                  all_branches: false
+                  default: true
               ---
 
               # Opt-ins:
@@ -116,7 +125,7 @@ jobs:
           import random
           from argparse import ArgumentParser
           from logging import LogRecord
-          from typing import Any, Dict, Iterable, List, NamedTuple, Tuple
+          from typing import Any, Dict, FrozenSet, Iterable, List, NamedTuple, Tuple
 
           import yaml
           from github import Auth, Github
@@ -144,6 +153,9 @@ jobs:
               )
               all_branches: bool = (
                   False  # If True, the experiment is also enabled on the exception branches
+              )
+              default: bool = (
+                  True  # If True, the experiment is enabled by default for all queries
               )
 
               # Add more fields as needed
@@ -199,6 +211,12 @@ jobs:
                   f.write(f"{key}={value}\n")
 
 
+          def _str_comma_separated_to_set(value: str) -> FrozenSet[str]:
+              return frozenset(
+                  filter(lambda itm: itm != "", map(str.strip, value.strip(" \n\t").split(",")))
+              )
+
+
           def parse_args() -> Any:
               parser = ArgumentParser("Get dynamic rollout settings")
               parser.add_argument("--github-token", type=str, required=True, help="GitHub token")
@@ -232,6 +250,13 @@ jobs:
                   type=str,
                   required=True,
                   help="Current GitHub ref type, branch or tag",
+              )
+              parser.add_argument(
+                  "--eligible-experiments",
+                  type=_str_comma_separated_to_set,
+                  required=False,
+                  default="",
+                  help="comma separated list of experiments to check, if omitted all experiments marked with default=True are checked",
               )
 
               return parser.parse_args()
@@ -407,6 +432,7 @@ jobs:
               rollout_state: str,
               workflow_requestors: Iterable[str],
               branch: str,
+              eligible_experiments: FrozenSet[str] = frozenset(),
               is_canary: bool = False,
           ) -> str:
               settings = parse_settings(rollout_state)
@@ -415,11 +441,22 @@ jobs:
               fleet_prefix = ""
               prefixes = []
               for experiment_name, experiment_settings in settings.experiments.items():
-                  enabled = False
-
                   if not experiment_settings.all_branches and is_exception_branch(branch):
                       log.info(
                           f"Branch {branch} is an exception branch. Not enabling experiment {experiment_name}."
+                      )
+                      continue
+
+                  if eligible_experiments:
+                      if experiment_name not in eligible_experiments:
+                          exp_list = ", ".join(eligible_experiments)
+                          log.info(
+                              f"Skipping experiment '{experiment_name}', as it is not in the eligible_experiments list: {exp_list}"
+                          )
+                          continue
+                  elif not experiment_settings.default:
+                      log.info(
+                          f"Skipping experiment '{experiment_name}', as it is not a default experiment"
                       )
                       continue
 
@@ -430,11 +467,13 @@ jobs:
                       if is_user_opted_in(requestor, user_optins, experiment_name)
                   ]
 
+                  enabled = False
                   if opted_in_users:
                       log.info(
                           f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
                       )
                       enabled = True
+
                   elif experiment_settings.rollout_perc:
                       # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
                       if random.uniform(0, 100) <= experiment_settings.rollout_perc:
@@ -503,6 +542,7 @@ jobs:
                       rollout_state,
                       (args.github_issue_owner, username),
                       args.github_branch,
+                      args.eligible_experiments,
                       is_canary,
                   )
 
@@ -538,4 +578,5 @@ jobs:
             --github-actor "$TRIGGERING_ACTOR" \
             --github-issue-owner "$ISSUE_OWNER" \
             --github-ref-type "$curr_ref_type" \
-            --github-repo "$GITHUB_REPOSITORY"
+            --github-repo "$GITHUB_REPOSITORY" \
+            --eligible-experiments "$CHECK_EXPERIMENTS" \

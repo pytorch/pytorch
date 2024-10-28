@@ -379,7 +379,6 @@ def minimize(
             minimizer_key = (
                 initial_key if initial_key in minimizer_keys else min(minimizer_keys)
             )
-            minimizer_target = all_values[minimizer_key]
             parameters = from_key(minimizer_key, parameters)
             speedup_incr = (1 - minimal_target / reference_target) * 100
             if speedup_incr < 0:
@@ -555,7 +554,7 @@ def optimize_scatter_mm(
             return value
         return next_value
 
-    meta, speedup, timing, sensitivity_message = minimize(
+    meta, speedup, timing, _sensitivity_message = minimize(
         bench, initial_meta, reference_meta, step_meta_parameter
     )
     if initial_meta is not reference_meta and initial_meta == meta and not force:
@@ -644,7 +643,15 @@ def tune_bsr_dense_addmm(
     # Compute the key of parameters:
     sparsity = round(1 - bsr._nnz() * BM * BK / (M * K), 2)
     dtype = bsr.dtype
-    version = (0, dtype, sparsity)
+    if out is None:
+        out_dtype = dtype
+    else:
+        out_dtype = out.dtype
+    if out_dtype is dtype:
+        version_dtype = dtype
+    else:
+        version_dtype = (dtype, out_dtype)
+    version = (0, version_dtype, sparsity)
     key = (M, K, N, BM, BK, beta == 0, beta == 1, alpha == 1)
 
     # For tuning, for an initial state, use parameters from the
@@ -740,6 +747,7 @@ def optimize_bsr_dense_addmm(
     use_left_alpha=False,
     use_right_alpha=False,
     dtype=torch.float16,
+    out_dtype=None,
     device="cuda",
     sparsity=0.5,
     force=False,
@@ -756,6 +764,10 @@ def optimize_bsr_dense_addmm(
     right_alpha = (
         make_tensor(n, dtype=dtype, device=device) if use_right_alpha else None
     )
+    if out_dtype is not None:
+        out = dense.new_empty((m, n), dtype=out_dtype)
+    else:
+        out = None
     tune_bsr_dense_addmm(
         input,
         bsr,
@@ -764,6 +776,7 @@ def optimize_bsr_dense_addmm(
         alpha=alpha,
         left_alpha=left_alpha,
         right_alpha=right_alpha,
+        out=out,
         store=True,
         force=force,
         verbose=verbose,
@@ -833,7 +846,7 @@ def main(op="scatter_mm", force=False, dtype=torch.float16, verbose=True):
                     raise NotImplementedError(op)
         except KeyboardInterrupt:
             break
-        except Exception as msg:
+        except Exception:
             dump()
             raise
     dump()
