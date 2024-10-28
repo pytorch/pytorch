@@ -2,7 +2,6 @@
 # mypy: allow-untyped-defs
 
 
-import dataclasses
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -280,41 +279,3 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
-
-
-# TODO - if I move this to invoke_quant.py, doesn't trace, not sure why
-
-
-@dataclasses.dataclass
-class InvokeQuant:
-    """
-    Invoke a quantization function that will be preserved as a single operator. Preservation
-    as a single operator aids in pattern matching and custom lowerings.
-
-    The operation appears as:
-        torch.ops.higher_order.invoke_quant(subgraph, *args, scheme=scheme)
-
-
-    Args:
-        codegen_low_precision: Use observed subgraph dtypes for codegen instead of
-            upcasting to fp32. Can improve performance for prologue fusion but
-            requires careful testing of numerics.
-
-        force_fuse_mm: Force fusion to Triton matrix multiplications even without
-            max-autotune enabled.
-    """
-
-    codegen_low_precision: bool = True
-    force_fuse_mm: bool = False
-
-    def __call__(
-        self,
-        *args,
-        **kwargs,
-    ):
-        if not torch._utils.is_compiling():
-            return args[0](*args[1])
-
-        from torch._higher_order_ops import invoke_quant_tracer
-
-        return invoke_quant_tracer(*args, **kwargs, quant_options=self)  # type: ignore[call-arg]

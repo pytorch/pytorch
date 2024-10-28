@@ -449,7 +449,10 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
     subgraph_invocations = graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.invoke_subgraph
     )
-    invoke_subgraph_mapping = torch._guards.TracingContext.get().invoke_subgraph_mapping
+    tc = torch._guards.TracingContext.try_get()
+    if not tc:
+        return
+    invoke_subgraph_mapping = tc.invoke_subgraph_mapping
     for invoke_subgraph in subgraph_invocations:
         if invoke_subgraph.args[1] not in invoke_subgraph_mapping:
             continue
