@@ -1228,7 +1228,11 @@ def compile_fx_aot(
         }
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
-    with V.set_aot_compilation(True):
+    saved_compile_id = model_.meta.get("dynamo_compile_id", None)
+    saved_compile_context = torch._guards.CompileContext(saved_compile_id)
+    with V.set_aot_compilation(True), torch._guards.compile_context(
+        saved_compile_context
+    ):
         compiled_lib_path = compile_fx(
             model_,
             example_inputs_,
@@ -1664,6 +1668,9 @@ def compile_fx(
                 unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                     "dynamo_flat_name_to_original_fqn"
                 ]
+
+            if "dynamo_compile_id" in model_.meta:
+                unlifted_gm.meta["dynamo_compile_id"] = model_.meta["dynamo_compile_id"]
 
             # Disable amp as in aot_dispatch_autograd (https://github.com/pytorch/pytorch/pull/86515)
             # In inference_compiler (fw_compiler_base), _recursive_joint_graph_passes will call into

@@ -619,6 +619,61 @@ graph():
         for vr_upper in vr_upper_bounds:
             self.assertTrue(vr_upper <= expected_upper_bound)
 
+    def test_nonzero_dynamic(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x: torch.Tensor, as_tuple: bool) -> torch.Tensor:
+                return torch.nonzero(x, as_tuple=as_tuple)
+
+        # Case 1 and 2: as_tuple is True and as_tuple is False.
+        for as_tuple in [True, False]:
+            example_args = (torch.randn(3, 4, 5), as_tuple)
+            dim0_x_max, dim1_x_max = 100, 7
+            dynamic_shapes = {
+                "x": {
+                    0: Dim("dim0_x", max=dim0_x_max),
+                    1: Dim("dim1_x_max", max=dim1_x_max),
+                },
+                "as_tuple": None,
+            }
+            m = M()
+            exported_program: torch.export.ExportedProgram = export(
+                m, args=example_args, dynamic_shapes=dynamic_shapes
+            )
+
+            # Test that the expected upper bound is among the range constraints.
+            expected_upper_bound = dim0_x_max * dim1_x_max * 5
+            vr_upper_bounds = [
+                vr.upper for vr in exported_program.range_constraints.values()
+            ]
+            self.assertTrue(expected_upper_bound in set(vr_upper_bounds))
+            # Test that none of the upper bounds are larger.
+            for vr_upper in vr_upper_bounds:
+                self.assertTrue(vr_upper <= expected_upper_bound)
+
+        # Case 3: Test special case when input has zero dimensions and a nonzero
+        # scalar value.
+        example_args = (torch.tensor(10), as_tuple)
+        dim0_x_max = 100
+        dynamic_shapes = {
+            "x": None,
+            "as_tuple": None,
+        }
+        m = M()
+        exported_program: torch.export.ExportedProgram = export(
+            m, args=example_args, dynamic_shapes=dynamic_shapes
+        )
+
+        # Test that the expected upper bound is equal to 1, since our output
+        # for this edge case should always be a tensor of size 1.
+        vr_upper_bounds = [
+            vr.upper for vr in exported_program.range_constraints.values()
+        ]
+        for vr_upper in vr_upper_bounds:
+            self.assertEqual(vr_upper, 1)
+
     def test_setgrad_lifted_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -6561,6 +6616,51 @@ graph():
                 test(ept)
 
         test(export(M(), inp))
+
+    def test_set_grad_unflatten(self):
+        class M1(torch.nn.Module):
+            def forward(self, a, b):
+                with torch.no_grad():
+                    return a + b
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, a, b):
+                return self.m1(a, b)
+
+        inp = (torch.ones(3, 3), torch.ones(3, 3))
+        ep = export(M(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
+
+    def test_cond_unflatten(self):
+        class M1(torch.nn.Module):
+            def forward(self, p, a, b):
+                def true_fn(x, y):
+                    return x + y
+
+                def false_fn(x, y):
+                    return x - y
+
+                return torch.cond(p, true_fn, false_fn, [a, b])
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, p, a, b):
+                return self.m1(p, a, b)
+
+        inp = (torch.tensor(False), torch.ones(3, 3), torch.ones(3, 3))
+        ep = export(M(), inp)
+        epm = ep.module()
+        ufm = torch.export.unflatten(ep)
+        self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
 
     def test_unflatten_multiple_graphs_shared_submodule(self):
         class N(torch.nn.Module):
