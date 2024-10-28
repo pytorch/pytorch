@@ -207,6 +207,17 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 
     # Handle pointwise fallbacks
     if torch.Tag.pointwise in func.tags:
+        from torch.fx.experimental.symbolic_shapes import is_nested_int
+
+        # No pointwise ops legitimately accept nested int inputs. Without this check,
+        # they will be incorrectly interpreted as tensors.
+        # See https://github.com/pytorch/pytorch/issues/138496
+        for arg in args:
+            if is_nested_int(arg):
+                raise RuntimeError(
+                    f"NestedTensor {func.__name__}: invalid argument {arg}"
+                )
+
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum(isinstance(x, torch.Tensor) for x in args)
         if num_tensor_args == 1:
@@ -1938,6 +1949,17 @@ def _nested_select_backward_default(func, *args, **kwargs):
     grad_input.select(new_kwargs["dim"], new_kwargs["index"]).copy_(grad_output)
 
     return grad_input
+
+
+@register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
+def record_stream_default(func, *args, **kwargs):
+    inp = args[0]
+    stream = args[1]
+    # ensure all components live until stream computation completes
+    func(inp._values, stream)
+    func(inp._offsets, stream)
+    if inp._lengths is not None:
+        func(inp._lengths, stream)
 
 
 # Make the dummy available on the C++ side.
