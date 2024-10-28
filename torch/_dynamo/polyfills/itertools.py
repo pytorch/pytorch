@@ -16,6 +16,7 @@ __all__ = [
     "chain_from_iterable",
     "islice",
     "tee",
+    "count",
 ]
 
 
@@ -49,21 +50,12 @@ def islice(iterable: Iterable[_T], /, *args: int | None) -> Iterator[_T]:
             "Indices for islice() must be None or an integer: 0 <= x <= sys.maxsize.",
         )
 
-    if stop is None:
-        # TODO: use indices = itertools.count() and merge implementation with the else branch
-        #       when we support infinite iterators
-        next_i = start
-        for i, element in enumerate(iterable):
-            if i == next_i:
-                yield element
-                next_i += step
-    else:
-        indices = range(max(start, stop))
-        next_i = start
-        for i, element in zip(indices, iterable):
-            if i == next_i:
-                yield element
-                next_i += step
+    indices = count() if stop is None else range(max(start, stop))
+    next_i = start
+    for i, element in zip(indices, iterable):
+        if i == next_i:
+            yield element
+            next_i += step
 
 
 # Reference: https://docs.python.org/3/library/itertools.html#itertools.pairwise
@@ -101,3 +93,12 @@ def tee(iterable: Iterable[_T], n: int = 2, /) -> tuple[Iterator[_T], ...]:
             return
 
     return tuple(_tee(shared_link) for _ in range(n))
+
+
+# Reference: https://docs.python.org/3/library/itertools.html#itertools.count
+@substitute_in_graph(itertools.count, is_embedded_type=True)
+def count(start: int = 0, step: int = 1) -> Iterator[int]:
+    n = start
+    while True:
+        yield n
+        n += step
