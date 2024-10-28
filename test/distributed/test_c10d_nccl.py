@@ -346,6 +346,42 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         with self.assertRaises(ValueError):
             dist.all_reduce(t)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_restart_pg(self):
+        # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
+        # abort the process group.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        # os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "0"
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            device_id=device,
+        )
+
+        t = torch.rand(10, 10, device=device)
+        # First allreduce to initialize state.
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
+        # Destroy pg and validate pg is no longer valid
+        dist.destroy_process_group()
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            device_id=device,
+        )
+        t1 = torch.rand(5, 5, device=device)
+        dist.all_reduce(t1)
+        torch.cuda.synchronize()
+        dist.destroy_process_group()
+
     CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
         torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
     )
