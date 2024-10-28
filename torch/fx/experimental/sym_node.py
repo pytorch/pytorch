@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
 from __future__ import annotations
+
 from torch.types import py_sym_types as SymTypes
 
 
