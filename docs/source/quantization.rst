@@ -453,7 +453,7 @@ FXPTQ API Example::
   class M(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+        self.fc1 = torch.nn.Linear(5, 5)
 
     def forward(self, x):
         x = self.fc1(x)
