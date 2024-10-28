@@ -12,9 +12,9 @@ import os
 import sys
 import textwrap
 import time
-from dataclasses import dataclass
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
+from dataclasses import dataclass
 from io import StringIO
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest.mock import patch
@@ -81,9 +81,11 @@ class KernelNamespace:
 # these objects are imported from the generated wrapper code
 extern_kernels = KernelNamespace()
 
+
 @dataclass
 class AutotuneInputs:
     """During autotuning, we need to pass the same inputs to all choices."""
+
     # Example inputs for non external inputs
     example_inputs: List[torch.Tensor]
     example_inputs_extern: List[torch.Tensor]
@@ -94,6 +96,22 @@ class AutotuneInputs:
     expected: Optional[torch.Tensor]
     # Some external kernels need a workspace tensor
     workspace: Optional[torch.Tensor]
+
+    def get_inputs_outputs(
+        self, extern=False
+    ) -> Tuple[List[torch.Tensor], torch.Tensor]:
+        """Returns the inputs and output tensors for a given choice."""
+        if extern:
+            inpts = self.example_inputs_extern
+            if self.workspace is not None:
+                inpts += [self.workspace]
+            return inpts, self.out_extern
+
+        inpts = self.example_inputs
+        if self.workspace is not None:
+            inpts += [self.workspace]
+        return inpts, self.out
+
 
 class PartialRender:
     """
@@ -1538,7 +1556,14 @@ class AlgorithmSelectorCache(PersistentCache):
                 choices[0].benchmark(*example_inputs_extern, out=out_extern)
                 expected = out_extern.clone()
 
-            return AutotuneInputs(example_inputs, example_inputs_extern, out, out_extern, expected, workspace_tensor)
+            return AutotuneInputs(
+                example_inputs,
+                example_inputs_extern,
+                out,
+                out_extern,
+                expected,
+                workspace_tensor,
+            )
 
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
@@ -1557,24 +1582,18 @@ class AlgorithmSelectorCache(PersistentCache):
                 lines.append(f"    {tensor_repr(x)},")
             lines += ["]", f"out = {tensor_repr(out)}", ""]
             return "\n".join(lines)
-        
-        def benchmark_choice_in_current_process(choice, autotune_inputs: AutotuneInputs):
+
+        def benchmark_choice_in_current_process(
+            choice, autotune_inputs: AutotuneInputs
+        ):
             autotune_inputs.out.zero_()
-            if isinstance(choice, ExternKernelCaller):
-                # aten kernels want the offset baked in for sliced tensors
-                example_inputs_extern = autotune_inputs.example_inputs_extern
-                out_extern = autotune_inputs.out_extern
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)
-            else:
-                # triton templates want the base pointer for sliced tensors
-                example_inputs = autotune_inputs.example_inputs
-                out = autotune_inputs.out
-                example_inputs = autotune_inputs.example_inputs
-                if autotune_inputs.workspace is not None:
-                    example_inputs = [*example_inputs, autotune_inputs.workspace]
-                result = choice.benchmark(*example_inputs, out=out)
-            if VERIFY and expected is not None:
-                torch.testing.assert_close(autotune_inputs.out_extern, autotune_inputs.expected, **VERIFY)
+            is_extern = isinstance(choice, ExternKernelCaller)
+            inpts, output = autotune_inputs.get_inputs_outputs(is_extern)
+            result = choice.benchmark(*inpts, out=output)
+            if VERIFY and autotune_inputs.expected is not None:
+                torch.testing.assert_close(
+                    autotune_inputs.out_extern, autotune_inputs.expected, **VERIFY
+                )
             if torch.cuda.is_available():
                 torch.cuda.synchronize()  # shake out any CUDA errors
             return result
