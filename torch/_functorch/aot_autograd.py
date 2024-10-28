@@ -101,7 +101,6 @@ from ._aot_autograd.schemas import (  # noqa: F401
     ViewAndMutationMeta,
 )
 from ._aot_autograd.subclass_utils import (  # noqa: F401
-    create_metadata_for_subclass,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
     unwrap_tensor_subclasses_with_indices_to_original,

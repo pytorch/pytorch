@@ -155,6 +155,12 @@ class InputAliasInfo:
 
 
 @dataclass
+class PlainTensorMeta:
+    unwrapped_idx: int
+    memory_format: Optional[torch.memory_format] = None
+
+
+@dataclass
 class SubclassCreationMeta:
     """
     Used for AOTDispatch.
@@ -181,7 +187,7 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: Dict[str, Union["SubclassCreationMeta", None]]
+    attrs: Dict[str, Union["SubclassCreationMeta", PlainTensorMeta]]
     outer_size: List[int]
     outer_stride: List[int]
     meta: Any
@@ -194,13 +200,14 @@ class SubclassCreationMeta:
 
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: Optional[type] = None
+    memory_format: Optional[torch.memory_format] = None
 
     def creation_fn(self, all_args, *, is_runtime: bool):
         inner_tensors = {}
 
         curr_start_idx = self.flat_tensor_start_idx
         for attr, creation_meta in self.attrs.items():
-            if creation_meta is None:
+            if isinstance(creation_meta, PlainTensorMeta):
                 subclass = all_args[curr_start_idx]
                 curr_start_idx += 1
             else:
@@ -233,7 +240,7 @@ class SubclassCreationMeta:
         self.original_subclass = None
         # Recurse on nested subclass info
         for creation_meta in self.attrs.values():
-            if creation_meta is not None:
+            if isinstance(creation_meta, SubclassCreationMeta):
                 creation_meta.make_runtime_safe()
 
     def __post_init__(self):
@@ -292,7 +299,7 @@ class ViewAndMutationMeta:
     #      inputs[3] and inputs[4] of the plain-tensor graph".
 
     # length = # user inputs
-    subclass_inp_meta: List[Union[int, SubclassCreationMeta]]
+    subclass_inp_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
     # So, the full set of outputs to the forward graph looks something like:
     # (*mutated_inps, *user_outs, *intermediate_bases, *saved_for_bw_tensors)
     # where the first 3 of those 4 can be subclasses
@@ -300,9 +307,9 @@ class ViewAndMutationMeta:
     # and not user visible, so there's no point in wrapping/unwrapping them at runtime).
     # This list contains subclass information on all of the fw graph outputs
     # except for saved_for_bw_tensors.
-    subclass_fw_graph_out_meta: List[Union[int, SubclassCreationMeta]]
+    subclass_fw_graph_out_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
     # length = # backward graph inputs
-    subclass_tangent_meta: List[Union[int, SubclassCreationMeta]]
+    subclass_tangent_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
     # TODO: we should kill this
     # (need to default it to not break internal)
     is_train: bool = False
@@ -614,7 +621,9 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
+    grad_input_metas: Optional[
+        List[Union[PlainTensorMeta, SubclassCreationMeta]]
+    ] = None
 
     def __init__(self) -> None:
         # The fields in this class get set after its construction.
