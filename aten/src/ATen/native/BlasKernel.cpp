@@ -410,6 +410,23 @@ static inline float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x
   return vaddvq_f32(x[0]);
 }
 
+namespace {
+// Returns (acc_low + a_low_half * b_low_half, acc_high + a_high_half * b_high_half)
+std::pair<vec::Vectorized<float>, vec::Vectorized<float>> inline fmadd(
+    const vec::Vectorized<c10::Half>& a,
+    const vec::Vectorized<c10::Half>& b,
+    const vec::Vectorized<float>& acc_low,
+    const vec::Vectorized<float>& acc_high) {
+#ifdef __ARM_FEATURE_FP16_FML
+  return std::make_pair(vfmlalq_low_f16(acc_low, a, b), vfmlalq_high_f16(acc_high, a, b));
+#else
+  const auto [a_float_low, a_float_high] = convert_half_float(a);
+  const auto [b_float_low, b_float_high] = convert_half_float(b);
+  return std::make_pair(fmadd(a_float_low, b_float_low, acc_low), fmadd(a_float_high, b_float_high, acc_high));
+#endif
+}
+} // namespace
+
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
   const float16_t* vec1,
   const float16_t* vec2,
@@ -419,7 +436,7 @@ static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
   const auto temp_vec1 = vec::Vectorized<Half>::loadu(&vec1[registerPairIndex * vec::Vectorized<Half>::size()]);
   const auto temp_vec2 = vec::Vectorized<Half>::loadu(&vec2[registerPairIndex * vec::Vectorized<Half>::size()]);
 
-  const auto [result_low, result_high] = vec::fmadd(temp_vec1, temp_vec2, sum[2 * registerPairIndex], sum[2 * registerPairIndex + 1]);
+  const auto [result_low, result_high] = fmadd(temp_vec1, temp_vec2, sum[2 * registerPairIndex], sum[2 * registerPairIndex + 1]);
   sum[2 * registerPairIndex] = result_low;
   sum[2 * registerPairIndex + 1] = result_high;
 }
