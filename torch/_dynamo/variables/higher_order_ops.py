@@ -633,7 +633,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
         ):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "invoke_subgraph":
-            return InvokeSubgraphImplHigherOrderVariable(value, source, **kwargs)
+            return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in ("invoke_quant_tracer", "invoke_quant"):
             return InvokeQuantHigherOrderVariable(value, source, **kwargs)
         else:
@@ -681,38 +681,40 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         # Specialize into one of the branches since pred is constant
-        if type(args[0]) is ConstantVariable:
+        pred, true_fn, false_fn, operands = args
+        if type(pred) is ConstantVariable:
             log.warning(
                 "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
                 " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
             )
-            if args[0].as_python_constant():
-                return args[1].call_function(tx, args[3].unpack_var_sequence(tx), {})
+            if pred.as_python_constant():
+                return true_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
             else:
-                return args[2].call_function(tx, args[3].unpack_var_sequence(tx), {})
+                return false_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
 
         # predicate
-        if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
+        if type(pred) not in (ConstantVariable, TensorVariable, SymNodeVariable):
             unimplemented(
                 f"Expected pred to be bool or a boolean tensor with single "
-                f"item but got {str(type(args[0]))} "
-                f"with original python type {str(args[0].python_type())}.",
+                f"item but got {str(type(pred))} "
+                f"with original python type {str(pred.python_type())}.",
             )
 
         # operands
-        if not isinstance(args[3], (ListVariable, TupleVariable)):
+        if not isinstance(operands, (ListVariable, TupleVariable)):
             unimplemented(
-                f"Expected a tuple but got {args[3].python_type()}",
+                f"Expected operands to be a list/tuple but got "
+                f"{operands.python_type()}",
             )
-        operands = args[3].unpack_var_sequence(tx)
-        if not only_consist_of(args[3], (TensorVariable,)):
+        operands_seq = operands.unpack_var_sequence(tx)
+        if not only_consist_of(operands, (TensorVariable,)):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
 
         # branches
-        _check_supported_callable_arg(tx, args[1], "true_fn")
-        _check_supported_callable_arg(tx, args[2], "false_fn")
+        _check_supported_callable_arg(tx, true_fn, "true_fn")
+        _check_supported_callable_arg(tx, false_fn, "false_fn")
 
         # Our strategy for tracing the true/false branches of cond
         # are to checkpoint our graphstate, run the true branch,
@@ -738,7 +740,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ) = speculate_subgraph(
                 tx,
                 args[ix],
-                operands,
+                operands_seq,
                 {},
                 "cond",
                 source_target=self.value,
@@ -825,7 +827,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         false_node = make_attr(tx, false_name)
 
         p_args = (
-            args[0].as_proxy(),
+            pred.as_proxy(),
             true_node,
             false_node,
             # We pick true_shared but it shouldn't matter
@@ -911,26 +913,30 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Usage: while_loop(cond_fn, body_fn, operands)",
             )
 
-        _check_supported_callable_arg(tx, args[0], "cond_fn")
-        _check_supported_callable_arg(tx, args[1], "body_fn")
+        cond_fn, body_fn, operands, additional_inputs = args
+        _check_supported_callable_arg(tx, cond_fn, "cond_fn")
+        _check_supported_callable_arg(tx, body_fn, "body_fn")
 
         # operands
-        if not isinstance(args[2], (ListVariable, TupleVariable)):
+        if not isinstance(operands, (ListVariable, TupleVariable)):
             unimplemented(
-                f"Expected a tuple but got {args[2].python_type()}",
+                f"Expected operands to be a list/tuple but got "
+                f"{operands.python_type()}",
             )
-        operands = args[2].unpack_var_sequence(tx)
-        if not only_consist_of(args[2], (TensorVariable,)):
+        operands_seq = operands.unpack_var_sequence(tx)
+        if not only_consist_of(operands, (TensorVariable,)):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
 
         # additional inputs check
-        if not isinstance(args[3], (ListVariable, TupleVariable)):
+        if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
             unimplemented(
-                f"Expected a tuple but got {args[3].python_type()}",
+                f"Expected additional_inputs to be a list/tuple but got "
+                f"{additional_inputs.python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
             )
-        additional_inputs = args[3].unpack_var_sequence(tx)
+        additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
 
         (
             (cond_r, cond_treespec),
@@ -938,8 +944,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_lifted_freevars,
         ) = speculate_subgraph(
             tx,
-            args[0],
-            operands + additional_inputs,
+            cond_fn,
+            operands_seq + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
@@ -967,8 +973,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_lifted_freevars,
         ) = speculate_subgraph(
             tx,
-            args[1],
-            operands + additional_inputs,
+            body_fn,
+            operands_seq + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
@@ -1014,9 +1020,10 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             cond_node,
             body_node,
-            tuple([operand.as_proxy() for operand in operands]),
+            tuple([operand.as_proxy() for operand in operands_seq]),
             tuple(
-                [inp.as_proxy() for inp in additional_inputs] + additional_lifted_inputs
+                [inp.as_proxy() for inp in additional_inputs_seq]
+                + additional_lifted_inputs
             ),
         )
 
@@ -1514,6 +1521,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         under_activation_checkpoint=False,
     ):
         # See NOTE [HigherOrderOperator tracing design] for more details
+
         (
             (body_r, treespec),
             body_graph,
@@ -1531,12 +1539,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
         body_name = self.install_subgraph_in_output_graph(
-            tx,
-            fn_vt,
-            fn_args_vt,
-            kwargs,
-            body_gmod,
-            description=description,
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod, description=description
         )
         body_node = make_attr(tx, body_name)
 
@@ -2623,7 +2626,7 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
     return key
 
 
-class InvokeSubgraphImplHigherOrderVariable(WrapHigherOrderVariable):
+class InvokeSubgraphHigherOrderVariableImpl(WrapHigherOrderVariable):
     def call_function(
         self,
         tx: "InstructionTranslator",
@@ -2631,17 +2634,17 @@ class InvokeSubgraphImplHigherOrderVariable(WrapHigherOrderVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This flattens the kwargs into lifted args
+        description = args[1].as_python_constant()
+        description = description if description is not None else "invoke_subgraph"
         (
             p_args,
             p_kwargs,
             example_value,
             body_r,
             treespec,
-            _,
+            body_gmod,
             body_name,
-        ) = self.create_wrapped_node(
-            tx, args[0], args[2].items, kwargs, args[1].as_python_constant()
-        )
+        ) = self.create_wrapped_node(tx, args[0], args[2].items, kwargs, description)
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
@@ -2662,7 +2665,7 @@ class InvokeSubgraphImplHigherOrderVariable(WrapHigherOrderVariable):
         )
 
 
-class InvokeSubgraphHigherOrderVariable(InvokeSubgraphImplHigherOrderVariable):
+class InvokeSubgraphHigherOrderVariable(InvokeSubgraphHigherOrderVariableImpl):
     def install_subgraph_in_output_graph(
         self,
         tx,
@@ -2677,22 +2680,37 @@ class InvokeSubgraphHigherOrderVariable(InvokeSubgraphImplHigherOrderVariable):
         # inputs have already been seen before. If yes, the subgraph is already
         # installed in the output graph and we can just access the subgraph
         # using the saved attr name.
+        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 
         fake_inputs = [arg.as_proxy().node.meta["example_value"] for arg in fn_args_vt]
 
+        # TODO(anijain2305) - This might be too big of a limitation. Consider
+        # supporting mutation/aliasing in HOP itself to remove this restriction.
+        if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
+            unimplemented("NYI: invoke_subgraph with aliasing/mutation")
+
         key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
 
-        if key in tx.output.seen_invoke_subgraphs:
-            return tx.output.seen_invoke_subgraphs[key]
+        invoke_subgraph_cache = (
+            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
+                torch._higher_order_ops.invoke_subgraph
+            )
+        )
+
+        if invoke_subgraph_cache:
+            if identifier := invoke_subgraph_cache.get_dynamo_identifier(key):
+                return identifier
 
         body_name = super().install_subgraph_in_output_graph(
             tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
         )
-        tx.output.seen_invoke_subgraphs[key] = body_name
+        if invoke_subgraph_cache:
+            invoke_subgraph_cache.add_dynamo_identifier(key, body_name)
+
         return body_name
 
 
-class InvokeQuantHigherOrderVariable(InvokeSubgraphImplHigherOrderVariable):
+class InvokeQuantHigherOrderVariable(InvokeSubgraphHigherOrderVariableImpl):
     def call_function(
         self,
         tx: "InstructionTranslator",

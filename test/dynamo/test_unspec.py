@@ -601,6 +601,20 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager")
         self.assertEqual(compl_fn(inputs), fn(inputs))
 
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_unspec_roundtrip_float_input(self):
+        def f(x, y):
+            if y == 5.0:
+                return x + 2
+            else:
+                return x + y
+            return (x, y)
+
+        cf = torch.compile(backend="eager", fullgraph=True)(f)
+        x = 1.1234567891234568
+        y = 1.1234567891234569
+        self.assertAlmostEqual(f(x, y), cf(x, y))
+
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_input(self):
         cnts = torch._dynamo.testing.CompileCounter()

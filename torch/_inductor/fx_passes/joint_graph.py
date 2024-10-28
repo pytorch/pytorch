@@ -466,7 +466,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
         with gm.graph.inserting_before(invoke_subgraph):
             invoke_quant_replacement = graph.call_function(
                 torch._higher_order_ops.invoke_quant,
-                tuple([subgraph, *args]),
+                (subgraph, *args),
                 kwargs,
             )
             invoke_quant_replacement.meta.update(subgraph.meta)
@@ -493,6 +493,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
                 output_node.args = (unpacked_output,)
                 if "val" in output_node.meta:
                     output_node.meta["val"] = output_node.meta["val"][0]
+                subgraph_graph.recompile()
 
                 invoke_quant_replacement.meta.update(first_user.meta)
                 first_user.replace_all_uses_with(invoke_quant_replacement)
