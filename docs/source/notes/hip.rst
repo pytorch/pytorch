@@ -116,10 +116,11 @@ handle and stream combination executes a hipBLAS kernel that requires a workspac
 avoid repeatedly allocating workspaces, these workspaces are not deallocated unless
 ``torch._C._cuda_clearCublasWorkspaces()`` is called; note that it's the same function for CUDA or
 HIP. The workspace size per allocation can be specified via the environment variable
-``HIPBLAS_WORKSPACE_CONFIG`` with the format ``:[SIZE]:[COUNT]``.  As an example, the default
-workspace size per allocation is ``HIPBLAS_WORKSPACE_CONFIG=:4096:2:16:8`` which specifies a total
-size of ``2 * 4096 + 8 * 16 KiB``. To force hipBLAS to avoid using workspaces, set
-``HIPBLAS_WORKSPACE_CONFIG=:0:0``. For convenience, ``CUBLAS_WORKSPACE_CONFIG`` is also accepted.
+``HIPBLAS_WORKSPACE_CONFIG`` with the format ``:[SIZE]:[COUNT]``.  As an example, the environment
+variable ``HIPBLAS_WORKSPACE_CONFIG=:4096:2:16:8`` specifies a total size of ``2 * 4096 + 8 * 16
+KiB`` or 8 MIB. The default workspace size is 32 MiB; MI300 and newer defaults to 128 MiB. To force
+hipBLAS to avoid using workspaces, set ``HIPBLAS_WORKSPACE_CONFIG=:0:0``. For convenience,
+``CUBLAS_WORKSPACE_CONFIG`` is also accepted.
 
 .. _hipfft-plan-cache:
 
