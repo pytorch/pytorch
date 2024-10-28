@@ -5426,27 +5426,28 @@ class UserDefinedTritonKernel(ExternKernel):
 
         # We have to compute the constexpr indices for the new, filtered raw_args
         # We also have to adjust equal_to_1.
-        eq1_indices_set = set(triton_meta["configs"][0].equal_to_1)
-        constexpr_indices = []
-        equal_to_1 = []
-        index_shift = 0
-        for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-            # every time we encounter an idx we removed, adjust by one to account for it
-            # So for example if we had [None, const X]
-            # iter 1:
-            #   None was removed, adjust=1
-            # iter 2:
-            #  X is const at idx=1, but the adjusted idx is 0 now, because None was removed
-            if idx in removed_none_args:
-                index_shift += 1
-                continue
-            arg_index = kernel.arg_names.index(kwarg)
-            if arg_index in kernel.constexprs:
-                constexpr_indices.append(idx - index_shift)
-            if arg_index in eq1_indices_set:
-                equal_to_1.append(idx - index_shift)
+        if removed_none_args:
+            eq1_indices_set = set(triton_meta["configs"][0].equal_to_1)
+            constexpr_indices = []
+            equal_to_1 = []
+            index_shift = 0
+            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+                # every time we encounter an idx we removed, adjust by one to account for it
+                # So for example if we had [None, const X]
+                # iter 1:
+                #   None was removed, adjust=1
+                # iter 2:
+                #  X is const at idx=1, but the adjusted idx is 0 now, because None was removed
+                if idx in removed_none_args:
+                    index_shift += 1
+                    continue
+                arg_index = kernel.arg_names.index(kwarg)
+                if arg_index in kernel.constexprs:
+                    constexpr_indices.append(idx - index_shift)
+                if arg_index in eq1_indices_set:
+                    equal_to_1.append(idx - index_shift)
 
-        triton_meta["configs"][0].equal_to_1 = equal_to_1
+            triton_meta["configs"][0].equal_to_1 = equal_to_1
 
         # Call to kernel
         self.codegen_comment(wrapper)
