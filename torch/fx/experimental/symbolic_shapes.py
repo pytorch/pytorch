@@ -305,13 +305,6 @@ def uninteresting_files() -> Set[str]:
     return {inspect.getfile(m) for m in mods}
 
 
-# We don't bother with the metaclass as all of the dispatching logic happens
-# entirely from Python
-#
-# Didn't bother with ancestors for now, unlikely to have multiple modes for
-# symints right now
-
-
 class ConstraintViolationError(RuntimeError):
     pass
 
@@ -352,7 +345,8 @@ def has_hint(a: Scalar) -> bool:
 
 
 def is_concrete_int(a: Union[int, SymInt]) -> bool:
-    r"""Utility to check if underlying object
+    """
+    Utility to check if underlying object
     in SymInt is concrete value. Also returns
     true if integer is passed in.
 
@@ -525,7 +519,8 @@ def is_accessor_node(node: torch.fx.Node) -> bool:
 
 
 def canonicalize_bool_expr(expr: _T) -> _T:
-    r"""Canonicalize a boolean expression by transforming it into a lt / le
+    """
+    Canonicalize a boolean expression by transforming it into a lt / le
     inequality and moving all the non-constant terms to the rhs.
     We canonicalize And / Ors / Not via cnf and then canonicalize their subexpr
     recursively
@@ -677,9 +672,11 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
 
 
 def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
-    r"""Utility to check if underlying object
+    """
+    Utility to check if underlying object
     in SymBool is concrete value. Also returns
     true if integer is passed in.
+
     Args:
         a (SymBool or bool): Object to test if it bool
     """
@@ -1059,7 +1056,8 @@ def definitely_false(a: BoolLikeType) -> bool:
 
 
 def statically_known_true(x: Union[bool, SymBool]) -> bool:
-    """Returns True if x can be simplified to a constant and is true.
+    """
+    Returns True if x can be simplified to a constant and is true.
 
     .. note::
         This function doesn't introduce new guards, so the expression may end
@@ -1067,7 +1065,6 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
 
     Args:
         x (bool, SymBool): The expression to try statically evaluating
-
     """
     if isinstance(x, SymBool):
         expr = x.node.expr
@@ -1481,7 +1478,8 @@ class EqualityConstraint(Constraint):
     _defs: Dict[Source, sympy.Expr] = field(init=False)
 
     def __post_init__(self) -> None:
-        """Pre-processing to answer queries `is_equal` and `is_derived` below.
+        """
+        Pre-processing to answer queries `is_equal` and `is_derived` below.
 
         Example: Suppose we are given:
           source_pairs [a = b, b = c]
@@ -3089,9 +3087,9 @@ class ShapeEnv:
 
         # Whenever we allocate a fresh unbacked Symbol, we add it to this
         # pending list.  Unbacked symbol allocation can occur at unpredictable
-        # points during meta tensor propagation, but at some point, the we
+        # points during meta tensor propagation, but at some point, we
         # have to know what the binding site for an unbacked symbol is, and
-        # this is computed when we actually place the node in the graph.  The
+        # this is computed when we actually place the node in the graph. The
         # important thing is that we always actually handle every unaccounted
         # for unbacked symbol, so this list helps us keep track of them and
         # then make sure they are all accounted for.
@@ -4051,7 +4049,8 @@ class ShapeEnv:
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
     ) -> sympy.Expr:
-        """Create a symbol with an unspecified value
+        """
+        Create a symbol with an unspecified value
 
         Compared to standard symbols we do not assume the value is positive,
         nor do we specialze on zero or one values.
@@ -4471,7 +4470,7 @@ class ShapeEnv:
         #
         # So, it is perhaps easier to flip things on their head: the guard
         # expressions we generate here say what simplifications are valid,
-        # and what are not.  Below, we explain each of the guard expressions
+        # and what are not. Below, we explain each of the guard expressions
         # we generate
 
         # TODO: Make this more efficient by binding all the size/stride/offsets

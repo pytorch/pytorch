@@ -879,7 +879,7 @@ class Reduction(Loops):
         reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
-        should_split = (
+        should_split = reduction_type == "scan" or (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
             and reduction_type
             not in (
@@ -887,11 +887,9 @@ class Reduction(Loops):
                 "argmin",
             )
             and config.split_reductions
-            # We don't support unbacked symints
-            and _is_static(reduction_numel_hint)
-            and _is_static(numel_hint)
         )
-        if not should_split:
+        if not (_is_static(reduction_numel_hint) and _is_static(numel_hint)):
+            # We don't support unbacked symints
             return ReductionHint.DEFAULT, 1
 
         device_interface = get_interface_for_device(get_device_type(device))  # type: ignore[arg-type] # next PR
@@ -909,6 +907,8 @@ class Reduction(Loops):
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
 
         def inner_reduction_splits(reduction_numel_hint, numel_hint):
+            if not should_split:
+                return 1
             # do heuristics that's close to eager mode for split inner reduction
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             num_warps = 8
@@ -945,6 +945,8 @@ class Reduction(Loops):
             )
 
         def outer_reduction_splits(reduction_numel_hint, numel_hint):
+            if not should_split:
+                return 1
             # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
             # extend to even smaller number of outputs
             num_warps = 8
@@ -1961,7 +1963,7 @@ class Scan(Loops):
             inner_fn=wrapper_fn,
             ranges=pointwise_ranges,
             reduction_ranges=scan_ranges,
-            reduction_type="sum",
+            reduction_type="scan",
             reduction_numel=scan_numel,
         )
 
