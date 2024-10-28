@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import enum
+import functools
 import logging
 import os
 import pickle
@@ -11,6 +12,7 @@ from collections import defaultdict
 from typing import DefaultDict, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
 
+import torch._dynamo.config
 import torch.compiler.config
 from torch._dynamo.utils import get_chromium_event_logger
 from torch._logging._internal import trace_structured_artifact
@@ -378,9 +380,16 @@ def process_automatic_dynamic(
         return res
 
 
+# NB: This currently also controls if pgo is enabled at all
+@functools.lru_cache(None)
 def code_state_path() -> Optional[str]:
+    if not torch._dynamo.config.automatic_dynamic_local_pgo:
+        log.info("automatic_dynamic_local_pgo not enabled")
+        return None
+
     workflow_id = torch.compiler.config.workflow_id
     if workflow_id is None:
+        log.info("automatic_dynamic_local_pgo disabled because no workflow_id")
         return None
 
     from torch._inductor.runtime.runtime_utils import cache_dir

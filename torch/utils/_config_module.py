@@ -25,7 +25,8 @@ def install_config_module(module: ModuleType) -> None:
     """
 
     class ConfigModuleInstance(ConfigModule):
-        _bypass_keys = set({"_is_dirty", "_hash_digest"})
+        # __annotations__ is written to by Sphinx autodoc
+        _bypass_keys = set({"_is_dirty", "_hash_digest", "__annotations__"})
 
     def visit(
         source: Union[ModuleType, type],
