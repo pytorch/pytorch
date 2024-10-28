@@ -159,7 +159,6 @@ static inline void NCCL_CHECK(ncclResult_t result) {
 }
 
 // TODO(eqy): can this duplication be avoided from NCCLUtils.cpp?
-// Default value: on
 bool nccl_use_nonblocking() {
   static bool nccl_use_nonblocking_ =
       c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
@@ -194,7 +193,8 @@ static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
                            currentTimepoint - startTimepoint)
                            .count();
     if (timeElapsed > nccl_nonblocking_timeout()) {
-      throw std::runtime_error("NCCL timeout.");
+      throw std::runtime_error(
+          "NCCL timeout when waiting for nonblocking call to become successful.");
     }
     sched_yield(); // yield to other threads
     ncclCommGetAsyncError(to_nccl_comm(comm), &result);
@@ -226,7 +226,8 @@ static inline void NCCL_CHECK_TIMEOUT(
                                currentTimepoint - startTimepoint)
                                .count();
         if (timeElapsed > nccl_nonblocking_timeout()) {
-          throw std::runtime_error("NCCL timeout.");
+          throw std::runtime_error(
+              "NCCL timeout when waiting for nonblocking call to become successful.");
         }
         sched_yield(); // yield to other threads
         ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);
