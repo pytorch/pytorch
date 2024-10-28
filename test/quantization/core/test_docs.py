@@ -6,10 +6,7 @@ from pathlib import Path
 
 import torch
 
-from torch.testing._internal.common_quantization import (
-    QuantizationTestCase,
-    SingleLayerLinearModel,
-)
+from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import IS_ARM64, IS_FBCODE
 import unittest
