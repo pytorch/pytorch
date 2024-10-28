@@ -3,6 +3,7 @@
 
 import contextlib
 import logging
+import unittest
 
 import torch
 import torch._dynamo
@@ -10,6 +11,14 @@ import torch._functorch
 import torch._inductor
 import torch._inductor.decomposition
 from torch._higher_order_ops import InvokeQuant
+from torch._inductor.pattern_matcher import (
+    Arg,
+    CallFunction,
+    Ignored,
+    Match,
+    PatternMatcherPass,
+    register_graph_pattern,
+)
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
@@ -80,6 +89,58 @@ class TestInvokeQuantEager(TestInvokeQuant):
 
 class TestInvokeQuantAotEager(TestInvokeQuant):
     backend = "aot_eager"
+
+
+class TestInvokeQuantInductor(TestInvokeQuant):
+    backend = "inductor"
+
+    def test_pattern_matching(self):
+        counter = 0
+
+        test_pass = PatternMatcherPass()
+
+        def my_pass(g):
+            return test_pass.apply(g)
+
+        def gn(x, y):
+            return torch.mul(x, y) + y
+
+        def fn(x, y, z):
+            return invoke_quant_tracer(gn, (x, y), scheme="nf4") @ z
+
+        def fn_no_match(x, y, z):
+            return invoke_quant_tracer(gn, (x, y)) @ z
+
+        x = torch.randn(64, 64, device="cuda", requires_grad=False)
+        y = torch.randn(64, 64, device="cuda", requires_grad=False)
+        z = torch.randn(64, 64, device="cuda", requires_grad=False)
+
+        @register_graph_pattern(
+            CallFunction(
+                torch.ops.aten.mm,
+                CallFunction(
+                    torch.ops.higher_order.invoke_quant,
+                    Ignored(),
+                    Ignored(),
+                    Ignored(),
+                    scheme="nf4",
+                ),
+                Arg(),
+            ),
+            pass_dict=test_pass,
+        )
+        def quant_matching(match: Match, *args, **kwargs):
+            nonlocal counter
+            counter += 1
+
+        with unittest.mock.patch(
+            "torch._inductor.config.post_grad_custom_pre_pass", my_pass
+        ):
+            torch.compile(fn)(x, y, z)
+            self.assertTrue(counter == 1)
+
+            torch.compile(fn_no_match)(x, y, z)
+            self.assertTrue(counter == 1)
 
 
 del TestInvokeQuant
