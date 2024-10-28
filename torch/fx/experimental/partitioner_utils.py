@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 from enum import Enum
-from typing import NamedTuple, Dict, List, Set
+from typing import Dict, List, NamedTuple, Set
 
-from torch.fx.node import Node, map_arg
+from torch.fx.node import map_arg, Node
 
 
 class Partition:
@@ -146,7 +146,7 @@ def get_latency_of_one_partition(
             # this node is on the top bfs level in this partition
             if not any(
                 n in partition.nodes and n.op not in {"placeholder", "get_attr"}
-                    for n in input_nodes
+                for n in input_nodes
             ):
                 top_nodes.append(node)
         return top_nodes
@@ -279,7 +279,9 @@ def get_latency_of_partitioned_graph(
     def dfs_helper(partition: Partition, latency_so_far_sec: float) -> float:
         """This function helps to recursively get the latency of a path of partitions"""
         # Update latency by adding current partition's latency
-        latency_so_far_sec += partition_to_latency_mapping[partition].overall_latency_sec
+        latency_so_far_sec += partition_to_latency_mapping[
+            partition
+        ].overall_latency_sec
 
         if partition.children:
             max_latency_sec = 0.0
