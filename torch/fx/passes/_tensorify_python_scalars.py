@@ -20,6 +20,7 @@ from torch.fx.passes.runtime_assert import _get_sym_val
 from torch.fx.proxy import MetaProxy
 from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import TensorReferenceAnalysis
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 
 __all__: List[str] = []
@@ -249,16 +250,14 @@ def tensorify_python_scalars(
                     graph.erase_node(node)
 
     nodes = list(graph.nodes)
-    for i, node in enumerate(nodes[-2::-1]):
+    for node in reversed(nodes):
+        if node.op == "output" or node.op == "placeholder":
+            continue
+
         with graph.inserting_before(
             nodes[-(i + 2)] if node not in placeholders else first_non_placeholder
         ):
-            if (
-                len(node.users) == 0
-                and node.op != "placeholder"
-                and node.op != "output"
-                and not node.is_impure()
-            ):
+            if len(node.users) == 0 and not node.is_impure():
                 graph.erase_node(node)
                 continue
 
@@ -271,11 +270,15 @@ def tensorify_python_scalars(
                     and "val" in a.meta
                     and isinstance(zf := a.meta["val"], torch.SymFloat)
                     and zf.node.hint is not None
+                    # The high level idea here is to specialize if we have
+                    # a node that is a SymFloat and has exclusively SymFloat
+                    # free symbols. This is because we don't want to specialize
+                    # cases like math.floor(math.sqrt(x.size(0))).
                     and all(
-                        (p := expr_to_sym_proxy.get(s)) is not None
+                        symbol_is_type(s, SymT.FLOAT)
+                        and (p := expr_to_sym_proxy.get(s)) is not None
                         and p.node is not None
                         and "val" in p.node.meta
-                        and isinstance(p.node.meta["val"], torch.SymFloat)
                         for s in zf.node.expr.free_symbols
                     )
                 ):
@@ -291,10 +294,10 @@ def tensorify_python_scalars(
                     and isinstance(zf := v.meta["val"], torch.SymFloat)
                     and zf.node.hint is not None
                     and all(
-                        (p := expr_to_sym_proxy.get(s)) is not None
+                        symbol_is_type(s, SymT.FLOAT)
+                        and (p := expr_to_sym_proxy.get(s)) is not None
                         and p.node is not None
                         and "val" in p.node.meta
-                        and isinstance(p.node.meta["val"], torch.SymFloat)
                         for s in zf.node.expr.free_symbols
                     )
                 ):
