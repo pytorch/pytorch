@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import copy
-import dataclasses
 import itertools
 import os
 import unittest
@@ -17,7 +16,6 @@ from torch._inductor.pattern_matcher import (
     Arg,
     CallFunction,
     gen_pattern,
-    Ignored,
     is_mutation_op,
     KeywordArg,
     Match,
