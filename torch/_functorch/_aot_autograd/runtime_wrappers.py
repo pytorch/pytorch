@@ -627,7 +627,6 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
-            assert self.trace_joint is False
             unwrapped_args = runtime_unwrap_tensor_subclasses(
                 args,
                 subclass_metas=runtime_metadata.subclass_inp_meta,
