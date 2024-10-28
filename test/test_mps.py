@@ -350,6 +350,7 @@ def mps_ops_modifier(ops):
         'transpose_copy',
         'T',
         'unbind',
+        'unbind_copy',
         'unflatten',
         'unfold',
         'unfold_copy',
@@ -7384,7 +7385,7 @@ class TestMPS(TestCaseMPS):
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
             embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
-            emedding_weight = embeddingMPS.weight.detach().cpu()
+            embedding_weight = embeddingMPS.weight.detach().cpu()
             W_MPS = torch.randn((m, d), requires_grad=True, device='mps')
             idx_MPS = torch.tensor(idx, device='mps')
             a_MPS = embeddingMPS.weight.clone() @ W_MPS.t()  # weight must be cloned for this to be differentiable
@@ -7395,7 +7396,7 @@ class TestMPS(TestCaseMPS):
             loss_MPS = out_MPS.sigmoid().prod()
             loss_MPS.backward()
 
-            embeddingCPU = nn.Embedding(n, d, max_norm=True, _weight=emedding_weight)
+            embeddingCPU = nn.Embedding(n, d, max_norm=True, _weight=embedding_weight)
             W_CPU = W_MPS.to('cpu')
             idx_CPU = torch.tensor(idx)
             a_CPU = embeddingCPU.weight.clone() @ W_CPU.t()  # weight must be cloned for this to be differentiable
@@ -12077,6 +12078,10 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'nn.functional.batch_norm',
+        # NOTE: nn.functional.group_norm is here because 1 ULP difference in the mean
+        # output from the forward pass (tolerable) blew up into 8 ULP difference from
+        # the backward pass, and MPS uses fp16 accumulation anyway.
+        'nn.functional.group_norm',
         'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
         'nn.functional.cross_entropy',

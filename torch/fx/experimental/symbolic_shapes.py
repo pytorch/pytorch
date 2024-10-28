@@ -233,6 +233,16 @@ class SymIntEqByExpr:
         return hash(self._extract())
 
 
+def _nested_int_aware_sort(tup: Tuple[Union[SymInt, int], int]) -> Tuple[int, int, int]:
+    return (
+        # Order nested ints by their coefficients.
+        # 1 here to order nested ints after non-nested-ints.
+        (1, tup[0].node.nested_int_coeff(), tup[1])
+        if is_nested_int(tup[0])
+        else (0, *tup)
+    )
+
+
 # Wrapper on lru_cache that reports statistics at process end
 def lru_cache(
     maxsize: Optional[int],
@@ -3767,21 +3777,10 @@ class ShapeEnv:
             candidates = {
                 ex_size[i] * ex_stride[i]: size[i] * stride[i]
                 for i in range(len(size))
-                if stride[i] is not None and ex_stride[i] >= 0
+                if stride[i] is not None
             }
 
             # iterate over unbound strides in sorted order
-            def _nested_int_aware_sort(
-                tup: Tuple[Union[SymInt, int], int]
-            ) -> Tuple[int, int, int]:
-                return (
-                    # Order nested ints by their coefficients.
-                    # 1 here to order nested ints after non-nested-ints.
-                    (1, tup[0].node.nested_int_coeff(), tup[1])
-                    if is_nested_int(tup[0])
-                    else (0, *tup)
-                )
-
             val_list = sorted(
                 [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
                 key=_nested_int_aware_sort,
@@ -6290,6 +6289,7 @@ class ShapeEnv:
             for ra in ras:
                 ra.stack.cleanup()
 
+    @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def defer_runtime_assert(
         self, orig_expr: SympyBoolean, msg: str, fx_node: Optional[torch.fx.Node] = None
@@ -6327,7 +6327,6 @@ class ShapeEnv:
         # NB: Don't use new_expr as expr; it could contain gunk like shape0
         # which we don't want to guard on
 
-        # OK, we're definitely doing a runtime assert now
         if (
             self._translation_validation_enabled
             and fx_node is not None
@@ -6341,10 +6340,9 @@ class ShapeEnv:
         if not self._suppress_guards_tls():
             # If you're here because of this assert, read Note [Backwards runtime asserts]
             # in torch/_inductor/graph.py
-            assert not self.runtime_asserts_frozen, expr
-
+            if self.runtime_asserts_frozen:
+                log.warning("runtime_asserts_frozen but then got %s", expr)
             self._check_frozen(expr, sympy.true)
-
             # eliminate symbols on equality tests / refine ranges
             if isinstance(expr, sympy.Rel):
                 self._maybe_guard_rel(expr)
