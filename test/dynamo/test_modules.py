@@ -1261,6 +1261,26 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
 
+    def test_nn_module_setattr(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.var = 0
+
+        @torch.compile(backend="eager", dynamic=False)
+        def f(x, m):
+            return x + m.var
+
+        inp = torch.ones(3)
+        m = Mod()
+
+        self.assertEqual(f(inp, m), inp)
+        # In 3.13.0, setattr will not fire a __dict__'s watchers,
+        # so guards may not be invalidated.
+        m.var = 1
+        # should trigger a recompile
+        self.assertEqual(f(inp, m), inp + 1)
+
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_generation_tag(self):
         cnt = torch._dynamo.testing.CompileCounter()
