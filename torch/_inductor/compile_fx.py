@@ -905,7 +905,6 @@ def fx_codegen_and_compile(
                     is_inference=is_inference,
                     is_backward=is_backward,
                     is_const_graph=True,
-                    is_backward=is_backward,
                 )
                 with V.set_graph_handler(const_graph):
                     assert cpp_wrapper, "AOT mode only supports C++ wrapper"
@@ -929,7 +928,6 @@ def fx_codegen_and_compile(
                 const_output_index=const_output_index,
                 const_code=const_code,
                 const_module=const_graph,
-                is_backward=is_backward,
             )
             metrics_helper = metrics.CachedMetricsHelper()
             with V.set_graph_handler(graph):

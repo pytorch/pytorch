@@ -74,7 +74,6 @@ from .exc import (
 )
 from .ir import (
     Constant,
-    DonatedBuffer,
     FixedLayout,
     get_device_type,
     InputBuffer,
@@ -338,7 +337,6 @@ class GraphLowering(torch.fx.Interpreter):
         const_code: Optional[str] = None,
         const_module: Optional["GraphLowering"] = None,
         name: Optional[str] = None,
-        is_backward: bool = False,
     ) -> None:
         super().__init__(gm)
         self.example_inputs = example_inputs
@@ -1015,8 +1013,6 @@ class GraphLowering(torch.fx.Interpreter):
         with maybe_get_suppress_shape_guards_ctx():
             if should_assume_input_aligned(example):
                 self.aligned_inputs.add(target)
-
-        self.placeholder_idx += 1
         return tensor
 
     def call_function(self, target: Callable, args: Any, kwargs: Dict[str, Any]) -> Any:  # type: ignore[type-arg, override]
