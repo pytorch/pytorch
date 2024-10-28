@@ -1072,7 +1072,7 @@ if(USE_XPU)
     if(MSVC)
       # Windows
       target_link_libraries(torch_xpu PRIVATE
-      "/WHOLEARCHIVE:torch_xpu_ops.lib")
+      "-WHOLEARCHIVE:\"$<TARGET_FILE:torch_xpu_ops>\"")
     else()
       # Linux
       target_link_libraries(torch_xpu PRIVATE
