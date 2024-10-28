@@ -7,6 +7,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -51,6 +52,7 @@ class CooperativeReductionTests(TestCase):
         ],
     )
     @parametrize("dtype", [torch.float16, torch.float32, torch.float64])
+    @skipIfRocm
     def test_reduction_fns(self, name, dtype):
         def fn(x, y):
             return reduction_fn(x + y, dim=-1)
@@ -59,6 +61,7 @@ class CooperativeReductionTests(TestCase):
         args = [torch.randn(1, 1024**2, device="cuda", dtype=dtype) for _ in range(2)]
         self.run_and_check(fn, args)
 
+    @skipIfRocm
     def test_bool_reduction_fns(self):
         def fn(x, y):
             return [
@@ -78,6 +81,7 @@ class CooperativeReductionTests(TestCase):
 
     @parametrize("bs", [1, 2, 5, 15])
     @parametrize("count", [1024**2 + 1, 1024**2 - 1, 1024])
+    @skipIfRocm
     def test_non_power_of_2(self, bs, count):
         def fn(x):
             return x.mean(), x.std() + x.min()
@@ -85,6 +89,7 @@ class CooperativeReductionTests(TestCase):
         args = [torch.randn([bs, count], device="cuda")]
         self.run_and_check(fn, args)
 
+    @skipIfRocm
     def test_chained_reductions(self):
         def fn(x):
             for _ in range(8):
@@ -96,6 +101,7 @@ class CooperativeReductionTests(TestCase):
         self.assertEqual(source_code.count("triton_helpers.x_grid_barrier"), 16)
         self.assertEqual(source_code.count("empty_strided_cuda"), 8)
 
+    @skipIfRocm
     def test_reduce_split(self):
         def fn(a, b):
             a1 = torch.linalg.vector_norm(a)

@@ -34,7 +34,7 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec, TypeGuard as _TypeGuard
+from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 
 if TYPE_CHECKING:
@@ -876,6 +876,8 @@ def _get_sym_math_fn(name):
     def fn(a):
         if overrides.has_torch_function_unary(a):
             return overrides.handle_torch_function(fn, (a,), a)
+        if isinstance(a, SymInt):
+            a = torch.sym_float(a)
         if hasattr(a, f"__sym_{name}__"):
             return getattr(a, f"__sym_{name}__")()
         return getattr(math, name)(a)
@@ -895,6 +897,7 @@ for __name in (
     "asin",
     "acos",
     "atan",
+    "log2",
 ):
     __sym_name = f"_sym_{__name}"
     __fn = _get_sym_math_fn(__name)
@@ -1033,7 +1036,7 @@ def typename(obj: _Any, /) -> str:
     return f"{module}.{qualname}"
 
 
-def is_tensor(obj: _Any, /) -> _TypeGuard["torch.Tensor"]:
+def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     r"""Returns True if `obj` is a PyTorch tensor.
 
     Note that this function is simply doing ``isinstance(obj, Tensor)``.
@@ -1053,7 +1056,7 @@ def is_tensor(obj: _Any, /) -> _TypeGuard["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> _TypeGuard[_Union["TypedStorage", "UntypedStorage"]]:
+def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]]:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
@@ -2092,6 +2095,7 @@ from torch import (
     __config__ as __config__,
     __future__ as __future__,
     _awaits as _awaits,
+    accelerator as accelerator,
     autograd as autograd,
     backends as backends,
     cpu as cpu,

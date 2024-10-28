@@ -10,7 +10,7 @@ import torch._dynamo.testing
 import torch._functorch.config
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
-from torch._dynamo.testing import normalize_gm
+from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._higher_order_ops.wrap import wrap
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
@@ -1821,7 +1821,7 @@ class GraphModule(torch.nn.Module):
 
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_mark_static_with_subclass_desugaring(self):
-        from typing import Any, Callable, Dict, List, Optional
+        from typing import Any, Callable, List, Optional
 
         from torch._dynamo.decorators import mark_static_address
         from torch._inductor.compile_fx import compile_fx
@@ -1843,7 +1843,6 @@ class GraphModule(torch.nn.Module):
             aot_mode: bool = False,
             is_inference: bool = False,
             boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-            user_visible_outputs: Optional[Dict[str, None]] = None,
             layout_opt: Optional[bool] = None,
             extern_node_serializer: Optional[Callable[[List[Any]], Any]] = None,
         ):
@@ -1987,6 +1986,36 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
             self.assertEqualIgnoringNestedInts(compile_grad, ref_grad)
 
         return guards_exported, guards_failed
+
+    def test_in_graph_is_nested_call(self):
+        def f(nt):
+            if nt.is_nested:
+                return nt + 2
+            else:
+                return nt + 1
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        compiled_f = torch.compile(f, backend=cnt, fullgraph=True)
+        nt, offsets = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        output = compiled_f(nt)
+        output.backward(torch.ones_like(output))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(cnt.graphs), 1)
+        graph = cnt.graphs[0]
+        norm_graph = normalize_gm(graph.print_readable(print_output=False))
+
+        # expect -no- is_nested calls within the graph
+        self.assertExpectedInline(
+            norm_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_nt_: "f64[3, s1, 5]", s1: "Sym(s1)"):
+        l_nt_ = L_nt_
+
+        add: "f64[3, s1, 5]" = l_nt_ + 2;  l_nt_ = None
+        return (add,)
+""",  # noqa: B950
+        )
 
     # Note: [What kind of guards are involved in nested tensor compilation]
     #
