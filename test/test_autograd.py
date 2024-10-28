@@ -73,6 +73,7 @@ from torch.testing._internal.common_utils import (
     skipIfMps,
     skipIfNoLapack,
     skipIfTorchDynamo,
+    skipIfWindows,
     slowTest,
     TestCase,
     xfailIfTorchDynamo,
@@ -4592,6 +4593,7 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
         ):
             t.backward()
 
+    @skipIfWindows(msg="node name demangling inconsistent on windows")
     def test_backward_hook_relative_ordering(self):
         order = []
 

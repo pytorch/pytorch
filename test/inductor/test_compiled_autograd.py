@@ -2794,6 +2794,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with torch._dynamo.compiled_autograd.enable(torch.compile):
             out.backward()
 
+    @skipIfWindows(msg="node name demangling inconsistent on windows")
     def test_backward_hook_relative_ordering_partial(self):
         # test backward hooks for cases that CA matches eager
 
