@@ -1151,9 +1151,8 @@ def get_env_num_workers() -> Optional[int]:
     return None
 
 
-from .ir import NoneAsConstantBuffer
 def create_inputs_key(input_nodes) -> str:
-    return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes if not isinstance(x, NoneAsConstantBuffer)])
+    return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes])
 
 
 def create_precompile_key(
@@ -1440,7 +1439,7 @@ class AlgorithmSelectorCache(PersistentCache):
             # de-duplicate args
             unique_example_inputs = {
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
-                for i, x in enumerate(input_nodes) if not isinstance(x, NoneAsConstantBuffer)
+                for i, x in enumerate(input_nodes)
             }
             example_inputs = list(unique_example_inputs.values())
             example_inputs_extern = [
@@ -1463,7 +1462,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         ),
                     )
                 )
-                for input_node in input_nodes if not isinstance(input_node, NoneAsConstantBuffer)
+                for input_node in input_nodes
             ]
 
             out = cls.benchmark_example_value(layout)
@@ -1602,7 +1601,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         ),
                     )
                 )
-                for n in input_nodes if not isinstance(n, NoneAsConstantBuffer)
+                for n in input_nodes
             ]
         )
 
