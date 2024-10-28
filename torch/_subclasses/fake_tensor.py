@@ -151,14 +151,15 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
             torch._C._set_dispatch_mode(old)
 
 
-def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
-    assert is_traceable_wrapper_subclass(subclass)
-    plain_tensors: List[Tensor] = []
+def get_plain_tensors(
+    subclass: Tensor, out_append_list: Optional[List[Tensor]] = None
+) -> List[Tensor]:
+    # This function is used in Runtime, do not add redundant asserts
+    plain_tensors: List[Tensor] = [] if out_append_list is None else out_append_list
     todo = [subclass]
     while todo:
         curr = todo.pop()
         if not is_traceable_wrapper_subclass(curr):
-            assert isinstance(curr, Tensor)
             plain_tensors.append(curr)
             continue
 
@@ -1665,11 +1666,8 @@ class FakeTensorMode(TorchDispatchMode):
         shape = tuple(check_value(v, state) for v in metadata.shape)
         stride = tuple(check_value(v, state) for v in metadata.stride)
         storage_offset = check_value(metadata.storage_offset, state)
-        storage_bytes = (
-            None
-            if metadata.storage_bytes is None
-            else check_value(metadata.storage_bytes, state)
-        )
+        if metadata.storage_bytes is not None:
+            check_value(metadata.storage_bytes, state)
 
         maybe_suppress: Callable[[], typing.ContextManager] = contextlib.nullcontext
         if self.shape_env is not None:
