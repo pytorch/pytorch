@@ -105,6 +105,25 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
       : Vectorized((float16_t)val) {}
   Vectorized(float16_t val)
       : Vectorized16(vdupq_n_f16(val)) {}
+  Vectorized(
+      value_type val0,
+      value_type val1,
+      value_type val2,
+      value_type val3,
+      value_type val4,
+      value_type val5,
+      value_type val6,
+      value_type val7)
+      : Vectorized16(float16x8_t{
+            val0,
+            val1,
+            val2,
+            val3,
+            val4,
+            val5,
+            val6,
+            val7}) {}
+
 
   static Vectorized<c10::Half> blendv(
       const Vectorized<c10::Half>& a,

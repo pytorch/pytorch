@@ -1096,8 +1096,8 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
   convert(arr, arr2, K); \
   return Vectorized<type>::loadu(arr2); \
 }
-CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
 #if !(defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256))
+CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
 CONVERT_NON_VECTORIZED_INIT(Half, half);
 #endif
 
