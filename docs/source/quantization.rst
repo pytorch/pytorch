@@ -354,7 +354,7 @@ QAT API Example::
           return x
 
   def training_loop(*args, **kwargs):
-            return None
+    return None
 
   # create a model instance
   model_fp32 = M()
