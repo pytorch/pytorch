@@ -473,7 +473,16 @@ class TestFlexAttention(InductorTestCase):
             dtype=dtype,
         )
 
-        # "randomly" initialize the page table
+        # For testing purposes, we randomly initialize the page table, which maps
+        # (batch_idx, logical_block_idx) to physical_block_idx. Specifically, PagedAttention
+        # maintains a stack empty_pages of unused physical_block_idx. The `batch_reserve`
+        # function grabs physical_block_idx from the top of empty_pages until there are enough
+        # pages for each batch index (i.e., num pages for batch_idx >= target_seq_len[batch_idx]).
+        # For example, at the first batch_reserve call, physical block indices (1,...,KV_S//4)
+        # are allocated to batch index 0, and physical block indices
+        # (KV_S//4+1, ..., KV_S//4 + KV_S//2) are allocated to batch index 1, etc.
+        # Thus, kv tensors of batch index 1 will be scattered in the kv cache, simulating
+        # a real use case of paged attention.
         paged_attention = PagedAttention(n_pages, page_size, max_batch_size)
         batch_reserve(
             paged_attention,
