@@ -186,7 +186,7 @@ def _check_capability():
      work properly, but your PyTorch was compiled
      with CUDA_VERSION %d. Please install the correct PyTorch binary
      using instructions from https://pytorch.org
-    """
+    """  # noqa: F841
 
     old_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
@@ -195,7 +195,7 @@ def _check_capability():
     """
 
     if torch.version.cuda is not None:  # on ROCm we don't want this check
-        CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+        CUDA_VERSION = torch._C._cuda_getCompiledVersion()  # noqa: F841
         for d in range(device_count()):
             capability = get_device_capability(d)
             major = capability[0]
@@ -750,11 +750,15 @@ def _raw_device_uuid_amdsmi() -> Optional[List[str]]:
             warnings.warn("Cannot get amd device handler")
             return None
         try:
-            uuid = amdsmi.amdsmi_get_gpu_device_uuid(handler)
+            uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
+                2:
+            ]  # Removes 0x prefix from serial
         except amdsmi.AmdSmiException:
             warnings.warn("Cannot get uuid for amd device")
             return None
-        uuids.append(str(uuid))
+        uuids.append(
+            str(uuid).lower()
+        )  # Lower-case to match expected HIP_VISIBLE_DEVICES uuid input
     return uuids
 
 
@@ -793,7 +797,7 @@ def _raw_device_uuid_nvml() -> Optional[List[str]]:
 def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List[int]:
     r"""Given the set of partial uuids and list of known uuids builds a set of ordinals excluding ambiguous partials IDs."""
 
-    def uuid_to_orinal(candidate: str, uuids: List[str]) -> int:
+    def uuid_to_ordinal(candidate: str, uuids: List[str]) -> int:
         best_match = -1
         for idx, uuid in enumerate(uuids):
             if not uuid.startswith(candidate):
@@ -806,7 +810,11 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
 
     rc: List[int] = []
     for candidate in candidates:
-        idx = uuid_to_orinal(candidate, uuids)
+        if torch.version.hip:
+            candidate = candidate.replace(
+                "GPU-", "", 1
+            )  # Remove GPU-prefix to match amdsmi asic serial
+        idx = uuid_to_ordinal(candidate, uuids)
         # First invalid ordinal stops parsing
         if idx < 0:
             break
@@ -823,7 +831,12 @@ def _device_count_amdsmi() -> int:
         return 0
     try:
         if type(visible_devices[0]) is str:
-            return -1
+            uuids = _raw_device_uuid_amdsmi()
+            if uuids is None:
+                return -1
+            # Create string version of visible devices to avoid mypy warnings
+            visible_device_str = cast(List[str], visible_devices)
+            visible_devices = _transform_uuid_to_ordinals(visible_device_str, uuids)
         else:
             raw_cnt = _raw_device_count_amdsmi()
             if raw_cnt <= 0:
@@ -1082,7 +1095,13 @@ def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
     if type(visible_devices[0]) is str:
-        raise RuntimeError("HIP_VISIBLE_DEVICES should be indices and not strings")
+        uuids = _raw_device_uuid_amdsmi()
+        if uuids is None:
+            raise RuntimeError("Can't get device UUIDs")
+        visible_devices_str = cast(
+            List[str], visible_devices
+        )  # Create str variable for mypy
+        visible_devices = _transform_uuid_to_ordinals(visible_devices_str, uuids)
     idx_map = dict(enumerate(cast(List[int], visible_devices)))
     if idx not in idx_map:
         raise RuntimeError(

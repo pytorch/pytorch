@@ -6,7 +6,6 @@ from enum import auto, Enum
 from typing import Any, Callable, cast, List, Optional, Sequence, Tuple
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -22,6 +21,7 @@ from ._fsdp_common import (
     _get_dim_chunked_size,
     _raise_assert_with_print,
     _to_dtype_if_needed,
+    compiled_autograd_enabled,
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
@@ -465,7 +465,7 @@ class FSDPParam:
         - Sharded parameters
         - Placeholders for the `self._unsharded_param` nn.Parameter
         """
-        if not ca.compiled_autograd_enabled and hasattr(
+        if not compiled_autograd_enabled() and hasattr(
             self, "_unsharded_param"
         ):  # after the 1st all-gather
             inner_tensor = self._sharded_local_tensor
@@ -483,7 +483,7 @@ class FSDPParam:
             self._extensions_data.clear()
             return
         inner_tensor = self._sharded_local_tensor
-        if not ca.compiled_autograd_enabled and hasattr(
+        if not compiled_autograd_enabled() and hasattr(
             inner_tensor, "fsdp_post_all_gather"
         ):
             all_gather_outputs = self._unflatten_all_gather_outputs()
@@ -510,7 +510,7 @@ class FSDPParam:
         if self.is_dtensor:
             unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
         if hasattr(self, "_unsharded_param"):
-            assert ca.compiled_autograd_enabled
+            assert compiled_autograd_enabled()
             with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
                 self._unsharded_param
             ):
@@ -649,7 +649,7 @@ class FSDPParam:
             alloc_storage(tensor)
 
     def free_unsharded_param(self) -> None:
-        if ca.compiled_autograd_enabled:
+        if compiled_autograd_enabled():
             """
             Assumptions under compile:
             - `self._unsharded_param` is NOT an alias of `self.all_gather_outputs`.
@@ -674,7 +674,7 @@ class FSDPParam:
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
-            if not ca.compiled_autograd_enabled and hasattr(
+            if not compiled_autograd_enabled() and hasattr(
                 self._sharded_local_tensor, "fsdp_pre_all_gather"
             ):
                 sharded_local_tensor = self._sharded_local_tensor
@@ -738,7 +738,7 @@ class FSDPParam:
                 )
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            if not ca.compiled_autograd_enabled and hasattr(
+            if not compiled_autograd_enabled() and hasattr(
                 self._sharded_local_tensor, "fsdp_pre_all_gather"
             ):
                 raise NotImplementedError
@@ -751,7 +751,6 @@ class FSDPParam:
 
     @property
     def unsharded_param(self) -> nn.Parameter:  # ND
-        self._assert_in_states(ShardedState.UNSHARDED)
         return self._unsharded_param
 
     @property

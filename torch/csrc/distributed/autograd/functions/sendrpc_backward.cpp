@@ -3,6 +3,7 @@
 namespace torch::distributed::autograd {
 
 torch::autograd::variable_list SendRpcBackward::apply(
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     torch::autograd::variable_list&& inputs) {
   TORCH_INTERNAL_ASSERT(
       inputs.empty(), "SendRpcBackward should receive no inputs");

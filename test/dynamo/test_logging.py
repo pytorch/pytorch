@@ -162,8 +162,8 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 17, inductor=logging.DEBUG)
-    test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
+    test_inductor_debug = within_range_record_test(3, 22, inductor=logging.DEBUG)
+    test_inductor_info = within_range_record_test(2, 9, inductor=logging.INFO)
 
     @make_logging_test()
     def test_inductor_error(self, records):
@@ -534,6 +534,24 @@ print("arf")
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
+    def test_trace_call_prefix(self, records):
+        def fn(x, y):
+            return (x * 2) @ (y * 3)
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(torch.randn(10, 20), torch.randn(20, 30))
+
+        msg0 = munge_exc(records[0].getMessage())
+        self.assertExpectedInline(
+            msg0,
+            """\
+TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_prefix.fn)
+            return (x * 2) @ (y * 3)
+                    ~~^~~""",
+        )
+
+    @skipIfNotPy311
+    @make_logging_test(trace_call=True)
     def test_trace_call_inline_call(self, records):
         def g(x):
             return x * 2
@@ -560,12 +578,14 @@ print("arf")
             return x * 2
                    ~~^~~""",
         )
-        self.assertExpectedInline(
-            messages[2],
-            """\
-            return g(g(x))
-                   ~^^^^^^""",
-        )
+        # skip this check since 3.13 removed carets for this case
+        # see https://github.com/python/cpython/issues/99180
+        # self.assertExpectedInline(
+        #     messages[2],
+        #     """\
+        #     return g(g(x))
+        #            ~^^^^^^""",
+        # )
         self.assertExpectedInline(
             messages[3],
             """\
