@@ -4580,7 +4580,10 @@ class TestMemPool(TestCase):
             # to make a new 2 MB buffer to accomodate out_2
             self.assertEqual(len(pool.snapshot()), 2)
 
-        del out_0, out_1, out_2, pool
+        del out_0, out_1, out_2
+
+        # pool's destructor calls emptyCache()
+        del pool
 
         # called_dummy_free should be 321 if dummy_free was used to deallocate
         # out tensor
