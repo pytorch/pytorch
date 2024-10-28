@@ -1855,10 +1855,6 @@ class AOTDispatchAutograd:
                         )
                     )
                 else:
-                    assert (
-                        CompiledFunction.metadata.traced_tangent_memory_formats
-                        is not None
-                    )
                     all_args = [
                         (
                             AOTDispatchAutograd.process_runtime_tangent(
