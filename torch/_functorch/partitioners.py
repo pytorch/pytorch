@@ -572,6 +572,16 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     for idx, node in enumerate(gm.graph.nodes):
         order[node] = idx
 
+    # The mutated arg's all downstream use nodes after an FSDP mutation node (fsdp.copy_ or resize_) should strongly depend on the mutation node
+    mutation_deps_of_node = defaultdict(set)
+    for idx, node in enumerate(gm.graph.nodes):
+        if node.op == "call_function" and node.target in [torch.ops.fsdp.copy_.default, torch.ops.inductor.resize_storage_bytes_.default]:
+            mutation_node = node
+            mutated_node = mutation_node.args[0]
+            for user in sorted(mutated_node.users, key=lambda user: order[user]):
+                if order[user] > order[mutation_node]:
+                    mutation_deps_of_node[user].add(mutation_node)
+
     def insert_node_in_graph(node):
         cur_nodes = [node]
         insertable_nodes = set()
@@ -584,6 +594,8 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
             # Bias traversal towards the nodes that have higher depth - prioritizes
             # critical path first.
             cur_nodes += node.all_input_nodes
+
+            cur_nodes += list(mutation_deps_of_node[node])
 
         insertable_nodes = sorted(insertable_nodes, key=lambda n: order[n])
         for node in insertable_nodes:
@@ -899,9 +911,8 @@ def solve_min_cut(
             return False
         if node.target == operator.getitem:
             return False
-        if hasattr(torch.ops.fsdp, "copy_"):
-            if node.op == "call_function" and node.target in [torch.ops.fsdp.copy_.default, torch.ops.inductor.resize_storage_bytes_.default]:
-                return False
+        if node.op == "call_function" and node.target in [torch.ops.fsdp.copy_.default, torch.ops.inductor.resize_storage_bytes_.default]:
+            return False
         if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
             return True
         if config.recompute_views and op_types.is_view(node):
@@ -1045,33 +1056,24 @@ def solve_min_cut(
             "val" not in node.meta and "tensor_meta" not in node.meta
         ) or ("val" in node.meta and not isinstance(node.meta["val"], torch.Tensor))
 
-        if hasattr(torch.ops.fsdp, "copy_"):
-            if node.op == "call_function" and node.target in [torch.ops.fsdp.copy_.default, torch.ops.inductor.resize_storage_bytes_.default]:
-                mutation_node = node
-                assert len(mutation_node.users) == 0, f"Expected FSDP mutation nodes to have no users (downstream should depend on the mutated arg instead), but got {len(mutation_node.users)} users: {mutation_node.users}"
+        if node.op == "call_function" and node.target in [torch.ops.fsdp.copy_.default, torch.ops.inductor.resize_storage_bytes_.default]:
+            mutation_node = node
+            assert len(mutation_node.users) == 0, f"Expected FSDP mutation nodes to have no users (downstream should depend on the mutated arg instead), but got {len(mutation_node.users)} users: {mutation_node.users}"
 
-                # We never want to save the output of FSDP mutation nodes (they are meaningless to save)
-                nx_graph.add_edge(mutation_node.name + "_in", mutation_node.name + "_out", capacity=math.inf)
+            # We never want to save the output of FSDP mutation nodes (they are meaningless to save)
+            nx_graph.add_edge(mutation_node.name + "_in", mutation_node.name + "_out", capacity=math.inf)
 
-                # The mutated arg's next use node after an FSDP mutation node (fsdp.copy_ or resize_) should strongly depend on the mutation node (they cannot be reordered)
-                mutated_node = mutation_node.args[0]
-                sorted_users = sorted(mutated_node.users, key=lambda user: user.meta["id_in_joint_graph"])
-                mutation_node_idx = next(i for i, user in enumerate(sorted_users) if user == mutation_node)
-                if mutation_node_idx < len(sorted_users) - 1:  # Get the next user after mutation_node, if it exists
-                    next_use = sorted_users[mutation_node_idx + 1]
+            # Always recompute the FSDP mutation nodes
+            nx_graph.add_edge(mutation_node.name + "_in", "sink", capacity=math.inf)
+
+            # The mutated arg's all downstream use nodes after an FSDP mutation node (fsdp.copy_ or resize_) should strongly depend on the mutation node (they cannot be reordered)
+            mutated_node = mutation_node.args[0]
+            for user in sorted(mutated_node.users, key=lambda user: user.meta["id_in_joint_graph"]):
+                if user.meta["id_in_joint_graph"] > mutation_node.meta["id_in_joint_graph"]:
                     nx_graph.add_edge(
-                        mutation_node.name + "_out", next_use.name + "_in", capacity=math.inf
+                        mutation_node.name + "_out", user.name + "_in", capacity=math.inf
                     )
-                # All downstream use nodes (mutation or not) of the resized-to-full arg must strongly depend on the resize_ node
-                if mutation_node.target == torch.ops.inductor.resize_storage_bytes_.default and mutation_node.args[1] > 0:
-                    resize_node = mutation_node
-                    resized_to_full_arg = resize_node.args[0]
-                    for user in resized_to_full_arg.users:
-                        if user.meta["id_in_joint_graph"] > resize_node.meta["id_in_joint_graph"]:
-                            nx_graph.add_edge(
-                                resize_node.name + "_out", user.name + "_in", capacity=math.inf
-                            )
-                continue
+            continue
 
         if is_sym_node(node):
             weight = float(sym_node_size(node))
@@ -1217,7 +1219,7 @@ def solve_min_cut(
 
     cut_nodes = set()
     for node_in, node_out in cutset:
-        assert node_in[:-3] == node_out[:-4]
+        assert node_in[:-3] == node_out[:-4], f"{node_in} {node_out}"
         node_name = node_in[:-3]
         cut_nodes.add(node_name)
 
@@ -1867,6 +1869,8 @@ def min_cut_rematerialization_partition(
                 required_bw_nodes.add(node)
             elif _must_be_in_backward(node):
                 required_bw_nodes.add(node)
+            elif node.op == "call_function" and node.target in [torch.ops.fsdp.copy_.default, torch.ops.inductor.resize_storage_bytes_.default]:
+                required_bw_nodes.add(node)
 
             if node in required_bw_nodes:
                 for user in node.users:
@@ -1949,12 +1953,43 @@ def min_cut_rematerialization_partition(
         num_fwd_outputs=num_fwd_outputs,
     )
 
+    bw_module_str = str(bw_module)
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "aot_backward_graph_right_before_functionalize_rng_ops",
+            "encoding": "string",
+        },
+        payload_fn=lambda: bw_module_str,
+    )
+
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
             fw_module, bw_module = functionalize_rng_ops(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
+
+    bw_module_str = str(bw_module)
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "aot_backward_graph_right_before_reordering_to_mimic_autograd_engine",
+            "encoding": "string",
+        },
+        payload_fn=lambda: bw_module_str,
+    )
+
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    bw_module_str = str(bw_module)
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "aot_backward_graph_right_before_min_cut_func_return",
+            "encoding": "string",
+        },
+        payload_fn=lambda: bw_module_str,
+    )
 
     if AOT_PARTITIONER_DEBUG:
         from torch._inductor.fx_utils import get_node_storage
