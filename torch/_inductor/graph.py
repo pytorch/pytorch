@@ -993,6 +993,7 @@ class GraphLowering(torch.fx.Interpreter):
                 name=target,
                 layout=FixedLayout(example.device, example.dtype, sizes, strides),
             )
+        )
         self.graph_inputs[target] = tensor
         self.graph_input_names.append(target)
         self.graph_inputs_original[target] = tensor.data.data
