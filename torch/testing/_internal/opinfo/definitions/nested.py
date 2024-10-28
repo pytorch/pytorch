@@ -108,7 +108,26 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 
         # Handle indices in index_put
         if "index_put" in op.full_name and "indices" in kwargs:
-            kwargs["indices"] = [t[i] for t in kwargs["indices"][1:]]
+            if len(kwargs["indices"]) > 1:
+                # If after unrolling we still have indices left, use them
+                kwargs["indices"] = [t[i] for t in kwargs["indices"][1:]]
+            else:
+                # If no indices are left, create them so they match the NJT implementation
+                sequence_put = kwargs["indices"][0].tolist()
+                if i in sequence_put:
+                    kwargs["indices"] = [
+                        torch.tensor(
+                            list(range(inp.shape[0])),
+                            dtype=torch.int32,
+                            device=kwargs["indices"][0].device,
+                        )
+                    ]
+                else:
+                    kwargs["indices"] = [
+                        torch.tensor(
+                            [], dtype=torch.int32, device=kwargs["indices"][0].device
+                        )
+                    ]
 
         from torch._prims_common import canonicalize_dims
 
@@ -119,7 +138,6 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 
         # TODO: handle this
         assert "dims" not in kwargs
-
         out_ref_component = op.op(inp, *args, **kwargs)
 
         # TODO: handle list / tuple / non-NJT outputs
