@@ -1948,9 +1948,9 @@ class DeviceCachingAllocator {
       segment_info.is_expandable = head_block->expandable_segment_;
       segment_info.context_when_allocated =
           head_block->context_when_segment_allocated;
-      mempool_id = pool_to_id.find(head_block->pool->owner_PrivatePool);
-      if (mempool_id != pool_to_id.end()) {
-        segment_info.owner_private_pool_id = mempool_id->second;
+      auto id = pool_to_id.find(head_block->pool->owner_PrivatePool);
+      if (id != pool_to_id.end()) {
+        segment_info.owner_private_pool_id = id->second;
       }
 
       const Block* block = head_block;
