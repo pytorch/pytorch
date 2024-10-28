@@ -280,18 +280,29 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             # thus guaranteeing that in the bad case `y * y` on GPU side will run in parallel with `all_reduce(y)`
             # thus will produce the wrong result that fails the unit test.
 
+            def _run_loop_collective_wait(x, wait_fn, expected_registry_size):
+                for _ in range(10):
+                    self.assertEqual(
+                        torch._C._distributed_c10d._get_work_registry_size(), 0
+                    )
+                    work, y = all_reduce_non_functional_eager(x)
+                    self.assertEqual(
+                        torch._C._distributed_c10d._get_work_registry_size(),
+                        expected_registry_size,
+                    )
+                    out = wait_fn(work, y)
+                    self.assertEqual(
+                        torch._C._distributed_c10d._get_work_registry_size(), 0
+                    )
+                return work, y, out
+
             # Test: Pure-eager
             all_reduce_wait_eager = all_reduce_wait
-            for _ in range(10):
-                work, y = all_reduce_non_functional_eager(x)
-                self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 0
-                )
-                out_ref = all_reduce_wait_eager(work, y)
-                # `work.wait()` will pop the work from the work registry immediately
-                self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 0
-                )
+            work, y, out_ref = _run_loop_collective_wait(
+                x,
+                wait_fn=all_reduce_wait_eager,
+                expected_registry_size=0,
+            )
 
             all_reduce_wait_compiled = torch.compile(
                 all_reduce_wait,
@@ -299,30 +310,11 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 fullgraph=True,
             )
 
-            def _run_loop_issue_comm_in_eager_wait_for_comm_in_compile(x):
-                for _ in range(10):
-                    self.assertEqual(
-                        torch._C._distributed_c10d._get_work_registry_size(), 0
-                    )
-                    work, y = all_reduce_non_functional_eager(x)
-                    # Non-functional collectives run under the context manager is registered in the work registry.
-                    self.assertEqual(
-                        torch._C._distributed_c10d._get_work_registry_size(), 1
-                    )
-                    out_compiled = all_reduce_wait_compiled(work, y)
-                    # `wait_tensor(y)` will pop the work from the work registry immediately
-                    self.assertEqual(
-                        torch._C._distributed_c10d._get_work_registry_size(), 0
-                    )
-                return work, y, out_compiled
-
             # Test: Issue comm in eager -> wait for comm in compile. Use the context manager.
             with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
-                (
-                    work,
-                    y,
-                    out_compiled,
-                ) = _run_loop_issue_comm_in_eager_wait_for_comm_in_compile(x)
+                work, y, out_compiled = _run_loop_collective_wait(
+                    x, wait_fn=all_reduce_wait_compiled, expected_registry_size=1
+                )
             self.assertEqual(out_ref, out_compiled)
 
             # Check that `wait_tensor()` is in the Inductor generated code
@@ -332,7 +324,9 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
 
             # Failure Case: Issue comm in eager -> wait for comm in compile. Doesn't use the context manager.
-            out_compiled = _run_loop_issue_comm_in_eager_wait_for_comm_in_compile(x)
+            _, _, out_compiled = _run_loop_collective_wait(
+                x, wait_fn=all_reduce_wait_compiled, expected_registry_size=0
+            )
             # In this case `.wait_tensor(y)` in compiled region will not be able to find the corresponding work object
             # to invoke the wait, thus the result will not match eager.
             self.assertNotEqual(out_ref, out_compiled)
