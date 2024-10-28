@@ -1,0 +1,127 @@
+Traceback (most recent call last):
+  File "/home/jessecai/local/pytorch/reproduce_error.py", line 24, in <module>
+    print(func())
+  File "/home/jessecai/local/pytorch/torch/_dynamo/eval_frame.py", line 554, in _fn
+    return fn(*args, **kwargs)
+  File "/home/jessecai/local/pytorch/torch/_dynamo/convert_frame.py", line 1401, in __call__
+    return self._torchdynamo_orig_callable(
+  File "/home/jessecai/local/pytorch/torch/_dynamo/convert_frame.py", line 1184, in __call__
+    result = self._inner_convert(
+  File "/home/jessecai/local/pytorch/torch/_dynamo/convert_frame.py", line 546, in __call__
+    return _compile(
+  File "/home/jessecai/local/pytorch/torch/_dynamo/convert_frame.py", line 979, in _compile
+    guarded_code = compile_inner(code, one_graph, hooks, transform)
+  File "/home/jessecai/local/pytorch/torch/_dynamo/convert_frame.py", line 705, in compile_inner
+    return _compile_inner(code, one_graph, hooks, transform)
+  File "/home/jessecai/local/pytorch/torch/_utils_internal.py", line 95, in wrapper_function
+    return function(*args, **kwargs)
+  File "/home/jessecai/local/pytorch/torch/_dynamo/convert_frame.py", line 740, in _compile_inner
+    out_code = transform_code_object(code, transform)
+  File "/home/jessecai/local/pytorch/torch/_dynamo/bytecode_transformation.py", line 1337, in transform_code_object
+    transformations(instructions, code_options)
+  File "/home/jessecai/local/pytorch/torch/_dynamo/convert_frame.py", line 231, in _fn
+    return fn(*args, **kwargs)
+  File "/home/jessecai/local/pytorch/torch/_dynamo/convert_frame.py", line 659, in transform
+    tracer.run()
+  File "/home/jessecai/local/pytorch/torch/_dynamo/symbolic_convert.py", line 2909, in run
+    super().run()
+  File "/home/jessecai/local/pytorch/torch/_dynamo/symbolic_convert.py", line 1115, in run
+    while self.step():
+  File "/home/jessecai/local/pytorch/torch/_dynamo/symbolic_convert.py", line 1027, in step
+    self.dispatch_table[inst.opcode](self, inst)
+  File "/home/jessecai/local/pytorch/torch/_dynamo/symbolic_convert.py", line 3100, in RETURN_VALUE
+    self._return(inst)
+  File "/home/jessecai/local/pytorch/torch/_dynamo/symbolic_convert.py", line 3085, in _return
+    self.output.compile_subgraph(
+  File "/home/jessecai/local/pytorch/torch/_dynamo/output_graph.py", line 1131, in compile_subgraph
+    self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
+  File "/home/jessecai/local/pytorch/torch/_dynamo/output_graph.py", line 1401, in compile_and_call_fx_graph
+    compiled_fn = self.call_user_compiler(gm)
+  File "/home/jessecai/local/pytorch/torch/_dynamo/output_graph.py", line 1448, in call_user_compiler
+    return self._call_user_compiler(gm)
+  File "/home/jessecai/local/pytorch/torch/_dynamo/output_graph.py", line 1497, in _call_user_compiler
+    raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
+  File "/home/jessecai/local/pytorch/torch/_dynamo/output_graph.py", line 1478, in _call_user_compiler
+    compiled_fn = compiler_fn(gm, self.example_inputs())
+  File "/home/jessecai/local/pytorch/torch/_dynamo/repro/after_dynamo.py", line 130, in __call__
+    compiled_gm = compiler_fn(gm, example_inputs)
+  File "/home/jessecai/local/pytorch/torch/__init__.py", line 2275, in __call__
+    return compile_fx(model_, inputs_, config_patches=self.config)
+  File "/home/jessecai/local/pytorch/torch/_inductor/compile_fx.py", line 1398, in compile_fx
+    return compile_fx(
+  File "/home/jessecai/local/pytorch/torch/_inductor/compile_fx.py", line 1675, in compile_fx
+    return aot_autograd(
+  File "/home/jessecai/local/pytorch/torch/_dynamo/backends/common.py", line 72, in __call__
+    cg = aot_module_simplified(gm, example_inputs, **self.kwargs)
+  File "/home/jessecai/local/pytorch/torch/_functorch/aot_autograd.py", line 1105, in aot_module_simplified
+    compiled_fn = dispatch_and_compile()
+  File "/home/jessecai/local/pytorch/torch/_functorch/aot_autograd.py", line 1081, in dispatch_and_compile
+    compiled_fn, _ = create_aot_dispatcher_function(
+  File "/home/jessecai/local/pytorch/torch/_functorch/aot_autograd.py", line 528, in create_aot_dispatcher_function
+    return _create_aot_dispatcher_function(
+  File "/home/jessecai/local/pytorch/torch/_functorch/aot_autograd.py", line 780, in _create_aot_dispatcher_function
+    compiled_fn, fw_metadata = compiler_fn(
+  File "/home/jessecai/local/pytorch/torch/_functorch/_aot_autograd/jit_compile_runtime_wrappers.py", line 196, in aot_dispatch_base
+    compiled_fw = compiler(fw_module, updated_flat_args)
+  File "/home/jessecai/local/pytorch/torch/_inductor/compile_fx.py", line 1495, in fw_compiler_base
+    return _fw_compiler_base(model, example_inputs, is_inference)
+  File "/home/jessecai/local/pytorch/torch/_inductor/compile_fx.py", line 1564, in _fw_compiler_base
+    return inner_compile(
+  File "/home/jessecai/.conda/envs/pytorch-3.10/lib/python3.10/contextlib.py", line 79, in inner
+    return func(*args, **kwds)
+  File "/home/jessecai/local/pytorch/torch/_inductor/compile_fx.py", line 572, in compile_fx_inner
+    return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
+  File "/home/jessecai/local/pytorch/torch/_dynamo/repro/after_aot.py", line 100, in debug_wrapper
+    inner_compiled_fn = compiler_fn(gm, example_inputs)
+  File "/home/jessecai/local/pytorch/torch/_inductor/compile_fx.py", line 724, in _compile_fx_inner
+    compiled_graph = FxGraphCache.load(
+  File "/home/jessecai/local/pytorch/torch/_inductor/codecache.py", line 1479, in load
+    compiled_graph = compile_fx_fn(
+  File "/home/jessecai/local/pytorch/torch/_inductor/compile_fx.py", line 635, in codegen_and_compile
+    compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
+  File "/home/jessecai/local/pytorch/torch/_inductor/compile_fx.py", line 942, in fx_codegen_and_compile
+    compiled_fn = graph.compile_to_fn()
+  File "/home/jessecai/local/pytorch/torch/_inductor/graph.py", line 2028, in compile_to_fn
+    return self.compile_to_module().call
+  File "/home/jessecai/local/pytorch/torch/_inductor/graph.py", line 1950, in compile_to_module
+    return self._compile_to_module()
+  File "/home/jessecai/local/pytorch/torch/_inductor/graph.py", line 1956, in _compile_to_module
+    self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
+  File "/home/jessecai/local/pytorch/torch/_inductor/graph.py", line 1891, in codegen
+    self.scheduler = Scheduler(self.operations)
+  File "/home/jessecai/local/pytorch/torch/_inductor/scheduler.py", line 1753, in __init__
+    self._init(nodes)
+  File "/home/jessecai/local/pytorch/torch/_inductor/scheduler.py", line 1835, in _init
+    self.finalize_multi_template_buffers()
+  File "/home/jessecai/local/pytorch/torch/_inductor/scheduler.py", line 2381, in finalize_multi_template_buffers
+    min_node_unfused, _ = multi_node.get_min_choice()
+  File "/home/jessecai/local/pytorch/torch/_inductor/ir.py", line 4150, in get_min_choice
+    min_choice = min(self.choice_timings, key=self.choice_timings.get)  # type: ignore[arg-type]
+  File "/home/jessecai/local/pytorch/torch/_inductor/ir.py", line 4128, in choice_timings
+    self._choice_timings = self._choice_timings_fn()
+  File "/home/jessecai/local/pytorch/torch/_inductor/select_algorithm.py", line 1390, in get_timings
+    timings = do_autotuning(precompile_fn)
+  File "/home/jessecai/local/pytorch/torch/_inductor/select_algorithm.py", line 1355, in do_autotuning
+    timings = self.lookup(
+  File "/home/jessecai/local/pytorch/torch/_inductor/codecache.py", line 370, in lookup
+    timings = benchmark(choices)
+  File "/home/jessecai/local/pytorch/torch/_inductor/select_algorithm.py", line 1341, in autotune
+    return make_benchmark_fn()(choices)
+  File "/home/jessecai/local/pytorch/torch/_inductor/select_algorithm.py", line 1553, in benchmark_in_current_process
+    raise e
+  File "/home/jessecai/local/pytorch/torch/_inductor/select_algorithm.py", line 1519, in benchmark_in_current_process
+    timing = benchmark_choice_in_current_process(choice, *inputs)
+  File "/home/jessecai/local/pytorch/torch/_inductor/select_algorithm.py", line 1503, in benchmark_choice_in_current_process
+    result = choice.benchmark(*example_inputs_extern, out=out_extern)
+  File "/home/jessecai/local/pytorch/torch/_inductor/select_algorithm.py", line 968, in benchmark
+    out_new = algo(*args)
+torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
+TypeError: _cslt_sparse_mm(): argument 'alpha' must be Tensor, not StorageBox
+
+Set TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information
+
+
+You can suppress this exception and fall back to eager by setting:
+    import torch._dynamo
+    torch._dynamo.config.suppress_errors = True
+
