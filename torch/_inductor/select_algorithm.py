@@ -1564,8 +1564,9 @@ class AlgorithmSelectorCache(PersistentCache):
             is_extern = isinstance(choice, ExternKernelCaller)
             input_set = autotune_inputs.get_input_set(is_extern)
             inpts, output, workspace = input_set.unpack()
+            workspace_arg = workspace if not is_extern else None
             output.zero_()
-            result = choice.benchmark(*inpts, out=output, workspace=workspace)
+            result = choice.benchmark(*inpts, out=output, workspace=workspace_arg)
             if VERIFY and autotune_inputs.expected is not None:
                 autotune_inputs.verify(**VERIFY)
             if torch.cuda.is_available():

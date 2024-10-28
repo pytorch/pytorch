@@ -650,12 +650,11 @@ class GPUDeviceBenchmarkMixin:
     ) -> float:
         device_idx_set = {
             tensor.device.index
-            for tensor in [*input_tensors, output_tensor]
+            for tensor in [*input_tensors, output_tensor, workspace]
             if isinstance(tensor, torch.Tensor)
             and tensor.is_cuda
             and tensor.device.index is not None
         }
-        assert workspace is None, "Workspace is not supported for generic GPU benchmark"
         assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
         if len(device_idx_set) == 1:
             device_idx = next(iter(device_idx_set))
