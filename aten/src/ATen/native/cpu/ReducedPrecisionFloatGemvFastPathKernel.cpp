@@ -247,11 +247,16 @@ C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
     const at::BFloat16* vec2,
     vec::Vectorized<float>* tail_sum,
     int idx) {
-  const auto temp_vec1 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
-  const auto temp_vec2 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
-  *tail_sum = f32_fma_bf16(*tail_sum, temp_vec1, temp_vec2);
+  const auto temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
+  const auto temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
+  *tail_sum = vaddq_f32(
+      f32_fma_bf16(*tail_sum, vget_low_u16(temp_vec1), vget_low_u16(temp_vec2)),
+      f32_fma_bf16(*tail_sum, vget_high_u16(temp_vec1), vget_high_u16(temp_vec2)));
 }
 
+#else // __aarch64__
+// TODO: broaden BF16 support beyond aarch64
+#define COMPILER_SUPPORTS_BF16_TARGET 0
 #endif // __aarch64__
 
 namespace {
@@ -489,7 +494,6 @@ void fp16_gemv_trans(
 #endif
   return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
 }
-#endif // !defined(C10_MOBILE)
 
 #ifdef __aarch64__
 float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec2, int64_t len) {
@@ -526,6 +530,7 @@ void bf16_gemv_trans(
   return bf16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
 }
 #endif // __aarch64__
+#endif // !defined(C10_MOBILE)
 } // namespace CPU_CAPABILITY
 
 #if !defined(C10_MOBILE)
