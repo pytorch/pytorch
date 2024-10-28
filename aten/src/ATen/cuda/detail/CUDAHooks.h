@@ -3,7 +3,6 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include <ATen/Generator.h>
-#include <optional>
 
 // TODO: No need to have this whole header, we can just put it all in
 // the cpp file
@@ -22,8 +21,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   void init() const override;
   Device getDeviceFromPtr(void* data) const override;
   bool isPinnedPtr(const void* data) const override;
-  const Generator& getDefaultGenerator(
-      DeviceIndex device_index = -1) const override;
+  const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
   bool hasCUDA() const override;
   bool hasMAGMA() const override;
   bool hasCuDNN() const override;
