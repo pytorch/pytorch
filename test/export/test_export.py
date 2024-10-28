@@ -165,8 +165,10 @@ class Inp:
 
 
 NON_STRICT_SUFFIX = "_non_strict"
-RETRACEABILITY_SUFFIX = "_retraceability"
+RETRACEABILITY_STRICT_SUFFIX = "_retraceability"
+RETRACEABILITY_NON_STRICT_SUFFIX = "_retraceability_non_strict"
 SERDES_SUFFIX = "_serdes"
+SERDES_NON_STRICT_SUFFIX = "_serdes_non_strict"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
 TRAINING_IR_DECOMP_STRICT_SUFFIX = "_training_ir_to_decomp"
 TRAINING_IR_DECOMP_NON_STRICT_SUFFIX = "_training_ir_to_decomp_non_strict"
@@ -177,11 +179,15 @@ def is_non_strict_test(test_name):
 
 
 def is_retracebility_test(test_name):
-    return test_name.endswith(RETRACEABILITY_SUFFIX)
+    return test_name.endswith(RETRACEABILITY_STRICT_SUFFIX) or test_name.endswith(
+        RETRACEABILITY_NON_STRICT_SUFFIX
+    )
 
 
 def is_serdes_test(test_name):
-    return test_name.endswith(SERDES_SUFFIX)
+    return test_name.endswith(SERDES_SUFFIX) or test_name.endswith(
+        SERDES_NON_STRICT_SUFFIX
+    )
 
 
 def is_training_ir_test(test_name):
@@ -1008,6 +1014,7 @@ graph():
         self.assertEqual(ep.module()(x, y), model(x, y))
 
     @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
+    @testing.expectedFailureSerDerNonStrict
     def test_real_tensor_bool_cast(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1019,6 +1026,7 @@ graph():
             ep = export(model, inputs, strict=False)
 
     @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
     def test_is_nonzero(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1172,6 +1180,7 @@ graph():
         self.assertEqual(actual_result, expected_result)
 
     @testing.expectedFailureSerDer  # failed serializing SymInt nodes in subgraph (known issue)
+    @testing.expectedFailureSerDerNonStrict
     def test_hoo_inline_users_issue(self):
         # This came from an issue where replace_with_hop passes would inline subgraphs,
         # and mess up node.users for nodes present in multiple subgraphs (e.g. _x in SetGradCase
@@ -1211,6 +1220,7 @@ graph():
         )
         check_users_for_graph(ep.graph)
 
+    @unittest.skipIf(IS_FBCODE, "Broken in fbcode")
     def test_export_predispatch_custom_ops_warnings(self):
         @torch.library.custom_op("mylib::foo", mutates_args={})
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -1270,12 +1280,7 @@ graph():
                     return torch.ops.mylib.foo123(lin)
 
             x = torch.randn(4, 4)
-            if IS_FBCODE:
-                ep = export(Bar(), (x,)).run_decompositions(
-                    decomp_table=None, _preserve_ops=(torch.ops.aten.linear.default,)
-                )
-            else:
-                ep = export(Bar(), (x,)).run_decompositions(table)
+            ep = export(Bar(), (x,)).run_decompositions(table)
 
             self.assertExpectedInline(
                 str(ep.graph_module.code).strip(),
@@ -1297,14 +1302,9 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 return torch.ops.aten.chunk.default(x, 3, 0)
 
         ep = torch.export.export(Foo(), (torch.randn(3, 3),))
-        if IS_FBCODE:
-            ep = ep.run_decompositions(
-                {}, _preserve_ops=(torch.ops.aten.linear.default,)
-            )
-        else:
-            decomp_table = _decomp_table_to_post_autograd_aten()
-            del decomp_table[torch.ops.aten.linear.default]
-            ep = ep.run_decompositions(decomp_table)
+        decomp_table = _decomp_table_to_post_autograd_aten()
+        del decomp_table[torch.ops.aten.linear.default]
+        ep = ep.run_decompositions(decomp_table)
 
         gm = ep.graph_module
         # linear is CompositeImplicitAutograd functional op so we should preserve it
@@ -1760,13 +1760,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
         ep = torch.export.export(
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
-        if IS_FBCODE:
-            ep_has_linear_convd = ep.run_decompositions(
-                {},
-                _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
-            )
-        else:
-            ep_has_linear_convd = ep.run_decompositions({})
+        ep_has_linear_convd = ep.run_decompositions({})
 
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),
@@ -1781,19 +1775,11 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     return (add,)""",
         )
 
-        if IS_FBCODE:
-            ep_has_convd = ep.run_decompositions(
-                _preserve_ops=(
-                    torch.ops.aten.conv2d.default,
-                    torch.ops.aten.conv1d.default,
-                )
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.conv2d.default]
-            del decomp_table[torch.ops.aten.conv1d.default]
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.conv2d.default]
+        del decomp_table[torch.ops.aten.conv1d.default]
 
-            ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
+        ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
@@ -1809,15 +1795,10 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add,)""",
         )
-        if IS_FBCODE:
-            ep_has_convd = ep_has_convd.run_decompositions(
-                _preserve_ops=(torch.ops.aten.conv2d.default,)
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.conv2d.default]
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.conv2d.default]
 
-            ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
+        ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
             """\
@@ -1861,15 +1842,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             Foo(), (torch.randn(20, 16, 50, 100), torch.randn(20, 16, 50))
         )
 
-        if IS_FBCODE:
-            ep_has_linear_convd = ep.run_decompositions(
-                {},
-                _preserve_ops=testing._COMPOSITE_OPS_THAT_CAN_BE_PRESERVED_TESTING_ONLY,
-            )
-        else:
-            ep_has_linear_convd = ep.run_decompositions(
-                decomp_table={},
-            )
+        ep_has_linear_convd = ep.run_decompositions(
+            decomp_table={},
+        )
 
         self.assertExpectedInline(
             str(ep_has_linear_convd.graph_module.code).strip(),
@@ -1884,19 +1859,11 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-        if IS_FBCODE:
-            ep_has_convd = ep.run_decompositions(
-                _preserve_ops=(
-                    torch.ops.aten.conv2d.default,
-                    torch.ops.aten.conv1d.default,
-                )
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.conv2d.default]
-            del decomp_table[torch.ops.aten.conv1d.default]
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.conv2d.default]
+        del decomp_table[torch.ops.aten.conv1d.default]
 
-            ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
+        ep_has_convd = ep.run_decompositions(decomp_table=decomp_table)
 
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
@@ -1914,14 +1881,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
     return (add,)""",
         )
 
-        if IS_FBCODE:
-            ep_has_convd = ep_has_convd.run_decompositions(
-                _preserve_ops=(torch.ops.aten.conv2d.default,)
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.conv2d.default]
-            ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.conv2d.default]
+        ep_has_convd = ep_has_convd.run_decompositions(decomp_table=decomp_table)
 
         self.assertExpectedInline(
             str(ep_has_convd.graph_module.code).strip(),
@@ -2023,14 +1985,9 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
                 return x.sin() + x.sum()
 
         ep = export(Foo(), (torch.ones(3, 3),))
-        if IS_FBCODE:
-            ep_preserve_sum = ep.run_decompositions(
-                _preserve_ops=(torch.ops.aten.sum.default,)
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.sum.default]
-            ep_preserve_sum = ep.run_decompositions(decomp_table)
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.sum.default]
+        ep_preserve_sum = ep.run_decompositions(decomp_table)
 
         # Even though we are decomposing to core aten which should make
         # sum into sum.dim_IntList, we explicitly marked it to not do that.
@@ -2444,6 +2401,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             if node.op == "placeholder":
                 self.assertEqual(str(tuple(node.meta["val"].shape)), f"({sym},)")
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_dynamic_shapes_builder_kwargs(self):
         class M(torch.nn.Module):
             def forward(self, x, y, z):
@@ -2615,6 +2573,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         export(N(), inputs, dynamic_shapes=dynamic_shapes)
 
     @testing.expectedFailureSerDer  # no unbacked bindings after deserialization?
+    @testing.expectedFailureSerDerNonStrict
     def test_unbacked_bindings_for_divisible_u_symint(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -2632,7 +2591,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             def foo_impl(a, b):
                 return a[b.item()]
 
-            @torch.library.register_fake("mylib::foo")
+            @torch.library.register_fake("mylib::foo", lib=lib)
             def foo_fake_impl(a, b):
                 ctx = torch.library.get_ctx()
                 u = ctx.new_dynamic_size(min=0, max=len(a) // 10) * 10
@@ -2815,6 +2774,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         export(N(), (t,), strict=strict)
 
     @testing.expectedFailureSerDer  # T195866111
+    @testing.expectedFailureSerDerNonStrict
     def test_suggested_fixes_for_data_dependent_errors_puzzlers(self):
         # suggested fixes for data-dependent errors only work in non-strict mode
         strict = False
@@ -3075,6 +3035,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             em.module()(x)
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_dont_duck_size_for_auto_dynamic(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -3095,6 +3056,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ep.module()(torch.randn(6, 3), torch.randn(7, 4))
 
     @testing.expectedFailureRetraceability  # T183144629
+    @testing.expectedFailureSerDerNonStrict
     def test_map(self):
         class Module(torch.nn.Module):
             def forward(self, xs, y, z):
@@ -3137,6 +3099,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         args = (torch.rand(3, 700, 700), 150, 150)
         self.assertEqual(ecrop.module()(*args), ecrop(*args))
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_export_func_with_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, kw1, kw2):
@@ -3147,6 +3110,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs = {"kw1": torch.ones(1, 1), "kw2": torch.ones(6, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_export_func_with_pytree_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b):
@@ -3160,6 +3124,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_export_func_with_default_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b=1):
@@ -3190,6 +3155,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         args = (torch.ones(2, 3), torch.ones(3, 4), torch.ones(2, 3), torch.ones(3, 4))
         self._test_export_same_as_eager(kw_func, args)
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_export_func_with_keyword_only_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2):
@@ -3200,6 +3166,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         kwargs = {"kw1": torch.ones(2, 3), "kw2": torch.ones(3, 4)}
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_export_func_with_var_keyword_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -3294,6 +3261,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self.assertTrue(torch.allclose(orig_res[1], ep_res[1]))
         self.assertTrue(torch.allclose(orig_res[2], ep_res[2]))
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_export_func_with_var_keyword_pytree_args(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, *args, kw1, kw2, **kwargs):
@@ -3318,8 +3286,10 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
     @testing.expectedFailureSerDer  # we don't save placeholder metadata
+    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -4235,6 +4205,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             "torch.ops.aten._assert_async.msg", 1, exactly=True
         ).run(ep.graph_module.code)
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_decomp_item_in_prim_after_decomposition(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -5718,6 +5689,7 @@ graph():
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_lazy_module_kwargs(self):
         class LazyModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
             def initialize_parameters(self, *args, **kwargs):
@@ -6140,6 +6112,7 @@ graph():
         self.assertEqual(ep.module()(*inputs), m(*inputs))
 
     @testing.expectedFailureSerDer  # symfloat nyi
+    @testing.expectedFailureSerDerNonStrict
     def test_sym_sqrt(self):
         import math
 
@@ -6527,6 +6500,7 @@ graph():
 
         test(export(M(), inp))
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_unflatten_multiple_graphs_state(self):
         class N(torch.nn.Module):
             def __init__(self):
@@ -6559,25 +6533,34 @@ graph():
         m = M()
         eager_result = m(*inp)
 
+        def test(ep):
+            epm = ep.module()
+            ufm = torch.export.unflatten(ep)
+
+            exported_result = epm(*inp)
+            self.assertTrue(torch.allclose(exported_result, eager_result))
+
+            unflattened_result = ufm(*inp)
+            self.assertTrue(torch.allclose(unflattened_result, eager_result))
+
         if not is_retracebility_test(self._testMethodName):
-            with self.assertRaisesRegex(
-                ValueError,
-                r"Found multiple calls of module n that mutate buffer n.buf",
-            ):
-                # Unflattening while preserving signatures is NYI for this case.
-                torch.export.unflatten(
-                    export(M(), inp, preserve_module_call_signature=("n",))
+            test(export(M(), inp, preserve_module_call_signature=("n",)))
+            # running decompositions again should work for all IRs
+            ep = export(M(), inp, preserve_module_call_signature=("n",))
+            test(ep.run_decompositions({}))
+            if is_training_ir_test(self._testMethodName):
+                # since we run decompositions by default when testing training IR,
+                # also test training IR without running decompositions
+                strict = not is_non_strict_test(self._testMethodName)
+                ept = torch.export.export_for_training(
+                    M(),
+                    inp,
+                    strict=strict,
+                    preserve_module_call_signature=("n",),
                 )
+                test(ept)
 
-        ep = export(M(), inp)
-        epm = ep.module()
-        ufm = torch.export.unflatten(ep)
-
-        exported_result = epm(*inp)
-        self.assertTrue(torch.allclose(exported_result, eager_result))
-
-        unflattened_result = ufm(*inp)
-        self.assertTrue(torch.allclose(unflattened_result, eager_result))
+        test(export(M(), inp))
 
     def test_unflatten_multiple_graphs_shared_submodule(self):
         class N(torch.nn.Module):
@@ -6890,12 +6873,11 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 
         model = Model()
         with torch.no_grad():
-            exported_program = torch.export._trace._export(
+            exported_program = torch.export.export_for_training(
                 model,
                 (torch.tensor(10), torch.tensor(12)),
                 {},
                 dynamic_shapes=None,
-                pre_dispatch=True,
                 strict=False,
             )
 
@@ -6948,12 +6930,11 @@ def forward(self, x, b_t, y):
         # no grad
         model = Model()
         with torch.no_grad():
-            ep_nograd = torch.export._trace._export(
+            ep_nograd = torch.export.export_for_training(
                 model,
                 (torch.tensor(10), torch.tensor(12)),
                 {},
                 dynamic_shapes=None,
-                pre_dispatch=True,
                 strict=False,
             )
         # check that only sub op is wrapped with grad_enabled
@@ -6969,12 +6950,11 @@ def forward(self, x, b_t, y):
 
         # enable grad
         model = Model()
-        ep_grad = torch.export._trace._export(
+        ep_grad = torch.export.export_for_training(
             model,
             (torch.tensor(10), torch.tensor(12)),
             {},
             dynamic_shapes=None,
-            pre_dispatch=True,
             strict=False,
         )
         # check that only add op is wrapped with grad_enabled
@@ -7606,6 +7586,7 @@ def forward(self, x, y):
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_disable_forced_specializations_ok(self):
         # check that we don't force specialization, and defer to runtime asserts
         # with allow_complex_guards_as_runtime_asserts=True to successfully export
@@ -7726,6 +7707,7 @@ def forward(self, x, y):
 
     # TODO requires_grad doesn't seem to work with serialization.
     @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
     def test_preserve_requires_grad_placeholders(self):
         class Module(torch.nn.Module):
             def __init__(self) -> None:
@@ -7932,6 +7914,7 @@ def forward(self, x, y):
         for param in ["alpha", "beta", "gamma"]:
             self.assertTrue(param in unep.state_dict())
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_intermediate_shape_comp(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -8106,7 +8089,9 @@ def forward(self, x, y):
                 w_transpose = torch.transpose(self.w_pre, 0, 1)
                 w_relu = torch.nn.functional.relu(w_transpose)
                 w = w_relu + self.b
-                return torch.matmul(x, w)
+                return (
+                    torch.matmul(x, w) + self.b + torch.arange(4, dtype=torch.float16)
+                )
 
         example_inputs = (torch.randn(4, 4),)
         mod = Model()
@@ -8122,17 +8107,38 @@ def forward(self, x, y):
             for n, spec in zip(placeholder_nodes, new_sig.input_specs)
             if spec.target is not None
         }
-        const_gm, _ = split_const_gm(new_gm, lifted_constants)
+        # [self.w_pre, self.b]
+        lifted_constant_names = list(lifted_constants)
+        lifted_constant_values = [lifted_constants[n] for n in lifted_constant_names]
+        const_gm, _ = split_const_gm(new_gm, False, lifted_constant_names)
         counter = 0
         for node in const_gm.graph.nodes:
             if node.op == "call_function":
                 counter += 1
-        self.assertTrue(counter > 0)
+        self.assertTrue(counter == 4)
+        counter = 0
+        for n in new_gm.graph.nodes:
+            if n.op == "placeholder":
+                counter += 1
+        # expect 3 existing placeholders and 2 folded constant
+        self.assertTrue(counter == 5)
+        # return (self.b, folded_const, folded_const)
+        const_folded_value = const_gm(*lifted_constant_values)
+
         test_input = torch.randn(4, 4)
-        expected = new_gm(None, None, test_input)[0]
-        actual = mod(test_input)
+        # new_gm(c_w_pre, b, x, folded_const, folded_const)
+        actual = new_gm(
+            lifted_constant_values[0],
+            const_folded_value[0],
+            test_input,
+            const_folded_value[1],
+            const_folded_value[2],
+        )[0]
+        expected = mod(test_input)
         self.assertEqual(actual, expected)
-        const_gm, _ = split_const_gm(ep.graph_module, lifted_constants, lambda x: True)
+        const_gm, _ = split_const_gm(
+            ep.graph_module, False, lifted_constant_names, lambda x: True
+        )
         counter = 0
         for node in const_gm.graph.nodes:
             if node.op == "call_function":
@@ -8163,14 +8169,10 @@ def forward(self, x, y):
                 return torch.ops.testlib.foo_mutated.default(y)
 
         decomp_table = torch.export.default_decompositions()
+        del decomp_table[torch.ops.testlib.foo_functional.default]
 
-        # FIXME (We need to design a proper way that doesn't need _preserve_ops)
         ep = torch.export.export(M(), (torch.randn(4, 4),)).run_decompositions(
             decomp_table,
-            _preserve_ops=(
-                torch.ops.testlib.foo_functional.default,
-                torch.ops.testlib.foo_mutated.default,
-            ),
         )
 
         self.assertExpectedInline(
@@ -8205,14 +8207,9 @@ def forward(self, x):
             },
         )
 
-        if IS_FBCODE:
-            ep = ep.run_decompositions(
-                {}, _preserve_ops=(torch.ops.aten.linear.default,)
-            )
-        else:
-            table = torch.export.default_decompositions()
-            del table[torch.ops.aten.linear.default]
-            ep = ep.run_decompositions(table)
+        table = torch.export.default_decompositions()
+        del table[torch.ops.aten.linear.default]
+        ep = ep.run_decompositions(table)
 
         comp_mod = ep.module()
         inp1 = torch.randn(3, 4)
@@ -8220,6 +8217,7 @@ def forward(self, x):
         self.assertTrue(torch.allclose(comp_mod(inp1), mod(inp1)))
         self.assertTrue(torch.allclose(comp_mod(inp2), mod(inp2)))
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_simple_equality(self):
         # The next 3 test cases tests for automatic dynamic shapes specs, verifying that automatic dynamism
         # leads to replacement symbols being set for equalities, and inferred relationships being checked
@@ -8291,6 +8289,7 @@ def forward(self, x):
             test_serdes=True,
         )
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_constant_relation(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -8336,6 +8335,7 @@ def forward(self, x):
             test_serdes=True,
         )
 
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_automatic_dynamic_shapes_linear_relation(self):
         AUTO, STATIC = Dim.AUTO, Dim.STATIC
 
@@ -8614,6 +8614,8 @@ def forward(self, x):
             _load_dynamic_shapes(spec, from_dict=True)
 
     @testing.expectedFailureSerDer  # TODO(pianpwk): PowByNatural valuerange deserialization
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_dim_dynamic(self):
         dynamic = Dim.DYNAMIC
 
@@ -8692,6 +8694,8 @@ def forward(self, x):
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # unbacked symint not tracked?
     @testing.expectedFailureSerDer  # T195866111
+    @testing.expectedFailureSerDerNonStrict
+    @testing.expectedFailureRetraceabilityNonStrict
     def test_hints_wrapper(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -9395,15 +9399,12 @@ class TestExportCustomClass(TorchTestCase):
             ep.graph_module.code
         )
 
-        if IS_FBCODE:
-            ep = ep.run_decompositions(_preserve_ops=(torch.ops.aten.elu.default,))
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.elu.default]
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.elu.default]
 
-            ep = ep.run_decompositions(
-                decomp_table=decomp_table,
-            )
+        ep = ep.run_decompositions(
+            decomp_table=decomp_table,
+        )
         FileCheck().check_count("torch.ops.aten.elu.default", 1, exactly=True).run(
             ep.graph_module.code
         )
@@ -9425,16 +9426,11 @@ class TestExportCustomClass(TorchTestCase):
             "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
-        if IS_FBCODE:
-            ep = ep.run_decompositions(
-                _preserve_ops=(torch.ops.aten.upsample_bilinear2d.vec,)
-            )
-        else:
-            decomp_table = default_decompositions()
-            del decomp_table[torch.ops.aten.upsample_bilinear2d.vec]
-            ep = ep.run_decompositions(
-                decomp_table=decomp_table,
-            )
+        decomp_table = default_decompositions()
+        del decomp_table[torch.ops.aten.upsample_bilinear2d.vec]
+        ep = ep.run_decompositions(
+            decomp_table=decomp_table,
+        )
 
         FileCheck().check_count(
             "torch.ops.aten.upsample_bilinear2d.vec", 1, exactly=True
