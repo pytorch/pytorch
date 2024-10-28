@@ -1503,6 +1503,7 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             if needs_workspace:
                 # TODO right now we only support the same workspace arg for all choices
+                # TODO 2 Currently we not benchmark the workspace creation time
                 assert (
                     triton_templates_choices[0].workspace_arg is not None
                 ), "Expected all triton templates choices to have the same workspace arg."
