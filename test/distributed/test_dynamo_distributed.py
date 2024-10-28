@@ -1347,7 +1347,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model = DDP(model, device_ids=self.device_ids)
 
         hidden_states = torch.randn(B, S, H * D).to(device)
-        attention_scores = model(hidden_states)
+        model(hidden_states)
         torch.cuda.synchronize()
 
     @patch.object(config, "optimize_ddp", True)
@@ -1403,7 +1403,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         model = DDP(model, device_ids=self.device_ids)
 
         hidden_states = torch.randn(B, S, H * D).to(device)
-        attention_scores = model(hidden_states)
+        model(hidden_states)
         torch.cuda.synchronize()
 
     @patch.object(config, "optimize_ddp", True)

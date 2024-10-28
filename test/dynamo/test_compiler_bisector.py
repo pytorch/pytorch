@@ -97,7 +97,6 @@ class TestCompilerBisector(TestCase):
         self.assertTrue("aten.exponential" in out.debug_info)
 
     def test_crossref(self):
-        test_ns = "bisect_ops"
         with _scoped_library(self.test_ns, "FRAGMENT") as lib:
             lib.define("foo(Tensor x) -> Tensor")
             op = self.get_op("foo")
