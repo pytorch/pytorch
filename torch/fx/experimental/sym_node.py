@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
 from __future__ import annotations
+from torch.types import py_sym_types as SymTypes
 
 
 """
@@ -45,9 +46,6 @@ sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 
 
 __all__ = ["SymNode", "method_to_operator", "magic_methods"]
-
-
-from torch.types import py_sym_types as SymTypes
 
 
 def _to_symtype(t):
@@ -421,7 +419,8 @@ class SymNode:
         return self.float_pow(other)
 
     def is_non_overlapping_and_dense(self, sizes, strides):
-        return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(to_node(self, 1))  # type: ignore[attr-defined]
+        # type: ignore[attr-defined]
+        return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(to_node(self, 1))
 
     def int_(self):
         return self.guard_int("", 0)  # NB: uses Python backtrace
@@ -430,7 +429,7 @@ class SymNode:
     # functions consider factoring it out to be metaprogrammed too.  Note that
     # some load bearing logic is directly in torch.sym_sum
 
-    def sym_sum(self, args) -> "SymNode":
+    def sym_sum(self, args) -> SymNode:
         import sympy
 
         # Inner impl
