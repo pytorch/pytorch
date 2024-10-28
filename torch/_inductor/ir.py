@@ -5422,9 +5422,7 @@ class UserDefinedTritonKernel(ExternKernel):
             for idx, arg in enumerate(raw_args)
         ]
         removed_none_args = [idx for idx, val in raw_args if val == REMOVED]
-
-        raw_args = list(filter(lambda tup: tup[1] != REMOVED, raw_args))
-        raw_args = [val for idx, val in raw_args]
+        raw_args = [val for idx, val in raw_args if val != REMOVED]
 
         # We have to compute the constexpr indices for the new, filtered raw_args
         # We also have to adjust equal_to_1.
