@@ -280,7 +280,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             # thus guaranteeing that in the bad case `y * y` on GPU side will run in parallel with `all_reduce(y)`
             # thus will produce the wrong result that fails the unit test.
 
-            # Test: pure-eager
+            # Test: Pure-eager
             all_reduce_wait_eager = all_reduce_wait
             for _ in range(10):
                 work, y = all_reduce_non_functional_eager(x)
@@ -316,7 +316,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                     )
                 return work, y, out_compiled
 
-            # Test: issue comm in eager -> wait for comm in compile. Use the context manager.
+            # Test: Issue comm in eager -> wait for comm in compile. Use the context manager.
             with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
                 (
                     work,
@@ -331,7 +331,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 triton_codes[0]
             )
 
-            # Failure Case: issue comm in eager -> wait for comm in compile. Doesn't use the context manager.
+            # Failure Case: Issue comm in eager -> wait for comm in compile. Doesn't use the context manager.
             out_compiled = _run_loop_issue_comm_in_eager_wait_for_comm_in_compile(x)
             # In this case `.wait_tensor(y)` in compiled region will not be able to find the corresponding work object
             # to invoke the wait, thus the result will not match eager.
