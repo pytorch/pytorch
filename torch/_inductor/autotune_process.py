@@ -20,7 +20,6 @@ from typing import (
     List,
     Optional,
     Sequence,
-    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -553,10 +552,9 @@ class BenchmarkRequest:
 
     def make_run_fn(
         self,
-        InputSet: InputSet,
-        # *input_tensors: torch.Tensor,
-        # output_tensor: torch.Tensor,
-        # workspace: Optional[torch.Tensor] = None,
+        *input_tensors: torch.Tensor,
+        output_tensor: torch.Tensor,
+        workspace: Optional[torch.Tensor] = None,
     ) -> Callable[[], None]:
         raise NotImplementedError
 
@@ -566,17 +564,18 @@ class BenchmarkRequest:
     def do_bench(
         self,
         fn,
-        input_set: InputSet,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+        workspace: Optional[torch.Tensor] = None,
     ) -> float:
         raise NotImplementedError
 
     def benchmark(
         self,
-        input_set: InputSet,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+        workspace: Optional[torch.Tensor] = None,
     ) -> float:
-        # Unpack input set
-        input_tensors, output_tensor, workspace = input_set.unpack()
-
         debug = log.isEnabledFor(logging.DEBUG)
         if debug:
             start_ts = time.time()
@@ -592,7 +591,9 @@ class BenchmarkRequest:
             create_tensor_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
         try:
-            fn = self.make_run_fn(input_set)
+            fn = self.make_run_fn(
+                *input_tensors, output_tensor=output_tensor, workspace=workspace
+            )
         except NonzeroWorkspaceNotSupportedError:
             # Skipping all ops with nonzero workspace requirements
             log.info("Skipping op due to nonzero workspace requirement")
@@ -602,7 +603,9 @@ class BenchmarkRequest:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
-        out = self.do_bench(fn, input_set)
+        out = self.do_bench(
+            fn, *input_tensors, output_tensor=output_tensor, workspace=workspace
+        )
 
         if debug:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -626,20 +629,25 @@ class TestBenchmarkRequest(BenchmarkRequest):
     def __init__(self, value: Optional[float] = None) -> None:
         self.value = value
 
-    def benchmark(self, input_set: InputSet) -> float:
+    def benchmark(
+        self,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+        workspace: Optional[torch.Tensor] = None,
+    ) -> float:
         if self.value is None:
             raise Exception("Failed to run")  # noqa: TRY002
         return self.value
 
 
 class GPUDeviceBenchmarkMixin:
-
     def do_bench(
         self,
         fn,
-        input_set: InputSet,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+        workspace: Optional[torch.Tensor] = None,
     ) -> float:
-        input_tensors, output_tensor, _ = input_set.unpack()
         device_idx_set = {
             tensor.device.index
             for tensor in [*input_tensors, output_tensor]
@@ -647,6 +655,7 @@ class GPUDeviceBenchmarkMixin:
             and tensor.is_cuda
             and tensor.device.index is not None
         }
+        assert workspace is None, "Workspace is not supported for generic GPU benchmark"
         assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
         if len(device_idx_set) == 1:
             device_idx = next(iter(device_idx_set))
@@ -661,11 +670,12 @@ class GPUDeviceBenchmarkMixin:
 
 
 class CPUDeviceBenchmarkMixin:
-
     def do_bench(
         self,
         fn,
-        input_set: InputSet,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+        workspace: Optional[torch.Tensor] = None,
     ) -> float:
         return benchmarker.benchmark_cpu(fn)
 
@@ -696,7 +706,12 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.matrix_instr_nonkdim = matrix_instr_nonkdim
         self.workspace_arg = workspace_arg
 
-    def make_run_fn(self, input_set: InputSet) -> Callable[[], None]:
+    def make_run_fn(
+        self,
+        *input_tensors: torch.Tensor,
+        output_tensor: torch.Tensor,
+        workspace: Optional[torch.Tensor] = None,
+    ) -> Callable[[], None]:
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
         log.debug(
             "benchmark module key: %s, path: %s",
@@ -715,8 +730,6 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         if "warmup" in inspect.signature(run_method).parameters:
             warmup_arg["warmup"] = False
 
-        input_tensors, output_tensor, workspace = input_set.unpack()
-
         if output_tensor.device.type == "cpu":
             stream = 0
         else:
@@ -724,7 +737,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
             stream = get_raw_stream(self.output_tensor_meta.device.index)
 
-        arg_list = [input_tensors, output_tensor]
+        arg_list = [*input_tensors, output_tensor]
         if workspace is not None:
             arg_list.append(workspace)
 
@@ -783,8 +796,15 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         CUDACodeCache.compile(self.source_code, "so")
         log.debug("Done precompiling %s", self)
 
-    def make_run_fn(self, input_set: InputSet) -> Callable[[], None]:
-        input_tensors, output_tensor, workspace = input_set.unpack()
+    def make_run_fn(
+        self,
+        *input_tensors: torch.Tensor,
+        output_tensor: torch.Tensor,
+        workspace: Optional[torch.Tensor] = None,
+    ) -> Callable[[], None]:
+        assert (
+            workspace is None
+        ), "Workspace is not supported for generic CUDA benchmark"
         self.ensure_dll_loaded()
         self.update_workspace_size()
         args = [
@@ -894,8 +914,13 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
         CppCodeCache.load(self.source_code, device_type="cpu")
         log.debug("Done precompiling %s", self)
 
-    def make_run_fn(self, input_set: InputSet) -> Callable[[], None]:
-        input_tensors, output_tensor, _ = input_set.unpack()
+    def make_run_fn(
+        self,
+        *input_tensors: torch.Tensor,
+        output_tensor: torch.Tensor,
+        workspace: Optional[torch.Tensor] = None,
+    ) -> Callable[[], None]:
+        assert workspace is None, "Workspace is not supported for generic CPU benchmark"
         # TODO(jgong5): use CppPythonBindingsCodeCache for better binding perf
         self.DLL = CppCodeCache.load(self.source_code, device_type="cpu")
         args = [tensor.data_ptr() for tensor in list(input_tensors) + [output_tensor]]

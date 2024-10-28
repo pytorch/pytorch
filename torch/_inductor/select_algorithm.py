@@ -29,7 +29,6 @@ from torch._dynamo.utils import counters, identity, preserve_rng_state
 from . import config, ir
 from .autotune_process import (
     AutotuneInputs,
-    InputSet,
     TensorMeta,
     TritonBenchmarkRequest,
     TritonCPUBenchmarkRequest,
@@ -914,13 +913,9 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.mutated_inputs = mutated_inputs
         self.workspace_arg = workspace_arg
 
-    def benchmakr(self, input_set: InputSet) -> float:
+    def benchmark(self, *args, out, workspace: Optional[torch.Tensor] = None):
         assert self.bmreq is not None
-        return self.bmreq.benchmark(input_set)
-
-    # def benchmark(self, *args, out):
-    #     assert self.bmreq is not None
-    #     return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(*args, output_tensor=out, workspace=workspace)
 
     def precompile(self):
         assert self.bmreq is not None
@@ -989,7 +984,7 @@ class ExternKernelCaller(ChoiceCaller):
     def __str__(self) -> str:
         return f"ExternKernelCaller({self.choice.call_name()})"
 
-    def benchmark(self, *args, out):
+    def benchmark(self, *args, out, workspace: Optional[torch.Tensor] = None):
         if out.numel() == 0:
             # no need to run the kerrnel of do benchmarking
             return 0.0
@@ -1568,10 +1563,9 @@ class AlgorithmSelectorCache(PersistentCache):
         ) -> float:
             is_extern = isinstance(choice, ExternKernelCaller)
             input_set = autotune_inputs.get_input_set(is_extern)
-            inpts, output = input_set.get_bench_args()
+            inpts, output, workspace = input_set.unpack()
             output.zero_()
-            result = choice.benchmark(input_set)
-            # result = choice.benchmark(*inpts, out=output)
+            result = choice.benchmark(*inpts, out=output, workspace=workspace)
             if VERIFY and autotune_inputs.expected is not None:
                 autotune_inputs.verify(**VERIFY)
             if torch.cuda.is_available():
