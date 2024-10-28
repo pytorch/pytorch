@@ -7,7 +7,7 @@
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
-
+#include <nvtx3/nvToolsExtMem.h>
 #include <array>
 #include <atomic>
 #include <cstddef>
