@@ -329,7 +329,6 @@ def get_backend_index_for_aoti(
             func_group_mapping[func.structured_delegate]
         )
     ):
-
         backend_index = backend_indices[dispatch_key]
     else:
         # for the extend out-of-tree kernels, we don't need to
@@ -340,9 +339,9 @@ def get_backend_index_for_aoti(
         elif backend_indices[DispatchKey.CompositeExplicitAutograd].has_kernel(func):
             # We need to create C shim wrappers for CompositeExplicitAutograd kernels
             backend_index = backend_indices[DispatchKey.CompositeExplicitAutograd]
-        elif backend_indices[DispatchKey.CompositeExplicitAutogradNonFunctional].has_kernel(
-            func
-        ):
+        elif backend_indices[
+            DispatchKey.CompositeExplicitAutogradNonFunctional
+        ].has_kernel(func):
             # We need to create C shim wrappers for CompositeExplicitAutogradNonFunctional kernels
             backend_index = backend_indices[
                 DispatchKey.CompositeExplicitAutogradNonFunctional
