@@ -29,6 +29,7 @@ from torch._dynamo.utils import counters, identity, preserve_rng_state
 from . import config, ir
 from .autotune_process import (
     AutotuneInputs,
+    InputSet,
     TensorMeta,
     TritonBenchmarkRequest,
     TritonCPUBenchmarkRequest,
@@ -359,8 +360,7 @@ class TritonTemplateKernel(TritonKernel):
 
         if isinstance(index, int):
             return texpr(self.rename_indexing(val[index]))
-        else:
-            return ", ".join([texpr(self.rename_indexing(i)) for i in val])
+        return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
         self, subgraph_number: int, output_name: str, **fixed_inputs
@@ -388,7 +388,13 @@ class TritonTemplateKernel(TritonKernel):
             subgraph = self.subgraphs[subgraph_number]
 
             def add_input(name):
+                # This also implicitly adds name as an input to the kernel
                 return self.args.input(name)
+
+            def print_and_rename_indexing(index):
+                # This also implicitly adds the indexing symbols as an input to
+                # the kernel
+                return self.kexpr(self.rename_indexing(index))
 
             name = f"PlaceholderSubstitution_{subgraph_number}"
 
@@ -399,7 +405,7 @@ class TritonTemplateKernel(TritonKernel):
                     if name not in fixed_inputs:
                         # If it's not a fixed input, it's a load from a captured
                         # tensor
-                        index_str = outer_self.kexpr(index)
+                        index_str = print_and_rename_indexing(index)
                         var = add_input(name)
                         return f"tl.load({var} + {index_str})"
 
@@ -908,9 +914,13 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.mutated_inputs = mutated_inputs
         self.workspace_arg = workspace_arg
 
-    def benchmark(self, *args, out):
+    def benchmakr(self, input_set: InputSet) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        return self.bmreq.benchmark(input_set)
+
+    # def benchmark(self, *args, out):
+    #     assert self.bmreq is not None
+    #     return self.bmreq.benchmark(*args, output_tensor=out)
 
     def precompile(self):
         assert self.bmreq is not None
@@ -998,8 +1008,7 @@ class ExternKernelCaller(ChoiceCaller):
         fn = self.choice.to_callable()
         if self.kwargs:
             return functools.partial(fn, **self.kwargs)
-        else:
-            return fn
+        return fn
 
     def hash_key(self):
         return "-".join(
@@ -1561,7 +1570,8 @@ class AlgorithmSelectorCache(PersistentCache):
             input_set = autotune_inputs.get_input_set(is_extern)
             inpts, output = input_set.get_bench_args()
             output.zero_()
-            result = choice.benchmark(*inpts, out=output)
+            result = choice.benchmark(input_set)
+            # result = choice.benchmark(*inpts, out=output)
             if VERIFY and autotune_inputs.expected is not None:
                 autotune_inputs.verify(**VERIFY)
             if torch.cuda.is_available():
