@@ -1695,7 +1695,7 @@ class CommonTemplate:
             (
                 torch.randn(8, device=self.device),
                 torch.tensor([True, False, True], device=self.device),
-                [torch.tensor([3, 9, -2], device=self.device)],
+                [torch.tensor([3, 9, 2], device=self.device)],
             ),
         )
 
@@ -1708,7 +1708,7 @@ class CommonTemplate:
             (
                 torch.randn(8, device=self.device),
                 torch.tensor([True, False, True], device=self.device),
-                [torch.tensor([3, 9, -2], device=self.device)],
+                [torch.tensor([3, 9, 2], device=self.device)],
                 torch.randn(3, device=self.device),
             ),
         )
@@ -9500,6 +9500,46 @@ class CommonTemplate:
             self.assertEqual(out_ref.stride(), out_test.stride())
             self.assertEqual(x_ref, x_test)
 
+    @requires_gpu()
+    def test_stride_preservation_with_stride_modifying_fx_pass(self):
+        def f(x):
+            return x + 1
+
+        def custom_pass(g: torch.fx.Graph) -> None:
+            """
+            Applies `lamda x: x.t().contiguous().t()` to the output.
+            """
+            output_node = g.find_nodes(op="output")[0]
+            assert len(output_node.args) == 1
+            output = output_node.args[0][0]
+
+            with g.inserting_before(output_node):
+                output = g.call_function(
+                    torch.ops.aten.permute.default, args=(output, [1, 0])
+                )
+                output = g.call_function(
+                    torch.ops.aten.clone.default,
+                    args=(output,),
+                    kwargs={"memory_format": torch.contiguous_format},
+                )
+                output = g.call_function(
+                    torch.ops.aten.permute.default, args=(output, [1, 0])
+                )
+            output_node.args = ((output,),)
+            return g
+
+        with config.patch(
+            post_grad_custom_post_pass=custom_pass,
+        ):
+            f_compiled = torch.compile(f)
+
+            x = torch.rand(4, 4, device=GPU_TYPE)
+            y = f(x)
+            y_compiled = f_compiled(x)
+
+            self.assertEqual(y, y_compiled)
+            self.assertEqual(y.stride(), y_compiled.stride())
+
     def test_int_input_dynamic_shapes(self):
         @torch.compile(dynamic=True)
         def fn(x, i):
@@ -12145,17 +12185,34 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
         @requires_gpu()
         @parametrize("upcast_to_fp32", [False, True])
+        @config.patch("triton.use_block_ptr", True)
         def test_codegen_upcast_to_fp32(self, upcast_to_fp32):
             @torch.compile
-            def func(a, b):
-                return a * b
+            def func(a, b, c, d):
+                return a * b * c * d
 
-            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 2
+            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=torch.float16),) * 4
             with config.patch("triton.codegen_upcast_to_fp32", upcast_to_fp32):
                 func_opt = torch._dynamo.optimize("inductor")(func)
                 code = run_and_get_triton_code(func_opt, *inps)
                 fp32_cast_in_code = "to(tl.float32)" in code
                 self.assertEqual(fp32_cast_in_code, upcast_to_fp32)
+
+        @requires_gpu()
+        @parametrize("load_upcast_to_fp32", [False, True])
+        @parametrize("input_dtype", [torch.float16, torch.bfloat16])
+        @config.patch("triton.use_block_ptr", True)
+        def test_dtype_aware_codegen(self, load_upcast_to_fp32, input_dtype):
+            @torch.compile
+            def func(a, b, c, d):
+                return torch.sqrt(a * b * c * d)
+
+            inps = (torch.rand((32, 32), device=GPU_TYPE, dtype=input_dtype),) * 4
+            with config.patch("triton.codegen_upcast_to_fp32", load_upcast_to_fp32):
+                func_opt = torch._dynamo.optimize("inductor")(func)
+                code = run_and_get_triton_code(func_opt, *inps)
+                libdevice_cast_in_code = "libdevice.sqrt(tmp3.to(tl.float32))" in code
+                self.assertNotEqual(libdevice_cast_in_code, load_upcast_to_fp32)
 
         @config.patch("triton.use_block_ptr", False)
         def test_evict_last_non_coalesced_loads(self):
