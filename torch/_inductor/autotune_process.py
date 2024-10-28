@@ -20,6 +20,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Tuple,
     TYPE_CHECKING,
     Union,
 )
@@ -465,6 +466,61 @@ class TensorMeta:
             dtype=self.dtype,
             extra_size=self.offset,
         )
+
+
+@dataclasses.dataclass
+class InputSet:
+    """Represents a set of inputs and outputs with optional workspace"""
+
+    example_inputs: List[torch.Tensor]
+    out: torch.Tensor
+    workspace: Optional[torch.Tensor] = None
+
+    def get_bench_args(self) -> Tuple[List[torch.Tensor], torch.Tensor]:
+        inpts = self.example_inputs
+        if self.workspace is not None:
+            inpts += [self.workspace]
+        return inpts, self.out
+
+
+@dataclasses.dataclass
+class AutotuneInputs:
+    """During autotuning, we need to pass the same inputs to all choices.
+
+    Note:
+        Since we typically have a mix of external choices and triton choices, we create
+        two lists of inputs, one for external inputs and one for triton inputs.
+    """
+
+    standard: InputSet
+    extern: InputSet
+    expected: Optional[torch.Tensor] = None
+
+    def get_input_set(self, extern=False) -> InputSet:
+        """Returns the inputs and output tensors for a given choice."""
+        input_set = self.extern if extern else self.standard
+        return input_set
+
+    @classmethod
+    def from_separate_inputs(
+        cls,
+        example_inputs: List[torch.Tensor],
+        example_inputs_extern: List[torch.Tensor],
+        out: torch.Tensor,
+        out_extern: torch.Tensor,
+        expected: Optional[torch.Tensor] = None,
+        workspace: Optional[torch.Tensor] = None,
+    ) -> AutotuneInputs:
+        """Factory method to create AutotuneInputs from separate inputs/outputs"""
+        return cls(
+            standard=InputSet(example_inputs, out, workspace),
+            extern=InputSet(example_inputs_extern, out_extern, workspace),
+            expected=expected,
+        )
+
+    def verify(self, **kwargs):
+        """Verify the correctness of the benchmarking results"""
+        torch.testing.assert_close(self.extern.out, self.expected, **kwargs)
 
 
 @dataclasses.dataclass
