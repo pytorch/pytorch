@@ -66,7 +66,7 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compiler,
 )
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
-from torch._utils_internal import log_cache_bypass
+from torch._utils_internal import log_cache_operation
 
 from .remote_cache import create_cache
 from .runtime import autotune_cache
@@ -1210,6 +1210,29 @@ class FxGraphCache:
         return compiled_graph
 
     @staticmethod
+    def __should_save_graph(compiled_graph: CompiledFxGraph) -> bool:
+        from torch.testing._internal.common_utils import IS_CI
+
+        # Do not use any heuristics in unit tests
+        if torch._utils_internal.is_fb_unit_test() or IS_CI:
+            return True
+
+        compile_time_ns = compiled_graph._time_taken_ns
+        assert compile_time_ns is not None
+        compile_time = int(compile_time_ns // 1e6)  # convert to ms
+        minimum_time = (
+            config.fx_graph_cache_minimum_inductor_compile_time_for_caching_ms
+        )
+
+        if minimum_time is not None:
+            return compile_time >= minimum_time
+
+        minimum_time = torch._utils_internal.justknobs_getval_int(
+            "pytorch/remote_cache:minimum_inductor_compile_time_ms"
+        )
+        return compile_time >= minimum_time
+
+    @staticmethod
     def _save_graph(
         key: str,
         compiled_graph: CompiledFxGraph,
@@ -1220,6 +1243,13 @@ class FxGraphCache:
         """
         Store a serialized CompiledFxGraph on disk.
         """
+
+        if not FxGraphCache.__should_save_graph(compiled_graph):
+            log.info("Choosing to not save the graph")
+            counters["inductor"]["fxgraph_cache_refuse_save"] += 1
+            log_cache_operation("refuse_save_fx_graph")
+            return
+
         disk_compiled_graph = copy(compiled_graph)
         # We can't really serialize callables that may be C++/Triton/etc.,
         # so we serialize their PyCodeCache disk cache location instead.
@@ -1346,7 +1376,7 @@ class FxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             log.info("Bypassing FX Graph Cache because '%s'", e)
             if remote:
-                log_cache_bypass("bypass_fx_graph", str(e))
+                log_cache_operation("bypass_fx_graph", bypass_reason=str(e))
             cache_info = {
                 "cache_state": "bypass",
                 "cache_bypass_reason": str(e),

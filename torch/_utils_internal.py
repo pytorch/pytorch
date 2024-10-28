@@ -140,7 +140,7 @@ def log_trace_structured_event(*args, **kwargs) -> None:
     pass
 
 
-def log_cache_bypass(*args, **kwargs) -> None:
+def log_cache_operation(operation: str, bypass_reason: Optional[str] = None) -> None:
     pass
 
 

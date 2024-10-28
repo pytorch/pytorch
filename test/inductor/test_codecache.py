@@ -444,6 +444,32 @@ class TestFxGraphCache(TestCase):
 
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
+    @config.patch(
+        {"fx_graph_cache_minimum_inductor_compile_time_for_caching_ms": 100000}
+    )
+    def test_cache_refuse_save(self):
+        """
+        Test cache save refusal
+        """
+
+        def fn(x, y):
+            return x + y
+
+        with mock.patch(
+            "torch._utils_internal.is_fb_unit_test", return_value=False
+        ), mock.patch("from torch.testing._internal.common_utils.IS_CI", False):
+            compiled_fn = torch.compile(fn, fullgraph=True)
+
+            x = torch.randn(4)
+            y = torch.randn(4)
+            compiled_fn(x, y)
+
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_refuse_save"], 1)
+
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
     def test_generated_kernel_count(self):
         """
         Test that we bump the generated_kernel_count metric on a cache hit.

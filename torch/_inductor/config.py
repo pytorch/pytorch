@@ -53,6 +53,11 @@ fx_graph_cache = (
 # None: Not set -- Off for OSS, JustKnobs based for internal
 fx_graph_remote_cache: Optional[bool] = fx_graph_remote_cache_default()
 
+# If the graph takes longer to compile than this number, write to cache
+# If this number is set, then it takes priority. If not set, we use justknobs
+# to tell us what the value should be.
+fx_graph_cache_minimum_inductor_compile_time_for_caching_ms: Optional[int] = None
+
 # Enable autotune local cache.
 #
 # See bundled_autotune_remote_cache for the effect this flag has on the bundled

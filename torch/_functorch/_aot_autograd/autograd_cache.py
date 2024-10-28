@@ -33,7 +33,7 @@ from torch._inductor.codecache import (
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
-from torch._utils_internal import log_cache_bypass
+from torch._utils_internal import log_cache_operation
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -624,7 +624,7 @@ class AOTAutogradCache:
             cache_event_time = time.time_ns()
             cache_info["cache_bypass_reason"] = str(e)
             if remote:
-                log_cache_bypass("bypass_aot_autograd", str(e))
+                log_cache_operation("bypass_aot_autograd", bypass_reason=str(e))
             if config.strict_autograd_cache:
                 raise e
         if compiled_fn is None:
