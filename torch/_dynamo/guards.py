@@ -1854,10 +1854,21 @@ class GuardBuilder(GuardBuilderBase):
             else:
                 guard_manager = self.get_guard_manager(guard)
 
-                # Keep track of all the tensor guard managers to insert
-                # NoAliasing check at the end.
-                self.no_tensor_aliasing_names.append(tensor_name)
-                self.no_tensor_aliasing_guard_managers.append(guard_manager)
+                # skip_no_tensor_aliasing_guards_on_parameters bring
+                # unsoundness. If you compile a function with two different
+                # parameters, but later on you pass on same tensor as two
+                # different outputs (aliasing), Dynamo will not detect this.
+                # But we deliberately take this soundness hit because this
+                # usecase is quite rare and there is substantial reduction in
+                # guard overhead.
+                if not (
+                    config.skip_no_tensor_aliasing_guards_on_parameters
+                    and istype(value, torch.nn.Parameter)
+                ):
+                    # Keep track of all the tensor guard managers to insert
+                    # NoAliasing check at the end.
+                    self.no_tensor_aliasing_names.append(tensor_name)
+                    self.no_tensor_aliasing_guard_managers.append(guard_manager)
 
                 output_graph = self.check_fn_manager.output_graph
                 metadata = output_graph.input_source_to_sizes_strides[
