@@ -1,9 +1,6 @@
 #include <c10/util/irange.h>
 #include "StoreTestCommon.hpp"
 
-#include <iostream>
-#include <thread>
-
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 
 TEST(BackoffTest, exponentialBackoffDefaults) {

@@ -1693,8 +1693,7 @@ Tensor repeat_backward(
   }
   const auto input_dims = input_shape.size();
   auto num_unsqueezed = grad.dim() - input_dims;
-  for (const auto i : c10::irange(num_unsqueezed)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(num_unsqueezed)) {
     grad = grad.sum(0, false);
   }
 
@@ -6882,7 +6881,8 @@ std::tuple<Tensor, Tensor> scatter_reduce_backward(
     grad_self = (self == result) * grad_distributed;
     grad_src = (src == value) * grad_distributed.gather(dim, index);
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Expected 'reduce' to be one of 'sum', 'prod', 'mean', 'amax', 'amin' but got ",
         reduce,
         ".");
@@ -6977,7 +6977,8 @@ std::tuple<Tensor, Tensor> index_reduce_backward(
     grad_self = self_is_result * grad_distributed;
     grad_src = source_is_result * grad_distributed.index_select(dim, index);
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Expected 'reduce' to be one of 'prod', 'amax', 'amin' or 'mean' but got ",
         reduce,
         ".");
@@ -7045,12 +7046,9 @@ mkldnn_rnn_layer_differentiable_backward(
     at::IntArrayRef batch_sizes,
     bool batch_first,
     const at::Tensor& workspace) {
-  const Tensor& grad_output_r =
-      c10::value_or_else(grad_output_r_opt, [] { return Tensor(); });
-  const Tensor& grad_hy_r =
-      c10::value_or_else(grad_hy_r_opt, [] { return Tensor(); });
-  const Tensor& grad_cy_r =
-      c10::value_or_else(grad_cy_r_opt, [] { return Tensor(); });
+  const Tensor& grad_output_r = grad_output_r_opt.value_or(Tensor());
+  const Tensor& grad_hy_r = grad_hy_r_opt.value_or(Tensor());
+  const Tensor& grad_cy_r = grad_cy_r_opt.value_or(Tensor());
   if (!grad_output_r.defined() && !grad_hy_r.defined() &&
       !grad_cy_r.defined()) {
     return std::make_tuple(

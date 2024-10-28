@@ -140,10 +140,6 @@ def make_test_case(
 
 
 if RUN_GPU:
-    config.abi_compatible = False
-    # TODO enable abi_compatible
-    if GPU_TYPE == "xpu":
-        config.abi_compatible = False
 
     class BaseTest(NamedTuple):
         name: str
@@ -161,6 +157,8 @@ if RUN_GPU:
         "test_mm_plus_mm3",
         "test_addmm",
         "test_linear_relu",
+        "test_fft_real_input",
+        "test_fft_real_input_real_output",
     ]
 
     # Maintain two separate test lists for cuda and cpp for now
@@ -211,6 +209,7 @@ if RUN_GPU:
             BaseTest(f"test_unspec_inputs_{str(dtype)[6:]}")
             for dtype in test_torchinductor.test_dtypes
         ],
+        BaseTest("test_consecutive_split_cumprod"),
         BaseTest("test_pointwise_hermite_polynomial_he"),
         BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(
@@ -270,10 +269,7 @@ if RUN_GPU:
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
     ]:
-        # TODO enable test_dtypeview cases after enable abi_compatible.
-        if item.device == "xpu" and (
-            item.name in XPU_BASE_TEST_SKIP or item.name.startswith("test_dtypeview")
-        ):
+        if item.device == "xpu" and item.name in XPU_BASE_TEST_SKIP:
             continue
         make_test_case(item.name, item.device, item.tests, check_code=item.check_code)
 
