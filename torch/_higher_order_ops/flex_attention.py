@@ -769,7 +769,7 @@ def sdpa_dense_backward(
     actual_grad_key = torch.empty_like(key)
     actual_grad_value = torch.empty_like(value)
 
-    def _map_buffer(
+    def _maybe_new_buffer(
         buffer: Union[torch.Tensor, torch.SymInt, int]
     ) -> Optional[Union[torch.Tensor, torch.SymInt, int]]:
         if isinstance(buffer, torch.Tensor):
@@ -777,7 +777,7 @@ def sdpa_dense_backward(
         return buffer
 
     actual_grad_score_mod_captured = [
-        _map_buffer(buffer) for buffer in score_mod_other_buffers
+        _maybe_new_buffer(buffer) for buffer in score_mod_other_buffers
     ]
 
     Bq, Bkv = query.size(0), key.size(0)
@@ -1070,10 +1070,6 @@ def flex_attention_backward_functionalize(
     assert isinstance(block_mask_unwrapped, tuple)
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
-    assert all(
-        isinstance(item, (torch.Tensor, torch.SymInt))
-        for item in score_mod_other_buffers_unwrapped + mask_mod_other_buffers_unwrapped
-    )
 
     with ctx.redispatch_to_next() as m:
         functional_fw_graph = ctx.functionalize(fw_graph)

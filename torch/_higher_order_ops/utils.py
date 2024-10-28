@@ -479,16 +479,16 @@ def get_dummy_aot_autograd_config():
 
 
 # Note [lifted arg types in hop]
-# We'll automatically lift the free symbols in tensors inputs as argument for Hops.
-# The implications to the types of lifted args of hops are:
+# For dynamoed hops, we automatically lift the free symbols in tensors as arguments.
+# This has implications for the types of lifted args for different dispatch keys:
 #   1. functionalization, FakeTensorMode, ProxyTorchDispatchMode, Autograd need to support torch.Symint
 #      lifted args because it's on the path of torch.compile(dynamic=True).
 #   2. functionalization, FakeTensorMode, ProxyTorchDispatchMode, Autograd, CompositeExplicitAutograd need
-#      to support int arguments. Because in the eager run case, we'll re-trace the subgraph in AutogradKey
-#      as of today. So for inner hops, they may receive int inputs from the shape of outer tensor inputs.
-#      CompositeExplicitAutograd won't receive SymInt inputs becuase it only accepts real tensor inputs.
-def validate_lifted_arg_types(args: Union[Tuple[Any], List[Any]]):
+#      to support int arguments. In the eager run case, we re-trace the subgraph in AutogradKey, so inner
+#      hops may receive int inputs from the shape of outer tensor inputs.
+#      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
+def validate_lifted_arg_types(lifted_args: Union[Tuple[Any], List[Any]]):
     allowed_types = (torch.Tensor, int, torch.SymInt)
     assert all(
-        isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in args
-    ), f"lifted args can only be of {allowed_types} but got {tuple(type(arg) for arg in args)}"
+        isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
+    ), f"lifted args can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
