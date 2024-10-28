@@ -549,7 +549,8 @@ API Example::
   # Step 1. program capture
   # NOTE: this API will be updated to torch.export API in the future, but the captured
   # result should mostly stay the same
-  m = capture_pre_autograd_graph(float_model, *example_inputs)
+  example_inputs = (torch.rand(1, 5),)
+  m = capture_pre_autograd_graph(float_model, example_inputs)
   # we get a model with aten ops
 
   # Step 2. quantization
