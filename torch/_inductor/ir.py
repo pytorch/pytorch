@@ -4057,7 +4057,7 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out, workspace=None) -> float:
         algo = self.to_callable()
-        return benchmarker.benchmark(algo, args, {"out": out, "workspace": workspace})
+        return benchmarker.benchmark(algo, args, {"out": out})
 
     def call_name(self) -> str:
         raise NotImplementedError
