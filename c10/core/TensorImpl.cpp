@@ -605,22 +605,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
 void TensorImpl::copy_tensor_metadata(
     const TensorImpl* src_impl,
     TensorImpl* dest_impl,
-    const c10::VariableVersion& version_counter,
-    bool allow_tensor_metadata_change) {
-  copy_tensor_metadata_except_version_counter(
-      src_impl, dest_impl, allow_tensor_metadata_change);
-  // TODO: In the ideal end state, it's okay to set disabled version_counter
-  // on inference tensor since it's a no-op. This requires refactor on call
-  // sites.
-  if (!dest_impl->is_inference()) {
-    dest_impl->set_version_counter(version_counter);
-  }
-}
-
-void TensorImpl::copy_tensor_metadata(
-    const TensorImpl* src_impl,
-    TensorImpl* dest_impl,
-    c10::VariableVersion&& version_counter,
+    c10::VariableVersion version_counter,
     bool allow_tensor_metadata_change) {
   copy_tensor_metadata_except_version_counter(
       src_impl, dest_impl, allow_tensor_metadata_change);

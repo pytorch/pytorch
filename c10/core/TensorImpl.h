@@ -2739,20 +2739,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   static void copy_tensor_metadata(
       const TensorImpl* src_impl,
       TensorImpl* dest_impl,
-      const c10::VariableVersion& version_counter,
-      bool allow_tensor_metadata_change);
-
-  /**
-   * Copy the tensor metadata fields (e.g. sizes / strides / storage pointer /
-   * storage_offset) from one TensorImpl to another TensorImpl.
-   *
-   * For usage of `version_counter` and `allow_tensor_metadata_change`, see NOTE
-   * [ TensorImpl Shallow-Copying ].
-   */
-  static void copy_tensor_metadata(
-      const TensorImpl* src_impl,
-      TensorImpl* dest_impl,
-      c10::VariableVersion&& version_counter,
+      c10::VariableVersion version_counter,
       bool allow_tensor_metadata_change);
 
  private:
