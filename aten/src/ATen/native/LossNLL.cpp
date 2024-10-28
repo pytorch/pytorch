@@ -147,7 +147,7 @@ inline Tensor optional_contiguous(const Tensor& source) {
 // or nullptr if the tensor is undefined.
 template <typename scalar_t>
 inline scalar_t* optional_data(const Tensor& source) {
-  if constexpr (std::is_const<scalar_t>::value) {
+  if constexpr (std::is_const_v<scalar_t>) {
     return source.defined() ? source.const_data_ptr<scalar_t>() : nullptr;
   } else {
     return source.defined() ? source.data_ptr<scalar_t>() : nullptr;

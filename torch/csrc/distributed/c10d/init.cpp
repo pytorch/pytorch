@@ -109,6 +109,7 @@ class IntrusivePtrNoGilDestructor {
   explicit IntrusivePtrNoGilDestructor(T* impl)
       // NOLINTNEXTLINE(bugprone-exception-escape)
       : impl_(c10::intrusive_ptr<T>::unsafe_steal_from_new(impl)) {}
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~IntrusivePtrNoGilDestructor() {
     if (impl_) {
       if (PyGILState_Check()) {
@@ -338,6 +339,7 @@ class PythonRequest : public ::c10d::control_plane::Request {
 };
 class PythonResponse : public ::c10d::control_plane::Response {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   void setContent(std::string&& content, const std::string& content_type)
       override {
     PYBIND11_OVERRIDE_PURE_NAME(
@@ -1610,7 +1612,7 @@ Arguments:
             if (!store) {
               throw py::value_error("store argument cannot be None");
             }
-            return new ::c10d::PrefixStore(prefix, store);
+            return new ::c10d::PrefixStore(prefix, std::move(store));
           }),
           py::arg("prefix"),
           py::arg("store"))
@@ -2755,7 +2757,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "_verify_work_timeout",
               [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 const c10::intrusive_ptr<::c10d::Work> work,
+                 const c10::intrusive_ptr<::c10d::Work>& work,
                  const std::chrono::milliseconds& timeout) {
                 return self->verifyWorkTimeoutForTest(work, timeout);
               },
@@ -3415,6 +3417,7 @@ static PyMethodDef methods[] = { // NOLINT
     {"_c10d_init", c10d_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 PyMethodDef* python_functions() {
   return methods;
 }
