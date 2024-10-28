@@ -2690,21 +2690,13 @@ class TestReductions(TestCase):
                     self.assertEqual(std1, std2)
                     self.assertEqual(mean1, mean2)
 
+    @onlyCPU
     def test_std_mean_inf(self, device):
-        x = torch.tensor(np.inf, dtype=torch.float32)
-        self.assertEqual(np.inf, torch.std_mean(x)[1].item())
-
-        x = torch.tensor([np.inf, np.inf], dtype=torch.float32)
-        self.assertEqual(np.inf, torch.std_mean(x)[1].item())
-
-        x = torch.tensor([[1, np.inf]], dtype=torch.float32)
-        self.assertEqual(np.inf, torch.std_mean(x)[1].item())
-
-        x = torch.tensor([[1, np.inf], [-1, np.inf]], dtype=torch.float32)
-        self.assertEqual(np.inf, torch.std_mean(x)[1].item())
-
-        x = torch.tensor([[1, np.inf]], dtype=torch.float32)
-        self.assertEqual(torch.mean(x).item(), torch.std_mean(x)[1].item())
+        test_cases = (np.inf, [np.inf, np.inf], [[1, np.inf], [-1, np.inf]])
+        for test_case in test_cases:
+            x = torch.tensor(test_case, dtype=torch.float32, device=device)
+            self.assertEqual(np.inf, torch.std_mean(x)[1].item())
+            self.assertEqual(torch.mean(x).item(), torch.std_mean(x)[1].item())
 
     def test_std_mean_all_dims(self, device):
         x = torch.rand(100, 50, 20, device=device)
