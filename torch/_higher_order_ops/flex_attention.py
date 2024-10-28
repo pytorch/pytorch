@@ -12,6 +12,7 @@ from torch._higher_order_ops.utils import (
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     UnsupportedAliasMutationException,
+    validate_lifted_arg_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
@@ -85,11 +86,7 @@ class FlexAttentionHOP(HigherOrderOperator):
         score_mod_other_buffers: Tuple = (),
         mask_mod_other_buffers: Tuple = (),
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        if not all(
-            isinstance(buf, (torch.Tensor, torch.SymInt, int))
-            for buf in score_mod_other_buffers + mask_mod_other_buffers
-        ):
-            raise RuntimeError("Other buffers must be tensors.")
+        validate_lifted_arg_types(score_mod_other_buffers + mask_mod_other_buffers)
         return super().__call__(
             query,
             key,
@@ -129,11 +126,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
     ) -> Tuple[
         torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
     ]:
-        if not all(
-            isinstance(buf, (torch.Tensor, int, torch.SymInt))
-            for buf in score_mod_other_buffers + mask_mod_other_buffers
-        ):
-            raise RuntimeError("Other buffers must be tensors.")
+        validate_lifted_arg_types(score_mod_other_buffers + mask_mod_other_buffers)
         return super().__call__(
             query,
             key,
@@ -415,10 +408,6 @@ def flex_attention_functionalize(
     assert isinstance(block_mask_unwrapped, tuple)
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
-    assert all(
-        isinstance(item, (torch.Tensor, torch.SymInt))
-        for item in score_mod_other_buffers_unwrapped + mask_mod_other_buffers_unwrapped
-    )
 
     example_vals = (
         [torch.zeros((), dtype=query.dtype)]
@@ -1082,7 +1071,7 @@ def flex_attention_backward_functionalize(
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
     assert all(
-        isinstance(item, torch.Tensor)
+        isinstance(item, (torch.Tensor, torch.SymInt))
         for item in score_mod_other_buffers_unwrapped + mask_mod_other_buffers_unwrapped
     )
 

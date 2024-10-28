@@ -2,7 +2,7 @@
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, List
+from typing import Any, Callable, List, Tuple, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -99,7 +99,23 @@ def _maybe_reenter_make_fx(fn):
     if _CURRENT_MAKE_FX_TRACER is not None:
         return reenter_make_fx(fn)
     else:
-        return make_fx(fn)
+
+        def _maybe_make_fx_with_fake_mode(fn):
+            @functools.wraps(fn)
+            def wrapped(*args):
+                from torch._guards import detect_fake_mode
+
+                fake_mode = detect_fake_mode(args)
+                if fake_mode is None:
+                    # we creaeta a fake_mode here to make sure we could
+                    # trace the graph with data-dependent calls e.g. .item()
+                    return make_fx(fn, tracing_mode="fake")(*args)
+                # Tracing with real if all inputs have been fakfied
+                return make_fx(fn)(*args)
+
+            return wrapped
+
+        return _maybe_make_fx_with_fake_mode(fn)
 
 
 @contextmanager
@@ -460,3 +476,19 @@ def get_dummy_aot_autograd_config():
         aot_id=0,
         keep_inference_input_mutations=False,
     )
+
+
+# Note [lifted arg types in hop]
+# We'll automatically lift the free symbols in tensors inputs as argument for Hops.
+# The implications to the types of lifted args of hops are:
+#   1. functionalization, FakeTensorMode, ProxyTorchDispatchMode, Autograd need to support torch.Symint
+#      lifted args because it's on the path of torch.compile(dynamic=True).
+#   2. functionalization, FakeTensorMode, ProxyTorchDispatchMode, Autograd, CompositeExplicitAutograd need
+#      to support int arguments. Because in the eager run case, we'll re-trace the subgraph in AutogradKey
+#      as of today. So for inner hops, they may receive int inputs from the shape of outer tensor inputs.
+#      CompositeExplicitAutograd won't receive SymInt inputs becuase it only accepts real tensor inputs.
+def validate_lifted_arg_types(args: Union[Tuple[Any], List[Any]]):
+    allowed_types = (torch.Tensor, int, torch.SymInt)
+    assert all(
+        isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in args
+    ), f"lifted args can only be of {allowed_types} but got {tuple(type(arg) for arg in args)}"

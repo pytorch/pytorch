@@ -32,17 +32,12 @@ from torch.nn.attention.flex_attention import (
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import (
+    flex_attention_supported_platform as supported_platform,
+)
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 from torch.utils._triton import has_triton
 
-
-# Skip tests if Triton is not available
-supported_platform = skipUnless(
-    torch.cuda.is_available()
-    and has_triton()
-    and torch.cuda.get_device_capability() >= (8, 0),
-    "Requires CUDA and Triton",
-)
 
 # Use this decorator only when hitting Triton bugs on H100
 running_on_a100_only = skipUnless(

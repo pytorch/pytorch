@@ -380,6 +380,10 @@ test_inductor_cpp_wrapper() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
+  # Run certain inductor unit tests with cpp wrapper. In the end state, we should be able to run all the inductor
+  # unit tests with cpp wrapper.
+  python test/run_test.py --include inductor/test_torchinductor.py --verbose
+
   python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
     --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
