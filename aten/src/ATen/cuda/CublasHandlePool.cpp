@@ -52,10 +52,8 @@ using CuBlasLtPoolType = DeviceThreadHandlePool<cublasLtHandle_t, createCublasLt
 // ugly hack until hipblasSetWorkspace exists
 #include <rocblas/rocblas.h>
 
-static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
-{
-    switch(error)
-    {
+static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error) {
+    switch(error) {
     case rocblas_status_size_unchanged:
     case rocblas_status_size_increased:
     case rocblas_status_success:
