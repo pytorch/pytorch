@@ -119,7 +119,7 @@ inline Tensor& fill_empty_deterministic_(Tensor& tensor) {
 // The ZeroTensor allocator ignores whatever allocation is requested and always
 // gives you nullptr
 struct ZeroTensorAllocator final : public at::Allocator {
-  ZeroTensorAllocator(at::Device device) : device_(device) {};
+  ZeroTensorAllocator(at::Device device) : device_(device) {}
   ~ZeroTensorAllocator() override = default;
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
