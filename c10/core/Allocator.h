@@ -10,7 +10,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 #include <c10/util/UniqueVoidPtr.h>
@@ -104,7 +103,7 @@ class C10_API DataPtr {
    * be; be sure to read the source code of the Allocator
    * in question to confirm this.
    */
-  C10_NODISCARD bool compare_exchange_deleter(
+  [[nodiscard]] bool compare_exchange_deleter(
       DeleterFnPtr expected_deleter,
       DeleterFnPtr new_deleter) {
     return ptr_.compare_exchange_deleter(expected_deleter, new_deleter);
@@ -114,10 +113,8 @@ class C10_API DataPtr {
   }
   // Unsafely mutates the device on a DataPtr.  Under normal use,
   // you should never actually need to call this function.
-  // We used to need this for the implementation of the hack detailed
-  // in Note [Masquerading as CUDA], but that hack has been removed.
-  C10_DEPRECATED_MESSAGE(
-      "unsafe_set_device is deprecated. You should never need to call this function.")
+  // We need this for the implementation of the hack detailed
+  // in Note [Masquerading as CUDA]
   void unsafe_set_device(Device device) {
     device_ = device;
   }
@@ -160,6 +157,7 @@ inline bool operator!=(std::nullptr_t, const DataPtr& dp) noexcept {
 // possible, or the raw interface will incorrectly reported as unsupported,
 // when it is actually possible.
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct C10_API Allocator {
   virtual ~Allocator() = default;
 
@@ -226,10 +224,24 @@ struct C10_API Allocator {
 // allocation InefficientStdFunctionContext, on top of the dynamic
 // allocation which is implied by std::function itself.
 struct C10_API InefficientStdFunctionContext {
-  void* ptr_;
+  void* ptr_{nullptr};
   std::function<void(void*)> deleter_;
   InefficientStdFunctionContext(void* ptr, std::function<void(void*)> deleter)
       : ptr_(ptr), deleter_(std::move(deleter)) {}
+  InefficientStdFunctionContext(const InefficientStdFunctionContext&) = delete;
+  InefficientStdFunctionContext(InefficientStdFunctionContext&& rhs) noexcept
+      : ptr_(std::exchange(rhs.ptr_, nullptr)),
+        deleter_(std::move(rhs.deleter_)) {}
+  InefficientStdFunctionContext& operator=(
+      const InefficientStdFunctionContext&) = delete;
+  // NOLINTNEXTLINE(performance-noexcept-move-constructor)
+  InefficientStdFunctionContext& operator=(
+      InefficientStdFunctionContext&& rhs) {
+    this->~InefficientStdFunctionContext();
+    ptr_ = std::exchange(rhs.ptr_, nullptr);
+    deleter_ = std::move(rhs.deleter_);
+    return *this;
+  }
   ~InefficientStdFunctionContext() {
     if (deleter_) {
       deleter_(ptr_);
@@ -273,9 +285,6 @@ struct AllocatorRegisterer {
 // An interface for reporting thread local memory usage
 // per device
 struct C10_API MemoryReportingInfoBase : public c10::DebugInfoBase {
-  MemoryReportingInfoBase();
-  ~MemoryReportingInfoBase() override = default;
-
   /**
    * alloc_size corresponds to the size of the ptr.
    *
@@ -315,6 +324,7 @@ C10_API void reportOutOfMemoryToProfiler(
     Device device);
 
 // used to hold traceback information in allocators
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct GatheredContext {
   virtual ~GatheredContext() = default;
 };

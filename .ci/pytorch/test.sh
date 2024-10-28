@@ -49,16 +49,16 @@ NUM_TEST_SHARDS="${NUM_TEST_SHARDS:=1}"
 export VALGRIND=ON
 # export TORCH_INDUCTOR_INSTALL_GXX=ON
 if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
-  # clang9 appears to miscompile code involving c10::optional<c10::SymInt>,
+  # clang9 appears to miscompile code involving std::optional<c10::SymInt>,
   # such that valgrind complains along these lines:
   #
   # Conditional jump or move depends on uninitialised value(s)
   #    at 0x40303A: ~optional_base (Optional.h:281)
   #    by 0x40303A: call (Dispatcher.h:448)
-  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:10)
+  #    by 0x40303A: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, std::optional<c10::SymInt>) (basic.cpp:10)
   #    by 0x403700: main (basic.cpp:16)
   #  Uninitialised value was created by a stack allocation
-  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, c10::optional<c10::SymInt>) (basic.cpp:6)
+  #    at 0x402AAA: call(at::Tensor const&, c10::ArrayRef<c10::SymInt>, c10::ArrayRef<c10::SymInt>, std::optional<c10::SymInt>) (basic.cpp:6)
   #
   # The problem does not appear with gcc or newer versions of clang (we tested
   # clang14).  So we suppress valgrind testing for clang9 specifically.
@@ -72,7 +72,7 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   #
   # using namespace at;
   #
-  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+  # Tensor call(const at::Tensor & self, c10::SymIntArrayRef size, c10::SymIntArrayRef stride, std::optional<c10::SymInt> storage_offset) {
   #   auto op = c10::Dispatcher::singleton()
   #       .findSchemaOrThrow(at::_ops::as_strided::name, at::_ops::as_strided::overload_name)
   #       .typed<at::_ops::as_strided::schema>();
@@ -81,7 +81,7 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   #
   # int main(int argv) {
   #   Tensor b = empty({3, 4});
-  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), c10::nullopt);
+  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), std::nullopt);
   # }
   export VALGRIND=OFF
 fi
@@ -196,6 +196,9 @@ install_tlparse
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=true:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0:check_initialization_order=true:debug=true
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+        export ASAN_OPTIONS="${ASAN_OPTIONS}:protect_shadow_gap=0"
+    fi
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
@@ -233,8 +236,8 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # it depends on a ton of dynamic libraries that most programs aren't gonna
     # have, and it applies to child processes.
 
-    # TODO: get rid of the hardcoded path
-    export LD_PRELOAD=/usr/lib/llvm-15/lib/clang/15.0.7/lib/linux/libclang_rt.asan-x86_64.so
+    LD_PRELOAD=$(clang --print-file-name=libclang_rt.asan-x86_64.so)
+    export LD_PRELOAD
     # Disable valgrind for asan
     export VALGRIND=OFF
 
@@ -281,7 +284,7 @@ test_python_shard() {
 
   # modify LD_LIBRARY_PATH to ensure it has the conda env.
   # This set of tests has been shown to be buggy without it for the split-build
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   assert_git_not_dirty
 }
@@ -307,7 +310,8 @@ test_dynamo_shard() {
     --exclude-distributed-tests \
     --exclude-torch-export-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
-    --verbose
+    --verbose \
+    --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -320,6 +324,7 @@ test_inductor_distributed() {
   python test/run_test.py -i distributed/test_c10d_functional_native.py --verbose
   python test/run_test.py -i distributed/_tensor/test_dtensor_compile.py --verbose
   python test/run_test.py -i distributed/tensor/parallel/test_micro_pipeline_tp.py --verbose
+  python test/run_test.py -i distributed/_composable/test_replicate_with_compiler.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_comm.py --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_multi_group --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_training.py -k test_train_parity_with_activation_checkpointing --verbose
@@ -331,11 +336,12 @@ test_inductor_distributed() {
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype --verbose
   python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_clip_grad_norm_.py -k test_clip_grad_norm_2d --verbose
+  python test/run_test.py -i distributed/_composable/fsdp/test_fully_shard_compile.py --verbose
   python test/run_test.py -i distributed/fsdp/test_fsdp_tp_integration.py -k test_fsdp_tp_integration --verbose
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives --verbose
+  python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives distributed/test_compute_comm_reordering --verbose
   assert_git_not_dirty
 }
 
@@ -369,21 +375,27 @@ test_inductor_aoti() {
   CPP_TESTS_DIR="${BUILD_BIN_DIR}" LD_LIBRARY_PATH="${TORCH_LIB_DIR}" python test/run_test.py --cpp --verbose -i cpp/test_aoti_abi_check cpp/test_aoti_inference
 }
 
-test_inductor_cpp_wrapper_abi_compatible() {
-  export TORCHINDUCTOR_ABI_COMPATIBLE=1
+test_inductor_cpp_wrapper() {
+  export TORCHINDUCTOR_CPP_WRAPPER=1
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  echo "Testing Inductor cpp wrapper mode with TORCHINDUCTOR_ABI_COMPATIBLE=1"
-  PYTORCH_TESTING_DEVICE_ONLY_FOR="" python test/run_test.py --include inductor/test_cpu_cpp_wrapper
-  python test/run_test.py --include inductor/test_cuda_cpp_wrapper inductor/test_cpu_repro inductor/test_extension_backend
-
-  TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
+  python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
     --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
   python benchmarks/dynamo/check_accuracy.py \
     --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
     --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_timm_training.csv"
+
+  python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+    --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
+  python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+    --bfloat16 --inference --inductor --only llama --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
+  python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+    --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
+  python benchmarks/dynamo/check_accuracy.py \
+    --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
+    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -403,7 +415,7 @@ pr_time_benchmarks() {
   PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks source benchmarks/dynamo/pr_time_benchmarks/benchmark_runner.sh "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "benchmarks/dynamo/pr_time_benchmarks/benchmarks"
   echo "benchmark results on current PR: "
   cat  "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
-  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks python benchmarks/dynamo/pr_time_benchmarks/check_results.py "benchmarks/dynamo/pr_time_benchmarks/expected_results.csv" "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv"
+  PYTHONPATH=$(pwd)/benchmarks/dynamo/pr_time_benchmarks python benchmarks/dynamo/pr_time_benchmarks/check_results.py "benchmarks/dynamo/pr_time_benchmarks/expected_results.csv" "$TEST_REPORTS_DIR/pr_time_benchmarks_results.csv" "$TEST_REPORTS_DIR/new_expected_results.csv"
 }
 
 if [[ "${TEST_CONFIG}" == *pr_time_benchmarks* ]]; then
@@ -511,7 +523,7 @@ test_perf_for_dashboard() {
               "${target_flag[@]}" --"$mode" --"$dtype" --export --disable-cudagraphs "$@" \
               --output "$TEST_REPORTS_DIR/${backend}_export_${suite}_${dtype}_${mode}_${device}_${target}.csv"
         fi
-        TORCHINDUCTOR_ABI_COMPATIBLE=1 $TASKSET python "benchmarks/dynamo/$suite.py" \
+        $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --export-aot-inductor --disable-cudagraphs "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_aot_inductor_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
@@ -566,13 +578,6 @@ test_single_dynamo_benchmark() {
     test_perf_for_dashboard "$suite" \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" "$@" "${partition_flags[@]}"
   else
-    if [[ "${TEST_CONFIG}" == *aot_inductor* && "${TEST_CONFIG}" != *cpu_aot_inductor* ]]; then
-      # Test AOTInductor with the ABI-compatible mode on CI
-      # This can be removed once the ABI-compatible mode becomes default.
-      # For CPU device, we perfer non ABI-compatible mode on CI when testing AOTInductor.
-      export TORCHINDUCTOR_ABI_COMPATIBLE=1
-    fi
-
     if [[ "${TEST_CONFIG}" == *_avx2* ]]; then
       TEST_CONFIG=${TEST_CONFIG//_avx2/}
     fi
@@ -647,17 +652,6 @@ test_dynamo_benchmark() {
 test_inductor_torchbench_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-
-  # Test some models in the cpp wrapper mode
-  TORCHINDUCTOR_ABI_COMPATIBLE=1 TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-    --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-  TORCHINDUCTOR_ABI_COMPATIBLE=1 TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-    --bfloat16 --inference --inductor --only llama --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-  TORCHINDUCTOR_ABI_COMPATIBLE=1 TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-    --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-  python benchmarks/dynamo/check_accuracy.py \
-    --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
-    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
 
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
     --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
@@ -748,19 +742,9 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     fi
     cat "$output_name"
     # The threshold value needs to be actively maintained to make this check useful.
-    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
+    # Allow 1% variance for CPU perf to accommodate perf fluctuation
+    python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target" -s 0.99
   done
-
-  # Add a few ABI-compatible accuracy tests for CPU. These can be removed once we turn on ABI-compatible as default.
-  TORCHINDUCTOR_ABI_COMPATIBLE=1 python benchmarks/dynamo/timm_models.py --device cpu --accuracy \
-    --bfloat16 --inference --export-aot-inductor --disable-cudagraphs --only adv_inception_v3 \
-    --output "$TEST_REPORTS_DIR/aot_inductor_smoke_test.csv"
-  TORCHINDUCTOR_ABI_COMPATIBLE=1 python benchmarks/dynamo/timm_models.py --device cpu --accuracy \
-    --bfloat16 --inference --export-aot-inductor --disable-cudagraphs --only beit_base_patch16_224 \
-    --output "$TEST_REPORTS_DIR/aot_inductor_smoke_test.csv"
-  python benchmarks/dynamo/check_accuracy.py \
-    --actual "$TEST_REPORTS_DIR/aot_inductor_smoke_test.csv" \
-    --expected "benchmarks/dynamo/ci_expected_accuracy/aot_inductor_timm_inference.csv"
 }
 
 test_torchbench_gcp_smoketest(){
@@ -1371,7 +1355,7 @@ test_executorch() {
   echo "Run ExecuTorch regression tests for some models"
   # TODO(huydhn): Add more coverage here using ExecuTorch's gather models script
   # shellcheck disable=SC1091
-  source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
+  source .ci/scripts/test_model.sh mv3 cmake xnnpack-quantization-delegation ''
 
   popd
 
@@ -1453,7 +1437,6 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   else
     install_torchaudio cuda
   fi
-  install_torchtext
   install_torchvision
   TORCH_CUDA_ARCH_LIST="8.0;8.6" pip_install git+https://github.com/pytorch/ao.git
   id=$((SHARD_NUMBER-1))
@@ -1479,9 +1462,11 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
-elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
+  install_torchaudio cuda
   install_torchvision
-  test_inductor_cpp_wrapper_abi_compatible
+  checkout_install_torchbench hf_T5 llama moco
+  PYTHONPATH=$(pwd)/torchbench test_inductor_cpp_wrapper
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"

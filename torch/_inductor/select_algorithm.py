@@ -347,8 +347,7 @@ class TritonTemplateKernel(TritonKernel):
 
         if isinstance(index, int):
             return texpr(self.rename_indexing(val[index]))
-        else:
-            return ", ".join([texpr(self.rename_indexing(i)) for i in val])
+        return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
         self, subgraph_number: int, output_name: str, **fixed_inputs
@@ -376,7 +375,13 @@ class TritonTemplateKernel(TritonKernel):
             subgraph = self.subgraphs[subgraph_number]
 
             def add_input(name):
+                # This also implicitly adds name as an input to the kernel
                 return self.args.input(name)
+
+            def print_and_rename_indexing(index):
+                # This also implicitly adds the indexing symbols as an input to
+                # the kernel
+                return self.kexpr(self.rename_indexing(index))
 
             name = f"PlaceholderSubstitution_{subgraph_number}"
 
@@ -387,7 +392,7 @@ class TritonTemplateKernel(TritonKernel):
                     if name not in fixed_inputs:
                         # If it's not a fixed input, it's a load from a captured
                         # tensor
-                        index_str = outer_self.kexpr(index)
+                        index_str = print_and_rename_indexing(index)
                         var = add_input(name)
                         return f"tl.load({var} + {index_str})"
 
@@ -646,7 +651,7 @@ class TritonTemplate(KernelTemplate):
             defines.write(f"{name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
 
-        fake_out = ir.Buffer("buf_out", layout)
+        fake_out = ir.Buffer(name="buf_out", layout=layout)
         kernel_name = f"triton_{self.name}"
 
         numel = sympy_product(layout.size)
@@ -676,7 +681,7 @@ class TritonTemplate(KernelTemplate):
 
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
-        ), TritonTemplateKernel(
+        ), V.graph.set_current_device(layout.device), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
             use_jit=False,
@@ -858,16 +863,15 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         input_nodes,
         layout,
         make_kernel_render,
-        debug_extra,
+        description,
         bmreq,
         log_info: Optional[
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
         mutated_inputs=None,
     ) -> None:
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
-        self.debug_extra = debug_extra
         self.bmreq: TritonBenchmarkRequest = bmreq
         if log_info is None:
             log_info = {}
@@ -891,7 +895,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.bmreq.precompile()
 
     def __str__(self) -> str:
-        return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
+        return f"TritonTemplateCaller({self.bmreq.module_path}, {self.description})"
 
     def call_name(self):
         return f"template_kernels.{self.name}"
@@ -910,7 +914,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 layout=self.layout,
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
-                debug_extra=self.debug_extra,
                 mutated_inputs=self.mutated_inputs,
             )
         )
@@ -946,7 +949,7 @@ class ExternKernelCaller(ChoiceCaller):
         *,
         has_out_variant=True,
     ) -> None:
-        super().__init__(choice.name, input_nodes, layout)
+        super().__init__(choice.name, input_nodes, layout, description="")
         self.choice = choice
         self.kwargs = kwargs or {}
         self.has_out_variant = has_out_variant
@@ -973,8 +976,7 @@ class ExternKernelCaller(ChoiceCaller):
         fn = self.choice.to_callable()
         if self.kwargs:
             return functools.partial(fn, **self.kwargs)
-        else:
-            return fn
+        return fn
 
     def hash_key(self):
         return "-".join(
@@ -989,7 +991,7 @@ class ExternKernelCaller(ChoiceCaller):
         )
 
     def output_node(self):
-        if config.abi_compatible and self.choice.use_fallback_kernel:
+        if self.choice.use_fallback_kernel:
             assert (
                 self.choice.op_overload is not None
             ), "Please provide an op_overload to use ir.FallbackKernel"
@@ -1407,6 +1409,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     layout,
                     input_nodes,
                     get_timings,
+                    choices,
                 )
             )
 
@@ -1648,11 +1651,9 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in top_k:
             result = timings[choice]
             if result:
-                kernel_info = (
-                    choice.debug_extra if hasattr(choice, "debug_extra") else ""
-                )
+                kernel_description = choice.description
                 sys.stderr.write(
-                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {kernel_info}\n"
+                    f"  {choice.name} {result:.4f} ms {best_time / result:.1%} {kernel_description}\n"
                 )
             else:
                 sys.stderr.write(
@@ -1664,7 +1665,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         sys.stderr.write(
             f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f}"
-            " seconds precompiling\n"
+            f" seconds precompiling for {len(timings)} choices\n"
         )
 
     @staticmethod
@@ -1674,7 +1675,7 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmarking.
         """
         if isinstance(node, ir.Layout):
-            node = ir.Buffer("fake", node)
+            node = ir.Buffer(name="fake", layout=node)
         # triton templates want the base tensor.
         if isinstance(node, ir.BaseView):
             node = node.unwrap_view()
