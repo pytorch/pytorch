@@ -1613,7 +1613,8 @@ def index_put_(func, *args, **kwargs):
         )
 
         if func == torch.ops.aten.index_put_.default:
-            inp._values.copy_(new_njt._values)
+            inp._values.copy_(new_njt.values())
+            return inp
         return new_njt
 
     # We can run on the underlying values directly
