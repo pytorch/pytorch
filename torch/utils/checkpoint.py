@@ -601,6 +601,20 @@ def _internal_assert(cond):
         )
 
 
+_global_checkpoint_saved_tensor_hooks = OrderedDict()
+
+
+def _register_checkpoint_saved_tensor_hook(hook) -> RemovableHandle:
+    r"""Register a hook to be called when a tensor is saved by checkpoint.
+
+    The hook will be called with the tensor as the only argument.
+    """
+    global _global_checkpoint_saved_tensor_hooks
+    handle = RemovableHandle(_global_checkpoint_saved_tensor_hooks)
+    _global_checkpoint_saved_tensor_hooks[handle.id] = hook
+    return handle
+
+
 # NOTE [ Nestable Checkpoint ]
 #
 # The semantics of nested checkpoint can be defined by two basic rules.
@@ -1080,6 +1094,9 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
                 _internal_assert(holder.handles.get(gid, None) is None)
                 holder.handles[gid] = _Handle()
                 target_frame.recomputed[gid][holder.handles[gid]] = x
+                global _global_checkpoint_saved_tensor_hooks
+                for hook in _global_checkpoint_saved_tensor_hooks.values():
+                    hook(x)
 
             if target_frame.early_stop and target_frame.recomp_counter[gid] == len(
                 target_frame.weak_holders
