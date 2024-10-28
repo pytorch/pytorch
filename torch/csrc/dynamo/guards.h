@@ -11,6 +11,8 @@ PyObject* torch_c_dynamo_guards_init();
 // not visible there.
 void* convert_to_root_guard_manager(py::object root);
 bool run_root_guard_manager(void* root, PyObject* f_locals);
+void set_run_diff_guards(void* root);
+void unset_run_diff_guards(void* root);
 
 struct LocalState {
   // TLS state that changes operators

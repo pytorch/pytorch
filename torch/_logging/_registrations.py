@@ -58,6 +58,7 @@ register_artifact(
     visible=True,
 )
 register_artifact("verbose_guards", "", off_by_default=True)
+register_artifact("diff_guards", "", off_by_default=True)
 register_artifact(
     "bytecode",
     "Prints the original and modified bytecode from Dynamo. Mostly useful if you're debugging our bytecode generation in Dynamo.",

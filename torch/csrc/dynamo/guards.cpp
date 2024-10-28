@@ -958,6 +958,7 @@ class GuardDebugInfo {
 class GuardManager;
 class RootGuardManager;
 class DictGuardManager;
+bool is_root_guard_manager_set_to_run_diff_guards_mode(RootGuardManager* root);
 
 /**
  * Base class for the leaf guard in the GuardManager hierarchy.
@@ -1693,6 +1694,11 @@ class GuardManager {
   // guards and does not change the fail count. For simplicity, we duplicate
   // the code here.
   virtual bool check_nopybind(PyObject* value) { // borrowed ref
+    if (is_root_guard_manager_set_to_run_diff_guards_mode(_root) &&
+        _fail_count == 0) {
+      // For run diff only guards, if the fail_count is 0, return right away;
+      return true;
+    }
 
     if (!this->check_leaf_guards_nopybind(value)) {
       return false;
@@ -2057,6 +2063,14 @@ class RootGuardManager : public GuardManager {
     _init_local_state = true;
   }
 
+  void set_run_diff_guards() {
+    _run_diff_guards = true;
+  }
+
+  void unset_run_diff_guards() {
+    _run_diff_guards = false;
+  }
+
   // DEBUG function - Returning raw pointers because we can't return unique_ptr
   // and pybind does not accept a unique_ptr reference return type.
   std::vector<LeafGuard*> get_epilogue_lambda_guards() const {
@@ -2079,6 +2093,12 @@ class RootGuardManager : public GuardManager {
  public:
   // Local state for TENSOR_MATCH guards.
   LocalState _local_state;
+
+  // This flag when true runs only those guards that have failed in the previous
+  // runs. Essentially, this runs a minimal set of guard that differentiates
+  // different guards for a cache entry. If use can guarantee no more
+  // recompilations, this can drastically cut down the guard overhead.
+  bool _run_diff_guards = false;
 
  private:
   // All the relational guards under this guard mananger. We only use these
@@ -2118,6 +2138,10 @@ class RootGuardManager : public GuardManager {
   // We init LocalState only when this flag it set. This flag is set during
   // TENSOR_MATCH guard init.
   bool _init_local_state = false;
+};
+
+bool is_root_guard_manager_set_to_run_diff_guards_mode(RootGuardManager* root) {
+  return root->_run_diff_guards;
 };
 
 /*
@@ -3694,6 +3718,14 @@ bool run_root_guard_manager(void* root, PyObject* f_locals) {
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
+void set_run_diff_guards(void* root) {
+  ((RootGuardManager*)root)->set_run_diff_guards();
+}
+
+void unset_run_diff_guards(void* root) {
+  ((RootGuardManager*)root)->unset_run_diff_guards();
+}
+
 PyObject* torch_c_dynamo_guards_init() {
   // initialize TensorGuardsType
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
@@ -3948,6 +3980,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardManager, std::unique_ptr<GuardManager>>(py_m, "GuardManager")
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
+      .def("fail_count", &GuardManager::fail_count)
       .def(
           "get_accessors",
           &GuardManager::get_accessors,
@@ -4353,6 +4386,7 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "RootGuardManager")
       .def(py::init<>())
       .def("check", &RootGuardManager::check)
+      .def("fail_count", &RootGuardManager::fail_count)
       .def("check_verbose", &RootGuardManager::check_verbose)
       // return by reference because GuardManager has the ownership of leaf
       // guards

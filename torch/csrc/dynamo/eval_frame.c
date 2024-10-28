@@ -520,6 +520,7 @@ static PyObject* _custom_eval_frame_shim(
   return result;
 }
 
+static PyObject* skip_guard_eval_callback_flag;
 static PyObject* skip_code_recursive_flag;
 static PyObject* cache_limit_hit_flag;
 
@@ -619,7 +620,7 @@ static PyObject* _custom_eval_frame(
     _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
     PyObject* maybe_cached_code = NULL;
     const char* trace_annotation = "";
-    lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation);
+    lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation, false);
     _pytorch_record_function_exit(rf);
 
     Py_DECREF(locals);
@@ -647,6 +648,7 @@ static PyObject* _custom_eval_frame(
     *should_clear_frame = 1;
     return eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, 0);
   }
+
   DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
@@ -656,10 +658,45 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
+  if (callback == skip_guard_eval_callback_flag) {
+
+    _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
+    PyObject* maybe_cached_code = NULL;
+    const char* trace_annotation = "";
+    lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation, true);
+    _pytorch_record_function_exit(rf);
+    if (maybe_cached_code == NULL) {
+      // Python error
+      *should_clear_frame = 1;
+      Py_DECREF(locals);
+      return NULL;
+    } else if (maybe_cached_code != Py_None) {
+      PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
+      // used cached version
+      *should_clear_frame = 1;
+      Py_DECREF(locals);
+      // Re-enable custom behavior
+      eval_frame_callback_set(callback);
+      return eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, free_vars_copied);
+    } else if (maybe_cached_code == Py_None) {
+      // TODO(anijain2305) - DONT MERGED BEFORE FIXING THIS - For some reason, torch._dynamo.disable called from
+      // a child functino of the bytecode is reaching here.
+      // printf("could not find a code for %p, %s\n", maybe_cached_code, get_frame_name(frame));
+      PyObject *ret = eval_frame_default(tstate, frame, throw_flag);
+      // Re-enable custom behavior
+      eval_frame_callback_set(callback);
+      return ret;
+    }
+
+    PyErr_SetString(PyExc_RuntimeError, "Could not find compiled code with set stance as skip_guard_eval");
+    return NULL;
+  }
+
+
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = NULL;
   const char* trace_annotation = "";
-  lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation);
+  lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation, false);
   _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
@@ -783,6 +820,7 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
+  //  - skip_guard_eval_callback_flag: skip guard and reuse existing single compile
   //  - Python callable(): enables TorchDynamo
   PyObject* old_callback = eval_frame_callback_get();
 
@@ -806,7 +844,7 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
 }
 
 static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
-  if (callback != Py_None && callback != Py_False &&
+  if (callback != Py_None && callback != Py_False && callback != skip_guard_eval_callback_flag &&
       !PyCallable_Check(callback)) {
     DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected a callable");
@@ -917,6 +955,17 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
     return NULL;
   }
 #endif
+
+
+  skip_guard_eval_callback_flag = PyObject_New(PyObject, &PyBaseObject_Type);
+  if (skip_guard_eval_callback_flag == NULL) {
+    return NULL;
+  }
+  if (PyModule_AddObject(module, "skip_guard_eval_callback_flag", skip_guard_eval_callback_flag) != 0) {
+    return NULL;
+  }
+
+
 
   skip_code_recursive_flag = PyObject_New(PyObject, &PyBaseObject_Type);
   if (skip_code_recursive_flag == NULL) {

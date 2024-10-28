@@ -31,6 +31,17 @@ void ExtraState::move_to_front(CacheEntry* cache_entry) {
       cache_entry->_owner_loc);
 }
 
+void ExtraState::move_front_to_back() {
+  CacheEntry* cache_entry = &this->cache_entry_list.front();
+  CHECK(cache_entry->_owner == this);
+  CHECK(!this->cache_entry_list.empty());
+  CHECK(cache_entry == &*cache_entry->_owner_loc);
+  this->cache_entry_list.splice(
+      this->cache_entry_list.end(),
+      this->cache_entry_list,
+      cache_entry->_owner_loc);
+}
+
 void ExtraState::invalidate(CacheEntry* cache_entry) {
   CHECK(cache_entry->_owner == this);
   CHECK(!this->cache_entry_list.empty());
@@ -114,18 +125,38 @@ void lookup(
     PyObject* f_locals,
     PyObject* backend,
     PyObject** maybe_cached_code,
-    const char** trace_annotation) {
+    const char** trace_annotation,
+    bool run_diff_guards) {
   size_t index = 0;
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
+  if (run_diff_guards && extra_state->cache_entry_list.size() > 1) {
+    // Move the first entry to the back because the first entry has not failed
+    // till now and therefore will have fail_count as 0. This is NOT a perf
+    // optimization. This is a necessity. Without this, the first entry will
+    // always return True.
+    extra_state->move_front_to_back();
+  }
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
 
-    bool valid =
-        backend == Py_False || backend_match(cache_entry.backend, backend);
+    bool valid = true;
+
+    // TODO(anijain2305) - The run_diff_guards info is stored indirectly in the
+    // backend (which is a callback). See if we can use it directly.
+    // TODO(anijain2305) - Consider code duplication for the entire lookup
+    // function if it speedus up the common case of original stance.
+    if (!run_diff_guards) {
+      valid =
+          backend == Py_False || backend_match(cache_entry.backend, backend);
+    }
 
     if (valid) {
       try {
+        if (run_diff_guards) {
+          torch::dynamo::set_run_diff_guards(cache_entry.root_mgr);
+        }
+
         valid = torch::dynamo::run_root_guard_manager(
             cache_entry.root_mgr, f_locals);
       } catch (py::error_already_set& e) {
@@ -142,9 +173,20 @@ void lookup(
         // the exception
         e.restore();
         *maybe_cached_code = nullptr;
+
+        // TODO(anijain2305) - Does it even matter to fix this? I think we have
+        // already messed up so bad if we are in this code path, that undoing
+        // this does not really matter.
+        torch::dynamo::unset_run_diff_guards(cache_entry.root_mgr);
+        if (run_diff_guards && extra_state->cache_entry_list.size() > 1) {
+          // Undo the move_front_to_back() done at the beginning of this
+          // function.
+          extra_state->move_front_to_back();
+        }
         return;
       }
     }
+    torch::dynamo::unset_run_diff_guards(cache_entry.root_mgr);
     if (valid) {
       found = &cache_entry;
       break;
@@ -152,7 +194,12 @@ void lookup(
     ++index;
   }
   if (found) {
-    extra_state->move_to_front(found);
+    if (run_diff_guards && extra_state->cache_entry_list.size() > 1) {
+      // Undo the move_front_to_back() done at the beginning of this function.
+      extra_state->move_front_to_back();
+    } else {
+      extra_state->move_to_front(found);
+    }
     *maybe_cached_code = found->code.ptr();
     *trace_annotation = found->trace_annotation.c_str();
     return;

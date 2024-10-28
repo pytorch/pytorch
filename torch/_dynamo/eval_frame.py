@@ -166,6 +166,8 @@ def _callback_from_stance(callback):
     elif _stance.stance == "eager_on_recompile":
         # run mode
         return False
+    elif _stance.stance == "skip_guard_eval":
+        return torch._C._dynamo.eval_frame.skip_guard_eval_callback_flag
     elif _stance.stance == "fail_on_recompile":
 
         def fail_callback(*args, **kwargs):

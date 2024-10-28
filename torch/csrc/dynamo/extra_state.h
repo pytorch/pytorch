@@ -48,6 +48,7 @@ typedef struct VISIBILITY_HIDDEN ExtraState {
 
   CacheEntry* get_first_entry();
   void move_to_front(CacheEntry* cache_entry);
+  void move_front_to_back();
   void invalidate(CacheEntry* cache_entry);
 } ExtraState;
 
@@ -149,7 +150,8 @@ void lookup(
     PyObject* f_locals,
     PyObject* backend,
     PyObject** maybe_cached_code,
-    const char** trace_annotation);
+    const char** trace_annotation,
+    bool run_diff_guards);
 
 // Create a new cache entry at extra_state holding on to guarded_code.
 // Ownership contract

@@ -144,6 +144,7 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
+diff_guards_log = torch._logging.getArtifactLogger(__name__, "diff_guards")
 
 
 class GuardManagerWrapper:
@@ -192,19 +193,23 @@ class GuardManagerWrapper:
             s += ", " + accessor_str
         return s
 
-    def construct_dict_manager_string(self, mgr, body):
+    def construct_dict_manager_string(self, mgr, body, diff_only):
+        if diff_only and mgr.fail_count() == 0:
+            return
         for idx, (key_mgr, val_mgr) in sorted(mgr.get_key_value_managers().items()):
             body.writeline(f"KeyValueManager pair at index={idx}")
             with body.indent():
                 if key_mgr:
                     body.writeline(f"KeyManager: {self.get_manager_line(key_mgr)}")
-                    self.construct_manager_string(key_mgr, body)
+                    self.construct_manager_string(key_mgr, body, diff_only)
 
                 if val_mgr:
                     body.writeline(f"ValueManager: {self.get_manager_line(val_mgr)}")
-                    self.construct_manager_string(val_mgr, body)
+                    self.construct_manager_string(val_mgr, body, diff_only)
 
-    def construct_manager_string(self, mgr, body):
+    def construct_manager_string(self, mgr, body, diff_only):
+        if diff_only and mgr.fail_count() == 0:
+            return
         with body.indent():
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
@@ -222,18 +227,21 @@ class GuardManagerWrapper:
 
             # This works for both DictGuardManager and SubclassedDictGuardManager
             if isinstance(mgr, DictGuardManager):
-                self.construct_dict_manager_string(mgr, body)
+                self.construct_dict_manager_string(mgr, body, diff_only)
 
             # General case of GuardManager/RootGuardManager
             for accessor, child_mgr in zip(
                 mgr.get_accessors(), mgr.get_child_managers()
             ):
-                body.writeline(
-                    self.get_manager_line(child_mgr, f"accessed_by={accessor.repr()}")
-                )
-                self.construct_manager_string(child_mgr, body)
+                if child_mgr.fail_count() != 0:
+                    body.writeline(
+                        self.get_manager_line(
+                            child_mgr, f"accessed_by={accessor.repr()}"
+                        )
+                    )
+                self.construct_manager_string(child_mgr, body, diff_only)
 
-    def __str__(self):
+    def str_helper(self, diff_only):
         from torch._inductor.utils import IndentedBuffer
 
         class IndentedBufferWithPrefix(IndentedBuffer):
@@ -252,10 +260,17 @@ class GuardManagerWrapper:
             body.writeline("", skip_prefix=True)
             body.writeline("TREE_GUARD_MANAGER:", skip_prefix=True)
             body.writeline("RootGuardManager")
-            self.construct_manager_string(self.root, body)
-            for guard in self.root.get_epilogue_lambda_guards():
-                body.writelines(self.get_guard_lines(guard))
+            self.construct_manager_string(self.root, body, diff_only)
+            if self.root.fail_count() != 0:
+                for guard in self.root.get_epilogue_lambda_guards():
+                    body.writelines(self.get_guard_lines(guard))
             return body.getvalue()
+
+    def print_diff_guard_set(self):
+        return self.str_helper(diff_only=True)
+
+    def __str__(self):
+        return self.str_helper(diff_only=False)
 
     def check(self, x):
         # Only needed for debugging purposes.
@@ -2608,6 +2623,8 @@ def get_and_maybe_log_recompilation_reason(
         )
         if reason:
             reasons.append(reason)
+
+        diff_guards_log.debug("%s", cache_entry.guard_manager.print_diff_guard_set())
         cache_entry = cache_entry.next
 
     code = frame.f_code

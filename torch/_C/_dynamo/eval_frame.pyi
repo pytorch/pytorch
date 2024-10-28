@@ -15,6 +15,10 @@ CacheLimitHitFlag = NewType("CacheLimitHitFlag", object)
 skip_code_recursive_flag: SkipCodeRecursiveFlag
 cache_limit_hit_flag: CacheLimitHitFlag
 
+# Comment TODO
+SkipGuardEvalCallbackFlag = NewType("SkipGuardEvalCallbackFlag", object)
+skip_guard_eval_callback_flag: SkipGuardEvalCallbackFlag
+
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
 def get_eval_frame_callback() -> DynamoCallback: ...
 def reset_code(code: types.CodeType) -> None: ...
