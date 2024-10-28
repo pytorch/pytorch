@@ -261,12 +261,8 @@ class OptimizeForInferenceTemplate(TestCase):
                 FileCheck().check_not("@triton.jit").run(code[0])
                 self.assertEqual(out_eager, out_compiled)
 
+    @torch._inductor.config.patch("cpp.enable_concat_linear", True)
     def test_mm_concat(self):
-        # CPU path will replace mm with mkl._linear,
-        # skip this case for now.
-        if self.device == "cpu":
-            raise unittest.SkipTest("NYI CPU")
-
         class MM(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -319,12 +315,13 @@ class OptimizeForInferenceTemplate(TestCase):
                 return mod(inp)
 
             kernel_invoke = "kernel_cpp_0" if self.device == "cpu" else "triton.jit"
+            mm_invoke = "mkl_linear.default(" if self.device == "cpu" else "mm("
 
             with torch.no_grad():
                 out_eager = mod(inp)
                 out, code = run_and_get_code(foo, mod, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
-                    "mm(", count=1, exactly=True
+                    mm_invoke, count=1, exactly=True
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 
@@ -343,7 +340,7 @@ class OptimizeForInferenceTemplate(TestCase):
                 out_eager = mod2(inp)
                 out, code = run_and_get_code(foo, mod2, inp)
                 FileCheck().check_not(kernel_invoke).check_count(
-                    "mm(", count=count, exactly=True
+                    mm_invoke, count=count, exactly=True
                 ).run(code[0])
                 self.assertEqual(out_eager, out)
 

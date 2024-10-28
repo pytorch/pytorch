@@ -879,6 +879,8 @@ class cpp:
     # Whether to enable masked vectorization for the tail_loop.
     enable_loop_tail_vec = True
 
+    # Whether to enable concat linear for cpu device
+    enable_concat_linear = False
 
 # config specific to codegen/triton.py
 class triton:
