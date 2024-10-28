@@ -149,6 +149,9 @@ pattern_matcher = True
 # set to True to enable the back-to-back GEMM pass
 b2b_gemm_pass = False
 
+# enable pattern match for concat addmm before other pattern match
+addmm_pattern_init_first = False
+
 # register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
 #

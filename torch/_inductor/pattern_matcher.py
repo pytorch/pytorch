@@ -1735,50 +1735,71 @@ class PatternMatcherPass:
         get_mutation_region_id_partial = functools.partial(
             get_mutation_region_id, graph
         )
-        count = 0
-        nodes = []
-        has_call_module = False
-        for op, target in self.patterns:
-            if op == "call_module":
-                has_call_module = True
-            else:
-                nodes.append(graph.find_nodes(op=op, target=target, sort=False))
-        if has_call_module:
-            nodes.append(graph.find_nodes(op="call_module", sort=False))
-        pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
-        with GraphTransformObserver(
-            gm, pass_name, trace_config.log_url_for_graph_xform
-        ):
-            for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
-                target = extract_target(node)
-                if node.op == "call_module":
-                    if (node.op, target) not in self.patterns:
-                        continue
 
-                # conservatively not applying pattern for cpu input,
-                # since some of the patterns induce codegen and split nodes.
-                # Note: we will only skip cpu compute if disable_cpp_codegen=True
-                if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
-                    continue
+        total_count = 0
 
-                for entry in self.patterns[(node.op, target)]:
-                    if node._erased:
-                        break
-                    m = entry.pattern.match(node)
-                    # pattern match crosses mutation barrier - discard
-                    if (
-                        is_match(m)
-                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
+        def apply_once() -> int:
+            count = 0
+            nodes = []
+            has_call_module = False
+            for op, target in self.patterns:
+                if op == "call_module":
+                    has_call_module = True
+                else:
+                    nodes.append(graph.find_nodes(op=op, target=target, sort=False))
+            if has_call_module:
+                nodes.append(graph.find_nodes(op="call_module", sort=False))
+            pass_name = (
+                self.pass_name if self.pass_name is not None else "pattern_matcher"
+            )
+            with GraphTransformObserver(
+                gm, pass_name, trace_config.log_url_for_graph_xform
+            ):
+                for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
+                    target = extract_target(node)
+                    if node.op == "call_module":
+                        if (node.op, target) not in self.patterns:
+                            continue
+
+                    # conservatively not applying pattern for cpu input,
+                    # since some of the patterns induce codegen and split nodes.
+                    # Note: we will only skip cpu compute if disable_cpp_codegen=True
+                    if fallback_node_due_to_unsupported_type(
+                        node, allow_cpu_inputs=False
                     ):
                         continue
-                    if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
-                        log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
-                    if is_match(m) and entry.extra_check(m):
-                        count += 1
-                        entry.apply(m, graph, node)  # type: ignore[arg-type]
-                        counters["inductor"]["pattern_matcher_count"] += 1
-                        counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
-        return count
+
+                    for entry in self.patterns[(node.op, target)]:
+                        if node._erased:
+                            break
+                        m = entry.pattern.match(node)
+                        # pattern match crosses mutation barrier - discard
+                        if (
+                            is_match(m)
+                            and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
+                        ):
+                            continue
+                        if (
+                            os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG")
+                            == node.name
+                        ):
+                            log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
+                        if is_match(m) and entry.extra_check(m):
+                            count += 1
+                            entry.apply(m, graph, node)  # type: ignore[arg-type]
+                            counters["inductor"]["pattern_matcher_count"] += 1
+                            counters["inductor"]["pattern_matcher_nodes"] += len(
+                                m.nodes
+                            )
+            return count
+
+        while True:
+            _count = apply_once()
+            if not _count:
+                break
+            total_count += _count
+
+        return total_count
 
     def clear(self) -> None:
         self.patterns.clear()
