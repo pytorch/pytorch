@@ -282,6 +282,11 @@ class Vectorized<c10::Half> {
     return mask;
   }
   Vectorized<c10::Half> isnan() const {
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+    return vreinterpretq_f16_u32(vmvnq_u32(vceqq_f16(values, values)));
+#else
+    // NOTE: we could make this faster by doing vectorized checks of
+    // exponent/payload bits.
     __at_align__ c10::Half tmp[size()];
     __at_align__ c10::Half res[size()];
     store(tmp);
@@ -293,6 +298,7 @@ class Vectorized<c10::Half> {
       }
     }
     return loadu(res);
+#endif
   };
   bool has_inf_nan() const {
     __at_align__ c10::Half tmp[size()];
