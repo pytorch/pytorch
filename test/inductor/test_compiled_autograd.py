@@ -6,9 +6,11 @@ import io
 import itertools
 import logging
 import os
+import queue
 import re
 import subprocess
 import sys
+import threading
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -24,7 +26,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.common_utils import scoped_load_inline, skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -1584,7 +1586,8 @@ main()
                 f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
             )
 
-    def test_non_traceable_autograd_cpp_node(self):
+    @scoped_load_inline
+    def test_non_traceable_autograd_cpp_node(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = false;
@@ -1611,7 +1614,7 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="test_non_traceable_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1632,8 +1635,8 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
         ), compiled_autograd.enable(compiler_fn):
             fn()
 
-    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
-    def test_autograd_cpp_node(self):
+    @scoped_load_inline
+    def test_autograd_cpp_node(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1660,7 +1663,7 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="test_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1680,7 +1683,8 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
         # compiles for 10 (static) and 100 (dynamic)
         self.check_output_and_recompiles(fn, 2)
 
-    def test_autograd_cpp_node_id(self):
+    @scoped_load_inline
+    def test_autograd_cpp_node_id(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1728,7 +1732,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="test_autograd_cpp_node_id",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1771,7 +1775,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
 
         self.check_output_and_recompiles(different_autograd_fn, 2)
 
-    def test_autograd_cpp_node_saved(self):
+    @scoped_load_inline
+    def test_autograd_cpp_node_saved(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1825,7 +1830,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="test_autograd_cpp_node_saved",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1846,7 +1851,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 
         self.check_output_and_recompiles(fn, 2)
 
-    def test_autograd_cpp_node_saved_dynamic(self):
+    @scoped_load_inline
+    def test_autograd_cpp_node_saved_dynamic(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1882,7 +1888,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="test_autograd_cpp_node_saved_dynamic",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1902,7 +1908,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
         # compiles for 10 (static) and 100 (dynamic)
         self.check_output_and_recompiles(fn, 2)
 
-    def test_autograd_cpp_node_saved_int(self):
+    @scoped_load_inline
+    def test_autograd_cpp_node_saved_int(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1941,7 +1948,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="test_autograd_cpp_node_saved_int",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1960,7 +1967,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
 
         self.check_output_and_recompiles(fn, 1)
 
-    def test_autograd_cpp_node_saved_float(self):
+    @scoped_load_inline
+    def test_autograd_cpp_node_saved_float(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1999,7 +2007,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="test_autograd_cpp_node_saved_float",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2019,7 +2027,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
         # compiled autograd and dynamo both support symfloat, but not backend
         self.check_output_and_recompiles(fn, [1, 3])
 
-    def test_autograd_cpp_node_data_dependent(self):
+    @scoped_load_inline
+    def test_autograd_cpp_node_data_dependent(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2090,7 +2099,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="test_autograd_cpp_node_data_dependent",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2330,8 +2339,9 @@ main()
         # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
+    @scoped_load_inline
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
-    def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self):
+    def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2369,7 +2379,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="test_cudagraphs_cpu_scalar_used_in_cpp_custom_op",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2404,6 +2414,39 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             "Cache miss due to new autograd node: torch::autograd::GraphRoot"
             not in logs.getvalue()
         )
+
+    def test_multithreading_tls(self):
+        def train(errors, model, x):
+            try:
+                out = model(x)
+                with compiled_autograd.enable(compiler_fn):
+                    self.assertEqual(compiled_autograd.enabled(), True)
+                    self.assertEqual(compiled_autograd.local.get("next_ctx_id"), 1)
+            except Exception as e:
+                print(f"Found error: {e}")
+                errors.put(1)
+                raise
+
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.ReLU(),
+            torch.nn.Linear(4, 4),
+            torch.nn.ReLU(),
+        )
+        x = torch.randn([2, 4])
+
+        threads = []
+        errors = queue.Queue()
+        with compiled_autograd.enable(compiler_fn):
+            for i in range(4):
+                thread = threading.Thread(target=train, args=(errors, model, x))
+                threads.append(thread)
+                thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        assert errors.empty()
 
     def test_verbose_logs_graph(self):
         def fn():
