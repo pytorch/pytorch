@@ -108,8 +108,8 @@ class AOTAutogradCacheTests(InductorTestCase):
                 gn, torch.sin(x), y, use_reentrant=True
             )
 
-        a = torch.randn(4, 4, device="cuda", requires_grad=True)
-        b = torch.randn(4, 4, device="cuda", requires_grad=True)
+        a = torch.randn(4, 4, device="cuda")
+        b = torch.randn(4, 4, device="cuda")
 
         compiled_fn = torch.compile(fn, backend="inductor")
 
