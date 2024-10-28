@@ -6,10 +6,7 @@
 #include <oneapi/dnnl/dnnl_graph.hpp>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 // Engine represents a device and its context. From the device kind, the engine
 // knows how to generate code for the target device and what kind of device
@@ -270,7 +267,4 @@ at::Tensor empty_llga(
 
 dnnl::graph::tensor llga_from_aten_tensor(const at::Tensor& tensor);
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn
