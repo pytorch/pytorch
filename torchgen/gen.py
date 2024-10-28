@@ -2867,9 +2867,6 @@ def main() -> None:
 
     options = parser.parse_args()
 
-    if options.backend_whitelist and str(DispatchKey.XPU) in options.backend_whitelist:
-        options.xpu = True
-
     selector = get_custom_build_selector(
         options.op_registration_whitelist,
         options.op_selection_yaml_path,
