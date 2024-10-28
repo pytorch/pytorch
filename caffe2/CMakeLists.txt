@@ -325,6 +325,10 @@ set(GENERATED_CXX_TORCH_CUDA
   "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp"
   )
 
+set(GENERATED_CXX_TORCH_XPU
+  "${TORCH_SRC_DIR}/csrc/inductor/aoti_torch/generated/c_shim_xpu.cpp"
+  )
+
 set(TORCH_GENERATED_CODE
   ${GENERATED_CXX_TORCH}
   ${GENERATED_H_TORCH}
@@ -332,6 +336,7 @@ set(TORCH_GENERATED_CODE
   ${GENERATED_H_PYTHON}
   ${GENERATED_TESTING_PYTHON}
   ${GENERATED_CXX_TORCH_CUDA}
+  ${GENERATED_CXX_TORCH_XPU}
   )
 
 set(GEN_PER_OPERATOR_FLAG)
@@ -1018,6 +1023,7 @@ elseif(USE_CUDA)
 endif()
 
 if(USE_XPU)
+  list(APPEND Caffe2_XPU_SRCS ${GENERATED_CXX_TORCH_XPU})
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
@@ -1068,15 +1074,14 @@ if(USE_XPU)
   if(NOT TARGET torch_xpu_ops)
     message(WARNING "Failed to include ATen XPU implementation target")
   else()
-    target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
     if(MSVC)
       # Windows
       target_link_libraries(torch_xpu PRIVATE
-      "-WHOLEARCHIVE:\"$<TARGET_FILE:torch_xpu_ops>\"")
+      "/WHOLEARCHIVE:torch_xpu_ops.lib")
     else()
       # Linux
       target_link_libraries(torch_xpu PRIVATE
-        "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
+        "-Wl,--whole-archive" torch_xpu_ops "-Wl,--no-whole-archive")
     endif()
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch
