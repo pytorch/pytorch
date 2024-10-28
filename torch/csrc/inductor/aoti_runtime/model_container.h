@@ -321,12 +321,25 @@ class AOTInductorModelContainer {
           device_idx,
           &tensor_handle));
 #else // USE_CUDA
-      AtenTensorHandle tensor_handle = it->second;
+      AtenTensorHandle tensor_handle = nullptr;
+      if (_should_skip_update(idx) && use_inactive) {
+        AtenTensorHandle original_tensor_handle = nullptr;
+        original_tensor_handle =
+            original_constants_map->find(constant_name)->second.get();
+        // TODO: We need a clone of the original tensor so that the tensor
+        // that's in the active buffer still holds a copy of the data, and
+        // maintains the ownership of the pointer. However, clone() doesn't work
+        // for prepacked tensor, we need some way to clone prepacked aten tensor
+        // and identify it.
+        aoti_torch_clone(original_tensor_handle, &tensor_handle);
+      } else {
+        tensor_handle = it->second;
+      }
 #endif // USE_CUDA
 
       // Now place the tensor to constants_map. Note at this point the ownership
       // of the tensor_handle will be taken over.
-      constants_map_to_update->emplace(constant_name, tensor_handle);
+      constants_map_to_update->insert_or_assign(constant_name, tensor_handle);
     }
     // Update the inactive constant array.
     update_array_from_map(
