@@ -195,7 +195,8 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
         return {RawTensorMetadata(), sizes, strides};
       }
       const auto& raw_metadata = *tensor_metadata_it++;
-      for (C10_UNUSED const auto _ : c10::irange(raw_metadata.size_dim_)) {
+      for ([[maybe_unused]] const auto _ :
+           c10::irange(raw_metadata.size_dim_)) {
         if (tensor_size_strides_it.exhausted()) {
           LOG(WARNING)
               << "Expected Tensor Size mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";
@@ -204,7 +205,8 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
         sizes.push_back(*tensor_size_strides_it++);
       }
       if (raw_metadata.layout_ == at::kStrided) {
-        for (C10_UNUSED const auto _ : c10::irange(raw_metadata.size_dim_)) {
+        for ([[maybe_unused]] const auto _ :
+             c10::irange(raw_metadata.size_dim_)) {
           if (tensor_size_strides_it.exhausted()) {
             LOG(WARNING)
                 << "Expected Tensor Strides mismatch with raw Tensor metadata. Reported shapes may be inaccurate!";
@@ -397,7 +399,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
 namespace {
 template <typename T>
 struct StealOrDefault {
-  StealOrDefault(T& container)
+  explicit StealOrDefault(T& container)
       : container_{container}, it_{container.begin()} {}
 
   ~StealOrDefault() {
@@ -429,7 +431,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     const kineto::DeviceAndResource& kineto_info) {
   // Plumb Autograd info to the top level annotation.
   auto it = op_events_.begin();
-  for (C10_UNUSED const auto _ :
+  for ([[maybe_unused]] const auto _ :
        c10::irange(static_cast<int64_t>(op_events_.size()) - 1)) {
     auto& first = it->basic_fields_;
     auto& second = (++it)->basic_fields_;
@@ -1060,7 +1062,7 @@ class TransferEvents {
       std::shared_ptr<Result>& r,
       std::shared_ptr<Result> parent) {
     r->visit(c10::overloaded(
-        [&](ExtraFields<EventType::Kineto>& i) {
+        [&]([[maybe_unused]] ExtraFields<EventType::Kineto>& i) {
           TORCH_INTERNAL_ASSERT(r->start_tid_ == noTID);
           r->start_tid_ = parent ? parent->start_tid_
                                  : at::RecordFunction::currentThreadId();
@@ -1297,7 +1299,7 @@ int64_t adjust_durations_dfs(std::shared_ptr<Result>& r) {
           [&children_total_duration](ExtraFields<EventType::Vulkan>& i) {
             i.duration_ns_ = children_total_duration;
           },
-          [](ExtraFields<EventType::Allocation>& _) {
+          []([[maybe_unused]] ExtraFields<EventType::Allocation>& _) {
             // Pass- Allocation events can't have children
           },
           [&](auto&) {
@@ -1333,10 +1335,10 @@ int64_t adjust_timestamps_dfs(
             i.end_time_ns_ =
                 new_start_time + (i.end_time_ns_ - r->start_time_ns_);
           },
-          [](ExtraFields<EventType::Vulkan>& i) {
+          []([[maybe_unused]] ExtraFields<EventType::Vulkan>& i) {
             // Pass- We don't need to manually adjust end time for Vulkan events
           },
-          [](ExtraFields<EventType::Allocation>& _) {
+          []([[maybe_unused]] ExtraFields<EventType::Allocation>& _) {
             // Pass- No duration or end time to adjust
           },
           [&](auto&) {
@@ -1475,20 +1477,26 @@ RecordQueue::getRecords(
     ProfilerStepInfo step =
         step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
     for (const auto& i : ev) {
-      // If event has start time after step end time we can continue to the next
-      // step
-      while (i->start_time_ns_ > step.end_time_ns) {
-        step_idx++;
-        step = step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
-      }
-      // If Step annotation starts before event and ends before event ends with
-      // intersection then we move the lefthand side of the step annotation to
-      // the event start time
-      if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
-        auto currStepRes = out[step.out_idx];
-        currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
-        step_idx++;
-        step = step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+      // Only adjust timestamps if experimental config is enabled
+      if (config_.experimental_config.adjust_profiler_step) {
+        // If event has start time after step end time we can continue to the
+        // next step
+        while (i->start_time_ns_ > step.end_time_ns) {
+          step_idx++;
+          step =
+              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+        }
+        // If Step annotation starts before event and ends before event ends
+        // with intersection then we move the lefthand side of the step
+        // annotation to the event start time
+        if (right_intersection_only(step, i->start_time_ns_, i->endTimeNS())) {
+          // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
+          auto currStepRes = out[step.out_idx];
+          currStepRes->start_time_ns_ = i->start_time_ns_ + 1;
+          step_idx++;
+          step =
+              step_idx < step_info.size() ? step_info[step_idx] : defaultStep;
+        }
       }
       out.push_back(i);
     }
