@@ -79,6 +79,7 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     IS_FBCODE,
+    scoped_load_inline,
     set_default_dtype,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -321,16 +322,17 @@ class MiscTests(torch._inductor.test_case.TestCase):
         res_compiled = add_fn(2, 3, torch.tensor(0.0))
         self.assertEqual(res, res_compiled)
 
+    @scoped_load_inline
     @skipIfNNModuleInlined("fails internal CI")
     @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
-    def test_cpp_extension_recommends_custom_ops(self):
+    def test_cpp_extension_recommends_custom_ops(self, load_inline):
         cpp_source = """
         #include <torch/extension.h>
         at::Tensor foobar(const at::Tensor& x) {
             return x.clone();
         }
         """
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="mylib",
             cpp_sources=cpp_source,
             functions="foobar",
@@ -362,7 +364,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return x.clone();
         }
         """
-        module2 = torch.utils.cpp_extension.load_inline(
+        module2 = load_inline(
             name="mylib2",
             cpp_sources=cpp_source,
             functions="baz",
@@ -3767,6 +3769,33 @@ utils_device.CURRENT_DEVICE == None""".split(
         actual2 = opt_mod(torch.tensor(True), inp)
         self.assertTrue(torch.allclose(exp1, actual1))
         self.assertTrue(torch.allclose(exp2, actual2))
+
+    def test_closure_write_across_functions(self):
+        z = 1
+        k = 2
+
+        def create_fn():
+            def fn(x):
+                nonlocal k, z
+                k = z
+
+            return fn
+
+        def update_z_and_run_fn(fn, x):
+            nonlocal z
+            z = 3
+            fn(x)
+            return x.cos()
+
+        @torch.compile(backend="eager")
+        def foo(x):
+            fn = create_fn()
+            return update_z_and_run_fn(fn, x)
+
+        x = torch.randn(1)
+        foo(x)
+        self.assertEqual(3, z)
+        self.assertEqual(3, k)
 
     def test_top_package_import(self):
         def fn(x):

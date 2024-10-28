@@ -866,6 +866,53 @@ void initJitScriptBindings(PyObject* module) {
                 // Similar to Tensor's `__hash__`, which is `id()`.
                 return std::hash<c10::ivalue::Object*>{}(self._ivalue().get());
               })
+          .def(
+              "__deepcopy__",
+              [](const Object& self, const py::dict& memo) {
+                if (auto getstate_method = self.find_method("__getstate__")) {
+                  auto object_state = toPyObject((*getstate_method)(Stack{}));
+
+                  if (auto qualname = self.type()->name()) {
+                    auto class_type = getCustomClass(qualname->qualifiedName());
+                    auto self = Object(c10::ivalue::Object::create(
+                        c10::StrongTypePtr(
+                            std::shared_ptr<torch::jit::CompilationUnit>(),
+                            class_type),
+                        1));
+
+                    if (auto setstate_method =
+                            self.find_method("__setstate__")) {
+                      auto setstate_schema =
+                          setstate_method->function().getSchema();
+                      TORCH_INTERNAL_ASSERT(
+                          setstate_schema.arguments().size() == 2,
+                          "__setstate__ method for class ",
+                          class_type->repr_str(),
+                          " must have exactly 2 arguments!");
+                      auto state_type =
+                          setstate_schema.arguments().at(1).type();
+                      (*setstate_method)(
+                          Stack{toIValue(object_state, state_type)});
+                      return self;
+                    }
+                    std::stringstream err;
+                    err << "Tried to deepcopy object ";
+                    if (auto qualname = class_type->name()) {
+                      err << qualname->qualifiedName() << " ";
+                    }
+                    err << "which does not have a __setstate__ method defined!";
+                    throw std::runtime_error(err.str());
+                  }
+                }
+
+                std::stringstream err;
+                err << "Tried to deepcopy object ";
+                if (auto qualname = self.type()->name()) {
+                  err << qualname->qualifiedName() << " ";
+                }
+                err << "which does not have a __getstate__ method defined!";
+                throw std::runtime_error(err.str());
+              })
           .def(py::pickle(
               [](const Object& self)
                   -> std::tuple<py::object, std::string> { // __getstate__

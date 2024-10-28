@@ -81,7 +81,7 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   #
   # int main(int argv) {
   #   Tensor b = empty({3, 4});
-  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), c10::nullopt);
+  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), std::nullopt);
   # }
   export VALGRIND=OFF
 fi

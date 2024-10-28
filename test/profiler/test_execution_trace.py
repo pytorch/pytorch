@@ -121,6 +121,7 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfHpu
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_execution_trace_with_kineto(self, device):
         trace_called_num = 0
 
