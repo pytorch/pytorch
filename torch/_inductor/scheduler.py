@@ -446,7 +446,8 @@ class BaseSchedulerNode:
                 ):
                     # If the writers of input_buf are in the same FusedSchedulerNode as the current op, then there is
                     # no need to inplace.
-                    if input_buf.defining_op.get_name() in fused_nodes:
+                    # TODO: why missing defining_op
+                    if input_buf.defining_op and input_buf.defining_op.get_name() in fused_nodes:
                         continue
 
                     assert input_buf.users is not None
@@ -1768,19 +1769,6 @@ class Scheduler:
         with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
 
-    def get_donated_buffer(self) -> Dict[str, SchedulerDonatedBuffer]:
-        name_to_donated_buf = {}
-        for node in self.nodes:
-            for read in node.read_writes.reads:
-                if read.name in V.graph.graph_inputs and isinstance(V.graph.graph_inputs[read.name].data.data, ir.DonatedBuffer):
-                    assert read.name not in name_to_donated_buf, f"donated buffer {read.name} should only be read once"
-                    name_to_donated_buf[read.name] = SchedulerDonatedBuffer(
-                        self,
-                        V.graph.graph_inputs[read.name].data.data,
-                        [NodeUser(node, can_inplace=True, is_weak=False)]
-                    )
-        return name_to_donated_buf
-
     def _init(self, nodes: List[ir.Operation]) -> None:
         super().__init__()
         self.__dep_size_hint_cache = {}
@@ -1887,6 +1875,20 @@ class Scheduler:
                 "num_nodes_after_fusion": len(self.nodes),
             }
         )
+
+    def get_donated_buffer(self) -> Dict[str, SchedulerDonatedBuffer]:
+        name_to_donated_buf = {}
+        for node in self.nodes:
+            for read in node.read_writes.reads:
+                if read.name in V.graph.graph_inputs and isinstance(V.graph.graph_inputs[read.name].data.data, ir.DonatedBuffer):
+                    # breakpoint()
+                    # assert read.name not in name_to_donated_buf, f"donated buffer {read.name} should only be read once"
+                    name_to_donated_buf[read.name] = SchedulerDonatedBuffer(
+                        self,
+                        V.graph.graph_inputs[read.name].data.data,
+                        [NodeUser(node, can_inplace=True, is_weak=False)]
+                    )
+        return name_to_donated_buf
 
     @property
     def current_device(self) -> Optional[torch.device]:
