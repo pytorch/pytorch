@@ -6209,7 +6209,6 @@ class TestAOTModuleSimplified(AOTTestCase):
         y2 = fn_comp(x2)
         y2.backward(gradient=torch.randn(2, 3))
 
-    @unittest.expectedFailure
     @unittest.skipIf(
         not torch.distributed.is_available(), "test requires torch distributed"
     )

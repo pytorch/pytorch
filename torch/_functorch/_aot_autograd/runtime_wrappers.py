@@ -1446,6 +1446,12 @@ class AOTDispatchAutograd:
         is_subclass: bool = is_traceable_wrapper_subclass(x)
         is_subclass_meta: bool = isinstance(meta, SubclassCreationMeta)
 
+        if is_subclass and not is_subclass_meta:
+            # Unexpected subclass, during tracing we guessed it was a plain Tensor
+            if hasattr(x, "__coerce_same_metadata_as_tangent__"):
+                x = x.__coerce_same_metadata_as_tangent__(None, torch.Tensor)
+                is_subclass = False
+
         mem_format = meta.memory_format
 
         if not x.is_contiguous(memory_format=meta.memory_format):
