@@ -353,6 +353,9 @@ QAT API Example::
           x = self.dequant(x)
           return x
 
+  def training_loop(*args, **kwargs):
+            return None
+
   # create a model instance
   model_fp32 = M()
 
@@ -390,6 +393,7 @@ QAT API Example::
   model_int8 = torch.ao.quantization.convert(model_fp32_prepared)
 
   # run the model, relevant calculations will happen in int8
+  input_fp32 = torch.randn(1, 1, 1, 1)
   res = model_int8(input_fp32)
 
 To learn more about quantization aware training, please see the `QAT
@@ -446,7 +450,16 @@ FXPTQ API Example::
   import torch.ao.quantization.quantize_fx as quantize_fx
   import copy
 
-  model_fp = UserModel()
+  class M(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        return x
+
+  model_fp = M()
 
   #
   # post training dynamic/weight_only quantization
@@ -457,6 +470,7 @@ FXPTQ API Example::
   model_to_quantize.eval()
   qconfig_mapping = QConfigMapping().set_global(torch.ao.quantization.default_dynamic_qconfig)
   # a tuple of one or more example inputs are needed to trace the model
+  input_fp32 = (torch.rand(1, 5),)
   example_inputs = (input_fp32)
   # prepare
   model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping, example_inputs)
@@ -507,9 +521,9 @@ Please follow the tutorials below to learn more about FX Graph Mode Quantization
 API Example::
 
   import torch
-  from torch.ao.quantization.quantize_pt2e import prepare_pt2e
+  from torch.ao.quantization.quantize_pt2e import prepare_pt2e, convert_pt2e
   from torch._export import capture_pre_autograd_graph
-  from torch.ao.quantization.quantizer import (
+  from torch.ao.quantization.quantizer.xnnpack_quantizer import (
       XNNPACKQuantizer,
       get_symmetric_quantization_config,
   )
@@ -535,7 +549,7 @@ API Example::
   # Step 1. program capture
   # NOTE: this API will be updated to torch.export API in the future, but the captured
   # result should mostly stay the same
-  m = capture_pre_autograd_graph(m, *example_inputs)
+  m = capture_pre_autograd_graph(float_model, *example_inputs)
   # we get a model with aten ops
 
   # Step 2. quantization

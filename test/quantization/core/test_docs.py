@@ -114,24 +114,14 @@ class TestQuantizationDocs(QuantizationTestCase):
     def test_quantization_doc_qat(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "QAT API Example::"
-
-        def _dummy_func(*args, **kwargs):
-            return None
-
-        input_fp32 = torch.randn(1, 1, 1, 1)
-        global_inputs = {"training_loop": _dummy_func, "input_fp32": input_fp32}
         code = self._get_code(path_from_pytorch, unique_identifier)
-        self._test_code(code, global_inputs)
+        self._test_code(code)
 
     def test_quantization_doc_fx(self):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "FXPTQ API Example::"
-
-        input_fp32 = SingleLayerLinearModel().get_example_inputs()
-        global_inputs = {"UserModel": SingleLayerLinearModel, "input_fp32": input_fp32}
-
         code = self._get_code(path_from_pytorch, unique_identifier)
-        self._test_code(code, global_inputs)
+        self._test_code(code)
 
     def test_quantization_doc_custom(self):
         path_from_pytorch = "docs/source/quantization.rst"
