@@ -37,6 +37,12 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocatorDeleterContext {
   cudaStream_t stream_;
 };
 
+#if defined(TORCH_HIP_VERSION)
+using streamType = c10::hip::HIPStream;
+#else
+using streamType = c10::cuda::CUDAStream;
+#endif
+
 TORCH_CUDA_CPP_API std::shared_ptr<
     c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator();
@@ -67,7 +73,11 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       std::function<FreeFuncType> free_fn);
 
   CUDAPluggableAllocator(CUDAPluggableAllocator& other);
-  CUDAPluggableAllocator& operator=(CUDAPluggableAllocator& other) = delete;
+  CUDAPluggableAllocator(CUDAPluggableAllocator&& other) = delete;
+  CUDAPluggableAllocator& operator=(const CUDAPluggableAllocator& other) =
+      delete;
+  CUDAPluggableAllocator& operator=(CUDAPluggableAllocator&& other) = delete;
+  ~CUDAPluggableAllocator() override = default;
 
   void set_init_fn(std::function<void(int)> init_fn);
 
@@ -111,7 +121,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override;
   void* getBaseAllocation(void* ptr, size_t* size) override;
 
-  void recordStream(const c10::DataPtr&, c10::cuda::CUDAStream stream) override;
+  void recordStream(const c10::DataPtr&, streamType stream) override;
 
   c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex device) override;

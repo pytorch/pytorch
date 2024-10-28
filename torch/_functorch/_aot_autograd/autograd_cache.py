@@ -33,6 +33,7 @@ from torch._inductor.codecache import (
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
+from torch._utils_internal import log_cache_bypass
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -47,6 +48,7 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 
 
 if TYPE_CHECKING:
+    from torch._inductor.compile_fx import _CompileFxKwargs
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
@@ -175,7 +177,7 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
@@ -205,7 +207,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         gm: torch.fx.GraphModule,
         example_inputs,
         aot_config: AOTConfig,
-        fx_config: Dict[str, BoxedBool],
+        fx_config: _CompileFxKwargs,
     ):
         # FxGraphHashDetails contains all the keys related to inductor. Also includes some system info
         self.aot_config = aot_config
@@ -269,7 +271,7 @@ def autograd_cache_key(
     gm: torch.fx.GraphModule,
     example_inputs,
     config: AOTConfig,
-    fx_config: Dict[str, BoxedBool],
+    fx_config: _CompileFxKwargs,
     # TODO: add args and parameters
 ) -> Tuple[str, List[str]]:
     """
@@ -295,7 +297,7 @@ class FXGraphCacheLoadable:
     def is_backward(self):
         return False
 
-    def load(self, example_inputs, fx_config: Dict[str, BoxedBool]) -> CompiledFxGraph:
+    def load(self, example_inputs, fx_config: _CompileFxKwargs) -> CompiledFxGraph:
         # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
         # As mentioned, AOTAutograd takes in the symint inputs from dynamo's list of arguments.
         # FXGraphCache serializes guards that are needed in the shape_env based on these symint inputs to the graph.
@@ -332,7 +334,7 @@ class FXGraphCacheLoadable:
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])
+        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])  # type: ignore[arg-type]
         result._boxed_call = True
         return result
 
@@ -369,6 +371,12 @@ class AOTAutogradCacheEntry:
     compiled_fw: CompiledForward
     compiled_bw: Optional[CompiledBackward]
 
+    # Code of the joint graph using print_readable()
+    # Used for logging purposes
+    aot_joint_graph_str: Optional[str]
+    aot_forward_graph_str: Optional[str]
+    aot_backward_graph_str: Optional[str]
+
     # Runtime_metadata saved right before compilation
     runtime_metadata: ViewAndMutationMeta
 
@@ -393,7 +401,7 @@ class AOTAutogradCacheEntry:
         self,
         args: List[torch.Tensor],
         aot_config: AOTConfig,
-        fx_config: Dict[str, BoxedBool],
+        fx_config: _CompileFxKwargs,
     ) -> Callable:
         """
         This function takes a cache entry and carefully reconstructs the original callable
@@ -411,13 +419,35 @@ class AOTAutogradCacheEntry:
 
         Which we'll handle separately later on, if necessary.
         """
+
+        # Log the output of AOTAutogradCache
+        if aot_config.enable_log:
+            # TODO: maybe also log to aot_graphs_log
+            # Unfortunately aot_graphs_log uses
+            # slightly different formatting though
+            if self.aot_joint_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_joint_graph", payload_fn=lambda: self.aot_joint_graph_str
+                )
+            if self.aot_forward_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_forward_graph", payload_fn=lambda: self.aot_forward_graph_str
+                )
+            if self.aot_backward_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
+                )
+
         compiled_fw_func = self.compiled_fw.load(args, fx_config)
         compiled_bw_func = None
+        chromium_log = get_chromium_event_logger()
         if self.compiled_bw is not None:
             compiled_bw_func = self.compiled_bw.load(args, fx_config)
             needs_autograd = True
+            chromium_log.add_event_data("backend_compile", dispatch_mode="autograd")
         else:
             needs_autograd = False
+            chromium_log.add_event_data("backend_compile", dispatch_mode="inference")
 
         # Wrap the forward function in post compile wrappers
         compiled_fw_func = AOTDispatchSubclassWrapper(
@@ -427,6 +457,11 @@ class AOTAutogradCacheEntry:
             num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
         ).post_compile(
             compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
+        )
+
+        req_subclass_dispatch = self.maybe_subclass_meta is not None
+        chromium_log.add_event_data(
+            "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
         )
 
         # In autograd case, functionalizedRngWrapper should not modify outs
@@ -541,7 +576,7 @@ class AOTAutogradCache:
         debug_lines: List[str] = []
         cache_event_time = time.time_ns()
         cache_state = None
-        fx_config = {"cudagraphs": cudagraphs}
+        fx_config: _CompileFxKwargs = {"cudagraphs": cudagraphs}
         try:
             cache_key, debug_lines = autograd_cache_key(gm, args, aot_config, fx_config)
             entry: Optional[AOTAutogradCacheEntry] = AOTAutogradCache._lookup(
@@ -593,6 +628,9 @@ class AOTAutogradCache:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             cache_state = "bypass"
             cache_event_time = time.time_ns()
+            cache_info["cache_bypass_reason"] = str(e)
+            if remote:
+                log_cache_bypass("bypass_aot_autograd", str(e))
             if config.strict_autograd_cache:
                 raise e
         if compiled_fn is None:
@@ -612,6 +650,18 @@ class AOTAutogradCache:
         chromium_log.log_instant_event(
             f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
+
+        chromium_log.add_event_data(
+            "backend_compile",
+            cache_state=cache_state,
+            cache_event_time=cache_event_time,
+            key=cache_info.get("key"),
+            components=cache_info.get("components"),
+            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+            remote_cache_enabled=remote,
+            local_cache_enabled=local,
+        )
+
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
