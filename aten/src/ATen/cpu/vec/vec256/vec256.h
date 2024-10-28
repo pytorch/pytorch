@@ -9,9 +9,6 @@
 #if !(defined(__VSX__)  || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_ZVECTOR))
 #if defined(CPU_CAPABILITY_SVE256)
 #include <ATen/cpu/vec/sve/vec_common_sve.h>
-#else
-#include <ATen/cpu/vec/vec256/vec256_float_neon.h>
-#include <ATen/cpu/vec/vec256/vec256_half_neon.h>
 #endif
 #include <ATen/cpu/vec/vec256/vec256_float.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
