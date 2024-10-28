@@ -207,6 +207,17 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 
     # Handle pointwise fallbacks
     if torch.Tag.pointwise in func.tags:
+        from torch.fx.experimental.symbolic_shapes import is_nested_int
+
+        # No pointwise ops legitimately accept nested int inputs. Without this check,
+        # they will be incorrectly interpreted as tensors.
+        # See https://github.com/pytorch/pytorch/issues/138496
+        for arg in args:
+            if is_nested_int(arg):
+                raise RuntimeError(
+                    f"NestedTensor {func.__name__}: invalid argument {arg}"
+                )
+
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum(isinstance(x, torch.Tensor) for x in args)
         if num_tensor_args == 1:
@@ -664,7 +675,7 @@ def _softmax_default(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,
+        _reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         (new_kwargs["dim"],),
@@ -985,7 +996,7 @@ def matmul_default(func, *args, **kwargs):
 
     def _padded_impl(a, b):
         assert a.is_nested and not b.is_nested
-        nt, t = a, b
+        nt = a
 
         from .nested_tensor import nested_from_padded
 
@@ -1571,9 +1582,10 @@ def index_put_(func, *args, **kwargs):
     assert len(indices) <= inp.dim()
 
     if len(indices) < inp._ragged_idx + 1:
-        assert (
-            inp.is_contiguous()
-        ), "If ragged dimension is not part of indices, this only works on contiguous NJTs"
+        if not inp.is_contiguous():
+            raise RuntimeError(
+                "index_put(): If ragged dimension is not part of indices, this only works on contiguous NJTs"
+            )
         # Ragged dim is NOT part of indices, we need to pad the nested tensor to apply func
         from .nested_tensor import nested_from_padded
 
@@ -1679,7 +1691,7 @@ def mean_dim(func, *args, **kwargs):
         new_kwargs["dim"],
         reduce_on_batch,
         reduce_on_ragged,
-        reduce_on_non_batch,
+        _reduce_on_non_batch,
     ) = _wrap_jagged_dims(
         inp.dim(),
         new_kwargs["dim"],
@@ -2029,6 +2041,17 @@ def _nested_select_backward_default(func, *args, **kwargs):
     grad_input.select(new_kwargs["dim"], new_kwargs["index"]).copy_(grad_output)
 
     return grad_input
+
+
+@register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
+def record_stream_default(func, *args, **kwargs):
+    inp = args[0]
+    stream = args[1]
+    # ensure all components live until stream computation completes
+    func(inp._values, stream)
+    func(inp._offsets, stream)
+    if inp._lengths is not None:
+        func(inp._lengths, stream)
 
 
 # Make the dummy available on the C++ side.

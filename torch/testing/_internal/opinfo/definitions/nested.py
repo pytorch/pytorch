@@ -136,7 +136,6 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 def reduction_reference(op, sample):
     assert sample.input.is_nested
     dim = sample.kwargs.get("dim", None)
-    keepdim = sample.kwargs.get("keepdim", False)
     assert dim != 0, "reductions over the batch dim are not supported"
     assert "dims" not in sample.kwargs
     assert sample.input._ragged_idx == 1
@@ -388,7 +387,7 @@ def sample_inputs_matmul(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[3]
     ):
         # (B, j1, D) x (D, E) => (B, j1, E)
-        B, D = njt_3d.shape[0], njt_3d.shape[-1]
+        D = njt_3d.shape[-1]
         E = D + 2
         yield SampleInput(
             njt_3d.clone().detach(),
@@ -400,7 +399,7 @@ def sample_inputs_matmul(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[4]
     ):
         # (B, j1, D, E) x (E, F) => (B, j1, D, F)
-        B, E = njt_4d.shape[0], njt_4d.shape[-1]
+        E = njt_4d.shape[-1]
         F = E + 2
         yield SampleInput(
             njt_4d.clone().detach(),
@@ -426,19 +425,23 @@ def sample_inputs_index_put(
     op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
 ):
     for njt in _sample_njts(
-        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2]
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
     ):
-        indices = [
-            torch.tensor(list(range(njt.size(0))), device=njt.device),
-            *[
-                torch.tensor([0] * njt.size(0), device=njt.device)
-                for _ in range(njt.dim() - 1)
-            ],
-        ]
-        yield SampleInput(
-            njt,
-            kwargs={"indices": indices, "values": torch.tensor(1.0, device=njt.device)},
-        )
+        for dim in range(njt.dim()):
+            indices = [
+                torch.tensor(list(range(njt.size(0))), device=njt.device),
+                *[
+                    torch.tensor([0] * njt.size(0), device=njt.device)
+                    for _ in range(dim - 1)
+                ],
+            ]
+            yield SampleInput(
+                njt,
+                kwargs={
+                    "indices": indices,
+                    "values": torch.tensor(1.0, device=njt.device),
+                },
+            )
 
     # Non-cont NJT for completeness
     offsets = torch.tensor([0, 2, 5, 7], device=device)

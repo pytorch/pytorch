@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     slowTest,
+    TEST_MKL,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU
@@ -236,6 +237,9 @@ if RUN_CPU:
             if func.startswith("test_lstm_packed_change_input_sizes")
         ],
         BaseTest("test_max_pool2d6"),
+        BaseTest(
+            "test_mkl_linear", "", test_cpu_repro.CPUReproTests(), condition=TEST_MKL
+        ),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
@@ -281,7 +285,11 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
-                None,
+                [
+                    "torch.ops.onednn.qconv2d_pointwise",
+                    "torch.ops.quantized.max_pool2d",
+                    "aoti_torch_cpu__qlinear_pointwise_tensor",
+                ]
             ],
         ),
         *[

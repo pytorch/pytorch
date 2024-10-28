@@ -590,10 +590,8 @@ class TestCuda(TestCase):
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
     def test_specify_improper_device_name(self):
-        import os
-
-        fname = "tempfile.pt"
-        try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fname = os.path.join(tmpdir, "tempfile.pt")
             with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
                 torch.save(
                     [torch.nn.Parameter(torch.randn(10, 10))],
@@ -601,9 +599,6 @@ class TestCuda(TestCase):
                     _use_new_zipfile_serialization=True,
                 )
                 torch.load(fname, "cuda0")
-        finally:
-            if os.path.exists(fname):
-                os.remove(fname)
 
     def test_get_device_index(self):
         from torch.cuda._utils import _get_device_index
@@ -4539,13 +4534,25 @@ class TestMemPool(TestCase):
         # pool should point to the same allocator as the one passed into it
         self.assertEqual(allocator.allocator(), pool.allocator)
 
+        # pool's use count should be 1 at this point as MemPool object
+        # holds a reference
+        self.assertEqual(pool.use_count(), 1)
+
         # no allocations happened yet, so called_dummy_alloc should be 0
         alloc_lib = ctypes.CDLL(dummy_allocator)
         called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
         self.assertEqual(called_dummy_alloc.value, 0)
 
         with torch.cuda.use_mem_pool(pool):
-            out = torch.randn(1, device="cuda")
+            out_0 = torch.randn(1, device="cuda")
+
+            # pool's use count should be 2 at this point as use_mem_pool
+            # holds a reference
+            self.assertEqual(pool.use_count(), 2)
+
+        # pool's use count should be back to 1 at this point as use_mem_pool
+        # released its reference
+        self.assertEqual(pool.use_count(), 1)
 
         # called_dummy_alloc should be 123 if dummy_alloc was used to allocate
         # out tensor
