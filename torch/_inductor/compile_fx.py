@@ -191,6 +191,21 @@ def get_static_input_idxs(num_fixed: int) -> List[int]:
     return fixed + context.fw_metadata.static_input_indices
 
 
+def record_original_output_strides(gm: GraphModule) -> None:
+    output_node = gm.graph.find_nodes(op="output")[0]
+    output_strides = []
+    for output in output_node.args[0]:
+        if (
+            isinstance(output, torch.fx.Node)
+            and (val := output.meta.get("val")) is not None
+            and isinstance(val, torch.Tensor)
+        ):
+            output_strides.append(val.stride())
+        else:
+            output_strides.append(None)
+    output_node.meta["original_output_strides"] = output_strides
+
+
 @functools.lru_cache(None)
 def _step_logger() -> Callable[..., None]:
     return dynamo_logging.get_step_logger(log)
@@ -335,7 +350,8 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
 
 def split_const_gm(
     gm: GraphModule,
-    lifted_constants: Optional[Dict[str, Any]] = None,
+    skip_constructor: bool = True,
+    lifted_constant_names: Optional[List[str]] = None,
     skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> Tuple[GraphModule, Dict[str, int]]:
     """
@@ -362,9 +378,10 @@ def split_const_gm(
         run_and_get_constant_graph,
     )
 
-    const_gm, const_result = run_and_get_constant_graph(
-        gm, lifted_constants, skip_folding_node_fn
+    const_gm = run_and_get_constant_graph(
+        gm, skip_constructor, lifted_constant_names, skip_folding_node_fn
     )
+    const_result = const_gm() if lifted_constant_names is None else None
 
     const_outputs = {
         x.name: idx for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
@@ -384,7 +401,11 @@ def split_const_gm(
         replace_node_with_constant(
             gm,
             node,
-            const_result[const_outputs[node.name]],
+            (
+                const_result[const_outputs[node.name]]
+                if lifted_constant_names is None
+                else None
+            ),
             new_const_name,
         )
         const_output_index[new_const_name] = const_outputs[node.name]
@@ -431,6 +452,11 @@ def maybe_disable_comprehensive_padding(
 
     if config.disable_padding_cpu and config.comprehensive_padding and not has_gpu:
         perf_hint_log.info("Skip comprehensive padding on CPU")
+        return config.patch(comprehensive_padding=False)
+    elif config.aot_inductor.use_runtime_constant_folding:
+        perf_hint_log.info(
+            "Skip comprehensive padding for use_runtime_constant_folding"
+        )
         return config.patch(comprehensive_padding=False)
     else:
         return contextlib.nullcontext()
@@ -494,7 +520,6 @@ class _CompileFxKwargs(TypedDict, total=False):
     cpp_wrapper: bool
     aot_mode: bool
     is_inference: bool
-    user_visible_outputs: Optional[Dict[str, None]]
     layout_opt: Optional[bool]
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]]
 
@@ -526,7 +551,6 @@ def compile_fx_inner(
     kwargs.setdefault("aot_mode", False)
     kwargs.setdefault("is_inference", False)
     kwargs.setdefault("boxed_forward_device_index", None)
-    kwargs.setdefault("user_visible_outputs", None)
     kwargs.setdefault("layout_opt", None)
     kwargs.setdefault("extern_node_serializer", None)
 
@@ -542,6 +566,12 @@ def compile_fx_inner(
                 "compile_fx_inner", phase_name="inductor_compile", fwd_only=False
             )
         )
+        # NB: Why is this the dynamo_compile counter?  The rule here is that
+        # if it gets an entry in the dynamo_compile table, we also want to
+        # tick up the wait counter.  We have to displeasingly manually trigger
+        # the counter here because we may dropped into compile_fx directly
+        # from lazy backwards compilation.
+        stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
 
@@ -742,9 +772,6 @@ def fx_codegen_and_compile(
     cpp_wrapper: bool = False,
     aot_mode: bool = False,
     is_inference: bool = False,
-    # Use a dict with None value rather than a set for deterministic
-    # iteration order just in case.
-    user_visible_outputs: Optional[Dict[str, None]] = None,
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
@@ -819,6 +846,8 @@ def fx_codegen_and_compile(
         with torch.no_grad():
             fake_mode = fake_tensor_prop(gm, example_inputs)
 
+        record_original_output_strides(gm)
+
         # pattern matcher passes might not preserve striding information
         # on node.meta["val"]. if in the future we rely on these being
         # correct we will need to fix.
@@ -867,7 +896,6 @@ def fx_codegen_and_compile(
                     graph_id=graph_id,
                     cpp_wrapper=cpp_wrapper,
                     aot_mode=aot_mode,
-                    user_visible_outputs=user_visible_outputs,
                     extern_node_serializer=extern_node_serializer,
                     is_inference=is_inference,
                     is_backward=is_backward,
@@ -889,7 +917,6 @@ def fx_codegen_and_compile(
                 graph_id=graph_id,
                 cpp_wrapper=cpp_wrapper,
                 aot_mode=aot_mode,
-                user_visible_outputs=user_visible_outputs,
                 extern_node_serializer=extern_node_serializer,
                 is_inference=is_inference,
                 is_backward=is_backward,
@@ -1252,9 +1279,9 @@ def fw_compiler_freezing(
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
-    user_visible_outputs = dict.fromkeys(
-        n.name for n in model_outputs if isinstance(n, torch.fx.Node)
-    )
+    model_outputs_node.meta["user_visible_output_idxs"] = [
+        idx for idx, n in enumerate(model_outputs) if isinstance(n, torch.fx.Node)
+    ]
 
     static_input_idxs = list(range(num_fixed))
     wrapper_new_args_unwrapped_indices: List[int] = []
@@ -1301,7 +1328,6 @@ def fw_compiler_freezing(
             is_inference=True,
             boxed_forward_device_index=forward_device,
             layout_opt=layout_opt,
-            user_visible_outputs=user_visible_outputs,
         )
 
     # aot_inductor codegens a call that takes in just the inputs, so we don't return a wrapper
@@ -1391,6 +1417,7 @@ def compile_fx(
                 }
             ), V.set_real_inputs(example_inputs_):
                 inputs_: Sequence[InputType] = example_inputs_
+
                 if isinstance(model_, GraphModule):
                     fake_inputs = [
                         node.meta.get("val")
@@ -1404,7 +1431,7 @@ def compile_fx(
                         for inp in fake_inputs
                     ]
 
-                    if all(v is not None for v in fake_inputs):
+                    if any(v is not None for v in fake_inputs):
                         # Validate devices before switching to fake tensors.
                         for idx, fi, i in zip(count(), fake_inputs, inputs_):
                             if fi is not None:
@@ -1415,7 +1442,7 @@ def compile_fx(
                                         f"{fi.device} vs {i.device}. If the model was exported via torch.export(), "
                                         "make sure torch.export() and torch.aot_compile() run on the same device."
                                     )
-                        inputs_ = fake_inputs
+                        inputs_ = fake_inputs  # type: ignore[assignment]
                 return compile_fx(
                     model_,
                     inputs_,
@@ -1486,10 +1513,8 @@ def compile_fx(
                 num_example_inputs, len(example_inputs)
             )
 
-            user_visible_outputs = {}
-
+            model_outputs_node = output_node(model)
             if config.keep_output_stride:
-                model_outputs_node = output_node(model)
                 model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
                 num_model_outputs = len(model_outputs)
 
@@ -1534,13 +1559,13 @@ def compile_fx(
                 # of "graph" outputs. Make sure we're within bounds.
                 assert orig_output_end_idx <= num_model_outputs
 
-                user_visible_outputs = dict.fromkeys(
-                    n.name
-                    for n in model_outputs[
-                        original_output_start_index:orig_output_end_idx
-                    ]
-                    if isinstance(n, torch.fx.Node)
-                )
+                model_outputs_node.meta["user_visible_output_idxs"] = [
+                    idx
+                    for idx in range(original_output_start_index, orig_output_end_idx)
+                    if isinstance(model_outputs[idx], torch.fx.Node)
+                ]
+            else:
+                model_outputs_node.meta["user_visible_output_idxs"] = []
 
             return inner_compile(
                 model,
@@ -1550,7 +1575,6 @@ def compile_fx(
                 graph_id=graph_id,
                 is_inference=is_inference,
                 boxed_forward_device_index=forward_device,
-                user_visible_outputs=user_visible_outputs,
             )
 
         fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
@@ -1585,14 +1609,17 @@ def compile_fx(
             model: GraphModule, example_inputs: List[InputType]
         ) -> Union[CompiledFxGraph, str]:
             with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
-                user_visible_outputs = {}
-
+                model_outputs_node = output_node(model)
                 if config.bw_outputs_user_visible:
-                    model_outputs_node = output_node(model)
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
-                    user_visible_outputs = dict.fromkeys(
-                        n.name for n in model_outputs if isinstance(n, torch.fx.Node)
-                    )
+                    model_outputs_node.meta["user_visible_output_idxs"] = [
+                        idx
+                        for idx, n in enumerate(model_outputs)
+                        if isinstance(n, torch.fx.Node)
+                    ]
+                else:
+                    model_outputs_node.meta["user_visible_output_idxs"] = []
+
                 fixed = count_tangents(model)
                 with config.patch(
                     get_cpp_wrapper_config()
@@ -1605,7 +1632,6 @@ def compile_fx(
                         is_backward=True,
                         graph_id=graph_id,
                         boxed_forward_device_index=forward_device,
-                        user_visible_outputs=user_visible_outputs,
                     )
 
         # TODO: can add logging before/after the call to create_aot_dispatcher_function
