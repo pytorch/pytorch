@@ -94,7 +94,14 @@ struct Vectorized16 {
     const Derived base_vec(base);
     const Derived step_vec(step);
     const Derived step_sizes(
-        0, 1, 2, 3, 4, 5, 6, 7);
+        value_type(0),
+        value_type(1),
+        value_type(2),
+        value_type(3),
+        value_type(4),
+        value_type(5),
+        value_type(6),
+        value_type(7));
     return fmadd(step_sizes, step_vec, base_vec);
   }
 
@@ -104,13 +111,13 @@ struct Vectorized16 {
   // this should be removed. TODO (kimishpatel)
   value_type operator[](int idx) const {
     __at_align__ value_type tmp[size()];
-    Derived::store(tmp);
+    static_cast<const Derived*>(this)->store(tmp);
     return tmp[idx];
   }
 
   int zero_mask() const {
     __at_align__ value_type tmp[size()];
-    Derived::store(tmp);
+    static_cast<const Derived*>(this)->store(tmp);
     int mask = 0;
     for (int i = 0; i < size(); ++i) {
       if (tmp[i] == 0) {
