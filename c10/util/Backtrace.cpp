@@ -1,3 +1,4 @@
+#include <c10/macros/Macros.h>
 #include <c10/util/Backtrace.h>
 #include <c10/util/Type.h>
 #include <c10/util/irange.h>
@@ -10,13 +11,17 @@
 #include <vector>
 
 #ifdef _MSC_VER
+#include <c10/util/Unicode.h>
 #include <c10/util/win32-headers.h>
 #include <iomanip>
 #pragma comment(lib, "Dbghelp.lib")
 #endif
 
 #if SUPPORTS_BACKTRACE
+C10_CLANG_DIAGNOSTIC_PUSH()
+C10_CLANG_DIAGNOSTIC_IGNORE("-Wdeprecated-dynamic-exception-spec")
 #include <cxxabi.h>
+C10_CLANG_DIAGNOSTIC_POP()
 #ifdef C10_ANDROID
 #include <dlfcn.h>
 #include <unwind.h>
@@ -277,6 +282,7 @@ class GetBacktraceImpl {
   }
 
  private:
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool skip_python_frames_;
   std::vector<void*> callstack_;
 };
@@ -284,27 +290,31 @@ class GetBacktraceImpl {
 #elif defined(_MSC_VER) // !SUPPORTS_BACKTRACE
 
 const int max_name_len = 256;
-std::string get_module_base_name(void* addr) {
+std::wstring get_module_base_name(void* addr) {
   HMODULE h_module;
-  char module[max_name_len];
-  strcpy(module, "");
-  GetModuleHandleEx(
+  wchar_t module[max_name_len];
+  wcscpy(module, L"");
+
+  GetModuleHandleExW(
       GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-      (LPCTSTR)addr,
+      (LPCWSTR)addr,
       &h_module);
+
   if (h_module != NULL) {
-    GetModuleFileNameA(h_module, module, max_name_len);
+    GetModuleFileNameW(h_module, module, max_name_len);
   }
-  char* last_slash_pos = strrchr(module, '\\');
+
+  wchar_t* last_slash_pos = wcsrchr(module, L'\\');
   if (last_slash_pos) {
-    std::string module_base_name(last_slash_pos + 1);
+    std::wstring module_base_name(last_slash_pos + 1);
     return module_base_name;
   } else {
-    std::string module_base_name(module);
+    std::wstring module_base_name(module);
     return module_base_name;
   }
 }
+
 class SymbolHelper {
  public:
   static SymbolHelper& getInstance() {
@@ -393,7 +403,8 @@ class GetBacktraceImpl {
       }
 
       // Get the module basename
-      std::string module = get_module_base_name(back_trace_[i_frame]);
+      std::string module =
+          c10::u16u8(get_module_base_name(back_trace_[i_frame]));
 
       // The pattern on Windows is
       // `<return-address> <symbol-address>

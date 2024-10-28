@@ -96,8 +96,6 @@ TraceWrapper::TraceWrapper(const int64_t start_time, const std::string& name)
 }
 #endif // USE_KINETO
 
-TraceWrapper::~TraceWrapper() = default;
-
 activity_t* TraceWrapper::addCPUActivity(
     const std::string& name,
     const libkineto::ActivityType type,
@@ -227,6 +225,7 @@ void prepareTrace(
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config) {
 #ifdef USE_KINETO
+  libkineto::api().resetKinetoTLS();
   if (!libkineto::api().isProfilerRegistered()) {
     libkineto_init(/*cpuOnly=*/cpuOnly, /*logOnError=*/true);
     libkineto::api().suppressLogMessages();

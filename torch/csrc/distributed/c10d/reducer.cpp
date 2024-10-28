@@ -1044,11 +1044,11 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 }
 
 void Reducer::install_futures(
-    c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs) {
+    const c10::List<c10::intrusive_ptr<c10::ivalue::Future>>& futs) {
   // Append instead of overwrite so that this method can be called multiple
   // times in one iteration.
   if (!installed_futures_) {
-    installed_futures_ = std::move(futs);
+    installed_futures_ = futs;
   } else {
     installed_futures_->append(futs);
   }
@@ -1698,7 +1698,7 @@ void Reducer::runGradCallbackForVariable(
     cb(variable.mutable_grad());
   } else {
     // Under distributed autograd
-    context_ptr->runGradCallbackForVariable(variable, std::move(cb));
+    context_ptr->runGradCallbackForVariable(variable, cb);
   }
 #endif
 }
@@ -1759,15 +1759,17 @@ void Reducer::sync_bucket_indices(
   num_buckets = indices_accessor[indices_accessor_Index];
 
   // Broadcast bucket_sizes
-  auto bucket_sizes_tensor = at::empty({(int64_t)num_buckets}, at::kInt);
+  auto bucket_sizes_tensor =
+      at::empty({static_cast<int64_t>(num_buckets)}, at::kInt);
   auto bucket_sizes_accessor = bucket_sizes_tensor.accessor<int, 1>();
   for (const auto i : c10::irange(num_buckets)) {
     // For rank != 0, it is possible that local num buckets bucket_sizes.size()
     // is smaller than broadcasted num_buckets
-    bucket_sizes_accessor[i] =
-        bucket_sizes.at(std::min(i, (bucket_sizes.size() - 1)));
+    bucket_sizes_accessor[static_cast<int64_t>(i)] = static_cast<int>(
+        bucket_sizes.at(std::min(i, (bucket_sizes.size() - 1))));
   }
-  auto bucket_sizes_tensor_device = at::empty({(int64_t)num_buckets}, options);
+  auto bucket_sizes_tensor_device =
+      at::empty({static_cast<int64_t>(num_buckets)}, options);
   bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> bucket_sizes_tensor_list = {
       bucket_sizes_tensor_device};
@@ -2238,7 +2240,7 @@ void verify_params_across_processes(
   std::vector<std::vector<at::Tensor>> param_size_output_tensors;
   param_size_output_tensors.emplace_back();
   auto world_size = process_group->getSize();
-  for (C10_UNUSED const auto i : c10::irange(world_size)) {
+  for ([[maybe_unused]] const auto i : c10::irange(world_size)) {
     param_size_output_tensors.front().emplace_back(
         at::empty_like(param_size_tensor));
   }

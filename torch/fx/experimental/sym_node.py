@@ -1096,7 +1096,6 @@ def _make_node_magic(method, func):
             get_proxy_mode,
             handle_sym_dispatch,
         )
-        from torch.fx.experimental.symbolic_shapes import safe_expand
 
         op = method_to_operator(method)
 
@@ -1136,7 +1135,6 @@ def _make_node_magic(method, func):
         except Exception:
             log.warning("failed to eval %s(%s, %s)", method, self.expr, other.expr)
             raise
-        out = safe_expand(out)
         sym_node_log.debug("%s %s %s -> %s", method, self.expr, other.expr, out)
         pytype: Type
         # This is not strictly correct. In Python, a**b may return complex when
@@ -1174,7 +1172,6 @@ def _make_node_magic(method, func):
             get_proxy_mode,
             handle_sym_dispatch,
         )
-        from torch.fx.experimental.symbolic_shapes import safe_expand
 
         op = method_to_operator(method)
         if get_proxy_mode():
@@ -1193,7 +1190,6 @@ def _make_node_magic(method, func):
         out_hint = None
         if self.hint is not None:
             out_hint = op(self.hint)
-        out = safe_expand(out)
         pytype: Type
         if method in always_int_magic_methods:
             pytype = int
@@ -1216,7 +1212,6 @@ def _make_node_magic(method, func):
                 get_proxy_mode,
                 handle_sym_dispatch,
             )
-            from torch.fx.experimental.symbolic_shapes import safe_expand
 
             out_hint = then_node.hint if pred_node.hint else else_node.hint
             if get_proxy_mode():
@@ -1245,7 +1240,6 @@ def _make_node_magic(method, func):
                 )
                 raise
 
-            out = safe_expand(out)
             fx_node, _ = pred_node.shape_env._create_fx_call_function(
                 sym_ite, (pred_node.fx_node, then_node.fx_node, else_node.fx_node)
             )
@@ -1261,7 +1255,6 @@ def _make_node_magic(method, func):
                 get_proxy_mode,
                 handle_sym_dispatch,
             )
-            from torch.fx.experimental.symbolic_shapes import safe_expand
 
             op = builtins.round
             if get_proxy_mode():
@@ -1275,8 +1268,6 @@ def _make_node_magic(method, func):
             except Exception:
                 log.warning("failed to eval %s(%s, ndigits=%s)", method, expr, ndigits)
                 raise
-
-            out = safe_expand(out)
 
             if ndigits is None:
                 pytype = int
