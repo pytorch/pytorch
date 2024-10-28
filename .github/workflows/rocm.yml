@@ -26,6 +26,7 @@ jobs:
       contents: read
 
   linux-focal-rocm6_2-py3_10-build:
+    if: github.event_name != 'schedule' || github.repository == 'pytorch/pytorch'
     name: linux-focal-rocm6.2-py3.10
     uses: ./.github/workflows/_linux-build.yml
     with:

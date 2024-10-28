@@ -5,9 +5,7 @@
 
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 class TORCH_API IRCloner : public IRMutator {
  public:
@@ -61,6 +59,4 @@ class TORCH_API IRCloner : public IRMutator {
   StmtPtr mutate(const CondPtr& v) override;
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
