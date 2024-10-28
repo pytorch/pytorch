@@ -293,13 +293,13 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                     torch._C._distributed_c10d._get_work_registry_size(), 0
                 )
 
-            # Test: issue comm in eager -> wait for comm in compile. Use the context manager.
             all_reduce_wait_compiled = torch.compile(
                 all_reduce_wait,
                 backend="inductor",
                 fullgraph=True,
             )
-            with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
+
+            def _run_loop_issue_comm_in_eager_wait_for_comm_in_compile(x):
                 for _ in range(10):
                     self.assertEqual(
                         torch._C._distributed_c10d._get_work_registry_size(), 0
@@ -314,7 +314,17 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                     self.assertEqual(
                         torch._C._distributed_c10d._get_work_registry_size(), 0
                     )
+                return work, y, out_compiled
+
+            # Test: issue comm in eager -> wait for comm in compile. Use the context manager.
+            with _functional_collectives.allow_inflight_collective_as_graph_input_ctx():
+                (
+                    work,
+                    y,
+                    out_compiled,
+                ) = _run_loop_issue_comm_in_eager_wait_for_comm_in_compile(x)
             self.assertEqual(out_ref, out_compiled)
+
             # Check that `wait_tensor()` is in the Inductor generated code
             _, triton_codes = run_and_get_code(all_reduce_wait_compiled, work, y)
             FileCheck().check("torch.ops._c10d_functional.wait_tensor.default(").run(
@@ -322,19 +332,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
 
             # Failure Case: issue comm in eager -> wait for comm in compile. Doesn't use the context manager.
-            for _ in range(10):
-                self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 0
-                )
-                work, y = all_reduce_non_functional_eager(x)
-                # Non-functional collectives not run under the context manager is not registered in the work registry.
-                self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 0
-                )
-                out_compiled = all_reduce_wait_compiled(work, y)
-                self.assertEqual(
-                    torch._C._distributed_c10d._get_work_registry_size(), 0
-                )
+            out_compiled = _run_loop_issue_comm_in_eager_wait_for_comm_in_compile(x)
             # In this case `.wait_tensor(y)` in compiled region will not be able to find the corresponding work object
             # to invoke the wait, thus the result will not match eager.
             self.assertNotEqual(out_ref, out_compiled)

@@ -21,7 +21,7 @@ List<T>::List()
 : List(make_intrusive<c10::detail::ListImpl>(
   typename c10::detail::ListImpl::list_type(),
   getTypePtr<T>())) {
-  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType) instead.");
+  static_assert(!std::is_same_v<T, IValue>, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType) instead.");
 }
 
 template<class T>
@@ -29,7 +29,7 @@ List<T>::List(ArrayRef<T> values)
 : List(make_intrusive<c10::detail::ListImpl>(
     typename c10::detail::ListImpl::list_type(),
     getTypePtr<T>())) {
-  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType).");
+  static_assert(!std::is_same_v<T, IValue>, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType).");
   impl_->list.reserve(values.size());
   for (const T& element : values) {
     impl_->list.push_back(element);
@@ -39,7 +39,7 @@ List<T>::List(ArrayRef<T> values)
 template<class T>
 List<T>::List(std::initializer_list<T> initial_values)
 : List(ArrayRef<T>(initial_values)) {
-  static_assert(!std::is_same<T, IValue>::value, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType).");
+  static_assert(!std::is_same_v<T, IValue>, "This constructor is not valid for List<IValue>. Please use c10::impl::GenericList(elementType).");
 }
 
 template<class T>
@@ -47,7 +47,7 @@ List<T>::List(TypePtr elementType)
 : List(make_intrusive<c10::detail::ListImpl>(
     typename c10::detail::ListImpl::list_type(),
     std::move(elementType))) {
-  static_assert(std::is_same<T, IValue>::value || std::is_same<T, c10::intrusive_ptr<ivalue::Future>>::value,
+  static_assert(std::is_same_v<T, IValue> || std::is_same<T, c10::intrusive_ptr<ivalue::Future>>::value,
                 "This constructor is only valid for c10::impl::GenericList or List<Future>.");
 }
 
