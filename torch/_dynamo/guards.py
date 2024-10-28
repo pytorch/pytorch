@@ -2624,7 +2624,8 @@ def get_and_maybe_log_recompilation_reason(
         if reason:
             reasons.append(reason)
 
-        diff_guards_log.debug("%s", cache_entry.guard_manager.print_diff_guard_set())
+        # TODO(anijain2305) - Fix some silly issue with printing
+        # diff_guards_log.debug("%s", cache_entry.guard_manager.print_diff_guard_set())
         cache_entry = cache_entry.next
 
     code = frame.f_code
