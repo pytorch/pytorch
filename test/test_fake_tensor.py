@@ -179,6 +179,16 @@ class FakeTensorTest(TestCase):
             x = torch.empty(2, 2, device="meta")
             self.assertEqual(repr(x), "FakeTensor(..., device='meta', size=(2, 2))")
 
+    def test_convert_fake_to_real(self):
+        x = torch.ones([20])
+        with FakeTensorMode(allow_non_fake_inputs=True) as m:
+            _ = x + 1
+
+        out = torch._subclasses.fake_utils.try_convert_fake_to_real([x[0:10]])
+
+        self.assertEqual(torch.ones([10]), out[0])
+
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         with FakeTensorMode() as mode:
