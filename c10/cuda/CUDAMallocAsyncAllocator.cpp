@@ -38,6 +38,7 @@ struct UsageStream {
   UsageStream(UsageStream&& us) noexcept = default;
   UsageStream& operator=(const UsageStream& other) = default;
   UsageStream& operator=(UsageStream&& other) noexcept = default;
+  ~UsageStream() = default;
 };
 
 bool operator==(const UsageStream& lhs, const UsageStream& rhs) {

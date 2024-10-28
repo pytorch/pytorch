@@ -434,6 +434,7 @@ class SparseBitVector {
       : Elements(RHS.Elements), CurrElementIter(Elements.begin()) {}
   SparseBitVector(SparseBitVector&& RHS) noexcept
       : Elements(std::move(RHS.Elements)), CurrElementIter(Elements.begin()) {}
+  ~SparseBitVector() = default;
 
   // Clear.
   void clear() {

@@ -24,12 +24,6 @@ C10_API void warnDeprecatedDataPtr();
 // used when throwing an exception when data_ptr is accessed.
 struct C10_API StorageExtraMeta {
   std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
-  StorageExtraMeta() = default;
-  StorageExtraMeta(const StorageExtraMeta& other) {
-    if (other.custom_data_ptr_error_msg_) {
-      custom_data_ptr_error_msg_ = other.custom_data_ptr_error_msg_;
-    }
-  }
 };
 
 // A storage represents the underlying backing data buffer for a
