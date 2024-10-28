@@ -478,6 +478,7 @@ class _PipelineStageBase(ABC):
             last_backward = self._seen_bwd_chunks == self.chunks - 1  # type: ignore[operator]
         else:
             # For backwards are split into weight and input, we will see twice as many bwd_chunks
+            # -1 because we skip the first bwd_chunk backward
             last_backward = self._seen_bwd_chunks == 2 * self.chunks - 1  # type: ignore[operator]
 
         def perform_backward(backward_type):
@@ -538,8 +539,6 @@ class _PipelineStageBase(ABC):
         else:
             # Non-DP submodule, regular backward
             result = perform_backward(backward_type)()
-
-        self._seen_bwd_chunks += 1
 
         if isinstance(result, tuple) and len(result) == 2:
             # for stage_backward_input()
@@ -709,6 +708,8 @@ class _PipelineStageBase(ABC):
             # this should be detached to release autograd graph context and free memory earlier
             for t in stage_output:
                 t.detach_()
+
+        self._seen_bwd_chunks += 1
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
     def backward_weight_one_chunk(self, bwd_chunk_id: int):
@@ -747,6 +748,8 @@ class _PipelineStageBase(ABC):
                     "full_backward": False,
                 }
                 self.backward_maybe_with_nosync("full", bwd_kwargs)
+
+        self._seen_bwd_chunks += 1
 
     def _validate_fwd_input(self, args, kwargs):
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""

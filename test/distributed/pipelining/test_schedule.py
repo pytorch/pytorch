@@ -116,7 +116,7 @@ class ScheduleTest(TestCase):
         )
         d_hid, batch_size = 512, 256
         n_stages = 1
-        device = "cuda"
+        device = "cpu"
         full_mod = MultiMLP(d_hid, n_layers=n_stages)
         full_mod.to(device)
 
