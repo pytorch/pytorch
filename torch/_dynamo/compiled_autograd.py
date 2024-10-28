@@ -306,13 +306,29 @@ class AutogradCompilerInstance:
         # TODO: if the node is a python autograd.Function or a CompiledFunctionBackward,
         # we should probably "plop" the subgraph into the graph instead
         # of allow_in_graph the node through Dynamo.
-        proxy_inputs, proxy_stack = pytree.tree_map(lambda t: self.to_proxy(t) if isinstance(t, torch.Tensor) else t,  (inputs, stack))
+        proxy_inputs, proxy_stack = pytree.tree_map(
+            lambda t: self.to_proxy(t) if isinstance(t, torch.Tensor) else t,
+            (inputs, stack),
+        )
+
+        # TODO(xmfan): determine this more reliably
+        if debug_name == "torch::autograd::AccumulateGrad":
+            assert len(proxy_stack) == 1
+            proxy_param = proxy_stack[0]
+            proxy_grad = proxy_inputs[0]
+            proxy_out = self.fx_tracer.create_proxy(
+                "call_function",
+                torch._dynamo.polyfills.accumulate_grad,
+                args=(proxy_param, proxy_grad),
+                kwargs={},
+            )
+            assert num_outputs == 0
+            return []
+
         op = ops.add(debug_name, fn)
         proxy_out = self.fx_tracer.create_proxy(
-            "call_function",
-            op,
-            args=(proxy_inputs, *proxy_stack),
-            kwargs={})
+            "call_function", op, args=(proxy_inputs, *proxy_stack), kwargs={}
+        )
         result = [self.allocate_dummy(*inputs, *stack) for _ in range(num_outputs)]
         self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(num_outputs)])
         return result
