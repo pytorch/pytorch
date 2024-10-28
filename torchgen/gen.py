@@ -2853,6 +2853,9 @@ def main() -> None:
 
     options = parser.parse_args()
 
+    if options.backend_whitelist and str(DispatchKey.XPU) in options.backend_whitelist:
+        options.xpu = True
+
     selector = get_custom_build_selector(
         options.op_registration_whitelist,
         options.op_selection_yaml_path,
@@ -2870,6 +2873,15 @@ def main() -> None:
 
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
+
+    xpu_in_whitelist = (
+        options.backend_whitelist and str(DispatchKey.XPU) in options.backend_whitelist
+    )
+    if (not options.xpu) and (not xpu_in_whitelist):
+        ignore_keys.add(DispatchKey.XPU)
+
+        if DispatchKey.XPU in dispatch_keys:
+            del dispatch_keys[dispatch_keys.index(DispatchKey.XPU)]
 
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
