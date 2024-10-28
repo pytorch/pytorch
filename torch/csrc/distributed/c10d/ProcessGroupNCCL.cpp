@@ -87,6 +87,7 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
 
 bool complexViewAsRealAllowed(const ReduceOp& reduceOp) {
   switch (reduceOp) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case ReduceOp::SUM:
       return true;
     case ReduceOp::AVG:
@@ -119,6 +120,7 @@ ncclRedOpRAII unpackPreMulSum(
       &preMulSum,
       // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/ops.html#ncclredopcreatepremulsum
       // tells us that the scalar input is strictly a multiplier.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       /*scalar=*/has_tensor ? const_cast<T*>(ptr_factor) : &scalar_factor,
       dataType,
       residence,
@@ -305,7 +307,7 @@ static bool allocatorHooksAttached = false;
 
 std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
-void cacheAllocatorRegisterHook(
+static void cacheAllocatorRegisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // Register after SEGMENT_ALLOC
   if (te.action_ !=
@@ -318,12 +320,13 @@ void cacheAllocatorRegisterHook(
     auto& ncclComm = it.first;
     auto& devIdx = it.second;
     if (te.device_ == devIdx) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
     }
   }
 }
 
-void cacheAllocatorDeregisterHook(
+static void cacheAllocatorDeregisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   // deregister before SEGMENT_FREE
   if (te.action_ !=
@@ -336,13 +339,15 @@ void cacheAllocatorDeregisterHook(
     auto& ncclComm = it.first;
     auto& devIdx = it.second;
     if (te.device_ == devIdx) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
     }
   }
 }
 
-std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
-getNCCLCommDumpMap() {
+static std::
+    unordered_map<std::string, std::unordered_map<std::string, std::string>>
+    getNCCLCommDumpMap() {
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<
       std::string /* ncclUniqueID */,
@@ -464,7 +469,7 @@ gil_checker_t& get_gil_checker() {
   return gil_checker;
 }
 
-std::future<bool> launchAsyncGilCheck() {
+static std::future<bool> launchAsyncGilCheck() {
   std::promise<bool> resultPromise;
   std::future<bool> resultFuture = resultPromise.get_future();
   TORCH_CHECK(get_gil_checker(), "Can't check GIL with null GIL checker");
@@ -720,9 +725,6 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
 
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeStream();
-  c10d::unregister_work(
-      c10::intrusive_ptr<
-          ProcessGroupNCCL::WorkNCCL>::unsafe_reclaim_from_nonowning(this));
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
@@ -864,14 +866,13 @@ constexpr const char* MULTI_DEVICE_ERROR_MSG =
     "ProcessGroupNCCL continues supporting multi-process and multi-thread modes.";
 
 ProcessGroupNCCL::ProcessGroupNCCL(
-    const c10::intrusive_ptr<Store>& store,
+    c10::intrusive_ptr<Store> store,
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
     : Backend(rank, size),
-      store_(store),
+      store_(std::move(store)),
       options_(std::move(options)),
-
       traceKeyStart_(getTraceStartKey("NCCL", rank)),
       traceKeyEnd_(getTraceEndKey("NCCL", rank)),
       terminateProcessGroup_(false),
@@ -890,7 +891,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // other threads and cause segfaults.
   const auto ncclVersion = getNcclVersion();
   this->setGroupUid(options_->group_name);
-  this->localDeviceCount_ = at::cuda::getNumGPUs();
+  this->localDeviceCount_ = static_cast<int>(at::cuda::getNumGPUs());
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
@@ -903,7 +904,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // both timeout and other errors.
   dumpOnTimeoutOrEx_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
-  sleepAfterException_ = getCvarBool(TORCH_NCCL_SLEEP_AFTER_EXCEPTION, false);
   // logging C++ stack isn't safe. Introduce a variable to control it.
   logCppStackOnUncleanShutdown_ =
       getCvarBool(TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN, true);
@@ -990,7 +990,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
-            << ", TORCH_NCCL_USE_COMM_NONBLOCKING: " << nccl_use_nonblocking()
 #ifdef NCCL_HAS_COMM_REGISTER
             << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
             << useTensorRegisterAllocatorHook_
@@ -1017,8 +1016,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     this->globalRankStride = 0;
   } else {
     bool ranksAreStrided = true;
-    int startRank = options_->global_ranks_in_group[0];
-    int stride =
+    auto startRank = options_->global_ranks_in_group[0];
+    auto stride =
         options_->global_ranks_in_group[1] - options_->global_ranks_in_group[0];
     for (std::vector<uint64_t>::size_type i = 0;
          i < options_->global_ranks_in_group.size();
@@ -1062,6 +1061,39 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   getNCCLComm(key, device, OpType::ALLREDUCE);
 }
 
+bool ProcessGroupNCCL::useNonblocking() {
+#ifndef NCCL_HAS_COMM_NONBLOCKING
+  return false;
+#endif
+  // Already parsed, return the cached value
+  if (useNonblocking_.has_value()) {
+    return useNonblocking_.value();
+  }
+  // Get environment variable.
+  auto nbEnv = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
+
+  // 1st priority: Respect the user's setting
+  if (options_->config.blocking != NCCL_CONFIG_UNDEF_INT) {
+    useNonblocking_ = options_->config.blocking == 0;
+  }
+  // 2nd priority: Respect the environment variable
+  else if (nbEnv.has_value()) {
+    useNonblocking_ = nbEnv.value();
+  }
+  // 3rd priority: automatically use nonblocking if we are in eager init mode
+  else if (getBoundDeviceId()) {
+    useNonblocking_ = true;
+  }
+  // 4th priority: otherwise, nonblocking = false to preserve old behavior
+  else {
+    useNonblocking_ = false;
+  }
+
+  LOG(INFO) << logPrefix()
+            << "Using non-blocking mode: " << useNonblocking_.value();
+  return useNonblocking_.value();
+}
+
 void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   // If our backend doesn't support splitting, this is a no-op for
   // ranks not in the new subgroup (and ranks that would be in it will
@@ -1070,6 +1102,8 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   const auto key = getKeyFromDevice(device);
   LOG(INFO) << logPrefix() << "Performing nocolor split on backend device "
             << device << ", key " << key << ", i am " << this;
+  bool useNb = useNonblocking();
+  options_->config.blocking = useNb ? 0 : 1;
   auto comm = getNCCLComm(key, device, OpType::ALLREDUCE);
   NCCLComm::split(
       comm.get(),
@@ -1078,6 +1112,21 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
       options_->config,
       options_->global_ranks_in_group);
 #endif
+}
+
+bool ProcessGroupNCCL::isInitialized() {
+  if (devNCCLCommMap_.empty()) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  bool initialized = true;
+  for (const auto& [_, comm] : devNCCLCommMap_) {
+    if (!comm->isInitialized()) {
+      initialized = false;
+      break;
+    }
+  }
+  return initialized;
 }
 
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
@@ -1275,7 +1324,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
 // Note: original name of this method is `abort`. It was renamed to
 // `abortComms` to distinguish from the `abort` method below. The `abort`
 // method calls `abortComms` but does more destruction than the latter.
-bool ProcessGroupNCCL::abortComms(std::optional<std::string> abortReason) {
+bool ProcessGroupNCCL::abortComms(
+    const std::optional<std::string>& abortReason) {
   // Remove record from global ncclCommDevIdxMapMutex before aboarting,
   // so that a new cache segment would not register to already aborded
   // communicators. Note that ncclCommDevIdxMap is a global container which may
@@ -1330,6 +1380,7 @@ void ProcessGroupNCCL::shutdown() {
   this->abort();
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
@@ -1396,7 +1447,7 @@ void ProcessGroupNCCL::terminateProcess(const std::string& errMsg) {
   LOG(FATAL) << logPrefix() << errMsg;
 }
 
-long computeDeltaMS(
+static long computeDeltaMS(
     std::chrono::time_point<std::chrono::steady_clock> start,
     std::chrono::time_point<std::chrono::steady_clock> end) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
@@ -1573,6 +1624,15 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   }
   LOG(ERROR) << errorMsg;
 
+  // We perform some checks to help users debug the timeout/hang issue:
+  // 1. Dump the nccl trace (flight recorder) to help debug the issue
+  //    (timeout after waitTimeoutDumpInMilSec_, which is one minute).
+  // 2. Check if there is a GIL deadlock (timeout after 300ms).
+  // 3. Try to dump the c++ stacktraces (blocking and would hang,
+  //    users can turn this off by set
+  //    TORCH_NCCL_LOG_CPP_STACK_ON_UNCLEAN_SHUTDOWN=0).
+
+  // Dump the nccl trace (flight recorder).
   if (checkDumpSignal && shouldDump_.load()) {
     // Store debug info to storage if no other thread does it. (By default to
     // local disk)
@@ -1586,16 +1646,11 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         "Flight recorder dump in heartbeatMonitor",
         false,
         true);
+    // Indicate to watchdog thread that we have finished dumping.
+    promiseFlightRecorderDump_.set_value();
   }
 
-  auto& cpp_dumper = get_cpp_trace_dumper();
-  if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
-    LOG(INFO) << logPrefix() << "Dumping c++ stacktraces:";
-    cpp_dumper.value()(
-        [&](const std::string& line) { LOG(INFO) << logPrefix() << line; });
-    LOG(INFO) << logPrefix() << "Finished c++ stacktraces dump.";
-  }
-
+  // GIL deadlock check.
   if (get_gil_checker() != nullptr) {
     auto fut = launchAsyncGilCheck();
     auto kGilCheckTimeout = std::chrono::milliseconds(300);
@@ -1612,6 +1667,15 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     LOG(INFO)
         << logPrefix()
         << "GIL checker was not registered, perhaps this is a no-python build?";
+  }
+
+  // Dump the c++ stacktraces.
+  auto& cpp_dumper = get_cpp_trace_dumper();
+  if (logCppStackOnUncleanShutdown_ && cpp_dumper.has_value()) {
+    LOG(INFO) << logPrefix() << "Dumping c++ stacktraces:";
+    cpp_dumper.value()(
+        [&](const std::string& line) { LOG(INFO) << logPrefix() << line; });
+    LOG(INFO) << logPrefix() << "Finished c++ stacktraces dump.";
   }
 
   // There are two possible cases for the watchdog thread exit:
@@ -1939,12 +2003,18 @@ void ProcessGroupNCCL::watchdogHandler() {
             }
             // signal the monitor thread on PG0 to start dumping
             shouldDump_.store(true);
-            if (sleepAfterException_) {
-              // This sleep is used to give time for dumping before throwing
-              // exception
-              std::this_thread::sleep_for(
-                  std::chrono::seconds(heartbeatTimeoutInSec_));
-              LOG(INFO) << logPrefix() << "slept for " << heartbeatTimeoutInSec_
+            // Give time for dumping before throwing exception
+            auto start = std::chrono::steady_clock::now();
+            auto status = promiseFlightRecorderDump_.get_future().wait_for(
+                std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+            if (status == std::future_status::timeout) {
+              LOG(WARNING) << logPrefix() << "timed out after waiting for "
+                           << waitTimeoutDumpInMilSec_ << "ms"
+                           << " flight recorder dumps to finish.";
+            } else if (status == std::future_status::ready) {
+              auto end = std::chrono::steady_clock::now();
+              LOG(INFO) << logPrefix() << "slept for "
+                        << computeDeltaMS(start, end) << "ms"
                         << " giving time for flight recorder dumps to finish.";
             }
           } catch (const std::exception& e) {
@@ -2324,6 +2394,11 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     numRanks = 2;
     rank = p2pRank;
   }
+
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+  bool useNb = useNonblocking();
+  options_->config.blocking = useNb ? 0 : 1;
+#endif
 
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
@@ -2741,7 +2816,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
     work->ncclStartEvent_->record(ncclStream);
   }
 
-  if (nccl_use_nonblocking()) {
+  if (useNonblocking()) {
     groupEndNonblocking(comm);
   } else {
     groupEnd();
@@ -3061,8 +3136,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 #endif
 
   {
-    torch::cuda::nccl::AutoNcclGroup nccl_group_guard(
-        comm, nccl_use_nonblocking());
+    torch::cuda::nccl::AutoNcclGroup nccl_group_guard(comm, useNonblocking());
     for (const auto i : c10::irange(inputs.size())) {
       // Both `inputs' and `outputs' are created on a worker stream and used in
       // different ncclStreams.  Hence, both must record the ncclStream to
@@ -3348,10 +3422,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       fn(tensor, comm_, ncclStream, p2pTargetRank),
       ncclComm->getNcclCommFailureReason());
 #else
-  C10D_NCCL_CHECK_TIMEOUT(
-      fn(tensor, comm_, ncclStream, p2pTargetRank),
-      ncclComm->getNcclComm(),
-      ncclComm->getNcclCommFailureReason());
+  // In non-blocking mode, we need to use ncclGroup semantics to ensure that the
+  // kernel is enqueued for single-P2P ops.  Otherwise, the event record below
+  // may not capture the kernel, leading to data corruption.
+  ncclGroupStart();
+  C10D_NCCL_CHECK_NONBLOCKING(
+      fn(tensor, comm_, ncclStream, p2pTargetRank), std::nullopt);
+  C10D_NCCL_CHECK_TIMEOUT_GROUPEND(
+      ncclGroupEnd(), ncclComm, ncclComm->getNcclCommFailureReason());
 #endif
 
   if (!coalescing_state_) {
@@ -4547,8 +4625,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream,
           int dst) {
-        torch::cuda::nccl::send(input, comm, stream, dst);
-        return ncclSuccess;
+        auto ncclDataType = getNcclDataType(input.scalar_type());
+        return ncclSend(
+            input.data_ptr(),
+            input.numel(),
+            ncclDataType,
+            dst,
+            comm,
+            stream.stream());
       },
       dstRank,
       OpType::SEND,
@@ -4590,8 +4674,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream,
           int src) {
-        torch::cuda::nccl::recv(output, comm, stream, src);
-        return ncclSuccess;
+        auto ncclDataType = getNcclDataType(output.scalar_type());
+        return ncclRecv(
+            output.data_ptr(),
+            output.numel(),
+            ncclDataType,
+            src,
+            comm,
+            stream.stream());
       },
       srcRank,
       OpType::RECV,
@@ -4614,7 +4704,7 @@ void ProcessGroupNCCL::groupEndNonblocking(
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
 #else
-  if (!nccl_use_nonblocking()) {
+  if (!useNonblocking()) {
     C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
   } else {
     C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), comm, std::nullopt);

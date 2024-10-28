@@ -34,6 +34,7 @@ from .functions import (
     IntTrueDiv,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
+    OpaqueUnaryFn_log2,
     OpaqueUnaryFn_sqrt,
     PowByNatural,
     RoundDecimal,
@@ -508,6 +509,8 @@ class SymPyValueRangeAnalysis:
             # 1...10..., so the smallest possible value is 1...101...1.
             # Thus, we need to find the next smallest power of 2 (inclusive).
             lower = -(2 ** math.ceil(math.log2(-lower)))
+        else:
+            lower = 0
         return ValueRanges(lower, max(a.upper, b.upper))
 
     @staticmethod
@@ -785,6 +788,13 @@ class SymPyValueRangeAnalysis:
         if x.lower <= 0:
             return ValueRanges.unknown()
         return ValueRanges.increasing_map(x, OpaqueUnaryFn_log)
+
+    @staticmethod
+    def log2(x):
+        x = ValueRanges.wrap(x)
+        if x.lower <= 0:
+            return ValueRanges.unknown()
+        return ValueRanges.increasing_map(x, OpaqueUnaryFn_log2)
 
     @classmethod
     def minimum(cls, a, b):

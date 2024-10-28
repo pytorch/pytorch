@@ -3,6 +3,7 @@
 import functools
 import itertools
 import math
+import pickle
 import sys
 from typing import Callable, List, Tuple, Type
 
@@ -19,7 +20,11 @@ from torch.testing._internal.common_utils import (
     TEST_Z3,
     TestCase,
 )
-from torch.utils._sympy.functions import FloorDiv, simple_floordiv_gcd
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    OpaqueUnaryFn_cos,
+    simple_floordiv_gcd,
+)
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
 from torch.utils._sympy.reference import (
@@ -56,6 +61,10 @@ BINARY_OPS = [
     "minimum",
     "maximum",
     "mod",
+]
+BITWISE_OPS = [
+    "bitwise_and",
+    "bitwise_or",
 ]
 
 UNARY_BOOL_OPS = ["not_"]
@@ -314,7 +323,7 @@ class TestValueRanges(TestCase):
                         self.assertIn(r, ref_r)
 
     # This takes about 4s for all the variants
-    @parametrize("fn", BINARY_OPS + COMPARE_OPS)
+    @parametrize("fn", BINARY_OPS + BITWISE_OPS + COMPARE_OPS)
     def test_binary_ref_range(self, fn):
         # TODO: bring back sympy.oo testing for float unary fns
         vals = LESS_CONSTANTS
@@ -335,6 +344,21 @@ class TestValueRanges(TestCase):
                         )
                         if r.is_finite:
                             self.assertIn(r, ref_r)
+
+    # stronger test specially for bitwise ops
+    @parametrize("fn", BITWISE_OPS)
+    def test_bitwise_ref_range(self, fn):
+        # N^4 complexity
+        vals = range(-4, 4)
+        for a, b in itertools.product(generate_range(vals), repeat=2):
+            with self.subTest(a=a, b=b):
+                for a0, b0 in itertools.product(vals, repeat=2):
+                    if a0 not in a or b0 not in b:
+                        continue
+                    with self.subTest(a0=a0, b0=b0):
+                        ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
+                        r = getattr(ReferenceAnalysis, fn)(a0, b0)
+                        self.assertIn(r, ref_r)
 
 
 class TestSympyInterp(TestCase):
@@ -809,6 +833,13 @@ class TestSympySolve(TestCase):
 
         # negative tests
         self.assertEqual(simple_floordiv_gcd(x * y + x + y + 1, x + 1), 1)
+
+
+class TestSympyFunctions(TestCase):
+    def test_pickle(self):
+        x = OpaqueUnaryFn_cos(sympy.Symbol("a"))
+        r = pickle.loads(pickle.dumps(x))
+        self.assertEqual(x, r)
 
 
 class TestSingletonInt(TestCase):

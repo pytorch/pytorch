@@ -1198,10 +1198,14 @@ def make_opaque_unary_fn(name):
                     a = sympy.oo
                 if a is -int_oo:
                     a = -sympy.oo
+                if name == "log2":
+                    return sympy.log(a, 2)
                 return getattr(sympy, name)(a)
             return None
 
-    OpaqueUnaryFn.__name__ = "OpaqueUnaryFn_" + name
+    nm = "OpaqueUnaryFn_" + name
+    OpaqueUnaryFn.__name__ = nm
+    OpaqueUnaryFn.__qualname__ = nm
 
     return OpaqueUnaryFn
 
@@ -1220,6 +1224,7 @@ OpaqueUnaryFn_atan = make_opaque_unary_fn("atan")
 OpaqueUnaryFn_exp = make_opaque_unary_fn("exp")
 OpaqueUnaryFn_log = make_opaque_unary_fn("log")
 OpaqueUnaryFn_asinh = make_opaque_unary_fn("asinh")
+OpaqueUnaryFn_log2 = make_opaque_unary_fn("log2")
 
 
 def make_opaque_bitwise_fn(name, real_op_name):
