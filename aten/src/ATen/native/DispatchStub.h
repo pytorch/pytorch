@@ -378,6 +378,9 @@ struct RegisterPRIVATEUSE1Dispatch {
     name##_DECLARE_DISPATCH_type() = default;                                              \
     name##_DECLARE_DISPATCH_type(const name##_DECLARE_DISPATCH_type&) = delete;            \
     name##_DECLARE_DISPATCH_type& operator=(const name##_DECLARE_DISPATCH_type&) = delete; \
+    name##_DECLARE_DISPATCH_type(name##_DECLARE_DISPATCH_type&&) = delete;                 \
+    name##_DECLARE_DISPATCH_type& operator=(name##_DECLARE_DISPATCH_type&&) = delete;      \
+    ~name##_DECLARE_DISPATCH_type() = default;                                             \
   };                                                                                       \
   extern TORCH_API struct name##_DECLARE_DISPATCH_type name;
 

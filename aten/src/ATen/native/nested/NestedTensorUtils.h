@@ -230,6 +230,7 @@ struct NestedNode {
   NestedNode& operator=(const NestedNode&) = delete;
   NestedNode(NestedNode&&) noexcept = default;
   NestedNode& operator=(NestedNode&&) noexcept = default;
+  ~NestedNode() = default;
   inline bool is_leaf() const {
     return _is_leaf;
   }
