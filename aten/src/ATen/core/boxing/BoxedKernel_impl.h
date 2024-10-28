@@ -80,7 +80,7 @@ inline BoxedKernel BoxedKernel::makeNamedNotSupported() {
 
 template<class KernelFunctor>
 inline BoxedKernel BoxedKernel::makeFromFunctor(std::unique_ptr<KernelFunctor> kernelFunctor) {
-    static_assert(std::is_base_of<OperatorKernel, KernelFunctor>::value, "Tried to call BoxedKernel::makeFromFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
+    static_assert(std::is_base_of_v<OperatorKernel, KernelFunctor>, "Tried to call BoxedKernel::makeFromFunctor<KernelFunctor>, but the functor doesn't inherit from c10::OperatorKernel. Please have the functor inherit from it.");
     return BoxedKernel(
         std::move(kernelFunctor),
         [](OperatorKernel* kernel, const OperatorHandle& op, DispatchKeySet ks, Stack* stack) {

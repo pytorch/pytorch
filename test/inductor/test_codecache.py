@@ -835,6 +835,22 @@ class TestFxGraphCacheHashing(TestCase):
                 FxGraphCachePickler.dumps(details3),
             )
 
+    def test_stable_strings(self):
+        """
+        Test that objects containing identical strings pickle the same
+        even if they are not the same id.
+        """
+        s1 = "string"
+        s2 = "strin"
+        s2 += "g"
+
+        self.assertNotEqual(id(s1), id(s2))
+
+        self.assertEqual(
+            FxGraphCachePickler.dumps([s1, s1]),
+            FxGraphCachePickler.dumps([s1, s2]),
+        )
+
     def test_get_hash_for_files(self):
         """
         Test the get_hash_for_files helper.
@@ -908,6 +924,7 @@ class TestAutotuneCache(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
     @config.patch({"autotune_remote_cache": True})
+    @config.patch({"bundled_autotune_remote_cache": False})
     @config.patch({"max_autotune": True})
     def test_autotune_cache(self):
         class Model(torch.nn.Module):
@@ -937,6 +954,52 @@ class TestAutotuneCache(TestCase):
             # Check that the cache entries seem reasonable
             for k in global_stats.autotune_remote.cache.keys():
                 self.assertRegex(k, r"[0-9a-z]{52}\.py")
+            for k in global_stats.triton.cache.keys():
+                self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
+
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(not SM80OrLater, "Requires SM80+")
+    @config.patch({"fx_graph_cache": False})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"autotune_local_cache": True})
+    @config.patch({"autotune_remote_cache": False})
+    @config.patch({"bundled_autotune_remote_cache": True})
+    @config.patch({"max_autotune": True})
+    def test_bundled_autotune_remote_cache(self):
+        class Model(torch.nn.Module):
+            def forward(self, a, b, c, d, e, f):
+                return a + b, c + d, e + f
+
+        def f(a, b, c, d, e, f):
+            return Model()(a, b, c, d, e, f)
+
+        f_compiled = torch.compile(f, fullgraph=True)
+
+        a = torch.randn(101, 100).cuda()
+        b = torch.randn(101, 100).cuda()
+        c = torch.randn(102, 100).cuda()
+        d = torch.randn(102, 100).cuda()
+        e = torch.randn(103, 100).cuda()
+        f = torch.randn(103, 100).cuda()
+
+        with PatchCaches():
+            f_compiled(a, b, c, d, e, f)
+
+            self.assertEqual(global_stats.autotune_local, Stats(3, 0, 3))
+            self.assertEqual(global_stats.bundled_autotune, Stats(1, 0, 1))
+
+            self.reset()
+            f_compiled(a, b, c, d, e, f)
+
+        self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
+        self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
+
+        if config.is_fbcode():
+            # Check that the cache entries seem reasonable
+            for k in global_stats.autotune_local.cache.keys():
+                self.assertRegex(k, r"tmp[^/]*/([^/]{2})/c\1[^/]{49}\.best_config")
+            for k in global_stats.bundled_autotune.cache.keys():
+                self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c10")
             for k in global_stats.triton.cache.keys():
                 self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c10")
 
