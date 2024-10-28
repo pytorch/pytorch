@@ -7,11 +7,10 @@
 #include <vector>
 
 namespace c10d {
-const int kUnsetSeqNum = 0;
+constexpr int kUnsetSeqNum = 0;
 
 namespace {
-// NOLINTNEXTLINE
-const int kByteOffset = 8;
+constexpr int kByteOffset = 8;
 } // namespace
 
 // Converts from int to char vec to write in store
