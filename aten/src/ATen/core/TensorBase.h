@@ -596,13 +596,19 @@ class TORCH_API TensorBase {
   }
 
   template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
-  const T* const_data_ptr() const;
+  const T* const_data_ptr() const {
+    return static_cast<const T*>(this->const_data_ptr());
+  }
 
   template <typename T, std::enable_if_t<std::is_const_v<T>, int> = 0>
-  const std::remove_const_t<T>* const_data_ptr() const;
+  const std::remove_const_t<T>* const_data_ptr() const {
+    return static_cast<const std::remove_const_t<T>*>(this->const_data_ptr());
+  }
 
   template <typename T>
-  T* mutable_data_ptr() const;
+  T* mutable_data_ptr() const {
+    return static_cast<T*>(this->mutable_data_ptr());
+  }
 
   // Legacy interface during the migration to indicate that a callsite
   // has not been audited for mutability.
@@ -614,7 +620,9 @@ class TORCH_API TensorBase {
   //              const because of the vast number of clients that
   //              rely on this.
   template <typename T>
-  T* data_ptr() const;
+  T* data_ptr() const {
+    return static_cast<T*>(this->mutable_data_ptr());
+  }
 
   // Purposely not defined here to avoid inlining
   void print() const;
