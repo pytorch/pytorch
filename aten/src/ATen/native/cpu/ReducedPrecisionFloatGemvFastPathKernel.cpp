@@ -213,9 +213,9 @@ void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
     const at::BFloat16* vec2,
     vec::Vectorized<float>* tail_sum,
     int idx) {
-  const auto temp_vec1 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
-  const auto temp_vec2 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
-  *tail_sum = f32_fma_bf16(*tail_sum, temp_vec1, temp_vec2);
+  const auto temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
+  const auto temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
+  *tail_sum = f32_dot_bf16(*tail_sum, temp_vec1, temp_vec2);
 }
 
 #else
