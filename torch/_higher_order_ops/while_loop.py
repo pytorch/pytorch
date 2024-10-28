@@ -59,6 +59,7 @@ def create_fw_bw_graph_combinefn(cond_fn, body_fn, carried_inputs, additional_in
             #     )
 
             fw_outputs = [pytree.tree_map(_from_fun, o) for o in outs]
+            fw_outputs_parts = [pytree.tree_map(_from_fun, o.expand(len(carried_inputs), *o.shape)) for o in outs]
             # if any(not isinstance(out, torch.Tensor) for out in fw_outputs):
             #     raise RuntimeError(
             #         "Expect outputs produced by combine_fn to only contains tensors. "
@@ -67,7 +68,7 @@ def create_fw_bw_graph_combinefn(cond_fn, body_fn, carried_inputs, additional_in
 
             fw_graph, joint_graph = create_fw_bw_graph(
                 body_fn,
-                False,
+                True,
                 (*fw_xs, *fw_additional_inputs),
                 (*fw_outputs,),
             )
@@ -76,13 +77,44 @@ def create_fw_bw_graph_combinefn(cond_fn, body_fn, carried_inputs, additional_in
                 # First element is the gradient, second element is the input
                 grad = args[:num_xs]
                 inp = args[num_xs:]
-                out = fw_graph(*inp, *fw_additional_inputs)
-                out_g = joint_graph(*[torch.ones_like(o) for o in out], *inp, *bw_additional_inputs)
-                new_grad = [g * ng for g, ng in zip(grad, out_g)]
-                return *new_grad, *out
+                
+                # v1
+                # out_fwd = fw_graph(*inp, *fw_additional_inputs)
+                # out_bwd = joint_graph(*[torch.ones_like(o) for o in out], *inp, *bw_additional_inputs)
+                
+                # v2
+                # out_fwd, out_bwd = joint_graph(*[torch.ones_like(o) for o in inp], *inp, *bw_additional_inputs)
+                # new_grad = [g * ng for g, ng in zip(grad, out_bwd)]
+                
+                # v3
+                def compute_part_grads(flat_grad_ind):
+                    flat_grads_init = [
+                        torch.ones_like(x)
+                        if flat_grad_ind == ind
+                        else torch.zeros_like(x)
+                        for ind, x in enumerate(inp)
+                    ]
+                    out_fwd, out_bwd = joint_graph(*flat_grads_init, *inp, *bw_additional_inputs)
+                    return out_fwd, out_bwd
+
+                # Compute all the partial gradients
+                out_fwd, out_bwd = compute_part_grads(0)
+                grad_parts = [torch.unsqueeze(g, 0) for g in out_bwd]
+                for part_ind in range(1, num_xs):
+                    grad_parts = [
+                        torch.concat([gp, torch.unsqueeze(g, 0)], 0)
+                        for gp, g in zip(grad_parts, compute_part_grads(part_ind)[1])
+                    ]
+                
+                # grad_parts = [torch.sum(g_p, 0) for g_p in grad_parts]
+                
+                # The parts may need to be first multiplied and then summed?
+                new_grad2 = [g * ng for g, ng in zip(grad, grad_parts)]
+                return *new_grad2, *out_fwd
             
             new_joint_graph = _maybe_reenter_make_fx(wrapper_bwd)(
-                *fw_outputs,
+                # *fw_outputs,
+                *fw_outputs_parts,
                 *fw_xs,
             )
             
@@ -124,15 +156,22 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         ctx._num_leaves_additional_inputs = len(additional_inputs)
 
         with torch._C._AutoDispatchBelowAutograd():
-            outs = while_loop_op(cond_fn_graph, fw_graph, tuple(xs), tuple(additional_inputs))
+            # outs = while_loop_op(cond_fn_graph, fw_graph, tuple(xs), tuple(additional_inputs))
             # ctx.save_for_backward(*(xs + additional_inputs))
             
             #BWD in FWD
-            ones = [torch.ones_like(o) for o in outs]
+            ones = [torch.ones_like(o.expand(num_leaves_xs, *o.shape)) for o in xs]
             inp = tuple([*ones, *xs])
             grads_outs = while_loop_op(bwd_cond_fn_graph, joint_graph, inp, tuple(additional_inputs))
-            grads = grads_outs[:num_leaves_xs]
+            grads, outs = grads_outs[:num_leaves_xs], grads_outs[num_leaves_xs:]
+            grads = [torch.sum(g, 0) for g in grads]
             ctx.save_for_backward(*(list(grads) + list(xs) + list(additional_inputs)))
+            
+            # ones = [torch.ones_like(o) for o in outs]
+            # inp = tuple([*ones, *xs])
+            # grads_outs = while_loop_op(bwd_cond_fn_graph, joint_graph, inp, tuple(additional_inputs))
+            # grads = grads_outs[:num_leaves_xs]
+            # ctx.save_for_backward(*(list(grads) + list(xs) + list(additional_inputs)))
             
             return (*outs,)
 

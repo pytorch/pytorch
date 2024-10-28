@@ -310,7 +310,8 @@ def prepare_fw_with_masks(fn):
 
 # TODO: The parameter use_output_and_grad_bw is required because some operations
 # that utilize this function, such as the while_loop, may require (grad, fwd_outputs)
-def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
+# def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
+def create_fw_bw_graph(fn, return_fwd_outs, fw_inputs, fw_outputs):
     from torch._functorch.aot_autograd import AOTConfig, create_joint
 
     # Note:[HOP create fw_bw graph] We create "clean" environments for make_fx by suspending all dispatch keys
@@ -343,15 +344,15 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
     fw_graph = _maybe_reenter_make_fx(fn)(*fw_inputs)
 
     def joint_fn(*joint_operands_grads):
-        if use_output_and_grad_bw:
-            grads = joint_operands_grads[0]
-            inputs = joint_operands_grads[1]
-        else:
-            grads = joint_operands_grads[:num_grads]
-            inputs = joint_operands_grads[num_grads:]
+        # if use_output_and_grad_bw:
+        #     grads = joint_operands_grads[0]
+        #     inputs = joint_operands_grads[1]
+        # else:
+        grads = joint_operands_grads[:num_grads]
+        inputs = joint_operands_grads[num_grads:]
 
         joint = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
-        _, grads = joint(
+        vals, grads = joint(
             list(inputs),
             [grad for grad in grads if grad is not None and grad.requires_grad],
         )
@@ -360,18 +361,21 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
         # we clone outputs that are aliasing inputs
         maybe_clone = clone_outputs_aliasing_inputs(joint_operands_grads)
 
-        return pytree.tree_map(maybe_clone, grads)
+        if return_fwd_outs:
+            return vals, pytree.tree_map(maybe_clone, grads)
+        else:
+            return pytree.tree_map(maybe_clone, grads)
 
-    if use_output_and_grad_bw:
-        example_xs_out = list(fw_inputs) + list(fw_outputs)
-        joint_graph = _maybe_reenter_make_fx(joint_fn)(
-            *(list(example_grad), list(example_xs_out))
-        )
-    else:
-        example_xs_out = list(fw_inputs)
-        joint_graph = _maybe_reenter_make_fx(joint_fn)(
-            *(list(example_grad) + list(example_xs_out))
-        )
+    # if use_output_and_grad_bw:
+    #     example_xs_out = list(fw_inputs) + list(fw_outputs)
+    #     joint_graph = _maybe_reenter_make_fx(joint_fn)(
+    #         *(list(example_grad), list(example_xs_out))
+    #     )
+    # else:
+    example_xs_out = list(fw_inputs)
+    joint_graph = _maybe_reenter_make_fx(joint_fn)(
+        *(list(example_grad) + list(example_xs_out))
+    )
 
     return fw_graph, joint_graph
 

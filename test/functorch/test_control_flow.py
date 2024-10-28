@@ -346,6 +346,8 @@ class TestControlFlow(TestCase):
         expected_grads = torch.autograd.grad(result_exp_flatten, params, grad_exp_init)
         grad_init = [torch.ones_like(el) for el in result_flatten]
         grads = torch.autograd.grad(result_flatten, params, grad_init)
+        print(grads)
+        print(expected_grads)
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
 
     def test_cond_no_trace(self):
@@ -1132,25 +1134,61 @@ def forward(self, pred_1, x_1):
     # @parametrize("autograd", [False, True])
     @parametrize("autograd", [True])
     def test_while_loop_gpu(self, autograd):
-        # def cond_fn(x):
-        #     return x.sum() < 10
-        
         def cond_fn(x):
-            return x.abs().sum() < 0.5
+            return x.sum() < 10
 
-        # def body_fn(x):
-        #     return (x + 1,)
-        
         def body_fn(x):
-            return (torch.sin(x) * x + 5.,)
+            return (x.abs() * 1.234,)
 
-        x = torch.ones(1, device="cuda", requires_grad=autograd) * 2
+        x = torch.randn(1, device="cuda", requires_grad=autograd)
         res = while_loop(cond_fn, body_fn, (x,))
         expected = _fake_while_loop(cond_fn, body_fn, (x,))
         self.assertEqual(expected, res)
         
         if autograd:
             self.check_autograd(res, expected, (x,))
+            
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    # @parametrize("autograd", [False, True])
+    @parametrize("autograd", [True])
+    def test_while_loop_tuple_gpu(self, autograd):
+        def cond_fn(x, y):
+            return y.sum() < 5.
+        
+        def body_fn(x, y):
+            return (torch.sin(x) * x + 5., y + 1)
+
+        x = torch.randn(1, device="cuda", requires_grad=autograd)
+        y = torch.randn(2, 3, device="cuda", requires_grad=autograd)
+        inp = (x, y)
+        
+        res = while_loop(cond_fn, body_fn, inp)
+        expected = _fake_while_loop(cond_fn, body_fn, inp)
+        self.assertEqual(expected, res)
+        
+        if autograd:
+            self.check_autograd(res, expected, inp)
+            
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    # @parametrize("autograd", [False, True])
+    @parametrize("autograd", [True])
+    def test_while_loop_tuple_mixed_gpu(self, autograd):
+        def cond_fn(x, y):
+            return y.sum() < 5.
+        
+        def body_fn(x, y):
+            return (torch.sin(x) * x + 5., y * x + 1)
+
+        x = torch.randn(1, device="cuda", requires_grad=autograd)
+        y = torch.randn(2, 3, device="cuda", requires_grad=autograd)
+        inp = (x, y)
+        
+        res = while_loop(cond_fn, body_fn, inp)
+        expected = _fake_while_loop(cond_fn, body_fn, inp)
+        self.assertEqual(expected, res)
+        
+        if autograd:
+            self.check_autograd(res, expected, inp)
 
     def test_map_illegal_inputs(self):
         def f(x, y):
