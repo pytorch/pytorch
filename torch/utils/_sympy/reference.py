@@ -143,6 +143,10 @@ class ReferenceAnalysis:
     def add(a, b):
         return _keep_float(operator.add)(a, b)
 
+    @classmethod
+    def sym_sum(cls, args):
+        return sympy.Add(*args)
+
     @staticmethod
     def mul(a, b):
         return _keep_float(operator.mul)(a, b)
@@ -210,6 +214,17 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def not_(a):
         return torch.sym_not(a)
+
+    @classmethod
+    def sym_sum(cls, args):
+        if len(args) == 0:
+            return 0
+        if len(args) == 1:
+            return args[0]
+        acc = cls.add(args[0], args[1])
+        for i in range(2, len(args)):
+            acc = cls.add(acc, args[i])
+        return acc
 
     @staticmethod
     def floordiv(a, b):
@@ -291,6 +306,14 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def round_decimal(a, b):
         return round(a, ndigits=b)
+
+
+# Like PythonReferenceAnalysis, but some export-unfriendly choices of
+# operators to make things faster
+class OptimizedPythonReferenceAnalysis(PythonReferenceAnalysis):
+    @staticmethod
+    def sym_sum(args):
+        return torch.sym_sum(args)
 
 
 def _to_dtype(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:

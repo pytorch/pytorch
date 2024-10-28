@@ -647,6 +647,19 @@ CacheNode* _compiled_autograd_impl(
 
     for (size_t i = 0; i < calls.size(); i++) {
       NodeCall& call = *calls[i];
+
+      std::string _node_name = call.node->name();
+      THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
+      TORCH_INTERNAL_ASSERT(node_name != nullptr);
+      THPObjectPtr set_node_origin(
+          PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
+      PyObject* pyobj = Py_None;
+      if (auto pynode = std::dynamic_pointer_cast<PyNode>(call.node)) {
+        pyobj = pynode->obj;
+      }
+      check(PyObject_CallFunction(
+          set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
+
       // TODO(jansel): consider adding some of this stuff:
       // guard(local_graph_task); NodeGuard ndguard(task.fn_); const auto
       // opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
@@ -691,20 +704,6 @@ CacheNode* _compiled_autograd_impl(
         }
         inputs = THPVariable_UnpackList(pyinputs);
       }
-
-      std::string _node_name = call.node->name();
-      THPObjectPtr node_name(PyUnicode_FromString(_node_name.data()));
-      TORCH_INTERNAL_ASSERT(node_name != nullptr);
-      THPObjectPtr set_node_origin(
-          PyObject_GetAttrString(py_compiler.get(), "set_node_origin"));
-
-      PyObject* pyobj = Py_None;
-      if (auto pynode = std::dynamic_pointer_cast<PyNode>(call.node)) {
-        pyobj = pynode->obj;
-      }
-
-      check(PyObject_CallFunction(
-          set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
       variable_list outputs = call.node->apply_with_saved(inputs, saved);
@@ -777,6 +776,7 @@ CacheNode* _compiled_autograd_impl(
   return cache;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct LockGuardWithErrorLogs {
   LockGuardWithErrorLogs(std::mutex& mtx) : mtx_(mtx) {
     // Note: the standard allows try_lock to fail spuriously during races for
