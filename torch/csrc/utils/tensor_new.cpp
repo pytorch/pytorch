@@ -345,6 +345,23 @@ Tensor internal_new_from_data(
   }
 #endif
 
+  if (PyObject_HasAttrString(data, "__dlpack__")) {
+    py::object tensor_o =
+        py::module::import("torch").attr("utils").attr("dlpack").attr(
+            "from_dlpack")(py::handle(data));
+    Tensor tensor = py::cast<Tensor>(tensor_o);
+    const auto& inferred_scalar_type =
+        type_inference ? tensor.scalar_type() : scalar_type;
+    auto device = device_opt.has_value() ? *device_opt : tensor.device();
+    pybind11::gil_scoped_release no_gil;
+    maybe_initialize_device(device);
+    return tensor.to(
+        device,
+        inferred_scalar_type,
+        /*non_blocking=*/false,
+        /*copy=*/copy_variables);
+  }
+
   auto device = device_opt.has_value() ? *device_opt : options.device();
 
   auto sizes = compute_sizes(data, scalar_type);
@@ -853,6 +870,14 @@ class CheckSparseTensorInvariantsContext {
   ~CheckSparseTensorInvariantsContext() {
     at::globalContext().setCheckSparseTensorInvariants(state);
   }
+  CheckSparseTensorInvariantsContext(
+      const CheckSparseTensorInvariantsContext&) = delete;
+  CheckSparseTensorInvariantsContext(CheckSparseTensorInvariantsContext&&) =
+      delete;
+  CheckSparseTensorInvariantsContext& operator=(
+      const CheckSparseTensorInvariantsContext&) = delete;
+  CheckSparseTensorInvariantsContext& operator=(
+      CheckSparseTensorInvariantsContext&&) = delete;
 
  private:
   bool state;

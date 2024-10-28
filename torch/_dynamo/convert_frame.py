@@ -45,6 +45,7 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
 )
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
+from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.utils._python_dispatch import (
     _disable_current_modes,
@@ -118,6 +119,7 @@ from .utils import (
     record_compilation_metrics,
     reset_graph_break_dup_checker,
     setup_compile_debug,
+    to_int_ms,
     troubleshooting_url,
     write_record_to_file,
 )
@@ -646,7 +648,7 @@ def _compile(
             one_graph,
             export,
             export_constraints,
-            mutated_closure_cell_contents,
+            mutated_closure_cell_ids,
             frame_state=frame_state,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
@@ -690,9 +692,19 @@ def _compile(
         hooks: Hooks,
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
-        with dynamo_timed("_compile.compile_inner", phase_name="entire_frame_compile"):
-            with CompileTimeInstructionCounter.record():
-                return _compile_inner(code, one_graph, hooks, transform)
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                dynamo_timed(
+                    "_compile.compile_inner", phase_name="entire_frame_compile"
+                )
+            )
+            stack.enter_context(
+                _WaitCounter("pytorch.wait_counter.dynamo_compile").guard()
+            )
+            stack.enter_context(CompileTimeInstructionCounter.record())
+            return _compile_inner(code, one_graph, hooks, transform)
+
+        return None  # dead, but see https://github.com/python/mypy/issues/7577
 
     @compile_time_strobelight_meta(phase_name="compile_inner")
     @maybe_cprofile
@@ -830,7 +842,7 @@ def _compile(
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
         guarded_code = GuardedCode(
-            out_code, check_fn.check_fn, compile_id, annotation_str
+            out_code, check_fn.guard_manager, compile_id, annotation_str  # type: ignore[arg-type]
         )
 
         if not output.is_empty_graph() and hooks.guard_export_fn is not None:
@@ -853,7 +865,7 @@ def _compile(
     ):
         restart_reasons: set[str] = set()
         # This is shared across restarts
-        mutated_closure_cell_contents: Set[str] = set()
+        mutated_closure_cell_ids: Set[int] = set()
         speculation_log = SpeculationLog()
         if compile_pg := get_compile_pg():
             distributed_state = DistributedState(compile_pg, LocalState())
@@ -1056,6 +1068,12 @@ def _compile(
                         "auto_functionalize",
                         {"missed_reinplacing_bytes": possibly_missed_reinplacing_bytes},
                     )
+                remote_fx_graph_cache_get_time = frame_phase_timing[frame_key].get(
+                    "remote_fx_graph_cache_get", None
+                )
+                remote_fx_graph_cache_put_time = frame_phase_timing[frame_key].get(
+                    "remote_fx_graph_cache_put", None
+                )
             else:
                 guard_count = None
                 shape_env_guard_count = None
@@ -1073,6 +1091,8 @@ def _compile(
                 dynamo_time_before_restart = time.time() - start_time
                 possibly_missed_reinplacing_opportunities = None
                 remote_cache_time_saved = None
+                remote_fx_graph_cache_get_time = None
+                remote_fx_graph_cache_put_time = None
 
             structured_logging_overhead_s = (
                 torch._logging.get_structured_logging_overhead()
@@ -1125,6 +1145,8 @@ def _compile(
                 config.specialize_float,
                 json.dumps(config_dict),
                 True,  # is_forward
+                to_int_ms(remote_fx_graph_cache_get_time),
+                to_int_ms(remote_fx_graph_cache_put_time),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
@@ -1200,9 +1222,17 @@ class ConvertFrame:
                         user_stack_formatted = "".join(
                             traceback.format_list(user_stack)
                         )
+                        user_stack_trace = f"Graph break: skip: from user code at:\n{user_stack_formatted}"
+                        torch._logging.trace_structured(
+                            "artifact",
+                            metadata_fn=lambda: {
+                                "name": "dynamo_graph_break_reason",
+                                "encoding": "string",
+                            },
+                            payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc()}",
+                        )
                         graph_break_log.debug(
-                            "Graph break: skip: from user code at:\n%s",
-                            user_stack_formatted,
+                            user_stack_trace,
                             exc_info=True,
                         )
 
