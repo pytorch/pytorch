@@ -937,6 +937,21 @@ This class does not support ``__members__`` property.)");
       py::arg("tensor"),
       py::arg("work"));
 
+  module.def("_get_work_registry_size", []() {
+    return ::c10d::get_work_registry_size();
+  });
+
+  module.def(
+      "_set_allow_inflight_collective_as_graph_input",
+      [](bool value) {
+        return ::c10d::set_allow_inflight_collective_as_graph_input(value);
+      },
+      py::arg("value"));
+
+  module.def("_allow_inflight_collective_as_graph_input", []() {
+    return ::c10d::allow_inflight_collective_as_graph_input();
+  });
+
   // Remove a group from the native registry
   module.def(
       "_unregister_process_group",
