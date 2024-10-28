@@ -1,3 +1,43 @@
+I1028 12:24:39.408000 2731790 torch/_dynamo/utils.py:947] ChromiumEventLogger initialized with id 8564d076-424f-406b-9bc6-f4fda09eb2d4
+V1028 12:24:39.408000 2731790 torch/_dynamo/convert_frame.py:918] [0/0] torchdynamo start compiling func /home/jessecai/local/pytorch/reproduce_error.py:14, stack (elided 5 frames):
+V1028 12:24:39.408000 2731790 torch/_dynamo/convert_frame.py:918] [0/0]   File "/home/jessecai/local/pytorch/reproduce_error.py", line 24, in <module>
+V1028 12:24:39.408000 2731790 torch/_dynamo/convert_frame.py:918] [0/0]     print(func())
+V1028 12:24:39.408000 2731790 torch/_dynamo/convert_frame.py:918] [0/0] 
+I1028 12:24:39.409000 2731790 torch/_dynamo/symbolic_convert.py:2797] [0/0] Step 1: torchdynamo start tracing func /home/jessecai/local/pytorch/reproduce_error.py:14
+I1028 12:24:39.409000 2731790 torch/fx/experimental/symbolic_shapes.py:3078] [0/0] create_env
+V1028 12:24:39.412000 2731790 torch/_dynamo/symbolic_convert.py:997] [0/0] [__trace_source] TRACE starts_line /home/jessecai/local/pytorch/reproduce_error.py:15 in func (func)
+V1028 12:24:39.412000 2731790 torch/_dynamo/symbolic_convert.py:997] [0/0] [__trace_source]         return torch._cslt_sparse_mm(A_sparse, B, alpha=alpha)
+V1028 12:24:39.412000 2731790 torch/_dynamo/symbolic_convert.py:1020] [0/0] [__trace_bytecode] TRACE LOAD_GLOBAL torch []
+V1028 12:24:39.414000 2731790 torch/_dynamo/symbolic_convert.py:1020] [0/0] [__trace_bytecode] TRACE LOAD_ATTR _cslt_sparse_mm [PythonModuleVariable(<module 'torch' from '/home/jessecai/local/pytorch/torch/__init__.py'>)]
+V1028 12:24:39.414000 2731790 torch/_dynamo/symbolic_convert.py:1020] [0/0] [__trace_bytecode] TRACE LOAD_GLOBAL A_sparse [TorchInGraphFunctionVariable(<built-in method _cslt_sparse_mm of type object at 0x7fdc442473c0>)]
+V1028 12:24:39.415000 2731790 torch/_dynamo/output_graph.py:2122] [0/0] create_graph_input G_A_sparse_ G['A_sparse']
+V1028 12:24:39.415000 2731790 torch/_dynamo/variables/builder.py:2660] [0/0] wrap_to_fake G['A_sparse'] (10240,) StatefulSymbolicContext(dynamic_sizes=[<DimDynamic.STATIC: 2>], dynamic_strides=[<DimDynamic.INFER_STRIDE: 4>], constraint_sizes=[None], constraint_strides=[None], view_base_context=None, tensor_source=GlobalSource(global_name='A_sparse'), shape_env_to_source_to_symbol_cache={}) <class 'torch.Tensor'>
+V1028 12:24:39.416000 2731790 torch/_dynamo/symbolic_convert.py:1020] [0/0] [__trace_bytecode] TRACE LOAD_GLOBAL B [TorchInGraphFunctionVariable(<built-in method _cslt_sparse_mm of type object at 0x7fdc442473c0>), TensorVariable()]
+V1028 12:24:39.416000 2731790 torch/_dynamo/output_graph.py:2122] [0/0] create_graph_input G_B_ G['B']
+V1028 12:24:39.417000 2731790 torch/_dynamo/variables/builder.py:2660] [0/0] wrap_to_fake G['B'] (128, 128) StatefulSymbolicContext(dynamic_sizes=[<DimDynamic.STATIC: 2>, <DimDynamic.STATIC: 2>], dynamic_strides=[<DimDynamic.INFER_STRIDE: 4>, <DimDynamic.INFER_STRIDE: 4>], constraint_sizes=[None, None], constraint_strides=[None, None], view_base_context=StatefulSymbolicContext(dynamic_sizes=[<DimDynamic.STATIC: 2>, <DimDynamic.STATIC: 2>], dynamic_strides=[<DimDynamic.INFER_STRIDE: 4>, <DimDynamic.INFER_STRIDE: 4>], constraint_sizes=[None, None], constraint_strides=[None, None], view_base_context=None, tensor_source=AttrSource(base=GlobalSource(global_name='B'), member='_base'), shape_env_to_source_to_symbol_cache={}), tensor_source=GlobalSource(global_name='B'), shape_env_to_source_to_symbol_cache={}) <class 'torch.Tensor'>
+V1028 12:24:39.419000 2731790 torch/_dynamo/symbolic_convert.py:1020] [0/0] [__trace_bytecode] TRACE LOAD_GLOBAL alpha [TorchInGraphFunctionVariable(<built-in method _cslt_sparse_mm of type object at 0x7fdc442473c0>), TensorVariable(), TensorVariable()]
+V1028 12:24:39.419000 2731790 torch/_dynamo/output_graph.py:2122] [0/0] create_graph_input G_alpha_ G['alpha']
+V1028 12:24:39.419000 2731790 torch/_dynamo/variables/builder.py:2660] [0/0] wrap_to_fake G['alpha'] (128,) StatefulSymbolicContext(dynamic_sizes=[<DimDynamic.STATIC: 2>], dynamic_strides=[<DimDynamic.INFER_STRIDE: 4>], constraint_sizes=[None], constraint_strides=[None], view_base_context=None, tensor_source=GlobalSource(global_name='alpha'), shape_env_to_source_to_symbol_cache={}) <class 'torch.Tensor'>
+V1028 12:24:39.420000 2731790 torch/_dynamo/symbolic_convert.py:1020] [0/0] [__trace_bytecode] TRACE LOAD_CONST ('alpha',) [TorchInGraphFunctionVariable(<built-in method _cslt_sparse_mm of type object at 0x7fdc442473c0>), TensorVariable(), TensorVariable(), TensorVariable()]
+V1028 12:24:39.420000 2731790 torch/_dynamo/symbolic_convert.py:1020] [0/0] [__trace_bytecode] TRACE CALL_FUNCTION_KW 3 [TorchInGraphFunctionVariable(<built-in method _cslt_sparse_mm of type object at 0x7fdc442473c0>), TensorVariable(), TensorVariable(), TensorVariable(), TupleVariable(length=1)]
+V1028 12:24:39.427000 2731790 torch/_dynamo/symbolic_convert.py:1020] [0/0] [__trace_bytecode] TRACE RETURN_VALUE None [TensorVariable()]
+I1028 12:24:39.427000 2731790 torch/_dynamo/symbolic_convert.py:3080] [0/0] Step 1: torchdynamo done tracing func (RETURN_VALUE)
+V1028 12:24:39.427000 2731790 torch/_dynamo/symbolic_convert.py:3084] [0/0] RETURN_VALUE triggered compile
+V1028 12:24:39.427000 2731790 torch/_dynamo/output_graph.py:1004] [0/0] COMPILING GRAPH due to GraphCompileReason(reason='return_value', user_stack=[<FrameSummary file /home/jessecai/local/pytorch/reproduce_error.py, line 15 in func>], graph_break=False)
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code] TRACED GRAPH
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code]  ===== __compiled_fn_1 =====
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code]  /home/jessecai/local/pytorch/torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code]     def forward(self, G_A_sparse_: "[31mi8[0m[34m[10240][0m[2m[34m[1][0m[2m[32mcuda:0[0m", G_B_: "[31mi8[0m[34m[128, 128][0m[2m[34m[1, 128][0m[2m[32mcuda:0[0m", G_alpha_: "[31mf32[0m[34m[128][0m[2m[34m[1][0m[2m[32mcuda:0[0m"):
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code]         g_a_sparse_ = G_A_sparse_
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code]         g_b_ = G_B_
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code]         g_alpha_ = G_alpha_
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code]         
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code]          [2m# File: /home/jessecai/local/pytorch/reproduce_error.py:15 in func, code: return torch._cslt_sparse_mm(A_sparse, B, alpha=alpha)[0m
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code]         _cslt_sparse_mm: "[31mi8[0m[34m[128, 128][0m[2m[34m[128, 1][0m[2m[32mcuda:0[0m" = torch._cslt_sparse_mm(g_a_sparse_, g_b_, alpha = g_alpha_);  [2mg_a_sparse_ = g_b_ = g_alpha_ = None[0m
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code]         return (_cslt_sparse_mm,)
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code]         
+V1028 12:24:39.430000 2731790 torch/_dynamo/output_graph.py:1372] [0/0] [__graph_code] 
+I1028 12:24:39.431000 2731790 torch/_dynamo/output_graph.py:1474] [0/0] Step 2: calling compiler function inductor
 Traceback (most recent call last):
   File "/home/jessecai/local/pytorch/reproduce_error.py", line 24, in <module>
     print(func())
@@ -118,10 +158,63 @@ Traceback (most recent call last):
 torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
 TypeError: _cslt_sparse_mm(): argument 'alpha' must be Tensor, not StorageBox
 
-Set TORCH_LOGS="+dynamo" and TORCHDYNAMO_VERBOSE=1 for more information
-
 
 You can suppress this exception and fall back to eager by setting:
     import torch._dynamo
     torch._dynamo.config.suppress_errors = True
 
+I1028 12:24:40.160000 2731790 torch/_dynamo/eval_frame.py:385] TorchDynamo attempted to trace the following frames: [
+I1028 12:24:40.160000 2731790 torch/_dynamo/eval_frame.py:385]   * func /home/jessecai/local/pytorch/reproduce_error.py:14
+I1028 12:24:40.160000 2731790 torch/_dynamo/eval_frame.py:385] ]
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] TorchDynamo compilation metrics:
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] Function                                Runtimes (s)
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] ------------------------------------  --------------
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] _compile.compile_inner                        0
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] OutputGraph.call_user_compiler                0
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] _recursive_pre_grad_passes                    0.0036
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] create_aot_dispatcher_function                0
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] compile_fx.<locals>.fw_compiler_base          0
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] compile_fx_inner                              0
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] inductor_codecache_torch_key                  0.0833
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] _recursive_post_grad_passes                   0.002
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] GraphLowering.run                             0.0165
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] GraphLowering.compile_to_module               0
+I1028 12:24:40.164000 2731790 torch/_dynamo/utils.py:427] Scheduler.__init__                            0
+V1028 12:24:40.164000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats constrain_symbol_range: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats evaluate_expr: CacheInfo(hits=0, misses=0, maxsize=256, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _simplify_floor_div: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _maybe_guard_rel: CacheInfo(hits=0, misses=0, maxsize=256, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _find: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats has_hint: CacheInfo(hits=0, misses=0, maxsize=256, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats size_hint: CacheInfo(hits=0, misses=0, maxsize=256, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats simplify: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _update_divisible: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats replace: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _maybe_evaluate_static: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats get_implications: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats get_axioms: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _maybe_evaluate_static_worker: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:40.165000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats safe_expand: CacheInfo(hits=0, misses=0, maxsize=256, currsize=0)
+V1028 12:24:40.166000 2731790 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats uninteresting_files: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+I1028 12:24:41.352000 2732029 torch/_dynamo/eval_frame.py:385] TorchDynamo attempted to trace the following frames: [
+I1028 12:24:41.352000 2732029 torch/_dynamo/eval_frame.py:385] 
+I1028 12:24:41.352000 2732029 torch/_dynamo/eval_frame.py:385] ]
+I1028 12:24:41.357000 2732029 torch/_dynamo/utils.py:427] TorchDynamo compilation metrics:
+I1028 12:24:41.357000 2732029 torch/_dynamo/utils.py:427] Function    Runtimes (s)
+I1028 12:24:41.357000 2732029 torch/_dynamo/utils.py:427] ----------  --------------
+V1028 12:24:41.357000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats constrain_symbol_range: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:41.357000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats evaluate_expr: CacheInfo(hits=0, misses=0, maxsize=256, currsize=0)
+V1028 12:24:41.357000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _simplify_floor_div: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:41.357000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _maybe_guard_rel: CacheInfo(hits=0, misses=0, maxsize=256, currsize=0)
+V1028 12:24:41.357000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _find: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:41.357000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats has_hint: CacheInfo(hits=0, misses=0, maxsize=256, currsize=0)
+V1028 12:24:41.357000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats size_hint: CacheInfo(hits=0, misses=0, maxsize=256, currsize=0)
+V1028 12:24:41.357000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats simplify: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:41.357000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _update_divisible: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:41.358000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats replace: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:41.358000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _maybe_evaluate_static: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:41.358000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats get_implications: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:41.358000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats get_axioms: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:41.358000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats _maybe_evaluate_static_worker: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
+V1028 12:24:41.358000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats safe_expand: CacheInfo(hits=0, misses=0, maxsize=256, currsize=0)
+V1028 12:24:41.358000 2732029 torch/fx/experimental/symbolic_shapes.py:171] lru_cache_stats uninteresting_files: CacheInfo(hits=0, misses=0, maxsize=None, currsize=0)
