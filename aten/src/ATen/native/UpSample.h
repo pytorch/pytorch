@@ -477,17 +477,17 @@ inline void compute_source_index_and_lambda(
 
 // It will not be used by data types other than BFloat16 and Half.
 template <typename scalar_in, typename scalar_out,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_out> || !std::is_same<scalar_in, float>::value, int> = 0>
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_out> || !std::is_same_v<scalar_in, float>, int> = 0>
 void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
   TORCH_CHECK((is_reduced_floating_point_v<scalar_out>),
               "Upsample backward only support BFloat16 and Half in the lower precision data types on CPU.")
-  TORCH_CHECK((std::is_same<scalar_in, float>::value),
+  TORCH_CHECK((std::is_same_v<scalar_in, float>),
               "Upsample backward should use float as acc buffer for BFloat16 and Half grad input on CPU.")
   return;
 }
 
 template <typename scalar_in, typename scalar_out,
-          typename std::enable_if_t<is_reduced_floating_point_v<scalar_out> && std::is_same<scalar_in, float>::value, int> = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_out> && std::is_same_v<scalar_in, float>, int> = 0>
 void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
   using bVec = Vectorized<scalar_out>;
   using fVec = Vectorized<float>;
