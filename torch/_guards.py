@@ -5,6 +5,7 @@ import contextlib
 import dataclasses
 import enum
 import functools
+import itertools
 import logging
 import threading
 import traceback
@@ -747,6 +748,12 @@ class TracingContext:
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
         self.hop_dispatch_set_cache = HopDispatchSetCache()
+
+        # To reuse invoke subgraph infrastructure, other hops that function similarly
+        # as invoke_subgraph get traced as invoke_subgraph with an identifier that we store here
+        # Then, after autograd tracing, we map them back to the correct hop
+        self.invoke_subgraph_mapping_counter = itertools.count(0)
+        self.invoke_subgraph_mapping: Dict[str, Any] = {}
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
