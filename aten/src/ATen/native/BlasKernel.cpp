@@ -333,11 +333,6 @@ static constexpr auto kF16RegistersPerIterationShift = kF16ElementsPerIterationS
 static constexpr auto kF16RegistersPerIteration = 1 << kF16RegistersPerIterationShift;
 static_assert(kF16RegistersPerIteration == kF16ElementsPerIteration / kF16ElementsPerRegister);
 
-// The below reduce overload and fp16_dot_with_fp32_arith are adapted
-// from llama.cpp's ggml_vec_dot_f32 and surrounding utility
-// functions. See NOTE [ GGML Copyright Notice ] above for the
-// required notice.
-
 // We need the shift for reduce(), hence the extra constants.
 static constexpr auto kF32ElementsPerIterationShift = 5;
 static constexpr auto kF32ElementsPerIteration = 1 << kF32ElementsPerIterationShift;
