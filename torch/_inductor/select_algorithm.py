@@ -44,7 +44,7 @@ from .codegen.triton import (
 )
 from .codegen.triton_utils import config_of, signature_to_meta
 from .exc import CUDACompileError
-from .ir import ChoiceCaller, PrimitiveInfoType, NoneAsConstantBuffer
+from .ir import ChoiceCaller, PrimitiveInfoType
 from .runtime.benchmarking import benchmarker
 from .runtime.hints import DeviceProperties
 from .utils import (
@@ -676,7 +676,7 @@ class TritonTemplate(KernelTemplate):
 
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
-        ), TritonTemplateKernel(
+        ), V.graph.set_current_device(layout.device), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
             use_jit=False,
@@ -1147,6 +1147,7 @@ def get_env_num_workers() -> Optional[int]:
     return None
 
 
+from .ir import NoneAsConstantBuffer
 def create_inputs_key(input_nodes) -> str:
     return repr([AlgorithmSelectorCache.key_of(x) for x in input_nodes if not isinstance(x, NoneAsConstantBuffer)])
 
@@ -1597,7 +1598,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         ),
                     )
                 )
-                for n in input_nodes
+                for n in input_nodes if not isinstance(n, NoneAsConstantBuffer)
             ]
         )
 
