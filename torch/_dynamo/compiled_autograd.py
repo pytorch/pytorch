@@ -307,8 +307,9 @@ class AutogradCompilerInstance:
         )
         self.rename_aot_dispatcher_nodes()
         self.reorder_tensor_pre_hook_nodes()
-        self.reorder_pre_hook_nodes()
+        self.reorder_pre_hook_nodes_to_schedule_asap()
         self.reorder_accumulate_grad_nodes()
+        self.reorder_pre_hook_nodes_to_mimic_eager()
         self.reorder_post_acc_grad_hook_nodes()
         self.reorder_post_hook_nodes()
         runtime_inputs_to_move: List[int] = []
@@ -496,12 +497,13 @@ class AutogradCompilerInstance:
                 input_node.append(getitem_node)
                 getitem_node.append(node)
 
-    def reorder_pre_hook_nodes(self):
+    def reorder_pre_hook_nodes_to_schedule_asap(self):
         """
-        Usage of AOTAutograd causes all the pre_hook nodes to get pushed to the
-        end of the graph. This differs from eager mode, which schedules them as
-        soon as possible. This pass attempts to reorder the graph to mimic eager
-        behavior.
+        In this function, we schedule the pre hooks as soon as possible. This
+        does not match eager behavior (schedule pre hook right before its
+        registered node), but it can make acc grad be scheduled properly when
+        the pre hooks are registered to them. After reordering acc grad node, we
+        will reorder the pre hooks again to mimic eager behavior.
         """
         for node in self.fx_tracer.graph.find_nodes(
             op="call_function", target=call_hook
@@ -530,6 +532,41 @@ class AutogradCompilerInstance:
                 arg.append(getitem_node)
                 for n in hook_block:
                     getitem_node.append(n)
+
+    def reorder_pre_hook_nodes_to_mimic_eager(self):
+        """
+        Usage of AOTAutograd causes all the pre_hook nodes to get pushed to the
+        end of the graph. This differs from eager mode, which schedules them
+        right before their registered node execution. This pass attempts to
+        reorder the graph to mimic eager behavior.
+        """
+        pre_hooks = []
+        for node in self.fx_tracer.graph.find_nodes(
+            op="call_function", target=call_hook
+        ):
+            if node.kwargs.get("hook_type", None) != "pre_hook":
+                continue
+            pre_hooks.append(node)
+
+        for node in reversed(pre_hooks):
+            hook_getitem_node = node.args[0]
+
+            users = list(node.users.keys())
+            if len(users) == 0:
+                continue
+
+            # users are all getitem ops and they are used by same registered node
+            assert all(
+                user.op == "call_function" and user.target == operator.getitem
+                for user in users
+            )
+            registered_node = list(users[0].users.keys())[0]
+
+            if registered_node is not node.next:
+                registered_node.prepend(hook_getitem_node)
+                registered_node.prepend(node)
+                for getitem in users:
+                    registered_node.prepend(getitem)
 
     def reorder_post_acc_grad_hook_nodes(self):
         """
