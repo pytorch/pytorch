@@ -2,7 +2,7 @@
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, List
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -458,47 +458,3 @@ def get_dummy_aot_autograd_config():
         aot_id=0,
         keep_inference_input_mutations=False,
     )
-
-
-registered_hop_fake_fns: Dict[torch._ops.OpOverload, Callable] = {}
-
-
-def register_hop_fake(op, fn=None):
-    """
-    Register a fake function for a HOP.
-    """
-    assert op not in registered_hop_fake_fns
-
-    def register(func):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        @op.py_impl(FakeTensorMode)
-        def _(mode, *args, **kwargs):
-            return mode.__torch_dispatch__(op, [], args, kwargs)
-
-        registered_hop_fake_fns[op] = func
-        return func
-
-    if fn is None:
-        return register
-    return register(fn)
-
-
-registered_hop_fake_tensor_cache_key_validation_fns: Dict[
-    torch._ops.OpOverload, Callable
-] = {}
-
-
-def register_hop_fake_tensor_cache_key_validation(op, fn=None):
-    """
-    Register fake tensor cache key validation function for a HOP.
-    """
-    assert op not in registered_hop_fake_tensor_cache_key_validation_fns
-
-    def register(func):
-        registered_hop_fake_tensor_cache_key_validation_fns[op] = func
-        return func
-
-    if fn is None:
-        return register
-    return register(fn)
