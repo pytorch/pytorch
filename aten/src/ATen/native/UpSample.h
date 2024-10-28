@@ -103,7 +103,9 @@ DECLARE_DISPATCH(upsampling_bicubic2d, upsample_bicubic2d_kernel);
 DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_kernel);
 DECLARE_DISPATCH(_upsampling_bicubic2d_aa, _upsample_bicubic2d_aa_backward_kernel);
 
-inline C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+[[maybe_unused]] inline std::array<int64_t, 3> upsample_1d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 1,
       "It is expected output_size equals to 1, but got size ",
@@ -131,7 +133,9 @@ inline C10_UNUSED std::array<int64_t, 3> upsample_1d_common_check(IntArrayRef in
   return {nbatch, channels, output_width};
 }
 
-inline C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+[[maybe_unused]] inline std::array<int64_t, 4> upsample_2d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 2,
       "It is expected output_size equals to 2, but got size ",
@@ -167,8 +171,9 @@ inline C10_UNUSED std::array<int64_t, 4> upsample_2d_common_check(IntArrayRef in
   return {nbatch, channels, output_height, output_width};
 }
 
-inline C10_UNUSED
-std::array<int64_t, 5> upsample_3d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
+[[maybe_unused]] inline std::array<int64_t, 5> upsample_3d_common_check(
+    IntArrayRef input_size,
+    IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 3,
       "It is expected output_size equals to 3, but got size ",
@@ -472,17 +477,17 @@ inline void compute_source_index_and_lambda(
 
 // It will not be used by data types other than BFloat16 and Half.
 template <typename scalar_in, typename scalar_out,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_out> || !std::is_same<scalar_in, float>::value, int> = 0>
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_out> || !std::is_same_v<scalar_in, float>, int> = 0>
 void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
   TORCH_CHECK((is_reduced_floating_point_v<scalar_out>),
               "Upsample backward only support BFloat16 and Half in the lower precision data types on CPU.")
-  TORCH_CHECK((std::is_same<scalar_in, float>::value),
+  TORCH_CHECK((std::is_same_v<scalar_in, float>),
               "Upsample backward should use float as acc buffer for BFloat16 and Half grad input on CPU.")
   return;
 }
 
 template <typename scalar_in, typename scalar_out,
-          typename std::enable_if_t<is_reduced_floating_point_v<scalar_out> && std::is_same<scalar_in, float>::value, int> = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_out> && std::is_same_v<scalar_in, float>, int> = 0>
 void inline apply_grad_input(scalar_in* buffer_ptr, scalar_out* gin, int64_t size) {
   using bVec = Vectorized<scalar_out>;
   using fVec = Vectorized<float>;

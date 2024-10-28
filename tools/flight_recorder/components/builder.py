@@ -112,8 +112,8 @@ def build_groups_memberships(
                 assert (
                     _groups[pg_guid].desc == desc
                 ), f"mismatch in desc {_groups[pg_guid].desc} vs {desc} for group {pg_guid}"
-                assert _memberships[pg_guid] == set(
-                    ranks
+                assert (
+                    _memberships[pg_guid] == set(ranks)
                 ), f"mismatch in membership for group {pg_guid} {_memberships[pg_guid]} vs {set(ranks)}"
     return groups, _groups, memberships, _memberships, _pg_guids
 

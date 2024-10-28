@@ -2573,6 +2573,22 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
+    def test_cond_with_empty_operands(self):
+        @torch.compile(fullgraph=True)
+        def fn(x, y, z):
+            def true_fn():
+                return y + 2
+
+            def false_fn():
+                return z + 1
+
+            return torch.cond(x, true_fn, false_fn)
+
+        zeros = torch.zeros(1)
+        ones = torch.ones(1)
+        self.assertEqual(fn(zeros, ones, ones), torch.tensor([2.0]))
+        self.assertEqual(fn(ones, ones, ones), torch.tensor([3.0]))
+
     def test_hints_wrapper(self):
         def ref_fn(x, y):
             x = x + y
@@ -4020,7 +4036,7 @@ class GraphModule(torch.nn.Module):
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
 
         sin: "f32[3, 3, 3]" = diff_args.sin()
-        add: "f32[3, 3, 3]" = sin + y;  sin = None
+        add: "f32[3, 3, 3]" = sin + y;  sin = y = None
         output: "f32[]" = add.sum();  add = None
 
         _autograd_grad = torch._functorch.eager_transforms._autograd_grad((output,), [diff_args], create_graph = True);  diff_args = None
@@ -4032,7 +4048,7 @@ class GraphModule(torch.nn.Module):
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
-        return (y, grad_input_1)
+        return (grad_input_1,)
 """,
         )
 
