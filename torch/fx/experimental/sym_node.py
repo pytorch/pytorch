@@ -674,7 +674,11 @@ only_float_magic_methods = {"is_integer", "round", "sym_int", "sym_log2"}
 
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
-bitwise_ops = {"bitwise_and", "bitwise_or"}
+# remap necessary because an op name can have a bitwise and boolean implementation
+bitwise_ops = {
+    "bitwise_and": "and",
+    "bitwise_or": "or",
+}
 
 
 always_float_magic_methods = {"int_truediv", "float_truediv", "sym_float", "float_pow"}
@@ -1596,7 +1600,7 @@ def _make_user_magic(method, user_type):
     else:
         method_name = method
         if method in bitwise_ops:
-            method_name = method[len("bitwise_") :]
+            method_name = bitwise_ops[method]
         setattr(user_type, f"__{method_name}__", binary_magic_impl)
         if method in reflectable_magic_methods:
             setattr(user_type, f"__r{method_name}__", rbinary_magic_impl)
