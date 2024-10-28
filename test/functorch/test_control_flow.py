@@ -338,6 +338,15 @@ class TestControlFlow(TestCase):
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
+        
+    def check_autograd(self, result, result_exp, params):
+        result_flatten, _ = pytree.tree_flatten(result)
+        result_exp_flatten, _ = pytree.tree_flatten(result_exp)
+        grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
+        expected_grads = torch.autograd.grad(result_exp_flatten, params, grad_exp_init)
+        grad_init = [torch.ones_like(el) for el in result_flatten]
+        grads = torch.autograd.grad(result_flatten, params, grad_init)
+        self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
 
     def test_cond_no_trace(self):
         def true_fn(x):
@@ -1120,17 +1129,28 @@ def forward(self, pred_1, x_1):
         self.assertEqual(expected, res)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
-    def test_while_loop_gpu(self):
+    # @parametrize("autograd", [False, True])
+    @parametrize("autograd", [True])
+    def test_while_loop_gpu(self, autograd):
+        # def cond_fn(x):
+        #     return x.sum() < 10
+        
         def cond_fn(x):
-            return x.sum() < 10
+            return x.abs().sum() < 0.5
 
+        # def body_fn(x):
+        #     return (x + 1,)
+        
         def body_fn(x):
-            return (x + 1,)
+            return (torch.sin(x) * x + 5.,)
 
-        x = torch.zeros(1, device="cuda")
+        x = torch.ones(1, device="cuda", requires_grad=autograd) * 2
         res = while_loop(cond_fn, body_fn, (x,))
         expected = _fake_while_loop(cond_fn, body_fn, (x,))
         self.assertEqual(expected, res)
+        
+        if autograd:
+            self.check_autograd(res, expected, (x,))
 
     def test_map_illegal_inputs(self):
         def f(x, y):

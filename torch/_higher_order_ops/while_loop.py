@@ -4,6 +4,7 @@ from typing import Callable, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -15,12 +16,138 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
     _temp_remove_metadata_torch_function_mode,
+    disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 
+from .utils import _from_fun, _maybe_reenter_make_fx, create_fw_bw_graph
+
+
+def create_fw_bw_graph_combinefn(cond_fn, body_fn, carried_inputs, additional_inputs):
+    # See Note [HOP create fw_bw graph] in create_fw_bw_graph in utils.py
+
+    # Helper wrapper for the autograd forward.
+    # This wrapper ensures that the forward returns all carries
+    # instead of only the last one
+    # The gradients of the carries forwarded to the output are
+    # detached in order not to raise problems with the function aliasing outputs
+
+    with suspend_functionalization(), disable_functional_mode():
+        with disable_proxy_modes_tracing():
+            num_xs = len(carried_inputs)
+            num_additional_inputs = len(additional_inputs)
+
+            fw_xs = [pytree.tree_map(_from_fun, x) for x in carried_inputs]
+            fw_additional_inputs = [
+                pytree.tree_map(_from_fun, a) for a in additional_inputs
+            ]
+            bw_additional_inputs = [
+                pytree.tree_map(_from_fun, a) for a in additional_inputs
+            ]
+            outs = body_fn(*fw_xs, *fw_additional_inputs)
+            # # TODO: Support this in the future
+            # if pytree.tree_any(
+            #     lambda t: not t.requires_grad,  # type: ignore[union-attr]
+            #     body_fn(*fw_xs, *fw_additional_inputs),
+            # ):
+            #     raise RuntimeError(
+            #         "scan currently only supports Autograd if all init, xs and lifted parameters require gradients."
+            #     )
+
+            fw_outputs = [pytree.tree_map(_from_fun, o) for o in outs]
+            # if any(not isinstance(out, torch.Tensor) for out in fw_outputs):
+            #     raise RuntimeError(
+            #         "Expect outputs produced by combine_fn to only contains tensors. "
+            #         f"Got types {[type(out) for out in fw_outputs]}."
+            #     )
+
+            fw_graph, joint_graph = create_fw_bw_graph(
+                body_fn,
+                False,
+                (*fw_xs, *fw_additional_inputs),
+                (*fw_outputs,),
+            )
+            
+            def wrapper_bwd(*args):
+                # First element is the gradient, second element is the input
+                grad = args[:num_xs]
+                inp = args[num_xs:]
+                out = fw_graph(*inp, *fw_additional_inputs)
+                out_g = joint_graph(*[torch.ones_like(o) for o in out], *inp, *bw_additional_inputs)
+                new_grad = [g * ng for g, ng in zip(grad, out_g)]
+                return *new_grad, *out
+            
+            new_joint_graph = _maybe_reenter_make_fx(wrapper_bwd)(
+                *fw_outputs,
+                *fw_xs,
+            )
+            
+            cond_fn_graph = _maybe_reenter_make_fx(cond_fn)(*fw_xs, *fw_additional_inputs)
+            
+            def bwd_cond_fn(*args):
+                # First element is the gradient, second element is the input
+                grad = args[:num_xs]
+                inp = args[num_xs:]
+                res = cond_fn(*inp, *fw_additional_inputs)
+                return res
+            
+            bwd_cond_fn_graph = _maybe_reenter_make_fx(bwd_cond_fn)(*fw_outputs, *fw_xs)
+
+        return cond_fn_graph, fw_graph, bwd_cond_fn_graph, new_joint_graph
+    
+class WhileLoopAutogradOp(torch.autograd.Function):
+    @staticmethod
+    def extract_init_xs_additional_inputs(flat_args, num_leaves_init, num_leaves_xs):
+        init = flat_args[:num_leaves_init]
+        xs = flat_args[num_leaves_init : num_leaves_init + num_leaves_xs]
+        additional_inputs = flat_args[num_leaves_init + num_leaves_xs :]
+        return init, xs, additional_inputs
+
+    @staticmethod
+    def forward(
+        ctx,
+        cond_fn_graph,
+        fw_graph,
+        bwd_cond_fn_graph,
+        joint_graph,
+        num_leaves_xs,
+        *flat_args,
+    ):
+        ctx._joint_graph = joint_graph
+        ctx._num_leaves_xs = num_leaves_xs
+        flat_args_list = list(flat_args)
+        xs, additional_inputs = flat_args_list[:num_leaves_xs], flat_args_list[num_leaves_xs:]
+        ctx._num_leaves_additional_inputs = len(additional_inputs)
+
+        with torch._C._AutoDispatchBelowAutograd():
+            outs = while_loop_op(cond_fn_graph, fw_graph, tuple(xs), tuple(additional_inputs))
+            # ctx.save_for_backward(*(xs + additional_inputs))
+            
+            #BWD in FWD
+            ones = [torch.ones_like(o) for o in outs]
+            inp = tuple([*ones, *xs])
+            grads_outs = while_loop_op(bwd_cond_fn_graph, joint_graph, inp, tuple(additional_inputs))
+            grads = grads_outs[:num_leaves_xs]
+            ctx.save_for_backward(*(list(grads) + list(xs) + list(additional_inputs)))
+            
+            return (*outs,)
+
+    @staticmethod
+    def backward(ctx, *flat_grads):
+        # import pdb
+        # pdb.set_trace()
+
+        num_leaves_xs = ctx._num_leaves_xs
+        num_leaves_additional_inputs = ctx._num_leaves_additional_inputs
+        grads_xs_additional_inputs = ctx.saved_tensors
+        grads = [fg * g for fg, g in zip(flat_grads, grads_xs_additional_inputs[:num_leaves_xs])]
+
+        # pdb.set_trace()
+        return *[None] * 5, *grads#, [None] * num_leaves_additional_inputs
 
 class WhileLoopOp(HigherOrderOperator):
     def __init__(self) -> None:
@@ -169,6 +296,7 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
             and pred.dtype == torch.bool
         )
 
+    # TODO: move these checks to another place?
     if not isinstance(carried_inputs, tuple):
         raise RuntimeError(
             f"carried_inputs must be a tuple but got {type(carried_inputs)}"
@@ -180,6 +308,8 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
                 f"cond_fn must return a boolean scalar tensor but got {pred}"
             )
         out = body_fn(*carried_vals, *additional_inputs)
+        
+        # TODO: move those checks to another place?
         assert isinstance(
             out, tuple
         ), f"body_fn should return a tuple but got {type(out)}"
@@ -190,9 +320,58 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
     return carried_vals
 
 
-while_loop_op.py_impl(DispatchKey.Autograd)(
-    autograd_not_implemented(while_loop_op, deferred_error=True)
-)
+@while_loop_op.py_impl(DispatchKey.Autograd)
+def scan_autograd(cond_fn, body_fn, carried_inputs, additional_inputs):
+    # A shortcut for the case where all inputs don't require gradient,
+    # we skip tracing the forward and backward graph.
+    # TODO: Figure out how to do this in dispatcher so that we don't have to do this check here
+    if pytree.tree_all_only(
+        torch.Tensor,
+        lambda t: not t.requires_grad,  # type: ignore[union-attr]
+        (carried_inputs, additional_inputs),
+    ):
+        with torch._C._AutoDispatchBelowAutograd():
+            return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
+
+    # TODO: Support this in the future
+    if pytree.tree_any(
+        lambda t: not t.requires_grad,  # type: ignore[union-attr]
+        (carried_inputs, additional_inputs),
+    ):
+        raise RuntimeError(
+            "scan currently only supports Autograd if all init, xs and lifted parameters require gradients."
+        )
+
+    # TODO: The create_fw_bw is always invoked twice:
+    # Once in the forward path and
+    # once in the backward path, where it should only be invoked for the grad grad case.
+    # We don't support this currently
+    if not torch.is_grad_enabled():
+        # This clause is hit in the case of double backward.
+        # Currently scan does not support this and thus we just dummy call another scan
+        # The scan dim in the backward backward is always zero, because the
+        # scan outputs during the forward are always collected at dim=0
+        with torch._C._AutoDispatchBelowAutograd():
+            return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
+
+    num_leaves_xs = len(carried_inputs)
+
+    (
+        cond_fn_graph,
+        fw_graph,
+        bwd_cond_fn_graph,
+        joint_graph
+    ) = create_fw_bw_graph_combinefn(cond_fn, body_fn, carried_inputs, additional_inputs)
+
+    flat_out = WhileLoopAutogradOp.apply(
+        cond_fn_graph,
+        fw_graph,
+        bwd_cond_fn_graph,
+        joint_graph,
+        num_leaves_xs,
+        *(carried_inputs + additional_inputs),
+    )
+    return *flat_out,
 
 
 @while_loop_op.py_impl(ProxyTorchDispatchMode)

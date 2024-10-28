@@ -345,7 +345,7 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
     def joint_fn(*joint_operands_grads):
         if use_output_and_grad_bw:
             grads = joint_operands_grads[0]
-            inputs = joint_operands_grads[1][-1:]
+            inputs = joint_operands_grads[1]
         else:
             grads = joint_operands_grads[:num_grads]
             inputs = joint_operands_grads[num_grads:]
@@ -365,7 +365,7 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
     if use_output_and_grad_bw:
         example_xs_out = list(fw_inputs) + list(fw_outputs)
         joint_graph = _maybe_reenter_make_fx(joint_fn)(
-            (list(example_grad), list(example_xs_out))
+            *(list(example_grad), list(example_xs_out))
         )
     else:
         example_xs_out = list(fw_inputs)
