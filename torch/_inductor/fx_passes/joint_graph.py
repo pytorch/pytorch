@@ -500,6 +500,14 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
                 graph.erase_node(first_user)
 
 
+def canonicalize_aten_ir_passes(gm: torch.fx.GraphModule):
+    """
+    Canonicalization passes that will run immediately after aot autograd
+    tracing. Thsis must be run before all other graph passes.
+    """
+    canonicalize_quant_mapping(gm)
+
+
 def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     Run FX transformations on the joint forwards+backwards graph.
@@ -508,7 +516,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     count = 0
 
     # must occur before other passes
-    canonicalize_quant_mapping(graph)
+    canonicalize_aten_ir_passes(graph)
 
     if config.joint_custom_pre_pass is not None:
         with GraphTransformObserver(
