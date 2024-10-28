@@ -1457,7 +1457,7 @@ class AOTDispatchAutograd:
 
         assert isinstance(
             meta, SubclassCreationMeta
-        ), "Runtime tangent is subclass, where plain Tensor was during tracing"
+        ), "Runtime tangent is subclass, where this tangent was a plain Tensor during tracing"
         assert meta.original_subclass_type == type(x)
 
         x_inner_keys, x_meta = x.__tensor_flatten__()  # type: ignore[attr-defined]

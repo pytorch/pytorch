@@ -825,8 +825,8 @@ def forward(self, primals_1):
         out = f(new_aa)
         new_out = out + aaaa
         with self.assertRaisesRegex(
-            RuntimeError,
-            "The grad inputs should be same tensor subclass type as forward output",
+            AssertionError,
+            "Runtime tangent is subclass, where this tangent was a plain Tensor during tracing",
         ):
             new_out.sum().backward()
 
