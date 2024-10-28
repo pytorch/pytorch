@@ -62,6 +62,16 @@ Windows llvm will not have this defination.
 #endif
 #define VECTOR_WIDTH 64
 #define int_vector __m512i
+#elif defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) // CPU_CAPABILITY_AVX512
+// SVE code expects 256-vectors; leave that set for SVE?
+#if defined(__GNUC__)
+#define __at_align__ __attribute__((aligned(16)))
+#elif defined(_WIN32)
+#define __at_align__ __declspec(align(16))
+#else
+#define __at_align__
+#endif
+#define VECTOR_WIDTH 16
 #else // CPU_CAPABILITY_AVX512
 #if defined(__GNUC__)
 #define __at_align__ __attribute__((aligned(32)))
@@ -138,40 +148,10 @@ private:
 public:
   using value_type = T;
   using size_type = int;
-  // Note [constexpr static function to avoid odr-usage compiler bug]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // Why, you might ask, is size defined to be a static constexpr function,
-  // rather than a more ordinary 'static constexpr int size;' variable?
-  // The problem lies within ODR rules for static constexpr members versus
-  // static constexpr functions.  First, recall that this class (along with all
-  // of its derivations) live in an anonymous namespace: they are intended to be
-  // *completely* inlined at their use-sites, because we need to compile it
-  // multiple times for different instruction sets.
-  //
-  // Because of this constraint, we CANNOT provide a single definition for
-  // any static members in this class; since we want to compile the class
-  // multiple times, there wouldn't actually be any good place to put the
-  // definition.  Now here is the problem: if we ODR-use a static constexpr
-  // member, we are *obligated* to provide a definition.  Without the
-  // definition, you get a compile error like:
-  //
-  //    relocation R_X86_64_PC32 against undefined symbol
-  //    `_ZN2at6vec25612_GLOBAL__N_16VectorizedIdE4sizeE' can not be used when making
-  //    a shared object; recompile with -fPIC
-  //
-  // If this were C++17, we could replace a static constexpr variable with
-  // an inline variable which doesn't require one definition. But we are not
-  // C++17.  So the next best thing is to replace the member with a static
-  // constexpr (and therefore inline) function, which does not require ODR
-  // either.
-  //
-  // Also, technically according to the C++ standard, we don't have to define
-  // a constexpr variable if we never odr-use it.  But it seems that some
-  // versions GCC/Clang have buggy determinations on whether or not an
-  // identifier is odr-used or not, and in any case it's hard to tell if
-  // a variable is odr-used or not.  So best to just cut the problem at the root.
+
+  static constexpr size_type kSize = VECTOR_WIDTH / sizeof(T);
   static constexpr size_type size() {
-    return VECTOR_WIDTH / sizeof(T);
+    return kSize;
   }
   Vectorized() : values{static_cast<T>(0)} {}
   Vectorized(T val) {
@@ -182,6 +162,9 @@ public:
   template<typename... Args,
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
   Vectorized(Args... vals) : values{vals...}{
+  }
+  Vectorized(const T(&arr)[kSize]) {
+    std::memcpy(values, arr, sizeof(values));
   }
   // This also implies const T& operator[](int idx) const
   inline operator const T*() const {

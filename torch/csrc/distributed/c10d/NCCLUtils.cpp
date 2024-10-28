@@ -176,9 +176,9 @@ bool nccl_use_nonblocking() {
 int nccl_nonblocking_timeout() {
   static int timeout = -2; // -2 means not initialized
   if (timeout == -2) {
-    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-    if (val && strlen(val) > 0) {
-      timeout = strtol(val, nullptr, 0);
+    const auto val = c10::utils::get_env("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val.has_value() && !val.value().empty()) {
+      timeout = stoi(val.value());
     } else {
       // Default value consistent with kBackendDefaultTimeout
       timeout = 30 * 60;
@@ -353,7 +353,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
     return;
   }
 
-  file.write(ncclTrace.data(), ncclTrace.size());
+  file.write(ncclTrace.data(), static_cast<std::streamsize>(ncclTrace.size()));
   if (!file) {
     LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
                << filename_;
@@ -547,7 +547,7 @@ void NCCLTraceBuffer::retire_id(
       return;
     }
     if (duration.has_value()) {
-      entry->duration_ = duration.value();
+      entry->duration_ = duration;
     }
   }
 }
