@@ -52,6 +52,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     runOnRocm,
     skipIfRocm,
+    skipIfTorchDynamo,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
@@ -2182,6 +2183,7 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input))
 
+    @skipIfTorchDynamo("segfaults")
     def test_extremal_numerics_l1_loss(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))
