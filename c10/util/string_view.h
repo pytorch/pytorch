@@ -596,7 +596,7 @@ constexpr inline void swap(
   lhs.swap(rhs);
 }
 using string_view_ext = basic_string_view<char>;
-#ifdef fbcode_caffe2
+#ifdef FBCODE_CAFFE2
 using string_view = basic_string_view<char>;
 #else
 using std::string_view;
