@@ -1890,7 +1890,9 @@ class AotCodeCompiler:
                 return n_bytes if all_cuda else _align(n_bytes)
 
             consts_size = sum(
-                get_nbytes_of_tensor(tensor, all_cuda)
+                get_nbytes_of_tensor(
+                    graph.get_original_value_of_constant(name), all_cuda
+                )
                 for (name, tensor) in graph.constants.items()
                 if name not in graph.folded_constants
             )
