@@ -21,7 +21,7 @@ if not torch.accelerator.is_available():
 class TestAccelerator(TestCase):
     def test_current_accelerator(self):
         self.assertTrue(torch.accelerator.is_available())
-        accelerators = ["cuda", "xpu"]
+        accelerators = ["cuda", "xpu", "mps"]
         for accelerator in accelerators:
             if torch.get_device_module(accelerator).is_available():
                 self.assertEqual(
