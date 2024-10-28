@@ -26,7 +26,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfWindows,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU
+
+
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 @instantiate_parametrized_tests
@@ -74,6 +77,45 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         # A first call should miss in the cache.
         self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # A second call should hit. (First reset so in-memory guards
+        # don't prevent compilation).
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @requires_cuda
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    # TODO - Enable this when fx_graph_cache support HOPs
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_activation_checkpointing(self):
+        """
+        Verify that AC work
+        """
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
+
+        a = torch.randn(4, 4, device="cuda")
+        b = torch.randn(4, 4, device="cuda")
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # A first call should miss in the cache.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)

@@ -391,6 +391,28 @@ class GraphModule(torch.nn.Module):
         ):
             opt_fn(x, y)
 
+    def test_ac(self):
+        def hn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def gn(x, y):
+            return x * torch.utils.checkpoint.checkpoint(
+                hn, torch.sin(x), y, use_reentrant=False
+            )
+
+        def fn(x, y):
+            return invoke_subgraph(gn, None, (x, y))
+
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        ref = fn(x, y)
+
+        x_clone = x.clone().detach().requires_grad_(True)
+        y_clone = y.clone().detach().requires_grad_(True)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone, y_clone)
+
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     run_tests()
