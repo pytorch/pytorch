@@ -668,6 +668,7 @@ def _compile_fx_inner(
                                 gm,
                                 compiled_graph,
                                 static_input_idxs,
+                            )
                         )
                         has_mutation = has_mutation_str is not None
 
