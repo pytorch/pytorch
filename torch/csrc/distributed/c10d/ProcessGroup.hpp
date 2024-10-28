@@ -27,7 +27,7 @@ namespace c10d {
 // We only call `register_work()` in two cases:
 // 1. If the work object is created from a functional collective call.
 // 2. If the work object is created from a non-functional collective call within
-//    the `with allow_inflight_collective_as_graph_input_ctx():` context manager.
+//    the `with allow_inflight_collective_as_graph_input_ctx()` context manager.
 C10_EXPORT void register_work(
     const at::Tensor& tensor,
     const c10::intrusive_ptr<c10d::Work>& work);
@@ -36,7 +36,7 @@ C10_EXPORT at::Tensor wait_tensor(const at::Tensor& tensor);
 
 // We only call `unregister_work()` in one case:
 // 1. If the work object is created from a non-functional collective call within
-//    the `with allow_inflight_collective_as_graph_input_ctx():` context manager.
+//    the `with allow_inflight_collective_as_graph_input_ctx()` context manager.
 //
 // Q: What about the functional collective case?
 // A: The unregistration of work object for functional collective is done in
