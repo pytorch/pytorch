@@ -945,6 +945,15 @@ if torch._C._has_mkldnn:
         weight_meta_value = linear_node.args[weight_idx].meta.get("val")
         if input_meta_value is None or weight_meta_value is None:
             return False
+        if linear_node.target == aten.bmm.default:
+            input_size = input_meta_value.size()
+            weight_size = weight_meta_value.size()
+            # bmm must be 3D tensor
+            assert len(input_size) == 3 and len(weight_size) == 3
+            if input_size[0] != weight_size[0]:
+                return False
+            if input_size[-1] != weight_size[1]:
+                return False
         batch_size = input_meta_value.shape[0]
         if (
             input_meta_value.dtype == torch.float64
@@ -963,11 +972,16 @@ if torch._C._has_mkldnn:
             and ((not torch._C.has_mkl) or has_free_symbols(batch_size))
         ):
             return False
+
         for meta_value in [input_meta_value, weight_meta_value]:
             if (
                 meta_value is None
                 or meta_value.device.type != "cpu"
-                or meta_value.dim() != 2
+                or (
+                    meta_value.dim() != 3
+                    if linear_node.target == aten.bmm.default
+                    else 2
+                )
             ):
                 return False
         if weight_idx == 2:
@@ -1133,10 +1147,25 @@ if torch._C._has_mkldnn:
             CallFunction(aten.mm.default, Arg(), Arg()),
             extra_check=_is_packable_linear,
         )
+        @register_freezing_graph_pattern(
+            CallFunction(
+                aten.bmm.default,
+                Arg(),
+                Arg(),
+            ),
+            extra_check=_is_packable_linear,
+        )
         def linear(match, *args, **kwargs):
             graph = match.graph
             linear_node = match.output_node()
-            input = args[0] if linear_node.target == aten.mm.default else args[1]
+            input = (
+                args[0]
+                if (
+                    linear_node.target == aten.mm.default
+                    or linear_node.target == aten.bmm.default
+                )
+                else args[1]
+            )
             bias = (
                 None
                 if linear_node.target == aten.mm.default
@@ -1144,14 +1173,31 @@ if torch._C._has_mkldnn:
                     linear_node.target == aten.addmm.default
                     and linear_node.kwargs.get("beta", 1.0) == 0.0
                 )
+                or (linear_node.target == aten.bmm.default)
                 else args[0]
             )
-            weight = args[1] if linear_node.target == aten.mm.default else args[2]
+            weight = (
+                args[1]
+                if (
+                    linear_node.target == aten.mm.default
+                    or linear_node.target == aten.bmm.default
+                )
+                else args[2]
+            )
             with graph.inserting_before(linear_node):
+                weight_dtype = weight.meta.get("val").dtype
+                if linear_node.target == aten.bmm.default:
+                    weight = graph.create_node(
+                        "call_function", aten.slice.Tensor, (weight, 0, 0, 1)
+                    )
+                    weight = graph.create_node(
+                        "call_function", aten.squeeze.default, (weight,)
+                    )
+
                 transpose_weight_node = graph.create_node(
                     "call_function", aten.permute.default, (weight, (1, 0))
                 )
-                weight_dtype = weight.meta.get("val").dtype
+
                 is_lp_weight = weight_dtype in (
                     torch.bfloat16,
                     torch.float16,

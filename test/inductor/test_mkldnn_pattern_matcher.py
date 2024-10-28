@@ -382,6 +382,29 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_nodes = 1
             self._test_common(mod, (v,), matcher_count, matcher_nodes)
 
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_linear_bmm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4096, 1024, bias=False)
+
+            def forward(self, x):
+                x = torch.ops.aten.permute.default(x, [0, 2, 1, 3])
+                x = torch.ops.aten.reshape.default(x, [4, 1, 4096])
+                return self.linear(x)
+
+        mod = M().eval()
+        v = torch.randn(4, 32, 1, 128)
+        with torch.no_grad(), torch.autocast(device_type="cpu"):
+            expected = mod(v)
+            actual, (source_code,) = run_and_get_code(
+                torch.compile(mod, fullgraph=True),
+                v,
+            )
+            self.assertIn("torch.ops.mkldnn._linear_pointwise.default", source_code)
+            torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+
     def test_linear_add_bias(self):
         class M(torch.nn.Module):
             def __init__(self, dtype, unary_fn, cast_bias):
