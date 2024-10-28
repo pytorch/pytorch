@@ -501,11 +501,14 @@ class CachingAutotuner(KernelInterface):
                     so we use self.fn.constexprs instead.
             3. It isn't in the compile_meta signature
         """
-        none_args = set(compile_meta["constants"].keys())
         known_constants = {
             arg for i, arg in enumerate(self.fn.arg_names) if i in self.fn.constexprs
         }
-        none_args = none_args.difference(known_constants)
+        none_args = {
+            k
+            for k, v in compile_meta["constants"].items()
+            if v is None and k not in known_constants
+        }
         none_args = none_args.difference(set(compile_meta["signature"].keys()))
 
         call_args = [
