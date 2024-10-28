@@ -4,10 +4,7 @@
 #include <ATen/core/functional.h>
 #include <torch/csrc/jit/jit_log.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 using namespace dnnl::graph;
 using data_type = dnnl::graph::logical_tensor::data_type;
@@ -293,7 +290,4 @@ void LlgaKernel::run(Stack& stack) {
 #endif
 }
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn
