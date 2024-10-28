@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 from __future__ import annotations
 
+import sys
 import atexit
 import contextlib
 import dataclasses
@@ -714,6 +715,7 @@ class FakeTensor(Tensor):
 
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
+        # print(f"*** FakeTensor({id(self)}).__new__({self})",file=sys.stderr)
         return self
 
     # In some circumstances, a conventional Tensor constructor

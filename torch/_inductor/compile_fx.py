@@ -831,6 +831,8 @@ class _InProcessFxCompile(FxCompile):
                 payload_fn=lambda: log_graph_runnable(),
             )
 
+            print("*** V.debug = ", repr(V.debug), file=sys.stderr)
+            print("*** V.debug.fx_graph = ", repr(V.debug.fx_graph), file=sys.stderr)
             V.debug.fx_graph(gm, example_inputs)
             # TODO: Should we actually dump this?  It should be redundant with the aot
             # structured logs...
@@ -1038,7 +1040,12 @@ class _DebugFxCompile(FxCompile):
         **kwargs: Unpack[_CompileFxKwargs],
     ) -> Union[CompiledFxGraph, str]:
         from .compile_worker.subproc_pool import _SubprocPickler, _SubprocUnpickler
+<<<<<<< dest:   ab029fafc807 - aorenste: Use Debug scheme
 
+||||||| base:   b9d79bea9ccd - aorenste: Use Debug scheme
+=======
+        print("*** USING DEBUG SCHEME ***", file=sys.stderr)
+>>>>>>> source: 868fa4f249e1 - aorenste: DEBUG: print
         data = (gm, example_inputs)
         pickled_data = _SubprocPickler.dumps(data)
 
@@ -1051,6 +1058,7 @@ class _DebugFxCompile(FxCompile):
         with torch._guards.tracing(TracingContext(fake_mode)):
             with fake_mode:
                 unpickled_data = _SubprocUnpickler.loads(pickled_data)
+            print(f"*** unpickled_data: {unpickled_data[1]!r}", file=sys.stderr)
             from torch._guards import detect_fake_mode
 
             x = detect_fake_mode(unpickled_data[1])
@@ -1081,6 +1089,11 @@ class _SubprocessFxCompile(FxCompile):
             Callable[[List[ExternKernelNode]], Any]
         ] = None,
     ) -> Union[CompiledFxGraph, str]:
+        print(
+            f"{os.getpid()}: _SubprocessFxCompile.codegen_and_compile", file=sys.stderr
+        )
+        print(f"{os.getpid()}:     Inputs:", repr(example_inputs), file=sys.stderr)
+
         # mode = torch.utils._python_dispatch._get_current_dispatch_mode()
         # assert isinstance(mode, torch._subclasses.FakeTensorMode)
         # Even though we get FakeTensors we might not be in a FakeTensorMode!
@@ -1109,12 +1122,14 @@ class _SubprocessFxCompile(FxCompile):
             )
             last = time.time()
             while not f.done():
+                # print("*** tick", file=sys.stderr)
                 time.sleep(0.5)
                 now = time.time()
                 if now - last > 1:
                     last = now
             graph = f.result()
             end = time.time()
+            print(f"{os.getpid()}: *** returning graph", file=sys.stderr)
             if isinstance(graph, CompiledFxGraph):
                 # NOTE: This is kind of slow in the async case. Check that it's
                 # just the first time - probably from loading torch itself in
@@ -1123,7 +1138,7 @@ class _SubprocessFxCompile(FxCompile):
             return graph
 
         finally:
-            pass
+            print(f"{os.getpid()}: *** exiting subproc", file=sys.stderr)
 
     @staticmethod
     def _subproc_codegen_and_compile(

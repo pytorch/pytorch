@@ -195,6 +195,7 @@ def _deserialize_graph_module(
     com = _CodeOnlyModule(body)
 
     tracer_extras = body.get("_tracer_extras", {})
+    print(f"*** tracer_extras: {tracer_extras!r}", file=sys.stderr)
     graph = KeepModules().trace(com, **tracer_extras)
 
     # Manually set Tracer class on the reconstructed Graph, to avoid

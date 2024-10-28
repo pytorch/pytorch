@@ -201,6 +201,10 @@ class _SubprocPickler(pickle.Pickler):
         _SubprocPickler._TODO_check_tensor_data(data)
         print(f"{os.getpid()}: *** unpickle data:", repr(data), file=sys.stderr)
 
+        print(
+            f"*** calling torch.empty_strided({data.shape}, {data.stride}, dtype={data.dtype}, layout={data.layout}, device={data.device}, requires_grad={data.requires_grad}",
+            file=sys.stderr,
+        )
         empty = torch.empty_strided(
             data.shape,  # type: ignore[arg-type]
             data.stride,  # type: ignore[arg-type]
@@ -530,13 +534,23 @@ class SubprocMain:
 
     @staticmethod
     def do_job(data: bytes) -> bytes:
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._guards import TracingContext
+
         # do the pickle/unpickle in the sub-subproc
-        job = typing.cast(Callable[[], object], _SubprocUnpickler.loads(data))
-        try:
-            result = job()
-        except Exception as e:
-            result = _SubprocExceptionInfo(traceback.format_exc())
-        return _SubprocPickler.dumps(result)
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+
+        with torch._guards.tracing(TracingContext(fake_mode)):
+            with fake_mode:
+                job = typing.cast(Callable[[], object], _SubprocUnpickler.loads(data))
+
+            try:
+                result = job()
+            except Exception as e:
+                result = _SubprocExceptionInfo(traceback.format_exc())
+            print(f"{os.getpid()}: *** result:", repr(result), file=sys.stderr)
+            return _SubprocPickler.dumps(result)
 
 
 AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]

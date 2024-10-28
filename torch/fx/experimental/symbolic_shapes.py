@@ -1815,6 +1815,8 @@ def _maybe_evaluate_static_worker(
     that occurs when we reallocate the symbols
     """
 
+    print(f"*** _maybe_evaluate_static_worker: {symbol_info!r}", file=sys.stderr)
+    # breakpoint()
     # Simplify making use of value range lower bound
     new_shape_env = {}
     new_range_env = {}
@@ -1839,6 +1841,7 @@ def _maybe_evaluate_static_worker(
             if lower <= upper:
                 vr = ValueRanges(lower, upper)
         else:
+            print(f"*** VR: {vr!r}", file=sys.stderr)
             lower = vr.lower
         # Don't do anything if we don't have a nontrivial lower bound
         # Also don't do anything if we asked only to simplify unbacked

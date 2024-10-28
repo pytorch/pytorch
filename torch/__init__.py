@@ -527,7 +527,7 @@ class SymInt:
         raise TypeError("type stub not overridden")
 
     def __repr__(self):
-        return self.node._graph_repr()
+        return repr(self.node)
 
     def _sympy_(self):
         return self.node.expr
