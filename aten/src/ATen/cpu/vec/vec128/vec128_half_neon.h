@@ -443,7 +443,6 @@ class Vectorized<c10::Half> {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return Vectorized<c10::Half>(vnegq_f16(values));
 #else
-    // TODO: can we flip the sign bits with u16 bitwise operations?
     return map_with_vec_float_method(&Vectorized<float>::neg);
 #endif
   }
@@ -801,36 +800,6 @@ Vectorized<c10::Half> inline fmsub(
   return convert_float_half(
       fmsub(a_float_low, b_float_low, c_float_low),
       fmsub(a_float_high, b_float_high, c_float_high));
-#endif
-}
-
-// Returns (acc_low + a_low_half * b_low_half, acc_high + a_high_half * b_high_half)
-std::pair<Vectorized<float>, Vectorized<float>> inline fmadd(
-    const Vectorized<c10::Half>& a,
-    const Vectorized<c10::Half>& b,
-    const Vectorized<float>& acc_low,
-    const Vectorized<float>& acc_high) {
-#ifdef __ARM_FEATURE_FP16_FML
-  return std::make_pair(vfmlalq_low_f16(acc_low, a, b), vfmlalq_high_f16(acc_high, a, b));
-#else
-  const auto [a_float_low, a_float_high] = convert_half_float(a);
-  const auto [b_float_low, b_float_high] = convert_half_float(b);
-  return std::make_pair(fmadd(a_float_low, b_float_low, acc_low), fmadd(a_float_high, b_float_high, acc_high));
-#endif
-}
-
-// Returns (acc_low - a_low_half * b_low_half, acc_high - a_high_half * b_high_half)
-std::pair<Vectorized<float>, Vectorized<float>> inline fmsub(
-    const Vectorized<c10::Half>& a,
-    const Vectorized<c10::Half>& b,
-    const Vectorized<float>& acc_low,
-    const Vectorized<float>& acc_high) {
-#ifdef __ARM_FEATURE_FP16_FML
-  return std::make_pair(vfmlslq_low_f16(acc_low, a, b), vfmlslq_high_f16(acc_high, a, b));
-#else
-  const auto [a_float_low, a_float_high] = convert_half_float(a);
-  const auto [b_float_low, b_float_high] = convert_half_float(b);
-  return std::make_pair(fmsub(a_float_low, b_float_low, acc_low), fmsub(a_float_high, b_float_high, acc_high));
 #endif
 }
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)
