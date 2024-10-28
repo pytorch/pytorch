@@ -291,7 +291,7 @@ python tools/amd_build/build_amd.py
 
 Install PyTorch
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py develop
 ```
 
@@ -373,14 +373,14 @@ with such a step.
 
 On Linux
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
 
 On macOS
 ```bash
-export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+export CMAKE_PREFIX_PATH="${CONDA_PREFIX:-'$(dirname $(which conda))/../'}:${CMAKE_PREFIX_PATH}"
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```

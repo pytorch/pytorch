@@ -53,6 +53,7 @@ from torchgen.model import (
     BackendMetadata,
     BaseOperatorName,
     DEFAULT_KERNEL_NAMESPACE,
+    dispatch_device_map,
     DispatchKey,
     FRAGMENT_NAMESPACES,
     FunctionSchema,
@@ -600,19 +601,15 @@ struct TORCH_API {name} {{
   using schema = {sig.type()};
   using ptr_schema = schema*;
   // See Note [static constexpr char* members for windows NVCC]
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::{f.func.name.name}")
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(overload_name, "{f.func.name.overload_name}")
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(schema_str, {cpp_string(str(f.func))})
+  static constexpr const char* name = "aten::{f.func.name.name}";
+  static constexpr const char* overload_name = "{f.func.name.overload_name}";
+  static constexpr const char* schema_str = {cpp_string(str(f.func))};
   static {sig.defn(name="call", is_redispatching_fn=False)};
   static {sig.defn(name="redispatch", is_redispatching_fn=True)};
 }};"""
 
         elif self.target is Target.DEFINITION:
             defns = f"""
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{f.func.name.name}")
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, overload_name, "{f.func.name.overload_name}")
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})
-
 // aten::{f.func}
 static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed_handle() {{
   return c10::Dispatcher::singleton()
@@ -695,7 +692,7 @@ inline {sig.decl()} {{
             if has_symint:
                 result += f"""
 namespace symint {{
-  template <typename T, typename = std::enable_if_t<std::is_same<T, {intlike_t}>::value>>
+  template <typename T, typename = std::enable_if_t<std::is_same_v<T, {intlike_t}>>>
   {sig.decl(suppress_symint_suffix=True)} {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
   }}
@@ -1362,7 +1359,7 @@ def get_grouped_by_view_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[NativeFunction | NativeFunctionsViewGroup]:
     def maybe_create_view_group(
-        d: dict[ViewSchemaKind | SchemaKind, NativeFunction]
+        d: dict[ViewSchemaKind | SchemaKind, NativeFunction],
     ) -> list[NativeFunction | NativeFunctionsViewGroup]:
         funcs: list[NativeFunction | NativeFunctionsViewGroup] = []
         if ViewSchemaKind.aliasing in d:
@@ -1409,7 +1406,7 @@ def get_grouped_native_functions(
     native_functions: Sequence[NativeFunction],
 ) -> Sequence[NativeFunction | NativeFunctionsGroup]:
     def flatten_pre_group(
-        d: dict[SchemaKind, NativeFunction]
+        d: dict[SchemaKind, NativeFunction],
     ) -> Sequence[NativeFunction | NativeFunctionsGroup]:
         r = NativeFunctionsGroup.from_dict(d)
         if r is None:
@@ -1476,9 +1473,7 @@ def get_native_function_declarations_from_ns_grouped_kernels(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -1671,9 +1666,7 @@ def get_namespaced_declaration(
 {ns_helper.prologue}
 {newline.join(ordered_kernels)}
 {ns_helper.epilogue}
-        """.split(
-                newline
-            )
+        """.split(newline)
         )
     return declarations
 
@@ -1724,7 +1717,7 @@ def gen_aggregated_headers(
     selector: SelectiveBuilder,
     backend_indices: dict[DispatchKey, BackendIndex],
     cpu_fm: FileManager,
-    cuda_fm: FileManager,
+    device_fms: dict[str, FileManager],
     functions_keys: set[DispatchKey],
     dispatch_keys: Sequence[DispatchKey],
     rocm: bool,
@@ -1804,7 +1797,18 @@ def gen_aggregated_headers(
     )
 
     for dispatch_key in dispatch_keys:
-        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
+        fm = device_fms.get(
+            next(
+                (
+                    device
+                    for check, device in dispatch_device_map.items()
+                    if check(dispatch_key)
+                ),
+                "cpu",
+            ),
+            cpu_fm,
+        )
+
         if dispatch_key in functions_keys:
             inl_headers = f"#include <ATen/{dispatch_key}Functions_inl.h>"
 
@@ -1844,7 +1848,7 @@ def gen_per_operator_headers(
     selector: SelectiveBuilder,
     backend_indices: dict[DispatchKey, BackendIndex],
     cpu_fm: FileManager,
-    cuda_fm: FileManager,
+    device_fms: dict[str, FileManager],
     ops_fm: FileManager,
     functions_keys: set[DispatchKey],
     dispatch_keys: Sequence[DispatchKey],
@@ -1992,7 +1996,17 @@ def gen_per_operator_headers(
                 },
             )
 
-        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
+        fm = device_fms.get(
+            next(
+                (
+                    device
+                    for check, device in dispatch_device_map.items()
+                    if check(dispatch_key)
+                ),
+                "cpu",
+            ),
+            cpu_fm,
+        )
         inl_headers = f"#include <ATen/{dispatch_key}Functions_inl.h>"
 
         fm.write_with_template(
@@ -2041,7 +2055,7 @@ def gen_headers(
     backend_indices: dict[DispatchKey, BackendIndex],
     core_fm: FileManager,
     cpu_fm: FileManager,
-    cuda_fm: FileManager,
+    device_fms: dict[str, FileManager],
     ops_fm: FileManager,
     dispatch_keys: Sequence[DispatchKey],
     functions_keys: set[DispatchKey],
@@ -2056,7 +2070,7 @@ def gen_headers(
             selector=selector,
             backend_indices=backend_indices,
             cpu_fm=cpu_fm,
-            cuda_fm=cuda_fm,
+            device_fms=device_fms,
             ops_fm=ops_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
@@ -2071,7 +2085,7 @@ def gen_headers(
             selector=selector,
             backend_indices=backend_indices,
             cpu_fm=cpu_fm,
-            cuda_fm=cuda_fm,
+            device_fms=device_fms,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
             rocm=rocm,
@@ -2179,9 +2193,9 @@ def gen_source_files(
     backend_indices: dict[DispatchKey, BackendIndex],
     aoti_fm: FileManager,
     core_fm: FileManager,
-    cpu_fm: FileManager,
     cpu_vec_fm: FileManager,
-    cuda_fm: FileManager,
+    cpu_fm: FileManager,
+    device_fms: dict[str, FileManager],
     dispatch_keys: Sequence[DispatchKey],
     functions_keys: set[DispatchKey],
     rocm: bool,
@@ -2189,6 +2203,8 @@ def gen_source_files(
     per_operator_headers: bool,
     skip_dispatcher_op_registration: bool,
     update_aoti_c_shim: bool,
+    aoti_backends: set[DispatchKey],
+    aoti_extend: bool,
 ) -> None:
     extra_cuda_headers = """\
 #include <c10/cuda/CUDAGuard.h>
@@ -2201,8 +2217,19 @@ def gen_source_files(
 #include <ATen/hip/ATenHIPGeneral.h>
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>"""
+
     for dispatch_key in dispatch_keys:
-        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
+        fm = device_fms.get(
+            next(
+                (
+                    device
+                    for check, device in dispatch_device_map.items()
+                    if check(dispatch_key)
+                ),
+                "cpu",
+            ),
+            cpu_fm,
+        )
 
         if per_operator_headers:
 
@@ -2354,16 +2381,7 @@ def gen_source_files(
                     structured_func_group_dict[func.structured_delegate] = func_group
                     break
 
-        aoti_c_shim_backends = [DispatchKey.CPU, DispatchKey.CUDA]
-        # generate aoti c shim for external backends
-        ext_backend_yamls = {
-            DispatchKey.XPU: "third_party/torch-xpu-ops/yaml/xpu_functions.yaml"
-        }
-        for key, yaml_path in ext_backend_yamls.items():
-            if os.path.exists(yaml_path):
-                aoti_c_shim_backends.append(key)
-
-        if dispatch_key in aoti_c_shim_backends:
+        if dispatch_key in aoti_backends:
             fallbacks = {}
             for func in native_functions:
                 op_name = get_fallback_op_name(func)
@@ -2372,20 +2390,6 @@ def gen_source_files(
             fallback_native_functions = tuple(
                 value for _, value in sorted(fallbacks.items())
             )
-            if dispatch_key in ext_backend_yamls:
-                from torchgen.gen_backend_stubs import parse_backend_yaml
-
-                # `parse_backend_yaml` will update `backend_indice`.
-                # Copy here to not modify the original backend_indices thus not affecting the rest of the codegen
-                cshim_backend_indices = backend_indices.copy()
-                parsed_backend_yaml = parse_backend_yaml(
-                    ext_backend_yamls[dispatch_key],
-                    grouped_native_functions,
-                    cshim_backend_indices,
-                )
-                cshim_backend_indices = parsed_backend_yaml.backend_indices
-            else:
-                cshim_backend_indices = backend_indices
 
             # header files were checked in for ABI-compatiblilty checking
             header_file_name = f"c_shim_{dispatch_key.lower()}.h"
@@ -2393,8 +2397,9 @@ def gen_source_files(
                 fallback_native_functions,
                 structured_func_group_dict,
                 dispatch_key,
-                cshim_backend_indices,
+                backend_indices,
                 header=True,
+                aoti_extend=aoti_extend,
                 includes="",
             )
             if update_aoti_c_shim:
@@ -2408,9 +2413,7 @@ def gen_source_files(
                         os.path.join(aoti_fm.install_dir, header_file_name)
                     ) as old_file:
                         old_header = old_file.read()
-                        assert (
-                            old_header == new_header
-                        ), """
+                        assert old_header == new_header, """
 
 WARNING: The generated AOTInductor C shim header files have unexpectedly changed. This
 indicates an AOTInductor fallback operator ABI backward compatibility breakage!!!
@@ -2437,7 +2440,11 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
                 headers = []
                 for func in fallback_native_functions:
                     header = get_header_for_aoti(
-                        func, structured_func_group_dict, dispatch_key, backend_indices
+                        func,
+                        structured_func_group_dict,
+                        dispatch_key,
+                        backend_indices,
+                        aoti_extend=aoti_extend,
                     )
                     if header is not None:
                         headers.append(header)
@@ -2453,8 +2460,9 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
                     fallback_native_functions,
                     structured_func_group_dict,
                     dispatch_key,
-                    cshim_backend_indices,
+                    backend_indices,
                     header=False,
+                    aoti_extend=aoti_extend,
                     includes=headers_for_aoti() + "\n" + extra_headers,
                 ),
             )
@@ -2784,6 +2792,12 @@ def main() -> None:
         action="store_true",
         help="Generate MPS registration code when set",
     )
+    parser.add_argument(
+        "--xpu",
+        action="store_true",
+        help="Generate XPU registration code when set",
+    )
+
     # TODO: --op-registration-whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
     # custom build.
@@ -2840,6 +2854,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--update-aoti-c-shim",
+        action="store_true",
+        help="Update AOTInductor C shim after adding an entry to inductor_fallback_ops in torchgen/aoti/fallback_ops.py. "
+        "WARNING: Do not use this unless you are sure what you are doing!!!",
+    )
+    parser.add_argument(
+        "--aoti-extend",
         action="store_true",
         help="Update AOTInductor C shim after adding an entry to inductor_fallback_ops in torchgen/aoti/fallback_ops.py. "
         "WARNING: Do not use this unless you are sure what you are doing!!!",
@@ -2909,6 +2929,9 @@ def main() -> None:
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
     aoti_fm = make_file_manager(options=options, install_dir=aoti_install_dir)
+    device_fms = {"cuda": cuda_fm}
+    if options.xpu:
+        device_fms["xpu"] = make_file_manager(options=options)
 
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
@@ -2921,8 +2944,18 @@ def main() -> None:
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.Meta,
     }
+
+    aoti_backends = {
+        DispatchKey.CPU,
+        DispatchKey.CUDA,
+    }
+
     if options.mps:
         functions_keys.add(DispatchKey.MPS)
+
+    if options.xpu:
+        functions_keys.add(DispatchKey.XPU)
+        aoti_backends.add(DispatchKey.XPU)
 
     if options.backend_whitelist:
         dispatch_keys = [
@@ -2953,9 +2986,9 @@ def main() -> None:
             backend_indices=backend_indices,
             aoti_fm=aoti_fm,
             core_fm=core_fm,
-            cpu_fm=cpu_fm,
             cpu_vec_fm=cpu_vec_fm,
-            cuda_fm=cuda_fm,
+            cpu_fm=cpu_fm,
+            device_fms=device_fms,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
             rocm=options.rocm,
@@ -2963,6 +2996,8 @@ def main() -> None:
             per_operator_headers=options.per_operator_headers,
             skip_dispatcher_op_registration=options.skip_dispatcher_op_registration,
             update_aoti_c_shim=options.update_aoti_c_shim,
+            aoti_backends=aoti_backends,
+            aoti_extend=options.aoti_extend,
         )
 
     if "headers" in options.generate:
@@ -2976,7 +3011,7 @@ def main() -> None:
             backend_indices=backend_indices,
             core_fm=core_fm,
             cpu_fm=cpu_fm,
-            cuda_fm=cuda_fm,
+            device_fms=device_fms,
             ops_fm=ops_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
@@ -2996,9 +3031,8 @@ def main() -> None:
             (cpu_fm, ""),
             (cpu_vec_fm, "cpu_vec_"),
             (core_fm, "core_"),
-            (cuda_fm, "cuda_"),
             (ops_fm, "ops_"),
-        ]:
+        ] + [(device_fm, f"{device}_") for device, device_fm in device_fms.items()]:
             varname = prefix + depfile_stem
             path = depfile_path.parent / (prefix + depfile_name)
             fm.write_outputs(varname, str(path))
