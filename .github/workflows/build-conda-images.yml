@@ -31,11 +31,12 @@ concurrency:
 
 jobs:
   build-docker:
+    if: github.repository_owner == 'pytorch'
     environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
-        cuda_version: ["11.8", "12.1", "12.4", "cpu"]
+        cuda_version: ["11.8", "12.1", "12.4", "12.6", "cpu"]
     env:
       CUDA_VERSION: ${{ matrix.cuda_version }}
     steps:

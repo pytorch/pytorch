@@ -23,7 +23,13 @@ import torch.distributed as dist
 import torch.nn
 import torch.utils._pytree as pytree
 from torch import fx
-from torch._guards import GlobalContextCheckpointState, Source, TracingContext
+from torch._guards import (
+    CompileContext,
+    CompileId,
+    GlobalContextCheckpointState,
+    Source,
+    TracingContext,
+)
 from torch._utils_internal import signpost_event
 from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-defined]
 from torch.fx.experimental._backward_state import BackwardState
@@ -313,6 +319,9 @@ class OutputGraph:
                 export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
+        self.dynamo_compile_id: Optional[
+            CompileId
+        ] = CompileContext.current_compile_id()
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -872,7 +881,7 @@ class OutputGraph:
 
         base = name
         for i in itertools.count():
-            if name not in self.nn_modules:
+            if name not in self.nn_modules and name not in self.global_scope:
                 self.nn_modules[name] = target
                 if isinstance(target, torch.nn.Module):
 
@@ -1349,6 +1358,7 @@ class OutputGraph:
                     fx.GraphModule(root, self.graph),
                     self.shape_env,
                     name,
+                    export=self.export,
                 )
             # NB: deferred runtime asserts can keep graphargs live, so make sure
             # those are inserted before pruning
@@ -1367,6 +1377,7 @@ class OutputGraph:
             gm.meta[
                 "dynamo_flat_name_to_original_fqn"
             ] = self.dynamo_flat_name_to_original_fqn.copy()
+            gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
 
             graph_code_log.debug(
                 "%s",
