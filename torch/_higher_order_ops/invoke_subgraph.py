@@ -282,7 +282,7 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
     )
 
 
-# TODO - if I move this to invoke_quant.py, doesn't trace, not sure why
+# Moved to invoke_quant in next PR
 
 
 @dataclasses.dataclass
