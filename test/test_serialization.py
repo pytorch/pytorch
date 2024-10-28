@@ -4366,6 +4366,35 @@ class TestSerialization(TestCase, SerializationMixin):
                 else:
                     os.environ[env_var] = old_value
 
+    def test_get_unsafe_globals_in_checkpoint(self):
+        t = torch.randn(2, 3)
+        tt = TwoTensor(t, t)
+        expected_unsafe_global_strs = {"torch.testing._internal.two_tensor.TwoTensor"}
+        expected_all_global_strs = {
+                                        "torch.testing._internal.two_tensor.TwoTensor",
+                                        "torch._utils._rebuild_wrapper_subclass",
+                                        "torch._tensor._rebuild_from_type_v2",
+                                        "torch.serialization._get_layout",
+                                        "torch.float32",
+                                        "torch.device",
+                                        "torch._utils._rebuild_tensor_v2",
+                                        "torch.FloatStorage",
+                                        "collections.OrderedDict",
+                                    }
+        with BytesIOContext() as f:
+            torch.save(tt, f)
+            f.seek(0)
+            unsafe_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
+            self.assertEqual(set(unsafe_globals), expected_unsafe_global_strs)
+            f.seek(0)
+            try:
+                old_get_allowed_globals = torch._weights_only_unpickler._get_allowed_globals
+                torch._weights_only_unpickler._get_allowed_globals = lambda: {}
+                unsafe_all_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
+                self.assertEqual(set(unsafe_all_globals), expected_all_global_strs)
+            finally:
+                torch._weights_only_unpickler._get_allowed_globals = old_get_allowed_globals
+
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
