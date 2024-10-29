@@ -1595,7 +1595,9 @@ class AOTInductorTestsTemplate:
         ), torch.no_grad():
             exported_model = capture_pre_autograd_graph(model, example_inputs)
             quantizer = X86InductorQuantizer()
-            quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+            quantizer.set_global(
+                xiq.get_default_x86_inductor_quantization_config(reduce_range=True)
+            )
             prepared_model = prepare_pt2e(exported_model, quantizer)
             prepared_model(*example_inputs)
             converted_model = convert_pt2e(prepared_model)
