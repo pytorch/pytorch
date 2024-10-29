@@ -1984,7 +1984,7 @@ only_fake_tensor_failures = {
     xfail('narrow'),
 }
 
-fake_tensor_failures = {}
+fake_tensor_failures = set()
 
 symbolic_tensor_failures = {
     xfail('combinations', ''),
