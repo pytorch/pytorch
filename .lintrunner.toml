@@ -222,6 +222,7 @@ exclude_patterns = [
     # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
     # CUDA files are also excluded.
     '**/fb/**',
+    '**/generated/**',
     '**/*pb.h',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
