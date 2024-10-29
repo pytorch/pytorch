@@ -6,22 +6,8 @@
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
 
-#if defined(__aarch64__) && !defined(C10_MOBILE)
-#include <arm_neon.h>
-
+#if !defined(C10_MOBILE)
 namespace at::native::blas_impl {
-void fp16_gemv_notrans(
-    const int m,
-    const int n,
-    const float alpha,
-    const Half* a,
-    const int lda,
-    const Half* x,
-    const int incx,
-    const float beta,
-    Half* y,
-    const int incy);
-
 void fp16_gemv_trans(
     const int m,
     const int n,
@@ -38,6 +24,23 @@ float fp16_dot_with_fp32_arith(
   const Half* x,
   const Half* a,
   int64_t len);
+} // namespace at::native::blas_impl
+#endif
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+#include <arm_neon.h>
+
+namespace at::native::blas_impl {
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const Half* a,
+    const int lda,
+    const Half* x,
+    const int incx,
+    const float beta,
+    Half* y,
+    const int incy);
 
 float bf16_dot_with_fp32_arith(
   const at::BFloat16* x,
@@ -360,20 +363,44 @@ void gemm_notrans_(
   }
 }
 
-
-inline float32x4_t load_as_float32x4(const BFloat16* ptr) {
-  int32x4_t shift = vdupq_n_s32(16);
-  uint32x4_t as_int = vmovl_u16(vld1_u16(reinterpret_cast<const uint16_t *>(ptr)));
-  return vreinterpretq_f32_u32(vshlq_u32(as_int, shift));
+static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
+  return at::native::blas_impl::bf16_dot_with_fp32_arith(a, b, len);
 }
 
+template <>
+void gemm_transa_(
+    TransposeType transa,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const at::BFloat16 *a, int64_t lda,
+    const at::BFloat16 *b, int64_t ldb,
+    float beta,
+    at::BFloat16 *c, int64_t ldc) {
+  // c = alpha * (a.T @ b) + beta * c
+  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
+    const auto *a_ = a + begin * lda;
+    for (const auto i : c10::irange(begin, end)) {
+      const auto *b_ = b;
+      for (const auto j : c10::irange(n)) {
+        const auto dot = compute_dot(a_, b_, k);
+        b_ += ldb;
+        if (beta == 0) {
+          c[j*ldc+i] = alpha*dot;
+        } else {
+          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+        }
+      }
+      a_ += lda;
+    }
+  });
+}
+
+#endif // defined(__aarch64__) && !defined(C10_MOBILE)
+
+#if !defined(C10_MOBILE)
 static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
   return at::native::blas_impl::fp16_dot_with_fp32_arith(
       a, b, len);
-}
-
-static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
-  return at::native::blas_impl::bf16_dot_with_fp32_arith(a, b, len);
 }
 
 template <>
@@ -407,36 +434,7 @@ void gemm_transa_(
     }
   });
 }
-
-template <>
-void gemm_transa_(
-    TransposeType transa,
-    int64_t m, int64_t n, int64_t k,
-    float alpha,
-    const at::BFloat16 *a, int64_t lda,
-    const at::BFloat16 *b, int64_t ldb,
-    float beta,
-    at::BFloat16 *c, int64_t ldc) {
-  // c = alpha * (a.T @ b) + beta * c
-  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
-    const auto *a_ = a + begin * lda;
-    for (const auto i : c10::irange(begin, end)) {
-      const auto *b_ = b;
-      for (const auto j : c10::irange(n)) {
-        const auto dot = compute_dot(a_, b_, k);
-        b_ += ldb;
-        if (beta == 0) {
-          c[j*ldc+i] = alpha*dot;
-        } else {
-          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
-        }
-      }
-      a_ += lda;
-    }
-  });
-}
-
-#endif
+#endif // !defined(C10_MOBILE)
 
 template <typename scalar_t, typename opmath_t>
 void gemm_core_(
