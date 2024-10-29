@@ -59,7 +59,7 @@ cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 
 TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6"
 case ${CUDA_VERSION} in
-    12.4)
+    12.4 | 12.6)
         if [[ "$GPU_ARCH_TYPE" = "cuda-aarch64" ]]; then
             TORCH_CUDA_ARCH_LIST="9.0"
         else
