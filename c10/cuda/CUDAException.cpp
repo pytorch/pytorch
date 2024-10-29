@@ -23,7 +23,7 @@ void c10_cuda_check_implementation(
     return;
   }
 
-  auto error_unused C10_UNUSED = cudaGetLastError();
+  [[maybe_unused]] auto error_unused = cudaGetLastError();
   (void)error_unused;
 
   std::string check_message;

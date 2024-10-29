@@ -24,11 +24,11 @@ from typing import (
     Tuple,
     TYPE_CHECKING,
     TypeVar,
+    Union,
 )
 
-from torch._C._dynamo.eval_frame import set_context_frame  # noqa: F401
 from torch.utils import _pytree as pytree
-from torch.utils._traceback import CapturedTraceback
+from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
 
 
@@ -152,9 +152,26 @@ class GuardBuilderBase:
     pass
 
 
+@dataclasses.dataclass(frozen=True)
+class SLoc:
+    framework_loc: Optional[Union[traceback.FrameSummary, str]]
+    maybe_user_loc: Optional[str]
+
+    def __str__(self):
+        floc = (
+            self.framework_loc
+            if isinstance(self.framework_loc, str)
+            else format_frame(self.framework_loc)
+        )
+        if self.maybe_user_loc is not None:
+            return f"{self.maybe_user_loc} ({floc})"
+        else:
+            return f"({floc})"
+
+
 class ShapeGuard(NamedTuple):
-    expr: sympy.Expr
-    stack: CapturedTraceback
+    expr: sympy.logic.boolalg.Boolean
+    sloc: SLoc
 
 
 @dataclasses.dataclass
@@ -553,6 +570,66 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.dynamo_guards = GuardsSet(state.dynamo_guards)
 
 
+class HopSubgraphCache:
+    @abstractmethod
+    def add_dynamo_identifier(self, cache_key: str, identifier: str): ...
+
+    @abstractmethod
+    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]: ...
+
+    @abstractmethod
+    def add_autograd_key_entry(self, identifier: str, key: Callable): ...
+
+    @abstractmethod
+    def get_autograd_key_entry(self, identifier: str): ...
+
+    @abstractmethod
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable): ...
+
+    @abstractmethod
+    def get_proxy_dispatch_entry(self, identifier: str): ...
+
+
+class InvokeSubgraphCache(HopSubgraphCache):
+    def __init__(self) -> None:
+        self.autograd_cache: Dict[str, Callable] = {}
+        self.proxy_dispatch_cache: Dict[str, Callable] = {}
+        self.dynamo_identifiers: Dict[str, str] = {}
+
+    def add_dynamo_identifier(self, cache_key: str, identifier: str):
+        self.dynamo_identifiers[cache_key] = identifier
+
+    def get_dynamo_identifier(self, cache_key: str) -> Optional[str]:
+        return self.dynamo_identifiers.get(cache_key, None)
+
+    def add_autograd_key_entry(self, identifier: str, key: Callable):
+        self.autograd_cache[identifier] = key
+
+    def get_autograd_key_entry(self, identifier: str):
+        return self.autograd_cache.get(identifier, None)
+
+    def add_proxy_dispatch_entry(self, identifier: str, key: Callable):
+        self.proxy_dispatch_cache[identifier] = key
+
+    def get_proxy_dispatch_entry(self, identifier: str):
+        return self.proxy_dispatch_cache.get(identifier, None)
+
+
+class HopDispatchSetCache:
+    def __init__(self) -> None:
+        # Delayed import to avoid circular dependency
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+
+        self.hop_cache_map = {invoke_subgraph: InvokeSubgraphCache()}
+
+    def get_cache(
+        self, op: torch._ops.HigherOrderOperator
+    ) -> Optional[HopSubgraphCache]:
+        if op not in self.hop_cache_map:
+            return None
+        return self.hop_cache_map[op]  # type: ignore[index]
+
+
 _TLS = threading.local()
 
 """
@@ -644,6 +721,8 @@ class TracingContext:
         # this is only set after aot_autograd
         self.aot_graph_name = None
         self.params_flat = None
+        self.params_flat_unwrap_subclasses = None
+        self.params_unwrapped_to_flat_index = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,
@@ -667,6 +746,7 @@ class TracingContext:
         # meta on the first invocation
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         self.fakify_first_call = False
+        self.hop_dispatch_set_cache = HopDispatchSetCache()
 
     def clear(self):
         # Look at the note in output_graph.py in function `save_global_state`
@@ -782,15 +862,6 @@ def compile_context(context: Optional[CompileContext]):
     try:
         yield context
     finally:
-        if context is not None:
-            if context.compile_id is not None:
-                set_context_frame(
-                    (
-                        context.compile_id.frame_id,
-                        context.compile_id.frame_compile_id,
-                        context.attempt,
-                    )
-                )
         _TLS.compile_context = old_context
 
 

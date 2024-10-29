@@ -14,8 +14,8 @@ from typing import (
 
 import torch
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
-from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
+from torch.distributed.tensor import DTensor
 
 
 PATH_ITEM = Union[str, int]

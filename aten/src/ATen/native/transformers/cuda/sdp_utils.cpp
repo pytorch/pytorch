@@ -68,16 +68,11 @@ bool check_prefer_cudnn_attention() {
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
       SDPBackend::flash_attention,
-      SDPBackend::cudnn_attention,
       SDPBackend::efficient_attention,
-      SDPBackend::math};
-  constexpr std::array<SDPBackend, num_backends> cudnn_order{
+      SDPBackend::math,
       SDPBackend::cudnn_attention,
-      SDPBackend::flash_attention,
-      SDPBackend::efficient_attention,
-      SDPBackend::math};
-  static const bool prefer_cudnn = check_prefer_cudnn_attention();
-  return prefer_cudnn ? cudnn_order : default_order;
+      };
+  return default_order;
 }
 
 bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {
@@ -210,6 +205,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
   // Check that the gpu is capable of running flash attention
   using sm80 = SMVersion<8, 0>;
   using sm90 = SMVersion<9, 0>;
+  auto dprops = at::cuda::getCurrentDeviceProperties();
 #if USE_ROCM
 #if USE_AOTRITON
   auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -221,11 +217,19 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
       }
       return false;
   }
+  c10::string_view arch(dprops->gcnArchName);
+  if (arch == "gfx1100") {
+    static const bool enable_navi3x = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
+    if (!enable_navi3x) {
+      TORCH_WARN_ONCE("Flash attention support on Navi31 GPU is still experimental."
+                      " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
+      return false;
+    }
+  }
 #else
   return false;
 #endif
 #else
-  auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm80, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
@@ -245,6 +249,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
   using sm50 = SMVersion<5, 0>;
   using sm90 = SMVersion<9, 0>;
+  auto dprops = at::cuda::getCurrentDeviceProperties();
 #if USE_ROCM
 #if USE_AOTRITON
   auto stream = at::cuda::getCurrentCUDAStream().stream();
@@ -256,11 +261,19 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
       }
       return false;
   }
+  c10::string_view arch(dprops->gcnArchName);
+  if (arch == "gfx1100") {
+    static const bool enable_navi3x = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
+    if (!enable_navi3x) {
+      TORCH_WARN_ONCE("Memory Efficient attention on Navi31 GPU is still experimental."
+                      " Enable it with TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1.");
+      return false;
+    }
+  }
 #else
   return false;
 #endif
 #else
-  auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm50, sm90>(dprops)) {
     if (debug) {
       TORCH_WARN(
@@ -395,6 +408,12 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       }
       return false;
     }
+  }
+  if (s_q == 1 || s_k == 1) {
+    if (debug) {
+      TORCH_WARN_ONCE("cudnn SDPA does not support sequence length 1.");
+    }
+    return false;
   }
   return true;
 }
@@ -543,7 +562,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #endif
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
   if (debug) {
-    TORCH_WARN(CUDNN_VERSION, "cuDNN version too old to use Flash Attention! (< v9.0.0)");
+    TORCH_WARN(CUDNN_VERSION, " cuDNN version too old to use CuDNN Attention (< v9.0.0)");
   }
   return false;
 #endif
@@ -559,9 +578,8 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_tensor_shapes,
           check_cudnn_tensor_shapes,
           check_cudnn_deterministic,
-          // check_is_causal,
           check_dtypes_low_precision,
-          check_for_attn_mask_cudnn,
+          check_attn_mask_shape,
           check_cudnn_hardware_support
           );
   for (auto& constraint : general_constraints) {
@@ -616,9 +634,14 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
       }
     }
   }
+#if USE_ROCM
+  constexpr bool backend_supports_grouped_query_attention = false;
+#else
+  constexpr bool backend_supports_grouped_query_attention = true;
+#endif
   if (has_only_dense_inputs(params)) {
     constexpr auto dense_constraints = array_of<bool (*)(sdp_params const&, bool)>(
-        check_batch_size_and_num_heads_dense<true /*supports_grouped_query_attention=*/>,
+        check_batch_size_and_num_heads_dense<backend_supports_grouped_query_attention>,
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<true /*ignore_singleton_dim=*/>);
     for (auto& constraint : dense_constraints) {

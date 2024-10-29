@@ -34,7 +34,7 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
                 "model": model.state_dict(),
             }
 
-            dist_cp.save_state_dict(
+            dist_cp.save(
                 state_dict=state_dict,
                 storage_writer=dist_cp.FileSystemWriter(CHECKPOINT_DIR),
                 planner=DefaultSavePlanner(),
@@ -55,7 +55,7 @@ class FsdpModelStateCheckpoint(DTensorTestBase):
                 "model": model_2.state_dict(),
             }
 
-            dist_cp.load_state_dict(
+            dist_cp.load(
                 state_dict=state_dict,
                 storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
                 planner=DefaultLoadPlanner(),

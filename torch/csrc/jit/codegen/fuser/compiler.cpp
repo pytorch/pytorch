@@ -201,7 +201,7 @@ std::shared_ptr<FusedKernel> compileKernel(
     const KernelSpec& spec,
     const ArgSpec& arg_spec,
     const std::vector<int64_t>& map_size,
-    const at::Device device) {
+    const at::Device& device) {
   const std::vector<TensorDesc>& input_desc = arg_spec.descs();
 
   auto graph = spec.graph()->copy();

@@ -560,6 +560,7 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_fp8, out_fp8_s)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not SM90OrLater, "rowwise implementation is currently sm90 specific")
     @skipIfRocm()
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
@@ -654,7 +655,7 @@ class TestFP8MatmulCuda(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            re.escape("For RowWise scaling the second input is required to be a float8_e4m3fn dtype."),
+            re.escape("Expected b.dtype() == at::kFloat8_e4m3fn to be true, but got false."),
         ):
             torch._scaled_mm(
                 x_fp8,

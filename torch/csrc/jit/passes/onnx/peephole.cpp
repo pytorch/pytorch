@@ -23,8 +23,7 @@
 typedef SSIZE_T ssize_t;
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace onnx {
 using namespace ::c10::onnx;
@@ -1068,5 +1067,4 @@ void PeepholeOptimizeONNX(
   GRAPH_DUMP("After PeepholeOptimizeONNX", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

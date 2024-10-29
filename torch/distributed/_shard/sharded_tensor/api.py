@@ -857,7 +857,7 @@ class ShardedTensor(ShardedTensorBase):
 
         local_shards: List[Shard] = []
         for shard_metadata in sharded_tensor_metadata.shards_metadata:
-            rank, device = _parse_and_validate_remote_device(
+            rank, _device = _parse_and_validate_remote_device(
                 process_group, shard_metadata.placement
             )
             if rank == current_rank:
@@ -1200,7 +1200,7 @@ class ShardedTensor(ShardedTensorBase):
     def __hash__(self):
         return id(self)
 
-    def __repr__(self):
+    def __repr__(self) -> str:  # type: ignore[override]
         return f"ShardedTensor({self._metadata})"
 
     @dataclass

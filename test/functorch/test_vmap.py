@@ -50,6 +50,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    tf32_on_and_off,
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -3923,6 +3924,44 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
                 in_dims=(2, 1, None),
             )
 
+    @parametrize("backend", PLATFORM_SPECIFIC_SDPA)
+    @parametrize("randomness", ["error", "same", "different"])
+    def test_randomness(self, device, randomness, backend):
+        if device == "cpu":
+            raise unittest.SkipTest("This test is only for CUDA for now")
+        backend_ctx = sdpa_kernel([backend])
+        with backend_ctx:
+            B = 4
+            query = torch.rand(B, 4, 32, 8, 128, dtype=torch.float16, device=device)
+            key = torch.rand(B, 4, 32, 8, 128, dtype=torch.float16, device=device)
+            value = torch.rand(B, 4, 32, 8, 128, dtype=torch.float16, device=device)
+
+            def f(q, k, v, dropout):
+                return F.scaled_dot_product_attention(q, k, v, dropout_p=dropout)
+
+            # No matter the randomness mode, dropout=0.0 should pass
+            vmap(
+                functools.partial(f, dropout=0.0),
+                in_dims=(0, 0, 0),
+                randomness=randomness,
+            )(query, key, value)
+
+            fail_with_randomness = randomness == "error"
+            if backend != SDPBackend.MATH:
+                fail_with_randomness |= randomness == "same"
+            context = (
+                self.assertRaises(RuntimeError)
+                # We currently don't support randomness == "same", and "error" should always error with randomness
+                if fail_with_randomness
+                else contextlib.nullcontext()
+            )
+            with context:
+                vmap(
+                    functools.partial(f, dropout=0.5),
+                    in_dims=(0, 0, 0),
+                    randomness=randomness,
+                )(query, key, value)
+
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):
         leaf = torch.randn(4, 5, requires_grad=True)
@@ -4389,10 +4428,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 # TODO: implement batching rule
                 xfail("_batch_norm_with_update"),
                 xfail("histogram"),
-                xfail("scatter_reduce", "sum"),
-                xfail("scatter_reduce", "mean"),
-                xfail("scatter_reduce", "amax"),
-                xfail("scatter_reduce", "amin"),
                 # `index_put` OpInfo in pytorch/pytorch has
                 # masked index as input which is not supported
                 xfail("index_put", ""),
@@ -4405,9 +4440,11 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("put"),
                 xfail("quantile"),
                 xfail("renorm"),
+                xfail("squeeze_copy"),
                 xfail("resize_as_"),
                 xfail("take"),
                 xfail("tensor_split"),
+                xfail("transpose_copy"),
                 xfail("to_sparse"),
                 # TypeError: expected Tensor as element 0 in argument 0, but got float
                 xfail("item"),
@@ -4435,6 +4472,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("histc"),
                 xfail("as_strided"),
                 xfail("as_strided_copy"),
+                xfail("permute_copy"),
                 xfail("t_copy"),
                 xfail("unsqueeze_copy"),
                 xfail("istft"),
@@ -4463,20 +4501,15 @@ class TestVmapOperatorsOpInfo(TestCase):
                 ),  # Batching rule not implemented for aten::narrow.Tensor
                 xfail("nn.functional.triplet_margin_loss", ""),
                 xfail("nn.functional.pdist", ""),
-                xfail("scatter_reduce", "sum"),
-                xfail("scatter_reduce", "amax"),
                 xfail("nn.functional.max_unpool1d", "grad"),
                 xfail("nn.functional.multi_margin_loss", ""),
-                xfail("scatter_reduce", "prod"),
                 xfail("nn.functional.multilabel_margin_loss", ""),
-                xfail("scatter_reduce", "amin"),
                 xfail("nn.functional.max_unpool3d", "grad"),
                 xfail("nn.functional.max_unpool2d", ""),
                 xfail("nn.functional.max_unpool2d", "grad"),
                 xfail("nn.functional.margin_ranking_loss", ""),
                 xfail("nn.functional.max_unpool1d", ""),
                 xfail("nn.functional.soft_margin_loss", ""),
-                xfail("scatter_reduce", "mean"),
                 xfail("nn.functional.max_unpool3d", ""),
                 xfail("linalg.ldl_solve", "", device_type="cpu"),
                 xfail("chalf", ""),
@@ -4727,6 +4760,7 @@ class TestVmapOperatorsOpInfo(TestCase):
 
         check_vmap_fallback(self, test, Tensor.fill_)
 
+    @tf32_on_and_off(0.005)
     def test_conv_double_backward(self, device):
         images = torch.randn(2, 1, 5, 5, device=device)
         weight = torch.randn(2, 1, 2, 2, device=device)
