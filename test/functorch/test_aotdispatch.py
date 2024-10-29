@@ -826,7 +826,10 @@ def forward(self, primals_1):
         new_out = out + aaaa
         with self.assertRaisesRegex(
             RuntimeError,
-            "Runtime tangent is subclass, where this tangent was a plain Tensor during tracing",
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             new_out.sum().backward()
 

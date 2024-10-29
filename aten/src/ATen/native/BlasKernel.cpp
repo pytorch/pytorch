@@ -986,8 +986,8 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
 
 #define INSTANTIATE(scalar_t, _) \
 template void gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, int64_t lda, const scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
-AT_FORALL_SCALAR_TYPES_AND2(BFloat16, Half, INSTANTIATE);
-AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
+AT_FORALL_SCALAR_TYPES_AND2(BFloat16, Half, INSTANTIATE)
+AT_FORALL_COMPLEX_TYPES(INSTANTIATE)
 #undef INSTANTIATE
 
 namespace blas_impl {
@@ -1123,19 +1123,19 @@ scalar_t vdot_impl(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, int64_t in
 #define INSTANTIATE_DOT_IMPL(scalar_t)  \
   template scalar_t dot_impl<scalar_t>( \
       int64_t n, scalar_t * x, int64_t incx, scalar_t * y, int64_t incy);
-INSTANTIATE_DOT_IMPL(uint8_t);
-INSTANTIATE_DOT_IMPL(int8_t);
-INSTANTIATE_DOT_IMPL(int16_t);
-INSTANTIATE_DOT_IMPL(int);
-INSTANTIATE_DOT_IMPL(int64_t);
-INSTANTIATE_DOT_IMPL(c10::Half);
-INSTANTIATE_DOT_IMPL(c10::BFloat16);
+INSTANTIATE_DOT_IMPL(uint8_t)
+INSTANTIATE_DOT_IMPL(int8_t)
+INSTANTIATE_DOT_IMPL(int16_t)
+INSTANTIATE_DOT_IMPL(int)
+INSTANTIATE_DOT_IMPL(int64_t)
+INSTANTIATE_DOT_IMPL(c10::Half)
+INSTANTIATE_DOT_IMPL(c10::BFloat16)
 
 #define INSTANTIATE_VDOT_IMPL(scalar_t)  \
   template scalar_t vdot_impl<scalar_t>( \
       int64_t n, scalar_t * x, int64_t incx, scalar_t * y, int64_t incy);
-INSTANTIATE_VDOT_IMPL(c10::complex<float>);
-INSTANTIATE_VDOT_IMPL(c10::complex<double>);
+INSTANTIATE_VDOT_IMPL(c10::complex<float>)
+INSTANTIATE_VDOT_IMPL(c10::complex<double>)
 
 #undef INSTANTIATE_DOT_IMPL
 

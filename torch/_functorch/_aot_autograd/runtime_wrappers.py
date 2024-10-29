@@ -54,7 +54,7 @@ from .schemas import (
 )
 from .subclass_utils import (
     requires_subclass_dispatch,
-    unwrap_tensor_subclasses,
+    runtime_unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
 )
 from .traced_function_transforms import aot_dispatch_subclass
@@ -627,8 +627,10 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
-            unwrapped_args = unwrap_tensor_subclasses(
-                args, is_joint_structure=self.trace_joint
+            unwrapped_args = runtime_unwrap_tensor_subclasses(
+                args,
+                subclass_metas=runtime_metadata.subclass_inp_meta,
+                append_symints=True,
             )
             args.clear()
             # expectation: runtime_fn is a boxed fn
@@ -638,6 +640,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 subclass_metas=subclass_metas,
                 num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 is_runtime=True,
+                included_subclass_symints=True,
             )
             return wrapped_outs
 
@@ -1440,72 +1443,77 @@ class AutogradLazyBackwardCompileInfo:
 class AOTDispatchAutograd:
     @staticmethod
     def process_runtime_tangent(x, meta: Union[PlainTensorMeta, SubclassCreationMeta]):
-        def maybe_coerce_to_memory_format(t, memory_format):
-            if not t.is_contiguous(memory_format=meta.memory_format):
-                return t.contiguous(memory_format=meta.memory_format)
-            return t
-
         if not isinstance(x, torch.Tensor):
             return x, [x]
 
-        is_subclass: bool = is_traceable_wrapper_subclass(x)
-        is_subclass_meta: bool = isinstance(meta, SubclassCreationMeta)
+        expected_type: Optional[type] = torch.Tensor
+        expected_meta = None
+        if isinstance(meta, SubclassCreationMeta):
+            expected_type = meta.original_subclass_type
+            expected_meta = meta.meta
 
-        if is_subclass and not is_subclass_meta:
-            # Unexpected subclass, during tracing we guessed it was a plain Tensor
-            if hasattr(x, "__coerce_same_metadata_as_tangent__"):
-                x = x.__coerce_same_metadata_as_tangent__(None, torch.Tensor)
-                is_subclass = False
-            else:
-                raise RuntimeError(
-                    "Runtime tangent is subclass, where this tangent was a plain Tensor during tracing"
-                )
+        runtime_type = type(x)
+        runtime_meta = None
 
-        if not is_subclass:
-            assert isinstance(meta, PlainTensorMeta)
-            x = maybe_coerce_to_memory_format(x, meta.memory_format)
+        if is_traceable_wrapper_subclass(x):
+            runtime_meta = x.__tensor_flatten__()[1]
+
+        def maybe_coerce(x):
+            same_type: bool = expected_type == runtime_type
+            same_meta: bool = expected_meta == runtime_meta
+
+            if same_type and same_meta:
+                return x
+
+            if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
+                return None
+
+            if same_type:
+                # Backward Compatibility, as some Subclass impls can have original 1-arg function.
+                return x.__coerce_same_metadata_as_tangent__(expected_meta)
+
+            return x.__coerce_same_metadata_as_tangent__(expected_meta, expected_type)
+
+        # Coerce to expected type and metadata
+        orig_x = x
+        x = maybe_coerce(x)
+        if x is None:
+            raise RuntimeError(
+                f"""
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+
+Expected metadata: {str(expected_meta)}, expected type: {str(expected_type)}
+
+Runtime metadata: {str(runtime_meta)}, runtime type: {str(runtime_type)}
+
+shape: {str(orig_x.shape)}
+To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
+"""
+            )
+
+        # Coerce to expected memory format
+        if not x.is_contiguous(memory_format=meta.memory_format):
+            x = x.contiguous(memory_format=meta.memory_format)
+
+        if not is_traceable_wrapper_subclass(x):
             return x, [x]
 
         assert isinstance(meta, SubclassCreationMeta)
+        inner_keys = x.__tensor_flatten__()[0]
 
-        x_inner_keys, x_meta = x.__tensor_flatten__()  # type: ignore[attr-defined]
-        same_type: bool = meta.original_subclass_type == type(x)
-        same_meta: bool = x_meta == meta.meta
-
-        if not same_type or not same_meta:
-            if hasattr(x, "__coerce_same_metadata_as_tangent__"):
-                if same_type:
-                    # Backward Compatibility, as some Subclass impls can have original 1-arg function.
-                    x = x.__coerce_same_metadata_as_tangent__(meta.meta)
-                else:
-                    x = x.__coerce_same_metadata_as_tangent__(meta.meta, type(x))
-            else:
-                raise RuntimeError(
-                    f"""
-    During the backward, we encountered a tensor subclass where we guessed its
-    metadata incorrectly.
-
-    Expected metadata: {str(meta.meta)}, expected type: {meta.original_subclass_type}
-
-    Runtime metadata: {str(x_meta)}, runtime type: {type(x)}
-
-    shape: {str(x.shape)}
-    To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
-    """
-                )
-
-        assert len(meta.attrs) == len(x_inner_keys)
-        flat_items_list = []
+        assert len(meta.attrs) == len(inner_keys)
+        leaves = []
         for i, (attr, attr_meta) in enumerate(meta.attrs.items()):
             elem = getattr(x, attr)
-            new_elem, flat_items = AOTDispatchAutograd.process_runtime_tangent(
+            new_elem, elem_leaves = AOTDispatchAutograd.process_runtime_tangent(
                 elem, attr_meta
             )
             if new_elem is not elem:
                 setattr(x, attr, new_elem)
-            flat_items_list.extend(flat_items)
+            leaves.extend(elem_leaves)
 
-        return x, flat_items_list
+        return x, leaves
 
     @staticmethod
     def post_compile(
@@ -1859,12 +1867,20 @@ class AOTDispatchAutograd:
                     )
 
                     all_args = (
-                        unwrap_tensor_subclasses(
-                            all_args[:tangents_start_idx], is_joint_structure=False
+                        runtime_unwrap_tensor_subclasses(
+                            all_args[:tangents_start_idx],
+                            # SymInts that are inputs to the backward graph are
+                            # already included in the "all_args" list.
+                            # Any symints coming from tensor subclasses should always
+                            # come from primals, and so they will show up as extra
+                            # arguments to the forward graph, and they will be saved
+                            # as activation in the backward graph.
+                            append_symints=False,
                         )
                         + flat_processed_tangents
-                        + unwrap_tensor_subclasses(
-                            all_args[tangents_end_idx:], is_joint_structure=False
+                        + runtime_unwrap_tensor_subclasses(
+                            all_args[tangents_end_idx:],
+                            append_symints=False,
                         )
                     )
                 else:
@@ -2028,6 +2044,7 @@ class AOTDispatchAutograd:
                                 outs_wrapped = wrap_tensor_subclasses(
                                     outs,
                                     subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
+                                    included_subclass_symints=False,
                                 )
                                 return outs_wrapped
                             return outs
@@ -2056,6 +2073,8 @@ class AOTDispatchAutograd:
                     outs_wrapped = wrap_tensor_subclasses(
                         out,
                         subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
+                        included_subclass_symints=True,
+                        is_runtime=True,
                     )
                     return outs_wrapped
                 return out
@@ -2158,3 +2177,7 @@ def make_runtime_safe(
     fw_metadata.make_runtime_safe()
     if maybe_subclass_meta is not None:
         maybe_subclass_meta.fw_metadata.make_runtime_safe()
+        if maybe_subclass_meta.grad_input_metas:
+            for meta in maybe_subclass_meta.grad_input_metas:
+                if isinstance(meta, SubclassCreationMeta):
+                    meta.make_runtime_safe()
