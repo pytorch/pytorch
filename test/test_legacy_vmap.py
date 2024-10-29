@@ -2733,7 +2733,7 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
         x = torch.full((1, 1,), 1, requires_grad=False, device=device)
         with self.assertRaises(IndexError):
             torch._remove_batch_dim(x, 0, 1, 1250999896764)
-        
+
         with self.assertRaises(ValueError):
             torch._remove_batch_dim(x, 0, 0, 1)
 
