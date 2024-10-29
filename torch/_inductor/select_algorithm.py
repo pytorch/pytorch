@@ -16,7 +16,7 @@ import time
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -77,6 +77,9 @@ class KernelNamespace:
 extern_kernels = KernelNamespace()
 
 
+_T = TypeVar("_T", bound="AutotuneArgs")
+
+
 @dataclasses.dataclass
 class BenchmarkTensors:
     """Represents a set of inputs and outputs for autotuining with a template"""
@@ -107,13 +110,13 @@ class AutotuneArgs:
 
     @classmethod
     def from_choice_args(
-        cls,
+        cls: Type[_T],
         example_inputs: List[torch.Tensor],
         example_inputs_extern: List[torch.Tensor],
         out: torch.Tensor,
         out_extern: torch.Tensor,
         expected: Optional[torch.Tensor] = None,
-    ) -> "AutotuneArgs":
+    ) -> _T:
         """Factory method to create AutotuneInputs from separate inputs/outputs"""
         return cls(
             triton=BenchmarkTensors(example_inputs, out),
