@@ -438,6 +438,7 @@ class FakeTensorConverter:
                     value,
                     source=item_source,
                     dynamic_dim=DimDynamic.DYNAMIC,
+                    symbolic_context=symbolic_context,
                 )
                 # NB: reusing item_memo here ensures that we invalidate on
                 # mutation

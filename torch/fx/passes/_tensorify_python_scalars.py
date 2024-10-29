@@ -20,6 +20,7 @@ from torch.fx.passes.runtime_assert import _get_sym_val
 from torch.fx.proxy import MetaProxy
 from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import TensorReferenceAnalysis
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 
 __all__: List[str] = []
@@ -106,8 +107,6 @@ def tensorify_python_scalars(
     tracer = fx.proxy.GraphAppendingTracer(graph)
     expr_to_sym_proxy: dict[sympy.Expr, MetaProxy] = {}
     expr_to_tensor_proxy: dict[sympy.Expr, MetaProxy] = {}
-    specialized_float_nodes: dict[fx.Node, float] = {}
-    deleted: set[fx.Node] = set()
 
     first_non_placeholder = None
     placeholders = set()
@@ -119,18 +118,6 @@ def tensorify_python_scalars(
             placeholders.add(node)
 
     Analysis = TensorReferenceAnalysis
-
-    def dce(graph: fx.Graph, deleted: set[fx.Node]) -> None:
-        for node in graph.nodes:
-            if (
-                len(node.users) == 0
-                and node.op != "placeholder"
-                and node.op != "output"
-                and node not in deleted
-                and not node.is_impure()
-            ):
-                graph.erase_node(node)
-                deleted.add(node)
 
     def _sympy_interp(expr: sympy.Expr) -> MetaProxy:
         # sympy_interp() with hash consing, and special handling for
@@ -261,71 +248,69 @@ def tensorify_python_scalars(
 
                     node.replace_all_uses_with(replacement_proxy.node)
                     graph.erase_node(node)
-                    deleted.add(node)
-
-    # DCE symbols (which are guaranteed to be pure) only
-    dce(graph, deleted)
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
     nodes = list(graph.nodes)
-    for i, node in enumerate(nodes[:-1]):
+    for i, node in reversed(list(enumerate(nodes))):
+        if node.op == "output" or node.op == "placeholder":
+            continue
+
         with graph.inserting_before(
-            nodes[i + 1] if node not in placeholders else first_non_placeholder
+            nodes[i - 1] if node not in placeholders else first_non_placeholder
         ):
+            if len(node.users) == 0 and not node.is_impure():
+                graph.erase_node(node)
+                continue
+
             args = []
             kwargs: Dict[str, Any] = {}
             transform = False
             for a in node.args:
-                if a in specialized_float_nodes:
-                    args.append(specialized_float_nodes[a])
-                elif (
+                if (
                     isinstance(a, fx.Node)
-                    and "val" in a.meta
-                    and isinstance(zf := a.meta["val"], torch.SymFloat)
-                    and isinstance(zf.node.expr, Symbol)
-                    and zf.node.hint is not None
+                    and (zf := a.meta.get("val")) is not None
+                    and isinstance(zf, (torch.SymFloat, torch.SymInt))
+                    and (node_hint := zf.node.hint) is not None
+                    # The high level idea here is to specialize if we have
+                    # a node that has exclusively SymFloat free symbols.
+                    # This is because we don't want to specialize cases like
+                    # math.floor(math.sqrt(x.size(0))).
+                    and all(
+                        symbol_is_type(s, SymT.FLOAT) for s in zf.node.expr.free_symbols
+                    )
                 ):
                     transform = True
-                    args.append(float(zf))
+                    args.append(
+                        float(zf) if isinstance(zf, torch.SymFloat) else int(zf)
+                    )
                 else:
                     args.append(a)
 
             for k, v in node.kwargs.items():
                 if (
                     isinstance(v, fx.Node)
-                    and "val" in v.meta
-                    and isinstance(zf := v.meta["val"], torch.SymFloat)
-                    and isinstance(zf.node.expr, Symbol)
-                    and zf.node.hint is not None
+                    and (zf := v.meta.get("val")) is not None
+                    and isinstance(zf, (torch.SymFloat, torch.SymInt))
+                    and (node_hint := zf.node.hint) is not None
+                    and all(
+                        symbol_is_type(s, SymT.FLOAT) for s in zf.node.expr.free_symbols
+                    )
                 ):
                     transform = True
-                    kwargs[k] = float(zf)
+                    kwargs[k] = float(zf) if isinstance(zf, torch.SymFloat) else int(zf)
                 else:
                     kwargs[k] = v
-
-            if (
-                callable(node.target)
-                and len(args) > 0
-                and all(isinstance(arg, float) for arg in args)
-                and (type(result := node.target(*args, **kwargs)) == float)
-            ):
-                # If all args are constants and resulting value is a float,
-                # add node to specialized_float_nodes and continue.
-                # In later iterations we'll DCE this node by specializing the float value
-                # into the args of downstream fx nodes.
-                specialized_float_nodes[node] = result
-                continue
 
             if transform:
                 # args may not be metaproxy (eg. float) so can't use metaproxy here
                 replacement_node = graph.call_function(node.target, tuple(args), kwargs)
-                replacement_node.meta["val"] = node.target(*args, **kwargs)
+                replacement_node.meta["val"] = node.target(
+                    *[a.meta["val"] if isinstance(a, fx.Node) else a for a in args],
+                    **kwargs,
+                )
                 node.replace_all_uses_with(replacement_node)
                 graph.erase_node(node)
-
-    # DCE one more time to remove specialized item calls
-    dce(graph, deleted)
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
