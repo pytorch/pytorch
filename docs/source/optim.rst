@@ -317,7 +317,7 @@ algorithms.
 How to utilize named parameters to load optimizer state dict
 ------------------------------------------------------------
 
-The function :func:`~Optimizer.load_state_dict` stores the optional ``param_names``content from the
+The function :func:`~Optimizer.load_state_dict` stores the optional ``param_names`` content from the
 loaded state dict if present. However, the process of loading the optimizer state is not affected,
 as the order of the parameters matters to maintain compatibility (in case of different ordering).
 To utilize the loaded parameters names from the loaded state dict, a custom ``register_load_state_dict_pre_hook``

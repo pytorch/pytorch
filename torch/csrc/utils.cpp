@@ -257,7 +257,7 @@ namespace torch::gdb {
 // call free than delete[] from withing gdb.
 // Currently the code for computing the repr of a tensor is written in Python,
 // so we need to wrap the Tensor into a Python object first.
-char* tensor_repr(at::Tensor tensor) {
+char* tensor_repr(const at::Tensor& tensor) {
   PyGILState_STATE gil = PyGILState_Ensure();
   PyObject* pytensor = nullptr;
   PyObject* repr = nullptr;

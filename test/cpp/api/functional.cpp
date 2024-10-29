@@ -1343,7 +1343,7 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
 
     auto counts = torch::zeros_like(logits);
     torch::Tensor y_draw;
-    for (C10_UNUSED const auto i : c10::irange(num_draws)) {
+    for ([[maybe_unused]] const auto i : c10::irange(num_draws)) {
       y_draw =
           F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true));
       counts += y_draw;

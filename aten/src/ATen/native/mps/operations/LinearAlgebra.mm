@@ -163,7 +163,7 @@ static void linalg_lu_factor_out_mps_impl(const Tensor& A, bool pivot, Tensor& L
 
   status_tensors.reserve(batchSize);
   pivots_list.reserve(batchSize);
-  for (C10_UNUSED const auto i : c10::irange(batchSize)) {
+  for ([[maybe_unused]] const auto i : c10::irange(batchSize)) {
     status_tensors.push_back(at::zeros(1, kInt, std::nullopt, kMPS, std::nullopt));
     pivots_list.push_back(at::zeros(numPivots, kInt, std::nullopt, kMPS, std::nullopt));
   }

@@ -220,6 +220,7 @@ void SetGlobalRank(int64_t rank) {
 void LogAPIUsage(const std::string& event) try {
   if (auto logger = GetAPIUsageLogger())
     (*logger)(event);
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -229,6 +230,7 @@ void LogAPIUsageMetadata(
     const std::map<std::string, std::string>& metadata_map) try {
   if (auto logger = GetAPIUsageMetadataLogger())
     (*logger)(context, metadata_map);
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -236,6 +238,7 @@ void LogAPIUsageMetadata(
 void LogPyTorchDDPUsage(const DDPLoggingData& ddpData) try {
   if (auto logger = GetDDPUsageLogger())
     (*logger)(ddpData);
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -245,6 +248,7 @@ bool LogAPIUsageFakeReturn(const std::string& event) try {
   if (auto logger = GetAPIUsageLogger())
     (*logger)(event);
   return true;
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
   return true;

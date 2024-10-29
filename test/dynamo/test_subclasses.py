@@ -10,7 +10,7 @@ import torch._dynamo.testing
 import torch._functorch.config
 import torch.utils._pytree as pytree
 import torch.utils.checkpoint
-from torch._dynamo.testing import normalize_gm
+from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._higher_order_ops.wrap import wrap
 from torch.fx.experimental.symbolic_shapes import (
     DimDynamic,
@@ -373,9 +373,11 @@ class CtxSubclassTensor(torch.Tensor):
         )
         out_a = func(*args_a, **kwargs_a)
         out = pytree.tree_map(
-            lambda x: CtxSubclassTensor(x, biggest_constant)
-            if isinstance(x, torch.Tensor)
-            else x,
+            lambda x: (
+                CtxSubclassTensor(x, biggest_constant)
+                if isinstance(x, torch.Tensor)
+                else x
+            ),
             out_a,
         )
 
@@ -854,6 +856,31 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_exp = fn(wrapped)
         res_act = fn_opt(wrapped)
         self.assertEqual(res_exp, res_act)
+
+    def test_no_torch_function_on_size_bytecode(self):
+        class TestTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                with torch._C.DisableTorchFunctionSubclass():
+                    out = func(*args, **kwargs)
+
+                    if func == torch.clone:
+                        return out * 2
+                    else:
+                        return out
+
+        def fn(x):
+            return torch.clone(x)
+
+        with torch._dynamo.config.patch(traceable_tensor_subclasses={TestTensor}):
+            inp = torch.ones(4, 4)
+            x = inp.as_subclass(TestTensor)
+            torch._dynamo.mark_dynamic(x, 0)
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            out = compiled_fn(x)
+            self.assertEqual(out, torch.ones(4, 4) * 2)
 
     def test_torch_function_wrapper_class_with_kwargs(self):
         x = torch.ones(2, 2)
@@ -1522,11 +1549,11 @@ s1 > 3""",
                 )
                 out_a = func(*args_a, **kwargs_a)
                 out = pytree.tree_map(
-                    lambda x: SubclassTensor(
-                        x, SubclassTensorArgs2(x.shape, x.device, None)
-                    )
-                    if isinstance(x, torch.Tensor)
-                    else x,
+                    lambda x: (
+                        SubclassTensor(x, SubclassTensorArgs2(x.shape, x.device, None))
+                        if isinstance(x, torch.Tensor)
+                        else x
+                    ),
                     out_a,
                 )
                 return return_and_correct_aliasing(func, args, kwargs, out)
@@ -1794,7 +1821,7 @@ class GraphModule(torch.nn.Module):
 
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_mark_static_with_subclass_desugaring(self):
-        from typing import Any, Callable, Dict, List, Optional
+        from typing import Any, Callable, List, Optional
 
         from torch._dynamo.decorators import mark_static_address
         from torch._inductor.compile_fx import compile_fx
@@ -1816,7 +1843,6 @@ class GraphModule(torch.nn.Module):
             aot_mode: bool = False,
             is_inference: bool = False,
             boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-            user_visible_outputs: Optional[Dict[str, None]] = None,
             layout_opt: Optional[bool] = None,
             extern_node_serializer: Optional[Callable[[List[Any]], Any]] = None,
         ):
@@ -1960,6 +1986,36 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
             self.assertEqualIgnoringNestedInts(compile_grad, ref_grad)
 
         return guards_exported, guards_failed
+
+    def test_in_graph_is_nested_call(self):
+        def f(nt):
+            if nt.is_nested:
+                return nt + 2
+            else:
+                return nt + 1
+
+        cnt = CompileCounterWithBackend("aot_eager")
+        compiled_f = torch.compile(f, backend=cnt, fullgraph=True)
+        nt, offsets = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        output = compiled_f(nt)
+        output.backward(torch.ones_like(output))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(len(cnt.graphs), 1)
+        graph = cnt.graphs[0]
+        norm_graph = normalize_gm(graph.print_readable(print_output=False))
+
+        # expect -no- is_nested calls within the graph
+        self.assertExpectedInline(
+            norm_graph,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_nt_: "f64[3, s1, 5]", s1: "Sym(s1)"):
+        l_nt_ = L_nt_
+
+        add: "f64[3, s1, 5]" = l_nt_ + 2;  l_nt_ = None
+        return (add,)
+""",  # noqa: B950
+        )
 
     # Note: [What kind of guards are involved in nested tensor compilation]
     #
