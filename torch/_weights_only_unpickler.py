@@ -169,6 +169,7 @@ def _get_allowed_globals():
         "torch.device": torch.device,
         "_codecs.encode": encode,  # for bytes
         "builtins.bytearray": bytearray,  # for bytearray
+        "builtins.set": set,  # for set
     }
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
@@ -292,7 +293,14 @@ class Unpickler:
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
                     else:
-                        inst.__dict__.update(state)
+                        slotstate = None
+                        if isinstance(state, tuple) and len(state) == 2:
+                            state, slotstate = state
+                        if state:
+                            inst.__dict__.update(state)
+                        if slotstate:
+                            for k, v in slotstate.items():
+                                setattr(inst, k, v)
                 else:
                     raise UnpicklingError(
                         "Can only build Tensor, Parameter, OrderedDict or types allowlisted "

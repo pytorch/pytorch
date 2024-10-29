@@ -201,6 +201,7 @@ if RUN_CPU:
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_inductor_layout_optimization_input_mutations"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
+        BaseTest("test_int8_weight_only_quant"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         *[
@@ -285,7 +286,11 @@ if RUN_CPU:
             test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
             condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
             func_inputs=[
-                None,
+                [
+                    "torch.ops.onednn.qconv2d_pointwise",
+                    "torch.ops.quantized.max_pool2d",
+                    "aoti_torch_cpu__qlinear_pointwise_tensor",
+                ]
             ],
         ),
         *[
