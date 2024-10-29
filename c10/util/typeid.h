@@ -430,7 +430,7 @@ class C10_API TypeMeta final {
   }
 
   template <class T>
-  static c10::string_view TypeName() noexcept {
+  static std::string_view TypeName() noexcept {
     return c10::util::get_fully_qualified_type_name<T>();
   }
 
