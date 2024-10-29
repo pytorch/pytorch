@@ -47,7 +47,7 @@ init_command = [
     'mccabe==0.7.0',
     'pycodestyle==2.11.1',
     'pyflakes==3.1.0',
-    'torchfix==0.4.0 ; python_version >= "3.9"',
+    'torchfix>=0.4.0',
 ]
 
 
@@ -136,10 +136,10 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'numpy==1.26.0 ; python_version >= "3.9"',
+    'numpy>=1.26.0',
     'expecttest==0.2.1',
     'mypy==1.11.2',
-    'sympy==1.13.0 ; python_version >= "3.9"',
+    'sympy>=1.13.0',
     'types-requests==2.27.25',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',
