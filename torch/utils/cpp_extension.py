@@ -4,6 +4,7 @@ import glob
 import importlib
 import importlib.abc
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -140,6 +141,21 @@ def _find_rocm_home() -> Optional[str]:
               file=sys.stderr)
     return rocm_home
 
+def _find_sycl_home() -> Optional[str]:
+    """Find the OneAPI install path."""
+    # Guess #1
+    sycl_home = os.environ.get('ONEAPI_ROOT')
+    if sycl_home is None:
+        # Guess #2
+        icpx_path = shutil.which('icpx')
+        if icpx_path is not None:
+            sycl_home = os.path.dirname(os.path.dirname(
+                os.path.realpath(icpx_path)))
+
+    if sycl_home and not torch.xpu.is_available():
+        print(f"No XPU runtime is found, using ONEAPI_ROOT='{sycl_home}'",
+              file=sys.stderr)
+    return sycl_home
 
 def _join_rocm_home(*paths) -> str:
     """
@@ -155,6 +171,20 @@ def _join_rocm_home(*paths) -> str:
         raise OSError('Building PyTorch extensions using '
                       'ROCm and Windows is not supported.')
     return os.path.join(ROCM_HOME, *paths)
+
+def _join_sycl_home(*paths) -> str:
+    """
+    Join paths with SYCL_HOME, or raises an error if it SYCL_HOME is not set.
+
+    This is basically a lazy way of raising an error for missing $SYCL_HOME
+    only once we need to get any SYCL-specific path.
+    """
+    if SYCL_HOME is None:
+        raise OSError('SYCL_HOME environment variable is not set. '
+                      'Please set it to your OneAPI install root.')
+
+    return os.path.join(SYCL_HOME, *paths)
+
 
 
 ABI_INCOMPATIBILITY_WARNING = '''
@@ -207,6 +237,8 @@ if torch.version.hip is not None:
 
 CUDA_HOME = _find_cuda_home() if torch.cuda._is_compiled() else None
 CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
+SYCL_HOME = _find_sycl_home() if torch.xpu._is_compiled() else None
+
 # PyTorch releases have the version pattern major.minor.patch, whereas when
 # PyTorch is built from source, we append the git commit hash, which gives
 # it the below pattern.
@@ -944,7 +976,7 @@ def CppExtension(name, sources, *args, **kwargs):
         ...             name='extension',
         ...             sources=['extension.cpp'],
         ...             extra_compile_args=['-g'],
-        ...             extra_link_flags=['-Wl,--no-as-needed', '-lm'])
+        ...             extra_link_args=['-Wl,--no-as-needed', '-lm'])
         ...     ],
         ...     cmdclass={
         ...         'build_ext': BuildExtension
@@ -963,7 +995,7 @@ def CppExtension(name, sources, *args, **kwargs):
     libraries.append('torch')
     libraries.append('torch_cpu')
     libraries.append('torch_python')
-    if IS_WINDOWS:
+    if IS_WINDOWS and platform.machine().lower() != "arm64":
         libraries.append("sleef")
 
     kwargs['libraries'] = libraries
@@ -998,7 +1030,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
         ...                 sources=['extension.cpp', 'extension_kernel.cu'],
         ...                 extra_compile_args={'cxx': ['-g'],
         ...                                     'nvcc': ['-O2']},
-        ...                 extra_link_flags=['-Wl,--no-as-needed', '-lcuda'])
+        ...                 extra_link_args=['-Wl,--no-as-needed', '-lcuda'])
         ...     ],
         ...     cmdclass={
         ...         'build_ext': BuildExtension
@@ -1075,7 +1107,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
         ...                            'nvcc': ['-O2', '-rdc=true']})
     """
     library_dirs = kwargs.get('library_dirs', [])
-    library_dirs += library_paths(cuda=True)
+    library_dirs += library_paths(device_type="cuda")
     kwargs['library_dirs'] = library_dirs
 
     libraries = kwargs.get('libraries', [])
@@ -1119,7 +1151,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
         sources = list(hipified_sources)
 
-    include_dirs += include_paths(cuda=True)
+    include_dirs += include_paths(device_type="cuda")
     kwargs['include_dirs'] = include_dirs
 
     kwargs['language'] = 'c++'
@@ -1144,13 +1176,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
     return setuptools.Extension(name, sources, *args, **kwargs)
 
 
-def include_paths(cuda: bool = False) -> List[str]:
+def include_paths(device_type: str = "cpu") -> List[str]:
     """
-    Get the include paths required to build a C++ or CUDA extension.
+    Get the include paths required to build a C++ or CUDA or SYCL extension.
 
     Args:
-        cuda: If `True`, includes CUDA-specific include paths.
-
+        device_type: Defaults to "cpu".
     Returns:
         A list of include path strings.
     """
@@ -1164,10 +1195,10 @@ def include_paths(cuda: bool = False) -> List[str]:
         os.path.join(lib_include, 'TH'),
         os.path.join(lib_include, 'THC')
     ]
-    if cuda and IS_HIP_EXTENSION:
+    if device_type == "cuda" and IS_HIP_EXTENSION:
         paths.append(os.path.join(lib_include, 'THH'))
         paths.append(_join_rocm_home('include'))
-    elif cuda:
+    elif device_type == "cuda":
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
         # but gcc doesn't like having /usr/include passed explicitly
@@ -1180,15 +1211,17 @@ def include_paths(cuda: bool = False) -> List[str]:
             paths.append(cuda_inc_path)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
+    elif device_type == "xpu":
+        paths.append(_join_sycl_home('include'))
     return paths
 
 
-def library_paths(cuda: bool = False) -> List[str]:
+def library_paths(device_type: str = "cpu") -> List[str]:
     """
     Get the library paths required to build a C++ or CUDA extension.
 
     Args:
-        cuda: If `True`, includes CUDA-specific library paths.
+        device_type: Defaults to "cpu".
 
     Returns:
         A list of library path strings.
@@ -1196,12 +1229,12 @@ def library_paths(cuda: bool = False) -> List[str]:
     # We need to link against libtorch.so
     paths = [TORCH_LIB_PATH]
 
-    if cuda and IS_HIP_EXTENSION:
+    if device_type == "cuda" and IS_HIP_EXTENSION:
         lib_dir = 'lib'
         paths.append(_join_rocm_home(lib_dir))
         if HIP_HOME is not None:
             paths.append(os.path.join(HIP_HOME, 'lib'))
-    elif cuda:
+    elif device_type == "cuda":
         if IS_WINDOWS:
             lib_dir = os.path.join('lib', 'x64')
         else:
@@ -1216,6 +1249,17 @@ def library_paths(cuda: bool = False) -> List[str]:
         paths.append(_join_cuda_home(lib_dir))
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, lib_dir))
+    elif device_type == "xpu":
+        if IS_WINDOWS:
+            lib_dir = os.path.join('lib', 'x64')
+        else:
+            lib_dir = 'lib64'
+            if (not os.path.exists(_join_sycl_home(lib_dir)) and
+                    os.path.exists(_join_sycl_home('lib'))):
+                lib_dir = 'lib'
+
+        paths.append(_join_sycl_home(lib_dir))
+
     return paths
 
 
@@ -1357,10 +1401,10 @@ def check_compiler_is_gcc(compiler):
     env['LC_ALL'] = 'C'  # Don't localize output
     try:
         version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-    except Exception as e:
+    except Exception:
         try:
             version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-        except Exception as e:
+        except Exception:
             return False
     # Check for 'gcc' or 'g++' for sccache wrapper
     pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
@@ -2032,7 +2076,7 @@ def _get_build_directory(name: str, verbose: bool) -> str:
         root_extensions_directory = get_default_build_root()
         cu_str = ('cpu' if torch.version.cuda is None else
                   f'cu{torch.version.cuda.replace(".", "")}')  # type: ignore[attr-defined]
-        python_version = f'py{sys.version_info.major}{sys.version_info.minor}'
+        python_version = f'py{sys.version_info.major}{sys.version_info.minor}{getattr(sys, "abiflags", "")}'
         build_folder = f'{python_version}_{cu_str}'
 
         root_extensions_directory = os.path.join(
@@ -2143,6 +2187,7 @@ def _import_module_from_library(module_name, path, is_python_module):
         return module
     else:
         torch.ops.load_library(filepath)
+        return filepath
 
 
 def _write_ninja_file_to_build_library(path,
@@ -2164,7 +2209,11 @@ def _write_ninja_file_to_build_library(path,
     user_includes = [os.path.abspath(file) for file in extra_include_paths]
 
     # include_paths() gives us the location of torch/extension.h
-    system_includes = include_paths(with_cuda)
+    # TODO generalize with_cuda as specific device type.
+    if with_cuda:
+        system_includes = include_paths("cuda")
+    else:
+        system_includes = include_paths("cpu")
     # sysconfig.get_path('include') gives us the location of Python.h
     # Explicitly specify 'posix_prefix' scheme on non-Windows platforms to workaround error on some MacOS
     # installations where default `get_path` points to non-existing `/Library/Python/M.m/include` folder

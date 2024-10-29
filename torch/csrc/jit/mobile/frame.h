@@ -5,9 +5,7 @@
 #include <torch/csrc/jit/mobile/code.h>
 #include <optional>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 class Frame {
  public:
@@ -48,6 +46,4 @@ class Frame {
   size_t pc_{0};
 };
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

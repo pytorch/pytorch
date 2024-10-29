@@ -8,9 +8,7 @@
 #include <functional>
 #include <optional>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 // A thread-safe cache interface.
 
@@ -22,7 +20,8 @@ TORCH_API std::shared_ptr<Graph> normalizeGraphForCache(
 TORCH_API int64_t store(std::shared_ptr<Graph> graph);
 
 // Given a graph, find a KernelSpec based on it
-TORCH_API std::optional<KernelSpec*> lookupGraph(std::shared_ptr<Graph> graph);
+TORCH_API std::optional<KernelSpec*> lookupGraph(
+    const std::shared_ptr<Graph>& graph);
 
 // Returns the graph corresponding to the given key (if it exists)
 TORCH_API std::optional<KernelSpec*> retrieve(const int64_t key);
@@ -31,6 +30,4 @@ TORCH_API std::optional<KernelSpec*> retrieve(const int64_t key);
 // Only used for testing.
 TORCH_API int64_t debugNumCachedKernelSpecs();
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

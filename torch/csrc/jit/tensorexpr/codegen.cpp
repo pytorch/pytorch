@@ -21,6 +21,11 @@ CodeGen::CodeGen(
   allocIntermediateBufs();
 }
 
+RegisterCodeGenList& RegisterCodeGenList::GetInstance() {
+  static RegisterCodeGenList codegen_list;
+  return codegen_list;
+}
+
 RegisterCodeGenList::StmtFactoryMethod RegisterCodeGenList::
     FindStmtFactoryMethod(const std::string& name) {
   auto iter = stmt_factory_methods_.find(name);

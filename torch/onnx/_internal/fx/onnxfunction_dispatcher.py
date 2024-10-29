@@ -415,10 +415,9 @@ class _OnnxSchemaChecker:
         inputs = (Tensor[2, 3], Tensor[2, 3])
         attributes = {"alpha": 1.0}
 
-        @torch_op("aten::op")
-        def aten_op(self: TReal, other: TReal, alpha: float = 1) -> TReal:
-            ...
 
+        @torch_op("aten::op")
+        def aten_op(self: TReal, other: TReal, alpha: float = 1) -> TReal: ...
         ```
         Result: Perfect match.
 

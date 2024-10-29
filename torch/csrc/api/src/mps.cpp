@@ -1,8 +1,7 @@
 #include <ATen/Context.h>
 #include <torch/mps.h>
 
-namespace torch {
-namespace mps {
+namespace torch::mps {
 
 bool is_available() {
   return at::detail::getMPSHooks().hasMPS();
@@ -36,5 +35,4 @@ DispatchQueue_t get_dispatch_queue() {
   return at::detail::getMPSHooks().getDispatchQueue();
 }
 
-} // namespace mps
-} // namespace torch
+} // namespace torch::mps

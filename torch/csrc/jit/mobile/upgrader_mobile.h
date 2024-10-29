@@ -1,18 +1,15 @@
 #pragma once
 
-// #include <ATen/core/ivalue.h>
 #include <ATen/core/ivalue_inl.h>
 
 #include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
-#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 struct Instruction;
 struct Upgrader {
   int min_version;
@@ -39,5 +36,4 @@ struct ByteCodeFunctionWithOperator {
 TORCH_API const std::vector<ByteCodeFunctionWithOperator>&
 getUpgraderBytecodeList();
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

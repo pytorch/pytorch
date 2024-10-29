@@ -1158,7 +1158,7 @@ REGISTER_CUDA_DISPATCH(ldl_solve_stub, &ldl_solve_kernel)
 template <typename scalar_t>
 static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, int64_t& info) {
 #if !AT_MAGMA_ENABLED()
-AT_ERROR("cholesky_solve: MAGMA library not found in "
+TORCH_CHECK(false, "cholesky_solve: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
@@ -1476,7 +1476,7 @@ template <typename scalar_t>
 static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
 #if !AT_MAGMA_ENABLED()
   // This should never be thrown if the calling functions are correct.
-  AT_ERROR("linalg.lu_factor: PyTorch was not compiled with MAGMA support.");
+  TORCH_CHECK(false, "linalg.lu_factor: PyTorch was not compiled with MAGMA support.");
 #else
   // magmaLu and magmaLuNoPiv require infos and pivots tensor to be on CPU
   // the data is later copied back to the appropriate output tensor
@@ -1677,7 +1677,7 @@ REGISTER_CUDA_DISPATCH(lu_factor_stub, &lu_factor);
 template <typename scalar_t>
 static void apply_triangular_solve_batched_magma(const Tensor& A, const Tensor& b, bool left, bool upper, TransposeType transpose, bool unitriangular) {
 #if !AT_MAGMA_ENABLED()
-AT_ERROR("triangular_solve: MAGMA library not found in "
+TORCH_CHECK(false, "triangular_solve: MAGMA library not found in "
          "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
@@ -2106,7 +2106,7 @@ static void apply_svd_magma(const Tensor& A,
                             const Tensor& Vh,
                             const Tensor& info) {
 #if !AT_MAGMA_ENABLED()
-AT_ERROR("linalg.svd: MAGMA library not found in "
+TORCH_CHECK(false, "linalg.svd: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -2457,7 +2457,7 @@ static void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor
       // B1 = P^T @ B  (must be done out-of-place as B is both source and target)
       auto B1 = B.scatter(-2, inv_perm.unsqueeze(-1).expand_as(B), B);
       // B = L^{-1} @ B1
-      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, std::move(B1), /*upper=*/false, /*left=*/true, /*unitriangular=*/true);
+      at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, B1, /*upper=*/false, /*left=*/true, /*unitriangular=*/true);
       // B = U^{-1} @ B
       at::linalg_solve_triangular_out(const_cast<Tensor&>(B), *LU_, B, /*upper=*/true);
     } else {
@@ -2701,7 +2701,7 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
     // we need to set the rest of the rows to zero so that the multiplication from step 3 is correct
     B.narrow(-2, m, n - m).zero_();
 
-    auto tau_expand_batch = expand_batch_portion;
+    auto tau_expand_batch = std::move(expand_batch_portion);
     tau_expand_batch.push_back(tau.size(-1));
     Tensor tau_broadcasted = tau.expand({tau_expand_batch}).contiguous();
 

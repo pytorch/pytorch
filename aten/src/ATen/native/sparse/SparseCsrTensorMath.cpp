@@ -584,12 +584,6 @@ Tensor& addmm_out_sparse_compressed_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  // TODO: remove this, there are no codegenerated checks for devices yet
-  sparse::impl::_check_is_cpu(self, "self");
-  sparse::impl::_check_is_cpu(mat1, "mat1");
-  sparse::impl::_check_is_cpu(mat2, "mat2");
-  sparse::impl::_check_is_cpu(result, "result");
-
   // All the checks are from addmm_out_cuda_impl (ATen/native/cuda/Blas.cpp) and
   // TORCH_META_FUNC(addmm) (ATen/native/LinearAlgebra.cpp)
   // TODO: remove code duplication and unify code
@@ -822,19 +816,19 @@ static void add_out_dense_sparse_compressed_cpu(
   TORCH_INTERNAL_ASSERT(dense.layout() == kStrided);
   TORCH_INTERNAL_ASSERT(
       src.layout() == kSparseCsr || src.layout() == kSparseCsc);
-  TORCH_INTERNAL_ASSERT(dense.device() == kCPU);
+  TORCH_INTERNAL_ASSERT(dense.device() == kCPU || dense.device() == kMeta);
 
   TORCH_CHECK(
       out.is_contiguous(),
       "out argument must be contiguous, but got: ",
       out.suggest_memory_format());
   TORCH_CHECK(
-      out.device() == kCPU,
-      "add: expected 'out' to be CPU tensor, but got tensor on device: ",
+      out.device() == dense.device(),
+      "add: expected 'out' to match dense tensor, but got tensor on device: ",
       out.device());
   TORCH_CHECK(
-      src.device() == kCPU,
-      "add: expected 'other' to be a CPU tensor, but got tensor on device: ",
+      src.device() == dense.device(),
+      "add: expected 'src' to match dense tensor, but got tensor on device: ",
       src.device());
 
   TORCH_CHECK(
@@ -869,6 +863,8 @@ static void add_out_dense_sparse_compressed_cpu(
   if (src._nnz() == 0) {
     return;
   }
+
+  TORCH_INTERNAL_ASSERT(dense.device() == kCPU);
 
   auto valuesBuffer = src_values.to(commonDtype).reshape({-1, src_values.size(-1)});
   resultBuffer = resultBuffer.view({-1, out.size(-2), out.size(-1)});

@@ -18,9 +18,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/tensor_qschemes.h>
 
-namespace torch {
-namespace autograd {
-namespace utils {
+namespace torch::autograd::utils {
 
 inline PyObject* wrap(bool value) {
   if (value) {
@@ -68,8 +66,8 @@ inline PyObject* wrap(at::Layout layout) {
   return Py_NewRef(getTHPLayout(layout));
 }
 
-inline PyObject* wrap(at::Tensor tensor) {
-  return THPVariable_Wrap(Variable(std::move(tensor)));
+inline PyObject* wrap(const at::Tensor& tensor) {
+  return THPVariable_Wrap(tensor);
 }
 
 inline PyObject* wrap(const at::Scalar& scalar) {
@@ -148,6 +146,4 @@ PyObject* wrap(PyTypeObject* type, std::tuple<Ts...> values) {
   return r.release();
 }
 
-} // namespace utils
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::utils

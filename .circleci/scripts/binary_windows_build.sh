@@ -10,6 +10,11 @@ export SCCACHE_BUCKET=ossci-compiler-cache
 export SCCACHE_IGNORE_SERVER_IO_ERROR=1
 export VC_YEAR=2019
 
+if [[ "$DESIRED_CUDA" == 'xpu' ]]; then
+    export VC_YEAR=2022
+    export USE_SCCACHE=0
+fi
+
 echo "Free space on filesystem before build:"
 df -h
 

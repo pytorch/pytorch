@@ -19,8 +19,7 @@ class AOTInductorModelContainer {
   AOTInductorModelContainer(
       size_t num_models,
       const std::string& device_str,
-      const std::optional<std::string>& cubin_dir = std::nullopt)
-      : use_secondary_(false), constant_folded_(false) {
+      const std::optional<std::string>& cubin_dir = std::nullopt) {
     constants_map_ = std::make_shared<ConstantMap>();
     constants_array_ = std::make_shared<std::vector<ConstantHandle>>();
 
@@ -147,6 +146,14 @@ class AOTInductorModelContainer {
     return models_[0]->constant_from_folded(static_cast<int64_t>(idx));
   }
 
+  // retrieve type of constants_info_[idx]
+  int32_t constant_type(size_t idx) const {
+    if (this->num_models() == 0) {
+      throw std::runtime_error("No available models in container!");
+    }
+    return models_[0]->constant_type(static_cast<int64_t>(idx));
+  }
+
   // retrieve dtype of constants_info_[idx]
   int32_t constant_dtype(size_t idx) const {
     if (this->num_models() == 0) {
@@ -217,9 +224,11 @@ class AOTInductorModelContainer {
     pending_models_available_.notify_one();
   }
 
-  bool _is_tensor_constant(const std::string& constant_name) const {
-    return constant_name.rfind("_tensor_constant", 0) == 0;
+  bool _should_skip_update(const size_t idx) const {
+    auto constant_type = models_[0]->constant_type(idx);
+    return constant_type == ConstantType::TensorConstant;
   }
+
   // This function updates the buffer for storing constants.
   // It will update the buffer, the mapping and the array mapping.
   void update_constant_buffer(
@@ -241,7 +250,7 @@ class AOTInductorModelContainer {
             std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
         auto it = constants_map.find(constant_name);
         if (it == constants_map.end()) {
-          if (_is_tensor_constant(constant_name)) {
+          if (_should_skip_update(idx)) {
             // tracing sometimes creates tensors that are non-existent in
             // original graph. We could skip those and do a direct copy.
             std::cerr << "[WARNING] Found constant " << constant_name
@@ -263,13 +272,13 @@ class AOTInductorModelContainer {
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end() &&
-          !(_is_tensor_constant(constant_name) && use_inactive)) {
+          !(_should_skip_update(idx) && use_inactive)) {
         continue;
       }
 
 #ifdef USE_CUDA
       AtenTensorHandle tensor;
-      if (_is_tensor_constant(constant_name) && use_inactive) {
+      if (_should_skip_update(idx) && use_inactive) {
         tensor = original_constants_map->find(constant_name)->second.get();
       } else {
         tensor = it->second;
@@ -403,10 +412,10 @@ class AOTInductorModelContainer {
   // If true,
   // constants_map_secondary/constant_blob_secondary/constants_array_secondary
   // is being used.
-  bool use_secondary_;
+  bool use_secondary_{false};
 
   // Determine whether we have ran constant folding
-  bool constant_folded_;
+  bool constant_folded_{false};
 
   // Holds the mapping of constants to at::Tensor.
   // The underlying data of at::Tensor is in either constant_blob_ (for CUDA).

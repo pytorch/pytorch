@@ -5,8 +5,7 @@
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void RemoveRedundantProfiles(Block* block, AliasDb& db) {
   for (auto it = block->nodes().end()->reverseIterator();
@@ -44,5 +43,4 @@ void RemoveRedundantProfiles(std::shared_ptr<Graph>& graph) {
   RemoveRedundantProfiles(graph->block(), db);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

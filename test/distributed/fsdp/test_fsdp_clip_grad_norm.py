@@ -18,7 +18,7 @@ from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    CUDAInitMode,
+    DEVICEInitMode,
     FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
@@ -102,7 +102,7 @@ class TestClipGradNorm(FSDPTest):
         local_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
         ddp_model = DDP(local_model, device_ids=[self.rank])
@@ -114,7 +114,7 @@ class TestClipGradNorm(FSDPTest):
             fsdp_model = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.NO_FSDP,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 deterministic=True,
             )
             # Apply `NO_SHARD` to the encoder
@@ -149,7 +149,7 @@ class TestClipGradNorm(FSDPTest):
             fsdp_model = TransformerWithSharedParams.init(
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 deterministic=True,
                 fsdp_kwargs=fsdp_kwargs,
             )
@@ -277,7 +277,7 @@ class TestClipGradNorm(FSDPTest):
             NestedWrappedModule.init(
                 self.process_group,
                 FSDPInitMode.RECURSIVE,
-                CUDAInitMode.CUDA_BEFORE,
+                DEVICEInitMode.DEVICE_BEFORE,
                 deterministic=True,
                 fsdp_kwargs=fsdp_kwargs,
             ),
