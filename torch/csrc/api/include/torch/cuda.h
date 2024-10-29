@@ -5,8 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace torch {
-namespace cuda {
+namespace torch::cuda {
 
 /// Returns the number of CUDA devices available.
 size_t TORCH_API device_count();
@@ -26,5 +25,4 @@ void TORCH_API manual_seed_all(uint64_t seed);
 /// Waits for all kernels in all streams on a CUDA device to complete.
 void TORCH_API synchronize(int64_t device_index = -1);
 
-} // namespace cuda
-} // namespace torch
+} // namespace torch::cuda

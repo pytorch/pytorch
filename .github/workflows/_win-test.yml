@@ -46,9 +46,10 @@ jobs:
         shell: bash
     steps:
       # Duplicated in win-build because this MUST go before a checkout
-      - name: Enable git symlinks on Windows and disable fsmonitor daemon
+      - name: Enable git long paths and symlinks on Windows and disable fsmonitor daemon
         shell: bash
         run: |
+          git config --global core.longpaths true
           git config --global core.symlinks true
 
           # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock

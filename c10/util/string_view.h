@@ -26,6 +26,7 @@ namespace c10 {
  * std::char_traits if we wanted to use it with our constexpr basic_string_view.
  */
 template <class CharT>
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class basic_string_view final {
  public:
   using value_type = CharT;
@@ -149,7 +150,7 @@ class basic_string_view final {
     return std::numeric_limits<difference_type>::max();
   }
 
-  C10_NODISCARD constexpr bool empty() const noexcept {
+  [[nodiscard]] constexpr bool empty() const noexcept {
     return size() == 0;
   }
 

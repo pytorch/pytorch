@@ -3,6 +3,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/jiterator_macros.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
@@ -624,7 +625,7 @@ static scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
   // exp(a - x).
 
   scalar_t ax, fac, res, num, numfac;
-  static scalar_t MAXLOG = std::is_same<scalar_t,double>::value ?
+  static scalar_t MAXLOG = std::is_same_v<scalar_t,double> ?
     7.09782712893383996843E2 : 88.72283905206835;
   static scalar_t EXP1 = 2.718281828459045;
   static scalar_t lanczos_g = 6.024680040776729583740234375;
@@ -654,7 +655,7 @@ static scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
 template <typename scalar_t>
 static scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
   // Compute igam using DLMF 8.11.4. [igam1]
-  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
+  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
   static int MAXITER = 2000;
 
@@ -692,7 +693,7 @@ static scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
   scalar_t sum = 0;
   scalar_t term, logx;
   static scalar_t MAXITER = 2000;
-  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
+  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
 
   for (n = 1; n < MAXITER; n++) {
@@ -941,7 +942,7 @@ static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam
 
   int k, n, sgn;
   int maxpow = 0;
-  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
+  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
   scalar_t lambda = x / a;
   scalar_t sigma = (x - a) / a;
@@ -1006,11 +1007,11 @@ static scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar_t x) {
   scalar_t ans, ax, c, yc, r, t, y, z;
   scalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
   int MAXITER = 2000;
-  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
+  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  static scalar_t BIG = std::is_same<scalar_t,double>::value ?
+  static scalar_t BIG = std::is_same_v<scalar_t,double> ?
     4.503599627370496e15 : 16777216.;
-  static scalar_t BIGINV = std::is_same<scalar_t,double>::value ?
+  static scalar_t BIGINV = std::is_same_v<scalar_t,double> ?
     2.22044604925031308085e-16 : 5.9604644775390625E-8;
 
   ax = _igam_helper_fac(a, x);
@@ -1203,22 +1204,30 @@ scalar_t calc_igamma(scalar_t a, scalar_t x) {
 }
 
 template <>
-C10_UNUSED inline c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+[[maybe_unused]] inline c10::BFloat16 calc_igamma<c10::BFloat16>(
+    c10::BFloat16 a,
+    c10::BFloat16 x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
+[[maybe_unused]] inline c10::Half calc_igamma<c10::Half>(
+    c10::Half a,
+    c10::Half x) {
   return calc_igamma<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+[[maybe_unused]] inline c10::BFloat16 calc_igammac<c10::BFloat16>(
+    c10::BFloat16 a,
+    c10::BFloat16 x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
 template <>
-C10_UNUSED inline c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
+[[maybe_unused]] inline c10::Half calc_igammac<c10::Half>(
+    c10::Half a,
+    c10::Half x) {
   return calc_igammac<float>(float(a), float(x));
 }
 
@@ -1230,7 +1239,7 @@ inline T abs_impl(T v) {
 }
 
 template <>
-C10_UNUSED inline uint8_t abs_impl(uint8_t v) {
+[[maybe_unused]] inline uint8_t abs_impl(uint8_t v) {
   return v;
 }
 
@@ -3071,14 +3080,14 @@ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     return r;
 } // hermite_polynomial_h_forward(T x, int64_t n)
 
-template<typename T, bool is_cuda=false, std::enable_if_t<!std::is_floating_point<T>::value, int> = 0>
+template<typename T, bool is_cuda=false, std::enable_if_t<!std::is_floating_point_v<T>, int> = 0>
 inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
     return hermite_polynomial_h_forward(x, static_cast<int64_t>(n));
 } // hermite_polynomial_h_forward(T x, T n)
 
-template<typename T, bool is_cuda=false, std::enable_if_t<std::is_floating_point<T>::value, int> = 0>
-inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
-    return hermite_polynomial_h_forward(x, ((!std::isinf(n)) && (!std::isnan(n))) ? static_cast<int64_t>(n) : static_cast<int64_t>(-1));
+template<typename T, bool is_cuda=false, std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+__ubsan_ignore_float_cast_overflow__ inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
+    return hermite_polynomial_h_forward(x, (!std::isinf(n) && !std::isnan(n)) ? static_cast<int64_t>(n) : static_cast<int64_t>(-1));
 } // hermite_polynomial_h_forward(T x, T n)
 
 template<typename T>

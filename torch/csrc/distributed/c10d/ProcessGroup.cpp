@@ -11,6 +11,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
+#include <utility>
 
 namespace c10d {
 
@@ -101,10 +102,10 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
 }
 
 ProcessGroup::ProcessGroup(
-    const c10::intrusive_ptr<::c10d::Store>& store,
+    c10::intrusive_ptr<::c10d::Store> store,
     int rank,
     int size)
-    : store_(store),
+    : store_(std::move(store)),
       rank_(rank),
       size_(size),
       backendType_(BackendType::UNDEFINED),

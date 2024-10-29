@@ -104,6 +104,7 @@ class TORCH_API TensorBase {
   }
   TensorBase(const TensorBase&) = default;
   TensorBase(TensorBase&&) noexcept = default;
+  ~TensorBase() noexcept = default;
 
  public:
   // Creates a new wrapper from TensorImpl. Intentionally a free method because
@@ -625,7 +626,7 @@ class TORCH_API TensorBase {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
     T* ptr = nullptr;
-    if constexpr (std::is_const<T>::value) {
+    if constexpr (std::is_const_v<T>) {
       ptr = const_data_ptr<T>();
     } else {
       ptr = mutable_data_ptr<T>();
@@ -645,7 +646,7 @@ class TORCH_API TensorBase {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data_ptr<T>()");
     TORCH_CHECK(dim() == N, "TensorAccessor expected ", N, " dims but tensor has ", dim());
     T* ptr = nullptr;
-    if constexpr (std::is_const<T>::value) {
+    if constexpr (std::is_const_v<T>) {
       ptr = const_data_ptr<T>();
     } else {
       ptr = mutable_data_ptr<T>();

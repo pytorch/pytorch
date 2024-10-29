@@ -138,6 +138,12 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
     if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
         return getattr(analysis, handler_name)(*args, index_dtype)
 
+    # Fastpath for n-ary integral addition
+    if expr.func is sympy.Add and expr.is_integer and hasattr(analysis, "sym_sum"):
+        r = analysis.sym_sum(args)
+        log.debug("sym_sum(%s) -> %s", args, r)
+        return r
+
     if hasattr(expr.func, "_torch_handler_name"):
         handler_name = expr.func._torch_handler_name
     else:
@@ -155,6 +161,8 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
             r = handler(*args)
             log.debug("%s(%s) -> %s", handler_name, args, r)
             return r
+    except NotImplementedError:
+        raise
     except Exception:
         log.warning("failed while executing %s(%s)", handler_name, args)
         raise
