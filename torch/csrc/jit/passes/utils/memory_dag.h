@@ -16,8 +16,7 @@
 
 // Uses a compressed index representation for faster comparisons
 typedef c10::SparseBitVector<256> MemoryLocations;
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Value;
 
@@ -172,5 +171,4 @@ class TORCH_API MemoryDAGBuilder {
   // the map to construct the `MemoryDAG`
   std::vector<std::unique_ptr<Element>> indexToElementMap_;
 };
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
