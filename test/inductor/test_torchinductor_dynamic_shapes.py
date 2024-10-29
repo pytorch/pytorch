@@ -999,7 +999,6 @@ class TestInductorDynamic(TestCase):
 
         cnt = CompileCounterWithBackend("inductor")
         fn_opt = torch._dynamo.optimize(cnt)(fn)
-
         x = torch.arange(3)
         z = 1.3
 
