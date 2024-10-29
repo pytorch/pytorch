@@ -2612,6 +2612,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
 
+    @supported_platform
     def test_symbol_closure_in_score_mod(self):
         class SimpleAttention(torch.nn.Module):
             def __init__(self, dim=512, n_head=8):
