@@ -18,14 +18,14 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeGuard
 
 import sympy
-from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
+from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 from torch._logging import LazyString
 from torch._prims_common import dtype_to_type
+from typing_extensions import TypeGuard
 
 from .functions import (
     _keep_float,
@@ -145,16 +145,14 @@ class ValueRanges(Generic[_T]):
         self: ValueRanges[sympy.Expr],
         lower: ExprIn,
         upper: ExprIn,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def __init__(  # type: ignore[misc]
         self: ValueRanges[SympyBoolean],
         lower: BoolIn,
         upper: BoolIn,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def __init__(self, lower: AllIn, upper: AllIn) -> None:
         lower = simple_sympify(lower)
@@ -241,15 +239,13 @@ class ValueRanges(Generic[_T]):
     def __and__(
         self: ValueRanges[sympy.Expr],
         other: ValueRanges[sympy.Expr],
-    ) -> ValueRanges[sympy.Expr]:
-        ...
+    ) -> ValueRanges[sympy.Expr]: ...
 
     @overload
     def __and__(  # type: ignore[misc]
         self: ValueRanges[SympyBoolean],
         other: ValueRanges[SympyBoolean],
-    ) -> ValueRanges[SympyBoolean]:
-        ...
+    ) -> ValueRanges[SympyBoolean]: ...
 
     def __and__(self: AllVR, other: AllVR) -> AllVR:
         if other in (ValueRanges.unknown(), ValueRanges.unknown_int()):
@@ -273,15 +269,13 @@ class ValueRanges(Generic[_T]):
     def __or__(
         self: ValueRanges[sympy.Expr],
         other: ValueRanges[sympy.Expr],
-    ) -> ValueRanges[sympy.Expr]:
-        ...
+    ) -> ValueRanges[sympy.Expr]: ...
 
     @overload
     def __or__(  # type: ignore[misc]
         self: ValueRanges[SympyBoolean],
         other: ValueRanges[SympyBoolean],
-    ) -> ValueRanges[SympyBoolean]:
-        ...
+    ) -> ValueRanges[SympyBoolean]: ...
 
     def __or__(self: AllVR, other: AllVR) -> AllVR:
         if ValueRanges.unknown() in (self, other):
@@ -344,8 +338,7 @@ class ValueRanges(Generic[_T]):
 
     @overload
     @staticmethod
-    def decreasing_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR:
-        ...
+    def decreasing_map(x: Union[ExprIn, ExprVR], fn: ExprFn) -> ExprVR: ...
 
     @overload
     @staticmethod
@@ -385,8 +378,7 @@ class ValueRanges(Generic[_T]):
         x: Union[ExprIn, ExprVR],
         y: Union[ExprIn, ExprVR],
         fn: ExprFn2,
-    ) -> ExprVR:
-        ...
+    ) -> ExprVR: ...
 
     @overload
     @staticmethod
@@ -394,8 +386,7 @@ class ValueRanges(Generic[_T]):
         x: Union[BoolIn, BoolVR],
         y: Union[BoolIn, BoolVR],
         fn: BoolFn2,
-    ) -> BoolVR:
-        ...
+    ) -> BoolVR: ...
 
     @staticmethod
     def coordinatewise_increasing_map(
@@ -501,6 +492,10 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.coordinatewise_increasing_map(a, b, sympy.And)
 
     @staticmethod
+    def _bit_length(n):
+        return len(bin(n).lstrip("-0b"))
+
+    @staticmethod
     def bitwise_and(a, b):
         a, b = ValueRanges.wrap(a), ValueRanges.wrap(b)
         lower = min(a.lower, b.lower)
@@ -508,7 +503,7 @@ class SymPyValueRangeAnalysis:
             # If both lower bounds are negative, then bits start like
             # 1...10..., so the smallest possible value is 1...101...1.
             # Thus, we need to find the next smallest power of 2 (inclusive).
-            lower = -(2 ** math.ceil(math.log2(-lower)))
+            lower = -(1 << SymPyValueRangeAnalysis._bit_length(-lower - 1))
         else:
             lower = 0
         return ValueRanges(lower, max(a.upper, b.upper))
@@ -523,7 +518,7 @@ class SymPyValueRangeAnalysis:
             # If both upper bounds are positive, then the largest
             # possible value is 01...1, so we need to find
             # next largest power of 2 (exclusive), minus 1
-            upper = 2 ** (math.floor(math.log2(upper)) + 1) - 1
+            upper = (1 << SymPyValueRangeAnalysis._bit_length(upper)) - 1
         elif upper < 0:
             upper = -1
         return ValueRanges(min(a.lower, b.lower), upper)
