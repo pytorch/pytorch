@@ -676,7 +676,8 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     auto compute = [&](int k) {
 {%- if use_cached_dequantized_B %}
     // base index for dequantized B
-    const int64_t base_idx_of_deq_B = (k / {{block_k // 2}}) * 512;
+    const auto num_elements_per_b_tile = 512;
+    const auto base_idx_of_deq_B = (k / {{block_k // 2}}) * num_elements_per_b_tile;
 {%- endif %}
 {%- set tile_offset_a = num_rows // 16 * num_columns %}
 {%- set tile_offset_b = tile_offset_a + num_rows // 16 %}
@@ -690,7 +691,7 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         {%- endif %}
         {%- if tile_row == 0 %}
             {%- if use_cached_dequantized_B %}
-        _tile_loadd({{tile_idx_b}}, B + base_idx_of_deq_B + {{tile_col}} * 512, 64);
+        _tile_loadd({{tile_idx_b}}, B + base_idx_of_deq_B + {{tile_col}} * num_elements_per_b_tile, 64);
             {%- else %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
             {%- endif %}
