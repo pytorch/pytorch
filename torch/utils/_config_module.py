@@ -29,11 +29,6 @@ class Config:
     Arguments:
         justknob: the name of the feature / JK. In OSS this is unused.
         default: is the value to default this knob to in OSS.
-
-    The semantics of this knob, are if no one has manually set it, it will resolve once to the underlying JK value.
-    It will not change the JK value at runtime. If the knob has been manually set, it will ignore JK and use the manually set value.
-    Similarly, if this is a OSS run, there is no JK, and it'll return the default value
-
     """
 
     default: bool = True
@@ -72,13 +67,11 @@ def install_config_module(module: ModuleType) -> None:
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
-                config[name] = _ConfigEntry(default=value)
+                config[name] = _ConfigEntry(value)
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, Config):
-                config[name] = _ConfigEntry(
-                    default=value.default, justknob=value.justknob
-                )
+                config[name] = _ConfigEntry(value)
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -159,8 +152,13 @@ class _ConfigEntry:
     user_override: Any = _UNSET_SENTINEL
     # The justknob to check for this config
     justknob: Optional[str] = None
-    # The resolved justknob value
-    justknob_value: Any = None
+
+    def __init__(self, config: Any):
+        if not isinstance(config, Config):
+            self.default = config
+            return
+        self.default = config.default
+        self.justknob = config.justknob
 
 
 class ConfigModule(ModuleType):
@@ -195,15 +193,9 @@ class ConfigModule(ModuleType):
             if config.user_override is not _UNSET_SENTINEL:
                 return config.user_override
 
-            if config.justknob_value is not None:
-                # JK only supports bools and ints
-                return config.justknob_value
             if config.justknob is not None:
-                config.justknob_value = justknobs_check(
-                    name=config.justknob, default=config.default
-                )
                 # JK only supports bools and ints
-                return config.justknob_value
+                return justknobs_check(name=config.justknob, default=config.default)
 
             # Note that reference types can still be modified, so we
             # copy them to user_overrides in case the user overrides
