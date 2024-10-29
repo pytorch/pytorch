@@ -73,12 +73,12 @@ from torch.testing._internal.common_utils import (
     TestCase as TorchTestCase,
 )
 from torch.utils._pytree import (
+    LeafSpec,
     tree_flatten,
     tree_map,
     tree_unflatten,
     TreeSpec,
     treespec_dumps,
-    treespec_leaf,
     treespec_loads,
 )
 
@@ -3861,7 +3861,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         dt = MyDataClass(x=3, y=4)
         flat, spec = tree_flatten(dt)
-        self.assertTrue(spec, treespec_leaf())
+        self.assertTrue(spec, LeafSpec())
         self.assertTrue(len(flat) == 1)
 
         register_dataclass_as_pytree_node(
@@ -3872,9 +3872,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         flat, spec = tree_flatten(dt)
         self.assertEqual(
             spec,
-            TreeSpec(
-                MyDataClass, [["x", "y"], ["z"]], [treespec_leaf(), treespec_leaf()]
-            ),
+            TreeSpec(MyDataClass, [["x", "y"], ["z"]], [LeafSpec(), LeafSpec()]),
         )
         self.assertEqual(flat, [3, 4])
 
@@ -3907,7 +3905,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             TreeSpec(
                 MyOtherDataClass,
                 [["x", "y", "z"], []],
-                [treespec_leaf(), treespec_leaf(), treespec_leaf()],
+                [LeafSpec(), LeafSpec(), LeafSpec()],
             ),
         )
         self.assertEqual(flat, [3, 4, None])

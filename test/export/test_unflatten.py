@@ -36,7 +36,14 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
-from torch.utils._pytree import TreeSpec
+from torch.utils._pytree import (
+    LeafSpec,
+    tree_flatten,
+    tree_unflatten,
+    TreeSpec,
+    treespec_dumps,
+    treespec_loads,
+)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
