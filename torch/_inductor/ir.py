@@ -266,13 +266,11 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
 
 
 @overload
-def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None:
-    ...
+def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None: ...
 
 
 @overload
-def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor:
-    ...
+def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor: ...
 
 
 def ir_node_to_tensor(
@@ -289,9 +287,9 @@ def ir_node_to_tensor(
     size = [shape_fn(s) for s in x.get_size()]
     stride: StrideType
     if is_storage_and_layout(x):
-        stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[misc, union-attr]
+        stride = [shape_fn(s) for s in x.get_layout().stride]
     else:
-        stride = FlexibleLayout.contiguous_strides(size)  # type: ignore[assignment]
+        stride = FlexibleLayout.contiguous_strides(size)
     dtype = x.get_dtype()
     device = x.get_device()
     size = convert_shape_to_symint(size)
@@ -406,7 +404,7 @@ class IRNode:
         return sympy_product(self.get_size())
 
     def is_zero_elements(self):
-        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))  # type: ignore[arg-type]
+        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
 
     def realize(self):
         """
@@ -892,7 +890,7 @@ class Reduction(Loops):
             # We don't support unbacked symints
             return ReductionHint.DEFAULT, 1
 
-        device_interface = get_interface_for_device(get_device_type(device))  # type: ignore[arg-type] # next PR
+        device_interface = get_interface_for_device(get_device_type(device))  # type: ignore[arg-type]
         device_properties = device_interface.Worker.get_device_properties(device)
         if get_device_type(device) == "xpu":
             num_sm = device_properties.gpu_subslice_count
@@ -1130,7 +1128,7 @@ class Reduction(Loops):
             return fn
 
     @classmethod
-    def create(  # type: ignore[override]
+    def create(
         cls,
         device: torch.device,
         dst_dtype: torch.dtype,
@@ -1152,9 +1150,7 @@ class Reduction(Loops):
                 return (
                     bool(val)
                     if dst_dtype == torch.bool
-                    else float(val)
-                    if dst_dtype.is_floating_point
-                    else int(val)
+                    else float(val) if dst_dtype.is_floating_point else int(val)
                 )
 
             rtypes_to_inits = {
@@ -1335,7 +1331,7 @@ class Reduction(Loops):
     ):
         reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
         need_mask = not V.graph.sizevars.is_expr_static_and_true(
-            sympy.Eq(reduction_numel % split, 0)  # type: ignore[arg-type]
+            sympy.Eq(reduction_numel % split, 0)
         )
 
         def wrapper_fn(index, reduction_index):
@@ -1478,7 +1474,7 @@ class Reduction(Loops):
             wrapper_fn,
             ranges,
             reduction_ranges,
-            [*ranges, split],  # type: ignore[list-item]
+            [*ranges, split],
             [block_size],
             reduction_type,
             split,
@@ -1710,7 +1706,7 @@ class WelfordReduction(Reduction):
         """
         reduction_numel = sympy_product(reduction_ranges)
         need_mask = not V.graph.sizevars.is_expr_static_and_true(
-            sympy.Eq(reduction_numel % split, 0)  # type: ignore[arg-type]
+            sympy.Eq(reduction_numel % split, 0)
         )
 
         if need_mask and reduction_type != "welford_combine":
@@ -1750,7 +1746,7 @@ class WelfordReduction(Reduction):
                 )
                 for loader in inner_fns
             ),
-            [*ranges, split],  # type: ignore[list-item]
+            [*ranges, split],
             [block_size],
             reduction_type,
             reduction_hint,
@@ -1775,7 +1771,7 @@ class WelfordReduction(Reduction):
                 for i in intermediates
             ),
             ranges,
-            [split],  # type: ignore[list-item]
+            [split],
             # welford_reduce turns one input into three outputs, which are combined with welford_combine
             "welford_combine",
             reduction_hint,
@@ -1876,7 +1872,7 @@ class Scan(Loops):
         assert len(dtypes) == len(inner_fns)
 
         # Scan with a single element is just a copy
-        if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):  # type: ignore[arg-type]
+        if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):
             return [
                 Pointwise.create(
                     device=device,
@@ -2071,7 +2067,7 @@ class Sort(Loops):
         assert len(dtypes) == len(inner_fns)
 
         # Sort with a single element is just a copy
-        if sizevars.is_expr_static_and_true(sympy.Le(sort_numel, 1)):  # type: ignore[arg-type]
+        if sizevars.is_expr_static_and_true(sympy.Le(sort_numel, 1)):
             return [
                 Pointwise.create(
                     device=device,
@@ -2410,7 +2406,7 @@ class PermuteView(BaseView):
 
     def make_reindexer(self):
         inv = {j: i for i, j in enumerate(self.dims)}
-        inv = [inv[i] for i in range(len(self.dims))]  # type: ignore[index]
+        inv = [inv[i] for i in range(len(self.dims))]
         assert OrderedSet(inv) == OrderedSet(range(len(self.dims)))
 
         def reindex(index):
@@ -2638,12 +2634,12 @@ class View(GenericView):
 
         while stack_old:
             size_old = stack_old.pop()
-            V.graph.sizevars.guard_equals(size_old, 1)  # type: ignore[arg-type]
+            V.graph.sizevars.guard_equals(size_old, 1)
             view_expr.append(sympy.Integer(0))
 
         while stack_new:
             var, size_new = stack_new.pop()
-            V.graph.sizevars.guard_equals(size_new, 1)  # type: ignore[arg-type]
+            V.graph.sizevars.guard_equals(size_new, 1)
 
         view_expr.reverse()
         assert len(view_expr) == len(old_size)
@@ -2651,7 +2647,7 @@ class View(GenericView):
         def reindex(index):
             assert len(index) == len(vars), (len(index), len(vars))
             replacements = dict(zip(vars, index))
-            return tuple(sympy_subs(x, replacements) for x in view_expr)  # type: ignore[arg-type]
+            return tuple(sympy_subs(x, replacements) for x in view_expr)
 
         return reindex
 
@@ -2977,7 +2973,7 @@ class Layout(IRNode):
         if ndim not in [4, 5] or shape[1] == 1:
             return False
         for left, right, size in zip(
-            strides, make_channels_last_strides_for(shape), shape  # type: ignore[arg-type]
+            strides, make_channels_last_strides_for(shape), shape
         ):
             if size != 1 and left != right:
                 return False
@@ -3126,7 +3122,7 @@ class Layout(IRNode):
         )
 
     def storage_size(self) -> sympy.Expr:
-        return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type, return-value]
+        return compute_required_storage_length(self.size, self.stride, self.offset)
 
 
 class FixedLayout(Layout):
@@ -3145,9 +3141,9 @@ class FixedLayout(Layout):
         super().__init__(
             device=device,
             dtype=dtype,
-            size=size,  # type: ignore[arg-type]
+            size=size,
             stride=stride,
-            offset=offset,  # type: ignore[arg-type]
+            offset=offset,
         )
 
     def make_indexer(self):
@@ -3327,7 +3323,7 @@ class NonOwningLayout(Layout):
             return True
         from .utils import ALIGNMENT
 
-        return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)  # type: ignore[arg-type]
+        return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)
 
 
 @ir_dataclass
@@ -3503,7 +3499,7 @@ class Buffer(IRNode):
         )
 
     def is_zero_elements(self):
-        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))  # type: ignore[arg-type]
+        return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
 
     def make_loader(self):
         # Loading from a zero-element buffer is a no-op
@@ -3719,7 +3715,7 @@ class ComputedBuffer(OperationBuffer):
                 else:
                     indices = index_vars
                 stride_lengths = [
-                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads  # type: ignore[arg-type]
+                    V.graph.sizevars.stride_hints(expr, indices) for expr in reads
                 ]
                 from .scheduler import pick_loop_order
 
@@ -4547,7 +4543,9 @@ class ExternKernel(InputsKernel):
         from .codegen.wrapper import get_cpp_op_schema
 
         self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
+        self.cpp_kernel_key = (
+            f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"
+        )
         try:
             self.cpp_op_schema = get_cpp_op_schema(kernel)
         except Exception:
@@ -4589,9 +4587,7 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
-    def process_kernel(
-        cls, kernel, *args, **kwargs
-    ) -> Tuple[
+    def process_kernel(cls, kernel, *args, **kwargs) -> Tuple[
         Any,
         List[Any],
         List[Any],
@@ -4845,7 +4841,7 @@ class ExternKernel(InputsKernel):
                         want_contiguous=False,
                         stride_order=None,
                         allow_padding=allow_padding,
-                        exact_strides=exact_strides,  # type: ignore[arg-type]  # int|Expr vs int|Integer
+                        exact_strides=exact_strides,
                     )
                     return x
             elif isinstance(x.get_layout(), FixedLayout) and (
@@ -4915,7 +4911,7 @@ class ExternKernel(InputsKernel):
             want_contiguous=False,
             stride_order=order,
             allow_padding=allow_padding,
-            exact_strides=exact_strides,  # type: ignore[arg-type]  # int|Expr vs int|Integer
+            exact_strides=exact_strides,
         )
         if order:
             assert is_stride_order_storage_and_layout(x, order)
@@ -5007,9 +5003,7 @@ class ExternKernel(InputsKernel):
                         if self.arg_properties and idx < len(self.arg_properties)
                         else None
                     )
-                result.append(
-                    V.graph.wrapper_code.val_to_arg_str(x, type_)  # type: ignore[arg-type]
-                )
+                result.append(V.graph.wrapper_code.val_to_arg_str(x, type_))
             return result
         else:
             return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
@@ -5033,11 +5027,7 @@ class ExternKernel(InputsKernel):
                     self.arg_properties
                 ), "Invalid access to ExternKernel.arg_properties"
                 type_ = self.arg_properties[i].get("type")
-                args.append(
-                    V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
-                        x, type_
-                    )
-                )
+                args.append(V.graph.wrapper_code.val_to_arg_str(x, type_))
             else:
                 args.append(V.graph.wrapper_code.val_to_arg_str(x))
         if need_codegen_constant_args:
@@ -5073,14 +5063,10 @@ class ExternKernel(InputsKernel):
                         if self.allarg_properties and arg_name in self.allarg_properties
                         else None
                     )
-                    kwargs.append(
-                        V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
-                            v, type_
-                        )
-                    )
+                    kwargs.append(V.graph.wrapper_code.val_to_arg_str(v, type_))
         else:
             kwargs = [
-                f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"  # type: ignore[misc]
+                f"{k}={V.graph.wrapper_code.val_to_arg_str(v)}"
                 for k, v in self.kwargs.items()
             ]
         return kwargs
@@ -5133,7 +5119,7 @@ class ExternKernel(InputsKernel):
         _, add_var = var_builder("c")
         replacement = dict(zip(index_vars, reindex([add_var(x) for x in new_sizes])))
 
-        index = sympy_subs(sympy.expand(index), replacement)  # type: ignore[arg-type]
+        index = sympy_subs(sympy.expand(index), replacement)
         return index, tuple(new_sizes)
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -5418,9 +5404,11 @@ class UserDefinedTritonKernel(ExternKernel):
         constexpr_indices_set = set(constexpr_indices)
         REMOVED = object()
         raw_args = [
-            (idx, arg)
-            if (arg is not None) or (arg is None and idx in constexpr_indices_set)
-            else (idx, REMOVED)
+            (
+                (idx, arg)
+                if (arg is not None) or (arg is None and idx in constexpr_indices_set)
+                else (idx, REMOVED)
+            )
             for idx, arg in enumerate(raw_args)
         ]
         removed_none_args = [idx for idx, val in raw_args if val == REMOVED]
@@ -5490,7 +5478,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
         super().__init__(
             None,
-            NoneLayout(device=self.device),  # type: ignore[arg-type]
+            NoneLayout(device=self.device),
             inputs,
             tuple(constant_args),
             kwargs,
@@ -5559,7 +5547,7 @@ class InplaceBernoulliFallback(ExternKernel):
     def __init__(self, op_overload, x, *constant_args):
         super().__init__(
             None,
-            NoneLayout(device=x.get_device()),  # type: ignore[arg-type]
+            NoneLayout(device=x.get_device()),
             self.unwrap_storage([x]),
             constant_args,
             op_overload=op_overload,
@@ -5611,7 +5599,7 @@ class InplaceCopyFallback(ExternKernel):
         inputs = [cls.realize_input(t) for t in [dst, src]]
         constant_args = (non_blocking,)
         result = InplaceCopyFallback(
-            NoneLayout(device=dst.get_device()),  # type: ignore[arg-type]
+            NoneLayout(device=dst.get_device()),
             inputs,
             constant_args,
         )
@@ -5650,7 +5638,7 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
         assert isinstance(new_size, int), "TODO: dynamic shapes"
         super().__init__(
             None,
-            NoneLayout(device=variable.get_device()),  # type: ignore[arg-type]
+            NoneLayout(device=variable.get_device()),
             self.unwrap_storage([variable]),
             constant_args=(new_size,),
         )
@@ -5746,7 +5734,7 @@ class ScatterFallback(ExternKernel):
 
         super().__init__(
             None,
-            NoneLayout(device=x.get_device()),  # type: ignore[arg-type]
+            NoneLayout(device=x.get_device()),
             self.unwrap_storage(tensors),
             constant_args,
             {"reduce": reduce, "include_self": include_self},
@@ -5794,7 +5782,7 @@ class IndexPutFallback(ExternKernel):
         cpp_kernel_name = "aoti_torch_index_put_out"
         super().__init__(
             None,
-            NoneLayout(device=x.get_device()),  # type: ignore[arg-type]
+            NoneLayout(device=x.get_device()),
             self.unwrap_storage(tensors),
             (accumulate,),
             python_kernel_name="aten.index_put_",
@@ -5855,7 +5843,9 @@ class DynamicScalar(ExternKernel):
 
     def __init__(self, sym, keypath, data):
         data.realize()
-        super().__init__(None, NoneLayout(device=torch.device("cpu")), self.unwrap_storage([data]))  # type: ignore[arg-type]
+        super().__init__(
+            None, NoneLayout(device=torch.device("cpu")), self.unwrap_storage([data])
+        )
         self.sym = sym
         self.keypath = keypath
 
@@ -5881,10 +5871,10 @@ class AssertScalar(ExternKernel):
         super().__init__(
             # Buffer(name, layotu)
             None,
-            NoneLayout(device=torch.device("cpu")),  # type: ignore[arg-type]
+            NoneLayout(device=torch.device("cpu")),
             # InputsKernel(inputs)
             [],
-        )  # type: ignore[arg-type]
+        )
         self.scalar = scalar
         self.msg = msg
 
@@ -6187,7 +6177,7 @@ class FallbackKernel(ExternKernelAlloc):
             return [*args, *ordered_kwargs]
 
         serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
-        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)  # type: ignore[arg-type]
+        named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)
 
         # serialize_outputs
         def handle_single_output(return_type, output):
@@ -6693,7 +6683,7 @@ class InvokeSubgraph(ExternKernel):
             with V.set_graph_handler(subgraph.graph):
                 subgraph.graph.run(*fake_operands)
 
-        outputs = subgraph.graph.graph_outputs  # type: ignore[union-attr]
+        outputs = subgraph.graph.graph_outputs
         device = operands[0].get_device()
         invoke_subgraph = InvokeSubgraph(
             subgraph=subgraph,
@@ -6751,8 +6741,8 @@ class Conditional(ExternKernel):
 
         super().__init__(
             name=None,
-            layout=layout,  # type: ignore[arg-type]
-            inputs=inputs,  # type: ignore[list-item]
+            layout=layout,
+            inputs=inputs,
         )
 
         self.name = V.graph.register_buffer(self)
@@ -6867,8 +6857,8 @@ class WhileLoop(ExternKernel):
 
         super().__init__(
             name=None,
-            layout=layout,  # type: ignore[arg-type]
-            inputs=carried_inputs + additional_inputs,  # type: ignore[list-item]
+            layout=layout,
+            inputs=carried_inputs + additional_inputs,
         )
 
         self.name = V.graph.register_buffer(self)
