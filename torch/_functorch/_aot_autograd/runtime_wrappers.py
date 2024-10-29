@@ -1443,7 +1443,7 @@ class AutogradLazyBackwardCompileInfo:
 class AOTDispatchAutograd:
     @staticmethod
     def process_runtime_tangent(x, meta: Union[PlainTensorMeta, SubclassCreationMeta]):
-        if not isinstance(x, torch.Tensor):
+        if not isinstance(x, torch.Tensor) or isinstance(x, FakeTensor):
             return x, [x]
 
         expected_type: Optional[type] = torch.Tensor
@@ -1807,29 +1807,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # In the future, we should add backward guards that would allow us to
                 # properly handle this case instead of erroring: we would need to retrace the backward graph,
                 # since we might produce an entirely different trace if our grad_outputs are subclass or not.
-                assert (
-                    len(CompiledFunction.metadata.output_types)
-                    == num_flat_bw_args_with_grads
-                )
-
-                grad_output_types = [type(x) for x in flat_bw_args_with_grads]
-                # In general, we can add more asserts/guards here for when we partitioned
-                # with incorrect assumptions about the grad_outputs.
-                # Normalize FakeTensor -> torch.Tensor
-                # - during tracing our types are FakeTensor
-                # - at runtime in the backward our types are torch.Tensor...
-                # - unless we're running compiled backward, in which case they are also FakeTensor
-                grad_output_types_ = [
-                    torch.Tensor if x is FakeTensor else x for x in grad_output_types
-                ]
-                assert (
-                    grad_output_types_ == CompiledFunction.metadata.output_types
-                ), f"""\
-    We incorrectly attempted to compile the backward with incorrect subclass metadata.
-    If you run into this error, please file an issue.
-    Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
-    Got grad_output types: {str(grad_output_types)}"""
-
                 del flat_bw_args_with_grads
 
                 tangents_start_idx = (

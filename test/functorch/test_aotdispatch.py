@@ -78,6 +78,7 @@ from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
     aot_autograd_check,
 )
+from torch.testing._internal.subclasses import WrapSC
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
 
@@ -6210,10 +6211,39 @@ class TestAOTModuleSimplified(AOTTestCase):
         )
         y2 = fn_comp(x2)
         with self.assertRaisesRegex(
-            AssertionError,
-            "We incorrectly attempted to compile the backward with incorrect subclass metadata.",
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             y2.backward(gradient=torch.randn(2, 3))
+
+    def test_tangent_type_coercion(self):
+        def fn(x):
+            return x.clone()
+
+        ref_y = fn(WrapSC(torch.randn(2, 3, requires_grad=True)))
+        ref_y.sum().backward()
+
+        fn_comp = torch.compile(fn, fullgraph=True)
+
+        x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y = fn_comp(x)
+        y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        x2 = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y2 = fn_comp(x2)
+        # Test coercion WrapSC -> TwoTensor
+        y2.backward(gradient=WrapSC(torch.randn(2, 3)))
+
+        y3 = torch.compile(fn, fullgraph=True)(torch.randn(2, 3, requires_grad=True))
+        # Test coercion WrapSC -> Tensor
+        y3.backward(gradient=WrapSC(torch.randn(2, 3)))
 
     @unittest.skipIf(
         not torch.distributed.is_available(), "test requires torch distributed"

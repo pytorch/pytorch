@@ -605,7 +605,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         self, expected_metadata: Any, expected_type: Optional[Type] = None
     ):
         if expected_type is not torch.Tensor:
-            raise RuntimeError("Not implemented")
+            return None
 
         t = self.trigger_wait()
         while isinstance(t, AsyncCollectiveTensor):
