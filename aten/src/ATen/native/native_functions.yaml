@@ -6475,6 +6475,9 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: view_as
+    NestedTensorCPU, NestedTensorCUDA: view_as_nested
 
 - func: where.self(Tensor condition, Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator

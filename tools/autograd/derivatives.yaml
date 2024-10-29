@@ -1920,6 +1920,16 @@
   self: at::view_as_real(grad.contiguous().resolve_conj()) # [gx, gy]
   result: at::view_as_complex(self_t)
 
+- name: view_as(Tensor(a) self, Tensor other) -> Tensor(a)
+  dispatch:
+    Default:
+      # the default case will use the CompositeImplicitAutograd impl
+      self: not_implemented("view_as")
+      other: non_differentiable
+    AutogradNestedTensor:
+      self: grad.view_as(self)
+      other: non_differentiable
+
 - name: where.self(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable
   self: where(condition, grad, 0)

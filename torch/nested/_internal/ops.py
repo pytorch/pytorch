@@ -1431,6 +1431,25 @@ def view_default(func, *args, **kwargs):
         return NestedTensor(func(inp._values, inner_size), **extract_kwargs(inp))
 
 
+@register_jagged_func([torch.ops.aten.view_as.default], "self: jt, other: jt")
+def view_as_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    other = new_kwargs.pop("other")
+
+    error_message = f"view_as(): Cannot view NJT of shape {inp.shape} as shape {other.shape}"
+
+    # verify input is viewable as other's shape
+    if inp._ragged_idx != other._ragged_idx:
+        raise RuntimeError(error_message)
+    torch._assert_async(torch.all(inp._offsets == other._offsets), error_message)
+
+    return NestedTensor(func(inp._values, other._values), **extract_kwargs(other))
+
+
 @register_jagged_func(
     torch.ops.aten.native_layer_norm.default,
     "input: jt_all, normalized_shape: any, weight: any?, bias: any?, eps: any",

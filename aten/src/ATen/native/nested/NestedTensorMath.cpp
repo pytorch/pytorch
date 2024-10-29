@@ -1090,4 +1090,9 @@ Tensor cat_nested(const ITensorListRef& tensors, int64_t dim) {
   return cat_nested_impl(materialized, at::legacy_cat_wrap_dim(dim, materialized));
 }
 
+Tensor view_as_nested(const Tensor& self, const Tensor& other) {
+  TORCH_INTERNAL_ASSERT(false, "view_as(): only implemented for jagged layout nested tensors");
+  return Tensor();
+}
+
 } // namespace at::native
