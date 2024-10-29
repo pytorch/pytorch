@@ -6194,6 +6194,34 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
+    # This can't happen in the opinfo tests due to subprocess creation
+    def test_index_put_error(self, device):
+        import subprocess
+
+        with self.subTest():
+            r = subprocess.call(
+                [
+                    sys.executable,
+                    "-c",
+                    """\
+import torch
+offsets = torch.tensor([0, 2, 5, 7], device='cuda')
+lengths = torch.tensor([2, 2, 2], device='cuda')
+indices = [
+    torch.tensor([0, 1, 2], device='cuda'),
+    torch.tensor([0, 2, 1], device='cuda'),
+    torch.tensor([0, 0, 0], device='cuda'),
+]
+a = torch.nested.nested_tensor_from_jagged(
+    torch.zeros(7, 3, device='cuda'), offsets, lengths
+)
+a[indices] = 1.0
+torch.cuda.synchronize()
+""",
+                ]
+            )
+            self.assertTrue(r != 0)
+
     @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
     def test_profiler_sequence_nr(self):
         with torch.profiler.profile() as prof:
@@ -7915,6 +7943,12 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_ref = op.ref(op, sample)
             self.assertEqualIgnoringNestedInts(out, out_ref)
 
+            # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
+            # TODO: Add xfails for other inplace ops instead of hardcoding
+            if op.inplace_variant and "index_put" in op.full_name:
+                op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
+                self.assertEqualIgnoringNestedInts(sample.input, out_ref)
+
     @withXFails(BACKWARD_FAILURES)
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
@@ -7969,6 +8003,32 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 self.assertEqualIgnoringNestedInts(out_compile, out_ref)
             else:
                 self.assertEqual(out_compile, out_ref)
+
+            # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
+            # TODO: Add xfails for other inplace ops instead of hardcoding
+            if op.inplace_variant and "index_put" in op.full_name:
+                op_fn = op.inplace_variant
+
+                def in_f(*args, **kwargs):
+                    return op_fn(*args, **kwargs)
+
+                compiled_in_f = torch.compile(
+                    in_f, fullgraph=True, backend="aot_eager_decomp_partition"
+                )
+
+                if sample.input.is_contiguous():
+                    compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                    if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                        self.assertEqualIgnoringNestedInts(sample.input, out_ref)
+                    else:
+                        self.assertEqual(sample.input, out_ref)
+                else:
+                    # see https://github.com/pytorch/pytorch/issues/106456
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
+                    ):
+                        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
 
     @withXFails(COMPILE_BACKWARD_FAILURES)
     @ops(
