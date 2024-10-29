@@ -7,15 +7,10 @@ from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.nn import Linear
 from torch.optim import SGD
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_CUDA,
-    TEST_WITH_DEV_DBG_ASAN,
-)
-
+from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_WITH_DEV_DBG_ASAN, TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -71,8 +66,7 @@ class TestUnevenParamShard(FSDPTest):
             self.assertEqual(ref_forward_output_my_rank, out)
             self.assertEqual(ref_weight_out, weight_out)
 
-
-devices = ("cuda", "hpu")
+devices = ("hpu" if TEST_HPU else "cuda")
 instantiate_device_type_tests(TestUnevenParamShard, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

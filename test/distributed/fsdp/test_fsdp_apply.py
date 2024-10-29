@@ -6,7 +6,6 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DEVICEInitMode,
@@ -15,12 +14,8 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import (
-    run_tests,
-    TEST_CUDA,
-    TEST_WITH_DEV_DBG_ASAN,
-)
-
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN, TEST_CUDA
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -108,7 +103,6 @@ class TestApply(FSDPTest):
         with transformer.summon_full_params(transformer):
             with self.assertRaisesRegex(ValueError, "expected to be in states"):
                 transformer.apply(self._init_linear_weights)
-
 
 devices = ("cuda", "hpu")
 instantiate_device_type_tests(TestApply, globals(), only_for=devices)

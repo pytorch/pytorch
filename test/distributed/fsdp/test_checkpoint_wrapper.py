@@ -15,13 +15,13 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     OffloadWrapper,
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TEST_HPU, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, TEST_HPU
 from torch.utils.checkpoint import checkpoint
-
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 _SAVED_PREFIX = "_saved_"
 GRAD_FN_NEXT_FUNCTIONS = "next_functions"
+
 
 
 class CheckpointWrapperTest(TestCase):
@@ -154,11 +154,9 @@ class CheckpointWrapperTest(TestCase):
                 self.use_reentrant = use_reentrant
                 wrp = partial(
                     checkpoint_wrapper,
-                    checkpoint_impl=(
-                        CheckpointImpl.REENTRANT
-                        if use_reentrant
-                        else CheckpointImpl.NO_REENTRANT
-                    ),
+                    checkpoint_impl=CheckpointImpl.REENTRANT
+                    if use_reentrant
+                    else CheckpointImpl.NO_REENTRANT,
                 )
                 for i in range(self.n):
                     l = nn.Sequential(
@@ -196,7 +194,7 @@ class CheckpointWrapperTest(TestCase):
                 torch.cuda.reset_peak_memory_stats()
                 loss = a(x).sum()
                 loss.backward()
-                return torch.cuda.max_memory_allocated()
+                return torch.cuda.max_memory_allocated()             
 
         functional_no_reentrant = test(
             use_checkpointing=True, use_wrapper=False, use_reentrant=False
@@ -391,8 +389,7 @@ class CheckpointWrapperTest(TestCase):
 
         torch.autograd.graph.saved_tensors_hooks.__init__ = orig_init
 
-
-devices = ("cuda", "hpu")
+devices = ("hpu" if TEST_HPU else "cuda")
 instantiate_device_type_tests(CheckpointWrapperTest, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

@@ -1,10 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 import torch
 from torch.distributed.fsdp._trace_utils import _ExecOrderTracer
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_HPU,
+    TestCase,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TestCase
-
-
 class Model(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -31,7 +33,6 @@ class Model(torch.nn.Module):
             # saved data structures
             z = self.relu(self.layer0(x))
         return z
-
 
 class TestSymbolicTracing(TestCase):
     def test_symbolic_tracing_outputs(self):
@@ -111,9 +112,7 @@ class TestSymbolicTracing(TestCase):
             len(exec_info.visited_params), len(exec_info.param_forward_order)
         )
         self.assertEqual(exec_info.visited_params, set(exec_info.param_forward_order))
-
-
-devices = ("cuda", "hpu")
+devices = ("hpu" if TEST_HPU else "cuda")
 instantiate_device_type_tests(TestSymbolicTracing, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
