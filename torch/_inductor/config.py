@@ -271,7 +271,7 @@ reorder_for_compute_comm_overlap_passes = [
 ]
 
 # enable operator reordering for peak memory optimization
-reorder_for_peak_memory = os.environ.get("TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY") == "1"
+reorder_for_peak_memory = True
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
@@ -1069,6 +1069,9 @@ class aot_inductor:
         os.environ.get("AOTINDUCTOR_RAISE_ERROR_ON_IGNORED_OPTIMIZATION", "1") == "1"
     )
 
+    # Dictionary of presets that can be passed in
+    presets: Dict[str, Any] = {}
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -1220,6 +1223,9 @@ class halide:
 class trace:
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+
+    # save real tensors
+    save_real_tensors = os.environ.get("TORCH_COMPILE_DEBUG_SAVE_REAL", "0") == "1"
 
     # Save debug information to a temporary directory
     # If not specified, a temp directory will be created by system
