@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from .codegen.common import WorkspaceArg
 
 from . import config
+from .codegen.common import WorkspaceZeroMode
 from .runtime.benchmarking import benchmarker
 from .virtualized import V
 
@@ -468,58 +469,6 @@ class TensorMeta:
 
 
 @dataclasses.dataclass
-class InputSet:
-    """Represents a set of inputs and outputs with optional workspace"""
-
-    input_tensors: List[torch.Tensor]
-    output_tensor: Optional[torch.Tensor]
-    workspace: Optional[torch.Tensor] = None
-
-    def unpack(self):
-        return dataclasses.astuple(self)
-
-
-@dataclasses.dataclass
-class AutotuneInputs:
-    """During autotuning, we need to pass the same inputs to all choices.
-
-    Note:
-        Since we typically have a mix of external choices and triton choices, we create
-        two lists of inputs, one for external inputs and one for triton inputs.
-    """
-
-    standard: InputSet
-    extern: InputSet
-    expected: Optional[torch.Tensor] = None
-
-    def get_input_set(self, extern=False) -> InputSet:
-        """Returns the inputs and output tensors for a given choice."""
-        input_set = self.extern if extern else self.standard
-        return input_set
-
-    @classmethod
-    def from_separate_inputs(
-        cls,
-        example_inputs: List[torch.Tensor],
-        example_inputs_extern: List[torch.Tensor],
-        out: torch.Tensor,
-        out_extern: torch.Tensor,
-        expected: Optional[torch.Tensor] = None,
-        workspace: Optional[torch.Tensor] = None,
-    ) -> AutotuneInputs:
-        """Factory method to create AutotuneInputs from separate inputs/outputs"""
-        return cls(
-            standard=InputSet(example_inputs, out, workspace),
-            extern=InputSet(example_inputs_extern, out_extern, workspace),
-            expected=expected,
-        )
-
-    def verify(self, **kwargs):
-        """Verify the correctness of the benchmarking results"""
-        torch.testing.assert_close(self.extern.output_tensor, self.expected, **kwargs)
-
-
-@dataclasses.dataclass
 class BenchmarkRequest:
     """
     Only handle triton template benchmark for now. The extern kernel benchmark
@@ -551,10 +500,7 @@ class BenchmarkRequest:
         self.extra_args = extra_args
 
     def make_run_fn(
-        self,
-        *input_tensors: torch.Tensor,
-        output_tensor: torch.Tensor,
-        workspace: Optional[torch.Tensor] = None,
+        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
         raise NotImplementedError
 
@@ -566,7 +512,6 @@ class BenchmarkRequest:
         fn,
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
-        workspace: Optional[torch.Tensor] = None,
     ) -> float:
         raise NotImplementedError
 
@@ -574,7 +519,6 @@ class BenchmarkRequest:
         self,
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
-        workspace: Optional[torch.Tensor] = None,
     ) -> float:
         debug = log.isEnabledFor(logging.DEBUG)
         if debug:
@@ -583,7 +527,6 @@ class BenchmarkRequest:
         # create args and out tensor
         if output_tensor is None:
             assert len(input_tensors) == 0
-            assert workspace is None, "Workspace is not supported when out is None"
             input_tensors = tuple(x.to_tensor() for x in self.input_tensor_meta)
             output_tensor = self.output_tensor_meta.to_tensor()
 
@@ -591,9 +534,7 @@ class BenchmarkRequest:
             create_tensor_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
         try:
-            fn = self.make_run_fn(
-                *input_tensors, output_tensor=output_tensor, workspace=workspace
-            )
+            fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
         except NonzeroWorkspaceNotSupportedError:
             # Skipping all ops with nonzero workspace requirements
             log.info("Skipping op due to nonzero workspace requirement")
@@ -603,9 +544,7 @@ class BenchmarkRequest:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
-        out = self.do_bench(
-            fn, *input_tensors, output_tensor=output_tensor, workspace=workspace
-        )
+        out = self.do_bench(fn, *input_tensors, output_tensor)
 
         if debug:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -630,10 +569,7 @@ class TestBenchmarkRequest(BenchmarkRequest):
         self.value = value
 
     def benchmark(
-        self,
-        *input_tensors: torch.Tensor,
-        output_tensor: Optional[torch.Tensor] = None,
-        workspace: Optional[torch.Tensor] = None,
+        self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
         if self.value is None:
             raise Exception("Failed to run")  # noqa: TRY002
@@ -646,11 +582,10 @@ class GPUDeviceBenchmarkMixin:
         fn,
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
-        workspace: Optional[torch.Tensor] = None,
     ) -> float:
         device_idx_set = {
             tensor.device.index
-            for tensor in [*input_tensors, output_tensor, workspace]
+            for tensor in [*input_tensors, output_tensor]
             if isinstance(tensor, torch.Tensor)
             and tensor.is_cuda
             and tensor.device.index is not None
@@ -674,7 +609,6 @@ class CPUDeviceBenchmarkMixin:
         fn,
         *input_tensors: torch.Tensor,
         output_tensor: Optional[torch.Tensor] = None,
-        workspace: Optional[torch.Tensor] = None,
     ) -> float:
         return benchmarker.benchmark_cpu(fn)
 
@@ -706,10 +640,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         self.workspace_arg = workspace_arg
 
     def make_run_fn(
-        self,
-        *input_tensors: torch.Tensor,
-        output_tensor: torch.Tensor,
-        workspace: Optional[torch.Tensor] = None,
+        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
         log.debug(
@@ -736,20 +667,48 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
             stream = get_raw_stream(self.output_tensor_meta.device.index)
 
-        arg_list = [*input_tensors, output_tensor]
-        if workspace is not None:
-            assert self.workspace_arg is not None, "Mismatch: workspace passed in while the template doesn't have a workspace arg"
-            arg_list.append(workspace)
+        if self.workspace_arg is not None:
+            # Create a function that handles both workspace creation and kernel execution
+            workspace_arg = self.workspace_arg
 
-        return functools.partial(
-            run_method,
-            *arg_list,
-            *self.extra_args,
-            grid=self.grid,
-            **warmup_arg,
-            stream=stream,
-            benchmark_run=True,
-        )
+            def run_with_workspace():
+                # Create workspace tensor
+                workspace_size = workspace_arg.count
+                workspace_tensor = torch.empty_strided(
+                    (workspace_size,),
+                    (1,),
+                    dtype=torch.uint8,
+                    device=output_tensor.device,
+                )
+
+                # Handle zero initialization if needed
+                if workspace_arg.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL:
+                    workspace_tensor.zero_()
+
+                # Run the kernel with workspace
+                run_method(
+                    *input_tensors,
+                    output_tensor,
+                    workspace_tensor,
+                    *extra_args,
+                    grid=self.grid,
+                    **warmup_arg,
+                    stream=stream,
+                    benchmark_run=True,
+                )
+
+            return run_with_workspace
+        else:
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                stream=stream,
+                benchmark_run=True,
+            )
 
     def precompile(self):
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
@@ -797,14 +756,8 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
-        self,
-        *input_tensors: torch.Tensor,
-        output_tensor: torch.Tensor,
-        workspace: Optional[torch.Tensor] = None,
+        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
-        assert (
-            workspace is None
-        ), "Workspace is not supported for generic CUDA benchmark"
         self.ensure_dll_loaded()
         self.update_workspace_size()
         args = [
@@ -915,12 +868,8 @@ class CppBenchmarkRequest(CPUDeviceBenchmarkMixin, BenchmarkRequest):
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
-        self,
-        *input_tensors: torch.Tensor,
-        output_tensor: torch.Tensor,
-        workspace: Optional[torch.Tensor] = None,
+        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
-        assert workspace is None, "Workspace is not supported for generic CPU benchmark"
         # TODO(jgong5): use CppPythonBindingsCodeCache for better binding perf
         self.DLL = CppCodeCache.load(self.source_code, device_type="cpu")
         args = [tensor.data_ptr() for tensor in list(input_tensors) + [output_tensor]]

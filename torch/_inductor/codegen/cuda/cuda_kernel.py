@@ -2,7 +2,6 @@
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
-from torch import Tensor
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
 from ...autotune_process import CUDABenchmarkRequest
@@ -388,10 +387,10 @@ class CUDATemplateCaller(ChoiceCaller):
         assert self.bmreq is not None
         self.bmreq.precompile()
 
-    def benchmark(self, *args, out, workspace: Optional[Tensor] = None) -> float:
+    def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
         return self.bmreq.benchmark(
-            *args, output_tensor=out, workspace=workspace
+            *args, output_tensor=out
         )  # @TODO: Hack for ensuring that Cutlass Kernel is preferred
 
     def __str__(self) -> str:

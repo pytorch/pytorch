@@ -5,6 +5,7 @@ import sympy
 
 import torch
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
+from torch.utils._triton import has_triton_tma
 
 from .. import config as inductor_config
 from ..ir import ChoiceCaller, Layout, StorageBox, TensorBox
