@@ -15,10 +15,9 @@ import time
 from collections import defaultdict
 from contextlib import ExitStack
 from datetime import datetime
+from importlib.metadata import Distribution, PackageNotFoundError
 from pathlib import Path
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
-
-import pkg_resources
 
 import torch
 import torch.distributed as dist
@@ -1753,9 +1752,10 @@ def check_pip_packages() -> None:
         "pytest-flakefinder",
         "pytest-xdist",
     ]
-    installed_packages = [i.key for i in pkg_resources.working_set]
     for package in packages:
-        if package not in installed_packages:
+        try:
+            Distribution.from_name(package)
+        except PackageNotFoundError:
             print_to_stderr(
                 f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
             )
