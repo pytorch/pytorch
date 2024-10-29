@@ -86,7 +86,6 @@ class TestConfigModule(TestCase):
         for k in config._config:
             config._config[k].user_override = _UNSET_SENTINEL
 
-
     def test_save_config(self):
         p = config.save_config()
         self.assertEqual(

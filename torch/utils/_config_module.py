@@ -47,11 +47,6 @@ class Config:
         default
 
     i.e. if set, env_name_force would override a user override, but a user override will override a JK.
-
-    justknob - The semantics of this knob, are if no one has manually set it, it will resolve once to the underlying JK value.
-    It will not change the JK value at runtime. If the knob has been manually set, it will ignore JK and use the manually set value.
-    Similarly, if this is a OSS run, there is no JK, and it'll return the default value
-
     """
 
     default: bool = True
@@ -107,24 +102,12 @@ def install_config_module(module: ModuleType) -> None:
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
-                config[name] = _ConfigEntry(default=value)
+                config[name] = _ConfigEntry(value)
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, Config):
-                config[name] = _ConfigEntry(
-                    default=value.default, justknob=value.justknob
-                )
+                config[name] = _ConfigEntry(value)
 
-                if value.env_name_default is not None:
-                    if (
-                        env_value := _read_env_variable(value.env_name_default)
-                    ) is not None:
-                        config[name].env_value_default = env_value
-                if value.env_name_force is not None:
-                    if (
-                        env_value := _read_env_variable(value.env_name_force)
-                    ) is not None:
-                        config[name].env_value_force = env_value
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -205,11 +188,22 @@ class _ConfigEntry:
     user_override: Any = _UNSET_SENTINEL
     # The justknob to check for this config
     justknob: Optional[str] = None
-    # The resolved justknob value
-    justknob_value: Any = None
     # environment variables are read at install time
     env_value_force: Any = _UNSET_SENTINEL
     env_value_default: Any = _UNSET_SENTINEL
+
+    def __init__(self, config: Any):
+        if not isinstance(config, Config):
+            self.default = config
+            return
+        self.default = config.default
+        self.justknob = config.justknob
+        if config.env_name_default is not None:
+            if (env_value := _read_env_variable(config.env_name_default)) is not None:
+                self.env_value_default = env_value
+        if config.env_name_force is not None:
+            if (env_value := _read_env_variable(config.env_name_force)) is not None:
+                self.env_value_force = env_value
 
 
 class ConfigModule(ModuleType):
@@ -251,15 +245,9 @@ class ConfigModule(ModuleType):
             if config.env_value_default is not _UNSET_SENTINEL:
                 return config.env_value_default
 
-            if config.justknob_value is not None:
-                # JK only supports bools and ints
-                return config.justknob_value
             if config.justknob is not None:
-                config.justknob_value = justknobs_check(
-                    name=config.justknob, default=config.default
-                )
                 # JK only supports bools and ints
-                return config.justknob_value
+                return justknobs_check(name=config.justknob, default=config.default)
 
             # Note that reference types can still be modified, so we
             # copy them to user_overrides in case the user overrides
