@@ -310,9 +310,10 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
 }
 
 /**
- * @brief Copies data from a non-contiguous CPU tensor to a GPU tensor directly, 
- * handling 1D and 2D cases without creating temporary contiguous buffers.
- * 
+ * @brief Attempts to copy data from a non-contiguous CPU tensor to a GPU tensor directly, 
+ * handling 1D and 2D cases without creating temporary contiguous buffers. Returns `true` 
+ * if the copy was successful, or `false` if conditions for the optimized path were not met.
+ *
  * This function leverages `cudaMemcpy2DAsync` to efficiently perform 2D memory 
  * transfers by specifying pitch (stride) information, which eliminates the need 
  * for temporary contiguous buffers for non-contiguous tensors. 
@@ -332,14 +333,20 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
  * Preconditions:
  * - `iter` must represent a non-contiguous tensor with 1 or 2 dimensions.
  * - The `src` and `dst` tensors must have valid stride and size information.
- * - Appropriate error checks ensure pitch (stride) values are compatible with the width of each row.
+ * - The function checks that pitch (stride) values are compatible with the width of each row.
+ *   If these conditions are not met, the function returns `false`, indicating that a fallback 
+ *   copy method should be used.
+  * 
+ * @return bool         Returns `true` if the copy was successfully performed with `cudaMemcpy2DAsync`.
+ *                      Returns `false` if conditions were not met for the optimized path.
  */
-static void copy_non_contiguous_2d(
+static bool copy_non_contiguous_2d(
   void* dst,
   const void* src,
   const TensorIterator& iter,
   cudaMemcpyKind kind,
-  cudaStream_t stream) {
+  cudaStream_t stream, 
+  bool non_blocking = false) {
 
   const auto& dst_tensor = iter.tensor(0);
   const auto& src_tensor = iter.tensor(1);
@@ -371,10 +378,12 @@ static void copy_non_contiguous_2d(
       height = dim0;
   }
 
-  TORCH_CHECK(src_pitch >= width_in_bytes, "Source pitch must be >= width_in_bytes");
-  TORCH_CHECK(dst_pitch >= width_in_bytes, "Destination pitch must be >= width_in_bytes");
+  // if conditions not met, fallback needed
+  if (src_pitch < width_in_bytes || dst_pitch < width_in_bytes) {
+    return false;  
+  }
 
-  at::cuda::memcpy2d_and_sync(
+  at::cuda::memcpy2d_conditional_sync(
       dst,
       src,
       src_pitch,
@@ -382,8 +391,11 @@ static void copy_non_contiguous_2d(
       width_in_bytes,
       height,
       kind,
-      stream
+      stream,
+      non_blocking
   );
+
+  return true;
 }
 
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
@@ -460,6 +472,13 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   int64_t nbytes = iter.numel() * iter.element_size(0);
   CUDAStream stream = getCurrentCUDAStream();
 
+  // Try optimized 1D/2D non-contiguous path first for both blocking and non-blocking
+  if (iter.ndim() <= 2 && !iter.is_contiguous()) {       
+    if (copy_non_contiguous_2d(dst, src, iter, kind, stream, non_blocking)) {
+      return; 
+    }
+  } 
+
   if (non_blocking) {
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
     // we use both the storage context and the tensor data pointer as the key
@@ -481,12 +500,8 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     // TODO: warn on the return value.
     CachingHostAllocator_recordEvent(ptr, ctx, stream);
 
-  } else { 
-    if (iter.ndim() <= 2 && !iter.is_contiguous()) {       
-      copy_non_contiguous_2d(dst, src, iter, kind, stream);      
-    } else {
-      at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
-    }
+  } else {   
+    at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);    
   }
 
   if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
