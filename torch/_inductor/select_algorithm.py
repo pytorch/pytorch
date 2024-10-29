@@ -34,12 +34,7 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import (
-    IndentedBuffer,
-    KernelTemplate,
-    WorkspaceArg,
-    WorkspaceZeroMode,
-)
+from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -1494,35 +1489,6 @@ class AlgorithmSelectorCache(PersistentCache):
             out_extern = torch.as_strided(
                 out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
             )
-            # Make sure that all workspace sizes for each choice are the same
-            triton_templates_choices = [
-                choice for choice in choices if isinstance(choice, TritonTemplateCaller)
-            ]
-            needs_workspace = any(
-                choice.workspace_arg is not None for choice in triton_templates_choices
-            )
-            if needs_workspace:
-                # TODO right now we only support the same workspace arg for all choices
-                # TODO 2 Currently we not benchmark the workspace creation time
-                assert (
-                    triton_templates_choices[0].workspace_arg is not None
-                ), "Expected all triton templates choices to have the same workspace arg."
-                workspace: WorkspaceArg = triton_templates_choices[0].workspace_arg
-                assert all(
-                    WorkspaceArg.can_join(choice.workspace_arg, workspace)
-                    for choice in triton_templates_choices
-                ), "All choices must have the same workspace argument."
-                size, zero_mode = workspace.count, workspace.zero_mode
-                workspace_tensor = torch.empty_strided(
-                    (size,), (1,), dtype=torch.uint8, device=out.device
-                )
-                assert zero_mode in (
-                    WorkspaceZeroMode.ZERO_ON_CALL,
-                    WorkspaceZeroMode.UNINITIALIZED,
-                )
-                if zero_mode == WorkspaceZeroMode.ZERO_ON_CALL:
-                    workspace_tensor.zero_()
-                example_inputs.append(workspace_tensor)
 
             expected = None
             if VERIFY:

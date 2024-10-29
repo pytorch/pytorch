@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from .codegen.common import WorkspaceArg
 
 from . import config
+from .codegen.common import WorkspaceZeroMode
 from .runtime.benchmarking import benchmarker
 from .virtualized import V
 
@@ -667,21 +668,47 @@ class TritonBenchmarkRequest(BenchmarkRequest):
             stream = get_raw_stream(self.output_tensor_meta.device.index)
 
         if self.workspace_arg is not None:
-            # Triton will generate code with the arg signature (args, output, workspace)
-            # We thus need to flip the order of the last entry in input_tensor and output_tensor
-            arg_list = [*input_tensors[:-1], output_tensor, input_tensors[-1]]
-        else:
-            arg_list = [*input_tensors, output_tensor]
+            # Create a function that handles both workspace creation and kernel execution
+            workspace_arg = self.workspace_arg
 
-        return functools.partial(
-            run_method,
-            *arg_list,
-            *self.extra_args,
-            grid=self.grid,
-            **warmup_arg,
-            stream=stream,
-            benchmark_run=True,
-        )
+            def run_with_workspace():
+                # Create workspace tensor
+                workspace_size = workspace_arg.count
+                workspace_tensor = torch.empty_strided(
+                    (workspace_size,),
+                    (1,),
+                    dtype=torch.uint8,
+                    device=output_tensor.device,
+                )
+
+                # Handle zero initialization if needed
+                if workspace_arg.zero_mode == WorkspaceZeroMode.ZERO_ON_CALL:
+                    workspace_tensor.zero_()
+
+                # Run the kernel with workspace
+                run_method(
+                    *input_tensors,
+                    output_tensor,
+                    workspace_tensor,
+                    *extra_args,
+                    grid=self.grid,
+                    **warmup_arg,
+                    stream=stream,
+                    benchmark_run=True,
+                )
+
+            return run_with_workspace
+        else:
+            return functools.partial(
+                run_method,
+                *input_tensors,
+                output_tensor,
+                *extra_args,
+                grid=self.grid,
+                **warmup_arg,
+                stream=stream,
+                benchmark_run=True,
+            )
 
     def precompile(self):
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
