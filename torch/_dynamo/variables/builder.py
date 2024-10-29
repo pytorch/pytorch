@@ -3,6 +3,7 @@
 import abc
 import collections
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -42,6 +43,7 @@ from torch._utils_internal import justknobs_check
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
     _constrain_range_for_size,
+    _nested_int_aware_sort,
     DimDynamic,
     RelaxedUnspecConstraint,
     StatefulSymbolicContext,
@@ -57,6 +59,13 @@ from .. import config, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, unimplemented
 from ..guards import GuardBuilder, install_guard, make_dupe_guard
+from ..pgo import (
+    auto_dynamic,
+    auto_unset,
+    FrameStateSizeEntry,
+    InferStride,
+    process_automatic_dynamic,
+)
 from ..side_effects import SideEffects
 from ..source import (
     AttrProxySource,
@@ -104,6 +113,7 @@ from ..utils import (
     istype,
     odict_values,
     proxy_args_kwargs,
+    range_iterator,
     set_example_value,
     tensor_always_has_static_shape,
     tuple_iterator,
@@ -139,6 +149,7 @@ from .distributed import (
 )
 from .functions import (
     CollectiveFunctionRewriteVariable,
+    CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
     TritonKernelVariable,
     UserFunctionVariable,
@@ -150,6 +161,7 @@ from .iter import ItertoolsVariable
 from .lazy import LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    ListIteratorVariable,
     ListVariable,
     NamedTupleVariable,
     RangeVariable,
@@ -193,6 +205,7 @@ from .script_object import TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
     NumpyNdarrayVariable,
+    supported_const_comparison_op_values,
     SymNodeVariable,
     TensorSubclassVariable,
     TensorVariable,
@@ -202,6 +215,7 @@ from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .torch_function import (
     build_torch_function_fn,
     TensorWithTFOverrideVariable,
+    torch_function_mode_stack_state_mgr,
     TorchFunctionModeVariable,
 )
 from .user_defined import (
@@ -325,13 +339,6 @@ class BackwardStateGraphArg(GraphArg):
         codegen.store(codegen.tx.output.backward_state_var)
 
 
-@dataclasses.dataclass
-class FrameStateSizeEntry:
-    scalar: Optional[int]
-    size: Optional[List[int]]
-    stride: Optional[List[int]]
-
-
 # All class-based iterators in itertools
 # NOTE: use id() because some objects are not hashable, it will raise error during lookup
 ITERTOOLS_TYPE_IDS: FrozenSet[int] = frozenset(
@@ -425,8 +432,12 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_mutable(value, var)
 
     @classmethod
-    @functools.lru_cache(None)
     def _type_dispatch(cls):
+        return cls._type_dispatch_impl(config.trace_numpy)
+
+    @classmethod
+    @functools.lru_cache(None)
+    def _type_dispatch_impl(cls, trace_numpy):
         # NB: Careful not to close over self to avoid ref cycle from lru_cache
         entries = [
             (
@@ -443,6 +454,7 @@ class VariableBuilder:
                 cls.wrap_listlike,
             ),
             (tuple_iterator, cls.wrap_tuple_iterator),
+            (range_iterator, cls.wrap_range_iterator),
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
             (re.Pattern, cls.wrap_regex_pattern),
@@ -451,7 +463,7 @@ class VariableBuilder:
             (torch.jit.ScriptFunction, cls.wrap_jit_function),
         ]
 
-        if config.trace_numpy and np:
+        if trace_numpy and np:
             entries.append((np.ndarray, cls.wrap_numpy_ndarray))
 
         result = {}
@@ -522,7 +534,7 @@ class VariableBuilder:
 
     def _wrap(self, value):
         # import here to avoid circular dependencies
-        from torch.utils._triton import has_triton
+        from torch.utils._triton import has_triton, has_triton_tma
 
         if has_triton():
             from triton.runtime.autotuner import Autotuner
@@ -533,6 +545,19 @@ class VariableBuilder:
                 pass
 
             class Autotuner:
+                pass
+
+        if has_triton_tma():
+            from triton.tools.experimental_descriptor import (
+                create_1d_tma_descriptor,
+                create_2d_tma_descriptor,
+            )
+        else:
+
+            def create_1d_tma_descriptor():
+                pass
+
+            def create_2d_tma_descriptor():
                 pass
 
         # Handle exact type() match
@@ -964,6 +989,10 @@ class VariableBuilder:
                 None,  # No grid provided
                 source=self.source,
             )
+        elif value is create_1d_tma_descriptor:
+            return CreateTMADescriptorVariable(rank=1)
+        elif value is create_2d_tma_descriptor:
+            return CreateTMADescriptorVariable(rank=2)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             self.install_guards(GuardBuilder.ID_MATCH)
             return AutocastModeVariable(
@@ -1289,6 +1318,12 @@ class VariableBuilder:
         )
 
         return self.set_source_and_track_mutable(value, result)
+
+    def wrap_range_iterator(self, value: range_iterator):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        # Get all the values from the range iterator
+        items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
+        return ListIteratorVariable(items, mutable_local=MutableLocal())
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -1667,15 +1702,16 @@ class VariableBuilder:
                 # but warning is not the end of the world
                 assert isinstance(value.base, np.nditer)
 
-        try:
-            tensor_value = _util._try_convert_to_tensor(value)
-            if readonly:
-                from torch._prims_common import clone_preserve_strides
+        with torch_function_mode_stack_state_mgr.temp_restore_stack():
+            try:
+                tensor_value = _util._try_convert_to_tensor(value)
+                if readonly:
+                    from torch._prims_common import clone_preserve_strides
 
-                tensor_value = clone_preserve_strides(tensor_value)
-        except NotImplementedError as e:
-            # failed to convert to tensor, graph break
-            unimplemented(str(e))
+                    tensor_value = clone_preserve_strides(tensor_value)
+            except NotImplementedError as e:
+                # failed to convert to tensor, graph break
+                unimplemented(str(e))
 
         # We do this because we want the full behavior of guarding the numpy ndarray as if it were
         # a tensor. It's a little annoying to make a VT to throw out, but there's so many side effects here
@@ -1740,58 +1776,20 @@ class VariableBuilder:
 
             name = self.source.name()
 
-            def update_frame_state(value):
-                if name not in self.tx.output.frame_state:
-                    # Note - this essentially means that if this name gets reused as a tensor,
-                    # it will start fully dynamic. That should always be a safe option, and not awfully inefficient.
-                    # Alternatively, if we want to improve pef here, we can add a third state of unset, but I am not
-                    # sure that is necessary for now.
-                    frame_state_entry = FrameStateSizeEntry(
-                        scalar=value, size=None, stride=None
-                    )
-                else:
-                    frame_state_entry = self.tx.output.frame_state[name]
-                    if frame_state_entry.scalar != value:
-                        log.debug(
-                            "automatic dynamic int %s val %s != %s",
-                            name,
-                            value,
-                            frame_state_entry.scalar,
-                        )
-                        if self.source.guard_source().is_unspecialized_nn_module():
-                            log.info(
-                                "%s",
-                                (
-                                    f"{name} is converted to a symbolic integer. It is an attribute of a "
-                                    "user defined nn module class. If you wish to keep it static, you can "
-                                    "mark the nn module class as `torch._dynamo.mark_static`."
-                                ),
-                            )
-                        frame_state_entry.scalar = None
-                self.tx.output.frame_state[name] = frame_state_entry
-
-            if (st := self.tx.distributed_state) is None:
-                update_frame_state(value)
-                frame_state_entry = self.tx.output.frame_state[name]
-            elif st.all_states is None:
-                # Preflight, always pretend as if it's static
-                frame_state_entry = FrameStateSizeEntry(
-                    size=None, scalar=value, stride=None
-                )
-                st.local_state.input_sizes[name] = value
-            else:
-                # Apply the updates
-                for sub_state in st.all_states:
-                    if name in sub_state.input_sizes:
-                        update_frame_state(sub_state.input_sizes[name])
-                frame_state_entry = self.tx.output.frame_state[name]
+            frame_state_entry = process_automatic_dynamic(
+                self.tx,
+                name,
+                FrameStateSizeEntry.make_scalar(value),
+                is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+            )
 
             # TODO: This should be dynamic, as we in general do not
             # know if bare integers are actually going to be sizevars
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
             if (
-                config.automatic_dynamic_shapes and frame_state_entry.scalar is None
+                config.automatic_dynamic_shapes
+                and frame_state_entry.scalar is auto_dynamic
             ) or not config.assume_static_by_default:
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
@@ -2321,12 +2319,16 @@ def wrap_fx_proxy_cls(
 
         set_example_value(proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
-    elif isinstance(example_value, bool) and proxy.node.target in [
-        torch._C._are_functorch_transforms_active,
-        torch.backends.cuda.is_flash_attention_available,
-        torch.backends.cuda.can_use_flash_attention,
-        torch.backends.cuda.can_use_efficient_attention,
-    ]:
+    elif isinstance(example_value, bool) and (
+        proxy.node.target
+        in [
+            torch._C._are_functorch_transforms_active,
+            torch.backends.cuda.is_flash_attention_available,
+            torch.backends.cuda.can_use_flash_attention,
+            torch.backends.cuda.can_use_efficient_attention,
+        ]
+        + list(supported_const_comparison_op_values.keys())
+    ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif (
@@ -2441,99 +2443,42 @@ def _automatic_dynamic(
         )
 
     # Prep for automatic dynamic
-    def update_frame_state(size, stride):
-        # Intentionally shadow e from parent scope so it is not accidentally
-        # called
-        e = None
-        frame_state_entry = None
-        if name not in tx.output.frame_state:
-            # If there is no entry for this source, add the tensor to frame state with its current static size.
-            # E.g., {} -> {"x": [2, 4]}
-            frame_state_entry = FrameStateSizeEntry(None, None, None)
-            frame_state_entry.size = list(size)
-            frame_state_entry.stride = list(stride)
-        else:
-            frame_state_entry = tx.output.frame_state[name]
-            if frame_state_entry.size is not None:
-                if len(size) != len(frame_state_entry.size):
-                    # If there is already an entry, and the dim mismatches, replace the frame state entry with None.
-                    # E.g. {"x": [2, 3, 4]} -> {"x": None}
-                    log.debug(
-                        "automatic dynamic %s dim %s != %s",
-                        name,
-                        len(size),
-                        frame_state_entry.size,
-                    )
-                    frame_state_entry.size = None
-                    frame_state_entry.stride = None
-                else:
-                    # If there is already an entry, and the dim matches, for every size/stride in the frame state which
-                    # disagrees with the current static size/stride, replace it with None.
-                    # E.g., {"x": [2, 3]} -> {"x": [2, # None]}
 
-                    has_size_changed = False
-                    for i, dim in enumerate(frame_state_entry.size):
-                        if dim is not None and size[i] != dim:
-                            log.debug(
-                                "automatic dynamic %s size(%s) %s != %s",
-                                name,
-                                i,
-                                size[i],
-                                dim,
-                            )
-                            frame_state_entry.size[i] = None
-                        has_size_changed = (
-                            has_size_changed or frame_state_entry.size[i] is None
-                        )
+    # This mimics stride inference algorithm in _create_symbolic_sizes_strides_storage_offset
+    ex_size = e.size()
+    if not is_sparse_any(e):
+        ex_stride = e.stride()
+        dim = e.dim()
 
-                    # We want to trigger automatic dynamism when strides change, but we have to think whether stride should
-                    # be INFER_STRIDE or DYNAMIC.
-                    #
-                    # Case 1: if strides change because of size changes, we might not want to allocate a new symbol for
-                    # stride. Lets say we have a tensor (10, 20) and we mark the dim=1 dynamic for size. Resulting size will
-                    # be (10, s0) and stride can be either (s0, 1) or (s1, 1). In most cases, (s0, 1) is preferred because
-                    # users are not changing both size and stride.
-                    #
-                    # Case 2: But for another case, lets suppose the size remains same between the two invocations but stride
-                    # change. In this case, we definitely want to mark the changing stride to be DYNAMIC.
+        stride = [None] * dim
+        while any(x is None for x in stride):
+            candidates = {
+                ex_size[i] * ex_stride[i]: InferStride(i)
+                for i in range(dim)
+                if stride[i] is not None and ex_stride[i] >= 0
+            }
+            val_list = sorted(
+                [(ex_stride[i], i) for i in range(dim) if stride[i] is None],
+                key=_nested_int_aware_sort,
+            )
+            for _, i in val_list:
+                if stride[i] is None and ex_stride[i] in candidates:
+                    stride[i] = candidates[ex_stride[i]]
+                    candidates[ex_stride[i] * ex_size[i]] = InferStride(i)
 
-                    # Here, we use a hueristic to simplify determination of dynamic stride. For case 1, we will always
-                    # assume that stride will be inferred (INFER_STRIDE). This might be suboptimal, where user is doing something
-                    # arbitrary size and stride resizing, and we fail to trigger dynamism, but we have not seen any cases
-                    # yet. For case 2, we will mark the changing dimensions DYNAMIC.
-                    if not has_size_changed:
-                        for i, dim in enumerate(frame_state_entry.stride):
-                            if dim is not None and stride[i] != dim:
-                                log.debug(
-                                    "automatic dynamic %s stride(%s) %s != %s",
-                                    name,
-                                    i,
-                                    stride[i],
-                                    dim,
-                                )
-                                frame_state_entry.stride[i] = None
-        tx.output.frame_state[name] = frame_state_entry
-
-    if (st := tx.distributed_state) is None:
-        stride = e.stride() if not is_sparse_any(e) else ()
-        update_frame_state(e.size(), stride)
-        frame_state_entry = tx.output.frame_state[name]
-    elif st.all_states is None:
-        # Preflight, always pretend as if it's static
-        frame_state_entry = FrameStateSizeEntry(
-            size=e.size(), scalar=None, stride=e.stride()
-        )
-        st.local_state.input_sizes[name] = list(e.size())
-        st.local_state.input_strides[name] = list(e.stride())
-    else:
-        # Apply the updates
-        for sub_state in st.all_states:
-            # Not all inputs are necessarily present on all ranks
-            if name in sub_state.input_sizes and name in sub_state.input_strides:
-                update_frame_state(
-                    sub_state.input_sizes[name], sub_state.input_strides[name]
+            if any(x is None for x in stride):
+                # bind the smallest unbound stride to a new variable
+                val, i = min(
+                    [(ex_stride[i], i) for i in range(dim) if stride[i] is None],
+                    key=_nested_int_aware_sort,
                 )
-        frame_state_entry = tx.output.frame_state[name]
+                stride[i] = val
+    else:
+        stride = []
+
+    frame_state_entry = process_automatic_dynamic(
+        tx, name, FrameStateSizeEntry.make_tensor(tuple(ex_size), tuple(stride))
+    )
 
     # TODO: index export_constraints ahead of time so we don't have to
     # do a linear scan every time here
@@ -2556,8 +2501,12 @@ def _automatic_dynamic(
         else:
             dim2constraint[dim] = constraint_range, name
 
+    from torch.export.dynamic_shapes import _RelaxedConstraint
+
     if tx.output.export_constraints:
         for constraint in tx.output.export_constraints:
+            if isinstance(constraint, _RelaxedConstraint):
+                continue
             if constraint.t_id == t_id:
                 update_dim2constraint(
                     constraint.dim, constraint.constraint_range, constraint.name
@@ -2574,27 +2523,30 @@ def _automatic_dynamic(
         marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
         marked_static = i in getattr(e, "_dynamo_static_indices", set())
 
-        # NB: both static and dynamic have precedence over
-        automatic_dynamic_size = config.automatic_dynamic_shapes and (
-            frame_state_entry.size is None or frame_state_entry.size[i] is None
-        )
+        # Reflect the user directive in the frame_state
+        # For dynamic, apply None always
+        if marked_dynamic:
+            # TODO: This can be batched
+            # TODO: Doing this here is kind of sus, maybe better to set this
+            # up when we initially created the FrameStateSizeEntry to bong
+            # into the mutable state
+            log.debug("automatic dynamic %s marked dynamic", name)
+            mark_size = [auto_unset] * e.dim()
+            mark_size[i] = auto_dynamic
+            frame_state_entry |= FrameStateSizeEntry(size=mark_size)
 
-        # if size is None, no need to make stride dynamic
-        automatic_dynamic_stride = config.automatic_dynamic_shapes and (
-            frame_state_entry.size is not None
-            and (
-                frame_state_entry.stride is None or frame_state_entry.stride[i] is None
-            )
+        # NB: both static and dynamic have precedence over
+        automatic_dynamic_size = (
+            config.automatic_dynamic_shapes and frame_state_entry.is_size_dynamic(i)
+        )
+        # NB: previously, if size was dynamic, we wouldn't make its stride
+        # dynamic.  But now, because of InferStride concept, we will properly
+        # not make stride dynamic even if it's wobbling
+        automatic_dynamic_stride = (
+            config.automatic_dynamic_shapes and frame_state_entry.is_stride_dynamic(i)
         )
 
         automatic_dynamic = automatic_dynamic_size or automatic_dynamic_stride
-
-        # Reflect the user directive in the frame_state
-        # For dynamic, apply None always
-        if frame_state_entry.size and marked_dynamic:
-            log.debug("automatic dynamic %s marked dynamic", name)
-            frame_state_entry.size[i] = None
-            frame_state_entry.stride[i] = None
 
         # We will process constraints first, as they will imply that we
         # have a dynamic dimension

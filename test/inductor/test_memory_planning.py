@@ -3,8 +3,14 @@
 import sys
 import unittest
 
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.common_device_type import expectedFailureXPU
+from torch.testing._internal.common_utils import (
+    IS_CI,
+    IS_WINDOWS,
+    skipIfRocm,
+    skipIfXpu,
+)
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
 if IS_WINDOWS and IS_CI:
@@ -24,9 +30,11 @@ from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
 
 
-@unittest.skipIf(not HAS_CUDA, "Inductor+gpu needs triton and CUDA")
+@requires_gpu()
 @config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
+    device = GPU_TYPE
+
     def _generate(self, *, device):
         """
         Generate a simple test case that has multiple simultaneously-live intermediate tensors.
@@ -46,12 +54,14 @@ class TestMemoryPlanning(TestCase):
         return (Foo(), (x, y, z))
 
     def test_python_wrapper(self):
-        f, args = self._generate(device="cuda")
+        f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)
         result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "pool1 = empty_strided_cuda(((4*s0*s1) + (align(4*(s0*s0))), ), (1, )"
+            "pool1 = empty_strided_"
+            + GPU_TYPE
+            + "(((4*s0*s1) + (align(4*(s0*s0))), ), (1, )"
         ).check_next(
             "buf0 = alloc_from_pool(pool1, 0, torch.float32, (s0, s0), (s0, 1))"
         ).check(
@@ -61,25 +71,25 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(f(*args), result))
 
+    @expectedFailureXPU
     def test_cpp_wrapper(self):
-        f, args = self._generate(device="cuda")
+        f, args = self._generate(device=GPU_TYPE)
         compiled = torch.compile(f, dynamic=True)
-        with config.patch({"cpp_wrapper": True, "abi_compatible": False}):
+        with config.patch({"cpp_wrapper": True}):
             result, code = run_and_get_cpp_code(compiled, *args)
 
         FileCheck().check(
-            "pool1 = at::detail::empty_strided_cuda({(4L*s0*s1) + (align(4L*(static_cast<int64_t>(s0*s0)))), }, {1L, }"
-        ).check_next(
-            "auto buf0 = alloc_from_pool(pool1, 0, at::kFloat, {s0, s0}, {s0, 1L});"
-        ).check(
-            "auto buf1 = alloc_from_pool(pool1, align(4L*(static_cast<int64_t>(s0*s0))),"
+            "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_float32, 2, int_array_4, int_array_5, &tmp_tensor_handle_1)"
+        ).check_next("auto buf0 = RAIIAtenTensorHandle(tmp_tensor_handle_1);").check(
+            "auto buf1 = RAIIAtenTensorHandle(tmp_tensor_handle_2);"
         ).run(
             code
         )
         self.assertTrue(same(f(*args), result))
 
     @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
-    def test_abi_compatible(self):
+    @skipIfXpu(msg="aoti doesn't work on XPU")
+    def test_aoti(self):
         try:
             from .test_aot_inductor import AOTIRunnerUtil
         except ImportError:
@@ -87,15 +97,12 @@ class TestMemoryPlanning(TestCase):
                 AOTIRunnerUtil,
             )
 
-        f, args = self._generate(device="cuda")
+        f, args = self._generate(device=GPU_TYPE)
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None)
-        with config.patch("abi_compatible", True):
-            result, code = run_and_get_cpp_code(
-                lambda: AOTIRunnerUtil.run(
-                    "cuda", f, args, dynamic_shapes=dynamic_shapes
-                )
-            )
+        result, code = run_and_get_cpp_code(
+            lambda: AOTIRunnerUtil.run(GPU_TYPE, f, args, dynamic_shapes=dynamic_shapes)
+        )
 
         FileCheck().check(
             "int64_t int_array_2[] = {24L + (align(12L*s0)), };"
@@ -120,5 +127,5 @@ class TestMemoryPlanning(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
+    if HAS_GPU:
         run_tests()

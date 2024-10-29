@@ -1,14 +1,16 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+import threading
+from dataclasses import dataclass
+from logging import Logger
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
     FakeCompiledAutogradEngine,
-    fill_uninitialized,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
@@ -39,31 +41,101 @@ compiled_autograd_log = getArtifactLogger(__name__, "compiled_autograd")
 verbose_log = getArtifactLogger(__name__, "compiled_autograd_verbose")
 
 
-def snapshot_verbose_logging_enabled():
-    return torch._logging._internal.log_state.is_artifact_enabled(
-        "compiled_autograd_verbose"
-    )
+@dataclass
+class CompiledAutogradTLS:
+    next_ctx_id: int = 0
+    in_compiled_autograd_region: bool = False
+    compiler: Optional["AutogradCompilerInstance"] = None
+    vlogger: Optional[Logger] = None
 
 
-def cpp_verbose_log_fn(msg: str) -> None:
-    verbose_log.debug(msg)
+class TLSWrapper:
+    tls_key = "compiled_autograd_state"
+
+    def __init__(self):
+        self._local = threading.local()
+
+    def _get_tls(self) -> CompiledAutogradTLS:
+        if hasattr(self._local, self.tls_key):
+            # first look in python
+            state = getattr(self._local, self.tls_key)
+        if torch._C._is_key_in_tls(self.tls_key):
+            # then look in cpp
+            state = torch._C._get_obj_in_tls(self.tls_key)
+        else:
+            # init new thread created outside of autograd
+            # TODO: what if context manager wrapped outside of thread?
+            setattr(self._local, self.tls_key, CompiledAutogradTLS())
+            state = getattr(self._local, self.tls_key)
+            torch._C._stash_obj_in_tls(self.tls_key, state)
+        return state
+
+    # queries on the object stored in TLS
+    def get(self, name):
+        return getattr(self._get_tls(), name)
+
+    def set_tls(self, **kwargs) -> Callable[[], None]:
+        priors: Dict[str, Any] = {}
+        for k, v in kwargs.items():
+            state = self._get_tls()
+            priors[k] = getattr(state, k)
+            setattr(state, k, v)
+
+        torch._C._dynamo.compiled_autograd.notify_autograd_engine()
+
+        def revert():
+            self.set_tls(**priors)
+
+        return revert
+
+    def enter_ctx(self) -> Callable[[], None]:
+        state = self._get_tls()
+        state.next_ctx_id += 1
+        id = state.next_ctx_id
+
+        def exit():
+            assert (
+                state is self._get_tls()
+            ), "Runtime must begin and end on the same thread"
+            assert state.next_ctx_id == id, (
+                "Error nesting compiled autograd context managers: "
+                "inner context managers must have shorter lifetime than the outer context manager"
+            )
+            state.next_ctx_id -= 1
+
+        return exit
+
+    def enter_compiled_region(self) -> Callable[[], None]:
+        state = self._get_tls()
+        prior = state.in_compiled_autograd_region
+        state.in_compiled_autograd_region = True
+        assert prior is False, "Nested compiled autograd regions are not supported"
+
+        def exit():
+            assert (
+                state is self._get_tls()
+            ), "Runtime must begin and end on the same thread"
+            assert state.in_compiled_autograd_region is True
+            state.in_compiled_autograd_region = prior
+
+        return exit
 
 
-def snapshot_cudagraph_enabled() -> bool:
-    return torch._inductor.config.triton.cudagraphs
+local = TLSWrapper()
 
 
-def snapshot_compiled_autograd_opaque_cpp_node() -> bool:
-    return torch._dynamo.config.compiled_autograd_opaque_cpp_node
+def enabled() -> bool:
+    return local.get("compiler") is not None
+
+
+def in_compiled_autograd_region() -> bool:
+    return local.get("in_compiled_autograd_region")
 
 
 def maybe_clone(x):
     if x is not None:
         return clone_preserve_strides(x)
     return x
-
-
-next_op = 0
 
 
 class AutogradCompilerInstance:
@@ -103,7 +175,7 @@ class AutogradCompilerInstance:
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-        args_proxy, sizes_proxy, self.scalars_proxy, self.hooks_proxy = (
+        args_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
             for name in self.graph_placeholders
         )
@@ -148,7 +220,7 @@ class AutogradCompilerInstance:
                 )
             else:
                 raise AssertionError("Unexpected scalar type: ", type(val))
-        self.bind_tensors_to_proxies(scalars, self.scalars_proxy, scalars_origins)
+        self.bind_tensors_to_proxies(scalars, scalars_proxy, scalars_origins)
 
         # TODO(jansel): are all these modes needed?
         self.stack.enter_context(decompose({}))
@@ -156,92 +228,6 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
         return inputs, sizes, scalars
-
-    def proxy_call_lambda(
-        self,
-        idx,
-        inputs,
-        output_metadatas: List[Optional[Any]],
-    ):
-        with disable_proxy_modes_tracing():
-            # create fake Tensors
-            grad_ins: List[Optional[torch.Tensor]] = []
-            for output_metadata in output_metadatas:
-                if output_metadata is None:
-                    continue
-
-                layout, device, dtype, size = output_metadata
-                grad_ins.append(
-                    torch.empty(size=size, dtype=dtype, layout=layout, device=device)
-                )
-
-            global next_op
-
-            @torch.library.custom_op(  # type: ignore[misc]
-                f"compiled_autograd::cpp_node_op_{next_op}", mutates_args=()
-            )
-            def cpp_node_op_i(
-                inputs: List[torch.Tensor], idx: int
-            ) -> List[torch.Tensor]:
-                cppouts = torch._C._dynamo.compiled_autograd.call_lambda(inputs, idx)
-                filtered_output_metadatas = [
-                    o for o in output_metadatas if o is not None
-                ]
-                assert len(cppouts) == len(filtered_output_metadatas)
-                # what happens when shit is marked as dynamic...
-                pyouts = []
-                for i, cppout in enumerate(cppouts):
-                    if cppout is None:
-                        layout, device, dtype, size = filtered_output_metadatas[i]
-                        pyouts.append(
-                            torch.empty(
-                                size=size, dtype=dtype, layout=layout, device=device
-                            )
-                        )
-                    else:
-                        # strides could be anything, and can cause issue with
-                        # downstream stride dependent operations
-                        pyouts.append(cppout.clone().contiguous())
-
-                return pyouts
-
-            def _(inputs, idx):
-                grad_ins: List[torch.Tensor] = []
-                for output_metadata in output_metadatas:
-                    if output_metadata is None:
-                        # eager semantics is to not return grads for tensors not requiring them
-                        continue
-
-                    layout, device, dtype, size = output_metadata
-                    grad_ins.append(
-                        torch.empty(
-                            size=size, dtype=dtype, layout=layout, device=device
-                        )
-                    )
-                return grad_ins
-
-            cpp_node_op_i.register_fake(_)
-
-            next_op += 1
-
-        # Undefined tensors in C++ will be passed to Python as None
-        # but custom ops signature does not support Optional[torch.Tensor]
-        # To work around this, we create torch.empty as the interface just for the custom op
-        fill_proxies = self.fx_tracer.create_proxy(
-            kind="call_function",
-            target=fill_uninitialized,
-            args=(self.to_proxy(inputs),),
-            kwargs={},
-        )
-        with disable_proxy_modes_tracing():
-            processed_inputs = [maybe_clone(x) for x in inputs]
-            self.bind_tensors_to_proxies(processed_inputs, fill_proxies)
-
-        cpp_node_proxies = cpp_node_op_i(fill_proxies, self.scalars_proxy[idx])
-        with disable_proxy_modes_tracing():
-            self.bind_tensors_to_proxies(grad_ins, cpp_node_proxies)
-
-        return grad_ins
 
     def proxy_call_backward(
         self,
@@ -405,7 +391,7 @@ class AutogradCompilerInstance:
         self.rename_aot_dispatcher_nodes()
         self.reorder_accumulate_grad_nodes()
         runtime_inputs_to_move: List[int] = []
-        if snapshot_cudagraph_enabled():
+        if torch._inductor.config.triton.cudagraphs:
             runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
 
         graph = GraphModule(
@@ -427,16 +413,15 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, scalars, hooks):
-            global in_compiled_autograd_region
             try:
-                in_compiled_autograd_region = True
+                exit_compiled_region = local.enter_compiled_region()
                 for i in runtime_inputs_to_move:
                     inputs[i] = inputs[i].pin_memory().cuda(non_blocking=True)
 
                 with disable():
                     return compiled_fn(inputs, sizes, scalars, hooks)
             finally:
-                in_compiled_autograd_region = False
+                exit_compiled_region()
 
         return runtime_wrapper, self.compiler_fn(graph)
 
@@ -608,57 +593,64 @@ class AutogradCompilerInstance:
         set_stack_trace(new_stack_trace)
 
 
-# state of the autograd engine dispatch, kept in sync by enable/disable context managers
-compiled_autograd_enabled = False
-
-# global flag to check if we are processing graphs produced from a compiled autograd graph
-in_compiled_autograd_region = False
+# global flag to check if compiled autograd is enabled but Dynamo stance is "force_eager"
+compiled_autograd_enabled_force_eager = False
 
 
 @contextlib.contextmanager
 def enable(compiler_fn):
-    # we need to import this, because user might not have imported it if they directly use this context manager
-    # we need to lazily import it, because of circular dependencies
-    import torch._inductor.cudagraph_trees
+    from torch._dynamo import eval_frame
 
-    prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-        functools.partial(AutogradCompilerInstance, compiler_fn)
-    )
-    torch._C._dynamo.compiled_autograd.set_verbose_logger(
-        cpp_verbose_log_fn if snapshot_verbose_logging_enabled() else None
-    )
-    torch._C._dynamo.compiled_autograd.set_opaque_cpp_node(
-        snapshot_compiled_autograd_opaque_cpp_node()
-    )
-    global compiled_autograd_enabled
-    compiled_autograd_enabled = True
-    try:
-        with torch.autograd.set_multithreading_enabled(False):
+    if eval_frame._stance.stance == "force_eager":
+        # If user explicitly sets Dynamo stance to "force_eager", we want Compiled Autograd
+        # to fall back to eager as well.
+        global compiled_autograd_enabled_force_eager
+        compiled_autograd_enabled_force_eager = True
+        try:
             yield
-    finally:
-        if not prior:
-            compiled_autograd_enabled = False
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+        finally:
+            compiled_autograd_enabled_force_eager = False
+    else:
+        # we need to import this, because user might not have imported it if they directly use this context manager
+        # we need to lazily import it, because of circular dependencies
+        import torch._inductor.cudagraph_trees
+
+        exit_ctx = local.enter_ctx()
+        revert_tls = local.set_tls(
+            compiler=functools.partial(AutogradCompilerInstance, compiler_fn),
+            vlogger=verbose_log
+            if torch._logging._internal.log_state.is_artifact_enabled(
+                "compiled_autograd_verbose"
+            )
+            else None,
+        )
+        try:
+            with torch.autograd.set_multithreading_enabled(False):
+                yield
+        finally:
+            revert_tls()
+            exit_ctx()
 
 
 @contextlib.contextmanager
 def disable():
-    prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
-    global compiled_autograd_enabled
-    compiled_autograd_enabled = False
+    exit_ctx = local.enter_ctx()
+    revert_tls = local.set_tls(
+        compiler=None,
+        vlogger=None,
+    )
     try:
         yield
     finally:
-        if prior:
-            compiled_autograd_enabled = True
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+        revert_tls()
+        exit_ctx()
 
 
 # return to starting state of a new process
 def reset() -> None:
-    compiled_autograd_enable = False
-    assert not in_compiled_autograd_region
-    torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
-    torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
-    torch._C._dynamo.compiled_autograd.set_opaque_cpp_node(False)
-    torch._C._dynamo.compiled_autograd.clear_cache()
+    assert local.get("next_ctx_id") == 0
+    assert local.get("in_compiled_autograd_region") is False
+    local.set_tls(
+        compiler=None,
+        vlogger=None,
+    )

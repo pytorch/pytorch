@@ -795,6 +795,7 @@ libtorch_python_xpu_sources = [
 
 libtorch_python_core_sources = [
     "torch/csrc/DataLoader.cpp",
+    "torch/csrc/DeviceAccelerator.cpp",
     "torch/csrc/Device.cpp",
     "torch/csrc/Dtype.cpp",
     "torch/csrc/DynamicTypes.cpp",
@@ -1314,7 +1315,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/IndexingUtils.cpp",
     "aten/src/ATen/native/Integration.cpp",
     "aten/src/ATen/native/Itertools.cpp",
-    "aten/src/ATen/native/LegacyBridge.cpp",
     "aten/src/ATen/native/Lerp.cpp",
     "aten/src/ATen/native/Linear.cpp",
     "aten/src/ATen/native/LinearAlgebra.cpp",

@@ -82,7 +82,7 @@ class TORCH_API ThreadLocalState {
     !defined(BUILD_LITE_INTERPRETER)
   // TLS for autocast dtypes
   std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
-      autocast_dtypes_;
+      autocast_dtypes_{};
 #endif
 
   friend class ThreadLocalStateGuard;

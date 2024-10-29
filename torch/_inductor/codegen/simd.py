@@ -48,6 +48,7 @@ from ..runtime.runtime_utils import green_text, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_on_self,
+    expr_fits_within_32bit,
     get_dtype_size,
     IndentedBuffer,
     Placeholder,
@@ -329,6 +330,7 @@ class SIMDKernel(Kernel):
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         override_persistent_reduction=None,
+        override_cooperative_reduction=None,
     ) -> None:
         if pid_cache is None:
             pid_cache = {}
@@ -347,6 +349,11 @@ class SIMDKernel(Kernel):
         self.index_dtype: str = index_dtype
         self.last_usage: OrderedSet[str] = OrderedSet()
         self.buf_accesses: DefaultDict[str, List[Dep]] = collections.defaultdict(list)
+        self.cooperative_reduction: bool = (
+            override_cooperative_reduction
+            if override_cooperative_reduction is not None
+            else self.should_use_cooperative_reduction()
+        )
         self.persistent_reduction: bool = (
             override_persistent_reduction
             if override_persistent_reduction is not None
@@ -419,6 +426,9 @@ class SIMDKernel(Kernel):
             return self.store(name, index, value)
         finally:
             self.inside_reduction = prior
+
+    def should_use_cooperative_reduction(self) -> bool:
+        return False  # defined in subclass
 
     def should_use_persistent_reduction(self) -> bool:
         return False  # defined in subclass
@@ -505,7 +515,7 @@ class SIMDKernel(Kernel):
         )
 
     def disable_reduction(self):
-        should_flush = self.range_trees[-1].is_loop
+        should_flush = self.range_trees[-1].is_loop or self.cooperative_reduction
 
         @contextlib.contextmanager
         def ctx():
@@ -1209,18 +1219,8 @@ class SIMDScheduling(BaseScheduling):
         numel: sympy.Expr, buffers: Iterable[Union[ir.Buffer, ir.TensorBox]]
     ) -> bool:
         int_max = torch.iinfo(torch.int32).max
-        size_hint = V.graph.sizevars.size_hint
-        has_hint = V.graph.sizevars.shape_env.has_hint
 
-        def within_32bit(e):
-            # Allow for unhinted e as long as we can still statically prove
-            # (e.g., via ValueRanges) that it is still in bounds
-            if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
-                return True
-            # Otherwise, the hint MUST exist and be in range
-            return has_hint(e) and size_hint(e) <= int_max
-
-        if not within_32bit(numel):
+        if not expr_fits_within_32bit(numel):
             return False
 
         # Any use of a MultiOutputLayout will create a buffer with a
@@ -1231,7 +1231,7 @@ class SIMDScheduling(BaseScheduling):
             if not isinstance(buf.get_layout(), ir.MultiOutputLayout)
         ]
 
-        if not all(within_32bit(size) for size in buf_sizes):
+        if not all(expr_fits_within_32bit(size) for size in buf_sizes):
             return False
 
         # Only install guards for 32-bit indexing as there is no correctness
@@ -1334,6 +1334,7 @@ class SIMDScheduling(BaseScheduling):
     def codegen_node_schedule(
         self, node_schedule, buf_accesses, numel, reduction_numel
     ):
+        from torch._inductor.codegen.triton import TritonKernel
         from torch._inductor.codegen.triton_split_scan import TritonSplitScanKernel
 
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
@@ -1343,7 +1344,8 @@ class SIMDScheduling(BaseScheduling):
             index_dtype,
         ) = self.get_kernel_args(node_schedule, numel, reduction_numel)
 
-        is_split_scan = any(
+        is_scan = schedule_contains_op(node_schedule, "scan")
+        is_split_scan = is_scan and any(
             isinstance(node, BaseSchedulerNode) and node.is_split_scan()
             for node in node_schedule
         )
@@ -1358,19 +1360,13 @@ class SIMDScheduling(BaseScheduling):
             index_dtype=index_dtype,
         )
 
-        def _node_has_sort(node):
-            if node in (EnableReduction, DisableReduction):
-                return False
-
-            sort_nodes = node._body.root_block.graph.find_nodes(
-                op="call_method", target="sort"
-            )
-            return bool(sort_nodes)
+        if is_scan and kernel_type == TritonKernel:
+            # TODO(jansel): scan does not yet work with cooperative reductions
+            kernel_kwargs["override_cooperative_reduction"] = False
 
         # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
         # so taking the hit of non-coalesced loads is okay
-        has_sort = any(_node_has_sort(node) for node in node_schedule)
-        if has_sort:
+        if has_sort := schedule_contains_op(node_schedule, "sort"):
             kernel_kwargs["override_persistent_reduction"] = True
 
         kernel = kernel_type(
@@ -1815,8 +1811,6 @@ class SIMDScheduling(BaseScheduling):
             def __del__(self) -> None:
                 self.n.last_usage = self.last_usage
 
-        last_usage_holders = [LastUsageHolder(n, n.last_usage) for n in nodes]
-
         # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
         for n in nodes:
             n.last_usage = OrderedSet()
@@ -1906,3 +1900,12 @@ class EnableReduction:
 
 class CantSplit(Exception):
     pass
+
+
+def schedule_contains_op(node_schedule, op_name: str) -> bool:
+    """True if V.ops.{op_name} is used in node_schedule"""
+    for node in node_schedule:
+        if node not in (EnableReduction, DisableReduction):
+            if node._body.has_op(op_name):
+                return True
+    return False
