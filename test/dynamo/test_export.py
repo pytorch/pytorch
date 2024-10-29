@@ -4565,10 +4565,7 @@ def forward(self, x, b, y):
     return pytree.tree_unflatten([x], self._out_spec)""",  # NOQA: B950
         )
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "boolean masking setitem backwards"
-        ):
-            gm, _ = torch._dynamo.export(fn)(x, b, y)
+        gm, _ = torch._dynamo.export(fn)(x, b, y)
 
     def test_dynamo_list_index(self):
         def fn(x, in_list):
@@ -4578,6 +4575,18 @@ def forward(self, x, b, y):
         graph, _ = torch._dynamo.export(fn)(*inputs)
         out = graph(*inputs)
         self.assertEqual(out, torch.ones(2, 2) + 1)
+
+    def test_dynamo_enum_in_tuple(self):
+        class IntEnum(int, Enum):
+            X = 0
+
+        def fn(tensor):
+            return tensor[..., IntEnum.X]
+
+        tensor = torch.rand((5, 5))
+        graph, _ = torch._dynamo.export(fn)(tensor)
+        out = graph(tensor)
+        self.assertEqual(out, tensor[:, 0])
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)

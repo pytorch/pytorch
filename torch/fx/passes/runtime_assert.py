@@ -166,7 +166,10 @@ def insert_deferred_runtime_asserts(
             for arg in node.args
         ]
         try:
-            node.meta[val_key] = node.target(*fake_args)  # type: ignore[operator]
+            target = node.target
+            if isinstance(target, str):
+                target = getattr(torch.Tensor, node.target)
+            node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
         except NotImplementedError:
             # This can happen when attempting to reify a symbol with an unsupported call_function node,
             # e.g. with NestedTensors + sym_size.int via match_symbol().
@@ -346,11 +349,12 @@ def insert_deferred_runtime_asserts(
                 # this guards against deleting calls that produce unbacked bindings we haven't yet seen.
                 # in this case looking at sym_expr.free_symbols might not be enough, if the example value has a hint
                 # (is backed), but produces an unbacked symbol. In this case keep the node alive.
+                resolved_unbacked_bindings = resolve_unbacked_bindings(
+                    shape_env, node.meta.get("unbacked_bindings", {})
+                )
+                assert resolved_unbacked_bindings is not None
                 new_unbacked_bindings = (
-                    resolve_unbacked_bindings(
-                        shape_env, node.meta.get("unbacked_bindings", {})
-                    ).keys()
-                    - expr_to_proxy.keys()
+                    resolved_unbacked_bindings.keys() - expr_to_proxy.keys()
                 )
 
                 # maybe re-reify expression, replace current node

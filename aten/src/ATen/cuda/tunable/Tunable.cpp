@@ -112,6 +112,32 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
   AddImpl(op_signature, params_signature, best, it->second);
 }
 
+void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature, const std::string& params_signature) {
+  std::scoped_lock l{lock_};
+  if (!untuned_file.good()) {
+    TORCH_WARN_ONCE("failed to open file for writing; untuned gemm will not be saved");
+    return;
+  } else {
+    bool isNew = false;
+    auto it = untuned_results_.find(op_signature);
+    if (it == untuned_results_.end()) {
+      it = untuned_results_.insert({op_signature, {}}).first;
+      isNew = true;
+    }
+
+    auto it_kernel_map = it->second.find(params_signature);
+    if (it_kernel_map == it->second.end()) {
+      it->second.insert(params_signature);
+      isNew = true;
+    }
+
+    if (isNew) {
+      untuned_file << op_signature << "," << params_signature << std::endl;
+      TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
+    }
+  }
+}
+
 void TuningResultsManager::Delete(const std::string& op_signature, const std::string& params_signature) {
   std::scoped_lock l{lock_};
 
@@ -359,6 +385,7 @@ TuningStatus TuningResultsValidator::ValidatePyTorchVersion(const std::string& v
 TuningContext::TuningContext() :
     enable_{false},
     tuning_enable_{true},
+    record_untuned_enable_{false},
     manager_initialized_{false},
     write_file_on_exit_{true},
     numerics_check_enable_{false},
@@ -369,6 +396,7 @@ TuningContext::TuningContext() :
     icache_flush_{true},
     rotating_buffer_size_{-1},
     filename_{},
+    untuned_file_{},
     results_count_from_input_file_{0}
 {
 }
@@ -393,6 +421,10 @@ TuningContext::~TuningContext() {
         TUNABLE_LOG1("failed to write file ", filename);
       }
     }
+  }
+
+  if (untuned_file_.good()) {
+    untuned_file_.close();
   }
 }
 
@@ -424,12 +456,48 @@ void TuningContext::EnableTuning(bool value) {
   }
 }
 
+void TuningContext::EnableRecordUntuned(bool value) {
+  record_untuned_enable_ = value;
+  if (value) {
+    TUNABLE_LOG1("Enable Record Untuned for TunableOp");
+  } else {
+    TUNABLE_LOG1("Disable Record Untuned for TunableOp");
+  }
+}
+
 bool TuningContext::IsTuningEnabled() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_TUNING");
   if (env != nullptr && strcmp(env, "0") == 0) {
     return false;
   }
   return tuning_enable_;
+}
+
+bool TuningContext::IsRecordUntunedEnabled() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_RECORD_UNTUNED");
+  if (env != nullptr && strcmp(env, "1") == 0) {
+    return true;
+  }
+  return record_untuned_enable_;
+}
+
+std::ofstream& TuningContext::GetUntunedFile(){
+  if (!untuned_file_.is_open()) {
+    const char *env = std::getenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME");
+    std::string filename = (env == nullptr) ? "tunableop_untuned.csv" : env;
+
+    std::string device = c10::str(int(c10::cuda::current_device()));
+    std::size_t found = filename.rfind(".");
+    if (found != std::string::npos) {
+      filename.insert(found, device);
+    } else {
+      // all else fails, just append
+      filename.append(device);
+    }
+
+    untuned_file_ = std::ofstream(filename, std::ios::out | std::ios::trunc);
+  }
+  return untuned_file_;
 }
 
 void TuningContext::WriteFileOnExit(bool value) {
@@ -545,7 +613,7 @@ TuningResultsManager& TuningContext::GetTuningResultsManager() {
       SetFilename(filename, true);
     }
     auto filename = GetFilename();
-    if (!filename.empty()) {
+    if (!filename.empty() && !IsRecordUntunedEnabled()) {
       ReadFile(filename);
       // attempt immediately to open file for writing to catch errors early
       std::ofstream file(filename, std::ios::out | std::ios::app);

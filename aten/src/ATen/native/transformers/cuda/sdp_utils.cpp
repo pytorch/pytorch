@@ -68,16 +68,11 @@ bool check_prefer_cudnn_attention() {
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
       SDPBackend::flash_attention,
-      SDPBackend::cudnn_attention,
       SDPBackend::efficient_attention,
-      SDPBackend::math};
-  constexpr std::array<SDPBackend, num_backends> cudnn_order{
+      SDPBackend::math,
       SDPBackend::cudnn_attention,
-      SDPBackend::flash_attention,
-      SDPBackend::efficient_attention,
-      SDPBackend::math};
-  static const bool prefer_cudnn = check_prefer_cudnn_attention();
-  return prefer_cudnn ? cudnn_order : default_order;
+      };
+  return default_order;
 }
 
 bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {
@@ -561,7 +556,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #endif
 #if defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
   if (debug) {
-    TORCH_WARN(CUDNN_VERSION, "cuDNN version too old to use Flash Attention! (< v9.0.0)");
+    TORCH_WARN(CUDNN_VERSION, " cuDNN version too old to use CuDNN Attention (< v9.0.0)");
   }
   return false;
 #endif
@@ -577,7 +572,6 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_tensor_shapes,
           check_cudnn_tensor_shapes,
           check_cudnn_deterministic,
-          // check_is_causal,
           check_dtypes_low_precision,
           check_attn_mask_shape,
           check_cudnn_hardware_support

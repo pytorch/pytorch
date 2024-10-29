@@ -162,6 +162,11 @@ class ArrayRef final {
     return reverse_iterator(begin());
   }
 
+  /// Check if all elements in the array satisfy the given expression
+  constexpr bool allMatch(const std::function<bool(const T&)>& pred) const {
+    return std::all_of(cbegin(), cend(), pred);
+  }
+
   /// empty - Check if the array is empty.
   constexpr bool empty() const {
     return Length == 0;
@@ -373,8 +378,8 @@ bool operator!=(c10::ArrayRef<T> a1, const std::vector<T>& a2) {
 
 using IntArrayRef = ArrayRef<int64_t>;
 
-// This alias is deprecated because it doesn't make ownership
-// semantics obvious.  Use IntArrayRef instead!
-C10_DEFINE_DEPRECATED_USING(IntList, ArrayRef<int64_t>)
+using IntList [[deprecated(
+    "This alias is deprecated because it doesn't make ownership semantics obvious. Use IntArrayRef instead!")]] =
+    ArrayRef<int64_t>;
 
 } // namespace c10

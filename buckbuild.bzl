@@ -5,13 +5,13 @@ load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
 load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
+load("//tools/build_defs/windows:windows_flag_map.bzl", "windows_convert_gcc_clang_flags")
 load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load("//tools/build_defs:platform_defs.bzl", "APPLETVOS", "IOS", "MACOSX")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 load("//tools/build_defs/android:build_mode_defs.bzl", is_production_build_android = "is_production_build")
 load("//tools/build_defs/apple:build_mode_defs.bzl", is_production_build_ios = "is_production_build")
-load("//tools/build_defs/windows:windows_flag_map.bzl", "windows_convert_gcc_clang_flags")
 load(
     ":build_variables.bzl",
     "aten_cpu_source_list",
@@ -213,7 +213,6 @@ _PT_COMPILER_FLAGS = [
 ATEN_COMPILER_FLAGS = [
     "-fexceptions",
     "-frtti",
-    "-fPIC",
     "-Os",
     "-Wno-absolute-value",
     "-Wno-deprecated-declarations",
@@ -225,10 +224,17 @@ ATEN_COMPILER_FLAGS = [
     "-Wno-unused-variable",
     "-Wno-pass-failed",
     "-Wno-shadow",
-]
+] + select({
+    # Not supported by clang on Windows
+    "DEFAULT": ["-fPIC"],
+    "ovr_config//compiler:clang-windows": [],
+})
 
 def get_aten_compiler_flags():
-    return ATEN_COMPILER_FLAGS
+    return select({
+        "DEFAULT": ATEN_COMPILER_FLAGS,
+        "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(ATEN_COMPILER_FLAGS),
+    })
 
 _COMMON_PREPROCESSOR_FLAGS = [
     "-DC10_MOBILE",

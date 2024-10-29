@@ -29,6 +29,7 @@ from ._memory_viz import memory as _memory, segments as _segments
 __all__ = [
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_enable",
     "set_per_process_memory_fraction",
     "empty_cache",
     "memory_stats",
@@ -71,11 +72,13 @@ if not hasattr(torch._C, "_MemPool"):
     torch._C.__dict__["_cuda_endAllocateCurrentStreamToPool"] = _dummy_type(
         "_cuda_endAllocateCurrentStreamToPool"
     )
+    torch._C.__dict__["_cuda_releasePool"] = _dummy_type("_cuda_releasePool")
 
 from torch._C import (  # noqa: F401
     _cuda_beginAllocateToPool,
     _cuda_CUDAAllocator,
     _cuda_endAllocateCurrentStreamToPool,
+    _cuda_releasePool,
     _MemPool,
     _MemPoolContext,
 )
@@ -146,6 +149,12 @@ def caching_allocator_delete(mem_ptr):
         management.
     """
     torch._C._cuda_cudaCachingAllocator_raw_delete(mem_ptr)
+
+
+def caching_allocator_enable(value: bool = True) -> None:
+    r"""Enable or disable the CUDA memory allocator. On by default."""
+    if is_initialized():
+        torch._C._cuda_cudaCachingAllocator_enable(value)
 
 
 def set_per_process_memory_fraction(
@@ -994,8 +1003,12 @@ class MemPool(_MemPool):
 
     @property
     def allocator(self) -> Optional[_cuda_CUDAAllocator]:
-        r"""Returns the allocator this MemPool routes allocations to"""
+        r"""Returns the allocator this MemPool routes allocations to."""
         return super().allocator
+
+    def use_count(self) -> int:
+        r"""Returns the reference count of this pool."""
+        return super().use_count()
 
 
 class MemPoolContext(_MemPoolContext):
@@ -1038,4 +1051,5 @@ def use_mem_pool(pool: MemPool, device: Union[Device, int] = None):
         yield
     finally:
         _cuda_endAllocateCurrentStreamToPool(device_index, pool.id)
+        _cuda_releasePool(device_index, pool.id)
         del ctx

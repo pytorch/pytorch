@@ -1341,8 +1341,12 @@ class TestOptimRenewed(TestCase):
             optimizer = optim_cls(params, **optim_input.kwargs)
             optimizer.__repr__()
 
+    @parametrize("is_named_optim0", [True, False])
+    @parametrize("is_named_optim1", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_state_dict_deterministic(self, device, dtype, optim_info):
+    def test_state_dict_deterministic(
+        self, device, dtype, optim_info, is_named_optim0, is_named_optim1
+    ):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -1356,6 +1360,17 @@ class TestOptimRenewed(TestCase):
         input = torch.randn(3, requires_grad=True, device=device, dtype=dtype)
         params = [weight, bias]
 
+        def make_named_param(param, is_named):
+            if not is_named:
+                return param
+            return [(f"name{i}", p) for i, p in enumerate(param)]
+
+        def without_param_names(state_dict):
+            new_state_dict = deepcopy(state_dict)
+            for pg in new_state_dict["param_groups"]:
+                pg.pop("param_names", None)
+            return new_state_dict
+
         def fwd_bwd(optim, w, b, i):
             optim.zero_grad()
             loss = (w.mv(i) + b).pow(2).sum()
@@ -1368,7 +1383,8 @@ class TestOptimRenewed(TestCase):
             return loss
 
         for optim_input in all_optim_inputs:
-            optimizer = optim_cls(params, **optim_input.kwargs)
+            params_in = make_named_param(params, is_named=is_named_optim0)
+            optimizer = optim_cls(params_in, **optim_input.kwargs)
             closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
 
             # Prime the optimizer
@@ -1383,8 +1399,8 @@ class TestOptimRenewed(TestCase):
             with torch.no_grad():
                 weight_c = Parameter(weight.clone())
                 bias_c = Parameter(bias.clone())
-
-            optimizer_c = optim_cls([weight_c, bias_c], **optim_input.kwargs)
+            params_c = make_named_param([weight_c, bias_c], is_named=is_named_optim1)
+            optimizer_c = optim_cls(params_c, **optim_input.kwargs)
             closure_c = functools.partial(fwd_bwd, optimizer_c, weight_c, bias_c, input)
 
             # Load the state dict from the original optimizer into the new one
@@ -1405,13 +1421,17 @@ class TestOptimRenewed(TestCase):
                 self.assertEqual(bias, bias_c)
 
             # Make sure state dict is deterministic with equal (not identical) parameters
-            self.assertEqual(optimizer.state_dict(), optimizer_c.state_dict())
+            # Param names are optional and not needed to be the consistent.
+            self.assertEqual(
+                without_param_names(optimizer.state_dict()),
+                without_param_names(optimizer_c.state_dict()),
+            )
 
             # Make sure repeated parameters have identical representation (see #36831)
             optimizer_c.param_groups.extend(optimizer_c.param_groups)
             self.assertEqual(
-                optimizer.state_dict()["param_groups"][-1],
-                optimizer_c.state_dict()["param_groups"][-1],
+                without_param_names(optimizer.state_dict())["param_groups"][-1],
+                without_param_names(optimizer_c.state_dict())["param_groups"][-1],
             )
 
     @optims(optim_db, dtypes=[torch.float32])
@@ -1462,8 +1482,77 @@ class TestOptimRenewed(TestCase):
                 fwd_bwd(optimizer, model, input)
                 optimizer.step()
 
+    @parametrize("is_named_optim0", [True, False])
+    @parametrize("is_named_optim1", [True, False])
+    @optims(
+        [o for o in optim_db if not o.only_supports_sparse_grads],
+        dtypes=[torch.float32],
+    )
+    def test_can_load_from_to_named_state_dict(
+        self, device, dtype, optim_info, is_named_optim0, is_named_optim1
+    ):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable",)
+        )
+        for optim_input in all_optim_inputs:
+            torch.manual_seed(1)
+            model = torch.nn.Sequential(
+                torch.nn.Conv2d(4, 2, 1, stride=2),
+                torch.nn.BatchNorm2d(2, eps=1e-05, momentum=0.1),
+            )
+            model.to(dtype=dtype, device=device)
+            input = torch.rand(1, 4, 16, 16, device=device, dtype=dtype)
+
+            def fwd_bwd(optim, mod, i):
+                optim.zero_grad()
+                loss = mod(i).sum()
+                loss.backward()
+                return loss
+
+            # test for parameters, named_parameters, and 2 groups:
+            params_to_optimizer = (
+                model.named_parameters() if is_named_optim0 else model.parameters()
+            )
+            optimizer = optim_cls(params_to_optimizer, **optim_input.kwargs)
+
+            for _ in range(3):
+                if optim_info.step_requires_closure:
+                    optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
+                else:
+                    fwd_bwd(optimizer, model, input)
+                    optimizer.step()
+
+            # old_state_dict has all new flags del'd
+            old_state_dict = deepcopy(optimizer.state_dict())
+
+            params_to_optimizer2 = (
+                model.named_parameters() if is_named_optim1 else model.parameters()
+            )
+            optimizer2 = optim_cls(params_to_optimizer2, **optim_input.kwargs)
+            optimizer2.load_state_dict(old_state_dict)
+
+            # Make sure we can still step
+            if optim_info.step_requires_closure:
+                optimizer2.step(functools.partial(fwd_bwd, optimizer2, model, input))
+            else:
+                fwd_bwd(optimizer2, model, input)
+                optimizer2.step()
+
+            # Make sure that param_names are preserved when provided to at least one of the optimizers
+            if is_named_optim0 or is_named_optim1:
+                self.assertEqual(
+                    optimizer2.state_dict()["param_groups"][0]["param_names"],
+                    ["0.weight", "0.bias", "1.weight", "1.bias"],
+                )
+
+    @parametrize("is_named_optim", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_save_load_equality_with_weights_only(self, device, dtype, optim_info):
+    def test_save_load_equality_with_weights_only(
+        self, device, dtype, optim_info, is_named_optim
+    ):
         optim_cls = optim_info.optim_cls
 
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -1477,6 +1566,11 @@ class TestOptimRenewed(TestCase):
         input = torch.randn(3, requires_grad=True, device=device, dtype=dtype)
         params = [weight, bias]
 
+        def make_named_param(param, is_named):
+            if not is_named:
+                return param
+            return [(f"name{i}", p) for i, p in enumerate(param)]
+
         def fwd_bwd(optim, w, b, i):
             optim.zero_grad()
             loss = (w.mv(i) + b).pow(2).sum()
@@ -1487,7 +1581,8 @@ class TestOptimRenewed(TestCase):
             return loss
 
         for optim_input in all_optim_inputs:
-            optimizer = optim_cls(params, **optim_input.kwargs)
+            params_in = make_named_param(params, is_named=is_named_optim)
+            optimizer = optim_cls(params_in, **optim_input.kwargs)
             closure = functools.partial(fwd_bwd, optimizer, weight, bias, input)
 
             # Prime the optimizer

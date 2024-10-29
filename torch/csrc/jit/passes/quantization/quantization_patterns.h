@@ -75,8 +75,7 @@ std::string getQuantizeForScalar(const std::string& value) {
           )" +
       value + "_tensor : Tensor = aten::scalar_tensor(" + value + ", " + value +
       "_float_scalar_type";
-  for (const auto i : c10::irange(3)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(3)) {
     quantize_pattern += ", " + value + "_none";
   }
   quantize_pattern += ")";

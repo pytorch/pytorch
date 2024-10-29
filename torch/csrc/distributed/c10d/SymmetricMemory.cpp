@@ -71,8 +71,11 @@ static at::Tensor empty_strided_p2p_persistent(
         "is still active.");
   }
 
-  const size_t numel =
-      std::accumulate(size.begin(), size.end(), 1, std::multiplies<int>());
+  const size_t numel = std::accumulate(
+      size.begin(),
+      size.end(),
+      static_cast<size_t>(1),
+      std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
   const size_t alloc_size = numel * element_size;
 
@@ -156,8 +159,11 @@ at::Tensor empty_strided_p2p(
     return empty_strided_p2p_persistent(
         size, stride, dtype, device, group_name, *alloc_id);
   }
-  const size_t numel =
-      std::accumulate(size.begin(), size.end(), 1, std::multiplies<int>());
+  const size_t numel = std::accumulate(
+      size.begin(),
+      size.end(),
+      static_cast<size_t>(1),
+      std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
   const size_t alloc_size = numel * element_size;
 
@@ -189,9 +195,11 @@ c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
   return allocator->rendezvous(tensor.data_ptr());
 }
 
-TORCH_API bool has_multicast_support(c10::DeviceType device_type) {
+TORCH_API bool has_multicast_support(
+    c10::DeviceType device_type,
+    int device_idx) {
   auto allocator = get_allocator(device_type);
-  return allocator->has_multicast_support();
+  return allocator->has_multicast_support(device_idx);
 }
 } // namespace symmetric_memory
 } // namespace c10d

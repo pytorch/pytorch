@@ -68,7 +68,7 @@ struct strided_tensor_iter_fixed {
   strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
   strided_tensor_iter_fixed(
       Tensor& tensor,
-      C10_UNUSED bool sort_strides = false)
+      [[maybe_unused]] bool sort_strides = false)
       : data_(tensor.data_ptr<T>()) {
     std::memset(counter_, 0, sizeof(int64_t) * N);
     if (tensor.dim() > 0) {
@@ -136,7 +136,7 @@ inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
   checkDeviceType("CPU_tensor_apply", tensors, kCPU);
   checkLayout("CPU_tensor_apply", tensors, kStrided);
   if (!_all_equal_numel(tensors))
-    AT_ERROR(_all_equal_numel_error(tensors));
+    TORCH_CHECK(false, _all_equal_numel_error(tensors));
   // An empty tensor has no elements
   for (auto& t : tensors)
     if (t.numel() == 0)
