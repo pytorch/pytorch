@@ -516,7 +516,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements,
     // but to make things simple, we'll allocate space for a 16x32 tile even for the tail.
     // It's possible that N may not be equal to Nr, but might be a multiple of it.
-    // In that case, Kc (which is K in the microkernel) would be smaller (than the case in which N == Nr).
+    // So, we'll allocate the buffer accordingly.
     const auto num_elements_per_b_tile = 512;
     const auto buf_size_per_nr_block = ((K + {{block_k}} - 1) / {{block_k}}) * num_elements_per_b_tile * 2;
     const auto buf_size = buf_size_per_nr_block * (N / {{block_n}});
@@ -556,8 +556,9 @@ class CppMicroGemmAMX(CppMicroGemm):
         // Load a tile of B & cache it in L1D.
         const int64_t init_idx =  n * buf_size_per_nr_block;
         // For simplicity, even if the tail would not be a multiple of block_k,
-        // we would incur the cost of reading some data we won't use because
-        // each B tile's dequantized data in the buffer would have 16x32 elements.
+        // each B tile's dequantized data in the buffer would have 16x32 elements,
+        // so while loading the tail, we would incur unnecessary loads in such a case,
+        // but we would only read the required number of elements while computing dot product.
         const auto last_k_offset = K / {{block_k}} * {{block_k}};
         const auto tail_k_size = K - last_k_offset;
         const auto max_k_idx = tail_k_size ? last_k_offset + {{block_k}} : last_k_offset;
@@ -572,16 +573,12 @@ class CppMicroGemmAMX(CppMicroGemm):
     };
 {%- endif %}
     // TODO(jgong5): loop unroll for M and N
-    for (int64_t m = 0; m < M; m += {{block_m}}) {
-        int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
-        int64_t m_tail = m;
-        for (int64_t n = 0; n < N; n += {{block_n}}) {
-{%- if use_cached_dequantized_B %}
-        if C10_UNLIKELY(m == 0) {
-            // Dequantize K * 32 int8 B elements into BF16
-            load_dequantized_B(n / {{block_n}});
-        }
-{%- endif %}
+    for (int64_t n = 0; n < N; n += {{block_n}}) {
+        // Dequantize K * 32 int8 B elements into BF16
+        load_dequantized_B(n / {{block_n}});
+        for (int64_t m = 0; m < M; m += {{block_m}}) {
+            int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
+            int64_t m_tail = m;
 {%- for num_rows in range(block_m, 0, -16) %}
     {%- if num_rows != block_m %}
             else
