@@ -292,16 +292,6 @@ class Attr {
     // if output is quantized, then append the eltwise linear to adjust the
     // output scale/zero_point
     if (is_quantized) {
-      // [Note: Gap of u8 qtensor scale between oneDNN and PyTorch]
-      // The /2 here is for output_scale collected by observer is different
-      // from quantization requirements in oneDNN.
-      // For Observer, the conv_scale (activation scale in other case) is
-      // computed through 2max_v/(qmax - qmin). The max_v is collected
-      // from the tensor to be observerd.
-      // (https://pytorch.org/docs/stable/generated/torch.quantization.observer.MinMaxObserver.html#torch.quantization.observer.MinMaxObserver)
-      // On the other hand, for u8 in oneDNN, the scale for quantization is
-      // defined as max_v/(qmax-qmin). Hence, we need to divide by 2 here.
-      // (https://oneapi-src.github.io/oneDNN/dev_guide_inference_int8.html)
       dnnl_post_ops_.append_eltwise(
           kind_with_linear, 1.f / q_scale_, q_zero_point_);
     }
