@@ -183,6 +183,9 @@ def package_aoti(archive_file: str, aoti_files: Union[str, Dict[str, str]]) -> s
             )
             for root, dirs, files in os.walk(aoti_output_dir):
                 for file in files:
+                    if file.endswith(".o"):
+                        # No need to package the .o files
+                        continue
                     log.debug(
                         "Saving AOTI generated file %s to archive in %s%s/%s",
                         os.path.join(root, file),
