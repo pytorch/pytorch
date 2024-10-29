@@ -14,15 +14,19 @@ import torch
 import torch._export
 import torch._inductor
 import torch._inductor.config
+import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 import torch.nn as nn
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
+from torch._export import capture_pre_autograd_graph
 from torch._inductor import config
 from torch._inductor.exc import CppWrapperCodegenError
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
+from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.export import Dim, export
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
@@ -1571,6 +1575,33 @@ class AOTInductorTestsTemplate:
             torch.randint(1, size=[38], dtype=torch.int64, device="cuda"),
         )
         torch._export.aot_compile(Model(), example_inputs)
+
+    def test_buffer_mutation_and_force_mmap_weights(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(16, 15)
+                self.linear2 = torch.nn.Linear(15, 14)
+
+            def forward(self, x):
+                x = self.linear1(x)
+                out = self.linear2(x)
+                return out
+
+        example_inputs = (torch.randn(32, 16),)
+        model = Model().eval()
+        with config.patch(
+            {"freezing": True, "aot_inductor.force_mmap_weights": True}
+        ), torch.no_grad():
+            exported_model = capture_pre_autograd_graph(model, example_inputs)
+            quantizer = X86InductorQuantizer()
+            quantizer.set_global(xiq.get_default_x86_inductor_quantization_config())
+            prepared_model = prepare_pt2e(exported_model, quantizer)
+            prepared_model(*example_inputs)
+            converted_model = convert_pt2e(prepared_model)
+            torch.ao.quantization.move_exported_model_to_eval(converted_model)
+
+            self.check_model(converted_model, example_inputs)
 
     @requires_multigpu()
     def test_replicate_on_devices(self):
