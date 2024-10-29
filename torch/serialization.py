@@ -355,16 +355,14 @@ def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
                 ]
                 # GLOBALs will always have non-None arg that is a string so we can safely .split(" ")
                 global_instruction_module_fn = [
-                    ".".join(inst[1].split(" "))
-                    for inst in global_instructions  # type: ignore[union-attr]
+                    ".".join(inst[1].split(" "))  # type: ignore[union-attr]
+                    for inst in global_instructions
                 ]
                 return list(
                     set(global_instruction_module_fn).difference(safe_global_strings)
                 )
         else:
-            raise ValueError(
-                "Expected input to be a checkpoint returned by torch.save"
-            )
+            raise ValueError("Expected input to be a checkpoint returned by torch.save")
 
 
 class skip_data:
