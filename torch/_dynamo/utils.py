@@ -56,7 +56,7 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Literal, TypeGuard
+from typing_extensions import Literal, TypeIs
 
 import torch
 import torch._functorch.config
@@ -120,6 +120,8 @@ except ImportError:
 T = TypeVar("T")
 
 unpatched_nn_module_getattr = torch.nn.Module.__getattr__
+unpatched_nn_module_call = torch.nn.Module.__call__
+unpatched_nn_module_call_impl = torch.nn.Module._call_impl
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
@@ -341,10 +343,18 @@ def dynamo_timed(
                                 remote_cache_time_saved = frame_phase_timing[
                                     compile_id
                                 ].get("remote_cache_time_saved", None)
+                                remote_fx_graph_cache_get_time = frame_phase_timing[
+                                    compile_id
+                                ].get("remote_fx_graph_cache_get", None)
+                                remote_fx_graph_cache_put_time = frame_phase_timing[
+                                    compile_id
+                                ].get("remote_fx_graph_cache_put", None)
                             else:
                                 inductor_compile_time = None
                                 code_gen_time = None
                                 remote_cache_time_saved = None
+                                remote_fx_graph_cache_get_time = None
+                                remote_fx_graph_cache_put_time = None
                             structured_logging_overhead_s = (
                                 torch._logging.get_structured_logging_overhead()
                             )
@@ -356,6 +366,9 @@ def dynamo_timed(
                                 fail_reason,
                                 remote_cache_time_saved,
                                 structured_logging_overhead_s,
+                                False,  # is_forward
+                                to_int_ms(remote_fx_graph_cache_get_time),
+                                to_int_ms(remote_fx_graph_cache_put_time),
                             )
                             record_compilation_metrics(metrics)
 
@@ -516,7 +529,7 @@ def count_calls(g: fx.Graph) -> int:
     return c
 
 
-def identity(x):
+def identity(x: T) -> T:
     return x
 
 
@@ -569,14 +582,14 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: Type[T]) -> TypeGuard[T]:
+def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
     ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
-) -> TypeGuard[T]:
+) -> TypeIs[T]:
     ...
 
 
@@ -762,6 +775,10 @@ def proxy_args_kwargs(args, kwargs):
         )
 
 
+def to_int_ms(v: Optional[float]) -> Optional[int]:
+    return None if v is None else int(v * 1000)
+
+
 @dataclasses.dataclass
 class CompilationMetrics:
     compile_id: str
@@ -800,6 +817,9 @@ class CompilationMetrics:
     config_inline_inbuilt_nn_modules: Optional[bool]
     specialize_float: Optional[bool]
     dynamo_config: Optional[str]
+    is_forward: Optional[bool]
+    remote_fx_graph_cache_get_time_ms: Optional[int]
+    remote_fx_graph_cache_put_time_ms: Optional[int]
 
 
 @dataclasses.dataclass
@@ -811,6 +831,9 @@ class BwdCompilationMetrics:
     fail_reason: Optional[str]
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
+    is_forward: Optional[bool]
+    remote_fx_graph_cache_get_time_ms: Optional[int]
+    remote_fx_graph_cache_put_time_ms: Optional[int]
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -821,6 +844,37 @@ _compilation_metrics: Deque[
 ] = collections.deque(maxlen=DEFAULT_COMPILATION_METRICS_LIMIT)
 
 
+def add_compilation_metrics_to_chromium(c: CompilationMetrics):
+    event_logger = get_chromium_event_logger()
+    # The following compilation metrics are related to
+    # dynamo, so go with the "entire frame compile" event
+    event_logger.add_event_data(
+        event_name="dynamo",
+        frame_key=c.frame_key,
+        co_name=c.co_name,
+        co_filename=c.co_filename,
+        co_firstlineno=c.co_firstlineno,
+        cache_size=c.cache_size,
+        accumulated_cache_size=c.accumulated_cache_size,
+        guard_count=c.guard_count,
+        shape_env_guard_count=c.shape_env_guard_count,
+        graph_op_count=c.graph_op_count,
+        graph_node_count=c.graph_node_count,
+        graph_input_count=c.graph_input_count,
+        fail_type=c.fail_type,
+        fail_reason=c.fail_reason,
+        fail_user_frame_filename=c.fail_user_frame_filename,
+        fail_user_frame_lineno=c.fail_user_frame_lineno,
+        # Sets aren't JSON serializable
+        non_compliant_ops=list(c.non_compliant_ops),
+        compliant_custom_ops=list(c.compliant_custom_ops),
+        restart_reasons=list(c.restart_reasons),
+        dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
+        has_guarded_code=c.has_guarded_code,
+        dynamo_config=c.dynamo_config,
+    )
+
+
 def record_compilation_metrics(
     compilation_metrics: Union[CompilationMetrics, BwdCompilationMetrics]
 ):
@@ -828,6 +882,7 @@ def record_compilation_metrics(
     _compilation_metrics.append(compilation_metrics)
     if isinstance(compilation_metrics, CompilationMetrics):
         name = "compilation_metrics"
+        add_compilation_metrics_to_chromium(compilation_metrics)
     else:
         name = "bwd_compilation_metrics"
     torch._logging.trace_structured(
@@ -877,6 +932,11 @@ class ChromiumEventLogger:
             self.tls.stack = ["__start__"]
             return self.tls.stack
 
+    def get_event_data(self) -> Dict[str, Any]:
+        if not hasattr(self.tls, "event_data"):
+            self.tls.event_data = {}
+        return self.tls.event_data
+
     def __init__(self):
         self.tls = threading.local()
         # Generate a unique id for this logger, which we can use in scuba to filter down
@@ -885,6 +945,25 @@ class ChromiumEventLogger:
 
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
+
+    def add_event_data(
+        self,
+        event_name: str,
+        **kwargs,
+    ) -> None:
+        """
+        Adds additional metadata info to an in-progress event
+        This metadata is recorded in the END event
+        """
+        if event_name not in self.get_stack():
+            raise RuntimeError(
+                "Cannot add metadata to events that aren't in progress."
+                "Please make sure the event has started and hasn't ended."
+            )
+        event_data = self.get_event_data()
+        if event_name not in event_data:
+            event_data[event_name] = {}
+        event_data[event_name].update(kwargs)
 
     def log_event_start(
         self,
@@ -898,7 +977,6 @@ class ChromiumEventLogger:
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
-
         compile_id = str(torch._guards.CompileContext.current_compile_id())
         metadata["compile_id"] = compile_id
         self._log_timed_event(
@@ -915,6 +993,8 @@ class ChromiumEventLogger:
         stack = self.get_stack()
         stack.clear()
         stack.append("__start__")
+        event_data = self.get_event_data()
+        event_data.clear()
 
     def log_event_end(
         self,
@@ -932,11 +1012,22 @@ class ChromiumEventLogger:
         """
         compile_id = str(torch._guards.CompileContext.current_compile_id())
         metadata["compile_id"] = compile_id
+
+        # Grab metadata collected during event span
+        all_event_data = self.get_event_data()
+        if event_name in all_event_data:
+            event_metadata = all_event_data[event_name]
+            del all_event_data[event_name]
+        else:
+            event_metadata = {}
+        # Add the passed in metadata
+        event_metadata.update(metadata)
+
         event = self._log_timed_event(
             event_name,
             time_ns,
             "E",
-            metadata,
+            event_metadata,
         )
 
         # These stack health checks currently never happen,
@@ -958,7 +1049,7 @@ class ChromiumEventLogger:
             )
             stack.pop()
 
-        log_chromium_event_internal(event, stack, compile_id, self.id_, start_time_ns)
+        log_chromium_event_internal(event, stack, self.id_, start_time_ns)
         # Finally pop the actual event off the stack
         stack.pop()
 
@@ -1025,9 +1116,7 @@ class ChromiumEventLogger:
             expect_trace_id=True,
         )
         # Log an instant event with the same start and end time
-        log_chromium_event_internal(
-            event, self.get_stack(), compile_id, self.id_, time_ns
-        )
+        log_chromium_event_internal(event, self.get_stack(), self.id_, time_ns)
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -1439,6 +1528,7 @@ dict_keys: Type[KeysView[Any]] = type({}.keys())
 dict_values: Type[ValuesView[Any]] = type({}.values())
 odict_values: Type[ValuesView[Any]] = type(collections.OrderedDict().values())
 tuple_iterator: Type[Iterator[Any]] = type(iter(()))
+range_iterator: Type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
 
@@ -2479,7 +2569,7 @@ class numpy_to_tensor_wrapper:
         self.f = f
         self.__name__ = "wrapped_" + self.f.__name__
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped function <original {self.f.__name__}>>"
 
     def __call__(self, *args, **kwargs):
@@ -2503,7 +2593,7 @@ class numpy_method_wrapper:
         self.method = method
         self.__name__ = "wrapped_" + self.method
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped method <original {self.method}>>"
 
     def __call__(self, *args, **kwargs):
@@ -2522,7 +2612,7 @@ class numpy_operator_wrapper:
         self.op = op
         self.__name__ = f"wrapped_{op.__name__}"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped operator <original {self.__name__}>>"
 
     def __call__(self, *args, **kwargs):
@@ -3048,7 +3138,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
         # fast path, avoid pytree overhead
         # compiled autograd inputs are always a list of tensors, maybe followed by symints
         assert inputs_idx_to_clear == [0]
@@ -3097,7 +3187,7 @@ class Lit:
     def __init__(self, s):
         self.s = s
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.s
 
 

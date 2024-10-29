@@ -524,6 +524,7 @@ class PythonWrapperCodegen(CodeGen):
         self._meta_vars: Set[str] = set()
         self.multi_kernel_state = MultiKernelState()
         self.already_codegened_subgraphs: Set[str] = set()
+        self.allocated_workspaces: Dict[str, Any] = {}
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
@@ -612,7 +613,14 @@ class PythonWrapperCodegen(CodeGen):
         import_str = f"""
             import triton
             import triton.language as tl
-            from {triton_heuristics.__name__} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
+            from {triton_heuristics.__name__} import (
+                grid,
+                split_scan_grid,
+                grid_combo_kernels,
+                start_graph,
+                end_graph,
+                cooperative_reduction_grid,
+            )
             """
         self.imports.splice(import_str, strip=True)
         if config.triton.autotune_at_compile_time:
@@ -1312,6 +1320,8 @@ class PythonWrapperCodegen(CodeGen):
             arg = kwargs[key]
             if idx in kernel.constexprs:
                 constants[key] = arg
+            elif kwargs[key] is None:
+                constants[key] = None
             else:
                 non_constant_indices.append(idx)
                 if isinstance(arg, ir.TMADescriptor):
@@ -1474,7 +1484,7 @@ class PythonWrapperCodegen(CodeGen):
                                 f"{symbol_name}{annotation_code} = {symbol_str}"
                             )
                         else:
-                            compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                            compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
                         symbols_included.add(symbol_name)
                     elif (
                         symbol_name in unqualified_loads
@@ -1537,7 +1547,7 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(line)
             self.writeline(self.make_zero_buffer(name))
         elif ws.zero_mode == WorkspaceZeroMode.ZERO_PER_GRAPH:
-            prior = V.graph.allocated_workspaces.get(name)
+            prior = self.allocated_workspaces.get(name)
             if prior:
                 assert isinstance(prior, AllocateLine)
                 # expand existing allocation
@@ -1545,7 +1555,7 @@ class PythonWrapperCodegen(CodeGen):
             else:
                 self.writeline(line)
                 self.writeline(self.make_zero_buffer(name))
-                V.graph.allocated_workspaces[name] = line
+                self.allocated_workspaces[name] = line
         else:
             raise AssertionError(ws.zero_mode)
 
@@ -2123,6 +2133,14 @@ class PythonWrapperCodegen(CodeGen):
 
         self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
 
+    def codegen_invoke_subgraph(self, invoke_subgraph):
+        name = invoke_subgraph.get_name()
+
+        self.writeline(f"{name} = [None] * {len(invoke_subgraph.outputs)}")
+        outer_inputs = [buf.codegen_reference() for buf in invoke_subgraph.inputs]
+        outer_outputs = [f"{name}[{i}]" for i in range(len(invoke_subgraph.outputs))]
+        self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, outer_outputs)
+
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
 
@@ -2248,10 +2266,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # This sets up the name of the function containing the launcher code of
         # the subgraph.
         self.launcher_fn_name = self.subgraph_name
-
-    def codegen_input_size_and_nan_asserts(self) -> None:
-        # No need to insert the asserts for the subgraph inputs.
-        pass
 
     def write_header(self) -> None:
         pass
