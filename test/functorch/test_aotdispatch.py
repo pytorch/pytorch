@@ -6210,8 +6210,11 @@ class TestAOTModuleSimplified(AOTTestCase):
         )
         y2 = fn_comp(x2)
         with self.assertRaisesRegex(
-            AssertionError,
-            "We incorrectly attempted to compile the backward with incorrect subclass metadata.",
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             y2.backward(gradient=torch.randn(2, 3))
 
