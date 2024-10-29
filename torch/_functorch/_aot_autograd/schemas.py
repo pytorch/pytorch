@@ -23,6 +23,7 @@ from typing import (
 )
 
 import torch
+import torch.utils.pytree as pytree
 from torch._guards import Source
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensor
