@@ -138,8 +138,7 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
 }
 } // namespace
 
-namespace at {
-namespace native {
+namespace at::native {
 
 std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
     const at::Tensor& self,
@@ -252,5 +251,4 @@ at::Tensor fused_moving_avg_obs_fake_quant(
       symmetric_quant);
   return std::get<0>(res);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native
