@@ -404,8 +404,8 @@ struct StealOrDefault {
 
   StealOrDefault(const StealOrDefault&) = delete;
   StealOrDefault(StealOrDefault&&) = delete;
-  StealOrDefault operator =(const StealOrDefault&) = delete;
-  StealOrDefault operator =(StealOrDefault&&) = delete;
+  StealOrDefault& operator=(const StealOrDefault&) = delete;
+  StealOrDefault& operator=(StealOrDefault&&) = delete;
   ~StealOrDefault() {
     container_.get().clear();
   }

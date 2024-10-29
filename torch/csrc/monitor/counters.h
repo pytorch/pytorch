@@ -124,8 +124,8 @@ class Stat {
   }
   Stat(const Stat&) = delete;
   Stat(Stat&&) = delete;
-  Stat operator =(const Stat&) = delete;
-  Stat operator =(Stat&&) = delete;
+  Stat& operator=(const Stat&) = delete;
+  Stat& operator=(Stat&&) = delete;
 
   virtual ~Stat() {
     {
