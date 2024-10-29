@@ -540,6 +540,15 @@ class CodeGen:
                 size = list(arg.size())
                 dtype = str(arg.dtype).split(".")[-1]
                 return f"torch.Tensor(size={size}, dtype={dtype})"
+            elif isinstance(arg, tuple):
+                if len(arg) == 1:
+                    return f"({_get_repr(arg[0])},)"
+                else:
+                    return "(" + ", ".join(_get_repr(a) for a in arg) + ")"
+            elif isinstance(arg, list):
+                return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
+            elif isinstance(arg, slice):
+                return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
             else:
                 return blue(repr(arg))
 
