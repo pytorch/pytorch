@@ -17,6 +17,8 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
 
+#include <torch/csrc/dynamo/debug_macros.h>
+
 #ifdef USE_CUDA
 #include <ATen/cuda/EmptyTensor.h>
 #endif
@@ -655,7 +657,7 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
 
 static std::unordered_map<PyObject*, uint64_t> dict_version_map;
 static int dict_version_watcher_id;
-static uint64_t global_dict_version_id = 0;
+static uint64_t global_dict_version_id = 1;
 static int dict_version_watch_callback(
     PyDict_WatchEvent event,
     PyObject* dict,
