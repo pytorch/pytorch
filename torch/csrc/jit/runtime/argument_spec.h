@@ -64,7 +64,7 @@ struct ArgumentInfo {
 };
 
 static_assert(
-    std::is_standard_layout<ArgumentInfo>::value,
+    std::is_standard_layout_v<ArgumentInfo>,
     "ArgumentInfo is to be a POD struct");
 static_assert(
     sizeof(ArgumentInfo) == sizeof(ArgumentInfo::plain_data_type),
@@ -106,7 +106,7 @@ struct ArgumentSpec {
       at::Device device = t->device();
       arg.dev_type_ =
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-          static_cast<std::underlying_type<DeviceType>::type>(device.type());
+          static_cast<std::underlying_type_t<DeviceType>>(device.type());
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       arg.device_ = device.index();
       arg.type_ = static_cast<unsigned>(t->scalar_type());
@@ -266,8 +266,8 @@ struct CompleteArgumentSpec {
           pod.type = static_cast<int>(t.scalar_type());
           at::Device device = t.device();
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-          pod.dev_type = static_cast<std::underlying_type<DeviceType>::type>(
-              device.type());
+          pod.dev_type =
+              static_cast<std::underlying_type_t<DeviceType>>(device.type());
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           pod.device = device.index();
           pod.requires_grad = with_grad && t.requires_grad();
