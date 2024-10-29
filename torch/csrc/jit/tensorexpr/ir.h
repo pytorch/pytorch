@@ -11,9 +11,7 @@
 
 #include <ATen/core/ivalue.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 enum CompareSelectOperation {
   kEQ = 0,
@@ -861,12 +859,9 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
-  Intrinsics(
-      IntrinsicsOp op_type,
-      Dtype dtype,
-      const std::vector<ExprPtr>& params)
+  Intrinsics(IntrinsicsOp op_type, Dtype dtype, std::vector<ExprPtr> params)
       : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
-        params_(params),
+        params_(std::move(params)),
         op_type_(op_type) {
     if (OpArgCount(op_type) != nparams()) {
       throw malformed_input("bad arg count in Intrinsics");
@@ -918,6 +913,4 @@ TORCH_API ExprPtr flatten_index(
     const std::vector<ExprPtr>& indices,
     const std::vector<ExprPtr>& strides);
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

@@ -1080,9 +1080,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         ):
             # For empty hooks, make an EMPTY_NN_MODULE_HOOKS_DICT. This allows us to control the installation of empty
             # hooks guard via skip_nnmodule_hook_guards
-            if not tx.output.side_effects.has_pending_mutation_of_attr(
-                self, name
-            ) and self.value.__module__.startswith(("torch.nn.", "torch.ao.")):
+            if not tx.output.side_effects.has_pending_mutation_of_attr(self, name):
                 hooks_dict = getattr(self.value, name)
                 if isinstance(hooks_dict, dict) and len(hooks_dict) == 0:
                     if self.source:
