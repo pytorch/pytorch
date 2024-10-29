@@ -226,17 +226,6 @@ private:
     int64_t data_;
 };
 
-std::ostream& operator<<(std::ostream& ss, DimEntry entry) {
-    if (entry.is_none()) {
-        ss << "None";
-    } else if (entry.is_positional()) {
-        ss << entry.position();
-    } else {
-        ss << entry.dim();
-    }
-    return ss;
-}
-
 // Dim wrapper methods
 DimEntry _wrap_dim(mpy::handle d, size_t N, bool keepdim) {
     if (Dim::check(d)) {
@@ -750,7 +739,7 @@ public:
 
     static mpy::obj<Tensor> create() {
         if (!TensorType) {
-            TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").ptr();
+            TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").release();
         }
         return Tensor::alloc(TensorType);
     }
@@ -878,7 +867,7 @@ mpy::object Tensor::from_positional(Arena & A, at::Tensor tensor, Slice<DimEntry
     }
     AT_ASSERT(last == 0 || last == -1);
     if (!seen_dims) {
-        return mpy::object::steal(THPVariable_Wrap(std::move(tensor)));
+        return mpy::object::steal(THPVariable_Wrap(tensor));
     }
 
     mpy::obj<Tensor> self = Tensor::create();
@@ -1704,7 +1693,7 @@ static mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry>
     DotPart ro_dims;
     DotPart lr_dims;
 
-    auto insert_dim = [&] (mpy::hdl<Dim> d, at::optional<int> lhs_idx, at::optional<int> rhs_idx) {
+    auto insert_dim = [&] (mpy::hdl<Dim> d, std::optional<int> lhs_idx, std::optional<int> rhs_idx) {
         bool reduced = sum.contains(d);
         int64_t lhs_stride = lhs_idx ? lhs_strides[*lhs_idx] : 0;
         int64_t rhs_stride = rhs_idx ? rhs_strides[*rhs_idx] : 0;
@@ -1743,7 +1732,7 @@ static mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry>
             continue;
         }
         auto d = rhs.levels[i];
-        insert_dim(d.dim(), at::nullopt, i);
+        insert_dim(d.dim(), std::nullopt, i);
     }
 
     if (lr_dims.dims.size() != sum.size()) {

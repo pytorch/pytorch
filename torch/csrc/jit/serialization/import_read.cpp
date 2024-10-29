@@ -1,6 +1,8 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
+#include <utility>
+
 namespace torch::jit {
 
 IValue readArchiveAndTensors(
@@ -48,13 +50,13 @@ IValue readArchiveAndTensors(
       device,
       false,
       type_parser,
-      storage_context);
+      std::move(storage_context));
   unpickler.set_version(stream_reader.version());
   return unpickler.parse_ivalue();
 }
 
 bool check_zip_file(
-    std::shared_ptr<caffe2::serialize::ReadAdapterInterface> rai) {
+    const std::shared_ptr<caffe2::serialize::ReadAdapterInterface>& rai) {
   std::array<uint8_t, 2> first_short{};
   static constexpr uint8_t first_slot = 0x80;
   static constexpr uint8_t second_slot = 0x02;

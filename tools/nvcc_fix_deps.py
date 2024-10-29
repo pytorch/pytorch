@@ -13,13 +13,15 @@ CMAKE_CUDA_COMPILER_LAUNCHER="python;tools/nvcc_fix_deps.py;ccache"
 
 """
 
+from __future__ import annotations
+
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Optional, TextIO
+from typing import TextIO
 
 
-def resolve_include(path: Path, include_dirs: List[Path]) -> Path:
+def resolve_include(path: Path, include_dirs: list[Path]) -> Path:
     for include_path in include_dirs:
         abs_path = include_path / path
         if abs_path.exists():
@@ -36,7 +38,7 @@ Tried the following paths, but none existed:
     )
 
 
-def repair_depfile(depfile: TextIO, include_dirs: List[Path]) -> None:
+def repair_depfile(depfile: TextIO, include_dirs: list[Path]) -> None:
     changes_made = False
     out = ""
     for line in depfile:
@@ -70,8 +72,8 @@ PRE_INCLUDE_ARGS = ["-include", "--pre-include"]
 POST_INCLUDE_ARGS = ["-I", "--include-path", "-isystem", "--system-include"]
 
 
-def extract_include_arg(include_dirs: List[Path], i: int, args: List[str]) -> None:
-    def extract_one(name: str, i: int, args: List[str]) -> Optional[str]:
+def extract_include_arg(include_dirs: list[Path], i: int, args: list[str]) -> None:
+    def extract_one(name: str, i: int, args: list[str]) -> str | None:
         arg = args[i]
         if arg == name:
             return args[i + 1]

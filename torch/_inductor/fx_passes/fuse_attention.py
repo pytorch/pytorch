@@ -6,6 +6,7 @@ import math
 
 import torch
 from torch.nn.attention import sdpa_kernel, SDPBackend
+
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
@@ -13,6 +14,7 @@ from ..pattern_matcher import (
     gen_register_replacement,
     joint_fwd_bwd,
 )
+
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -40,9 +42,9 @@ def _sfdp_pattern_1(query, key, value, inv_scale):
 def _sfdp_replacement_1(query, key, value, inv_scale):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=0.0,
         is_causal=False,
@@ -62,9 +64,9 @@ def _sfdp_pattern_2(query, key, value, scale_factor):
 def _sfdp_replacement_2(query, key, value, scale_factor):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=0.0,
         is_causal=False,
@@ -84,9 +86,9 @@ def _sfdp_pattern_3(query, key, value, inv_scale_factor, dropout_p):
 def _sfdp_replacement_3(query, key, value, inv_scale_factor, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=dropout_p,
         is_causal=False,
@@ -104,9 +106,9 @@ def _sfdp_pattern_4(query, key, value, scale_factor, dropout_p):
 def _sfdp_replacement_4(query, key, value, scale_factor, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=None,
         dropout_p=dropout_p,
         is_causal=False,
@@ -125,9 +127,9 @@ def _sfdp_pattern_5(query, key, value, attn_mask):
 def _sfdp_replacement_5(query, key, value, attn_mask):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=0.0,
         is_causal=False,
@@ -145,9 +147,9 @@ def _sfdp_pattern_6(query, key, value, attn_mask, dropout_p):
 def _sfdp_replacement_6(query, key, value, attn_mask, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     return _scaled_dot_product_attention(
-        query.contiguous(),
-        key.contiguous(),
-        value.contiguous(),
+        query,
+        key,
+        value,
         attn_mask=attn_mask.to(dtype=query.dtype),
         dropout_p=dropout_p,
         is_causal=False,
@@ -809,16 +811,14 @@ def _get_sfdp_patterns():
                 _sfdp_replacement_18,
                 [g(), g(), g(), m_bool()],
                 d,
-                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_18,
                 _sfdp_replacement_18,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
                 d,
-                # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
-                _sfdp_extra_check(disable_cuda=True),
+                _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_19,

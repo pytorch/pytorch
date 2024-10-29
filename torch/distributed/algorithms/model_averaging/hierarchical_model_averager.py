@@ -3,12 +3,13 @@
 import logging
 import warnings
 from collections import OrderedDict
-from typing import Union, Iterable, Dict
+from typing import Dict, Iterable, Union
 
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms.model_averaging.averagers as averagers
 import torch.distributed.algorithms.model_averaging.utils as utils
+
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,9 @@ class HierarchicalModelAverager(averagers.ModelAverager):
             raise ValueError("Arg ``period_group_size_dict`` must not be empty.")
         self._periods = list(period_group_size_dict.keys())
         if self._periods[0] <= 0:
-            raise ValueError("The minimum period in arg ``period_group_size_dict`` must be a positive value.")
+            raise ValueError(
+                "The minimum period in arg ``period_group_size_dict`` must be a positive value."
+            )
         elif self._periods[-1] == 1:
             warnings.warn(
                 "When the maximum period in arg ``period_group_size_dict`` is 1, "
@@ -124,10 +127,14 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         for period, group_size in period_group_size_dict.items():
             logger.info(
                 "\tEach group that has %s processes average parameters every %s iterations, "
-                "if no higher-level averaging.", group_size, period)
+                "if no higher-level averaging.",
+                group_size,
+                period,
+            )
             if group_size != overall_group_size:
                 self.period_process_group_dict[period], _ = dist.new_subgroups(
-                    group_size=group_size, group=self.process_group)
+                    group_size=group_size, group=self.process_group
+                )
             else:
                 self.period_process_group_dict[period] = self.process_group
 
@@ -149,7 +156,12 @@ class HierarchicalModelAverager(averagers.ModelAverager):
                 return self.period_process_group_dict[period]
         return None
 
-    def average_parameters(self, params: Union[Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]]):
+    def average_parameters(
+        self,
+        params: Union[
+            Iterable[torch.nn.Parameter], Iterable[Dict[str, torch.nn.Parameter]]
+        ],
+    ):
         """
         Averages parameters or parameter groups of an optimizer.
 

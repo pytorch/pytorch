@@ -29,9 +29,16 @@ SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_devic
 SM70OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 0))
 SM75OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 5))
 SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
+SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 9))
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
 
 IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() in [(7, 2), (8, 7)])
+
+def CDNA2OrLater():
+    if TEST_WITH_ROCM:
+        gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
+        return any(arch in gcn_arch_name for arch in {"gfx90a", "gfx940", "gfx941", "gfx942"})
+    return False
 
 def evaluate_gfx_arch_exact(matching_arch):
     if not torch.cuda.is_available():
@@ -50,9 +57,6 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     return False
 
-def evaluate_platform_supports_cudnn_attention():
-    return (not TEST_WITH_ROCM) and (not IS_WINDOWS) and TEST_CUDA and SM80OrLater
-
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
         return evaluate_gfx_arch_exact('gfx90a:sramecc+:xnack-') or evaluate_gfx_arch_exact('gfx942:sramecc+:xnack-')
@@ -60,10 +64,12 @@ def evaluate_platform_supports_efficient_attention():
         return True
     return False
 
+def evaluate_platform_supports_cudnn_attention():
+    return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
+
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
 PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
-
 # This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
 PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or
                                                   PLATFORM_SUPPORTS_CUDNN_ATTENTION or
@@ -73,11 +79,22 @@ PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
 PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
 
+def evaluate_platform_supports_fp8():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            return 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName
+        else:
+            return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
+    return False
+
+PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
+
+
 if TEST_NUMBA:
     try:
         import numba.cuda
         TEST_NUMBA_CUDA = numba.cuda.is_available()
-    except Exception as e:
+    except Exception:
         TEST_NUMBA_CUDA = False
         TEST_NUMBA = False
 else:
@@ -235,6 +252,8 @@ def _check_cusparse_generic_available():
 
 def _check_hipsparse_generic_available():
     if not TEST_WITH_ROCM:
+        return False
+    if not torch.version.hip:
         return False
 
     rocm_version = str(torch.version.hip)

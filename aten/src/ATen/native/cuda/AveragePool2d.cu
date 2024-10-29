@@ -135,7 +135,7 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const index_t nthreads, const
     const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const bottom_diff, const int divisor_override,
     bool count_include_pad, bool use_divisor) {
-  CUDA_KERNEL_LOOP(index, nthreads) {
+  CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
     // find out the local index
     // find out the local offset
     const int w = index % width + pad_w;
@@ -192,7 +192,7 @@ __global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const index_t nthreads,
     const int stride_w, const int pad_h, const int pad_w,
     scalar_t* const bottom_diff, const int divisor_override,
     bool count_include_pad, bool use_divisor) {
-  CUDA_KERNEL_LOOP(index, nthreads) {
+  CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
     const int c = index % channels;
     const int w = (index / channels) % width;
     const int h = (index / channels / width) % height;

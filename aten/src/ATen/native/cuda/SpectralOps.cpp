@@ -109,33 +109,33 @@ CuFFTParamsLRUCache &cufft_get_plan_cache(DeviceIndex device_index) {
 namespace detail {
 
 int64_t cufft_get_plan_cache_max_size_impl(DeviceIndex device_index) {
-  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().deviceCount(),
     "cufft_get_plan_cache_max_size: expected 0 <= device_index < ",
-    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    at::detail::getCUDAHooks().deviceCount(), "], but got device_index=",
     device_index);
   return cufft_get_plan_cache(device_index).max_size();
 }
 
 void cufft_set_plan_cache_max_size_impl(DeviceIndex device_index, int64_t max_size) {
-  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().deviceCount(),
     "cufft_set_plan_cache_max_size: expected 0 <= device_index < ",
-    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    at::detail::getCUDAHooks().deviceCount(), "], but got device_index=",
     device_index);
   return cufft_get_plan_cache(device_index).resize(max_size);
 }
 
 int64_t cufft_get_plan_cache_size_impl(DeviceIndex device_index) {
-  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().deviceCount(),
     "cufft_get_plan_cache_size: expected 0 <= device_index < ",
-    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    at::detail::getCUDAHooks().deviceCount(), "], but got device_index=",
     device_index);
   return cufft_get_plan_cache(device_index).size();
 }
 
 void cufft_clear_plan_cache_impl(DeviceIndex device_index) {
-  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().getNumGPUs(),
+  TORCH_CHECK(0 <= device_index && device_index < at::detail::getCUDAHooks().deviceCount(),
     "cufft_clear_plan_cache: expected 0 <= device_index < ",
-    at::detail::getCUDAHooks().getNumGPUs(), "], but got device_index=",
+    at::detail::getCUDAHooks().deviceCount(), "], but got device_index=",
     device_index);
   return cufft_get_plan_cache(device_index).clear();
 }
@@ -227,7 +227,7 @@ static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_
   // sizes with only small prime factors can still be cached
   bool use_caching = true;
 #ifdef CUFFT_VERSION
-  if (10300 <= CUFFT_VERSION && CUFFT_VERSION < 10400) {
+  if constexpr (10300 <= CUFFT_VERSION && CUFFT_VERSION < 10400) {
     // Only cache plans for transforms with small prime factors
     use_caching = std::none_of(
         signal_size.begin() + 1, signal_size.end(), [](int64_t dim_size) {

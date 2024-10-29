@@ -55,6 +55,10 @@ class TORCH_API MapAllocator {
     return base_ptr_;
   }
 
+  int flags() const {
+    return flags_;
+  }
+
   static MapAllocator* fromDataPtr(const at::DataPtr&);
   static at::DataPtr makeDataPtr(
       c10::string_view filename,
@@ -108,6 +112,10 @@ class TORCH_API RefcountedMapAllocator : private RefcountedMapAllocatorArgCheck,
       size_t size);
 
   static RefcountedMapAllocator* fromDataPtr(const at::DataPtr&);
+  RefcountedMapAllocator(const RefcountedMapAllocator&) = delete;
+  RefcountedMapAllocator(RefcountedMapAllocator&&) = delete;
+  RefcountedMapAllocator& operator=(const RefcountedMapAllocator&) = delete;
+  RefcountedMapAllocator& operator=(RefcountedMapAllocator&&) = delete;
   static at::DataPtr makeDataPtr(
       const char* filename,
       int flags,

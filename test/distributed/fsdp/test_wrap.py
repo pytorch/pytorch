@@ -36,8 +36,8 @@ from torch.nn.modules.batchnorm import _BatchNorm
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    _maybe_cuda,
-    CUDAInitMode,
+    _move_to_device,
+    DEVICEInitMode,
     DummyProcessGroup,
     FSDPInitMode,
     FSDPTest,
@@ -55,7 +55,7 @@ from torch.testing._internal.common_utils import (
 
 
 class BatchNormNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.lin = nn.Linear(10, 10, bias=False)
         self.bn1 = nn.BatchNorm1d(10)
@@ -67,7 +67,7 @@ class BatchNormNet(nn.Module):
 class LoraModel(nn.Module):
     """This is a toy LoRA decoder model."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.embed_tokens = nn.Embedding(100, 32)
         self.layers = nn.ModuleList([LoraDecoder() for _ in range(4)])
@@ -78,7 +78,7 @@ class LoraModel(nn.Module):
 
 
 class LoraDecoder(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.attn = LoraAttention()
         self.mlp = LoraMLP()
@@ -91,7 +91,7 @@ class LoraDecoder(nn.Module):
 
 
 class LoraAttention(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.q_proj = nn.Linear(32, 32, bias=False)
         self.lora_A = nn.Linear(32, 8, bias=False)
@@ -106,7 +106,7 @@ class LoraAttention(nn.Module):
 
 
 class LoraMLP(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.proj1 = nn.Linear(32, 128, bias=False)
         self.proj2 = nn.Linear(128, 32, bias=False)
@@ -165,7 +165,7 @@ class TestFSDPWrap(FSDPTest):
         return nn.Linear(fin, fout, bias=False)
 
     def _get_already_wrapped_fsdp(
-        self, cuda_init_mode=CUDAInitMode.CUDA_BEFORE, nested=False
+        self, device_init_mode=DEVICEInitMode.DEVICE_BEFORE, nested=False
     ) -> FSDP:
         fn_self = self
 
@@ -173,20 +173,26 @@ class TestFSDPWrap(FSDPTest):
             def __init__(self, nested):
                 super().__init__()
                 # TODO: test the various init modes.
-                move_to_cuda = cuda_init_mode == CUDAInitMode.CUDA_BEFORE
+                move_to_device = device_init_mode == DEVICEInitMode.DEVICE_BEFORE
                 # if nested=True, the FSDP module will be nested one layer deep
                 # and we should pick that up.
                 if nested:
                     self.lin1 = nn.Sequential(
-                        _maybe_cuda(fn_self._get_linear(1, 1), move_to_cuda),
-                        FSDP(_maybe_cuda(fn_self._get_linear(1, 1), move_to_cuda)),
+                        _move_to_device(fn_self._get_linear(1, 1), move_to_device),
+                        FSDP(
+                            _move_to_device(fn_self._get_linear(1, 1), move_to_device)
+                        ),
                     )
                 else:
                     self.lin1 = FSDP(
-                        _maybe_cuda(fn_self._get_linear(1, 1), move_to_cuda)
+                        _move_to_device(fn_self._get_linear(1, 1), move_to_device)
                     )
-                self.lin2 = FSDP(_maybe_cuda(fn_self._get_linear(1, 1), move_to_cuda))
-                self.lin3 = FSDP(_maybe_cuda(fn_self._get_linear(1, 1), move_to_cuda))
+                self.lin2 = FSDP(
+                    _move_to_device(fn_self._get_linear(1, 1), move_to_device)
+                )
+                self.lin3 = FSDP(
+                    _move_to_device(fn_self._get_linear(1, 1), move_to_device)
+                )
 
             def forward(self, input: torch.Tensor) -> torch.Tensor:
                 return self.lin3(self.lin2(self.lin1(input)))
@@ -196,16 +202,18 @@ class TestFSDPWrap(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize("nested", [True, False])
-    @parametrize("cuda_init_mode", [CUDAInitMode.CUDA_AFTER, CUDAInitMode.CUDA_BEFORE])
-    def test_error_already_wrapped(self, nested, cuda_init_mode):
+    @parametrize(
+        "device_init_mode", [DEVICEInitMode.DEVICE_AFTER, DEVICEInitMode.DEVICE_BEFORE]
+    )
+    def test_error_already_wrapped(self, nested, device_init_mode):
         """
         Test that an error is raised if we attempt to wrap when submodules are
         already FSDP.
         """
         wrapped_fsdp = self._get_already_wrapped_fsdp(
-            nested=nested, cuda_init_mode=cuda_init_mode
+            nested=nested, device_init_mode=device_init_mode
         )
-        if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
+        if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
             wrapped_fsdp = wrapped_fsdp.cuda()
 
         wrapped_module_name = "lin1.1" if nested else "lin1"
@@ -252,7 +260,7 @@ class TestFSDPWrap(FSDPTest):
         """
 
         class MyModule(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.bn_container = BatchNormNet()
 
@@ -309,34 +317,41 @@ class TestFSDPWrap(FSDPTest):
         [BackwardPrefetch.BACKWARD_POST, BackwardPrefetch.BACKWARD_PRE],
     )
     @parametrize("forward_prefetch", [False, True])
-    @parametrize("cuda_init_mode", [CUDAInitMode.CUDA_AFTER, CUDAInitMode.CUDA_BEFORE])
+    @parametrize(
+        "device_init_mode", [DEVICEInitMode.DEVICE_AFTER, DEVICEInitMode.DEVICE_BEFORE]
+    )
     def test_main_wrap_api(
         self,
         cpu_offload: CPUOffload,
         backward_prefetch: BackwardPrefetch,
         forward_prefetch: bool,
-        cuda_init_mode: CUDAInitMode,
+        device_init_mode: DEVICEInitMode,
     ):
-        if cuda_init_mode == CUDAInitMode.CUDA_AFTER and cpu_offload.offload_params:
+        if (
+            device_init_mode == DEVICEInitMode.DEVICE_AFTER
+            and cpu_offload.offload_params
+        ):
             # they don't work together, expected
             return
 
-        move_to_cuda = cuda_init_mode == CUDAInitMode.CUDA_BEFORE
+        move_to_device = device_init_mode == DEVICEInitMode.DEVICE_BEFORE
 
         class Nested(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.nested_lin = _maybe_cuda(nn.Linear(1, 1, bias=False), move_to_cuda)
+                self.nested_lin = _move_to_device(
+                    nn.Linear(1, 1, bias=False), move_to_device
+                )
 
             def forward(self, input):
                 return self.nested_lin(input)
 
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
-                self.lin1 = _maybe_cuda(nn.Linear(1, 1, bias=False), move_to_cuda)
-                self.lin2 = _maybe_cuda(nn.Linear(1, 1, bias=False), move_to_cuda)
-                self.lin3 = _maybe_cuda(nn.Linear(1, 1, bias=False), move_to_cuda)
+                self.lin1 = _move_to_device(nn.Linear(1, 1, bias=False), move_to_device)
+                self.lin2 = _move_to_device(nn.Linear(1, 1, bias=False), move_to_device)
+                self.lin3 = _move_to_device(nn.Linear(1, 1, bias=False), move_to_device)
                 self.lin4 = Nested()
 
             def forward(self, input):
@@ -353,7 +368,7 @@ class TestFSDPWrap(FSDPTest):
             backward_prefetch=backward_prefetch,
             forward_prefetch=forward_prefetch,
         )
-        if cuda_init_mode == CUDAInitMode.CUDA_AFTER:
+        if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
             wrapped_model = wrapped_model.cuda()
 
         modules_in_fsdp_graph_order = [
@@ -411,7 +426,7 @@ class TestAutoWrap(TestCase):
         pg = self.process_group
 
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = wrap(nn.Linear(5, 5), process_group=pg)
 
@@ -476,7 +491,7 @@ class TestAutoWrap(TestCase):
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             fsdp_kwargs,
         )
         modules = list(fsdp_model.modules())
@@ -508,7 +523,7 @@ class TestAutoWrap(TestCase):
         model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
-            CUDAInitMode.CUDA_BEFORE,
+            DEVICEInitMode.DEVICE_BEFORE,
             {},
         )
 
@@ -699,15 +714,20 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[1], nn.ModuleList))
 
     @unittest.skipIf(not TEST_CUDA, "Test Requires CUDA")
-    @parametrize("cuda_init_mode", [CUDAInitMode.CUDA_BEFORE, CUDAInitMode.CUDA_AFTER])
+    @parametrize(
+        "device_init_mode", [DEVICEInitMode.DEVICE_BEFORE, DEVICEInitMode.DEVICE_AFTER]
+    )
     @parametrize(
         "cpu_offload",
         [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
     )
     @parametrize("use_device_id", [True, False])
-    def test_auto_wrap_smoke_test(self, cuda_init_mode, cpu_offload, use_device_id):
+    def test_auto_wrap_smoke_test(self, device_init_mode, cpu_offload, use_device_id):
         # CPU offload and CUDA after don't work together as expected.
-        if cpu_offload.offload_params and cuda_init_mode == CUDAInitMode.CUDA_AFTER:
+        if (
+            cpu_offload.offload_params
+            and device_init_mode == DEVICEInitMode.DEVICE_AFTER
+        ):
             return
 
         device = torch.device("cuda")
@@ -730,7 +750,7 @@ class TestAutoWrap(TestCase):
 
         # NOTE: We move model to CUDA after init with FSDP to simulate real use
         # cases where full model cannot be loaded onto GPU, but their shards can.
-        cuda_after_init = cuda_init_mode == CUDAInitMode.CUDA_AFTER
+        cuda_after_init = device_init_mode == DEVICEInitMode.DEVICE_AFTER
         try:
             sequential = TestFSDPWrap.NestedSequentialModel.get_model(
                 cuda=(not cuda_after_init)

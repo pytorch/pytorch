@@ -10,9 +10,9 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
-#include <c10/util/Optional.h>
-#include <limits>
 #include <cmath>
+#include <limits>
+#include <optional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -42,9 +42,9 @@ namespace at::native::templates {
 template<typename scalar_t>
 int64_t update_from(int64_t from) {
   static_assert(
-    std::is_floating_point<scalar_t>::value ||
-    std::is_same<scalar_t, at::Half>::value ||
-    std::is_same<scalar_t, at::BFloat16>::value, "scalar_t must be floating-point type");
+    std::is_floating_point_v<scalar_t> ||
+    std::is_same_v<scalar_t, at::Half> ||
+    std::is_same_v<scalar_t, at::BFloat16>, "scalar_t must be floating-point type");
   const auto from_plus_1 = static_cast<int64_t>(static_cast<scalar_t>(from + 1));
   if (from_plus_1 < from) {
     int64_t from_ = std::abs(from + 1);
@@ -59,9 +59,9 @@ int64_t update_from(int64_t from) {
 template<typename scalar_t>
 int64_t update_to(int64_t to) {
   static_assert(
-    std::is_floating_point<scalar_t>::value ||
-    std::is_same<scalar_t, at::Half>::value ||
-    std::is_same<scalar_t, at::BFloat16>::value, "scalar_t must be floating-point type");
+    std::is_floating_point_v<scalar_t> ||
+    std::is_same_v<scalar_t, at::Half> ||
+    std::is_same_v<scalar_t, at::BFloat16>, "scalar_t must be floating-point type");
   const auto to_minus_1 = static_cast<int64_t>(static_cast<scalar_t>(to - 1));
   if (to_minus_1 >= to) {
     int64_t to_ = std::abs(to - 1);
@@ -98,7 +98,7 @@ at::Tensor& random_impl(at::Tensor& self, std::optional<Generator> generator) {
       "This warning will become an error in version 1.7 release, please fix the code in advance"); \
   }
 
-static void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMeta dtype) {
+inline void check_from_to_in_range(int64_t from, int64_t to_inc, caffe2::TypeMeta dtype) {
   const auto scalar_type = typeMetaToScalarType(dtype);
   if (isFloatingType(scalar_type)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "check_random_fp_bounds", [&] {
@@ -290,7 +290,7 @@ at::Tensor& uniform_impl_(at::Tensor& self, double from, double to, std::optiona
     uniform_impl_<uniform_kernel, RNG>(float_tensor, from, to, generator);
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "check_uniform_bounds", [&] {
-      const auto dtype = self.dtype();
+      [[maybe_unused]] const auto dtype = self.dtype();
       const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
       const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
       CHECK_OUT_OF_BOUNDS(from, "from", min, max, dtype);

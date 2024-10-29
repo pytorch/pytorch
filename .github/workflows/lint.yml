@@ -15,11 +15,21 @@ permissions: read-all
 # The names of steps that actually test the code should be suffixed with `(nonretryable)`.
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+
   lintrunner-clang:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    needs: get-label-type
     with:
       timeout: 120
-      runner: linux.2xlarge
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
@@ -27,15 +37,16 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT"
+        export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
         export CLANG=1
         .github/scripts/lintrunner.sh
 
   lintrunner-noclang:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    needs: get-label-type
     with:
       timeout: 120
-      runner: linux.2xlarge
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
@@ -43,13 +54,14 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT"
+        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT --all-files"
         .github/scripts/lintrunner.sh
 
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    needs: get-label-type
     with:
-      runner: linux.2xlarge
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -83,7 +95,8 @@ jobs:
 
   pr-sanity-checks:
     name: pr-sanity-checks
-    runs-on: [self-hosted, linux.large]
+    needs: get-label-type
+    runs-on: [self-hosted, "${{ needs.get-label-type.outputs.label-type }}linux.large"]
     # Only run this on pull requests. This check is simple enough to be done without a Docker image
     if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-pr-sanity-checks')
     steps:
@@ -102,8 +115,9 @@ jobs:
 
   workflow-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    needs: get-label-type
     with:
-      runner: linux.2xlarge
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: -1
       submodules: true
@@ -138,8 +152,9 @@ jobs:
 
   toc:
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    needs: get-label-type
     with:
-      runner: linux.2xlarge
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -176,8 +191,9 @@ jobs:
     name: Test tools
     if: ${{ github.repository == 'pytorch/pytorch' }}
     uses: pytorch/test-infra/.github/workflows/linux_job.yml@main
+    needs: get-label-type
     with:
-      runner: linux.2xlarge
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       docker-image: pytorch-linux-focal-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -200,15 +216,16 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.8
+      - name: Setup Python 3.9
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
           cache: pip
       - name: Install dependencies
         run: |
-          pip install pytest-rerunfailures==11.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.1.* numpy==1.24.*
+          python3 -m pip install --upgrade pip
+          pip install pytest-rerunfailures==11.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.2.* fbscribelogger==0.1.* numpy==1.24.*
           pip install torch --pre --index-url https://download.pytorch.org/whl/nightly/cpu/
       - name: Run run_test.py (nonretryable)
         run: |
@@ -240,11 +257,11 @@ jobs:
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
-      - name: Setup Python 3.8
+      - name: Setup Python 3.9
         if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
           check-latest: false
           cache: pip
@@ -255,7 +272,7 @@ jobs:
         run: |
           pip install -r requirements.txt
           # Doesn't really matter what torch version, we just need ANY torch installed
-          pip install 'torch==1.*'
+          pip install 'torch==2.*'
       - name: Run collect_env.py (nonretryable)
         run: |
           # All we need to see is that it passes

@@ -213,9 +213,9 @@ void PyTorchStreamReader::init() {
   if (version_ < static_cast<decltype(version_)>(kMinSupportedFileFormatVersion)) {
     CAFFE_THROW(
         "Attempted to read a PyTorch file with version ",
-        c10::to_string(version_),
+        std::to_string(version_),
         ", but the minimum supported version for reading is ",
-        c10::to_string(kMinSupportedFileFormatVersion),
+        std::to_string(kMinSupportedFileFormatVersion),
         ". Your PyTorch script module file is too old. Please regenerate it",
         " with latest version of PyTorch to mitigate this issue.");
   }
@@ -621,15 +621,17 @@ size_t ostream_write_func(
   return ret;
 }
 
-PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name)
-    : archive_name_(basename(file_name)) {
+PyTorchStreamWriter::PyTorchStreamWriter(const std::string& file_name, bool compute_crc32)
+    : archive_name_(basename(file_name)),
+      compute_crc32_(compute_crc32) {
   setup(file_name);
 }
 
 PyTorchStreamWriter::PyTorchStreamWriter(
-    const std::function<size_t(const void*, size_t)> writer_func)
+    const std::function<size_t(const void*, size_t)> writer_func, bool compute_crc32)
     : archive_name_("archive"),
-      writer_func_(writer_func) {
+      writer_func_(writer_func),
+      compute_crc32_(compute_crc32) {
   setup(archive_name_);
 }
 
@@ -695,6 +697,11 @@ void PyTorchStreamWriter::writeRecord(
   size_t padding_size =
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
+  if (!compute_crc32_) {
+#if (!defined(FBCODE_CAFFE2))
+    flags |= MZ_ZIP_FLAG_DO_NOT_COMPUTE_CRC32;
+#endif
+  }
   mz_zip_writer_add_mem_ex_v2(
       /*pZip=*/ar_.get(),
       /*pArchive_name=*/full_name.c_str(),
@@ -733,7 +740,7 @@ void PyTorchStreamWriter::writeEndOfFile() {
   auto allRecords = getAllWrittenRecords();
   // If no ".data/version" or "version" record in the output model, rewrites version info
   if(allRecords.find(".data/version") == allRecords.end() && allRecords.find("version") == allRecords.end()) {
-    std::string version = c10::to_string(version_);
+    std::string version = std::to_string(version_);
     version.push_back('\n');
     if (version_ >= 0x6L) {
       writeRecord(".data/version", version.c_str(), version.size());

@@ -1,4 +1,5 @@
 import torch
+
 from ._common_operator_config_utils import (
     _get_binary_op_configs,
     _get_bn_configs,
@@ -12,6 +13,7 @@ from ._common_operator_config_utils import (
     _get_share_qparams_op_configs,
 )
 from .backend_config import BackendConfig, DTypeConfig, DTypeWithConstraints
+
 
 __all__ = [
     "get_qnnpack_backend_config",
@@ -82,14 +84,14 @@ qnnpack_weight_only_quint4x2_dtype_config = DTypeConfig(
 
 qnnpack_act_qint8_scale_min_2_neg_12 = DTypeWithConstraints(
     dtype=torch.qint8,
-    scale_min_lower_bound=2 ** -12,
+    scale_min_lower_bound=2**-12,
 )
 
 qnnpack_weight_qint8_neg_127_to_127_scale_min_2_neg_12 = DTypeWithConstraints(
     dtype=torch.qint8,
     quant_min_lower_bound=-127,
     quant_max_upper_bound=127,
-    scale_min_lower_bound=2 ** -12,
+    scale_min_lower_bound=2**-12,
 )
 
 qnnpack_weighted_op_qint8_symmetric_dtype_config = DTypeConfig(
@@ -108,6 +110,7 @@ qnnpack_default_op_qint8_symmetric_dtype_config = DTypeConfig(
 # =====================
 # |  BACKEND CONFIGS  |
 # =====================
+
 
 def get_qnnpack_backend_config() -> BackendConfig:
     """
@@ -147,14 +150,22 @@ def get_qnnpack_backend_config() -> BackendConfig:
         qnnpack_weight_only_quint8_dtype_config,
         qnnpack_weight_only_quint4x2_dtype_config,
     ]
-    return BackendConfig("qnnpack") \
-        .set_backend_pattern_configs(_get_conv_configs(conv_dtype_configs)) \
-        .set_backend_pattern_configs(_get_linear_configs(linear_dtype_configs)) \
-        .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs)) \
-        .set_backend_pattern_config(_get_cat_config(default_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_default_op_configs(default_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_share_qparams_op_configs(share_qparams_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_bn_configs(default_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_rnn_op_configs(rnn_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_embedding_op_configs(embedding_op_dtype_configs))
+    return (
+        BackendConfig("qnnpack")
+        .set_backend_pattern_configs(_get_conv_configs(conv_dtype_configs))
+        .set_backend_pattern_configs(_get_linear_configs(linear_dtype_configs))
+        .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs))
+        .set_backend_pattern_config(_get_cat_config(default_op_dtype_configs))
+        .set_backend_pattern_configs(_get_default_op_configs(default_op_dtype_configs))
+        .set_backend_pattern_configs(
+            _get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs)
+        )
+        .set_backend_pattern_configs(
+            _get_share_qparams_op_configs(share_qparams_op_dtype_configs)
+        )
+        .set_backend_pattern_configs(_get_bn_configs(default_op_dtype_configs))
+        .set_backend_pattern_configs(_get_rnn_op_configs(rnn_op_dtype_configs))
+        .set_backend_pattern_configs(
+            _get_embedding_op_configs(embedding_op_dtype_configs)
+        )
+    )

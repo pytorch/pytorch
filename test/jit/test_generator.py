@@ -127,7 +127,7 @@ class TestGenerator(JitTestCase):
 
     def test_save_load(self):
         class Foo(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.foo = torch.nn.Linear(2, 2, bias=False)
                 self.bar = torch.nn.Linear(2, 2, bias=False)

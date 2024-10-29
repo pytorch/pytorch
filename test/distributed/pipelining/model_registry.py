@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 # This file is a model zoo for testing torch.distributed.pipelining.
 import torch
+from torch.autograd import Function
 from torch.distributed.pipelining import pipe_split, SplitPoint
 
 
@@ -10,7 +11,7 @@ class ExampleCode(torch.nn.Module):
         super().__init__()
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
-        self.register_buffer("cval", torch.randn((d_hid,), requires_grad=False))
+        self.cval = torch.nn.Buffer(torch.randn((d_hid,), requires_grad=False))
         self.lin0 = torch.nn.Linear(d_hid, d_hid)
         self.lin1 = torch.nn.Linear(d_hid, d_hid)
 
@@ -101,3 +102,132 @@ class MultiMLP(torch.nn.Module):
         for layer in self.layers:
             x = layer(x)
         return x
+
+
+class CustomLinearDx(Function):
+    @staticmethod
+    def forward(ctx, input_val, weight, bias, module, layer_idx):
+        ctx.save_for_backward(input_val, weight, bias)
+        ctx.module = module
+        ctx.layer_idx = layer_idx
+        return input_val.mm(weight.t()) + bias
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input_val, weight, bias = ctx.saved_tensors
+        grad_input = grad_output.mm(weight)
+        ctx.module.cached_context[ctx.layer_idx].append(grad_output.clone())
+        ctx.module.cached_context[str(ctx.layer_idx) + "_input"].append(
+            input_val.clone()
+        )
+        return grad_input, None, None, None, None
+
+
+class CustomLinearDxDw(Function):
+    @staticmethod
+    def forward(ctx, input_val, weight, bias):
+        ctx.save_for_backward(input_val, weight, bias)
+        return input_val.mm(weight.t()) + bias
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        input_val, weight, bias = ctx.saved_tensors
+        grad_input = grad_output.mm(weight)
+        grad_weight = grad_output.t().mm(input_val)
+        grad_bias = grad_output.sum(0)
+        return grad_input, grad_weight, grad_bias
+
+
+class MLPModuleWithDw(torch.nn.Module):
+    def __init__(self, d_hid: int):
+        super().__init__()
+        self.fc1_weight = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+        self.fc1_bias = torch.nn.Parameter(torch.randn(d_hid))
+        self.fc2_weight = torch.nn.Parameter(torch.randn(d_hid, d_hid))
+        self.fc2_bias = torch.nn.Parameter(torch.randn(d_hid))
+
+        torch.nn.init.uniform_(self.fc1_weight, -0.01, 0.01)
+        torch.nn.init.uniform_(self.fc2_weight, -0.01, 0.01)
+        torch.nn.init.uniform_(self.fc1_bias, -0.01, 0.01)
+        torch.nn.init.uniform_(self.fc2_bias, -0.01, 0.01)
+
+        self.cached_context = {}
+        self.cached_context["fc1"] = []
+        self.cached_context["fc2"] = []
+        self.cached_context["fc1_input"] = []
+        self.cached_context["fc2_input"] = []
+
+        self.use_custom_logic = False
+
+    def forward(self, x):
+        if not self.use_custom_logic:
+            self.hidden = CustomLinearDxDw.apply(x, self.fc1_weight, self.fc1_bias)
+            self.hidden = torch.nn.functional.relu(self.hidden)
+            output = CustomLinearDxDw.apply(self.hidden, self.fc2_weight, self.fc2_bias)
+            return output
+
+        self.hidden = CustomLinearDx.apply(
+            x, self.fc1_weight, self.fc1_bias, self, "fc1"
+        )
+        self.hidden = torch.nn.functional.relu(self.hidden)
+        output = CustomLinearDx.apply(
+            self.hidden, self.fc2_weight, self.fc2_bias, self, "fc2"
+        )
+        return output
+
+    def compute_dW(self):
+        grad_output_fc1 = self.cached_context["fc1"].pop(0)
+        grad_output_fc2 = self.cached_context["fc2"].pop(0)
+        cached_input_fc1 = self.cached_context["fc1_input"].pop(0)
+        cached_input_fc2 = self.cached_context["fc2_input"].pop(0)
+
+        dW2 = grad_output_fc2.t().mm(cached_input_fc2)
+        db2 = grad_output_fc2.sum(0)
+
+        dW1 = grad_output_fc1.t().mm(cached_input_fc1)
+        db1 = grad_output_fc1.sum(0)
+
+        if self.fc1_weight.grad is not None:
+            self.fc1_weight.grad += dW1
+            self.fc1_bias.grad += db1
+            self.fc2_weight.grad += dW2
+            self.fc2_bias.grad += db2
+        else:
+            self.fc1_weight.grad = dW1
+            self.fc1_bias.grad = db1
+            self.fc2_weight.grad = dW2
+            self.fc2_bias.grad = db2
+
+    def toggle(self):
+        self.use_custom_logic = not self.use_custom_logic
+
+
+# Multi-MLP model With Dw
+class MultiMLPWithDw(torch.nn.Module):
+    def __init__(self, d_hid: int, n_layers: int = 2):
+        super().__init__()
+        self.layers = torch.nn.ModuleList(
+            [MLPModuleWithDw(d_hid) for _ in range(n_layers)]
+        )
+        # For testing purpose only, this should be defined by user
+        self.split_spec = {
+            f"layers.{i}": SplitPoint.BEGINNING for i in range(1, n_layers)
+        }
+        self.use_custom_logic = False
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x
+
+    def toggle(self):
+        self.use_custom_logic = not self.use_custom_logic
+        for layer in self.layers:
+            layer.toggle()
+
+    def compute_dW(self):
+        if not self.use_custom_logic:
+            raise RuntimeError("Need to call toggle() to enable custom backward and dW")
+
+        for i in reversed(range(len(self.layers))):
+            self.layers[i].compute_dW()

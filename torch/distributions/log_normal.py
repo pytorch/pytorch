@@ -4,6 +4,7 @@ from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
 
+
 __all__ = ["LogNormal"]
 
 

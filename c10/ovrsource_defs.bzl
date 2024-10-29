@@ -49,6 +49,7 @@ def define_c10_ovrsource(name, is_mobile):
             "-DC10_BUILD_MAIN_LIB=1",
             "-DSUPPORTS_BACKTRACE=0",
         ],
+        fbobjc_compiler_flags = ["-Wno-error=global-constructors", "-Wno-error=missing-prototypes"],
         public_include_directories = [".."],
         public_preprocessor_flags = pp_flags,
         public_raw_headers = native.glob([

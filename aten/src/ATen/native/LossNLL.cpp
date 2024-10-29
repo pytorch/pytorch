@@ -147,7 +147,7 @@ inline Tensor optional_contiguous(const Tensor& source) {
 // or nullptr if the tensor is undefined.
 template <typename scalar_t>
 inline scalar_t* optional_data(const Tensor& source) {
-  if constexpr (std::is_const<scalar_t>::value) {
+  if constexpr (std::is_const_v<scalar_t>) {
     return source.defined() ? source.const_data_ptr<scalar_t>() : nullptr;
   } else {
     return source.defined() ? source.data_ptr<scalar_t>() : nullptr;
@@ -525,10 +525,10 @@ static Tensor cross_entropy_loss_prob_target(
 
     switch (reduction) {
       case Reduction::Mean:
-        if (input.numel()==0){
+        if (input.sym_numel()==0){
           return -(input * target * weight_).sum().fill_(std::numeric_limits<double>::quiet_NaN());
         } else {
-          return -(input * target * weight_).sum() / (input.numel() / n_classes);
+          return -(input * target * weight_).sum() / (input.sym_numel() / n_classes);
         }
       case Reduction::Sum:
         return -(input * target * weight_).sum();
@@ -540,10 +540,10 @@ static Tensor cross_entropy_loss_prob_target(
   } else {
     switch (reduction) {
       case Reduction::Mean:
-        if (input.numel()==0){
+        if (input.sym_numel()==0){
           return -(input * target).sum().fill_(std::numeric_limits<double>::quiet_NaN());
         } else {
-          return -(input * target).sum() / (input.numel() / n_classes);
+          return -(input * target).sum() / (input.sym_numel() / n_classes);
         }
       case Reduction::Sum:
         return -(input * target).sum();

@@ -1,13 +1,13 @@
+from __future__ import annotations
+
 import os
 import tempfile
 import unittest
-from typing import Dict
 
 import yaml
 
 from torchgen.executorch.model import ETKernelIndex, ETKernelKey
 from torchgen.gen import LineLoader
-
 from torchgen.gen_executorch import (
     ComputeCodegenUnboxedKernels,
     gen_functions_declarations,
@@ -23,6 +23,7 @@ from torchgen.model import (
     OperatorName,
 )
 from torchgen.selective_build.selector import SelectiveBuilder
+
 
 TEST_YAML = """
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -345,7 +346,7 @@ class TestGenFunctionsDeclarations(unittest.TestCase):
             valid_tags=set(),
         )
 
-        backend_indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]] = {
+        backend_indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]] = {
             DispatchKey.CPU: {},
             DispatchKey.QuantizedCPU: {},
         }
@@ -502,7 +503,7 @@ Kernel(
         """
             + """
 
-        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
         internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);
@@ -589,7 +590,7 @@ Kernel(
         """
             + """
 
-        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
         internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);
@@ -625,7 +626,7 @@ Kernel(
         """
             + """
 
-        internal::EventTracerProfileScope event_tracer_scope(context.internal_event_tracer(), "native_call_op_1");
+        internal::EventTracerProfileOpScope event_tracer_op_scope(context.internal_event_tracer(), "native_call_op_1");
         EXECUTORCH_SCOPE_PROF("native_call_op_1");
         bool result_ = at::native::default_kernel(context, );
         internal::event_tracer_log_evalue(context.internal_event_tracer(), *stack[0]);

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+
 DTYPE_MAP = {
     "fp16": "cutlass::half_t",
     "bf16": "cutlass::bfloat16_t",

@@ -8,6 +8,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/erfinv_native.h>
+#include <ATen/ops/exp_native.h>
+#include <ATen/ops/tanh_native.h>
 #endif
 
 #include <fmt/format.h>
@@ -15,14 +17,8 @@
 namespace at::native {
 static mps::MetalShaderLibrary lib(UNARY_KERNEL_TEMPLATE, 2);
 
-TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
-  // handle erfinv ops using metal kernel
-  // erfinv algorithm ported from aten/src/ATen/native/Math.h
-  // https://github.com/pytorch/pytorch/blob/4154c8ea159fdaecc71ee9af820ac956193c875b/aten/src/ATen/native/Math.h#L152
-
-  TORCH_CHECK(self.scalar_type() != ScalarType::Double, "MPS does not support erfinv op with scalar type: Double");
-
-  Tensor inputTensor = self;
+static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const std::string& name) {
+  Tensor inputTensor = self.contiguous();
   Tensor outputTensor = output_;
   bool needs_output_copy = false;
   uint32_t length = output_.numel();
@@ -31,11 +27,16 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
   }
   using namespace mps;
   @autoreleasepool {
-    auto cplState = lib.getPipelineStateForFunc("erfinv_mps_kernel",
-                                                {scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(self)});
+    id<MTLComputePipelineState> cplState = nil;
+    if (c10::isComplexType(self.scalar_type())) {
+      auto scalarStr = self.scalar_type() == kComplexFloat ? "float" : "half";
+      cplState = lib.getPipelineStateForFunc(name + "_complex_kernel", {scalarStr, scalarStr});
+    } else {
+      cplState = lib.getPipelineStateForFunc(name + "_kernel",
+                                             {scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(self)});
+    }
 
-    if (!self.is_contiguous()) {
-      inputTensor = inputTensor.contiguous();
+    if (!outputTensor.is_contiguous()) {
       outputTensor = outputTensor.contiguous();
       needs_output_copy = true;
     }
@@ -44,7 +45,7 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
     dispatch_sync(mpsStream->queue(), ^() {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      getMPSProfiler().beginProfileKernel(cplState, "erf_inv", {inputTensor});
+      getMPSProfiler().beginProfileKernel(cplState, name, {self});
 
       [computeEncoder setComputePipelineState:cplState];
       mtl_setBuffer(computeEncoder, outputTensor, 0);
@@ -57,5 +58,20 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
   if (needs_output_copy) {
     output_.copy_(outputTensor);
   }
+}
+TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
+  // handle erfinv ops using metal kernel
+  // erfinv algorithm ported from aten/src/ATen/native/Math.h
+  // https://github.com/pytorch/pytorch/blob/4154c8ea159fdaecc71ee9af820ac956193c875b/aten/src/ATen/native/Math.h#L152
+
+  TORCH_CHECK(self.scalar_type() != ScalarType::Double, "MPS does not support erfinv op with scalar type: Double");
+  exec_unary_kernel(self, output_, "erfinv");
+}
+
+TORCH_IMPL_FUNC(exp_out_mps)(const Tensor& self, const Tensor& output_) {
+  exec_unary_kernel(self, output_, "exp");
+}
+TORCH_IMPL_FUNC(tanh_out_mps)(const Tensor& self, const Tensor& output_) {
+  exec_unary_kernel(self, output_, "tanh");
 }
 } // namespace at::native

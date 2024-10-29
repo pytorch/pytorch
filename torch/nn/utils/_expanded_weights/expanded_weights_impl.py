@@ -1,13 +1,12 @@
 # mypy: allow-untyped-defs
-from contextlib import contextmanager
-
-import torch
 import functools
-from torch._decomp import decomposition_table
-
+from contextlib import contextmanager
 from typing import Callable, Dict
 
+import torch
+from torch._decomp import decomposition_table
 from torch.utils._pytree import tree_map_only
+
 
 HANDLED_FUNCTIONS: Dict[Callable, torch.autograd.Function] = {}
 
@@ -16,11 +15,24 @@ aten = torch._ops.ops.aten
 # decompositions indexed by their torch equivalent
 expanded_weights_rnn_decomps = {
     # func: (input_decomp, data_decomp)
-    torch.rnn_relu: (decomposition_table[aten.rnn_relu.input], decomposition_table[aten.rnn_relu.data]),
-    torch.rnn_tanh: (decomposition_table[aten.rnn_tanh.input], decomposition_table[aten.rnn_tanh.data]),
-    torch.lstm: (decomposition_table[aten.lstm.input], decomposition_table[aten.lstm.data]),
-    torch.gru: (decomposition_table[aten.gru.input], decomposition_table[aten.gru.data]),
+    torch.rnn_relu: (
+        decomposition_table[aten.rnn_relu.input],
+        decomposition_table[aten.rnn_relu.data],
+    ),
+    torch.rnn_tanh: (
+        decomposition_table[aten.rnn_tanh.input],
+        decomposition_table[aten.rnn_tanh.data],
+    ),
+    torch.lstm: (
+        decomposition_table[aten.lstm.input],
+        decomposition_table[aten.lstm.data],
+    ),
+    torch.gru: (
+        decomposition_table[aten.gru.input],
+        decomposition_table[aten.gru.data],
+    ),
 }
+
 
 # all of the RNN decomps run linear with the batch dimension second, even if batch_first was set
 @contextmanager
@@ -39,6 +51,7 @@ def batch_second(args, kwargs):
         tree_map_only(ExpandedWeight, reset_batch_first, args)
         tree_map_only(ExpandedWeight, reset_batch_first, kwargs)
 
+
 # to support packed sequences, we need to allow for smaller batches. Expanded weights represents the largest batch
 @contextmanager
 def allow_smaller_batches(args, kwargs):
@@ -56,9 +69,12 @@ def allow_smaller_batches(args, kwargs):
         tree_map_only(ExpandedWeight, reset, args)
         tree_map_only(ExpandedWeight, reset, kwargs)
 
+
 @contextmanager
 def setup_rnn(use_input_variant, args, kwargs):
-    with batch_second(args, kwargs) if use_input_variant else allow_smaller_batches(args, kwargs):
+    with batch_second(args, kwargs) if use_input_variant else allow_smaller_batches(
+        args, kwargs
+    ):
         yield
 
 
@@ -67,7 +83,9 @@ def implements_per_sample_grads(torch_function):
     def decorator(autograd_func):
         HANDLED_FUNCTIONS[torch_function] = autograd_func
         return autograd_func
+
     return decorator
+
 
 # ExpandedWeight represents a weight (parameter) Tensor that has an expanded
 # batch dimension. Operations on the ExpandedWeight Tensor act exactly like
@@ -93,9 +111,13 @@ class ExpandedWeight(torch.Tensor):
 
     def __new__(cls, orig_weight, batch_size, loss_reduction):
         if not isinstance(orig_weight, torch.Tensor):
-            raise RuntimeError(f"Can only make Expanded Weights of Tensors, got {type(orig_weight).__name__}")
+            raise RuntimeError(
+                f"Can only make Expanded Weights of Tensors, got {type(orig_weight).__name__}"
+            )
         if not orig_weight.requires_grad:
-            raise RuntimeError("Can only build ExpandedWeights objects of tensors that require_grad")
+            raise RuntimeError(
+                "Can only build ExpandedWeights objects of tensors that require_grad"
+            )
         ret = torch.Tensor._make_subclass(cls, orig_weight, True)
         return ret
 
@@ -106,7 +128,9 @@ class ExpandedWeight(torch.Tensor):
         if func in expanded_weights_rnn_decomps:
             # in aten, choosing the input or data variants is done by parsing logic. This mimics some of that
             decomp_opts = expanded_weights_rnn_decomps[func]
-            use_input_variant = isinstance(args[2], list)  # data variant uses a list here
+            use_input_variant = isinstance(
+                args[2], list
+            )  # data variant uses a list here
             decomp = decomp_opts[0] if use_input_variant else decomp_opts[1]
 
             if decomp is not None:
@@ -116,10 +140,14 @@ class ExpandedWeight(torch.Tensor):
             # since we aren't using the fused cuda kernels for RNNs, don't do this
             return
         if func in cls.handled_functions:
-            return cls.handled_functions[func].apply(tuple(kwargs.keys()), func, *(args + tuple(kwargs.values())))
+            return cls.handled_functions[func].apply(
+                tuple(kwargs.keys()), func, *(args + tuple(kwargs.values()))
+            )
         # We cannot use a fallback here because we do not know the batch dimension for any regular tensor inputs,
         # i.e. torch.add(torch.Tensor, ExpandedWeight)
-        raise RuntimeError(f"Expanded Weights encountered but cannot handle function {func.__name__}")
+        raise RuntimeError(
+            f"Expanded Weights encountered but cannot handle function {func.__name__}"
+        )
 
     @property
     def dtype(self):

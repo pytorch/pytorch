@@ -328,7 +328,7 @@ For example:
 
 ```
 class M(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         self.a = torch.rand(2, 3)
         self.b = torch.nn.Linear(10, 10)
 

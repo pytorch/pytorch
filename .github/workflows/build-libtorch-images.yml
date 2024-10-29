@@ -1,0 +1,161 @@
+name: Build libtorch docker images
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    paths:
+      - '.ci/docker/libtorch/*'
+      - '.ci/docker/common/*'
+      - .github/workflows/build-libtorch-images.yml
+  pull_request:
+    paths:
+      - '.ci/docker/libtorch/*'
+      - '.ci/docker/common/*'
+      - .github/workflows/build-libtorch-images.yml
+
+env:
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_BUILDKIT: 1
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  build-docker-cuda:
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
+    strategy:
+      matrix:
+        cuda_version: ["12.6", "12.4", "12.1", "11.8"]
+    env:
+      GPU_ARCH_TYPE: cuda
+      GPU_ARCH_VERSION: ${{ matrix.cuda_version }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: libtorch-cxx11-builder-cuda${{matrix.cuda_version}}
+            docker-build-dir:  .ci/docker/libtorch
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        uses: nick-fields/retry@v3.0.0
+        with:
+          shell: bash
+          timeout_minutes: 90
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            .ci/docker/libtorch/build.sh libtorch-cxx11-builder:cuda${{matrix.cuda_version}}
+  build-docker-rocm:
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
+    strategy:
+      matrix:
+        rocm_version: ["6.1", "6.2"]
+    env:
+      GPU_ARCH_TYPE: rocm
+      GPU_ARCH_VERSION: ${{ matrix.rocm_version }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: libtorch-cxx11-builder-rocm${{matrix.rocm_version}}
+            docker-build-dir:  .ci/docker/libtorch
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        uses: nick-fields/retry@v3.0.0
+        with:
+          shell: bash
+          timeout_minutes: 90
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            .ci/docker/libtorch/build.sh libtorch-cxx11-builder:rocm${{matrix.rocm_version}}
+  build-docker-cpu:
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.9xlarge.ephemeral"
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+      - name: Calculate docker image
+        if: env.WITH_PUSH == 'false'
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+            docker-image-name: libtorch-cxx11-builder-cpu
+            docker-build-dir:  .ci/docker/libtorch
+            always-rebuild: true
+            push: true
+      - name: Authenticate if WITH_PUSH
+        if: env.WITH_PUSH == 'true'
+        env:
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+          DOCKER_ID: ${{ secrets.DOCKER_ID }}
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        if: env.WITH_PUSH == 'true'
+        uses: nick-fields/retry@v3.0.0
+        with:
+          shell: bash
+          timeout_minutes: 90
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            .ci/docker/libtorch/build.sh libtorch-cxx11-builder:cpu

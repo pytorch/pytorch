@@ -11,11 +11,8 @@ It is lazily initialized, so you can always import it, and use
 :ref:`cuda-semantics` has more details about working with CUDA.
 """
 
-
-import contextlib
 import importlib
 import os
-import sys
 import threading
 import traceback
 import warnings
@@ -24,9 +21,11 @@ from typing import Any, Callable, cast, List, Optional, Tuple, Union
 
 import torch
 import torch._C
+from torch import device as _device
+from torch._utils import _dummy_type, _LazySeedTracker, classproperty
 from torch.types import Device
-from .. import device as _device
-from .._utils import _dummy_type, _LazySeedTracker, classproperty
+
+from . import gds
 from ._utils import _get_device_index
 from .graphs import (
     CUDAGraph,
@@ -36,6 +35,7 @@ from .graphs import (
     make_graphed_callables,
 )
 from .streams import Event, ExternalStream, Stream
+
 
 try:
     from torch._C import _cudart  # type: ignore[attr-defined]
@@ -54,18 +54,19 @@ _device_t = Union[_device, str, int, None]
 _HAS_PYNVML = False
 _PYNVML_ERR = None
 try:
+    from torch import version as _version
+
     try:
-        import pynvml  # type: ignore[import]
+        if not _version.hip:
+            import pynvml  # type: ignore[import]
+        else:
+            import amdsmi  # type: ignore[import]
 
         _HAS_PYNVML = True
     except ModuleNotFoundError:
         pass
-    try:
-        import amdsmi  # type: ignore[import]
-
-        _HAS_PYNVML = True
-    except ModuleNotFoundError:
-        pass
+    finally:
+        del _version
 except ImportError as err:
     _PYNVML_ERR = err  # sometimes a lib is installed but the import fails for some other reason, so we log the error for later
 
@@ -128,12 +129,16 @@ def is_available() -> bool:
         return torch._C._cuda_getDeviceCount() > 0
 
 
-def is_bf16_supported():
+def is_bf16_supported(including_emulation: bool = True):
     r"""Return a bool indicating if the current CUDA/ROCm device supports dtype bfloat16."""
     # Check for ROCm, if true return true, no ROCM_VERSION check required,
     # since it is supported on AMD GPU archs.
     if torch.version.hip:
         return True
+
+    # If CUDA is not available, than it does not support bf16 either
+    if not is_available():
+        return False
 
     device = torch.cuda.current_device()
 
@@ -146,6 +151,9 @@ def is_bf16_supported():
         and torch.cuda.get_device_properties(device).major >= 8
     ):
         return True
+
+    if not including_emulation:
+        return False
 
     # Finally try to create a bfloat16 device.
     return _check_bf16_tensor_supported(device)
@@ -178,7 +186,7 @@ def _check_capability():
      work properly, but your PyTorch was compiled
      with CUDA_VERSION %d. Please install the correct PyTorch binary
      using instructions from https://pytorch.org
-    """
+    """  # noqa: F841
 
     old_gpu_warn = """
     Found GPU%d %s which is of cuda capability %d.%d.
@@ -187,7 +195,7 @@ def _check_capability():
     """
 
     if torch.version.cuda is not None:  # on ROCm we don't want this check
-        CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+        CUDA_VERSION = torch._C._cuda_getCompiledVersion()  # noqa: F841
         for d in range(device_count()):
             capability = get_device_capability(d)
             major = capability[0]
@@ -334,6 +342,59 @@ def _lazy_init():
 
 
 def cudart():
+    r"""Retrieves the CUDA runtime API module.
+
+
+    This function initializes the CUDA runtime environment if it is not already
+    initialized and returns the CUDA runtime API module (_cudart). The CUDA
+    runtime API module provides access to various CUDA runtime functions.
+
+    Args:
+        ``None``
+
+    Returns:
+        module: The CUDA runtime API module (_cudart).
+
+    Raises:
+        RuntimeError: If CUDA cannot be re-initialized in a forked subprocess.
+        AssertionError: If PyTorch is not compiled with CUDA support or if libcudart functions are unavailable.
+
+    Example of CUDA operations with profiling:
+        >>> import torch
+        >>> from torch.cuda import cudart, check_error
+        >>> import os
+        >>>
+        >>> os.environ['CUDA_PROFILE'] = '1'
+        >>>
+        >>> def perform_cuda_operations_with_streams():
+        >>>     stream = torch.cuda.Stream()
+        >>>     with torch.cuda.stream(stream):
+        >>>         x = torch.randn(100, 100, device='cuda')
+        >>>         y = torch.randn(100, 100, device='cuda')
+        >>>         z = torch.mul(x, y)
+        >>>     return z
+        >>>
+        >>> torch.cuda.synchronize()
+        >>> print("====== Start nsys profiling ======")
+        >>> check_error(cudart().cudaProfilerStart())
+        >>> with torch.autograd.profiler.emit_nvtx():
+        >>>     result = perform_cuda_operations_with_streams()
+        >>>     print("CUDA operations completed.")
+        >>> check_error(torch.cuda.cudart().cudaProfilerStop())
+        >>> print("====== End nsys profiling ======")
+
+    To run this example and save the profiling information, execute:
+        >>> $ nvprof --profile-from-start off --csv --print-summary -o trace_name.prof -f -- python cudart_test.py
+
+    This command profiles the CUDA operations in the provided script and saves
+    the profiling information to a file named `trace_name.prof`.
+    The `--profile-from-start off` option ensures that profiling starts only
+    after the `cudaProfilerStart` call in the script.
+    The `--csv` and `--print-summary` options format the profiling output as a
+    CSV file and print a summary, respectively.
+    The `-o` option specifies the output file name, and the `-f` option forces the
+    overwrite of the output file if it already exists.
+    """
     _lazy_init()
     return _cudart
 
@@ -449,12 +510,14 @@ def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]
     return prop.major, prop.minor
 
 
-def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
+def get_device_properties(device: Optional[_device_t] = None) -> _CudaDeviceProperties:
     r"""Get the properties of a device.
 
     Args:
-        device (torch.device or int or str): device for which to return the
-            properties of the device.
+        device (torch.device or int or str, optional): device for which to return the
+            properties of the device.  It uses the current device, given by
+            :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
+            (default).
 
     Returns:
         _CudaDeviceProperties: the properties of the device
@@ -581,9 +644,13 @@ def set_stream(stream: Stream):
 
 def _parse_visible_devices() -> Union[List[int], List[str]]:
     r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
-    var = os.getenv(
-        "CUDA_VISIBLE_DEVICES" if not torch.version.hip else "HIP_VISIBLE_DEVICES"
-    )
+    var = os.getenv("CUDA_VISIBLE_DEVICES")
+
+    if torch.version.hip:
+        hip_devices = os.getenv("HIP_VISIBLE_DEVICES")
+        if hip_devices is not None:
+            var = hip_devices
+
     if var is None:
         return list(range(64))
 
@@ -683,11 +750,15 @@ def _raw_device_uuid_amdsmi() -> Optional[List[str]]:
             warnings.warn("Cannot get amd device handler")
             return None
         try:
-            uuid = amdsmi.amdsmi_get_gpu_device_uuid(handler)
+            uuid = amdsmi.amdsmi_get_gpu_asic_info(handler)["asic_serial"][
+                2:
+            ]  # Removes 0x prefix from serial
         except amdsmi.AmdSmiException:
             warnings.warn("Cannot get uuid for amd device")
             return None
-        uuids.append(str(uuid))
+        uuids.append(
+            str(uuid).lower()
+        )  # Lower-case to match expected HIP_VISIBLE_DEVICES uuid input
     return uuids
 
 
@@ -726,7 +797,7 @@ def _raw_device_uuid_nvml() -> Optional[List[str]]:
 def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List[int]:
     r"""Given the set of partial uuids and list of known uuids builds a set of ordinals excluding ambiguous partials IDs."""
 
-    def uuid_to_orinal(candidate: str, uuids: List[str]) -> int:
+    def uuid_to_ordinal(candidate: str, uuids: List[str]) -> int:
         best_match = -1
         for idx, uuid in enumerate(uuids):
             if not uuid.startswith(candidate):
@@ -739,7 +810,11 @@ def _transform_uuid_to_ordinals(candidates: List[str], uuids: List[str]) -> List
 
     rc: List[int] = []
     for candidate in candidates:
-        idx = uuid_to_orinal(candidate, uuids)
+        if torch.version.hip:
+            candidate = candidate.replace(
+                "GPU-", "", 1
+            )  # Remove GPU-prefix to match amdsmi asic serial
+        idx = uuid_to_ordinal(candidate, uuids)
         # First invalid ordinal stops parsing
         if idx < 0:
             break
@@ -756,7 +831,12 @@ def _device_count_amdsmi() -> int:
         return 0
     try:
         if type(visible_devices[0]) is str:
-            return -1
+            uuids = _raw_device_uuid_amdsmi()
+            if uuids is None:
+                return -1
+            # Create string version of visible devices to avoid mypy warnings
+            visible_device_str = cast(List[str], visible_devices)
+            visible_devices = _transform_uuid_to_ordinals(visible_device_str, uuids)
         else:
             raw_cnt = _raw_device_count_amdsmi()
             if raw_cnt <= 0:
@@ -1011,11 +1091,17 @@ def _get_amdsmi_handler(device: Optional[Union[Device, int]] = None):
 
 
 def _get_amdsmi_device_index(device: Optional[Union[int, Device]]) -> int:
-    r"""Return the amdsmi index of the device, taking HIP_VISIBLE_DEVICES into account."""
+    r"""Return the amdsmi index of the device, taking visible_devices into account."""
     idx = _get_device_index(device, optional=True)
     visible_devices = _parse_visible_devices()
     if type(visible_devices[0]) is str:
-        raise RuntimeError("HIP_VISIBLE_DEVICES should be indices and not strings")
+        uuids = _raw_device_uuid_amdsmi()
+        if uuids is None:
+            raise RuntimeError("Can't get device UUIDs")
+        visible_devices_str = cast(
+            List[str], visible_devices
+        )  # Create str variable for mypy
+        visible_devices = _transform_uuid_to_ordinals(visible_devices_str, uuids)
     idx_map = dict(enumerate(cast(List[int], visible_devices)))
     if idx not in idx_map:
         raise RuntimeError(
@@ -1048,12 +1134,20 @@ def _get_amdsmi_temperature(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+    socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
+    if socket_power != "N/A":
+        return socket_power
+    else:
+        return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
 
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)["cur_clk"]
+    clock_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
+    if "cur_clk" in clock_info:  # ROCm 6.2 deprecation
+        return clock_info["cur_clk"]
+    else:
+        return clock_info["clk"]
 
 
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
@@ -1217,9 +1311,8 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "cuda") -> int
 
 
 from .memory import *  # noqa: F403
-
-
 from .random import *  # noqa: F403
+
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -1469,6 +1562,7 @@ _lazy_call(_register_triton_kernels)
 
 from . import amp, jiterator, nvtx, profiler, sparse, tunable
 
+
 __all__ = [
     # Typed storage and tensors
     "BFloat16Storage",
@@ -1503,6 +1597,7 @@ __all__ = [
     "amp",
     "caching_allocator_alloc",
     "caching_allocator_delete",
+    "caching_allocator_enable",
     "can_device_access_peer",
     "check_error",
     "cudaStatus",
@@ -1557,6 +1652,9 @@ __all__ = [
     "memory_stats_as_nested_dict",
     "memory_summary",
     "memory_usage",
+    "MemPool",
+    "MemPoolContext",
+    "use_mem_pool",
     "temperature",
     "power_draw",
     "clock_rate",

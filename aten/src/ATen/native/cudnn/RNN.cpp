@@ -44,7 +44,8 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t fn_num_layers,
     bool batch_first,
     bool fn_bidirectional) {
-  AT_ERROR("_cudnn_rnn_flatten_weight: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "_cudnn_rnn_flatten_weight: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
@@ -64,7 +65,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
     bool fn_bidirectional,
     IntArrayRef fn_batch_sizes,
     const std::optional<Tensor>& fn_dropout_state_opt) {
-  AT_ERROR("_cudnn_rnn: ATen not compiled with cuDNN support");
+  TORCH_CHECK(false, "_cudnn_rnn: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
@@ -90,7 +91,8 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     const std::optional<Tensor>& dropout_state_opt,
     const Tensor& reserve,
     std::array<bool, 4> output_mask) {
-  AT_ERROR("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "_cudnn_rnn_backward: ATen not compiled with cuDNN support");
 }
 
 Tensor _cudnn_init_dropout_state(
@@ -105,7 +107,8 @@ Tensor _cudnn_init_dropout_state(
   TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
       pin_memory);
 
-  AT_ERROR("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
+  TORCH_CHECK(
+      false, "_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
 
 } // namespace native
@@ -181,7 +184,7 @@ struct RNNDescriptorParams {
       default: {
         std::ostringstream oss;
         oss << "unrecognized cuDNN RNN mode " << fn_mode;
-        AT_ERROR(oss.str());
+        TORCH_CHECK(false, oss.str());
       }
     }
   }
@@ -583,7 +586,7 @@ int64_t _num_linear_layers(cudnnRNNMode_t mode) {
     case CUDNN_RNN_TANH:
       return 2;
     default:
-      AT_ERROR("unknown cuDNN RNN mode ", mode);
+      TORCH_CHECK(false, "unknown cuDNN RNN mode ", mode);
   }
 }
 
@@ -614,8 +617,6 @@ void add_projection_weights(
       /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
       /*linLayerMat=*/&matrix_pointer));
 #else
-  void* unused_pointer;
-  TensorDescriptor unused_desc;
   TensorDescriptor lin_layer_mat_desc;
   AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
       /*handle=*/handle,
@@ -626,8 +627,8 @@ void add_projection_weights(
       /*linLayerID=*/linear_id,
       /*linLayerMatDesc=*/lin_layer_mat_desc.mut_desc(),
       /*linLayerMat=*/&matrix_pointer,
-      unused_desc.mut_desc(),
-      &unused_pointer));
+      nullptr,
+      nullptr));
 #endif
 
   cudnnDataType_t data_type;
@@ -735,8 +736,6 @@ get_parameters(
             lin_layer_mat_desc.mut_desc(),
             &matrix_pointer));
 #else
-        void* unused_pointer = nullptr;
-        TensorDescriptor unused_desc;
         TensorDescriptor lin_layer_mat_desc;
         for (int stateless = 0; stateless < 100; stateless++) {
           if (cudnn_method) { // matrix
@@ -749,8 +748,8 @@ get_parameters(
                 linear_id,
                 lin_layer_mat_desc.mut_desc(),
                 &matrix_pointer,
-                unused_desc.mut_desc(),
-                &unused_pointer));
+                nullptr,
+                nullptr));
           } else { // bias
             AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
                 handle,
@@ -759,8 +758,8 @@ get_parameters(
                 weight_buf.numel() * weight_buf.element_size(),
                 weight_buf.data_ptr(),
                 linear_id,
-                unused_desc.mut_desc(),
-                &unused_pointer,
+                nullptr,
+                nullptr,
                 lin_layer_mat_desc.mut_desc(),
                 &matrix_pointer));
           }
@@ -922,8 +921,6 @@ std::vector<void*> get_expected_data_ptrs(
             lin_layer_mat_desc.mut_desc(),
             &matrix_pointer));
 #else
-        void* unused_pointer = nullptr;
-        TensorDescriptor unused_desc;
         TensorDescriptor lin_layer_mat_desc;
         if (cudnn_method) { // matrix
           AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
@@ -935,8 +932,8 @@ std::vector<void*> get_expected_data_ptrs(
               linear_id,
               lin_layer_mat_desc.mut_desc(),
               &matrix_pointer,
-              unused_desc.mut_desc(),
-              &unused_pointer));
+              nullptr,
+              nullptr));
         } else { // bias
           AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
               handle,
@@ -945,8 +942,8 @@ std::vector<void*> get_expected_data_ptrs(
               weight_buf.numel() * weight_buf.element_size(),
               weight_buf.data_ptr(),
               linear_id,
-              unused_desc.mut_desc(),
-              &unused_pointer,
+              nullptr,
+              nullptr,
               lin_layer_mat_desc.mut_desc(),
               &matrix_pointer));
         }
@@ -972,8 +969,6 @@ std::vector<void*> get_expected_data_ptrs(
           lin_layer_mat_desc.mut_desc(),
           &matrix_pointer));
 #else
-      void* unused_pointer;
-      TensorDescriptor unused_desc;
       TensorDescriptor lin_layer_mat_desc;
 
       AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
@@ -985,8 +980,8 @@ std::vector<void*> get_expected_data_ptrs(
           linear_id,
           lin_layer_mat_desc.mut_desc(),
           &matrix_pointer,
-          unused_desc.mut_desc(),
-          &unused_pointer));
+          nullptr,
+          nullptr));
 #endif
       data_ptrs.push_back(matrix_pointer);
     }
@@ -1176,7 +1171,6 @@ inline bool use_rnn_persist_small_h(
     const RNNDescriptorParams& rnn,
     const TensorDescriptorListParams& tensors,
     bool forward) {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8201 // 8.2.1
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   if (prop->major < 6)
     return false;
@@ -1198,9 +1192,6 @@ inline bool use_rnn_persist_small_h(
   }
 
   return false;
-#else
-  return false;
-#endif
 }
 
 cudnnRNNAlgo_t get_algo(
@@ -1219,13 +1210,11 @@ cudnnRNNAlgo_t get_algo(
   // https://docs.nvidia.com/deeplearning/cudnn/developer-guide/index.html#features-of-rnn-functions
   if (!tensors.is_input_packed()) {
     auto cudnnDataType = getCudnnDataType(input);
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8201 // 8.2.1
     if (cudnnDataType != CUDNN_DATA_DOUBLE) {
       if (use_rnn_persist_small_h(rnn, tensors, forward)) {
         return CUDNN_RNN_ALGO_PERSIST_STATIC_SMALL_H;
       }
     }
-#endif
     if (cudnnDataType == CUDNN_DATA_HALF) {
       if (use_persist_common_heuristics(rnn, tensors) &&
           use_persist_device_heuristics(rnn, tensors)) {
@@ -1413,9 +1402,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   c10::MaybeOwned<Tensor> weight_buf_r_maybe_owned =
       at::borrow_from_optional_tensor(weight_buf_r_opt);
   const Tensor& weight_buf_r = *weight_buf_r_maybe_owned;
-  const Tensor& cx = c10::value_or_else(cx_opt, [] { return Tensor(); });
-  const Tensor& fn_dropout_state =
-      c10::value_or_else(fn_dropout_state_opt, [] { return Tensor(); });
+  const Tensor& cx = cx_opt.value_or(Tensor());
+  const Tensor& fn_dropout_state = fn_dropout_state_opt.value_or(Tensor());
 
   check_attributes(input_r, weight, {hx, cx}, /*check_dtype=*/true);
   auto input = input_r;
@@ -2126,14 +2114,10 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
   c10::MaybeOwned<Tensor> cx_maybe_owned =
       at::borrow_from_optional_tensor(cx_opt);
   const Tensor& cx = *cx_maybe_owned;
-  const Tensor& grad_output_r =
-      c10::value_or_else(grad_output_r_opt, [] { return Tensor(); });
-  const Tensor& grad_hy_r =
-      c10::value_or_else(grad_hy_r_opt, [] { return Tensor(); });
-  const Tensor& grad_cy_r =
-      c10::value_or_else(grad_cy_r_opt, [] { return Tensor(); });
-  const Tensor& dropout_state =
-      c10::value_or_else(dropout_state_opt, [] { return Tensor(); });
+  const Tensor& grad_output_r = grad_output_r_opt.value_or(Tensor());
+  const Tensor& grad_hy_r = grad_hy_r_opt.value_or(Tensor());
+  const Tensor& grad_cy_r = grad_cy_r_opt.value_or(Tensor());
+  const Tensor& dropout_state = dropout_state_opt.value_or(Tensor());
 
   if (!grad_output_r.defined() && !grad_hy_r.defined() &&
       !grad_cy_r.defined()) {
@@ -2249,9 +2233,8 @@ std::tuple<Tensor, Tensor> unpack_hidden(
 template <typename hidden_type>
 hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
   static_assert(
-      std::is_same<hidden_type, void>::value,
+      false && sizeof(hidden_type),
       "pack_hidden not implemented for this type");
-  AT_ERROR("NOT IMPLEMENTED");
 }
 
 template <>

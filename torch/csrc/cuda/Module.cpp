@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
-#include <ATen/CachedTensorUtils.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/UniqueVoidPtr.h>
+#include <fmt/core.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <unordered_set>
@@ -35,6 +35,7 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
+#include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/cuda/python_comm.h>
@@ -389,9 +390,11 @@ PyObject* THCPModule_cudaJiteratorCompileAndLaunchKernel(
   PyObject* key = nullptr;
   PyObject* value = nullptr;
   Py_ssize_t pos = 0;
+  Py_BEGIN_CRITICAL_SECTION(kwargs_o);
   while (PyDict_Next(kwargs_o, &pos, &key, &value)) {
     extra_args.emplace_back(as_scalar(value));
   }
+  Py_END_CRITICAL_SECTION();
 
   c10::SmallVector<at::Tensor> outputs = at::cuda::CompileAndLaunchKernel(
       code_string,
@@ -423,6 +426,19 @@ PyObject* THCPModule_cudaCachingAllocator_raw_delete(
     pybind11::gil_scoped_release no_gil;
     c10::cuda::CUDACachingAllocator::raw_delete(mem_ptr);
   }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cudaCachingAllocator_enable(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkBool(arg),
+      "cudaCachingAllocator_enable expects a bool, but got ",
+      THPUtils_typename(arg));
+  c10::cuda::CUDACachingAllocator::enable(THPUtils_unpackBool(arg));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -541,9 +557,20 @@ PyObject* THCPModule_setMemoryFraction(PyObject* _unused, PyObject* args) {
   Py_RETURN_NONE;
 }
 
+PyObject* THCPModule_hostEmptyCache(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::cuda::CachingHostAllocator_emptyCache();
+  }
+  END_HANDLE_TH_ERRORS
+  Py_RETURN_NONE;
+}
+
 PyObject* THCPModule_emptyCache(PyObject* _unused, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  c10::cuda::CUDACachingAllocator::emptyCache();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    c10::cuda::CUDACachingAllocator::emptyCache();
+  }
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -553,10 +580,10 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to memory_allocated");
   const auto device_index = THPUtils_unpackDeviceIndex(arg);
 
-  using c10::cuda::CUDACachingAllocator::DeviceStats;
-  using c10::cuda::CUDACachingAllocator::Stat;
-  using c10::cuda::CUDACachingAllocator::StatArray;
-  using c10::cuda::CUDACachingAllocator::StatType;
+  using c10::CachingDeviceAllocator::DeviceStats;
+  using c10::CachingDeviceAllocator::Stat;
+  using c10::CachingDeviceAllocator::StatArray;
+  using c10::CachingDeviceAllocator::StatType;
 
   const auto statToDict = [](const Stat& stat) {
     py::dict dict;
@@ -786,6 +813,17 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     traces.append(trace);
   }
 
+  py::list external_annotations;
+  for (const auto& ae : snapshot.external_annotations) {
+    py::dict annotation_entry;
+    for (const auto& md : ae.metadata_) {
+      annotation_entry[(py::str)md.first] = md.second;
+    }
+    annotation_entry[device_s] = ae.device_;
+    annotation_entry[time_us_s] = ae.time_.t_;
+    external_annotations.append(annotation_entry);
+  }
+
   py::dict allocator_settings;
   py::str last_allocator_settings_s = "PYTORCH_CUDA_ALLOC_CONF";
   py::str max_split_size_s = "max_split_size";
@@ -823,6 +861,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   result["segments"] = segments;
   result["device_traces"] = traces;
   result["allocator_settings"] = allocator_settings;
+  result["external_annotations"] = external_annotations;
 
   auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
@@ -851,7 +890,7 @@ PyObject* THCPModule_attachOutOfMemoryObserver(
     }
     Py_XDECREF(result);
   };
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   c10::cuda::CUDACachingAllocator::attachOutOfMemoryObserver(std::move(obs));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -903,6 +942,34 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+std::string uuid_to_string(const char* uuid_bytes) {
+  // UUIDs are a 128-bit label. CUDA and HIP store this as char[16].
+  // For string representation, the code here expands this to
+  // 8-4-4-4-12 hex format, so each byte becomes 2 hex characters.
+  return fmt::format(
+      "{:02x}{:02x}{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}-"
+      "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+      (uint8_t)uuid_bytes[0],
+      (uint8_t)uuid_bytes[1],
+      (uint8_t)uuid_bytes[2],
+      (uint8_t)uuid_bytes[3],
+      (uint8_t)uuid_bytes[4],
+      (uint8_t)uuid_bytes[5],
+      (uint8_t)uuid_bytes[6],
+      (uint8_t)uuid_bytes[7],
+      (uint8_t)uuid_bytes[8],
+      (uint8_t)uuid_bytes[9],
+      (uint8_t)uuid_bytes[10],
+      (uint8_t)uuid_bytes[11],
+      (uint8_t)uuid_bytes[12],
+      (uint8_t)uuid_bytes[13],
+      (uint8_t)uuid_bytes[14],
+      (uint8_t)uuid_bytes[15]);
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -910,6 +977,20 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 static void registerCudaDeviceProperties(PyObject* module) {
   // Add _cudaDevicePropertires class to torch._C
   auto m = py::handle(module).cast<py::module>();
+  // until internal build is using a rocm version with uuid attr
+#ifndef FBCODE_CAFFE2
+  // CUuuid is defined in either cuda.h or driver_types.h
+  // hipified to hipUUID which is defined in hip_runtime_api.h
+  py::class_<CUuuid>(m, "_CUuuid")
+      .def_property_readonly(
+          "bytes",
+          [](const CUuuid& uuid) {
+            return std::vector<uint8_t>(uuid.bytes, uuid.bytes + 16);
+          })
+      .def("__str__", [](const CUuuid& uuid) {
+        return uuid_to_string(uuid.bytes);
+      });
+#endif
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
       .def_readonly("name", &cudaDeviceProp::name)
       .def_readonly("major", &cudaDeviceProp::major)
@@ -922,11 +1003,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
-#if !USE_ROCM
-      // NVIDA only property
+      .def_readonly("warp_size", &cudaDeviceProp::warpSize)
+#if (defined(USE_ROCM) && ROCM_VERSION >= 60100) || !USE_ROCM
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
-#endif // USE_ROCM
+#endif
       // HIP-only property; reuse name attribute for CUDA builds
       .def_readonly(
           "gcnArchName",
@@ -936,6 +1017,10 @@ static void registerCudaDeviceProperties(PyObject* module) {
           &cudaDeviceProp::name
 #endif // USE_ROCM
           )
+#ifndef FBCODE_CAFFE2
+      .def_readonly("uuid", &cudaDeviceProp::uuid)
+#endif
+      .def_readonly("L2_cache_size", &cudaDeviceProp::l2CacheSize)
       .def("__repr__", [](const cudaDeviceProp& prop) {
         std::ostringstream stream;
         stream << "_CudaDeviceProperties(name='" << prop.name
@@ -945,7 +1030,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
-               << ")";
+#ifndef FBCODE_CAFFE2
+               << ", uuid=" << uuid_to_string(prop.uuid.bytes)
+#endif
+               << ", L2_cache_size=" << prop.l2CacheSize / (1024ull * 1024)
+               << "MB)";
         return stream.str();
       });
 
@@ -1122,16 +1211,14 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_release_pool(func);
           });
   m.def("_cuda_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
-    using MallocFuncType = void*(size_t, int, cudaStream_t);
-    using FreeFuncType = void(void*, size_t, int, cudaStream_t);
+    using namespace torch::cuda::CUDAPluggableAllocator;
     std::function<MallocFuncType> malloc_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<MallocFuncType*>(malloc_ptr);
     std::function<FreeFuncType> free_fn =
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         reinterpret_cast<FreeFuncType*>(free_ptr);
-    return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
-        malloc_fn, free_fn);
+    return createCustomAllocator(malloc_fn, free_fn);
   });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
@@ -1163,27 +1250,18 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             ->release_storage_and_set_meta_custom_data_ptr_error_msg_(s);
       });
 
+  m.def(
+      "_set_storage_data_ptr_access_error_msg",
+      [](size_t storage_impl_ptr, std::string s) {
+        c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+        storage_impl->release_data_and_set_meta_custom_data_ptr_error_msg_(s);
+      });
+
   m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     auto alloc = c10::cuda::CUDACachingAllocator::get();
     return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
-  });
-
-  m.def("_set_cached_tensors_enabled", [](bool enabled) {
-    at::caching::set_cached_tensors_enabled(enabled);
-  });
-
-  m.def("_add_cached_tensor", [](const at::Tensor& t) {
-    at::caching::add_cached_tensor(t);
-  });
-
-  m.def("_remove_cached_tensor", [](const at::Tensor& t) {
-    at::caching::remove_cached_tensor(t);
-  });
-
-  m.def("_is_cached_tensor", [](const at::Tensor& t) {
-    return at::caching::is_cached_tensor(t);
   });
 
   m.def("_storage_Use_Count", [](size_t storage_impl_ptr) {
@@ -1195,8 +1273,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   m.def(
       "_tensors_data_ptrs_at_indices_equal",
       [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
-        for (size_t i = 0, end = indices.size(); i < end; ++i) {
-          auto index = indices[i].cast<int64_t>();
+        for (auto index : indices) {
           auto t = tensors[index].cast<at::Tensor>();
           auto data_ptr = data_ptrs[index].cast<int64_t>();
           if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
@@ -1233,6 +1310,13 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             device, mempool_id, [stream](cudaStream_t target) {
               return target == stream;
             });
+      });
+
+  m.def(
+      "_cuda_beginAllocateToPool",
+      [](c10::DeviceIndex device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::beginAllocateToPool(
+            device, mempool_id, [](cudaStream_t) { return true; });
       });
 
   m.def(
@@ -1341,7 +1425,7 @@ static PyObject* THCPModule_initExtension(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   TORCH_INTERNAL_ASSERT(!in_bad_fork); // Handled at python level
   poison_fork();
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
   auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
   if (!m)
@@ -1373,7 +1457,6 @@ PyObject* THCPModule_getCurrentBlasHandle_wrap(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
   return PyLong_FromVoidPtr(handle);
   END_HANDLE_TH_ERRORS
@@ -1446,6 +1529,32 @@ PyObject* THCPModule_cuda_tunableop_tuning_is_enabled(
     PyObject* noarg) {
   HANDLE_TH_ERRORS
   if (at::cuda::tunable::getTuningContext()->IsTuningEnabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_record_untuned_enable(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPUtils_checkBool(arg),
+      "cuda_record_untuned_enable expects a bool, but got ",
+      THPUtils_typename(arg));
+  at::cuda::tunable::getTuningContext()->EnableRecordUntuned(
+      THPUtils_unpackBool(arg));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THCPModule_cuda_record_untuned_is_enabled(
+    PyObject* _unused,
+    PyObject* noarg) {
+  HANDLE_TH_ERRORS
+  if (at::cuda::tunable::getTuningContext()->IsRecordUntunedEnabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -1784,12 +1893,17 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cudaHostAllocator,
      METH_NOARGS,
      nullptr},
+    {"_host_emptyCache", THCPModule_hostEmptyCache, METH_NOARGS, nullptr},
     {"_cuda_cudaCachingAllocator_raw_alloc",
      THCPModule_cudaCachingAllocator_raw_alloc,
      METH_VARARGS,
      nullptr},
     {"_cuda_cudaCachingAllocator_raw_delete",
      THCPModule_cudaCachingAllocator_raw_delete,
+     METH_O,
+     nullptr},
+    {"_cuda_cudaCachingAllocator_enable",
+     THCPModule_cudaCachingAllocator_enable,
      METH_O,
      nullptr},
     {"_cuda_cudaCachingAllocator_set_allocator_settings",
@@ -1862,6 +1976,14 @@ static struct PyMethodDef _THCPModule_methods[] = {
      THCPModule_cuda_tunableop_tuning_is_enabled,
      METH_NOARGS,
      nullptr},
+    {"_cuda_record_untuned_enable",
+     THCPModule_cuda_record_untuned_enable,
+     METH_O,
+     nullptr},
+    {"_cuda_record_untuned_is_enabled",
+     THCPModule_cuda_record_untuned_is_enabled,
+     METH_NOARGS,
+     nullptr},
     {"_cuda_tunableop_write_file_on_exit",
      THCPModule_cuda_tunableop_write_file_on_exit,
      METH_O,
@@ -1918,8 +2040,12 @@ namespace shared {
 
 void initCudartBindings(PyObject* module);
 void initNvtxBindings(PyObject* module);
+void initGdsBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
+#endif
+#if defined(USE_CUSPARSELT)
+void initCusparseltBindings(PyObject* module);
 #endif
 
 } // namespace shared
@@ -1933,6 +2059,10 @@ void initModule(PyObject* module) {
 #if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
 #endif
+#if defined(USE_CUSPARSELT)
+  shared::initCusparseltBindings(module);
+#endif
+  shared::initGdsBindings(module);
   registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
 }

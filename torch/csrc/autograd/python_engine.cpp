@@ -32,9 +32,7 @@ struct THPEngine {
 
 static bool _reinitialize_engine = false;
 
-namespace torch {
-namespace autograd {
-namespace python {
+namespace torch::autograd::python {
 
 PythonEngine::PythonEngine() = default;
 
@@ -102,7 +100,7 @@ void PythonEngine::thread_init(
 }
 
 void PythonEngine::thread_on_exception(
-    std::shared_ptr<GraphTask> graph_task,
+    const std::shared_ptr<GraphTask>& graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
   // See Note [ Persisting PyErr state across autograd engine threads ]
@@ -110,7 +108,7 @@ void PythonEngine::thread_on_exception(
   if (python_err) {
     python_err->persist();
   }
-  Engine::thread_on_exception(std::move(graph_task), fn, e);
+  Engine::thread_on_exception(graph_task, fn, e);
 }
 
 std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
@@ -160,11 +158,27 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     throw;
   }
 }
-} // namespace python
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::python
 
 PyObject* THPEngineClass = nullptr;
+
+inline static Edge parseGradientEdge(PyObject* obj, int64_t index) {
+  PyObject* grad_fn = PyTuple_GetItem(obj, 0);
+  auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(obj, 1));
+  std::shared_ptr<torch::autograd::Node> grad_fn_sp;
+  if (THPFunction_Check(grad_fn)) {
+    grad_fn_sp = ((THPFunction*)grad_fn)->cdata.lock();
+  } else if (THPCppFunction_Check(grad_fn)) {
+    grad_fn_sp = ((THPCppFunction*)grad_fn)->cdata;
+  } else {
+    TORCH_CHECK(
+        false,
+        "GradientEdge's first object must be an autograd.graph.Node "
+        "but got ",
+        THPUtils_typename(grad_fn));
+  }
+  return Edge(grad_fn_sp, output_nr);
+}
 
 // Implementation of torch._C._EngineBase.run_backward
 PyObject* THPEngine_run_backward(
@@ -239,22 +253,29 @@ PyObject* THPEngine_run_backward(
   grads.reserve(num_tensors);
   for (const auto i : c10::irange(num_tensors)) {
     PyObject* _tensor = PyTuple_GET_ITEM(tensors, i);
-    TORCH_CHECK(
-        THPVariable_Check(_tensor),
-        "element ",
-        i,
-        " of tensors tuple is not a Tensor");
-    const auto& variable = THPVariable_Unpack(_tensor);
-    TORCH_CHECK(
-        !isBatchedTensor(variable),
-        "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
-        "torch.vmap. We do not support the case where any outputs are ",
-        "vmapped tensors (output ",
-        i,
-        " is being vmapped over). Please "
-        "call autograd.grad() outside torch.vmap or file a bug report "
-        "with your use case.")
-    auto gradient_edge = torch::autograd::impl::gradient_edge(variable);
+    Edge gradient_edge; // Temporary variable to hold the gradient edge
+    std::optional<at::Tensor> mb_output;
+    if (THPVariable_Check(_tensor)) {
+      mb_output = THPVariable_Unpack(_tensor);
+      TORCH_CHECK(
+          !isBatchedTensor(mb_output.value()),
+          "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
+          "torch.vmap. We do not support the case where any outputs are ",
+          "vmapped tensors (output ",
+          i,
+          " is being vmapped over). Please "
+          "call autograd.grad() outside torch.vmap or file a bug report "
+          "with your use case.");
+      gradient_edge = torch::autograd::impl::gradient_edge(mb_output.value());
+    } else if (PyObject_IsInstance(_tensor, THPGradientEdgeClass)) {
+      gradient_edge = parseGradientEdge(_tensor, i);
+    } else {
+      TORCH_CHECK(
+          false,
+          "element ",
+          i,
+          " of tensors tuple is neither a Tensor nor a GradientEdge");
+    }
     TORCH_CHECK(
         gradient_edge.function,
         "element ",
@@ -281,7 +302,13 @@ PyObject* THPEngine_run_backward(
           i,
           " of gradients tuple is not a Tensor or None");
       TORCH_CHECK(
-          !variable.requires_grad(),
+          mb_output.has_value(),
+          "element ",
+          i,
+          " of gradients tuple is None, but the corresponding output is a GradientEdge."
+          "This is not supported.");
+      TORCH_CHECK(
+          !mb_output.value().requires_grad(),
           "element ",
           i,
           " of gradients tuple is None, but the corresponding Tensor requires grad");
@@ -330,23 +357,7 @@ PyObject* THPEngine_run_backward(
           output_edges.emplace_back(grad_fn, output_nr);
         }
       } else if (PyObject_IsInstance(input, THPGradientEdgeClass)) {
-        auto node = PyTuple_GetItem(input, 0);
-        bool isTHPFunction = THPFunction_Check(node);
-        bool isTHPCppFunction = THPCppFunction_Check(node);
-        TORCH_CHECK(
-            isTHPFunction || isTHPCppFunction,
-            "GradientEdge first object must be an autograd.graph.Node "
-            "but got ",
-            THPUtils_typename(node));
-        std::shared_ptr<torch::autograd::Node> node_sp;
-        if (isTHPFunction) {
-          node_sp = ((THPFunction*)node)->cdata.lock();
-        } else {
-          node_sp = ((torch::autograd::THPCppFunction*)node)->cdata;
-        }
-
-        auto output_nr = THPUtils_unpackUInt32(PyTuple_GetItem(input, 1));
-        output_edges.emplace_back(node_sp, output_nr);
+        output_edges.emplace_back(parseGradientEdge(input, i));
       } else {
         TORCH_CHECK(
             false,
@@ -449,7 +460,8 @@ static struct PyMethodDef THPEngine_methods[] = {
     {nullptr}};
 
 PyTypeObject THPEngineType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._EngineBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._EngineBase", /* tp_name */
     sizeof(THPEngine), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */

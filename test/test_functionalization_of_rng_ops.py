@@ -298,9 +298,9 @@ class TestFunctionalizationRngOps(TestCase):
         torch.cuda.manual_seed(123)
         ref = fn(x, y)
 
-        # With checkpointing we should recompute dropout in bwd, and should see philox_rand
+        # With checkpointing we should recompute dropout in bwd, and philox_rand is passed from fwd
         fwd_compiler = functools.partial(count_philox_rand, freq=1)
-        bwd_compiler = functools.partial(count_philox_rand, freq=1)
+        bwd_compiler = functools.partial(count_philox_rand, freq=0)
         aot_fn = aot_function(fn, fwd_compiler, bwd_compiler)
         # We cant check accuracy here because rand_like generated different rand numbers than dropout
         res = aot_fn(x, y)

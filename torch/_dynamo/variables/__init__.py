@@ -1,19 +1,20 @@
-# mypy: ignore-errors
-
 from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
+    CUDADeviceVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
+    FSDPParamGroupUseTrainingStateVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
     InferenceModeVariable,
     JvpIncrementNestingCtxManagerVariable,
+    SDPAKernelVariable,
     SetFwdGradEnabledContextManager,
     StreamContextVariable,
     StreamVariable,
@@ -24,17 +25,22 @@ from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
     DefaultDictVariable,
+    FrozensetVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
+    CreateTMADescriptorVariable,
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    PolyfilledFunctionVariable,
     SkipFunctionVariable,
+    TMADescriptorVariable,
     UserFunctionVariable,
     UserMethodVariable,
 )
 from .higher_order_ops import (
+    FunctionalCallVariable,
     FunctorchHigherOrderVariable,
     TorchHigherOrderOperatorVariable,
 )
@@ -43,7 +49,9 @@ from .iter import (
     CycleIteratorVariable,
     IteratorVariable,
     ItertoolsVariable,
+    MapVariable,
     RepeatIteratorVariable,
+    ZipVariable,
 )
 from .lazy import LazyVariableTracker
 from .lists import (
@@ -71,19 +79,25 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
+    RandomClassVariable,
+    RandomVariable,
     RegexPatternVariable,
-    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
     TypingVariable,
     UnknownVariable,
 )
-from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
-
+from .nn_module import (
+    FSDPManagedNNModuleVariable,
+    NNModuleVariable,
+    UnspecializedBuiltinNNModuleVariable,
+    UnspecializedNNModuleVariable,
+)
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
 from .tensor import (
+    DataPtrVariable,
     FakeItemVariable,
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -93,10 +107,13 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    WeakRefVariable,
 )
+
 
 __all__ = [
     "AutogradFunctionContextVariable",
@@ -110,8 +127,11 @@ __all__ = [
     "ConstDictVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
+    "CreateTMADescriptorVariable",
+    "CUDADeviceVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
+    "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
@@ -135,6 +155,7 @@ __all__ = [
     "NumpyVariable",
     "OptimizerVariable",
     "PlacementVariable",
+    "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
     "RegexPatternVariable",
@@ -144,10 +165,10 @@ __all__ = [
     "SDPAParamsVariable",
     "SkipFunctionVariable",
     "SliceVariable",
-    "StopIterationVariable",
     "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",
+    "TMADescriptorVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
     "TorchVersionVariable",

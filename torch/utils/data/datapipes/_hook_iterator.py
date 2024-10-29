@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
-import inspect
 import functools
+import inspect
 from enum import Enum
 
-import torch.autograd
+import torch
 
 
 class _SnapshotState(Enum):
@@ -40,25 +40,31 @@ def _generate_input_args_string(obj):
     for name, value in inspect.getmembers(obj):
         if name in input_param_names:
             result.append((name, _simplify_obj_name(value)))
-    return ', '.join([f'{name}={value}' for name, value in result])
+    return ", ".join([f"{name}={value}" for name, value in result])
 
 
 def _generate_iterdatapipe_msg(datapipe, simplify_dp_name: bool = False):
-    output_string = f"{datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
+    output_string = (
+        f"{datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
+    )
     if simplify_dp_name:
         output_string = _strip_datapipe_from_name(output_string)
     return output_string
 
 
 def _gen_invalid_iterdatapipe_msg(datapipe):
-    return ("This iterator has been invalidated because another iterator has been created "
-            f"from the same IterDataPipe: {_generate_iterdatapipe_msg(datapipe)}\n"
-            "This may be caused multiple references to the same IterDataPipe. We recommend "
-            "using `.fork()` if that is necessary.")
+    return (
+        "This iterator has been invalidated because another iterator has been created "
+        f"from the same IterDataPipe: {_generate_iterdatapipe_msg(datapipe)}\n"
+        "This may be caused multiple references to the same IterDataPipe. We recommend "
+        "using `.fork()` if that is necessary."
+    )
 
 
-_feedback_msg = ("\nFor feedback regarding this single iterator per IterDataPipe constraint, feel free "
-                 "to comment on this issue: https://github.com/pytorch/data/issues/45.")
+_feedback_msg = (
+    "\nFor feedback regarding this single iterator per IterDataPipe constraint, feel free "
+    "to comment on this issue: https://github.com/pytorch/data/issues/45."
+)
 
 
 def _check_iterator_valid(datapipe, iterator_id, next_method_exists=False) -> None:
@@ -73,15 +79,24 @@ def _check_iterator_valid(datapipe, iterator_id, next_method_exists=False) -> No
         # iterator (`0`). Otherwise, it means there are multiple iterators.
         if datapipe._valid_iterator_id is not None and datapipe._valid_iterator_id != 0:
             extra_msg = "\nNote that this exception is raised inside your IterDataPipe's a `__next__` method"
-            raise RuntimeError(_gen_invalid_iterdatapipe_msg(datapipe) + extra_msg + _feedback_msg)
-    elif hasattr(datapipe, "_is_child_datapipe") and datapipe._is_child_datapipe is True:
+            raise RuntimeError(
+                _gen_invalid_iterdatapipe_msg(datapipe) + extra_msg + _feedback_msg
+            )
+    elif (
+        hasattr(datapipe, "_is_child_datapipe") and datapipe._is_child_datapipe is True
+    ):
         if hasattr(datapipe, "_check_valid_iterator_id"):
             if not datapipe._check_valid_iterator_id(iterator_id):
-                raise RuntimeError("This iterator has been invalidated, because a new iterator has been created "
-                                   f"from one of the ChildDataPipes of "
-                                   f"{_generate_iterdatapipe_msg(datapipe.main_datapipe)}." + _feedback_msg)
+                raise RuntimeError(
+                    "This iterator has been invalidated, because a new iterator has been created "
+                    f"from one of the ChildDataPipes of "
+                    f"{_generate_iterdatapipe_msg(datapipe.main_datapipe)}."
+                    + _feedback_msg
+                )
         else:
-            raise RuntimeError("ChildDataPipe must have method `_check_valid_iterator_id`.")
+            raise RuntimeError(
+                "ChildDataPipe must have method `_check_valid_iterator_id`."
+            )
     elif datapipe._valid_iterator_id != iterator_id:
         raise RuntimeError(_gen_invalid_iterdatapipe_msg(datapipe) + _feedback_msg)
 
@@ -92,7 +107,9 @@ def _set_datapipe_valid_iterator_id(datapipe):
         if hasattr(datapipe, "_set_main_datapipe_valid_iterator_id"):
             datapipe._set_main_datapipe_valid_iterator_id()  # reset() is called within this method when appropriate
         else:
-            raise RuntimeError("ChildDataPipe must have method `_set_main_datapipe_valid_iterator_id`.")
+            raise RuntimeError(
+                "ChildDataPipe must have method `_set_main_datapipe_valid_iterator_id`."
+            )
     else:
         if datapipe._valid_iterator_id is None:
             datapipe._valid_iterator_id = 0
@@ -111,7 +128,9 @@ def hook_iterator(namespace):
 
     def profiler_record_fn_context(datapipe):
         if not hasattr(datapipe, "_profile_name"):
-            datapipe._profile_name = _generate_iterdatapipe_msg(datapipe, simplify_dp_name=True)
+            datapipe._profile_name = _generate_iterdatapipe_msg(
+                datapipe, simplify_dp_name=True
+            )
         return torch.autograd.profiler.record_function(datapipe._profile_name)
 
     class IteratorDecorator:
@@ -128,7 +147,9 @@ def hook_iterator(namespace):
             self.iterator_id = iterator_id
             self._profiler_enabled = torch.autograd._profiler_enabled()
             # Check if `__iter__` returns `self` and `DataPipe` has `__next__`
-            self.self_and_has_next_method = self.iterator is self.datapipe and has_next_method
+            self.self_and_has_next_method = (
+                self.iterator is self.datapipe and has_next_method
+            )
 
         def __iter__(self):
             return self
@@ -153,10 +174,11 @@ def hook_iterator(namespace):
         def __getattr__(self, name):
             return getattr(self.iterator, name)
 
-    func = namespace['__iter__']
+    func = namespace["__iter__"]
 
     # ``__iter__`` of IterDataPipe is a generator function
     if inspect.isgeneratorfunction(func):
+
         @functools.wraps(func)
         def wrap_generator(*args, **kwargs):
             gen = func(*args, **kwargs)
@@ -170,7 +192,9 @@ def hook_iterator(namespace):
                         yield next(it)
                     except StopIteration:
                         return
-            iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
+            iterator_id = _set_datapipe_valid_iterator_id(
+                datapipe
+            )  # This ID is tied to each created iterator
             _profiler_enabled = torch.autograd._profiler_enabled()
             try:
                 if _profiler_enabled:
@@ -190,7 +214,7 @@ def hook_iterator(namespace):
                     else:  # Decided against using `contextlib.nullcontext` for performance reasons
                         _check_iterator_valid(datapipe, iterator_id)
                         response = gen.send(request)
-            except StopIteration as e:
+            except StopIteration:
                 return
             except Exception as e:
                 # TODO: Simplify the traceback message to skip over `response = gen.send(None)`
@@ -198,20 +222,24 @@ def hook_iterator(namespace):
                 datapipe = args[0]
                 msg = "thrown by __iter__ of"
                 single_iterator_msg = "single iterator per IterDataPipe constraint"
-                if hasattr(e.args, '__len__'):
+                if hasattr(e.args, "__len__"):
                     full_msg = f"{msg} {datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
-                    if len(e.args) == 0 or not isinstance(e.args[0], str):  # If an exception message doesn't exist
-                        e.args = (f'\nThis exception is {full_msg}',)
+                    if len(e.args) == 0 or not isinstance(
+                        e.args[0], str
+                    ):  # If an exception message doesn't exist
+                        e.args = (f"\nThis exception is {full_msg}",)
                     elif msg not in e.args[0] and single_iterator_msg not in e.args[0]:
-                        e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]
+                        e.args = (
+                            e.args[0] + f"\nThis exception is {full_msg}",
+                        ) + e.args[1:]
                 raise
 
-        namespace['__iter__'] = wrap_generator
+        namespace["__iter__"] = wrap_generator
     else:  # ``__iter__`` of IterDataPipe is NOT a generator function
         # IterDataPipe is an iterator with both ``__iter__`` and ``__next__``
         # And ``__iter__`` may or may not return `self`
-        if '__next__' in namespace:  # If `__next__` exists, put a wrapper around it
-            next_func = namespace['__next__']
+        if "__next__" in namespace:  # If `__next__` exists, put a wrapper around it
+            next_func = namespace["__next__"]
 
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
@@ -224,7 +252,7 @@ def hook_iterator(namespace):
                 datapipe._number_of_samples_yielded += 1
                 return result
 
-            namespace['__next__'] = wrap_next
+            namespace["__next__"] = wrap_next
 
             # Note that if the `__next__` and `__iter__` do something completely unrelated. It may cause issue but
             # the user will be violating the iterator protocol. Potential issue:
@@ -241,7 +269,11 @@ def hook_iterator(namespace):
                 iter_ret = datapipe._fast_forward_iterator
                 datapipe._fast_forward_iterator = None
                 return iter_ret
-            iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
-            return IteratorDecorator(iter_ret, datapipe, iterator_id, '__next__' in namespace)
+            iterator_id = _set_datapipe_valid_iterator_id(
+                datapipe
+            )  # This ID is tied to each created iterator
+            return IteratorDecorator(
+                iter_ret, datapipe, iterator_id, "__next__" in namespace
+            )
 
-        namespace['__iter__'] = wrap_iter
+        namespace["__iter__"] = wrap_iter

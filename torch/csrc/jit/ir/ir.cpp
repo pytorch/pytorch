@@ -292,8 +292,7 @@ SourceRange Node::sourceRange() const {
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
-  for (const auto i : c10::irange(level)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(level)) {
     out << "  ";
   }
   return out;
@@ -412,7 +411,7 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
 
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
-  std::optional<at::Device> device = c10::nullopt;
+  std::optional<at::Device> device = std::nullopt;
   auto checkValue = [&](const Value* v) {
     if (TensorTypePtr type = v->type()->cast<TensorType>()) {
       if (type->device() && !has_device) {
@@ -747,9 +746,10 @@ void Block::destroy() {
 
 void Graph::cloneFrom(Graph& src) {
   auto env = [](Value* v) -> Value* {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Graph::copy() encountered a use of a value " + v->debugName() +
-        " not in scope. Run lint!");
+            " not in scope. Run lint!");
   };
   block()->cloneFrom(src.block(), env);
 }
@@ -1297,9 +1297,8 @@ Node::Node(Graph* graph_, NodeKind kind_)
       graph_(graph_),
       owning_block_(nullptr),
       scope_(graph_->current_scope_),
-      callstack_(c10::nullopt),
-      op_(nullptr),
-      topo_position_(0) {
+      callstack_(std::nullopt),
+      op_(nullptr) {
   graph_->all_nodes.emplace(this);
 }
 
@@ -1769,8 +1768,7 @@ Node* Graph::createTupleSlice(
   new_vals.reserve(num_values);
 
   int64_t i = beg;
-  for (const auto j : c10::irange(num_values)) {
-    (void)j; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto j : c10::irange(num_values)) {
     auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
     auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
 
@@ -1818,8 +1816,7 @@ Node* Graph::createListUnpack(Value* v, size_t size) {
   ListTypePtr list_type = v->type()->expect<ListType>();
   TypePtr elem_type = list_type->getElementType();
   auto n = create(prim::ListUnpack, {v}, 0);
-  for (const auto i : c10::irange(size)) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(size)) {
     n->addOutput()->setType(elem_type);
   }
   return n;
@@ -2044,14 +2041,14 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    std::optional<ModuleInstanceInfo> m_info);
+    const std::optional<ModuleInstanceInfo>& m_info);
 
 static void inlineCallStackOfBlock(
     Block* b,
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    std::optional<ModuleInstanceInfo> m_info) {
+    const std::optional<ModuleInstanceInfo>& m_info) {
   for (auto n : b->nodes()) {
     inlineCallStackOfNode(n, new_cs_entries, callee, to_replace, m_info);
   }
@@ -2062,7 +2059,7 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    std::optional<ModuleInstanceInfo> m_info) {
+    const std::optional<ModuleInstanceInfo>& m_info) {
   auto new_node_cs = new_node->callstack();
 
   InlinedCallStack* raw_callstack_ptr =
@@ -2101,11 +2098,11 @@ std::vector<Value*> inlineCallTo(
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
-  std::optional<ModuleInstanceInfo> module_instance_info = c10::nullopt;
+  std::optional<ModuleInstanceInfo> module_instance_info = std::nullopt;
   if (to_replace->kind() == prim::CallMethod) {
     auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
     if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
-      module_instance_info = c10::make_optional(ModuleInstanceInfo(
+      module_instance_info = std::make_optional(ModuleInstanceInfo(
           class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
     } else if (
         !to_replace->owningGraph()->inputs().empty() &&
@@ -2113,11 +2110,11 @@ std::vector<Value*> inlineCallTo(
       // This CallMethod must correspond to method of the same object
       // to which this graph belongs.
       module_instance_info =
-          c10::make_optional(ModuleInstanceInfo(class_type_ptr, "SELF"));
+          std::make_optional(ModuleInstanceInfo(class_type_ptr, "SELF"));
     } else {
       // Not sure if it is possible to come here ever.
       // TODO: Remove this else. Or add assert
-      module_instance_info = c10::make_optional(
+      module_instance_info = std::make_optional(
           ModuleInstanceInfo(class_type_ptr, "INSTANCE_NAME_UNKNOWN"));
     }
   }

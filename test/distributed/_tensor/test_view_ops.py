@@ -7,9 +7,15 @@ from typing import cast, List
 import torch
 import torch.distributed as dist
 from torch import rand, randn, Tensor
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
-from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.ops.view_ops import (
+from torch.distributed._tensor import (
+    DeviceMesh,
+    distribute_tensor,
+    init_device_mesh,
+    Replicate,
+    Shard,
+)
+from torch.distributed._tensor.placement_types import Placement
+from torch.distributed.tensor._ops._view_ops import (
     Broadcast,
     dim_maps,
     Flatten,
@@ -19,7 +25,7 @@ from torch.distributed._tensor.ops.view_ops import (
     Split,
     view_groups,
 )
-from torch.distributed._tensor.placement_types import Placement
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -29,6 +35,10 @@ from torch.utils import _pytree as pytree
 
 
 class TestViewOps(DTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 6
+
     def test_view_groups(self):
         self.assertEqual(
             view_groups([2, 3], [3, 2]),
@@ -106,8 +116,8 @@ class TestViewOps(DTensorTestBase):
             view_groups([1, 1, 3, 2, 1, 1], [6, 1, 1, 1]),
             (
                 Flatten((InputDim(2), InputDim(3))),
-                Singleton(),
-                Singleton(),
+                InputDim(4),
+                InputDim(5),
                 Singleton(),
             ),
         )
@@ -116,7 +126,7 @@ class TestViewOps(DTensorTestBase):
             (
                 Split(InputDim(2), (3, 4), 0),
                 Split(InputDim(2), (3, 4), 1),
-                Singleton(),
+                InputDim(3),
                 Flatten((InputDim(6), InputDim(7))),
             ),
         )
@@ -124,10 +134,6 @@ class TestViewOps(DTensorTestBase):
             view_groups([2, 3, 4], [2, -1, 4]),
             (InputDim(0), InputDim(1), InputDim(2)),
         )
-
-    @property
-    def world_size(self) -> int:
-        return 6
 
     def call_dt_test(self, op, args, kwargs, device_mesh: DeviceMesh):
         dim_map = dim_maps[op]
@@ -429,7 +435,7 @@ class TestViewOps(DTensorTestBase):
         self.dimmap_test(
             Tensor.view,
             (randn(1, 1, 42, 1, 24, 1), -1),
-            (Flatten((InputDim(2), InputDim(4))),),
+            (Flatten((InputDim(2), InputDim(input_dim=3), InputDim(4))),),
         )
 
         self.dimmap_test(
@@ -524,6 +530,46 @@ class TestViewOps(DTensorTestBase):
                 comm_mode.get_total_counts(), 0, "Expected no redistribution."
             )
             self.assertEqual(out, out_dt.full_tensor())
+
+    @with_comms
+    def test_dtensor_view_op_uneven(self):
+        """
+        Test two uneven cases for view op:
+            1) the sharded tensor dim is 1 so that only the first rank has an non-empty shard.
+            2) the sharded tensor dim is uneven such that some ranks have full shards,
+                smaller non-empty shards, and empty shards.
+        """
+        dim0_sizes = [1, self.world_size + 1]
+        for dim0_size in dim0_sizes:
+            p = torch.randn(dim0_size, 2, 2, 2)
+            mesh = init_device_mesh(self.device_type, (self.world_size,))
+            dtensor = distribute_tensor(p, mesh, [Shard(0)])
+
+            with CommDebugMode() as comm_mode:
+                view = dtensor.view(dim0_size, 2, 4)
+                self.assertEqual(len(comm_mode.get_comm_counts()), 0)
+                # when no communication happens, the data pointer should be the same.
+                self.assertEqual(
+                    view.to_local().data_ptr(), dtensor.to_local().data_ptr()
+                )
+
+                view = dtensor.view(dim0_size, 4, 2)
+                self.assertEqual(
+                    view.to_local().data_ptr(), dtensor.to_local().data_ptr()
+                )
+                self.assertEqual(len(comm_mode.get_comm_counts()), 0)
+
+                view = dtensor.view(dim0_size, 8)
+                self.assertEqual(
+                    view.to_local().data_ptr(), dtensor.to_local().data_ptr()
+                )
+                self.assertEqual(len(comm_mode.get_comm_counts()), 0)
+
+                view = dtensor.view(dtensor.shape)
+                self.assertEqual(
+                    view.to_local().data_ptr(), dtensor.to_local().data_ptr()
+                )
+                self.assertEqual(len(comm_mode.get_comm_counts()), 0)
 
 
 if __name__ == "__main__":

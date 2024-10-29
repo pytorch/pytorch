@@ -3,10 +3,7 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
-namespace torch {
-namespace jit {
-namespace fuser {
-namespace onednn {
+namespace torch::jit::fuser::onednn {
 
 static bool compareConstValue(Value* v, double d) {
   auto ival = toIValue(v);
@@ -69,7 +66,7 @@ static void handleBinaryOpInputs(Node* node) {
       auto second_input_typeptr = node->input(1)->type()->expect<TensorType>();
       std::optional<at::ScalarType> second_input_type =
           second_input_typeptr->scalarType();
-      if (second_input_type != c10::nullopt) {
+      if (second_input_type != std::nullopt) {
         // dtype of the second tensor might not be available in the IR
         auto dtypeOfSecondInput = second_input_type.value();
         if (dtypeOfFirstInput != dtypeOfSecondInput) {
@@ -179,7 +176,4 @@ void PrepareBinaryForLLGA(const std::shared_ptr<Graph>& graph) {
   ConvertScalarToTensor(graph->block());
 }
 
-} // namespace onednn
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser::onednn

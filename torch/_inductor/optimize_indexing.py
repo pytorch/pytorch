@@ -1,15 +1,16 @@
-# mypy: allow-untyped-defs
 import math
+from typing import Any, Dict, List
 
 import sympy
 
 import torch
 from torch.utils._sympy.value_ranges import ValueRanges
-from .ir import LoopBody
+
+from .loop_body import LoopBody
 from .utils import dominated_nodes
 
 
-def val_expressable_in_32_bits(val):
+def val_expressable_in_32_bits(val: Any) -> bool:
     if getattr(val, "is_Boolean", False):
         return True
 
@@ -31,17 +32,23 @@ def val_expressable_in_32_bits(val):
     raise TypeError(f"Unexpected value {val}")
 
 
-def range_expressable_in_32_bits(range):
+def range_expressable_in_32_bits(range: ValueRanges[sympy.Expr]) -> bool:
     return val_expressable_in_32_bits(range.lower) and val_expressable_in_32_bits(
         range.upper
     )
 
 
-def try_to_reduce_precision(node, bounds, indirect_vars, indices, replacement_vals):
+def try_to_reduce_precision(
+    node: Any,
+    bounds: Dict[Any, Any],
+    indirect_vars: List[Any],
+    indices: Dict[Any, sympy.Expr],
+    replacement_vals: Dict[Any, ValueRanges[sympy.Expr]],
+) -> None:
     # if a downstream use of a node explicitly converts to int32, or float16/float32/float64,
     # then it's precision is set for that chain of uses, and we don't need to consider those
     # dominated values
-    def skip_filter(node):
+    def skip_filter(node: Any) -> bool:
         return node.target == "to_dtype" and node.args[2] in (
             torch.int32,
             torch.float32,
@@ -86,7 +93,7 @@ def try_to_reduce_precision(node, bounds, indirect_vars, indices, replacement_va
     node.args = tuple(args)
 
 
-def indexing_dtype_strength_reduction(loop_body: LoopBody):
+def indexing_dtype_strength_reduction(loop_body: LoopBody) -> None:
     """
     Performs Value Range Analysis on LoopBody's fx graph to reduce precision of
     intermediaries from int64 to int32

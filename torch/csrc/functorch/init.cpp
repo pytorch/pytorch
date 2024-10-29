@@ -143,17 +143,17 @@ static Tensor _movedim(const Tensor& self, int64_t src, int64_t dst) {
 Tensor _remove_batch_dim(
     const Tensor& self,
     int64_t level,
-    int64_t batch_size,
+    const c10::SymInt& batch_size,
     int64_t out_dim) {
   TORCH_CHECK(
       out_dim == 0 || !self.key_set().has(DispatchKey::BatchedNestedTensor),
       "Nested tensors can only be vmapped over dim=0, but got dim=",
       out_dim);
   if (!has_level(self, level)) {
-    auto self_sizes = self.sizes();
-    VmapDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
+    auto self_sizes = self.sym_sizes();
+    VmapSymDimVector expanded_sizes(self_sizes.begin(), self_sizes.end());
     expanded_sizes.insert(expanded_sizes.begin() + out_dim, batch_size);
-    auto result = self.expand(expanded_sizes);
+    auto result = self.expand_symint(expanded_sizes);
     return result;
   }
 
@@ -242,7 +242,7 @@ int64_t _grad_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_grad_mode = c10::GradMode::is_enabled();
   return initAndPushDynamicLayer(
-      TransformType::Grad, c10::nullopt, c10::nullopt, prev_grad_mode);
+      TransformType::Grad, std::nullopt, std::nullopt, prev_grad_mode);
 }
 
 int64_t _grad_decrement_nesting() {
@@ -257,9 +257,9 @@ int64_t _jvp_increment_nesting() {
       c10::AutogradState::get_tls_state().get_fw_grad_mode();
   return initAndPushDynamicLayer(
       TransformType::Jvp,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
       prev_fwd_grad_mode);
 }
 
@@ -287,10 +287,10 @@ int64_t _vmap_decrement_nesting() {
 int64_t _func_increment_nesting(bool reapply_views) {
   return initAndPushDynamicLayer(
       TransformType::Functionalize,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
       /*functionalize_add_back_views=*/reapply_views);
 }
 
@@ -392,13 +392,13 @@ static void _set_dynamic_layer_keys_included(bool value) {
 }
 
 static void dump_dls() {
-  std::cout << getDynamicLayerStack() << std::endl;
+  std::cout << getDynamicLayerStack() << '\n';
 }
 
 static void dump_local_tls() {
   auto tls = c10::impl::tls_local_dispatch_key_set();
-  std::cout << "[Local Include] " << tls.included_ << std::endl;
-  std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
+  std::cout << "[Local Include] " << tls.included_ << '\n';
+  std::cout << "[Local Exclude] " << tls.excluded_ << '\n';
 }
 
 namespace {
@@ -434,12 +434,12 @@ static std::tuple<Tensor, std::optional<int64_t>> unwrapBatched(
     int64_t level) {
   auto* batched = maybeGetBatchedImpl(tensor);
   if (!batched) {
-    return std::make_tuple(tensor, nullopt);
+    return std::make_tuple(tensor, std::nullopt);
   }
   if (batched->level() == level) {
     return std::make_tuple(batched->value(), batched->bdim());
   }
-  return std::make_tuple(tensor, nullopt);
+  return std::make_tuple(tensor, std::nullopt);
 }
 
 void initFuncTorchBindings(PyObject* module) {
@@ -528,7 +528,7 @@ void initFuncTorchBindings(PyObject* module) {
       "get_interpreter_stack", []() -> std::optional<std::vector<Interpreter>> {
         const auto& stack = getDynamicLayerStack();
         if (stack.empty()) {
-          return c10::nullopt;
+          return std::nullopt;
         }
         std::vector<Interpreter> result;
         result.reserve(stack.size());
@@ -540,7 +540,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("peek_interpreter_stack", []() -> std::optional<Interpreter> {
     const auto& stack = getDynamicLayerStack();
     if (stack.empty()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     auto result = stack.back().interpreter();
     return result;

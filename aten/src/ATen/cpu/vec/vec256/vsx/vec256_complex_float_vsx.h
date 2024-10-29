@@ -55,6 +55,13 @@ class Vectorized<ComplexFlt> {
     _vec1 = vfloat32{val3.real(), val3.imag(), val4.real(), val4.imag()};
   }
 
+  C10_ALWAYS_INLINE const vec_internal_type& vec0() const {
+    return _vec0;
+  }
+  C10_ALWAYS_INLINE const vec_internal_type& vec1() const {
+    return _vec1;
+  }
+
   template <uint64_t mask>
   static std::enable_if_t<blendChoiceComplex(mask) == 0, Vectorized<ComplexFlt>>
       C10_ALWAYS_INLINE
@@ -621,6 +628,31 @@ Vectorized<ComplexFlt> inline minimum(
   // Exploit the fact that all-ones is a NaN.
   // auto isnan = _mm256_cmp_ps(abs_a, abs_b, _CMP_UNORD_Q);
   // return _mm256_or_ps(min, isnan);
+}
+
+template <>
+Vectorized<ComplexFlt> C10_ALWAYS_INLINE operator+(const Vectorized<ComplexFlt>& a, const Vectorized<ComplexFlt>& b) {
+  return Vectorized<ComplexFlt>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<ComplexFlt> C10_ALWAYS_INLINE operator-(const Vectorized<ComplexFlt>& a, const Vectorized<ComplexFlt>& b) {
+  return Vectorized<ComplexFlt>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<ComplexFlt> C10_ALWAYS_INLINE operator&(const Vectorized<ComplexFlt>& a, const Vectorized<ComplexFlt>& b) {
+  return Vectorized<ComplexFlt>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<ComplexFlt> C10_ALWAYS_INLINE operator|(const Vectorized<ComplexFlt>& a, const Vectorized<ComplexFlt>& b) {
+  return Vectorized<ComplexFlt>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<ComplexFlt> C10_ALWAYS_INLINE operator^(const Vectorized<ComplexFlt>& a, const Vectorized<ComplexFlt>& b) {
+  return Vectorized<ComplexFlt>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
 }
 
 } // namespace

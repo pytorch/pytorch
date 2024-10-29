@@ -75,7 +75,7 @@ static void repeat_out(
   }
 
   // return an empty tensor if one of the repeat dimensions is zero
-  at::native::resize_(result, target_size, c10::nullopt);
+  at::native::resize_(result, target_size, std::nullopt);
   if (zero_tensor) {
     return;
   }
@@ -101,7 +101,7 @@ at::Tensor& reshape_copy_out(
   const auto& shape = infer_size
       ? at::infer_size_dv(proposed_shape, self.numel())
       : proposed_shape;
-  at::native::resize_(out, shape, c10::nullopt);
+  at::native::resize_(out, shape, std::nullopt);
 
   auto self_contig = self.expect_contiguous();
 
@@ -214,7 +214,7 @@ at::Tensor& to_copy_out(
     at::native::resize_impl_cpu_(
         out.unsafeGetTensorImpl(), self.sizes(), self.strides());
   } else {
-    at::native::resize_(out, self.sizes(), c10::nullopt);
+    at::native::resize_(out, self.sizes(), std::nullopt);
   }
   auto is_unsupported_dtype = [](ScalarType t) {
 #define TORCH_OPS_UNSUPPORTED_TYPE(_, type) \
@@ -233,7 +233,7 @@ at::Tensor& to_copy_out(
   // expensive.
   if (self.is_contiguous() && !non_blocking &&
       // Did the user request us to make a copy that isn't contiguous?
-      (memory_format == c10::nullopt ||
+      (memory_format == std::nullopt ||
        memory_format == c10::MemoryFormat::Preserve ||
        memory_format == c10::MemoryFormat::Contiguous) &&
       // CopyKernel.cpp handles this case specially, so let's not mess
@@ -303,7 +303,7 @@ static Tensor& c2_argmin_out(
     out_dims.push_back(in_dims[i]);
     next_size *= in_dims[i];
   }
-  at::native::resize_(output, out_dims, c10::nullopt);
+  at::native::resize_(output, out_dims, std::nullopt);
 
   const auto n = in_dims[dim_];
 
@@ -370,7 +370,7 @@ static at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
   if (C10_UNLIKELY(!self.is_quantized())) {
     // fallback to dequantize_cpu equivalent case: make sure out is at::kFloat
     DCHECK(out.scalar_type() == kFloat);
-    return at::native::to_copy_out(out, self, false, false, c10::nullopt);
+    return at::native::to_copy_out(out, self, false, false, std::nullopt);
   }
   return get_qtensorimpl(self)->quantizer()->dequantize_out(out, self);
 }
@@ -658,11 +658,11 @@ REGISTER_OPERATOR_FUNCTOR(
               out_t,
               at::cpu::clamp(in0_t, clamp_min, clamp_max),
               in3_s,
-              c10::nullopt,
-              c10::nullopt);
+              std::nullopt,
+              std::nullopt);
           return;
         }
-        at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+        at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
 
         auto output_size = in0_t.numel();
 
@@ -700,7 +700,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
         at::cpu::clamp_out(out_t, in0_t, in1_s, in2_s);
         return;
       }
-      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+      at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
       auto output_size = in0_t.numel();
       auto min = in1_s.has_value() ? in1_s->toFloat()
                                    : -std::numeric_limits<float>::infinity();
@@ -830,7 +830,7 @@ void varStackFastOut(
       ? std::array<int64_t, 2>{num_inputs, 1}
       : std::array<int64_t, 2>{1, num_inputs};
 
-  at::native::resize_(out, output_size, c10::nullopt);
+  at::native::resize_(out, output_size, std::nullopt);
 
   AT_DISPATCH_ALL_TYPES(out.scalar_type(), "varStackFastOut", [&]() {
     auto* out_data = out.mutable_data_ptr<scalar_t>();
@@ -952,7 +952,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
       at::cpu::threshold_out(out_t, in0_t, 0, 0);
       return;
     }
-    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+    at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
     int64_t nn = in0_t.numel();
     te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
   };
@@ -975,7 +975,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
       at::cpu::tanh_out(out_t, in0_t);
       return;
     }
-    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+    at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
     int64_t nn = in0_t.numel();
     te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
   };
@@ -1036,7 +1036,7 @@ REGISTER_OPERATOR_FUNCTOR(
           at::cpu::sigmoid_out(out_t, in0_t);
           return;
         }
-        at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+        at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
         int64_t nn = in0_t.numel();
         te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
       };
@@ -1048,12 +1048,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
     LogAndDumpSchema(n);
     return nullptr;
   }
-  std::optional<float> clamp = c10::nullopt;
+  std::optional<float> clamp = std::nullopt;
   if (n->inputs()[1]->node()->kind() == prim::Constant) {
     auto clamp_d = toIValue(n->inputs()[1])->toOptional<double>();
     clamp = clamp_d
-        ? c10::make_optional<float>(static_cast<float>(clamp_d.value()))
-        : c10::nullopt;
+        ? std::make_optional<float>(static_cast<float>(clamp_d.value()))
+        : std::nullopt;
   }
   auto te = clamp ? createLogit() : nullptr;
   float clamp_value = clamp ? *clamp : 0.0f;
@@ -1070,7 +1070,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       at::native::logit_out(in0_t, in1_d, out_t);
       return;
     }
-    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+    at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
     int64_t nn = in0_t.numel();
     float c = clamp_value;
     te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn, &c});
@@ -1454,7 +1454,7 @@ C10_ALWAYS_INLINE void to_copy_functor_impl(
 
   if (memory_format == c10::MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
-      memory_format = c10::nullopt;
+      memory_format = std::nullopt;
       copy_strides = true;
     } else {
       memory_format = self.suggest_memory_format();
@@ -1485,7 +1485,7 @@ C10_ALWAYS_INLINE void to_copy_functor_impl(
         args->dtype,
         args->layout,
         self.device(),
-        c10::nullopt,
+        std::nullopt,
         memory_format);
   } else {
     if (has_memory_format) {
@@ -1905,7 +1905,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
 
   return [te = createDiv()](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
-    std::optional<c10::string_view> rounding_mode = c10::nullopt;
+    std::optional<c10::string_view> rounding_mode = std::nullopt;
     if (p_node->num_inputs() > 2) {
       rounding_mode = p_node->Input(2).toOptional<c10::string_view>();
     }
@@ -2112,14 +2112,14 @@ REGISTER_OPERATOR_FUNCTOR(aten::layer_norm, aten_layer_norm, [](Node* n) -> SROp
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::empty_like(
           *X,
-          c10::nullopt /* dtype */,
-          c10::nullopt /* layout */,
-          c10::nullopt /* device */,
-          c10::nullopt /* pin_memory */,
+          std::nullopt /* dtype */,
+          std::nullopt /* layout */,
+          std::nullopt /* device */,
+          std::nullopt /* pin_memory */,
           at::MemoryFormat::Contiguous);
     } else {
       at::native::resize_(
-          p_node->Output(0).toTensor(), X->sizes(), c10::nullopt);
+          p_node->Output(0).toTensor(), X->sizes(), std::nullopt);
     }
     at::Tensor& output = p_node->Output(0).toTensor();
     at::native::layer_norm_cpu_out(output, *X, *gamma, *beta, eps, M, N);
@@ -2231,12 +2231,12 @@ REGISTER_OPERATOR_FUNCTOR(quantized::linear, quantized_linear, [](Node* n) -> SR
       p_node->Output(0) = at::native::empty_affine_quantized(
           {0},
           c10::kQUInt8,
-          c10::nullopt,
+          std::nullopt,
           c10::kCPU,
           false,
           output_scale,
           output_zero_point,
-          c10::nullopt);
+          std::nullopt);
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
@@ -2277,12 +2277,12 @@ REGISTER_OPERATOR_FUNCTOR(
           p_node->Output(0) = at::native::empty_affine_quantized(
               {0},
               c10::kQUInt8,
-              c10::nullopt,
+              std::nullopt,
               c10::kCPU,
               false,
               output_scale,
               output_zero_point,
-              c10::nullopt);
+              std::nullopt);
         }
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
@@ -2463,7 +2463,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::full_like, aten_full_like, [](Node* n) -> SROper
           in0_t, dtype, layout, device, pin_memory, memory_format);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+    at::native::resize_(out_t, in0_t.sizes(), std::nullopt);
     at::native::fill_out(out_t, in1_s);
   };
 });
@@ -2528,7 +2528,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::zeros, aten_zeros, [](Node* n) -> SROperator {
     const auto layout = p_node->Input(2).toOptional<c10::Layout>();
     if (!hasTensorWithOptions(p_node->Output(0), dtype, layout)) {
       p_node->Output(0) = at::compositeexplicitautograd::zeros(
-          size, dtype, layout, c10::nullopt, c10::nullopt);
+          size, dtype, layout, std::nullopt, std::nullopt);
       return;
     }
     auto& out_t = p_node->Output(0).toTensor();
@@ -2709,7 +2709,7 @@ unsigned char abs_if_signed<unsigned char>(unsigned char val) {
 
 // Computes f(x) = sign(x) * ln(|1 + x|) for each x in the input tensor
 void signed_log1p_out(at::Tensor& out, const at::Tensor& input) {
-  at::native::resize_(out, input.sizes(), c10::nullopt);
+  at::native::resize_(out, input.sizes(), std::nullopt);
 
   const auto input_contig = input.expect_contiguous();
   auto output_contig = out.expect_contiguous();
@@ -2750,7 +2750,7 @@ REGISTER_OPERATOR_FUNCTOR(
           signed_log1p_out(out, input);
           return;
         }
-        at::native::resize_(out, input.sizes(), c10::nullopt);
+        at::native::resize_(out, input.sizes(), std::nullopt);
         int64_t nn = input.numel();
         te->call({out.data_ptr(), input.data_ptr(), &nn});
       };

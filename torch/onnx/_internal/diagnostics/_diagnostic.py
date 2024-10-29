@@ -1,18 +1,21 @@
 # mypy: allow-untyped-defs
 """Diagnostic components for TorchScript based ONNX export, i.e. `torch.onnx.export`."""
+
 from __future__ import annotations
 
 import contextlib
 import gzip
-from collections.abc import Generator
-from typing import List, Optional
+from typing import TYPE_CHECKING
 
 import torch
-
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 from torch.onnx._internal.diagnostics.infra.sarif import version as sarif_version
 from torch.utils import cpp_backtrace
+
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32) -> infra.Stack:
@@ -24,7 +27,6 @@ def _cpp_call_stack(frames_to_skip: int = 0, frames_to_log: int = 32) -> infra.S
     r"frame #[0-9]+: (?P<frame_info>.*)". More info at `c10/util/Backtrace.cpp`.
 
     """
-    # NOTE: Cannot use `@_beartype.beartype`. It somehow erases the cpp stack frame info.
     frames = cpp_backtrace.get_cpp_backtrace(frames_to_skip, frames_to_log).split("\n")
     frame_messages = []
     for frame in frames:
@@ -49,8 +51,8 @@ class TorchScriptOnnxExportDiagnostic(infra.Diagnostic):
     diagnostic.
     """
 
-    python_call_stack: Optional[infra.Stack] = None
-    cpp_call_stack: Optional[infra.Stack] = None
+    python_call_stack: infra.Stack | None = None
+    cpp_call_stack: infra.Stack | None = None
 
     def __init__(
         self,
@@ -70,9 +72,6 @@ class TorchScriptOnnxExportDiagnostic(infra.Diagnostic):
 
     def record_cpp_call_stack(self, frames_to_skip: int) -> infra.Stack:
         """Records the current C++ call stack in the diagnostic."""
-        # NOTE: Cannot use `@_beartype.beartype`. It somehow erases the cpp stack frame info.
-        # No need to skip this function because python frame is not recorded
-        # in cpp call stack.
         stack = _cpp_call_stack(frames_to_skip=frames_to_skip)
         stack.message = "C++ call stack"
         self.with_stack(stack)
@@ -95,7 +94,7 @@ class ExportDiagnosticEngine:
     established.
     """
 
-    contexts: List[infra.DiagnosticContext]
+    contexts: list[infra.DiagnosticContext]
     _background_context: infra.DiagnosticContext
 
     def __init__(self) -> None:
@@ -113,7 +112,7 @@ class ExportDiagnosticEngine:
         self,
         name: str,
         version: str,
-        options: Optional[infra.DiagnosticOptions] = None,
+        options: infra.DiagnosticOptions | None = None,
     ) -> infra.DiagnosticContext:
         """Creates a new diagnostic context.
 
@@ -191,7 +190,7 @@ def create_export_diagnostic_context() -> (
 def diagnose(
     rule: infra.Rule,
     level: infra.Level,
-    message: Optional[str] = None,
+    message: str | None = None,
     frames_to_skip: int = 2,
     **kwargs,
 ) -> TorchScriptOnnxExportDiagnostic:
@@ -200,7 +199,6 @@ def diagnose(
     This is a wrapper around `context.log` that uses the global diagnostic
     context.
     """
-    # NOTE: Cannot use `@_beartype.beartype`. It somehow erases the cpp stack frame info.
     diagnostic = TorchScriptOnnxExportDiagnostic(
         rule, level, message, frames_to_skip=frames_to_skip, **kwargs
     )

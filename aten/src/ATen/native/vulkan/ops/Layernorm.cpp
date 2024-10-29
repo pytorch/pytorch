@@ -78,7 +78,7 @@ Tensor run_layernorm_context(
   return std::get<0>(native_layer_norm_output);
 }
 
-Tensor layer_norm(
+static Tensor layer_norm(
     const at::Tensor& input_arg,
     IntArrayRef normalized_shape,
     const std::optional<Tensor>& weight_opt /* optional */,

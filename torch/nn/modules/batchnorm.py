@@ -1,18 +1,25 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Any
+from typing import Any, Optional
 
 import torch
 from torch import Tensor
-from torch.nn.parameter import Parameter, UninitializedParameter, UninitializedBuffer
+from torch.nn import functional as F, init
+from torch.nn.parameter import Parameter, UninitializedBuffer, UninitializedParameter
 
-from .. import functional as F
-from .. import init
 from ._functions import SyncBatchNorm as sync_batch_norm
 from .lazy import LazyModuleMixin
 from .module import Module
 
-__all__ = ['BatchNorm1d', 'LazyBatchNorm1d', 'BatchNorm2d', 'LazyBatchNorm2d', 'BatchNorm3d',
-           'LazyBatchNorm3d', 'SyncBatchNorm']
+
+__all__ = [
+    "BatchNorm1d",
+    "LazyBatchNorm1d",
+    "BatchNorm2d",
+    "LazyBatchNorm2d",
+    "BatchNorm3d",
+    "LazyBatchNorm3d",
+    "SyncBatchNorm",
+]
 
 
 class _NormBase(Module):
@@ -36,9 +43,9 @@ class _NormBase(Module):
         affine: bool = True,
         track_running_stats: bool = True,
         device=None,
-        dtype=None
+        dtype=None,
     ) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.num_features = num_features
         self.eps = eps
@@ -52,13 +59,22 @@ class _NormBase(Module):
             self.register_parameter("weight", None)
             self.register_parameter("bias", None)
         if self.track_running_stats:
-            self.register_buffer('running_mean', torch.zeros(num_features, **factory_kwargs))
-            self.register_buffer('running_var', torch.ones(num_features, **factory_kwargs))
+            self.register_buffer(
+                "running_mean", torch.zeros(num_features, **factory_kwargs)
+            )
+            self.register_buffer(
+                "running_var", torch.ones(num_features, **factory_kwargs)
+            )
             self.running_mean: Optional[Tensor]
             self.running_var: Optional[Tensor]
-            self.register_buffer('num_batches_tracked',
-                                 torch.tensor(0, dtype=torch.long,
-                                              **{k: v for k, v in factory_kwargs.items() if k != 'dtype'}))
+            self.register_buffer(
+                "num_batches_tracked",
+                torch.tensor(
+                    0,
+                    dtype=torch.long,
+                    **{k: v for k, v in factory_kwargs.items() if k != "dtype"},
+                ),
+            )
             self.num_batches_tracked: Optional[Tensor]
         else:
             self.register_buffer("running_mean", None)
@@ -108,7 +124,8 @@ class _NormBase(Module):
             if num_batches_tracked_key not in state_dict:
                 state_dict[num_batches_tracked_key] = (
                     self.num_batches_tracked
-                    if self.num_batches_tracked is not None and self.num_batches_tracked.device != torch.device('meta')
+                    if self.num_batches_tracked is not None
+                    and self.num_batches_tracked.device != torch.device("meta")
                     else torch.tensor(0, dtype=torch.long)
                 )
 
@@ -132,9 +149,9 @@ class _BatchNorm(_NormBase):
         affine: bool = True,
         track_running_stats: bool = True,
         device=None,
-        dtype=None
+        dtype=None,
     ) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
         )
@@ -189,13 +206,19 @@ class _BatchNorm(_NormBase):
 
 
 class _LazyNormBase(LazyModuleMixin, _NormBase):
-
     weight: UninitializedParameter  # type: ignore[assignment]
     bias: UninitializedParameter  # type: ignore[assignment]
 
-    def __init__(self, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True,
-                 device=None, dtype=None) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+    def __init__(
+        self,
+        eps=1e-5,
+        momentum=0.1,
+        affine=True,
+        track_running_stats=True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(
             # affine and track_running_stats are hardcoded to False to
             # avoid creating tensors that will soon be overwritten.
@@ -215,7 +238,10 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
             self.running_mean = UninitializedBuffer(**factory_kwargs)
             self.running_var = UninitializedBuffer(**factory_kwargs)
             self.num_batches_tracked = torch.tensor(
-                0, dtype=torch.long, **{k: v for k, v in factory_kwargs.items() if k != 'dtype'})
+                0,
+                dtype=torch.long,
+                **{k: v for k, v in factory_kwargs.items() if k != "dtype"},
+            )
 
     def reset_parameters(self) -> None:
         if not self.has_uninitialized_params() and self.num_features != 0:
@@ -230,8 +256,12 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
                 self.weight.materialize((self.num_features,))
                 self.bias.materialize((self.num_features,))
             if self.track_running_stats:
-                self.running_mean.materialize((self.num_features,))  # type:ignore[union-attr]
-                self.running_var.materialize((self.num_features,))  # type:ignore[union-attr]
+                self.running_mean.materialize(  # type:ignore[union-attr]
+                    (self.num_features,)
+                )
+                self.running_var.materialize(  # type:ignore[union-attr]
+                    (self.num_features,)
+                )
             self.reset_parameters()
 
 
@@ -308,9 +338,7 @@ class BatchNorm1d(_BatchNorm):
 
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
-            raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
-            )
+            raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
 
 class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
@@ -344,9 +372,7 @@ class LazyBatchNorm1d(_LazyNormBase, _BatchNorm):
 
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
-            raise ValueError(
-                f"expected 2D or 3D input (got {input.dim()}D input)"
-            )
+            raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
 
 class BatchNorm2d(_BatchNorm):
@@ -683,9 +709,9 @@ class SyncBatchNorm(_BatchNorm):
         track_running_stats: bool = True,
         process_group: Optional[Any] = None,
         device=None,
-        dtype=None
+        dtype=None,
     ) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
         )
@@ -693,9 +719,7 @@ class SyncBatchNorm(_BatchNorm):
 
     def _check_input_dim(self, input):
         if input.dim() < 2:
-            raise ValueError(
-                f"expected at least 2D input (got {input.dim()}D input)"
-            )
+            raise ValueError(f"expected at least 2D input (got {input.dim()}D input)")
 
     def _check_non_zero_input_channels(self, input):
         if input.size(1) == 0:
@@ -746,13 +770,22 @@ class SyncBatchNorm(_BatchNorm):
         )
 
         # Don't sync batchnorm stats in inference mode (model.eval()).
-        need_sync = (bn_training and self.training and
-                     torch.distributed.is_available() and torch.distributed.is_initialized())
+        need_sync = (
+            bn_training
+            and self.training
+            and torch.distributed.is_available()
+            and torch.distributed.is_initialized()
+        )
         if need_sync:
             # currently only GPU/PrivateUse1 input is supported
-            if input.device.type not in ["cuda", torch._C._get_privateuse1_backend_name()]:
-                raise ValueError("SyncBatchNorm expected input tensor to be on GPU or "
-                                 f"{torch._C._get_privateuse1_backend_name()}")
+            if input.device.type not in [
+                "cuda",
+                torch._C._get_privateuse1_backend_name(),
+            ]:
+                raise ValueError(
+                    "SyncBatchNorm expected input tensor to be on GPU or "
+                    f"{torch._C._get_privateuse1_backend_name()}"
+                )
 
             process_group = torch.distributed.group.WORLD
             if self.process_group:

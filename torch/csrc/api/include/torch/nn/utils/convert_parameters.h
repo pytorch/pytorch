@@ -3,9 +3,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
-namespace utils {
+namespace torch::nn::utils {
 
 // This helper function is to check if the parameters are located
 // in the same device. Currently, the conversion between model parameters
@@ -15,7 +13,7 @@ inline std::optional<int64_t> _check_param_device(
     const torch::Tensor& param,
     std::optional<int64_t> old_param_device) {
   // Meet the first parameter
-  if (old_param_device == c10::nullopt) {
+  if (old_param_device == std::nullopt) {
     old_param_device = param.is_cuda() ? param.get_device() : -1;
   } else {
     bool warn = false;
@@ -77,6 +75,4 @@ inline void vector_to_parameters(
   }
 }
 
-} // namespace utils
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::utils

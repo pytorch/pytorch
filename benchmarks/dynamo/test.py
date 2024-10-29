@@ -2,8 +2,8 @@ import os
 import unittest
 
 from .common import parse_args, run
-
 from .torchbench import setup_torchbench_cwd, TorchBenchmarkRunner
+
 
 try:
     # fbcode only

@@ -9,7 +9,8 @@ import torch._inductor
 import torch._inductor.fx_passes.group_batch_fusion
 from torch._dynamo.utils import counters, optimus_scuba_log
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, requires_gpu
+
 
 try:
     # importing this will register fbgemm lowerings for inductor
@@ -18,9 +19,6 @@ try:
     has_fbgemm = True
 except Exception:
     has_fbgemm = False
-    pass
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 class TestHighwaySelfGating(torch.nn.Module):
@@ -240,10 +238,8 @@ class TestPoitwiseOps(torch.nn.Module):
         inputs = torch.split(x.to(self.device), 500, dim=1)
         x_split = torch.split(inputs[0].to(self.device), 50, dim=1)
         y_split = torch.split(inputs[1].to(self.device), 50, dim=1)
-        tanh_1 = [torch.tanh(x_split[i]) for i in range(len(x_split))]
-        tanh_2 = [torch.tanh(y_split[i]) for i in range(len(y_split))]
-        sigmoid_1 = [torch.sigmoid(tanh_1[i]) for i in range(len(tanh_1))]
-        sigmoid_2 = [torch.sigmoid(tanh_2[i]) for i in range(len(tanh_2))]
+        sigmoid_1 = [torch.sigmoid(x_split[i]) for i in range(len(x_split))]
+        sigmoid_2 = [torch.sigmoid(y_split[i]) for i in range(len(y_split))]
         relu_1 = [torch.nn.functional.relu(sigmoid_1[i]) for i in range(len(sigmoid_1))]
         relu_2 = [torch.nn.functional.relu(sigmoid_2[i]) for i in range(len(sigmoid_2))]
         add = [torch.add(relu_1[i], relu_2[i]) for i in range(len(relu_1))]
@@ -272,7 +268,26 @@ class TestPoitwiseOpsPostGrad(torch.nn.Module):
         return torch.cat(add, dim=1)
 
 
-@requires_cuda
+class TestMathOps(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def forward(self, x):
+        inputs = [x.to(self.device) for i in range(10)]
+        others = [x.to(self.device) for i in range(10)]
+        clamp_input = [x.clamp(min=-1000.1, max=1000.1) for x in inputs]
+        clamp_other = [x.clamp(min=-1000.1, max=1000.1) for x in others]
+        nan_to_num_input = [torch.nan_to_num(x, 0.0) for x in clamp_input]
+        nan_to_num_other = [torch.nan_to_num(x, 0.0) for x in clamp_other]
+        detach_input = [x.detach() for x in nan_to_num_input]
+        detach_other = [x.detach() for x in nan_to_num_other]
+        stack_input = torch.stack(detach_input, dim=0)
+        stack_other = torch.stack(detach_other, dim=0)
+        return torch.stack((stack_input, stack_other), dim=0)
+
+
+@requires_gpu()
 @torch._inductor.config.patch(
     pre_grad_fusion_options={
         "batch_linear": {},
@@ -323,8 +338,8 @@ class TestGroupBatchFusion(TestCase):
         z = 10
         for has_bias in [True, False]:
             counters.clear()
-            module = MyModule(z, has_bias).to("cuda")
-            input = [torch.randn(z, z, device="cuda")]
+            module = MyModule(z, has_bias).to(GPU_TYPE)
+            input = [torch.randn(z, z, device=GPU_TYPE)]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)
@@ -344,7 +359,7 @@ class TestGroupBatchFusion(TestCase):
             )
             self.assertEqual(
                 counters["inductor"]["batch_aten_add"],
-                3,
+                0,
             )
             self.assertIn("GroupLinearFusion", optimus_scuba_log)
             counters.clear()
@@ -352,8 +367,8 @@ class TestGroupBatchFusion(TestCase):
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
     def test_group_linear_fusion_different_shapes(self):
         counters.clear()
-        module = MyModule2().eval().to("cuda")
-        input = [torch.rand(4, 24, device="cuda")]
+        module = MyModule2().eval().to(GPU_TYPE)
+        input = [torch.rand(4, 24, device=GPU_TYPE)]
         traced = torch.compile(module)
         ref = module(*input)
         res = traced(*input)
@@ -384,8 +399,8 @@ class TestGroupBatchFusion(TestCase):
         for has_weight in [True, False]:
             for has_bias in [True, False]:
                 counters.clear()
-                module = MyModule3("cuda", has_weight, has_bias).to("cuda")
-                input = [torch.randn(2, 5, 50, device="cuda")]
+                module = MyModule3(GPU_TYPE, has_weight, has_bias).to(GPU_TYPE)
+                input = [torch.randn(2, 5, 50, device=GPU_TYPE)]
                 traced = torch.compile(module)
                 ref = module(*input)
                 res = traced(*input)
@@ -401,8 +416,8 @@ class TestGroupBatchFusion(TestCase):
         z = 10
         for has_bias in [True, False]:
             counters.clear()
-            module = MyModule4(z, "cuda", has_bias)
-            input = [torch.randn(20, z, device="cuda")]
+            module = MyModule4(z, GPU_TYPE, has_bias)
+            input = [torch.randn(20, z, device=GPU_TYPE)]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)
@@ -417,8 +432,8 @@ class TestGroupBatchFusion(TestCase):
     def test_batch_linear_pre_grad_fusion(self):
         for has_bias in [True, False]:
             counters.clear()
-            module = MyModule5("cuda", has_bias)
-            input = [torch.randn(50, 500, device="cuda")]
+            module = MyModule5(GPU_TYPE, has_bias)
+            input = [torch.randn(50, 500, device=GPU_TYPE)]
             traced = torch.compile(module)
             ref = module(*input)
             res = traced(*input)
@@ -432,13 +447,12 @@ class TestGroupBatchFusion(TestCase):
 
     def test_pointwise_op_fusion(self):
         counters.clear()
-        module = TestPoitwiseOps("cuda")
-        input = [torch.randn(50, 1000, requires_grad=True, device="cuda")]
+        module = TestPoitwiseOps(GPU_TYPE)
+        input = [torch.randn(50, 1000, requires_grad=True, device=GPU_TYPE)]
         traced = torch.compile(module)
         ref = module(*input)
         res = traced(*input)
         self.compare_pred(module, traced, input)
-        self.assertEqual(counters["inductor"]["batch_tanh"], 1)
         self.assertEqual(counters["inductor"]["batch_relu"], 1)
         self.assertEqual(counters["inductor"]["batch_sigmoid"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_add"], 1)
@@ -451,7 +465,7 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_cuda
+    @requires_gpu()
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -463,8 +477,8 @@ class TestGroupBatchFusion(TestCase):
     )
     def test_pointwise_op_fusion_post_grad(self):
         counters.clear()
-        module = TestPoitwiseOpsPostGrad("cuda")
-        input = [torch.randn(50, 1000, requires_grad=True, device="cuda")]
+        module = TestPoitwiseOpsPostGrad(GPU_TYPE)
+        input = [torch.randn(50, 1000, requires_grad=True, device=GPU_TYPE)]
         traced = torch.compile(module)
         ref = module(*input)
         res = traced(*input)
@@ -472,14 +486,14 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_aten_tanh"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_relu"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_sigmoid"], 1)
-        self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 2)
+        self.assertEqual(counters["inductor"]["unbind_stack_aten_pass"], 1)
         ref.sum().backward()
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_cuda
+    @requires_gpu()
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -497,10 +511,10 @@ class TestGroupBatchFusion(TestCase):
     def test_gate_fusion_post_grad(self):
         counters.clear()
         size = 20
-        module = TestHighwaySelfGating(d_model=10, size=size)
+        module = TestHighwaySelfGating(d_model=10, size=size, device=GPU_TYPE)
         input = [
             [
-                torch.randn(10, 10, requires_grad=True, device="cuda")
+                torch.randn(10, 10, requires_grad=True, device=GPU_TYPE)
                 for i in range(size)
             ]
         ]
@@ -520,9 +534,42 @@ class TestGroupBatchFusion(TestCase):
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+            "batch_detach": {},
+            "batch_nan_to_num": {},
+            "batch_clamp": {},
+            "unbind_stack_pass": {},
+            "unbind_stack_to_slices_pass": {},
+        },
+        post_grad_fusion_options={},
+    )
+    def test_math_op_fusion(self):
+        counters.clear()
+        module = TestMathOps(GPU_TYPE)
+        input = [
+            torch.tensor(
+                [float("nan"), float("inf"), -float("inf"), 3.14], device=GPU_TYPE
+            )
+        ]
+        traced = torch.compile(module)
+        ref = module(*input)
+        res = traced(*input)
+        self.compare_pred(module, traced, input)
+        self.assertEqual(counters["inductor"]["normalization_pass"], 3)
+        self.assertEqual(counters["inductor"]["batch_clamp"], 1)
+        self.assertEqual(counters["inductor"]["batch_detach"], 1)
+        self.assertEqual(counters["inductor"]["batch_nan_to_num"], 1)
+        self.assertEqual(counters["inductor"]["unbind_stack_to_slices_pass"], 2)
+        self.assertEqual(counters["inductor"]["unbind_stack_pass"], 2)
+        self.assertTrue(torch.allclose(ref, res))
+        counters.clear()
+
 
 class TestBMMFusionModule(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.my_modules = torch.nn.ModuleList()
         for _ in range(10):
@@ -538,16 +585,16 @@ class TestBMMFusionModule(torch.nn.Module):
         return output
 
 
-@requires_cuda
+@requires_gpu()
 @torch._inductor.config.patch(
     post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
 )
 class TestPostGradBatchLinearFusion(TestCase):
     def test_batch_linear_post_grad_fusion(self):
-        pt1_module = TestBMMFusionModule().cuda()
+        pt1_module = TestBMMFusionModule().to(GPU_TYPE)
         inputs = []
         for _ in range(10):
-            inputs.append(torch.randn(10, 10).cuda())
+            inputs.append(torch.randn(10, 10).to(GPU_TYPE))
         eager_output = pt1_module(inputs)
         pt2_module = torch.compile(pt1_module)
         pt2_output = pt2_module(inputs)

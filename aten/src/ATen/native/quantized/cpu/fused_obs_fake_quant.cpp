@@ -3,7 +3,6 @@
 #include <c10/util/irange.h>
 #include <cmath>
 #include <tuple>
-#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -76,8 +75,7 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
     float* x_max_data = inp_running_max.data_ptr<float>();
     for (const auto i : c10::irange(inp_running_min.numel())) {
 #ifdef USE_FBGEMM
-      fbgemm::TensorQuantizationParams x_qparams{};
-      x_qparams = fbgemm::ChooseQuantizationParams(
+      auto x_qparams = fbgemm::ChooseQuantizationParams(
           x_min_data[i],
           x_max_data[i],
           qmin,
@@ -88,8 +86,7 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
       scale[i] = x_qparams.scale;
       zero_point[i] = x_qparams.zero_point;
 #else
-      quant_utils::TensorQuantizationParams x_qparams{};
-      x_qparams = quant_utils::ChooseQuantizationParams(
+      auto x_qparams = quant_utils::ChooseQuantizationParams(
           x_min_data[i],
           x_max_data[i],
           qmin,
@@ -141,8 +138,7 @@ std::tuple<at::Tensor, at::Tensor> choose_qparams_fake_quant(
 }
 } // namespace
 
-namespace at {
-namespace native {
+namespace at::native {
 
 std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
     const at::Tensor& self,
@@ -255,5 +251,4 @@ at::Tensor fused_moving_avg_obs_fake_quant(
       symmetric_quant);
   return std::get<0>(res);
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

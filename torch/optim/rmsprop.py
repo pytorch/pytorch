@@ -1,8 +1,11 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional
+r"""Implementation for the RMSprop algorithm."""
+from typing import cast, List, Optional, Union
 
 import torch
 from torch import Tensor
+
 from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
@@ -12,30 +15,34 @@ from .optimizer import (
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
     ParamsT,
 )
 
+
 __all__ = ["RMSprop", "rmsprop"]
 
 
-class RMSprop(Optimizer):
+class RMSprop(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: float = 1e-2,
+        lr: Union[float, Tensor] = 1e-2,
         alpha: float = 0.99,
         eps: float = 1e-8,
         weight_decay: float = 0,
         momentum: float = 0,
-        centered=False,
-        capturable=False,
+        centered: bool = False,
+        capturable: bool = False,
         foreach: Optional[bool] = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ):
+    ):  # noqa: D107
+        if isinstance(lr, Tensor) and lr.numel() != 1:
+            raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 <= eps:
@@ -61,7 +68,7 @@ class RMSprop(Optimizer):
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("momentum", 0)
@@ -135,7 +142,7 @@ class RMSprop(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -195,9 +202,10 @@ RMSprop.__doc__ = (
     .. math::
        \begin{aligned}
             &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{input}      : \alpha \text{ (alpha)},\: \gamma \text{ (lr)},
+            &\textbf{input}      : \alpha \text{ (alpha)}, \: \gamma \text{ (lr)},
                 \: \theta_0 \text{ (params)}, \: f(\theta) \text{ (objective)}                   \\
-            &\hspace{13mm}   \lambda \text{ (weight decay)},\: \mu \text{ (momentum)},\: centered\\
+            &\hspace{13mm}   \lambda \text{ (weight decay)},\: \mu \text{ (momentum)},
+                \: centered, \: \epsilon \text{ (epsilon)}                                       \\
             &\textbf{initialize} : v_0 \leftarrow 0 \text{ (square average)}, \:
                 \textbf{b}_0 \leftarrow 0 \text{ (buffer)}, \: g^{ave}_0 \leftarrow 0     \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
@@ -235,19 +243,18 @@ RMSprop.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-2)
-        momentum (float, optional): momentum factor (default: 0)
+        {_params_doc}
+        lr (float, Tensor, optional): learning rate (default: 1e-2)
         alpha (float, optional): smoothing constant (default: 0.99)
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        momentum (float, optional): momentum factor (default: 0)
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        {_capturable_doc}
         {_foreach_doc}
         {_maximize_doc}
-        {_capturable_doc}
         {_differentiable_doc}
 
     """
@@ -359,23 +366,32 @@ def _multi_tensor_rmsprop(
         ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, square_avgs, grad_avgs, momentum_buffer_list, state_steps]
+        [params, grads, square_avgs, grad_avgs, momentum_buffer_list, state_steps]  # type: ignore[list-item]
     )
     for (
         (
-            grouped_params,
-            grouped_grads,
-            grouped_square_avgs,
-            grouped_grad_avgs,
-            grouped_momentum_buffer_list,
-            grouped_state_steps,
+            grouped_params_,
+            grouped_grads_,
+            grouped_square_avgs_,
+            grouped_grad_avgs_,
+            grouped_momentum_buffer_list_,
+            grouped_state_steps_,
         )
     ), _ in grouped_tensors.values():
+        grouped_params = cast(List[Tensor], grouped_params_)
+        grouped_grads = cast(List[Tensor], grouped_grads_)
+        grouped_square_avgs = cast(List[Tensor], grouped_square_avgs_)
+        grouped_state_steps = cast(List[Tensor], grouped_state_steps_)
+
         if has_complex:
             state_and_grads = [grouped_grads, grouped_square_avgs]
             if momentum > 0:
+                grouped_momentum_buffer_list = cast(
+                    List[Tensor], grouped_momentum_buffer_list_
+                )
                 state_and_grads.append(grouped_momentum_buffer_list)
             if centered:
+                grouped_grad_avgs = cast(List[Tensor], grouped_grad_avgs_)
                 state_and_grads.append(grouped_grad_avgs)
             _view_as_real(grouped_params, *state_and_grads)
 
@@ -386,7 +402,7 @@ def _multi_tensor_rmsprop(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if grouped_state_steps[0].is_cpu:
+        if not torch._utils.is_compiling() and grouped_state_steps[0].is_cpu:
             torch._foreach_add_(
                 grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -408,6 +424,7 @@ def _multi_tensor_rmsprop(
         )
 
         if centered:
+            grouped_grad_avgs = cast(List[Tensor], grouped_grad_avgs_)
             torch._foreach_lerp_(grouped_grad_avgs, grouped_grads, 1 - alpha)
             avg = torch._foreach_addcmul(
                 grouped_square_avgs, grouped_grad_avgs, grouped_grad_avgs, value=-1
@@ -419,6 +436,9 @@ def _multi_tensor_rmsprop(
             torch._foreach_add_(avg, eps)
 
         if momentum > 0:
+            grouped_momentum_buffer_list = cast(
+                List[Tensor], grouped_momentum_buffer_list_
+            )
             torch._foreach_mul_(grouped_momentum_buffer_list, momentum)
             torch._foreach_addcdiv_(grouped_momentum_buffer_list, grouped_grads, avg)
             # If LR is a tensor, the else branch will internally call item()
@@ -464,6 +484,7 @@ def rmsprop(
     centered: bool,
 ):
     r"""Functional API that performs rmsprop algorithm computation.
+
     See :class:`~torch.optim.RMSProp` for details.
     """
     # this check is slow during compilation, so we skip it

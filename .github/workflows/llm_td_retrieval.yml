@@ -8,9 +8,23 @@ permissions:
   contents: read
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   llm-retrieval:
-    runs-on: linux.4xlarge
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
     continue-on-error: true
+    needs: get-label-type
     steps:
       - name: Clone PyTorch
         uses: actions/checkout@v3
@@ -36,38 +50,29 @@ jobs:
           ref: v0.0.2
           path: llm-target-determinator
 
-      - name: Setup Conda
-        uses: conda-incubator/setup-miniconda@v2.1.1
+      - name: Setup miniconda
+        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          miniconda-version: "py39_4.12.0"
-          python-version: 3.9
+          python-version: "3.9"
 
-      - name: Install Requirements
-        shell: bash -l {0}
+      - name: Install requirements
+        shell: bash
         run: |
           set -euxo pipefail
-          conda create \
-            --yes \
-            --quiet \
-            --name "tdenv" \
-            "python=3.9"
-          conda activate tdenv
-          cd "${GITHUB_WORKSPACE}/llm-target-determinator"
-          pip install -r requirements.txt
-          cd ../codellama
-          pip install -e .
+          ${CONDA_RUN} pip install -r llm-target-determinator/requirements.txt
+          cd "${GITHUB_WORKSPACE}/codellama"
+          ${CONDA_RUN} pip install -e .
 
       - name: Fetch CodeLlama Checkpoint
-        shell: bash -l {0}
+        shell: bash
         run: |
           set -euxo pipefail
-          conda activate tdenv
-          cd codellama/
+          cd "${GITHUB_WORKSPACE}/codellama"
           mkdir "CodeLlama-7b-Python"
           aws s3 cp "s3://target-determinator-assets/CodeLlama-7b-Python" "CodeLlama-7b-Python" --recursive --no-progress
 
       - name: Fetch indexes
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         with:
           max_attempts: 3
           retry_wait_seconds: 10
@@ -75,7 +80,7 @@ jobs:
           shell: bash
           command: |
             set -euxo pipefail
-            python3 -m pip install awscli==1.29.40
+            ${CONDA_RUN} python -m pip install awscli==1.29.40
             cd "${GITHUB_WORKSPACE}"/llm-target-determinator/assets
             aws s3 cp "s3://target-determinator-assets/indexes/latest" . --recursive
 
@@ -85,12 +90,11 @@ jobs:
       - name: Run Retriever
         id: run_retriever
         continue-on-error: true  # ghstack not currently supported due to problems getting git diff
-        shell: bash -l {0}
+        shell: bash
         run: |
           set -euxo pipefail
-          conda activate tdenv
           cd "${GITHUB_WORKSPACE}"/llm-target-determinator
-          torchrun \
+          ${CONDA_RUN} torchrun \
             --standalone \
             --nnodes=1 \
             --nproc-per-node=1 \

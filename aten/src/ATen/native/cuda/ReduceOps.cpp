@@ -28,9 +28,9 @@ namespace at::native {
 namespace {
 
 void norm_kernel_cuda(TensorIterator& iter, const Scalar& val) {
-  double p;
+  double p = 0;
   if (val.isIntegral(false)) {
-    p = val.to<int64_t>();
+    p = static_cast<double>(val.to<int64_t>());
   } else if (val.isFloatingPoint()) {
     p = val.to<double>();
   } else {

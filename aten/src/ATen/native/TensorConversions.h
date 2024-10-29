@@ -4,7 +4,7 @@
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace at {
   class Tensor;

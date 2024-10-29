@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
+import sys
 from typing import Dict, Optional
 
 import torch
-
 from torch._logging import LazyString
 
 
@@ -19,6 +19,9 @@ def lazy_format_graph_code(name, gm, maybe_id=None, **kwargs):
 
     if "print_output" not in kwargs:
         kwargs["print_output"] = False
+
+    if "colored" in kwargs and not sys.stdout.isatty():
+        kwargs["colored"] = False
 
     return LazyString(
         lambda: _format_graph_code(
@@ -52,7 +55,7 @@ def get_node_context(node, num_nodes=2) -> str:
     """
     node_contexts = []
     cur = node
-    for i in range(num_nodes):
+    for _ in range(num_nodes):
         node_contexts.append(cur.format_node())
         if cur.op == "root":
             break

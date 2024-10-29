@@ -1,26 +1,23 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import inspect
-
 from typing import (
     Any,
     Callable,
-    List,
     Mapping,
-    Optional,
     Protocol,
     runtime_checkable,
     Sequence,
-    Tuple,
-    Union,
+    TYPE_CHECKING,
 )
 
 import torch
 import torch.export as torch_export
-
-from torch.onnx._internal import _beartype
 from torch.utils import _pytree as pytree
+
+
+if TYPE_CHECKING:
+    import inspect
 
 # TODO(bowbao): Add diagnostics for IO adapters.
 
@@ -42,20 +39,16 @@ class InputAdaptStep(Protocol):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
-        ...
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]: ...
 
 
 class InputAdapter:
     """A class that adapts the PyTorch model inputs to exported ONNX model inputs format."""
 
-    def __init__(self, steps: Optional[List[InputAdaptStep]] = None):
+    def __init__(self, steps: list[InputAdaptStep] | None = None):
         self._steps = steps or []
 
-    @_beartype.beartype
     def append_step(self, step: InputAdaptStep) -> None:
         """Appends a step to the input adapt steps.
 
@@ -64,15 +57,12 @@ class InputAdapter:
         """
         self._steps.append(step)
 
-    @_beartype.beartype
     def apply(
         self,
         *model_args,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
         **model_kwargs,
-    ) -> Sequence[Union[int, float, bool, str, "torch.Tensor", torch.dtype, None]]:
+    ) -> Sequence[int | float | bool | str | torch.Tensor | torch.dtype | None]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Args:
@@ -106,20 +96,16 @@ class OutputAdaptStep(Protocol):
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Any:
-        ...
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
+    ) -> Any: ...
 
 
 class OutputAdapter:
     """A class that adapts the PyTorch model outputs to exported ONNX model outputs format."""
 
-    def __init__(self, steps: Optional[List[OutputAdaptStep]] = None):
+    def __init__(self, steps: list[OutputAdaptStep] | None = None):
         self._steps = steps or []
 
-    @_beartype.beartype
     def append_step(self, step: OutputAdaptStep) -> None:
         """Appends a step to the output format steps.
 
@@ -128,14 +114,11 @@ class OutputAdapter:
         """
         self._steps.append(step)
 
-    @_beartype.beartype
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Sequence[Union["torch.Tensor", int, float, bool, str]]:
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
+    ) -> Sequence[torch.Tensor | int | float | bool | str]:
         """Converts the PyTorch model outputs to exported ONNX model outputs format.
 
         Args:
@@ -153,15 +136,35 @@ class OutputAdapter:
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
 
 
-def _replace_tuple_with_list(spec: pytree.TreeSpec) -> pytree.TreeSpec:
-    _type = list if spec.type == tuple else spec.type
-    return pytree.TreeSpec(
-        _type, spec.context, list(map(_replace_tuple_with_list, spec.children_specs))
+# TODO(XuehaiPan): Dynamo does not support `dummy_leaf = object()` as a sentinel value in the frame.
+class _DummyLeaf:  # use a class instead.
+    pass
+
+
+def _replace_list_with_tuple(spec: pytree.TreeSpec) -> pytree.TreeSpec:
+    def replace_list_with_tuple(x: Any) -> Any:
+        if type(x) is list:
+            return pytree.tree_map(
+                replace_list_with_tuple,
+                tuple(x),
+                is_leaf=lambda x: type(x) is list,
+            )
+        return x
+
+    dummy_leaf = _DummyLeaf()
+    dummy_tree = pytree.tree_unflatten([dummy_leaf] * spec.num_leaves, spec)
+    dummy_tree = pytree.tree_map(
+        replace_list_with_tuple,
+        dummy_tree,
+        is_leaf=lambda x: type(x) is list,
     )
+    return pytree.tree_structure(dummy_tree)
 
 
-def _open_top_level_list_if_single_element(spec: pytree.TreeSpec) -> pytree.TreeSpec:
-    if spec.type == list and spec.num_children == 1:
+def _open_top_level_sequence_if_single_element(
+    spec: pytree.TreeSpec,
+) -> pytree.TreeSpec:
+    if spec.type in (tuple, list) and spec.num_children == 1:
         return spec.children_specs[0]
     return spec
 
@@ -184,10 +187,10 @@ def _assert_identical_pytree_spec(
     pass_if_any_checks: Sequence[Callable[[], bool]] = [
         lambda: spec1 == spec2,
         # FIXME: Bug in `dynamo.export`. Sometimes outputs returned in 'list' instead of 'tuple'.
-        lambda: _replace_tuple_with_list(spec1) == _replace_tuple_with_list(spec2),
+        lambda: _replace_list_with_tuple(spec1) == _replace_list_with_tuple(spec2),
         # FIXME: Bug in `dynamo.export`. Sometimes single function return is wrapped in list.
-        lambda: _open_top_level_list_if_single_element(spec1) == spec2,
-        lambda: spec1 == _open_top_level_list_if_single_element(spec2),
+        lambda: _open_top_level_sequence_if_single_element(spec1) == spec2,
+        lambda: spec1 == _open_top_level_sequence_if_single_element(spec2),
     ]
 
     if not any(check() for check in pass_if_any_checks):
@@ -204,10 +207,8 @@ class BindInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Bind the input arguments to the model signature.
 
         We hope the input kwargs will be mapped to bound.args after binding.
@@ -243,10 +244,8 @@ class MergeKwargsIntoArgsInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Merge the input kwargs into the input args.
 
         Args:
@@ -263,17 +262,15 @@ class MergeKwargsIntoArgsInputStep(InputAdaptStep):
 class LiftParametersAndBuffersIntoArgsInputStep(InputAdaptStep):
     """Append parameters and buffers to model's positional argument list."""
 
-    def __init__(self, inputs: Tuple["torch.Tensor", ...]) -> None:
+    def __init__(self, inputs: tuple[torch.Tensor, ...]) -> None:
         self.inputs = inputs
 
     def apply(
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Append model's parameters and buffers into its input.
 
         Args:
@@ -300,10 +297,8 @@ class ConvertComplexToRealRepresentationInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Convert complex tensors to float tensors.
 
         Args:
@@ -336,10 +331,8 @@ class RemoveNoneInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Remove `None` from arguments.
 
         Args:
@@ -397,10 +390,8 @@ class RemoveNonTensorInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Remove Constant from arguments.
 
         Args:
@@ -435,16 +426,14 @@ class FlattenInputWithTreeSpecValidationInputStep(InputAdaptStep):
     time. It then validates the `SpecTree` output produced from later `adapt` calls.
     """
 
-    _spec: Optional[pytree.TreeSpec] = None
+    _spec: pytree.TreeSpec | None = None
 
     def apply(
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Flatten the model args and kwargs and validate the `SpecTree` output.
 
         Args:
@@ -490,9 +479,7 @@ class FlattenOutputStep(OutputAdaptStep):
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
     ) -> Sequence[Any]:
         """Flatten the model outputs.
 
@@ -518,9 +505,7 @@ class ConvertComplexToRealRepresentationOutputStep(OutputAdaptStep):
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
     ) -> Any:
         """Convert float tensors to complex tensors.
 
@@ -546,14 +531,12 @@ class FlattenOutputWithTreeSpecValidationOutputStep(OutputAdaptStep):
     time. It then validates the `SpecTree` output produced from later `adapt` calls.
     """
 
-    _spec: Optional[pytree.TreeSpec] = None
+    _spec: pytree.TreeSpec | None = None
 
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
     ) -> Sequence[Any]:
         """Flatten the model outputs and validate the `SpecTree` output.
 
@@ -595,10 +578,8 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
         self,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
-    ) -> Tuple[Sequence[Any], Mapping[str, Any]]:
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
         """Convert complex tensors to float tensors.
 
         Args:
@@ -610,7 +591,8 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
             A tuple of the model args and kwargs.
         """
         ordered_params = tuple(
-            model.state_dict[name] for name in model.graph_signature.parameters  # type: ignore[union-attr,index]
+            model.state_dict[name]  # type: ignore[union-attr,index]
+            for name in model.graph_signature.parameters  # type: ignore[union-attr]
         )
         non_persistent_buffers = set(model.graph_signature.non_persistent_buffers)  # type: ignore[union-attr]
         ordered_buffers = []
@@ -620,7 +602,8 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
             else:
                 ordered_buffers.append(model.state_dict[name])  # type: ignore[union-attr,index]
         ordered_constant_tensors = tuple(
-            model.constants[fqn] for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
+            model.constants[fqn]  # type: ignore[union-attr,index]
+            for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr]
         )
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
@@ -651,9 +634,7 @@ class PrependParamsAndBuffersAotAutogradOutputStep(OutputAdaptStep):
     def apply(
         self,
         model_outputs: Any,
-        model: Optional[
-            Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
-        ] = None,
+        model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
     ) -> Sequence[Any]:
         """Flatten the model outputs and validate the `SpecTree` output.
 

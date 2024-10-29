@@ -12,8 +12,7 @@
 // EDITING THIS FILE? READ THIS FIRST!
 // see Note [Edit Pattern Conversion] in pattern_conversion.h
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 // Converting inplace index_put to ONNX
 namespace {
@@ -46,7 +45,7 @@ Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
       aten::slice,
       {index,
        graph->insertConstant(
-           scalar_to_tensor(at::Scalar(0)), c10::nullopt, slice->scope()),
+           scalar_to_tensor(at::Scalar(0)), std::nullopt, slice->scope()),
        start,
        end,
        step});
@@ -392,5 +391,4 @@ std::vector<Value*> ConvertPatternFromSubblock(
   return res;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -11,13 +11,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-jammy-xpu-py3_8-build:
-    name: linux-jammy-xpu-py3.8
-    uses: ./.github/workflows/_linux-build.yml
+
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
-      build-environment: linux-jammy-xpu-py3.8
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-jammy-xpu-py3_9-build:
+    name: linux-jammy-xpu-py3.9
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      build-environment: linux-jammy-xpu-py3.9
       docker-image-name: pytorch-linux-jammy-xpu-2024.0-py3
-      runner: linux.2xlarge
+      runner: linux.12xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu" },
@@ -26,14 +39,24 @@ jobs:
           { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
         ]}
 
-  linux-jammy-xpu-py3_8-test:
-    name: linux-jammy-xpu-py3.8
+  linux-jammy-xpu-py3_9-test:
+    name: linux-jammy-xpu-py3.9
     uses: ./.github/workflows/_xpu-test.yml
-    needs: linux-jammy-xpu-py3_8-build
+    needs: linux-jammy-xpu-py3_9-build
     permissions:
       id-token: write
       contents: read
     with:
-      build-environment: linux-jammy-xpu-py3.8
-      docker-image: ${{ needs.linux-jammy-xpu-py3_8-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-xpu-py3_8-build.outputs.test-matrix }}
+      build-environment: linux-jammy-xpu-py3.9
+      docker-image: ${{ needs.linux-jammy-xpu-py3_9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-xpu-py3_9-build.outputs.test-matrix }}
+
+  windows-xpu-build:
+    if: github.repository_owner == 'pytorch'
+    name: win-vs2022-xpu-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2022-xpu-py3
+      cuda-version: cpu
+      use-xpu: true
+      vc-year: '2022'

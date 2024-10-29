@@ -26,7 +26,7 @@ Node* preRecordPythonTrace(
 std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
     const py::function& func,
     const py::dict& inputs_dict,
-    Stack inputs,
+    const Stack& inputs,
     const py::function& var_name_lookup_fn,
     bool strict,
     bool force_outplace,

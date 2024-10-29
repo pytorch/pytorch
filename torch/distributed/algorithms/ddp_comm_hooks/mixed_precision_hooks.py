@@ -1,10 +1,11 @@
+from dataclasses import dataclass
+from typing import Any, no_type_check
+
 import torch
 import torch.distributed as dist
 from torch.autograd import Variable
-
-from dataclasses import dataclass
-from typing import Any, no_type_check
 from torch.distributed.utils import _free_storage
+
 
 @dataclass
 class _AllreduceUpcastHookState:
@@ -19,6 +20,7 @@ class _AllreduceUpcastHookState:
     upcast_stream: torch.cuda.Stream
     wait_for_stream_enqueued: bool = False
 
+
 @no_type_check
 def _reducer_allreduce_and_upcast_hook(
     hook_state: _AllreduceUpcastHookState, bucket: dist.GradBucket
@@ -32,13 +34,15 @@ def _reducer_allreduce_and_upcast_hook(
     """
     ddp_weakref = hook_state.ddp_weakref
     reducer, process_group = ddp_weakref().reducer, ddp_weakref().process_group
-    gradient_is_bucket_view = ddp_weakref().gradient_as_bucket_view
     # Cast bucket if different than param_dtype.
     if (
-        ddp_weakref().mixed_precision.param_dtype != ddp_weakref().mixed_precision.reduce_dtype
+        ddp_weakref().mixed_precision.param_dtype
+        != ddp_weakref().mixed_precision.reduce_dtype
     ):
         # Cast bucket tensor to reduce_dtype
-        bucket.set_buffer(bucket.buffer().to(ddp_weakref().mixed_precision.reduce_dtype))
+        bucket.set_buffer(
+            bucket.buffer().to(ddp_weakref().mixed_precision.reduce_dtype)
+        )
     fut = reducer._run_allreduce_hook(bucket)
     ret_fut = torch.futures.Future()
     stream = hook_state.upcast_stream
@@ -48,8 +52,7 @@ def _reducer_allreduce_and_upcast_hook(
         ret_fut.set_result(bucket.buffer())
 
         # Upcast parameters and gradients so optimizer step can run in fp32.
-        params, grads = bucket.parameters(), bucket.gradients()
-        for p, g in zip(params, grads):
+        for p in bucket.parameters():
             p.data = p._fp_param
             # free storage for mp param as it will be allocated again in next
             # forward pass.
@@ -65,20 +68,18 @@ def _reducer_allreduce_and_upcast_hook(
         # they may participate in computation. However, they would not be recast
         # by hook above as they don't have a grad hook installed, so cast them
         # back here.
-        for n, p in ddp_weakref().module.named_parameters():
-            if hasattr(p, '_ddp_mp_hook_state'):
+        for _, p in ddp_weakref().module.named_parameters():
+            if hasattr(p, "_ddp_mp_hook_state"):
                 p._ddp_mp_hook_state[1].remove()
-                delattr(p, '_ddp_mp_hook_state')
-            if not p.requires_grad and not hasattr(p, '_ddp_ignored'):
+                delattr(p, "_ddp_mp_hook_state")
+            if not p.requires_grad and not hasattr(p, "_ddp_ignored"):
                 p.data = p._fp_param
 
         # reset for next backward pass
         hook_state.wait_for_stream_enqueued = False
 
     if not hook_state.wait_for_stream_enqueued:
-        Variable._execution_engine.queue_callback(
-            wait_for_stream_cb
-        )
+        Variable._execution_engine.queue_callback(wait_for_stream_cb)
         # mark that the callback is enqueued
         hook_state.wait_for_stream_enqueued = True
 

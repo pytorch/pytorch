@@ -5,7 +5,7 @@ import logging
 import operator
 from collections import defaultdict
 from enum import Enum
-from inspect import Parameter, signature, Signature
+from inspect import Parameter, Signature, signature
 from types import MethodType
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -21,6 +21,7 @@ from torch.export.unflatten import (
 )
 from torch.fx.node import map_aggregate
 from torch.fx.passes.split_module import split_module
+
 from ._backward import _null_coalesce_accumulate, stage_backward
 from ._unflatten import _outline_submodules
 from ._utils import PipeInfo
@@ -212,7 +213,7 @@ def _insert_stage_symbolic_backward(
                 input_nodes = list(node.all_input_nodes)
                 grads_proxy = fx.Proxy(grads)
                 for i, input_node in enumerate(input_nodes):
-                    assign_or_accumulate_grad(input_node, grads_proxy[i].node)
+                    assign_or_accumulate_grad(input_node, grads_proxy[i].node)  # type: ignore[index]
 
     return g
 
@@ -363,7 +364,7 @@ class DetachExecutor(fx.Interpreter):
         super().__init__(module, garbage_collect_values)
         self.value_remap = {}
 
-    def run(self, *args, initial_env=None):
+    def run(self, *args, initial_env=None):  # type: ignore[override]
         self.value_remap = {}
         return super().run(*args, initial_env=initial_env)
 
@@ -414,15 +415,15 @@ class _LinearNodeList:
     def __init__(self, node_list):
         self.serialize_node_list = []
         for node in node_list:
-            node_args = fx.node.map_arg(node.args, lambda n: _NodeReference(n.name))
-            node_kwargs = fx.node.map_arg(node.kwargs, lambda n: _NodeReference(n.name))
+            node_args = fx.node.map_arg(node.args, lambda n: _NodeReference(n.name))  # type: ignore[arg-type,return-value]
+            node_kwargs = fx.node.map_arg(node.kwargs, lambda n: _NodeReference(n.name))  # type: ignore[arg-type,return-value]
             serialize_node = fx.Node(
-                graph=None,
+                graph=None,  # type: ignore[arg-type]
                 name=node.name,
                 op=node.op,
                 target=node.target,
-                args=node_args,
-                kwargs=node_kwargs,
+                args=node_args,  # type: ignore[arg-type]
+                kwargs=node_kwargs,  # type: ignore[arg-type]
                 return_type=node.type,
             )
             serialize_node.meta = copy.copy(node.meta)
@@ -445,8 +446,8 @@ class _LinearNodeList:
             deser_node = graph.create_node(
                 op=node.op,
                 target=node.target,
-                args=node_args,
-                kwargs=node_kwargs,
+                args=node_args,  # type: ignore[arg-type]
+                kwargs=node_kwargs,  # type: ignore[arg-type]
                 name=node.name,
                 type_expr=node.type,
             )
@@ -729,7 +730,7 @@ class Pipe(torch.nn.Module):
 
         # TODO: what does split do with module invocations? does it move the modules
         # into the submodules?
-        split = split_module(traced, mod, split_callback)
+        split = split_module(traced, mod, split_callback)  # type: ignore[arg-type]
         # a (custom) tracer can produce dead code like orphan get_attr nodes
         split.graph.eliminate_dead_code()
 
@@ -770,7 +771,7 @@ class Pipe(torch.nn.Module):
 
         # A list of param referrals for deferred deletion.
         # To be accumulated in `move_param_to_callee`.
-        to_delete = list()
+        to_delete = []
 
         def _recursive_getattr_with_parent(mod, fqn):
             # Returns getattr call given a nested FQN, and the last parent
@@ -931,8 +932,7 @@ class Pipe(torch.nn.Module):
                         if node.op == "get_attr":
                             # get_attr might get access deeper level attribute
                             fqn = scope + "." + node.target if scope else node.target
-                            if fqn in unused_attributes:  # used, remove it
-                                unused_attributes.remove(fqn)
+                            unused_attributes.discard(fqn)
                 for _name, _submod in _mod.named_children():
                     stack.append((scope + "." + _name if scope else _name, _submod))
             # delete unused attributes
@@ -1176,7 +1176,8 @@ def annotate_split_points(mod: torch.nn.Module, spec: Dict[str, SplitPoint]):
                 predecessor_module = getattr(predecessor_module, atom)
             except AttributeError as e:
                 raise AttributeError(
-                    f'Specified target {qualname} referenced nonexistent module {".".join(atoms[:i+1])}'
+                    f"Specified target {qualname} referenced "
+                    f'nonexistent module {".".join(atoms[: i + 1])}'
                 ) from e
 
         mod_to_wrap = getattr(predecessor_module, atoms[-1])

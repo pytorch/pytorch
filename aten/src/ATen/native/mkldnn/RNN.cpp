@@ -41,7 +41,7 @@ const Tensor& input,
     bool bidirectional,
     bool batch_first,
     bool train) {
-      AT_ERROR("mkldnn_rnn_layer: ATen not compiled with MKLDNN support");
+      TORCH_CHECK(false, "mkldnn_rnn_layer: ATen not compiled with MKLDNN support");
   }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_layer_backward(
@@ -68,7 +68,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     at::IntArrayRef batch_sizes,
     bool batch_first,
     const at::Tensor& workspace) {
-      AT_ERROR("mkldnn_rnn_layer_backward: ATen not compiled with MKLDNN support");
+      TORCH_CHECK(false, "mkldnn_rnn_layer_backward: ATen not compiled with MKLDNN support");
     }
 
 REGISTER_NO_CPU_DISPATCH(lstm_mkldnn_stub);
@@ -167,10 +167,6 @@ struct RNNParams {
     return {{1, 1, mini_batch, hidden_size}, dtype, format::ldnc};
   }
 };
-
-static std::vector<int64_t> _hidden_size(const RNNParams& rnn) {
-  return {rnn.num_layers * rnn.num_directions, rnn.mini_batch, rnn.hidden_size};
-}
 
 template<bool is_single_direction>
 std::vector<int64_t> _output_size(const RNNParams& rnn) {
@@ -319,9 +315,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
     at::IntArrayRef batch_sizes,
     bool batch_first,
     const at::Tensor& workspace) {
-  const Tensor& grad_output_r = c10::value_or_else(grad_output_r_opt, [] {return Tensor();});
-  const Tensor& grad_hy_r = c10::value_or_else(grad_hy_r_opt, [] {return Tensor();});
-  const Tensor& grad_cy_r = c10::value_or_else(grad_cy_r_opt, [] {return Tensor();});
+  const Tensor& grad_output_r = grad_output_r_opt.value_or(Tensor());
+  const Tensor& grad_hy_r = grad_hy_r_opt.value_or(Tensor());
+  const Tensor& grad_cy_r = grad_cy_r_opt.value_or(Tensor());
   if (!grad_output_r.defined() && !grad_hy_r.defined() && !grad_cy_r.defined()) {
       return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), Tensor(), Tensor(), Tensor());
   }
@@ -527,8 +523,7 @@ std::tuple<Tensor, Tensor> unpack_hidden(const std::tuple<Tensor, Tensor>& hidde
 
 template<typename hidden_type>
 hidden_type pack_hidden(const Tensor& hx, const Tensor& cx) {
-  static_assert(std::is_same<hidden_type, void>::value, "pack_hidden not implemented for this type");
-  AT_ERROR("NOT IMPLEMENTED");
+  static_assert(false && sizeof(hidden_type), "pack_hidden not implemented for this type");
 }
 
 template<>

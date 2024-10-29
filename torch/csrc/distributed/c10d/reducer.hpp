@@ -137,7 +137,8 @@ class TORCH_API Reducer {
   // Install futures that should be awaited at end of backwards. Currently these
   // are only used by user-defined custom buffer reduction hooks, but can be
   // generalized to any user-originating futures that need to be awaited.
-  void install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs);
+  void install_futures(
+      const c10::List<c10::intrusive_ptr<c10::ivalue::Future>>& futs);
 
   // Returns true if we should rebuild buckets, else false. We only rebuild
   // buckets once after the first iteration and never rebuild them if
@@ -262,9 +263,9 @@ class TORCH_API Reducer {
   // List of futures installed by Reducer::install_futures that should be
   // awaited at the end of backwards pass.
   std::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>>
-      installed_futures_{c10::nullopt};
+      installed_futures_{std::nullopt};
   // Mixed precision parameter dtype for bucket type checking.
-  std::optional<c10::ScalarType> mixed_precision_param_dtype_{c10::nullopt};
+  std::optional<c10::ScalarType> mixed_precision_param_dtype_{std::nullopt};
 
   // Work handle for allreduce on local_used_map_
   c10::intrusive_ptr<c10d::Work> local_used_work_;
@@ -389,7 +390,7 @@ class TORCH_API Reducer {
     bool expect_sparse_gradient = false;
 
     // Sparse indices tensor
-    std::optional<at::Tensor> sparse_tensor_indices = c10::nullopt;
+    std::optional<at::Tensor> sparse_tensor_indices = std::nullopt;
 
     // TODO(@pietern)
     // Memory copies from gradient tensors into the bucket are potentially

@@ -2,7 +2,7 @@
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/native/GridSamplerUtils.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 using detail::GridSamplerInterpolation;
 using detail::GridSamplerPadding;
@@ -18,7 +18,7 @@ using detail::GridSamplerPadding;
 //     +1 --> (size - 1) + 0.5 == size - 0.5
 //     scale_factor = size / 2
 template <typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 scalar_t grid_sampler_unnormalize(scalar_t coord, int size, bool align_corners) {
   if (align_corners) {
     // unnormalize coord from [-1, 1] to [0, size - 1]
@@ -34,7 +34,7 @@ scalar_t grid_sampler_unnormalize(scalar_t coord, int size, bool align_corners) 
 // `grad_in`.
 // This is useful in the backward pass of grid_sampler.
 template <typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int size,
                                            bool align_corners, scalar_t *grad_in) {
   if (align_corners) {
@@ -50,7 +50,7 @@ scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int size,
 
 // Clips coordinates to between 0 and clip_limit - 1
 template <typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 scalar_t clip_coordinates(scalar_t in, int clip_limit) {
   return ::min(static_cast<scalar_t>(clip_limit - 1), ::max(in, static_cast<scalar_t>(0)));
 }
@@ -59,7 +59,7 @@ scalar_t clip_coordinates(scalar_t in, int clip_limit) {
 // it also returns the `d output / d input` via pointer argument `grad_in`.
 // This is useful in the backward pass of grid_sampler.
 template <typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 scalar_t clip_coordinates_set_grad(scalar_t in, int clip_limit, scalar_t *grad_in) {
   // Note that it is important for the gradient calculation that borders
   // are considered out of bounds.
@@ -82,7 +82,7 @@ scalar_t clip_coordinates_set_grad(scalar_t in, int clip_limit, scalar_t *grad_i
 // The bounds are passed as twice their value so that half-integer values
 // can be represented as ints.
 template <typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 scalar_t reflect_coordinates(scalar_t in, int twice_low, int twice_high) {
   if (twice_low == twice_high) {
     return static_cast<scalar_t>(0);
@@ -105,7 +105,7 @@ scalar_t reflect_coordinates(scalar_t in, int twice_low, int twice_high) {
 // `grad_in`.
 // This is useful in the backward pass of grid_sampler.
 template <typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, int twice_high,
                                       scalar_t *grad_in) {
   if (twice_low == twice_high) {
@@ -135,7 +135,7 @@ scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, int twice_high
 }
 
 template<typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 scalar_t safe_downgrade_to_int_range(scalar_t x){
   // -100.0 does not have special meaning. This is just to make sure
   // it's not within_bounds_2d or within_bounds_3d, and does not cause
@@ -146,7 +146,7 @@ scalar_t safe_downgrade_to_int_range(scalar_t x){
 }
 
 template<typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 scalar_t compute_coordinates(scalar_t coord, int size,
                              GridSamplerPadding padding_mode,
                              bool align_corners) {
@@ -170,7 +170,7 @@ scalar_t compute_coordinates(scalar_t coord, int size,
 
 // Computes the pixel source index value for a grid coordinate
 template <typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 scalar_t grid_sampler_compute_source_index(
     scalar_t coord,
     int size,
@@ -186,7 +186,7 @@ scalar_t grid_sampler_compute_source_index(
 // `d output / d input` via pointer argument `grad_in`.
 // This is useful in the backward pass of grid_sampler.
 template <typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 scalar_t grid_sampler_compute_source_index_set_grad(
     scalar_t coord,
     int size,
@@ -215,18 +215,18 @@ scalar_t grid_sampler_compute_source_index_set_grad(
   return coord;
 }
 
-static __forceinline__ __device__
+__forceinline__ __device__
 bool within_bounds_2d(int h, int w, int H, int W) {
   return h >= 0 && h < H && w >= 0 && w < W;
 }
 
-static __forceinline__ __device__
+__forceinline__ __device__
 bool within_bounds_3d(int d, int h, int w, int D, int H, int W) {
   return d >= 0 && d < D && h >= 0 && h < H && w >= 0 && w < W;
 }
 
 template<typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 scalar_t get_value_bounded(
     const scalar_t *data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
     GridSamplerPadding padding_mode,
@@ -245,7 +245,7 @@ scalar_t get_value_bounded(
 }
 
 template<typename scalar_t, typename index_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 void safe_add_2d(scalar_t *data, int h, int w,
                  int sH, int sW, int H, int W,
                  scalar_t delta,
@@ -261,7 +261,7 @@ void safe_add_2d(scalar_t *data, int h, int w,
 }
 
 template<typename scalar_t, typename index_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 void safe_add_3d(scalar_t *data, int d, int h, int w,
                  int sD, int sH, int sW, int D, int H, int W,
                  scalar_t delta,
@@ -277,7 +277,7 @@ void safe_add_3d(scalar_t *data, int d, int h, int w,
 }
 
 template<typename scalar_t, typename index_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 void add_value_bounded(
     scalar_t* data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
     scalar_t delta,
@@ -297,7 +297,7 @@ void add_value_bounded(
 
 // Calculate the differential of the cubic convolution, i.e. `d coeff / d x`
 template<typename scalar_t>
-static __forceinline__ __device__
+__forceinline__ __device__
 void get_cubic_coefficients_grad(
     scalar_t coeffs[4],
     scalar_t t) {
@@ -318,4 +318,4 @@ void get_cubic_coefficients_grad(
 }
 
 
-}}  // namespace at::native
+}  // namespace at::native

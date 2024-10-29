@@ -2,13 +2,13 @@
 import multiprocessing
 import os
 import threading
-from multiprocessing.reduction import ForkingPickler
+from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
 from typing import Union
 
 import torch
-import torch.utils.hooks
 from torch._namedtensor_internals import check_serializing_named_tensor
+
 
 try:
     # Early load resource_sharer to prevent a partially initialized instance
@@ -61,7 +61,7 @@ class StorageWeakRef:
 class SharedCache(dict):
     """Dictionary from multiprocessing handles to StorageWeakRef."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         # free_dead_references() is called if the len exceeds the current
         # limit. The limit scales with the number of remaining live objects.
         self.limit = 128
@@ -74,7 +74,7 @@ class SharedCache(dict):
     def _after_fork(self):
         self.lock = threading.Lock()
 
-    def get(self, key):
+    def get(self, key):  # type: ignore[override]
         with self.lock:
             return dict.get(self, key)
 
@@ -117,6 +117,38 @@ def rebuild_tensor(cls, storage, metadata):
         t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
     else:
         t.requires_grad = requires_grad
+    return t
+
+
+def rebuild_meta_tensor(
+    tensor_cls,
+    tensor_size,
+    tensor_stride,
+    tensor_offset,
+    dtype,
+    storage_size_bytes,
+    requires_grad,
+):
+    untyped_storage = torch.UntypedStorage(storage_size_bytes, device="meta")
+
+    typed_storage = torch.TypedStorage(
+        wrap_storage=untyped_storage, dtype=dtype, _internal=True
+    )
+
+    t = torch._utils._rebuild_tensor(
+        typed_storage,
+        tensor_offset,
+        tensor_size,
+        tensor_stride,
+    )
+
+    if tensor_cls == torch.nn.parameter.Parameter:
+        # It is crucial for integer tensors to receive
+        # the requires_grad=False as an argument in the constructor
+        t = torch.nn.parameter.Parameter(t, requires_grad=requires_grad)
+    else:
+        t.requires_grad = requires_grad
+
     return t
 
 
@@ -344,6 +376,19 @@ def reduce_tensor(tensor):
                 event_sync_required,
             ),
         )
+    elif storage._untyped_storage.device.type == "meta":
+        return (
+            rebuild_meta_tensor,
+            (
+                type(tensor),
+                tensor.size(),
+                tensor.stride(),
+                tensor.storage_offset(),
+                tensor.dtype,
+                tensor.untyped_storage().size(),
+                tensor.requires_grad,
+            ),
+        )
 
     # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
     metadata = (
@@ -554,6 +599,10 @@ def reduce_storage(storage):
         raise RuntimeError(
             "Cannot pickle CUDA storage; try pickling a CUDA tensor instead"
         )
+    elif storage.device.type == "meta":
+        raise RuntimeError(
+            "Cannot pickle meta storage; try pickling a meta tensor instead"
+        )
     elif get_sharing_strategy() == "file_system":
         metadata = storage._share_filename_cpu_()
         cache_key = metadata[1]
@@ -577,19 +626,22 @@ def reduce_storage(storage):
 
 
 def init_reductions():
-    ForkingPickler.register(torch.cuda.Event, reduce_event)
+    reduction.register(torch.cuda.Event, reduce_event)
 
     for t in torch._storage_classes:
         if t.__name__ == "UntypedStorage":
-            ForkingPickler.register(t, reduce_storage)
+            reduction.register(t, reduce_storage)
         else:
-            ForkingPickler.register(t, reduce_typed_storage_child)
+            reduction.register(t, reduce_typed_storage_child)
 
-    ForkingPickler.register(torch.storage.TypedStorage, reduce_typed_storage)
+    reduction.register(torch.storage.TypedStorage, reduce_typed_storage)
 
     for t in torch._tensor_classes:
-        ForkingPickler.register(t, reduce_tensor)
+        reduction.register(t, reduce_tensor)
 
     # TODO: Maybe this should be in tensor_classes? :)
-    ForkingPickler.register(torch.Tensor, reduce_tensor)
-    ForkingPickler.register(torch.nn.parameter.Parameter, reduce_tensor)
+    reduction.register(torch.Tensor, reduce_tensor)
+
+    from torch.nn.parameter import Parameter
+
+    reduction.register(Parameter, reduce_tensor)

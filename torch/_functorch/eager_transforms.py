@@ -12,7 +12,6 @@ from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.autograd.forward_ad as fwAD
-
 from torch._C._functorch import (
     _assert_wrapped_functional,
     _func_decrement_nesting,
@@ -42,8 +41,8 @@ from torch.utils._pytree import (
     tree_unflatten,
     treespec_pprint,
 )
-from .apis import vmap
 
+from .apis import vmap
 from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 
@@ -767,8 +766,6 @@ def jacrev(
     # wraps only if we're not tracing with dynamo.
     if not torch._dynamo.is_compiling():
         wrapper_fn = wraps(func)(wrapper_fn)
-    else:
-        wrapper_fn = torch._dynamo.disable(wrapper_fn)
 
     return wrapper_fn
 
@@ -1088,7 +1085,6 @@ def jvp(
     )
 
 
-@doesnt_support_saved_tensors_hooks
 def _jvp_with_argnums(
     func: Callable,
     primals: Any,
@@ -1350,8 +1346,6 @@ def jacfwd(
     # wraps only if we're not tracing with dynamo.
     if not torch._dynamo.is_compiling():
         wrapper_fn = wraps(func)(wrapper_fn)
-    else:
-        wrapper_fn = torch._dynamo.disable(wrapper_fn)
 
     return wrapper_fn
 
@@ -1679,7 +1673,6 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
             " replaced with their non-aliasing counterparts, {view}_copy.\n"
         )
 
-    @doesnt_support_saved_tensors_hooks
     @wraps(func)
     def wrapped(*args, **kwargs):
         try:
@@ -1788,7 +1781,7 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
             duals = tree_unflatten(flat_duals, primals_argspec)
             output = func(*duals)
             tangents = tree_map_only(
-                torch.Tensor, lambda t: fwAD.unpack_dual(t)[1], output
+                torch.Tensor, lambda dual: safe_unpack_dual(dual, False)[1], output
             )
 
         return tangents

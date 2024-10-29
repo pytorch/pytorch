@@ -2,9 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/util/Optional.h>
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 // NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for
@@ -44,8 +44,9 @@ enum class ncclResult {
   InternalError = 3,
   InvalidArgument = 4,
   InvalidUsage = 5,
-  NumResults = 6,
-  InProgress = 7
+  RemoteError = 6,
+  InProgress = 7,
+  NumResults = 8
 };
 
 /* Reduction operation selector */
@@ -74,7 +75,7 @@ enum class ncclDataType {
 // RAII helper class to manage NCCL group API and CUDA free mutex.
 // The destructor is allowed to throw since this helper class only
 // manages group and lock lifetimes.
-struct AutoNcclGroup {
+struct TORCH_CUDA_CPP_API AutoNcclGroup {
   AutoNcclGroup();
   AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking);
   ~AutoNcclGroup() noexcept(false);

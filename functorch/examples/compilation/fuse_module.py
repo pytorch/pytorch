@@ -2,7 +2,6 @@ import timeit
 
 import torch
 import torch.nn as nn
-
 from functorch.compile import compiled_module, tvm_compile
 
 
@@ -24,7 +23,7 @@ def run(mod, input):
 
 
 class Foo(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.param = nn.Parameter(torch.randn(1))
         self.register_buffer("buf", torch.randn(1))

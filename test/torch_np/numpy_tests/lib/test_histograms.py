@@ -1,11 +1,10 @@
 # Owner(s): ["module: dynamo"]
 
-# from numpy.testing._private.utils import requires_memory
 import functools
-
 from unittest import expectedFailure as xfail, skipIf
 
 from pytest import raises as assert_raises
+
 
 skip = functools.partial(skipIf, True)
 
@@ -19,6 +18,7 @@ from torch.testing._internal.common_utils import (
     xpassIfTorchDynamo,
 )
 
+
 if TEST_WITH_TORCHDYNAMO:
     import numpy as np
     from numpy import histogram, histogram_bin_edges, histogramdd
@@ -29,7 +29,6 @@ if TEST_WITH_TORCHDYNAMO:
         assert_array_almost_equal,
         assert_array_equal,
         assert_equal,
-        # assert_array_max_ulp, #assert_raises_regex, suppress_warnings,
     )
 else:
     import torch._numpy as np
@@ -41,7 +40,6 @@ else:
         assert_array_almost_equal,
         assert_array_equal,
         assert_equal,
-        # assert_array_max_ulp, #assert_raises_regex, suppress_warnings,
     )
 
 

@@ -93,11 +93,11 @@ struct TORCH_API MetaBase {
   // output. If `strides` does not match the given output strides, proxy outputs
   // will be created and passed to the IMPL function.
   virtual void set_output_strided(
-      int64_t output_idx,
-      IntArrayRef sizes,
-      IntArrayRef strides,
-      TensorOptions options,
-      DimnameList names = {}) {
+      int64_t output_idx [[maybe_unused]],
+      IntArrayRef sizes [[maybe_unused]],
+      IntArrayRef strides [[maybe_unused]],
+      TensorOptions options [[maybe_unused]],
+      DimnameList names [[maybe_unused]] = {}) {
     TORCH_INTERNAL_ASSERT(false, "set_output_strided not implemented.");
   }
 
@@ -105,11 +105,11 @@ struct TORCH_API MetaBase {
   // outputs. This function has the same behavior as the old `set_output`: it
   // will only re-stride if the given output was resized.
   virtual void set_output_raw_strided(
-      int64_t output_idx,
-      IntArrayRef sizes,
-      IntArrayRef strides_hint,
-      TensorOptions options,
-      DimnameList names = {}) {
+      int64_t output_idx [[maybe_unused]],
+      IntArrayRef sizes [[maybe_unused]],
+      IntArrayRef strides_hint [[maybe_unused]],
+      TensorOptions options [[maybe_unused]],
+      DimnameList names [[maybe_unused]] = {}) {
     TORCH_INTERNAL_ASSERT(false, "set_output_strided not implemented.");
   }
 

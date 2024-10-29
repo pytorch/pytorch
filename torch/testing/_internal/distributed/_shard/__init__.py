@@ -1,1 +1,1 @@
-# mypy: ignore-errors
+# mypy: allow-untyped-defs

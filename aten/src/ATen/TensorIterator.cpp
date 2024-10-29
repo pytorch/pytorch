@@ -171,7 +171,7 @@ TensorIteratorConfig& TensorIteratorConfig::declare_static_shape(IntArrayRef sha
   //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
   //   are expected to check shapes before calling `add_owned_input` or `add_owned_output`.
   TORCH_CHECK(!resize_outputs_, "resize_outputs() must be called before declare_static_shape(...)")
-  static_shape_ = c10::make_optional(DimVector(shape));
+  static_shape_ = std::make_optional(DimVector(shape));
   return *this;
 }
 
@@ -1482,8 +1482,6 @@ FastSetupType TensorIteratorBase::compute_fast_setup_type(const TensorIteratorCo
   }
   return FastSetupType::NONE;
 }
-
-TensorIteratorBase::TensorIteratorBase() = default;
 
 void TensorIteratorBase::build(TensorIteratorConfig& config) {
   // populate some persistent configuration fields

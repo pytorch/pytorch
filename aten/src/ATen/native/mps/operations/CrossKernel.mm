@@ -33,6 +33,9 @@ REGISTER_CROSS_FUNC(short);
 REGISTER_CROSS_FUNC(char);
 REGISTER_CROSS_FUNC(uchar);
 REGISTER_CROSS_FUNC(bool);
+#if __METAL_VERSION__ >= 310
+REGISTER_CROSS_FUNC(bfloat);
+#endif
 
 template<typename T, typename U>
 kernel void cross(constant void     * input_        [[buffer(0)]],
@@ -77,6 +80,9 @@ REGISTER_CROSS_OP(short);
 REGISTER_CROSS_OP(char);
 REGISTER_CROSS_OP(uchar);
 REGISTER_CROSS_OP(bool);
+#if __METAL_VERSION__ >= 310
+REGISTER_CROSS_OP(bfloat);
+#endif
 
 )CROSS_METAL");
 
@@ -114,9 +120,9 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
       mtl_setBuffer(computeEncoder, other, 1);
       mtl_setBuffer(computeEncoder, out, 2);
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
-      [computeEncoder setBytes:&out_dim_stride length:sizeof(int64_t) atIndex:4];
-      [computeEncoder setBytes:&input_dim_stride length:sizeof(int64_t) atIndex:5];
-      [computeEncoder setBytes:&other_dim_stride length:sizeof(int64_t) atIndex:6];
+      mtl_setBytes(computeEncoder, out_dim_stride, 4);
+      mtl_setBytes(computeEncoder, input_dim_stride, 5);
+      mtl_setBytes(computeEncoder, other_dim_stride, 6);
       mtl_dispatch1DJob(computeEncoder, crossPSO, numThreads);
 
       getMPSProfiler().endProfileKernel(crossPSO);

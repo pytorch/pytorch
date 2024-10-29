@@ -3,7 +3,6 @@ import copyreg
 import functools
 import logging
 import sys
-import threading
 import traceback
 import warnings
 from collections import defaultdict
@@ -68,6 +67,17 @@ def _to(self, device, non_blocking=False):
     if self.device == device:
         return self
 
+    if device.type == "cpu":
+        pin_memory = non_blocking and self.device.type in (
+            "cuda",
+            torch._C._get_privateuse1_backend_name(),
+        )
+        untyped_storage = torch.empty(
+            self.nbytes(), dtype=torch.uint8, device=device, pin_memory=pin_memory
+        ).untyped_storage()
+        untyped_storage.copy_(self, non_blocking)
+        return untyped_storage
+
     device_module = getattr(torch, device.type, None)
     assert (
         device_module is not None
@@ -109,16 +119,13 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
     return kwargs["async"]
 
 
-_thread_local_state = threading.local()
-
-
 def _get_restore_location(device):
     """Return the map_location location.
 
     Used for rebuild functions where the tensor device is distinct from the storage
     """
 
-    map_location = getattr(_thread_local_state, "map_location", None)
+    map_location = torch.serialization._serialization_tls.map_location
     if map_location is None:
         return device
     else:
@@ -195,7 +202,13 @@ def set_tensor_metadata(tensor, metadata):
 
 
 def _rebuild_tensor_v2(
-    storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None
+    storage,
+    storage_offset,
+    size,
+    stride,
+    requires_grad,
+    backward_hooks,
+    metadata=None,
 ):
     tensor = _rebuild_tensor(storage, storage_offset, size, stride)
     tensor.requires_grad = requires_grad
@@ -328,6 +341,13 @@ def _rebuild_nested_tensor(buffer, sizes, strides, storage_offsets):
     return torch._nested_view_from_buffer(buffer, sizes, strides, storage_offsets)
 
 
+def _rebuild_device_tensor_from_cpu_tensor(data, dtype, device, requires_grad):
+    device = _get_restore_location(device)
+    tensor = data.to(dtype=dtype, device=device)
+    tensor.requires_grad = requires_grad
+    return tensor
+
+
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
     device = _get_restore_location(device)
     tensor = torch.from_numpy(data).to(dtype=dtype, device=device)
@@ -346,7 +366,14 @@ def _rebuild_meta_tensor_no_storage(dtype, size, stride, requires_grad):
 
 
 def _rebuild_wrapper_subclass(
-    cls, dtype, size, stride, storage_offset, layout, device, requires_grad
+    cls,
+    dtype,
+    size,
+    stride,
+    storage_offset,
+    layout,
+    device,
+    requires_grad,
 ):
     device = _get_restore_location(device)
     return torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
@@ -762,7 +789,9 @@ def get_current_device_index() -> int:
 
 
 def _get_device_index(
-    device: Any, optional: bool = False, allow_cpu: bool = False
+    device: Any,
+    optional: bool = False,
+    allow_cpu: bool = False,
 ) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
@@ -962,3 +991,47 @@ class CallbackRegistry(Generic[P]):
                 logger.exception(
                     "Exception in callback for %s registered with gpu trace", self.name
                 )
+
+
+# IMPORT_MAPPING and NAME_MAPPING are adapted from https://github.com/python/cpython/blob/main/Lib/_compat_pickle.py
+# for use in the weights_only Unpickler.
+
+IMPORT_MAPPING = {
+    "__builtin__": "builtins",
+    "copy_reg": "copyreg",
+    "Queue": "queue",
+    "repr": "reprlib",
+    "_abcoll": "collections.abc",
+    # Non-mutual mappings.
+    "UserDict": "collections",
+    "UserList": "collections",
+    "UserString": "collections",
+    "whichdb": "dbm",
+    "StringIO": "io",
+    "cStringIO": "io",
+}
+
+
+# This contains rename rules that are easy to handle.  We ignore the more
+# complex stuff (e.g. mapping the names in the urllib and types modules).
+# These rules should be run before import names are fixed.
+NAME_MAPPING = {
+    ("__builtin__", "xrange"): ("builtins", "range"),
+    ("__builtin__", "reduce"): ("functools", "reduce"),
+    ("__builtin__", "intern"): ("sys", "intern"),
+    ("__builtin__", "unichr"): ("builtins", "chr"),
+    ("__builtin__", "unicode"): ("builtins", "str"),
+    ("__builtin__", "long"): ("builtins", "int"),
+    ("itertools", "izip"): ("builtins", "zip"),
+    ("itertools", "imap"): ("builtins", "map"),
+    ("itertools", "ifilter"): ("builtins", "filter"),
+    ("itertools", "ifilterfalse"): ("itertools", "filterfalse"),
+    ("itertools", "izip_longest"): ("itertools", "zip_longest"),
+    ("UserDict", "IterableUserDict"): ("collections", "UserDict"),
+    ("UserList", "UserList"): ("collections", "UserList"),
+    ("UserString", "UserString"): ("collections", "UserString"),
+    # Non-mutual mappings.
+    ("__builtin__", "basestring"): ("builtins", "str"),
+    ("exceptions", "StandardError"): ("builtins", "Exception"),
+    ("UserDict", "UserDict"): ("collections", "UserDict"),
+}

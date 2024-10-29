@@ -466,9 +466,9 @@ TEST(OperatorRegistrationTestLambdaBasedKernel, givenFallbackKernelWithoutTensor
   EXPECT_EQ(4, outputs[0].toInt());
 }
 
-std::optional<Tensor> called_arg2 = c10::nullopt;
-std::optional<int64_t> called_arg3 = c10::nullopt;
-std::optional<std::string> called_arg4 = c10::nullopt;
+std::optional<Tensor> called_arg2 = std::nullopt;
+std::optional<int64_t> called_arg3 = std::nullopt;
+std::optional<std::string> called_arg4 = std::nullopt;
 
 TEST(OperatorRegistrationTestLambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op(

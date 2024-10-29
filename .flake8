@@ -2,12 +2,12 @@
 # NOTE: **Mirror any changes** to this file the [tool.ruff] config in pyproject.toml
 # before we can fully move to use ruff
 enable-extensions = G
-select = B,C,E,F,G,P,SIM1,T4,W,B9,TOR0,TOR1,TOR2,TOR9
+select = B,C,E,F,G,P,SIM1,SIM911,T4,W,B9,TOR0,TOR1,TOR2,TOR9
 max-line-length = 120
 # C408 ignored because we like the dict keyword argument syntax
 # E501 is not flexible enough, we're using B950 instead
 ignore =
-    E203,E305,E402,E501,E721,E741,F405,F841,F999,W503,W504,C408,E302,W291,E303,
+    E203,E305,E402,E501,E704,E721,E741,F405,F841,F999,W503,W504,C408,E302,W291,E303,
     # shebang has extra meaning in fbcode lints, so I think it's not worth trying
     # to line this up with executable bit
     EXE001,
@@ -55,6 +55,9 @@ per-file-ignores =
     torch/distributed/_functional_collectives.py: TOR901
     torch/distributed/_spmd/data_parallel.py: TOR901
     torch/distributed/_tensor/_collective_utils.py: TOR901
+    # This is a full package that happen to live within the test
+    # folder, so ok to skip
+    test/cpp_extensions/open_registration_extension/pytorch_openreg/_aten_impl.py: TOR901
 optional-ascii-coding = True
 exclude =
     ./.git,

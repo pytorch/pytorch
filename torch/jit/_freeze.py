@@ -65,7 +65,7 @@ def freeze(
     .. testcode::
         import torch
         class MyModule2(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.modified_tensor = torch.tensor(10.)
                 self.version = 1

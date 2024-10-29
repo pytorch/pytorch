@@ -1,3 +1,4 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from typing import Optional, Iterable
 
@@ -749,7 +750,7 @@ Computes the minimum 4-term Blackman-Harris window according to Nuttall.
 .. math::
     w_n = 1 - 0.36358 \cos{(z_n)} + 0.48917 \cos{(2z_n)} - 0.13659 \cos{(3z_n)} + 0.01064 \cos{(4z_n)}
 
-where ``z_n = 2 \u03c0 n/ M``.
+where :math:`z_n = \frac{2 \pi n}{M}`.
     """,
     """
 

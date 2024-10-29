@@ -1,8 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 import torch
 import torch.distributed._functional_collectives as funcol
-import torch.distributed._tensor.random as random
-
+import torch.distributed.tensor._random as random
 from torch.distributed._tensor import init_device_mesh, Replicate
 from torch.distributed.tensor.parallel.api import parallelize_module
 from torch.distributed.tensor.parallel.style import ColwiseParallel

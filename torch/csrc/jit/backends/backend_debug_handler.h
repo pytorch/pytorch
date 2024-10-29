@@ -7,8 +7,7 @@
 
 #include <atomic>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /*
  *  BackendDebugHandleManager is responsible for issuing debug handles to
@@ -77,17 +76,17 @@ namespace jit {
  *
  *  So why does debug handle map to DebugInfoTuple = {source range and inlined
  *  cs}? {debug_handle, source_range_tag, serialized_callstack} Take this
- *  example: class L(nn.Module): def __init__(self):
+ *  example: class L(nn.Module): def __init__(self) -> None:
  *      ...
  *    def forward(self, x):
  *      return x * 5
  *  class M(nn.Module):
- *    def __init__(self):
+ *    def __init__(self) -> None:
  *      ...
  *    def forward(self, x):
  *      return x - 2
  *  class N(nn.Module):
- *    def __init__(self):
+ *    def __init__(self) -> None:
  *      self.m = M()
  *    def forward(self, x):
  *      return self.m(x) + 3
@@ -136,5 +135,4 @@ class TORCH_API BackendDebugInfoRecorder {
   BackendDebugInfoMapType handles_to_inlined_callstack_ptrs_;
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

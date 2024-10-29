@@ -9,7 +9,6 @@ from torch.distributed._shard.sharded_optim import ShardedOptimizer
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
-
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,

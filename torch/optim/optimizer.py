@@ -1,6 +1,7 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+"""Base optimizer."""
 import functools
-import math
 import warnings
 from collections import defaultdict, OrderedDict
 from copy import deepcopy
@@ -31,13 +32,14 @@ from torch.utils._foreach_utils import (
     _get_fused_kernels_supported_devices,
     _group_tensors_by_device_and_dtype,
     Indices,
+    TensorListList,
 )
 from torch.utils.hooks import RemovableHandle
+
 
 Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
-TensorListList: TypeAlias = List[List[torch.Tensor]]
 DeviceDict = Dict[Optional[torch.device], torch.Tensor]
 
 
@@ -109,15 +111,6 @@ def _stack_if_compiling(x):
         return torch.stack(x)
     else:
         return x
-
-
-def _dispatch_sqrt(
-    x: float,
-):  # float annotation is needed because of torchscript type inference
-    if not torch.jit.is_scripting() and isinstance(x, torch.Tensor):
-        return x.sqrt()
-    else:
-        return math.sqrt(x)
 
 
 def _disable_dynamo_if_unsupported(single_tensor_fn=None):
@@ -199,6 +192,19 @@ def _default_to_fused_or_foreach(
     return fused, foreach
 
 
+def _device_dtype_check_for_fused(
+    p: torch.Tensor, cuda_unsupported: bool = False
+) -> None:
+    fused_supported_devices = _get_fused_kernels_supported_devices()
+    if cuda_unsupported:
+        fused_supported_devices.remove("cuda")
+    if not (p.device.type in fused_supported_devices and torch.is_floating_point(p)):
+        raise RuntimeError(
+            "`fused=True` requires all the params to be floating point Tensors of "
+            f"supported devices: {fused_supported_devices} but {p.dtype} and {p.device.type}"
+        )
+
+
 def _view_as_real(params, *state_and_grads):
     for i, p in enumerate(params):
         if torch.is_complex(p):
@@ -217,7 +223,7 @@ def _get_scalar_dtype(is_fused=None):
 
 def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
     r"""Return the device type list that supports capturable optimizer."""
-    capturable_supported_devices = ["cuda"]
+    capturable_supported_devices = ["cuda", "xpu", "hpu"]
     if not torch.jit.is_scripting():
         capturable_supported_devices.append(torch._C._get_privateuse1_backend_name())
     if supports_xla:
@@ -226,6 +232,10 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
 
 
 # Common doc strings among optimizers
+_params_doc = r"""params (iterable): iterable of parameters or named_parameters to optimize
+            or iterable of dicts defining parameter groups. When using named_parameters,
+            all parameters in all groups should be named"""
+
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use
             foreach over the for-loop implementation on CUDA, since it is usually
@@ -239,17 +249,13 @@ _fused_doc = r"""fused (bool, optional): whether the fused implementation is use
             are supported. (default: None)
 
     .. note:: The foreach and fused implementations are typically faster than the for-loop,
-              single-tensor implementation. Thus, if the user has not specified BOTH flags
-              (i.e., when foreach = fused = None), we will attempt defaulting to the foreach
-              implementation when the tensors are all on CUDA. For example, if the user specifies
-              True for fused but nothing for foreach, we will run the fused implementation. If
-              the user specifies False for foreach but nothing for fused (or False for fused but
-              nothing for foreach), we will run the for-loop implementation. If the user specifies
-              True for both foreach and fused, we will prioritize fused over foreach, as it is
-              typically faster. We attempt to use the fastest, so the hierarchy goes fused ->
-              foreach -> for-loop. HOWEVER, since the fused implementation is relatively new,
-              we want to give it sufficient bake-in time, so we default to foreach and NOT
-              fused when the user has not specified either flag."""
+              single-tensor implementation, with fused being theoretically fastest with both
+              vertical and horizontal fusion. As such, if the user has not specified either
+              flag (i.e., when foreach = fused = None), we will attempt defaulting to the foreach
+              implementation when the tensors are all on CUDA. Why not fused? Since the fused
+              implementation is relatively new, we want to give it sufficient bake-in time.
+              To specify fused, pass True for fused. To force running the for-loop
+              implementation, pass False for either foreach or fused. """
 
 _capturable_doc = r"""capturable (bool, optional): whether this instance is safe to
             capture in a CUDA graph. Passing True can impair ungraphed performance,
@@ -267,8 +273,9 @@ _maximize_doc = r"""maximize (bool, optional): maximize the objective with respe
 
 
 def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableHandle:
-    r"""Register a pre hook common to all optimizers. The hook should have the following
-    signature::
+    r"""Register a pre hook common to all optimizers.
+
+    The hook should have the following signature::
 
         hook(optimizer, args, kwargs) -> None or modified args and kwargs
 
@@ -286,8 +293,9 @@ def register_optimizer_step_pre_hook(hook: GlobalOptimizerPreHook) -> RemovableH
 
 
 def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> RemovableHandle:
-    r"""Register a post hook common to all optimizers. The hook should have the following
-    signature::
+    r"""Register a post hook common to all optimizers.
+
+    The hook should have the following signature::
 
         hook(optimizer, args, kwargs) -> None
 
@@ -304,7 +312,9 @@ def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> Removabl
     return handle
 
 
-ParamsT: TypeAlias = Union[Iterable[torch.Tensor], Iterable[Dict[str, Any]]]
+ParamsT: TypeAlias = Union[
+    Iterable[torch.Tensor], Iterable[Dict[str, Any]], Iterable[Tuple[str, torch.Tensor]]
+]
 
 _P = ParamSpec("_P")
 R = TypeVar("R")
@@ -336,7 +346,7 @@ class Optimizer:
     _optimizer_load_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
     _optimizer_load_state_dict_post_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
 
-    def __init__(self, params: ParamsT, defaults: Dict[str, Any]) -> None:
+    def __init__(self, params: ParamsT, defaults: Dict[str, Any]) -> None:  # noqa: D107
         torch._C._log_api_usage_once("python.optimizer")
         self.defaults = defaults
         self._optimizer_step_pre_hooks = OrderedDict()
@@ -371,14 +381,14 @@ class Optimizer:
         # https://github.com/pytorch/pytorch/issues/72948
         self._warned_capturable_if_run_uncaptured = True
 
-    def __getstate__(self) -> Dict[str, Any]:
+    def __getstate__(self) -> Dict[str, Any]:  # noqa: D105
         return {
             "defaults": self.defaults,
             "state": self.state,
             "param_groups": self.param_groups,
         }
 
-    def __setstate__(self, state: Dict[str, Any]) -> None:
+    def __setstate__(self, state: Dict[str, Any]) -> None:  # noqa: D105
         self.__dict__.update(state)
         if "_optimizer_step_pre_hooks" not in self.__dict__:
             self._optimizer_step_pre_hooks = OrderedDict()
@@ -395,7 +405,7 @@ class Optimizer:
         self._patch_step_function()  # To support multiprocessing pickle/unpickle
         self.defaults.setdefault("differentiable", False)
 
-    def __repr__(self) -> str:
+    def __repr__(self) -> str:  # noqa: D105
         format_string = self.__class__.__name__ + " ("
         for i, group in enumerate(self.param_groups):
             format_string += "\n"
@@ -457,10 +467,9 @@ class Optimizer:
         This is a workaround due to lack of a proper step hook on the optimizer,
         and will be removed if it exists.
         """
-        pass
 
     @staticmethod
-    def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:
+    def profile_hook_step(func: Callable[_P, R]) -> Callable[_P, R]:  # noqa: D102
         @functools.wraps(func)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> R:
             self, *_ = args
@@ -503,7 +512,8 @@ class Optimizer:
         Dict[Tuple[None, None], Tuple[TensorListList, Indices]],
         Dict[Tuple[torch.device, torch.dtype], Tuple[TensorListList, Indices]],
     ]:
-        """Groups a list of lists of tensors by device and dtype.
+        """Group a list of lists of tensors by device and dtype.
+
         Skips this step if we are compiling since this will occur during inductor lowering.
         """
         if is_compiling():
@@ -521,8 +531,9 @@ class Optimizer:
             self.__class__.step.hooked = True  # type: ignore[attr-defined]
 
     def register_step_pre_hook(self, hook: OptimizerPreHook) -> RemovableHandle:
-        r"""Register an optimizer step pre hook which will be called before
-        optimizer step. It should have the following signature::
+        r"""Register an optimizer step pre hook which will be called before optimizer step.
+
+        It should have the following signature::
 
             hook(optimizer, args, kwargs) -> None or modified args and kwargs
 
@@ -544,6 +555,7 @@ class Optimizer:
 
     def register_step_post_hook(self, hook: OptimizerPostHook) -> RemovableHandle:
         r"""Register an optimizer step post hook which will be called after optimizer step.
+
         It should have the following signature::
 
             hook(optimizer, args, kwargs) -> None
@@ -564,10 +576,10 @@ class Optimizer:
 
     def register_state_dict_pre_hook(
         self, hook: Callable[["Optimizer"], None], prepend: bool = False
-    ) -> RemovableHandle:
-        r"""Register a state dict pre-hook which will be called before
-        :meth:`~torch.optim.Optimizer.state_dict` is called. It should have the
-        following signature::
+    ) -> RemovableHandle:  # noqa: D101
+        r"""Register a state dict pre-hook which will be called before :meth:`~torch.optim.Optimizer.state_dict` is called.
+
+        It should have the following signature::
 
             hook(optimizer) -> None
 
@@ -599,9 +611,9 @@ class Optimizer:
         hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
         prepend: bool = False,
     ) -> RemovableHandle:
-        r"""Register a state dict post-hook which will be called after
-        :meth:`~torch.optim.Optimizer.state_dict` is called. It should have the
-        following signature::
+        r"""Register a state dict post-hook which will be called after :meth:`~torch.optim.Optimizer.state_dict` is called.
+
+        It should have the following signature::
 
             hook(optimizer, state_dict) -> state_dict or None
 
@@ -630,7 +642,7 @@ class Optimizer:
 
     @torch._disable_dynamo
     def state_dict(self) -> StateDict:
-        r"""Returns the state of the optimizer as a :class:`dict`.
+        r"""Return the state of the optimizer as a :class:`dict`.
 
         It contains two entries:
 
@@ -643,6 +655,8 @@ class Optimizer:
             parameter group is a Dict. Each parameter group contains metadata
             specific to the optimizer, such as learning rate and weight decay,
             as well as a List of parameter IDs of the parameters in the group.
+            If a param group was initialized with ``named_parameters()`` the names
+            content will also be saved in the state dict.
 
         NOTE: The parameter IDs may look like indices but they are just IDs
         associating state with param_group. When loading from a state_dict,
@@ -667,18 +681,19 @@ class Optimizer:
                         'weight_decay': 0,
                         ...
                         'params': [0]
+                        'param_names' ['param0']  (optional)
                     },
                     {
                         'lr': 0.001,
                         'weight_decay': 0.5,
                         ...
                         'params': [1, 2, 3]
+                        'param_names': ['param1', 'layer.weight', 'layer.bias'] (optional)
                     }
                 ]
             }
 
         """
-
         for pre_hook in self._optimizer_state_dict_pre_hooks.values():
             pre_hook(self)
 
@@ -753,7 +768,7 @@ class Optimizer:
         self,
         hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
         prepend: bool = False,
-    ) -> RemovableHandle:
+    ) -> RemovableHandle:  # noqa: D205 D400
         r"""Register a load_state_dict pre-hook which will be called before
         :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
         following signature::
@@ -790,7 +805,7 @@ class Optimizer:
 
     def register_load_state_dict_post_hook(
         self, hook: Callable[["Optimizer"], None], prepend: bool = False
-    ) -> RemovableHandle:
+    ) -> RemovableHandle:  # noqa: D205 D400
         r"""Register a load_state_dict post-hook which will be called after
         :meth:`~torch.optim.Optimizer.load_state_dict` is called. It should have the
         following signature::
@@ -824,11 +839,22 @@ class Optimizer:
 
     @torch._disable_dynamo
     def load_state_dict(self, state_dict: StateDict) -> None:
-        r"""Loads the optimizer state.
+        r"""Load the optimizer state.
 
         Args:
             state_dict (dict): optimizer state. Should be an object returned
                 from a call to :meth:`state_dict`.
+
+        .. note::
+            The names of the parameters (if they exist under the "param_names" key of each param group
+            in :meth:`state_dict`) will not affect the loading process.
+            To use the parameters' names for custom cases (such as when the parameters in the loaded state dict
+            differ from those initialized in the optimizer),
+            a custom ``register_load_state_dict_pre_hook`` should be implemented to adapt the loaded dict
+            accordingly.
+            If ``param_names`` exist in loaded state dict ``param_groups`` they will be saved and override
+            the current names, if present, in the optimizer state. If they do not exist in loaded state dict,
+            the optimizer ``param_names`` will remain unchanged.
         """
         # shallow copy, to be consistent with module API
         state_dict = state_dict.copy()
@@ -900,6 +926,8 @@ class Optimizer:
             group: Dict[str, Any], new_group: Dict[str, Any]
         ) -> Dict[str, Any]:
             new_group["params"] = group["params"]
+            if "param_names" in group and "param_names" not in new_group:
+                new_group["param_names"] = group["param_names"]
             return new_group
 
         param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups)]
@@ -910,7 +938,7 @@ class Optimizer:
 
     @torch._disable_dynamo
     def zero_grad(self, set_to_none: bool = True) -> None:
-        r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
+        r"""Reset the gradients of all optimized :class:`torch.Tensor` s.
 
         Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
@@ -972,15 +1000,11 @@ class Optimizer:
         ...
 
     def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
-        r"""Performs a single optimization step (parameter update).
+        r"""Perform a single optimization step to update parameter.
 
         Args:
             closure (Callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
-
-        .. note::
-            Unless otherwise specified, this function should not modify the
-            ``.grad`` field of the parameters.
         """
         raise NotImplementedError
 
@@ -1008,6 +1032,25 @@ class Optimizer:
             )
         else:
             param_group["params"] = list(params)
+
+        extracted_param_tensors = []
+        extracted_param_names = []
+        for param in param_group["params"]:
+            if isinstance(param, tuple):
+                param_name = param[0]
+                extracted_param_names.append(param_name)
+                extracted_param_tensors.append(param[1])
+            else:
+                extracted_param_tensors.append(param)
+
+        param_group["params"] = extracted_param_tensors
+        if len(extracted_param_names) != 0:
+            if len(extracted_param_names) == len(extracted_param_tensors):
+                param_group["param_names"] = extracted_param_names
+            else:
+                raise ValueError(
+                    "all optimizer params should be with/without names. Some param names are missing"
+                )
 
         for param in param_group["params"]:
             if not isinstance(param, torch.Tensor):
@@ -1040,6 +1083,14 @@ class Optimizer:
         param_set: Set[torch.Tensor] = set()
         for group in self.param_groups:
             param_set.update(set(group["params"]))
+            if ("param_names" in param_group) != ("param_names" in group):
+                current_group_txt = (
+                    "with names" if "param_names" in param_group else "without names"
+                )
+                raise ValueError(
+                    "all optimizer param groups should be with/without names. "
+                    f"cannot add param group {current_group_txt} to the optimizer"
+                )
 
         if not param_set.isdisjoint(set(param_group["params"])):
             raise ValueError("some parameters appear in more than one parameter group")

@@ -24,8 +24,7 @@
 
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qadaptive_avg_pool2d_nhwc_stub);
 DEFINE_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub);
@@ -202,7 +201,7 @@ Tensor _adaptive_avg_pool(const Tensor& input,
         input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
 
     qadaptive_avg_pool3d_ndhwc_stub(
         input.device().type(),
@@ -292,7 +291,7 @@ Tensor qnnpack_adaptive_avg_pool2d(
       padding,
       ceil_mode,
       count_include_pad,
-      c10::nullopt);
+      std::nullopt);
 }
 
 bool enable_qnnpack_for_ada_avgpool(
@@ -352,5 +351,4 @@ Tensor adaptive_avg_pool3d_quantized_cpu(
   return at::native::adaptive_avg_pool3d_out_quantized_cpu(input, output_size, output);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

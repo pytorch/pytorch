@@ -121,7 +121,7 @@ struct CaptureList {
   }
 
   void captureTensor(const at::Tensor& tensor, bool is_output) {
-    var_captures_.emplace_back(Variable(tensor), is_output);
+    var_captures_.emplace_back(tensor, is_output);
   }
 
   void capture(const IValue& val, bool is_output) {
@@ -487,7 +487,6 @@ struct DifferentiableGraphOp {
       for (auto& tensor : lst) {
         tensor = detach(tensor);
       }
-      // NOLINTNEXTLINE(performance-move-const-arg)
       v = std::move(lst);
     }
   }

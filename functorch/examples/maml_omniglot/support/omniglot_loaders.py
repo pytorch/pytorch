@@ -169,9 +169,7 @@ class OmniglotNShot:
                 ),
             )
 
-            temp = (
-                {}
-            )  # {label:img1, img2..., 20 imgs, label2: img1, img2,... in total, 1623 label}
+            temp = {}  # {label:img1, img2..., 20 imgs, label2: img1, img2,... in total, 1623 label}
             for img, label in self.x:
                 if label in temp.keys():
                     temp[label].append(img)

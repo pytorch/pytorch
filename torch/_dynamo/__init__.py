@@ -1,4 +1,5 @@
 import torch
+
 from . import convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, lookup_backend, register_backend
 from .callback import callback_handler, on_compile_end, on_compile_start
@@ -16,6 +17,8 @@ from .decorators import (
     mark_static_address,
     maybe_mark_dynamic,
     run,
+    set_stance,
+    substitute_in_graph,
 )
 from .eval_frame import (
     _reset_guarded_backend_cache,
@@ -30,13 +33,20 @@ from .eval_frame import (
 )
 from .external_utils import is_compiling
 from .mutation_guard import GenerationTracker
+from .pgo import CODE_STATE
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
+
+
+# Register polyfill functions
+from .polyfills import loader as _  # usort: skip # noqa: F401
+
 
 __all__ = [
     "allow_in_graph",
     "assume_constant_result",
     "disallow_in_graph",
     "forbid_in_graph",
+    "substitute_in_graph",
     "graph_break",
     "mark_dynamic",
     "maybe_mark_dynamic",
@@ -49,6 +59,7 @@ __all__ = [
     "run",
     "replay",
     "disable",
+    "set_stance",
     "reset",
     "OptimizedModule",
     "is_compiling",
@@ -72,6 +83,7 @@ def reset() -> None:
     with convert_frame.compile_lock:
         reset_code_caches()
         convert_frame.input_codes.clear()
+        CODE_STATE.clear()
         convert_frame.output_codes.clear()
         orig_code_map.clear()
         guard_failures.clear()
@@ -84,11 +96,15 @@ def reset() -> None:
         convert_frame.FRAME_COMPILE_COUNTER.clear()
         callback_handler.clear()
         GenerationTracker.clear()
+        torch._dynamo.utils.warn_once_cache.clear()
+        torch._dynamo.utils.user_obj_id_to_weakref.clear()
+        torch._C._autograd._saved_tensors_hooks_set_tracing(False)
 
 
 def reset_code_caches() -> None:
     """Clear compile caches that are keyed by code objects"""
     with convert_frame.compile_lock:
+        CODE_STATE.clear()
         for weak_code in (
             convert_frame.input_codes.seen + convert_frame.output_codes.seen
         ):

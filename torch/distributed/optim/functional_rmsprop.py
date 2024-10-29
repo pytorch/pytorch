@@ -3,10 +3,11 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.optim._functional as F
-
 from torch import Tensor
 
+
 __all__: List[str] = []
+
 
 # Define a TorchScript compatible Functional RMSprop Optimizer
 # where we use these optimizer in a functional way.

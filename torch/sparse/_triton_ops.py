@@ -1,14 +1,21 @@
+# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
 import os
-import torch
 import weakref
 from functools import lru_cache
-from torch.utils._triton import has_triton
-from ._triton_ops_meta import get_meta
 from typing import Optional, Tuple
 
-TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(os.getenv('TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE', 2))
+import torch
+from torch._dynamo.utils import warn_once
+from torch.utils._triton import has_triton
+
+from ._triton_ops_meta import get_meta
+
+
+TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE = int(
+    os.getenv("TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE", 2)
+)
 
 
 def check(cond, msg):
@@ -34,11 +41,11 @@ def check_mm_compatible_shapes(f_name, lhs, rhs):
     check(
         lhs.dim() >= 2 and rhs.dim() >= 2,
         f"{f_name}(): all inputs involved in the matrix product are expected to be at least 2D, "
-        f"but got lhs.dim() == {lhs.dim()} and rhs.dim() == {rhs.dim()}."
+        f"but got lhs.dim() == {lhs.dim()} and rhs.dim() == {rhs.dim()}.",
     )
 
-    m, kl = lhs.shape[-2:]
-    kr, n = rhs.shape[-2:]
+    _m, kl = lhs.shape[-2:]
+    kr, _n = rhs.shape[-2:]
 
     check(
         kl == kr,
@@ -50,7 +57,8 @@ def check_mm_compatible_shapes(f_name, lhs, rhs):
 def check_dtype(f_name, t, dtype, *additional_dtypes):
     check(
         t.dtype == dtype
-        and t.dtype in ((torch.half, torch.bfloat16, torch.float) + tuple(*additional_dtypes)),
+        and t.dtype
+        in ((torch.half, torch.bfloat16, torch.float) + tuple(*additional_dtypes)),
         f"{f_name}(): all inputs are expected to be of the same dtype "
         f"and one of (half, bfloat16, float32) or {additional_dtypes}, "
         f"but got dtype == {t.dtype}.",
@@ -81,14 +89,14 @@ def make_triton_contiguous(t):
     """Return input as a triton-contiguous tensor.
 
     A triton-contiguous tensor is defined as a tensor that has strides
-    with minimal value equal to 1.
+    with minimal value smaller than or equal to 1.
 
     While triton kernels support triton-non-contiguous tensors (all
-    strides being greater than 1 or having 0 strides) arguments, a
-    considerable slow-down occurs because tensor data is copied
-    element-wise rather than chunk-wise.
+    strides being greater than 1) arguments, a considerable slow-down
+    occurs because tensor data is copied element-wise rather than
+    chunk-wise. Zero strides is assumed to not have this defect.
     """
-    if min(t.stride()) != 1:
+    if min(t.stride()) > 1:
         # TODO: investigate if contiguity along other axes than the
         # last one can be beneficial for performance
         return t.contiguous()
@@ -140,7 +148,9 @@ def grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
             yield next(multidim_slicer(t_dims, slices, t))
 
     for grid_point in itertools.product(*generate_grid_points()):
-        grid = [min(fg - gp, mg) for fg, gp, mg in zip(full_grid, grid_point, grid_blocks)]
+        grid = [
+            min(fg - gp, mg) for fg, gp, mg in zip(full_grid, grid_point, grid_blocks)
+        ]
         slices = [slice(gp, gp + g) for gp, g in zip(grid_point, grid)]
         # grid_points are iterated in a "contiguous" order, i.e.
         # left dimensions traversed slower than right dimensions.
@@ -166,7 +176,9 @@ def launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks=None):
             valid_grid_dim(g, mg) for g, mg in zip(grid_blocks, cuda_max_grid)
         )  # type: ignore[assignment]
 
-    for grid, *sliced_tensors in grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
+    for grid, *sliced_tensors in grid_partitioner(
+        full_grid, grid_blocks, tensor_dims_map
+    ):
         kernel(grid, *sliced_tensors)
 
 
@@ -178,7 +190,9 @@ def prepare_inputs(bsr, *dense_tensors):
     tensors = [make_triton_contiguous(t.unsqueeze(0)) for t in dense_tensors]
 
     # Compute broadcasted batch dimension
-    batch_dims_broadcasted = torch.broadcast_shapes(values.shape[:-3], *(t.shape[:-2] for t in tensors))
+    batch_dims_broadcasted = torch.broadcast_shapes(
+        values.shape[:-3], *(t.shape[:-2] for t in tensors)
+    )
 
     # Broadcast batch dimensions and squash.
     # The result can be either a view or a copy.
@@ -191,14 +205,13 @@ def prepare_inputs(bsr, *dense_tensors):
         crow_indices, batch_dims_broadcasted, (-1,)
     )
 
-    col_indices = batch_broadcast_and_squash(
-        col_indices, batch_dims_broadcasted, (-1,)
-    )
+    col_indices = batch_broadcast_and_squash(col_indices, batch_dims_broadcasted, (-1,))
     values = batch_broadcast_and_squash(
         values, batch_dims_broadcasted, values.shape[-3:]
     )
     tensors = [
-        batch_broadcast_and_squash(t, batch_dims_broadcasted, t.shape[-2:]) for t in tensors
+        batch_broadcast_and_squash(t, batch_dims_broadcasted, t.shape[-2:])
+        for t in tensors
     ]
 
     return crow_indices, col_indices, values, *tensors
@@ -211,7 +224,9 @@ def broadcast_batch_dims_bsr(f_name, bsr, *tensors):
     col_indices = bsr.col_indices().broadcast_to(batch_shape + (-1,))
     values = bsr.values().broadcast_to(batch_shape + bsr.values().shape[-3:])
     size = batch_shape + bsr.shape[-2:]
-    return torch.sparse_compressed_tensor(crow_indices, col_indices, values, size=size, layout=bsr.layout)
+    return torch.sparse_compressed_tensor(
+        crow_indices, col_indices, values, size=size, layout=bsr.layout
+    )
 
 
 # NOTE: this function will ALWAYS create a view
@@ -345,18 +360,20 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
     indices_format = indices_data[0]
 
     assert blocks.ndim == 3
-    P, Ms, Ks = blocks.shape
+    _P, Ms, Ks = blocks.shape
 
-    if indices_format == 'scatter_mm':
+    if indices_format == "scatter_mm":
         c_offsets, pq = indices_data[1:]
 
         assert others.ndim == 3
-        Q, Ks_, Ns = others.shape
+        _Q, Ks_, Ns = others.shape
         assert Ks == Ks_
 
         if accumulators is None:
             R = c_offsets.shape[0] - 1
-            accumulators = torch.zeros((R, Ms, Ns), dtype=blocks.dtype, device=blocks.device)
+            accumulators = torch.zeros(
+                (R, Ms, Ns), dtype=blocks.dtype, device=blocks.device
+            )
         else:
             R, Ms_, Ns_ = accumulators.shape
             assert Ms_ == Ms
@@ -373,7 +390,7 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
             _scatter_mm2(blocks, others, c_offsets, pq, accumulators)
         return accumulators
 
-    elif indices_format == 'bsr_strided_mm':
+    elif indices_format == "bsr_strided_mm":
         others_shape = others.shape
         others = as1Dbatch(others)
 
@@ -381,11 +398,13 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
         assert K % Ks == 0
 
         c_indices, r_offsets, p_offsets, q_offsets, meta = indices_data[1:]
-        SPLIT_N = meta['SPLIT_N']
+        SPLIT_N = meta["SPLIT_N"]
 
         if accumulators is None:
             M = Ms + (r_offsets.max().item() + 1) // N
-            accumulators = torch.zeros((*others_shape[:-2], M, N), dtype=blocks.dtype, device=blocks.device)
+            accumulators = torch.zeros(
+                (*others_shape[:-2], M, N), dtype=blocks.dtype, device=blocks.device
+            )
         else:
             M, N_ = accumulators.shape[-2:]
             assert N_ == N
@@ -403,16 +422,25 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
                     g0 = c_indices[r].item()
                     g1 = c_indices[r + 1].item()
                     r0, r1 = divmod(r_, N)
-                    acc = accumulators[b, r0:r0 + Ms, r1:r1 + Ns]
+                    acc = accumulators[b, r0 : r0 + Ms, r1 : r1 + Ns]
                     for g in range(g0, g1):
                         p, q = p_offsets[g], q_offsets[g]
                         q0, q1 = divmod(q.item(), N)
-                        acc += blocks[p] @ others[b, q0:q0 + Ks, q1:q1 + Ns]
+                        acc += blocks[p] @ others[b, q0 : q0 + Ks, q1 : q1 + Ns]
         else:
-            _scatter_mm6(blocks, others, c_indices, r_offsets, p_offsets, q_offsets, meta, accumulators)
+            _scatter_mm6(
+                blocks,
+                others,
+                c_indices,
+                r_offsets,
+                p_offsets,
+                q_offsets,
+                meta,
+                accumulators,
+            )
         return accumulators.view(accumulators_shape)
 
-    elif indices_format == 'bsr_strided_mm_compressed':
+    elif indices_format == "bsr_strided_mm_compressed":
         others_shape = others.shape
         others = as1Dbatch(others)
 
@@ -420,11 +448,13 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
         assert K % Ks == 0
 
         c_indices, r_offsets, q_offsets, meta = indices_data[1:]
-        SPLIT_N = meta['SPLIT_N']
+        SPLIT_N = meta["SPLIT_N"]
 
         if accumulators is None:
             M = Ms + (r_offsets.max().item() + 1) // N
-            accumulators = torch.zeros((*others_shape[:-2], M, N), dtype=blocks.dtype, device=blocks.device)
+            accumulators = torch.zeros(
+                (*others_shape[:-2], M, N), dtype=blocks.dtype, device=blocks.device
+            )
         else:
             M, N_ = accumulators.shape[-2:]
             assert N_ == N
@@ -442,26 +472,53 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
                     n = r1 // Ns
                     c0 = c_indices[m].item()
                     c1 = c_indices[m + 1].item()
-                    acc = accumulators[b, r0:r0 + Ms, r1:r1 + Ns]
+                    acc = accumulators[b, r0 : r0 + Ms, r1 : r1 + Ns]
                     for i, p in enumerate(range(c0, c1)):
                         q = q_offsets[n * c1 + (SPLIT_N - n) * c0 + i].item()
                         q0, q1 = divmod(q, N)
-                        acc += blocks[p] @ others[b, q0:q0 + Ks, q1:q1 + Ns]
+                        acc += blocks[p] @ others[b, q0 : q0 + Ks, q1 : q1 + Ns]
         else:
-            p_offsets = torch.empty((0, ), dtype=q_offsets.dtype, device=q_offsets.device)
-            _scatter_mm6(blocks, others, c_indices, r_offsets, p_offsets, q_offsets, meta, accumulators)
+            p_offsets = torch.empty(
+                (0,), dtype=q_offsets.dtype, device=q_offsets.device
+            )
+            _scatter_mm6(
+                blocks,
+                others,
+                c_indices,
+                r_offsets,
+                p_offsets,
+                q_offsets,
+                meta,
+                accumulators,
+            )
         return accumulators.view(accumulators_shape)
 
     else:
         raise NotImplementedError(indices_format)
 
 
-def scatter_mm_meta(M, K, N, Ms, Ks,
-                    GROUP_SIZE=None, TILE_M=None, TILE_N=None, SPLIT_N=None, num_warps=None, num_stages=None, **extra):
+def scatter_mm_meta(
+    M,
+    K,
+    N,
+    Ms,
+    Ks,
+    GROUP_SIZE=None,
+    TILE_M=None,
+    TILE_N=None,
+    SPLIT_N=None,
+    num_warps=None,
+    num_stages=None,
+    **extra,
+):
     if {TILE_M, TILE_N, SPLIT_N, num_warps, num_stages, GROUP_SIZE} == {None}:
         device_name = torch.cuda.get_device_name()
-        meta = get_meta('scatter_mm', (M, K, N, Ms, Ks), device_name,
-                        version=(0, torch.float16, 0.5))
+        meta = get_meta(
+            "scatter_mm",
+            (M, K, N, Ms, Ks),
+            device_name,
+            version=(0, torch.float16, 0.5),
+        )
         if meta is not None:
             meta.update(**extra)
             return meta
@@ -473,51 +530,156 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
         # parameters are likely different from what specified below.
         if (M, K, N) == (256,) * 3:
             if (Ms, Ks) == (16, 16):
-                SPLIT_N=1;TILE_M=16;TILE_N=16;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 1
+                TILE_M = 16
+                TILE_N = 16
+                GROUP_SIZE = 4
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
-                SPLIT_N=2;TILE_M=32;TILE_N=16;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 2
+                TILE_M = 32
+                TILE_N = 16
+                GROUP_SIZE = 4
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
-                SPLIT_N=1;TILE_M=32;TILE_N=32;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 1
+                TILE_M = 32
+                TILE_N = 32
+                GROUP_SIZE = 4
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
-                SPLIT_N=1;TILE_M=32;TILE_N=32;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 1
+                TILE_M = 32
+                TILE_N = 32
+                GROUP_SIZE = 2
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
         elif (M, K, N) == (512,) * 3:
             if (Ms, Ks) == (16, 16):
-                SPLIT_N=8;TILE_M=16;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+                SPLIT_N = 8
+                TILE_M = 16
+                TILE_N = 64
+                GROUP_SIZE = 2
+                num_stages = 1
+                num_warps = 2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
-                SPLIT_N=8;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+                SPLIT_N = 8
+                TILE_M = 32
+                TILE_N = 64
+                GROUP_SIZE = 4
+                num_stages = 1
+                num_warps = 2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
-                SPLIT_N=4;TILE_M=32;TILE_N=128;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 4
+                TILE_M = 32
+                TILE_N = 128
+                GROUP_SIZE = 4
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
-                SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 8
+                TILE_M = 64
+                TILE_N = 64
+                GROUP_SIZE = 4
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
         elif (M, K, N) == (1024,) * 3:
             if (Ms, Ks) == (16, 16):
-                SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+                SPLIT_N = 4
+                TILE_M = 16
+                TILE_N = 128
+                GROUP_SIZE = 2
+                num_stages = 1
+                num_warps = 1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
-                SPLIT_N=8;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+                SPLIT_N = 8
+                TILE_M = 32
+                TILE_N = 64
+                GROUP_SIZE = 2
+                num_stages = 1
+                num_warps = 1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
-                SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+                SPLIT_N = 16
+                TILE_M = 64
+                TILE_N = 64
+                GROUP_SIZE = 4
+                num_stages = 1
+                num_warps = 2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
-                SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 16
+                TILE_M = 64
+                TILE_N = 64
+                GROUP_SIZE = 4
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (256, 256):
-                SPLIT_N=16;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 16
+                TILE_M = 64
+                TILE_N = 64
+                GROUP_SIZE = 2
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
         elif (M, K, N) == (2048,) * 3:
             if (Ms, Ks) == (16, 16):
-                SPLIT_N=4;TILE_M=16;TILE_N=128;GROUP_SIZE=8;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+                SPLIT_N = 4
+                TILE_M = 16
+                TILE_N = 128
+                GROUP_SIZE = 8
+                num_stages = 1
+                num_warps = 1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
-                SPLIT_N=4;TILE_M=32;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+                SPLIT_N = 4
+                TILE_M = 32
+                TILE_N = 64
+                GROUP_SIZE = 4
+                num_stages = 1
+                num_warps = 1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
-                SPLIT_N=4;TILE_M=64;TILE_N=128;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 4
+                TILE_M = 64
+                TILE_N = 128
+                GROUP_SIZE = 4
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (128, 128):
-                SPLIT_N=8;TILE_M=64;TILE_N=64;GROUP_SIZE=4;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 8
+                TILE_M = 64
+                TILE_N = 64
+                GROUP_SIZE = 4
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
             elif (Ms, Ks) == (256, 256):
-                SPLIT_N=4;TILE_M=64;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 4
+                TILE_M = 64
+                TILE_N = 64
+                GROUP_SIZE = 2
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
         elif (M, K, N) == (4096,) * 3:
             if (Ms, Ks) == (16, 16):
-                SPLIT_N=2;TILE_M=16;TILE_N=256;GROUP_SIZE=2;num_stages=1;num_warps=2  # noqa: E225,E231,E702
+                SPLIT_N = 2
+                TILE_M = 16
+                TILE_N = 256
+                GROUP_SIZE = 2
+                num_stages = 1
+                num_warps = 2  # noqa: E225,E231,E702
             elif (Ms, Ks) == (32, 32):
-                SPLIT_N=2;TILE_M=32;TILE_N=64;GROUP_SIZE=2;num_stages=1;num_warps=1  # noqa: E225,E231,E702
+                SPLIT_N = 2
+                TILE_M = 32
+                TILE_N = 64
+                GROUP_SIZE = 2
+                num_stages = 1
+                num_warps = 1  # noqa: E225,E231,E702
             elif (Ms, Ks) == (64, 64):
-                SPLIT_N=2;TILE_M=64;TILE_N=128;GROUP_SIZE=2;num_stages=1;num_warps=4  # noqa: E225,E231,E702
+                SPLIT_N = 2
+                TILE_M = 64
+                TILE_N = 128
+                GROUP_SIZE = 2
+                num_stages = 1
+                num_warps = 4  # noqa: E225,E231,E702
 
     if SPLIT_N is None:
         # Assume NVIDIA GeForce RTX 2060 SUPER:
@@ -526,7 +688,17 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
         # performance when using an optimal value.  Otherwise, when N
         # <= 512, using the following heuristics may give upto 15%
         # lower performance.
-        SPLIT_N = {16: 1, 32: 2, 64: 4, 128: 8, 256: 16, 512: 8, 1024: 16, 4096: 32, 8192: 64}.get(N, 16)
+        SPLIT_N = {
+            16: 1,
+            32: 2,
+            64: 4,
+            128: 8,
+            256: 16,
+            512: 8,
+            1024: 16,
+            4096: 32,
+            8192: 64,
+        }.get(N, 16)
         if Ms >= 512 and N >= 2048:
             SPLIT_N = 1
     Ns = N // SPLIT_N
@@ -552,42 +724,114 @@ def scatter_mm_meta(M, K, N, Ms, Ks,
     assert Ns <= N, dict(N=N, Ns=Ns)
     assert Ks <= K, dict(K=K, Ks=Ks)
 
-    return dict(TILE_M=TILE_M, TILE_N=TILE_N, GROUP_SIZE=GROUP_SIZE,
-                num_stages=num_stages, num_warps=num_warps, SPLIT_N=SPLIT_N, **extra)
+    return dict(
+        TILE_M=TILE_M,
+        TILE_N=TILE_N,
+        GROUP_SIZE=GROUP_SIZE,
+        num_stages=num_stages,
+        num_warps=num_warps,
+        SPLIT_N=SPLIT_N,
+        **extra,
+    )
 
 
-def bsr_dense_addmm_meta(M, K, N, Ms, Ks, beta, alpha,
-                         SPLIT_N=None, GROUP_SIZE_ROW=None, num_warps=None, num_stages=None, sparsity=None, dtype=None, **extra):
+def bsr_dense_addmm_meta(
+    M,
+    K,
+    N,
+    Ms,
+    Ks,
+    beta,
+    alpha,
+    SPLIT_N=None,
+    GROUP_SIZE_ROW=None,
+    num_warps=None,
+    num_stages=None,
+    sparsity=None,
+    dtype=None,
+    out_dtype=None,
+    _version=0,
+    **extra,
+):
+    # Specifying _version is useful for situations when one wants to
+    # discard existing triton kernel tuning results, say, in testing
+    # bsr_dense_addmm_meta functionality.
     if dtype is None:
         dtype = torch.float16
+    if out_dtype is None:
+        out_dtype = dtype
     if sparsity is None:
         sparsity = 0.5
     if {SPLIT_N, num_warps, num_stages, GROUP_SIZE_ROW} == {None}:
         device_name = torch.cuda.get_device_name()
         key = (M, K, N, Ms, Ks, beta == 0, beta == 1, alpha == 1)
-        meta = get_meta('bsr_dense_addmm', key,
-                        device_name, version=(0, dtype, sparsity))
+        if dtype is out_dtype:
+            version_dtype = dtype
+        else:
+            version_dtype = dtype, out_dtype
+        meta = get_meta(
+            "bsr_dense_addmm",
+            key,
+            device_name,
+            version=(_version, version_dtype, sparsity),
+        )
         if meta is None and sparsity != 0.5:
-            meta = get_meta('bsr_dense_addmm', key,
-                            device_name, version=(0, dtype, 0.5))
-            if meta is None:
-                # find approximate meta such that N % SPLIT_N == 0.
+            meta = get_meta(
+                "bsr_dense_addmm",
+                key,
+                device_name,
+                version=(_version, version_dtype, 0.5),
+            )
+        if meta is None and dtype is not out_dtype:
+            meta = get_meta(
+                "bsr_dense_addmm", key, device_name, version=(_version, dtype, 0.5)
+            )
+        if meta is None:
+            # find approximate meta such that N % SPLIT_N == 0.
+            matching_meta = get_meta(
+                "bsr_dense_addmm",
+                (*key[:2], "*", *key[3:]),
+                device_name,
+                version=(_version, version_dtype, 0.5),
+            )
+            if matching_meta is None and dtype is not out_dtype:
                 matching_meta = get_meta(
-                    'bsr_dense_addmm',
-                    (*key[:2], '*', *key[3:]),
-                    device_name, version=(0, dtype, 0.5))
-                for mkey in sorted(matching_meta or {}):
-                    meta_ = matching_meta[mkey]
-                    if N % meta_['SPLIT_N'] == 0 and mkey[2] <= N:
-                        meta = meta_
+                    "bsr_dense_addmm",
+                    (*key[:2], "*", *key[3:]),
+                    device_name,
+                    version=(_version, dtype, 0.5),
+                )
+            for mkey in sorted(matching_meta or {}):
+                meta_ = matching_meta[mkey]
+                n = mkey[2]
+                split_n = meta_["SPLIT_N"]
+                c = n // split_n
+                if N % c == 0 and n <= N:
+                    meta = dict(meta_)
+                    meta["SPLIT_N"] = N // c
         if meta is not None:
             meta.update(**extra)
             return meta
+        else:
+            # see [Computing optimal kernel parameters] in
+            # _triton_ops_meta.py for ways to avoid this warning
+            # message
+            warn_once(
+                "bsr_dense_addmm uses non-optimal triton kernel parameters"
+                f" for {M=} {K=} {N=} {Ms=}, {Ks=} {beta=} {alpha=} {dtype=} {out_dtype=}"
+            )
+
     SPLIT_N = SPLIT_N or max(N // Ms, 1)
     GROUP_SIZE_ROW = GROUP_SIZE_ROW or 4
     num_stages = num_stages or 1
     num_warps = num_warps or 4
-    return dict(SPLIT_N=SPLIT_N, GROUP_SIZE_ROW=GROUP_SIZE_ROW, num_stages=num_stages, num_warps=num_warps, **extra)
+    return dict(
+        SPLIT_N=SPLIT_N,
+        GROUP_SIZE_ROW=GROUP_SIZE_ROW,
+        num_stages=num_stages,
+        num_warps=num_warps,
+        **extra,
+    )
 
 
 class TensorAsKey:
@@ -614,7 +858,6 @@ class TensorAsKey:
     """
 
     def __init__(self, obj):
-
         def get_tensor_key(obj):
             # Warning: TensorAsKey does not track negative nor
             # conjugate bits of its input object because in the use
@@ -626,15 +869,27 @@ class TensorAsKey:
             # and is_conj methods) must be included in the key as
             # well.
             assert not (obj.dtype.is_floating_point or obj.dtype.is_complex), obj.dtype
-            return (obj.data_ptr(), obj.storage_offset(), obj.shape, obj.stride(), obj.dtype)
+            return (
+                obj.data_ptr(),
+                obj.storage_offset(),
+                obj.shape,
+                obj.stride(),
+                obj.dtype,
+            )
 
         self._obj_ref = weakref.ref(obj)
         if obj.layout is torch.strided:
             self.key = get_tensor_key(obj)
         elif obj.layout in {torch.sparse_csr, torch.sparse_bsr}:
-            self.key = (get_tensor_key(obj.crow_indices()), get_tensor_key(obj.col_indices()))
+            self.key = (
+                get_tensor_key(obj.crow_indices()),
+                get_tensor_key(obj.col_indices()),
+            )
         elif obj.layout in {torch.sparse_csc, torch.sparse_bsc}:
-            self.key = (get_tensor_key(obj.ccol_indices()), get_tensor_key(obj.row_indices()))
+            self.key = (
+                get_tensor_key(obj.ccol_indices()),
+                get_tensor_key(obj.row_indices()),
+            )
         else:
             raise NotImplementedError(obj.layout)
         self._hash = hash(self.key)
@@ -658,14 +913,16 @@ class TensorAsKey:
 
 
 @lru_cache(maxsize=TORCH_SPARSE_BSR_SCATTER_MM_LRU_CACHE_SIZE)
-def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, compressed_sparse_tensor_as_key):
+def _bsr_scatter_mm_indices_data(
+    indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, compressed_sparse_tensor_as_key
+):
     bsr = compressed_sparse_tensor_as_key.obj
     assert bsr is not None
     crow_indices, col_indices = bsr.crow_indices(), bsr.col_indices()
     device = crow_indices.device
     indices_dtype = torch.int32
 
-    if indices_format == 'bsr_strided_mm_compressed':
+    if indices_format == "bsr_strided_mm_compressed":
         Ns = N // SPLIT_N
         q_offsets_lst = []
         b = torch.arange(SPLIT_N, dtype=indices_dtype, device=device) * Ns
@@ -674,7 +931,10 @@ def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLI
             r1 = crow_indices[m + 1].item()
             if r1 == r0:
                 continue
-            q_offsets_lst.append((col_indices[r0:r1] * (Ks * N)).repeat(SPLIT_N) + b.repeat_interleave(r1 - r0))
+            q_offsets_lst.append(
+                (col_indices[r0:r1] * (Ks * N)).repeat(SPLIT_N)
+                + b.repeat_interleave(r1 - r0)
+            )
         q_offsets = torch.cat(q_offsets_lst)
         crow_indices_diff = crow_indices.diff()
         non_zero_row_indices = crow_indices_diff.nonzero()
@@ -687,7 +947,7 @@ def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLI
         r_offsets = r_offsets[indices]
         return (indices_format, c_indices, r_offsets, q_offsets)
 
-    elif indices_format == 'bsr_strided_mm':
+    elif indices_format == "bsr_strided_mm":
         Ns = N // SPLIT_N
         p_offsets_lst = []
         q_offsets_lst = []
@@ -697,19 +957,31 @@ def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLI
             r1 = crow_indices[m + 1].item()
             if r1 == r0:
                 continue
-            p_offsets_lst.append(torch.arange(r0, r1, dtype=indices_dtype, device=device).repeat(SPLIT_N))
-            q_offsets_lst.append((col_indices[r0:r1] * (Ks * N)).repeat(SPLIT_N) + b.repeat_interleave(r1 - r0))
+            p_offsets_lst.append(
+                torch.arange(r0, r1, dtype=indices_dtype, device=device).repeat(SPLIT_N)
+            )
+            q_offsets_lst.append(
+                (col_indices[r0:r1] * (Ks * N)).repeat(SPLIT_N)
+                + b.repeat_interleave(r1 - r0)
+            )
         q_offsets = torch.cat(q_offsets_lst)
         crow_indices_diff = crow_indices.diff()
         non_zero_row_indices = crow_indices_diff.nonzero()
         a = non_zero_row_indices * (Ms * N)
         r_offsets = (a + b).view(-1)
-        c_indices = torch.cat((crow_indices[:1],
-                               torch.cumsum(crow_indices_diff[non_zero_row_indices].repeat_interleave(SPLIT_N), 0)))
+        c_indices = torch.cat(
+            (
+                crow_indices[:1],
+                torch.cumsum(
+                    crow_indices_diff[non_zero_row_indices].repeat_interleave(SPLIT_N),
+                    0,
+                ),
+            )
+        )
         p_offsets = torch.cat(p_offsets_lst)
         return (indices_format, c_indices, r_offsets, p_offsets, q_offsets)
 
-    elif indices_format == 'scatter_mm':
+    elif indices_format == "scatter_mm":
         Ns = Ms
         c_indices = [0]
         pq_offsets = []
@@ -725,22 +997,26 @@ def _bsr_scatter_mm_indices_data(indices_format, M, K, N, Ms, Ks, nbatches, SPLI
                         q = (col_indices[p].item() + b * (K // Ks)) * (N // Ns) + n
                         pq_offsets.append([p, q])
 
-        return (indices_format,
-                torch.tensor(c_indices, dtype=indices_dtype, device=device),
-                torch.tensor(pq_offsets, dtype=indices_dtype, device=device))
+        return (
+            indices_format,
+            torch.tensor(c_indices, dtype=indices_dtype, device=device),
+            torch.tensor(pq_offsets, dtype=indices_dtype, device=device),
+        )
 
     else:
-        raise ValueError(f'Invalid {indices_format=}. Expected bsr_strided_mm_compressed|bsr_strided_mm|scatter_mm')
+        raise ValueError(
+            f"Invalid {indices_format=}. Expected bsr_strided_mm_compressed|bsr_strided_mm|scatter_mm"
+        )
 
 
-def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compressed', **meta_input):
+def bsr_scatter_mm_indices_data(
+    bsr, other, indices_format="bsr_strided_mm_compressed", **meta_input
+):
     """Computes indices data for :func:`scatter_mm` used in BSR and
     strided tensor matrix multiplication.
     """
     assert bsr.dense_dim() == 0
     assert bsr.ndim == 2  # no batch dims
-    crow_indices = bsr.crow_indices()
-    col_indices = bsr.col_indices()
     blocksize = bsr.values().shape[-2:]
     M, K = bsr.shape
     Ms, Ks = blocksize
@@ -749,16 +1025,17 @@ def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compr
     nbatches = other.shape[:-2].numel()
 
     meta = scatter_mm_meta(M, K, N, Ms, Ks, **meta_input)
-    if 'allow_tf32' not in meta_input:
+    if "allow_tf32" not in meta_input:
         meta.update(allow_tf32=bsr.dtype in {torch.float16, torch.bfloat16})
-    SPLIT_N = meta['SPLIT_N']
+    SPLIT_N = meta["SPLIT_N"]
     indices_data = _bsr_scatter_mm_indices_data(
-        indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, TensorAsKey(bsr))
+        indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, TensorAsKey(bsr)
+    )
 
-    if indices_format == 'bsr_strided_mm_compressed':
+    if indices_format == "bsr_strided_mm_compressed":
         meta.update(is_compressed=True)
         return indices_data + (meta,)
-    elif indices_format == 'bsr_strided_mm':
+    elif indices_format == "bsr_strided_mm":
         meta.update(is_compressed=False)
         return indices_data + (meta,)
     else:
@@ -766,8 +1043,7 @@ def bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compr
 
 
 def bsr_scatter_mm(bsr, other, indices_data=None, out=None):
-    """BSR @ strided -> strided
-    """
+    """BSR @ strided -> strided"""
 
     assert bsr.ndim == 2
     assert other.ndim >= 2
@@ -776,66 +1052,143 @@ def bsr_scatter_mm(bsr, other, indices_data=None, out=None):
     blocksize = bsr.values().shape[-2:]
 
     if indices_data is None:
-        indices_data = bsr_scatter_mm_indices_data(bsr, other, indices_format='bsr_strided_mm_compressed')
+        indices_data = bsr_scatter_mm_indices_data(
+            bsr, other, indices_format="bsr_strided_mm_compressed"
+        )
 
     indices_format = indices_data[0]
 
     if out is None:
-        out = torch.empty((*other.shape[:-2], Ms, Ns), dtype=bsr.dtype, device=bsr.device)
+        out = torch.empty(
+            (*other.shape[:-2], Ms, Ns), dtype=bsr.dtype, device=bsr.device
+        )
     out_shape = out.shape
     out = as1Dbatch(out)
 
     if bsr._nnz() == 0:
         out.zero_()
-    elif indices_format in {'bsr_strided_mm_compressed', 'bsr_strided_mm'}:
+    elif indices_format in {"bsr_strided_mm_compressed", "bsr_strided_mm"}:
         out.zero_()
         scatter_mm(bsr.values(), other, indices_data, accumulators=out)
-    elif indices_format == 'scatter_mm':
+    elif indices_format == "scatter_mm":
         nbatches = other.shape[:-2].numel()
-        accumulators = torch.zeros((nbatches * Ms // blocksize[0] * Ns // blocksize[0], blocksize[0], blocksize[0]),
-                                   dtype=bsr.dtype, device=bsr.device)
-        others = (as1Dbatch(other)
-                  .transpose(-2, -1)
-                  .view(nbatches, Ns // blocksize[0], blocksize[0], Ks // blocksize[1], blocksize[1])
-                  .movedim((3, 1, 4, 2), (1, 2, 3, 4))  # equivalent to .transpose(-3, -2).transpose(-2, -1).transpose(-4, -3)
-                  .flatten(0, 2)
-                  )
+        accumulators = torch.zeros(
+            (
+                nbatches * Ms // blocksize[0] * Ns // blocksize[0],
+                blocksize[0],
+                blocksize[0],
+            ),
+            dtype=bsr.dtype,
+            device=bsr.device,
+        )
+        others = (
+            as1Dbatch(other)
+            .transpose(-2, -1)
+            .view(
+                nbatches,
+                Ns // blocksize[0],
+                blocksize[0],
+                Ks // blocksize[1],
+                blocksize[1],
+            )
+            .movedim(
+                (3, 1, 4, 2), (1, 2, 3, 4)
+            )  # equivalent to .transpose(-3, -2).transpose(-2, -1).transpose(-4, -3)
+            .flatten(0, 2)
+        )
         scatter_mm(bsr.values(), others, indices_data, accumulators=accumulators)
-        out.copy_(accumulators
-                  .unflatten(0, (nbatches, Ms // blocksize[0], Ns // blocksize[0]))
-                  .movedim((1, 2, 3, 4), (3, 1, 4, 2))  # equivalent to .transpose(-4, -3).transpose(-2, -1).transpose(-3, -2)
-                  .reshape(nbatches, Ns, Ms)
-                  .transpose(-2, -1))
+        out.copy_(
+            accumulators.unflatten(
+                0, (nbatches, Ms // blocksize[0], Ns // blocksize[0])
+            )
+            .movedim(
+                (1, 2, 3, 4), (3, 1, 4, 2)
+            )  # equivalent to .transpose(-4, -3).transpose(-2, -1).transpose(-3, -2)
+            .reshape(nbatches, Ns, Ms)
+            .transpose(-2, -1)
+        )
     else:
         raise NotImplementedError(indices_format)
 
     return out.view(out_shape)
 
 
+def _int_bsr_dense_addmm(
+    input: torch.Tensor,
+    bsr: torch.Tensor,
+    dense: torch.Tensor,
+    *,
+    beta=1,
+    alpha=1,
+    left_alpha: Optional[torch.Tensor] = None,
+    right_alpha: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+    skip_checks: bool = False,
+    max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+    meta: Optional[dict] = None,
+):
+    if out is None and dense.dtype is torch.int8:
+        f_name = "_int_bsr_dense_addmm"
+        crow_indices = bsr.crow_indices()
+        batch_ndim = crow_indices.dim() - 1
+        M = bsr.shape[batch_ndim]
+        N = dense.shape[-1]
+        original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
+        out = torch.empty(
+            original_batch_dims_broadcasted + (M, N),
+            dtype=torch.int32,
+            device=dense.device,
+        )
+    return bsr_dense_addmm(
+        input,
+        bsr,
+        dense,
+        beta=beta,
+        alpha=alpha,
+        left_alpha=left_alpha,
+        right_alpha=right_alpha,
+        out=out,
+        skip_checks=skip_checks,
+        max_grid=max_grid,
+        meta=meta,
+    )
+
+
 def bsr_dense_addmm(
-        input: torch.Tensor,
-        bsr: torch.Tensor,
-        dense: torch.Tensor,
-        *,
-        beta=1,
-        alpha=1,
-        out: Optional[torch.Tensor] = None,
-        skip_checks: bool = False,
-        max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
-        meta: Optional[dict] = None):
-    f_name = 'bsr_dense_addmm'
+    input: torch.Tensor,
+    bsr: torch.Tensor,
+    dense: torch.Tensor,
+    *,
+    beta=1,
+    alpha=1,
+    left_alpha: Optional[torch.Tensor] = None,
+    right_alpha: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
+    skip_checks: bool = False,
+    max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
+    meta: Optional[dict] = None,
+):
+    """Compute
+
+      out = beta * input + left_alpha.reshape(-1, 1) * (alpha * (bsr @ dense)) * right_alpha.reshape(1, -1)
+
+    where left_alpha, right_alpha are (* + 1)-D tensors when
+    specified, otherwise, these are treated as tensors filled with
+    ones.
+    """
+    f_name = "bsr_dense_addmm"
     values = bsr.values()
     crow_indices = bsr.crow_indices()
     col_indices = bsr.col_indices()
     batch_ndim = crow_indices.dim() - 1
-    M, K = bsr.shape[batch_ndim:batch_ndim + 2]
-    blocksize = values.shape[batch_ndim + 1:batch_ndim + 3]
+    M, K = bsr.shape[batch_ndim : batch_ndim + 2]
+    blocksize = values.shape[batch_ndim + 1 : batch_ndim + 3]
     N = dense.shape[-1]
 
     # todo: implement checks
 
+    original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
     if out is None:
-        original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
         out = dense.new_empty(original_batch_dims_broadcasted + (M, N))
 
     if bsr._nnz() == 0 or alpha == 0 or N == 0 or M == 0 or K == 0:
@@ -847,26 +1200,77 @@ def bsr_dense_addmm(
                 out.mul_(beta)
         return out
 
+    left_alpha_is_one = False
+    right_alpha_is_one = False
+    if left_alpha is None:
+        left_alpha_is_one = True
+        left_alpha = dense.new_empty(()).expand(
+            *original_batch_dims_broadcasted, M, N
+        )  # not referenced
+    else:
+        left_alpha = left_alpha.view(*original_batch_dims_broadcasted, M, 1).expand(
+            *original_batch_dims_broadcasted, M, N
+        )
+
+    if right_alpha is None:
+        right_alpha_is_one = True
+        right_alpha = dense.new_empty(()).expand(
+            *original_batch_dims_broadcasted, M, N
+        )  # not referenced
+    else:
+        right_alpha = right_alpha.view(*original_batch_dims_broadcasted, 1, N).expand(
+            *original_batch_dims_broadcasted, M, N
+        )
+    assert left_alpha.stride()[-1] == 0
+    assert right_alpha.stride()[-2] == 0
+
     if meta is None:
         sparsity = round(1 - bsr._nnz() * blocksize[0] * blocksize[1] / (M * K), 2)
-        meta = bsr_dense_addmm_meta(M, K, N, blocksize[0], blocksize[1], beta, alpha, sparsity=sparsity, dtype=out.dtype)
+        meta = bsr_dense_addmm_meta(
+            M,
+            K,
+            N,
+            blocksize[0],
+            blocksize[1],
+            beta,
+            alpha,
+            sparsity=sparsity,
+            dtype=dense.dtype,
+            out_dtype=out.dtype,
+        )
     out_backup = out
 
-    crow_indices, col_indices, values, input, dense, out = prepare_inputs(bsr, input, dense, out)
+    (
+        crow_indices,
+        col_indices,
+        values,
+        input,
+        dense,
+        left_alpha,
+        right_alpha,
+        out,
+    ) = prepare_inputs(bsr, input, dense, left_alpha, right_alpha, out)
 
     BM, BK = blocksize
-    SPLIT_N = meta.get('SPLIT_N', N // BM)
+    SPLIT_N = meta.get("SPLIT_N", N // BM)
     BN = N // SPLIT_N
 
     out_untiled = out
     out = tile_to_blocksize(out, (BM, BN))
     dense = tile_to_blocksize(dense, (BK, BN))
     input = tile_to_blocksize(input, (BM, BN))
+    left_alpha = tile_to_blocksize(left_alpha, (BM, BN))
+    right_alpha = tile_to_blocksize(right_alpha, (BM, BN))
 
-    dot_out_dtype = {torch.float16: tl.float32,
-                     torch.bfloat16: tl.float32,
-                     torch.float32: tl.float64,
-                     torch.float64: tl.float64}[out.dtype]
+    # tl.dot supports float16, float32, int32 as accumulator types.
+    dot_out_dtype = {
+        torch.float16: tl.float32,
+        torch.bfloat16: tl.float32,
+        torch.float32: tl.float64,
+        torch.float64: tl.float64,
+        torch.int8: tl.int32,
+        torch.int32: tl.int32,
+    }[out.dtype]
 
     n_batches = dense.size(0)
     n_block_rows = crow_indices.size(-1) - 1
@@ -884,6 +1288,8 @@ def bsr_dense_addmm(
         col_indices: (0, None, None),
         input: (0, -3, -4),
         dense: (0, -3, None),
+        left_alpha: (0, -3, -4),
+        right_alpha: (0, -3, -4),
         out: (0, -3, -4),
     }
 
@@ -892,16 +1298,20 @@ def bsr_dense_addmm(
     def kernel(grid, *sliced_tensors):
         _bsr_strided_addmm_kernel[grid](
             *ptr_stride_extractor(*sliced_tensors),
-            beta, alpha,
+            beta,
+            alpha,
             beta_is_one=beta == 1,
             beta_is_nonzero=beta != 0,
             alpha_is_one=alpha == 1,
+            left_alpha_is_one=left_alpha_is_one,
+            right_alpha_is_one=right_alpha_is_one,
             BLOCKSIZE_ROW=BM,
             BLOCKSIZE_INNER=BK,
             BLOCKSIZE_COL=BN,
             allow_tf32=dot_out_dtype == tl.float32,
             acc_dtype=dot_out_dtype,
-            **meta)
+            **meta,
+        )
 
     launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
 
@@ -1014,19 +1424,22 @@ if has_triton():
                 mask_k = k_offsets < k
 
                 mat1_block = tl.load(
-                    mat1_block_ptrs
-                    + mat1_col_block_stride * k_offsets[None, :],
-                    mask=mask_k[None, :], other=0.0
+                    mat1_block_ptrs + mat1_col_block_stride * k_offsets[None, :],
+                    mask=mask_k[None, :],
+                    other=0.0,
                 )
 
                 mat2_block = tl.load(
                     mat2_block_ptrs
                     + mat2_tiled_col_stride * col_block
                     + mat2_row_block_stride * k_offsets[:, None],
-                    mask=mask_k[:, None], other=0.0
+                    mask=mask_k[:, None],
+                    other=0.0,
                 )
 
-                acc_block += tl.dot(mat1_block, mat2_block, allow_tf32=allow_tf32, out_dtype=acc_dtype)
+                acc_block += tl.dot(
+                    mat1_block, mat2_block, allow_tf32=allow_tf32, out_dtype=acc_dtype
+                )
 
             if IS_BETA_ZERO:
                 acc_block *= alpha
@@ -1156,10 +1569,14 @@ if has_triton():
             # find which row of dense needs to get loaded
             # for multiplication with values_block.
             dense_row_idx = tl.load(col_index_nnz_ptr)
-            dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
+            dense_block = tl.load(
+                dense_block_ptrs + dense_tiled_row_stride * dense_row_idx
+            )
 
             # do block mm
-            output_acc_block += tl.dot(values_block, dense_block, allow_tf32=allow_tf32, out_dtype=acc_dtype)
+            output_acc_block += tl.dot(
+                values_block, dense_block, allow_tf32=allow_tf32, out_dtype=acc_dtype
+            )
 
             # move val/col_index ptrs to the next block in the row
             values_block_ptrs += values_nnz_stride
@@ -1168,13 +1585,19 @@ if has_triton():
         # write back the result
         tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
 
-
     def _run_sampled_addmm_kernel(
-        alpha, beta, is_beta_zero,
-        blocksize, k, tile_k,
-        values, crow_indices, col_indices,
-        mat1, mat2,
-        max_grid
+        alpha,
+        beta,
+        is_beta_zero,
+        blocksize,
+        k,
+        tile_k,
+        values,
+        crow_indices,
+        col_indices,
+        mat1,
+        mat2,
+        max_grid,
     ):
         n_batches = values.size(0)
         n_block_rows = crow_indices.size(-1) - 1
@@ -1200,17 +1623,20 @@ if has_triton():
 
         def kernel(grid, *sliced_tensors):
             _sampled_addmm_kernel[grid](
-                alpha, beta, is_beta_zero,
-                *blocksize, k, tile_k,
+                alpha,
+                beta,
+                is_beta_zero,
+                *blocksize,
+                k,
+                tile_k,
                 *ptr_stride_extractor(*sliced_tensors),
                 acc_dtype=acc_dtype,
                 allow_tf32=allow_tf32,
                 num_stages=1,
-                num_warps=4
+                num_warps=4,
             )
 
         launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
-
 
     def sampled_addmm(
         input: torch.Tensor,
@@ -1234,7 +1660,7 @@ if has_triton():
             if beta != 0.0 and input.dtype is torch.bool:
                 check(
                     False,
-                    f"{f_name}(): having beta == {beta} not equal to 0.0 with boolean mask is not allowed."
+                    f"{f_name}(): having beta == {beta} not equal to 0.0 with boolean mask is not allowed.",
                 )
             if input.dtype is not torch.bool:
                 check_dtype(f_name, mat1, input.dtype)
@@ -1247,11 +1673,10 @@ if has_triton():
                 check_device(f_name, out, mat1.device)
                 check_dtype(f_name, out, input.dtype)
                 check(
-                    out.shape == input_broadcasted.shape
-                    and out._nnz() == input._nnz(),
+                    out.shape == input_broadcasted.shape and out._nnz() == input._nnz(),
                     f"{f_name}(): Expects `out` to be of shape {input_broadcasted.shape} "
                     f"and with nnz equal to {input_broadcasted._nnz()} "
-                    f"but got out.shape = {out.shape} and out.nnz = {out._nnz()}"
+                    f"but got out.shape = {out.shape} and out.nnz = {out._nnz()}",
                 )
 
         if out is None:
@@ -1263,8 +1688,6 @@ if has_triton():
             return out
 
         blocksize = out.values().shape[-2:]
-        m = mat1.size(-2)
-        n = mat2.size(-1)
         k = mat1.size(-1)
 
         # NOTE: (m, 0) @ (0, n) == zeros(m, n)
@@ -1281,11 +1704,18 @@ if has_triton():
         tile_k = max(*blocksize)
 
         _run_sampled_addmm_kernel(
-            alpha, beta, beta == 0.0,
-            blocksize, k, tile_k,
-            values, crow_indices, col_indices,
-            mat1, mat2,
-            max_grid
+            alpha,
+            beta,
+            beta == 0.0,
+            blocksize,
+            k,
+            tile_k,
+            values,
+            crow_indices,
+            col_indices,
+            mat1,
+            mat2,
+            max_grid,
         )
 
         # If nnz x block strides are not the same in out_backup.values and values,
@@ -1295,7 +1725,6 @@ if has_triton():
             out_backup.values().copy_(values.reshape(out_backup.values().shape))
         return out_backup
 
-
     def bsr_dense_mm(
         bsr: torch.Tensor,
         dense: torch.Tensor,
@@ -1303,14 +1732,14 @@ if has_triton():
         out: Optional[torch.Tensor] = None,
         skip_checks: bool = False,
         max_grid: Optional[Tuple[Optional[int], Optional[int], Optional[int]]] = None,
-        meta: Optional[dict] = None
+        meta: Optional[dict] = None,
     ):
         f_name = "bsr_dense_mm"
-        m, kl = bsr.shape[-2:]
+        m, _kl = bsr.shape[-2:]
         if not skip_checks:
             check_bsr_layout(f_name, bsr)
             check_device(f_name, bsr, dense.device)
-            check_dtype(f_name, bsr, dense.dtype)
+            check_dtype(f_name, bsr, dense.dtype, (torch.int8,))
             check_mm_compatible_shapes(f_name, bsr, dense)
 
             n = dense.size(-1)
@@ -1318,10 +1747,10 @@ if has_triton():
             check_blocksize(f_name, (row_block, col_block))
             check(
                 not n % 16,
-                f"{f_name}(): dense.size(-1) == {n} should be divisible by 16"
+                f"{f_name}(): dense.size(-1) == {n} should be divisible by 16",
             )
         else:
-            kr, n = dense.shape[-2:]
+            _kr, n = dense.shape[-2:]
 
         original_batch_dims_broadcasted = broadcast_batch_dims(f_name, bsr, dense)
 
@@ -1351,7 +1780,6 @@ if has_triton():
         # as a placeholder for input because their shapes match:
         return bsr_dense_addmm(out, bsr, dense, alpha=1, beta=0, out=out)
 
-
     @triton.jit
     def _bsr_softmax_kernel(
         crow_indices_ptr,
@@ -1361,9 +1789,10 @@ if has_triton():
         values_batch_stride,
         values_row_block_stride,
         values_nnz_col_block_stride,
-        row_block, col_block,
+        row_block,
+        col_block,
         MAX_ROW_NNZ: tl.constexpr,
-        TILE: tl.constexpr
+        TILE: tl.constexpr,
     ):
         batch_pid = tl.program_id(axis=2)
         row_block_offset_pid = tl.program_id(axis=1)
@@ -1394,14 +1823,20 @@ if has_triton():
         )
 
         # find max in the row
-        row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+        row_tile = tl.load(
+            curr_row_values_ptrs + row_arange, mask=mask, other=-float("inf")
+        ).to(tl.float32)
         max_row_value = tl.max(row_tile, axis=0)
         for _ in range(TILE, MAX_ROW_NNZ, TILE):
             row_arange += TILE
             mask = row_arange < row_nnz * col_block
-            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            row_tile = tl.load(
+                curr_row_values_ptrs + row_arange, mask=mask, other=-float("inf")
+            ).to(tl.float32)
             curr_max_row_value = tl.max(row_tile, axis=0)
-            max_row_value = tl.where(max_row_value > curr_max_row_value, max_row_value, curr_max_row_value)
+            max_row_value = tl.where(
+                max_row_value > curr_max_row_value, max_row_value, curr_max_row_value
+            )
 
         # find denominator for stable softmax
         num = tl.exp(row_tile - max_row_value)
@@ -1409,19 +1844,30 @@ if has_triton():
         for _ in range(TILE, MAX_ROW_NNZ, TILE):
             row_arange -= TILE
             mask = row_arange < row_nnz * col_block
-            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            row_tile = tl.load(
+                curr_row_values_ptrs + row_arange, mask=mask, other=-float("inf")
+            ).to(tl.float32)
             num = tl.exp(row_tile - max_row_value)
             denom += tl.sum(num, axis=0)
 
         # populate output
-        tl.store(curr_row_values_ptrs + row_arange, (num / denom).to(values_ptr.dtype.element_ty), mask=mask)
+        tl.store(
+            curr_row_values_ptrs + row_arange,
+            (num / denom).to(values_ptr.dtype.element_ty),
+            mask=mask,
+        )
         for _ in range(TILE, MAX_ROW_NNZ, TILE):
             row_arange += TILE
             mask = row_arange < row_nnz * col_block
-            row_tile = tl.load(curr_row_values_ptrs + row_arange, mask=mask, other=-float('inf')).to(tl.float32)
+            row_tile = tl.load(
+                curr_row_values_ptrs + row_arange, mask=mask, other=-float("inf")
+            ).to(tl.float32)
             num = tl.exp(row_tile - max_row_value)
-            tl.store(curr_row_values_ptrs + row_arange, (num / denom).to(values_ptr.dtype.element_ty), mask=mask)
-
+            tl.store(
+                curr_row_values_ptrs + row_arange,
+                (num / denom).to(values_ptr.dtype.element_ty),
+                mask=mask,
+            )
 
     def bsr_softmax(input, max_row_nnz=None):
         f_name = "bsr_softmax"
@@ -1452,7 +1898,13 @@ if has_triton():
             values = input.values().clone()
         else:
             values = input.values()
-        values = values.transpose(-3, -2).contiguous().unsqueeze(0).flatten(0, -4).reshape(-1, row_block, nnz * col_block)
+        values = (
+            values.transpose(-3, -2)
+            .contiguous()
+            .unsqueeze(0)
+            .flatten(0, -4)
+            .reshape(-1, row_block, nnz * col_block)
+        )
         full_grid = (values.shape[0], row_block, m // row_block)
         grid_blocks = None
         tensor_dims_map = {
@@ -1465,22 +1917,27 @@ if has_triton():
         def kernel(grid, *sliced_tensors):
             _bsr_softmax_kernel[grid](
                 *ptr_stride_extractor(*sliced_tensors),
-                row_block, col_block,
+                row_block,
+                col_block,
                 max_row_nnz,
                 # Triton's max numel is bounded by 2 ** 17.
-                min(2 ** 17, max_row_nnz)
+                min(2**17, max_row_nnz),
             )
 
         launch_kernel(kernel, tensor_dims_map, full_grid, grid_blocks)
 
-        values = values.reshape(-1, row_block, nnz, col_block).transpose(-3, -2).reshape(*input.values().shape)
+        values = (
+            values.reshape(-1, row_block, nnz, col_block)
+            .transpose(-3, -2)
+            .reshape(*input.values().shape)
+        )
 
         return torch.sparse_compressed_tensor(
             input.crow_indices().clone(),
             input.col_indices().clone(),
             values,
             size=input.shape,
-            layout=input.layout
+            layout=input.layout,
         )
 
     def _scaled_dot_product_attention(
@@ -1490,24 +1947,18 @@ if has_triton():
         attn_mask: Optional[torch.Tensor],
         dropout_p: float = 0.0,
         is_causal: bool = False,
-        scale: Optional[float] = None
+        scale: Optional[float] = None,
     ):
         f_name = "_scaled_dot_product_attention"
-        check(
-            not is_causal,
-            f"{f_name}(): is_causal == True is not supported."
-        )
-        check(
-            attn_mask is not None,
-            f"{f_name}(): attn_mask == None is not supported."
-        )
+        check(not is_causal, f"{f_name}(): is_causal == True is not supported.")
+        check(attn_mask is not None, f"{f_name}(): attn_mask == None is not supported.")
         assert attn_mask is not None
 
         check(
             attn_mask.layout == torch.sparse_bsr,
             f"{f_name}(): "
             f"attn_mask.layout must be {torch.sparse_bsr}, but got "
-            f"attn_mask.layout == {attn_mask.layout}."
+            f"attn_mask.layout == {attn_mask.layout}.",
         )
 
         check_device(f_name, key, query.device)
@@ -1519,12 +1970,14 @@ if has_triton():
         if attn_mask.dtype is not torch.bool:
             check_dtype(f_name, attn_mask, query.dtype)
 
-        sdpa = sampled_addmm(attn_mask, query, key.transpose(-2, -1), beta=0.0, skip_checks=False)
+        sdpa = sampled_addmm(
+            attn_mask, query, key.transpose(-2, -1), beta=0.0, skip_checks=False
+        )
         if scale is None and query.size(-1) == 0 or scale == 0.0:
             check(
                 False,
                 f"{f_name}(): current value of scale == {scale} "
-                "results in division by zero."
+                "results in division by zero.",
             )
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
         sdpa.values().mul_(scale_factor)
@@ -1535,19 +1988,32 @@ if has_triton():
 
     @triton.jit
     def _scatter_mm2_kernel(
-            M: tl.constexpr, K: tl.constexpr, N: tl.constexpr,
-            blocks_ptr, blocks_stride_P, blocks_stride_M, blocks_stride_K,
-            others_ptr, others_stride_Q, others_stride_K, others_stride_N,
-            accumulators_ptr, accumulators_stride_R, accumulators_stride_M, accumulators_stride_N,
-            pq_offsets_ptr, pq_offsets_stride,
-            pq_ptr, pq_stride_T, pq_stride_1,
-            dot_out_dtype: tl.constexpr,
-            TILE_M: tl.constexpr,
-            TILE_N: tl.constexpr,
-            allow_tf32: tl.constexpr):
-
+        M: tl.constexpr,
+        K: tl.constexpr,
+        N: tl.constexpr,
+        blocks_ptr,
+        blocks_stride_P,
+        blocks_stride_M,
+        blocks_stride_K,
+        others_ptr,
+        others_stride_Q,
+        others_stride_K,
+        others_stride_N,
+        accumulators_ptr,
+        accumulators_stride_R,
+        accumulators_stride_M,
+        accumulators_stride_N,
+        pq_offsets_ptr,
+        pq_offsets_stride,
+        pq_ptr,
+        pq_stride_T,
+        pq_stride_1,
+        dot_out_dtype: tl.constexpr,
+        TILE_M: tl.constexpr,
+        TILE_N: tl.constexpr,
+        allow_tf32: tl.constexpr,
+    ):
         Ms = M // TILE_M
-        Ns = N // TILE_N
 
         pid_t = tl.program_id(axis=0)
 
@@ -1555,12 +2021,16 @@ if has_triton():
         pid_m = pid // Ms
         pid_n = pid % Ms
 
-        rm = (pid_m * TILE_M + tl.arange(0, TILE_M))
-        rn = (pid_n * TILE_N + tl.arange(0, TILE_N))
+        rm = pid_m * TILE_M + tl.arange(0, TILE_M)
+        rn = pid_n * TILE_N + tl.arange(0, TILE_N)
         rk = tl.arange(0, K)
 
-        A_ptr = blocks_ptr + (rm[:, None] * blocks_stride_M + rk[None, :] * blocks_stride_K)
-        B_ptr = others_ptr + (rk[:, None] * others_stride_K + rn[None, :] * others_stride_N)
+        A_ptr = blocks_ptr + (
+            rm[:, None] * blocks_stride_M + rk[None, :] * blocks_stride_K
+        )
+        B_ptr = others_ptr + (
+            rk[:, None] * others_stride_K + rn[None, :] * others_stride_N
+        )
 
         g0 = tl.load(pq_offsets_ptr + pid_t * pq_offsets_stride)
         g1 = tl.load(pq_offsets_ptr + (pid_t + 1) * pq_offsets_stride)
@@ -1577,58 +2047,100 @@ if has_triton():
             B = tl.load(B_ptr + q * others_stride_Q)
             acc_block += tl.dot(A, B, out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
 
-        C_ptr = accumulators_ptr + pid_t * accumulators_stride_R + (
-            rm[:, None] * accumulators_stride_M + rn[None, :] * accumulators_stride_N)
+        C_ptr = (
+            accumulators_ptr
+            + pid_t * accumulators_stride_R
+            + (
+                rm[:, None] * accumulators_stride_M
+                + rn[None, :] * accumulators_stride_N
+            )
+        )
         tl.store(C_ptr, acc_block.to(accumulators_ptr.dtype.element_ty))
 
     def _scatter_mm2(
-            blocks: torch.Tensor,
-            others: torch.Tensor,
-            pq_offsets: torch.Tensor,
-            pq_indices: torch.Tensor,
-            accumulators: torch.Tensor
+        blocks: torch.Tensor,
+        others: torch.Tensor,
+        pq_offsets: torch.Tensor,
+        pq_indices: torch.Tensor,
+        accumulators: torch.Tensor,
     ):
-        P, M, K = blocks.shape
-        Q, _, N = others.shape
-        R, _, _ = accumulators.shape
+        _P, M, K = blocks.shape
+        _Q, _, N = others.shape
 
-        meta = dict(TILE_M=max(16, M // 4), TILE_N=max(16, N // 4), num_stages=1, num_warps=2)
+        meta = dict(
+            TILE_M=max(16, M // 4), TILE_N=max(16, N // 4), num_stages=1, num_warps=2
+        )
 
         def grid(META):
-            return (pq_offsets.shape[0] - 1, triton.cdiv(M, META['TILE_M']) * triton.cdiv(N, META['TILE_N']), 1)
+            return (
+                pq_offsets.shape[0] - 1,
+                triton.cdiv(M, META["TILE_M"]) * triton.cdiv(N, META["TILE_N"]),
+                1,
+            )
 
-        dot_out_dtype = {torch.float16: tl.float32,
-                         torch.bfloat16: tl.float32,
-                         torch.float32: tl.float64,
-                         torch.float64: tl.float64}[accumulators.dtype]
-        if 'allow_tf32' not in meta:
+        dot_out_dtype = {
+            torch.float16: tl.float32,
+            torch.bfloat16: tl.float32,
+            torch.float32: tl.float64,
+            torch.float64: tl.float64,
+        }[accumulators.dtype]
+        if "allow_tf32" not in meta:
             meta.update(allow_tf32=dot_out_dtype == tl.float32)
         _scatter_mm2_kernel[grid](
-            M, K, N,
-            blocks, blocks.stride(0), blocks.stride(1), blocks.stride(2),
-            others, others.stride(0), others.stride(1), others.stride(2),
-            accumulators, accumulators.stride(0), accumulators.stride(1), accumulators.stride(2),
-            pq_offsets, pq_offsets.stride(0),
-            pq_indices, pq_indices.stride(0), pq_indices.stride(1),
+            M,
+            K,
+            N,
+            blocks,
+            blocks.stride(0),
+            blocks.stride(1),
+            blocks.stride(2),
+            others,
+            others.stride(0),
+            others.stride(1),
+            others.stride(2),
+            accumulators,
+            accumulators.stride(0),
+            accumulators.stride(1),
+            accumulators.stride(2),
+            pq_offsets,
+            pq_offsets.stride(0),
+            pq_indices,
+            pq_indices.stride(0),
+            pq_indices.stride(1),
             dot_out_dtype=dot_out_dtype,
-            **meta
+            **meta,
         )
 
     @triton.jit
     def _scatter_mm6_kernel(
-            nbatches, Ms, Ks: tl.constexpr, N,
-            blocks_ptr, blocks_stride_P, blocks_stride_M, blocks_stride_K,
-            others_ptr, others_stride_B, others_stride_K, others_stride_N,
-            accumulators_ptr, accumulators_stride_B, accumulators_stride_M, accumulators_stride_N,
-            c_indices_ptr, r_offsets_ptr,
-            p_offsets_ptr, q_offsets_ptr,
-            is_compressed: tl.constexpr,
-            dot_out_dtype: tl.constexpr,
-            SPLIT_N: tl.constexpr,
-            TILE_M: tl.constexpr,
-            TILE_N: tl.constexpr,
-            GROUP_SIZE: tl.constexpr,
-            allow_tf32: tl.constexpr):
+        nbatches,
+        Ms,
+        Ks: tl.constexpr,
+        N,
+        blocks_ptr,
+        blocks_stride_P,
+        blocks_stride_M,
+        blocks_stride_K,
+        others_ptr,
+        others_stride_B,
+        others_stride_K,
+        others_stride_N,
+        accumulators_ptr,
+        accumulators_stride_B,
+        accumulators_stride_M,
+        accumulators_stride_N,
+        c_indices_ptr,
+        r_offsets_ptr,
+        p_offsets_ptr,
+        q_offsets_ptr,
+        is_compressed: tl.constexpr,
+        dot_out_dtype: tl.constexpr,
+        SPLIT_N: tl.constexpr,
+        TILE_M: tl.constexpr,
+        TILE_N: tl.constexpr,
+        GROUP_SIZE: tl.constexpr,
+        allow_tf32: tl.constexpr,
+    ):
         Ns = N // SPLIT_N
         BLOCKS_M = Ms // TILE_M
         BLOCKS_N = Ns // TILE_N
@@ -1645,11 +2157,17 @@ if has_triton():
         pid_m = first_pid_m + (pid % group_size_m)
         pid_n = (pid % num_pid_in_group) // group_size_m
 
-        rm = (pid_m * TILE_M + tl.arange(0, TILE_M))
-        rn = (pid_n * TILE_N + tl.arange(0, TILE_N))
+        rm = pid_m * TILE_M + tl.arange(0, TILE_M)
+        rn = pid_n * TILE_N + tl.arange(0, TILE_N)
         rk = tl.arange(0, Ks)
-        A_ptr = blocks_ptr + (rm[:, None] * blocks_stride_M + rk[None, :] * blocks_stride_K)
-        B_ptr = others_ptr + pid_b * others_stride_B + (rk[:, None] * others_stride_K + rn[None, :] * others_stride_N)
+        A_ptr = blocks_ptr + (
+            rm[:, None] * blocks_stride_M + rk[None, :] * blocks_stride_K
+        )
+        B_ptr = (
+            others_ptr
+            + pid_b * others_stride_B
+            + (rk[:, None] * others_stride_K + rn[None, :] * others_stride_N)
+        )
 
         # When is_compressed is True, r is the only variable that
         # depends on pid_t. This property allows sorting r values
@@ -1678,7 +2196,9 @@ if has_triton():
                 q = tl.load(q_ptr)
                 B = tl.load(B_ptr + q)
                 A = tl.load(A_ptr)
-                acc_block += tl.dot(A, B, out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
+                acc_block += tl.dot(
+                    A, B, out_dtype=dot_out_dtype, allow_tf32=allow_tf32
+                )
                 A_ptr += blocks_stride_P
                 q_ptr += 1
         else:
@@ -1690,39 +2210,53 @@ if has_triton():
                 A = tl.load(A_ptr + p * blocks_stride_P)
                 p_ptr += 1
                 q_ptr += 1
-                acc_block += tl.dot(A, B, out_dtype=dot_out_dtype, allow_tf32=allow_tf32)
+                acc_block += tl.dot(
+                    A, B, out_dtype=dot_out_dtype, allow_tf32=allow_tf32
+                )
 
-        C_ptr = accumulators_ptr + r + pid_b * accumulators_stride_B + (
-            rm[:, None] * accumulators_stride_M + rn[None, :] * accumulators_stride_N)
+        C_ptr = (
+            accumulators_ptr
+            + r
+            + pid_b * accumulators_stride_B
+            + (
+                rm[:, None] * accumulators_stride_M
+                + rn[None, :] * accumulators_stride_N
+            )
+        )
         tl.store(C_ptr, acc_block.to(accumulators_ptr.dtype.element_ty))
 
     def _scatter_mm6(
-            blocks: torch.Tensor,
-            others: torch.Tensor,
-            c_indices: torch.Tensor,
-            r_offsets: torch.Tensor,
-            p_offsets: torch.Tensor,
-            q_offsets: torch.Tensor,
-            meta: dict,
-            accumulators: torch.Tensor,
-            force_contiguous: bool = True,
+        blocks: torch.Tensor,
+        others: torch.Tensor,
+        c_indices: torch.Tensor,
+        r_offsets: torch.Tensor,
+        p_offsets: torch.Tensor,
+        q_offsets: torch.Tensor,
+        meta: dict,
+        accumulators: torch.Tensor,
+        force_contiguous: bool = True,
     ):
-        SPLIT_N = meta['SPLIT_N']
-        P, Ms, Ks = blocks.shape
-        B, K_, N = others.shape
-        B_, M, N_ = accumulators.shape
+        SPLIT_N = meta["SPLIT_N"]
+        _P, Ms, Ks = blocks.shape
+        B, _K, N = others.shape
+        B_, _M, N_ = accumulators.shape
         assert N_ == N
         Ns = N // SPLIT_N
         assert B_ == B
 
         def grid(META):
-            return (r_offsets.shape[0] * B, triton.cdiv(Ms, META['TILE_M']) * triton.cdiv(Ns, META['TILE_N']))
+            return (
+                r_offsets.shape[0] * B,
+                triton.cdiv(Ms, META["TILE_M"]) * triton.cdiv(Ns, META["TILE_N"]),
+            )
 
-        dot_out_dtype = {torch.float16: tl.float32,
-                         torch.bfloat16: tl.float32,
-                         torch.float32: tl.float64,
-                         torch.float64: tl.float64}[accumulators.dtype]
-        if 'allow_tf32' not in meta:
+        dot_out_dtype = {
+            torch.float16: tl.float32,
+            torch.bfloat16: tl.float32,
+            torch.float32: tl.float64,
+            torch.float64: tl.float64,
+        }[accumulators.dtype]
+        if "allow_tf32" not in meta:
             meta.update(allow_tf32=dot_out_dtype == tl.float32)
 
         assert c_indices.stride(0) == 1
@@ -1754,16 +2288,28 @@ if has_triton():
             accumulators_ = accumulators
 
         _scatter_mm6_kernel[grid](
-            B, Ms, Ks, N,
-            blocks, blocks.stride(0), blocks.stride(1), blocks.stride(2),
-            others, others.stride(0), others.stride(1), others.stride(2),
-            accumulators_, accumulators_.stride(0), accumulators_.stride(1), accumulators_.stride(2),
+            B,
+            Ms,
+            Ks,
+            N,
+            blocks,
+            blocks.stride(0),
+            blocks.stride(1),
+            blocks.stride(2),
+            others,
+            others.stride(0),
+            others.stride(1),
+            others.stride(2),
+            accumulators_,
+            accumulators_.stride(0),
+            accumulators_.stride(1),
+            accumulators_.stride(2),
             c_indices,
             r_offsets,
             p_offsets,
             q_offsets,
             dot_out_dtype=dot_out_dtype,
-            **meta
+            **meta,
         )
 
         if force_contiguous and not accumulators.is_contiguous():
@@ -1804,6 +2350,22 @@ if has_triton():
         dense_row_block_stride,
         dense_col_block_stride,
         # dense epilogue
+        # left_alpha prologue
+        left_alpha_ptr,
+        left_alpha_batch_stride,
+        left_alpha_tiled_row_stride,
+        left_alpha_tiled_col_stride: tl.constexpr,
+        left_alpha_row_block_stride,
+        left_alpha_col_block_stride: tl.constexpr,
+        # left_alpha epilogue
+        # right_alpha prologue
+        right_alpha_ptr,
+        right_alpha_batch_stride,
+        right_alpha_tiled_row_stride: tl.constexpr,
+        right_alpha_tiled_col_stride,
+        right_alpha_row_block_stride: tl.constexpr,
+        right_alpha_col_block_stride,
+        # right_alpha epilogue
         # output prologue
         output_ptr,
         output_batch_stride,
@@ -1817,14 +2379,21 @@ if has_triton():
         beta_is_one: tl.constexpr,
         beta_is_nonzero: tl.constexpr,
         alpha_is_one: tl.constexpr,
+        left_alpha_is_one: tl.constexpr,
+        right_alpha_is_one: tl.constexpr,
         BLOCKSIZE_ROW: tl.constexpr,
         BLOCKSIZE_COL: tl.constexpr,
         BLOCKSIZE_INNER: tl.constexpr,
         acc_dtype: tl.constexpr,
         allow_tf32: tl.constexpr,
         GROUP_SIZE_ROW: tl.constexpr,
-        SPLIT_N: tl.constexpr
+        SPLIT_N: tl.constexpr,
     ):
+        # left/right_alpha tensors are originally (* + 1)-dimensional
+        assert left_alpha_tiled_col_stride == 0
+        assert left_alpha_col_block_stride == 0
+        assert right_alpha_tiled_row_stride == 0
+        assert right_alpha_row_block_stride == 0
 
         batch_pid = tl.program_id(axis=2)
         row_block_pid = tl.program_id(axis=0)
@@ -1850,17 +2419,6 @@ if has_triton():
         row_block_arange = tl.arange(0, BLOCKSIZE_ROW)
         inner_block_arange = tl.arange(0, BLOCKSIZE_INNER)
         col_block_arange = tl.arange(0, BLOCKSIZE_COL)
-
-        if beta_is_nonzero:
-            # Pointers are set to exact write-to locations
-            input_ptrs = (
-                input_ptr
-                + input_batch_stride * batch_pid
-                + input_tiled_row_stride * row_block_pid
-                + input_tiled_col_stride * col_block_pid
-                + input_row_block_stride * row_block_arange[:, None]
-                + input_col_block_stride * col_block_arange[None, :]
-            )
 
         # Pointers are set to the first block of the current row.
         values_block_ptrs = (
@@ -1898,14 +2456,7 @@ if has_triton():
             + col_indices_stride * nnz_offset
         )
 
-        # alpha is never 0
-        if beta_is_nonzero:
-            output_acc_block = tl.load(input_ptrs).to(acc_dtype)  # type: ignore[possibly-undefined]
-            if not (beta_is_one and alpha_is_one):
-                beta_alpha = beta / alpha
-                output_acc_block *= beta_alpha
-        else:
-            output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_COL), dtype=acc_dtype)
+        output_acc_block = tl.zeros((BLOCKSIZE_ROW, BLOCKSIZE_COL), dtype=acc_dtype)
 
         for _ in range(row_nnz):
             values_block = tl.load(values_block_ptrs)
@@ -1913,10 +2464,14 @@ if has_triton():
             # find which row of dense needs to get loaded
             # for multiplication with values_block.
             dense_row_idx = tl.load(col_index_nnz_ptr)
-            dense_block = tl.load(dense_block_ptrs + dense_tiled_row_stride * dense_row_idx)
+            dense_block = tl.load(
+                dense_block_ptrs + dense_tiled_row_stride * dense_row_idx
+            )
 
             # do block mm
-            output_acc_block += tl.dot(values_block, dense_block, allow_tf32=allow_tf32, out_dtype=acc_dtype)
+            output_acc_block += tl.dot(
+                values_block, dense_block, allow_tf32=allow_tf32, out_dtype=acc_dtype
+            )
 
             # move val/col_index ptrs to the next block in the row
             values_block_ptrs += values_nnz_stride
@@ -1925,9 +2480,44 @@ if has_triton():
         if not alpha_is_one:
             output_acc_block *= alpha
 
+        if not left_alpha_is_one:
+            left_alpha_ptrs = (
+                left_alpha_ptr
+                + left_alpha_batch_stride * batch_pid
+                + left_alpha_tiled_row_stride * row_block_pid
+                + left_alpha_tiled_col_stride * col_block_pid
+                + left_alpha_row_block_stride * row_block_arange[:, None]
+                + left_alpha_col_block_stride * col_block_arange[None, :]
+            )
+            output_acc_block *= tl.load(left_alpha_ptrs)
+
+        if not right_alpha_is_one:
+            right_alpha_ptrs = (
+                right_alpha_ptr
+                + right_alpha_batch_stride * batch_pid
+                + right_alpha_tiled_row_stride * row_block_pid
+                + right_alpha_tiled_col_stride * col_block_pid
+                + right_alpha_row_block_stride * row_block_arange[:, None]
+                + right_alpha_col_block_stride * col_block_arange[None, :]
+            )
+            output_acc_block *= tl.load(right_alpha_ptrs)
+
+        if beta_is_nonzero:
+            input_ptrs = (
+                input_ptr
+                + input_batch_stride * batch_pid
+                + input_tiled_row_stride * row_block_pid
+                + input_tiled_col_stride * col_block_pid
+                + input_row_block_stride * row_block_arange[:, None]
+                + input_col_block_stride * col_block_arange[None, :]
+            )
+            if beta_is_one:
+                output_acc_block += tl.load(input_ptrs)
+            else:
+                output_acc_block += beta * tl.load(input_ptrs)
+
         # write back the result
         tl.store(output_ptrs, output_acc_block.to(output_ptr.dtype.element_ty))
-
 
 else:
     bsr_softmax = None  # type: ignore[assignment]

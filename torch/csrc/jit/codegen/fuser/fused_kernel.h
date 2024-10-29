@@ -9,14 +9,11 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace jit {
-namespace fuser {
+namespace torch::jit::fuser {
 
 struct FusedKernel {
   AT_DISALLOW_COPY_AND_ASSIGN(FusedKernel);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   FusedKernel(
       std::string name,
       std::string code,
@@ -98,6 +95,4 @@ struct FusedKernel {
   const bool has_random_;
 };
 
-} // namespace fuser
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::fuser

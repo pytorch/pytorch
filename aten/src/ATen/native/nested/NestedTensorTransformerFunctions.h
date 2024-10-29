@@ -9,7 +9,7 @@
 #include <vector>
 
 #include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 namespace c10 {
 class Scalar;
@@ -36,7 +36,7 @@ Tensor NestedTensor_times_Tensor_plus_Tensor_addmm(
     const Tensor& mat2,
     const c10::Scalar& beta,
     const c10::Scalar& alpha,
-    std::optional<bool> use_gelu = c10::nullopt);
+    std::optional<bool> use_gelu = std::nullopt);
 
 Tensor NestedTensor_add_NestedTensor_in_place(
     const Tensor& self,

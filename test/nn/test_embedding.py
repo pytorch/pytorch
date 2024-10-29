@@ -12,6 +12,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
+    largeTensorTest,
     onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIf,
@@ -179,6 +180,15 @@ class TestEmbeddingNN(NNTestCase):
         res_F = F.embedding(a, embeddings, padding_idx=2)
 
         self.assertEqual(res_old, res_F)
+
+    # https://github.com/pytorch/pytorch/issues/130806
+    @largeTensorTest("40GB", device="cuda")
+    def test_large_tensors(self):
+        input = torch.randint(low=0, high=16032, size=[131072], device="cuda")
+        w = torch.randn([16032, 16384], device="cuda")
+        out = torch.nn.functional.embedding(input, w)
+        self.assertEqual(out.dim(), 2)
+        self.assertEqual(out.numel(), 2147483648)
 
     def test_embedding_bag_functional(self):
         a = torch.tensor([[1, 3, 2], [0, 2, 1]], dtype=torch.long)
@@ -866,16 +876,13 @@ class TestEmbeddingNNDeviceType(NNTestCase):
 
     @dtypes(*itertools.product((torch.int, torch.long), (torch.int, torch.long)))
     def test_EmbeddingBag_per_sample_weights_failures(self, device, dtypes):
-        # Failure 1: mismatched embeddings / per_sample_weights dtype
+        # Failure 1: mismatched embeddings / per_sample_weights dtype (only on CPU device)
         es = nn.EmbeddingBag(5, 2, mode="sum").to(dtype=torch.float, device=device)
         input = torch.tensor([3, 1, 1, 1, 4, 0], dtype=dtypes[0], device=device)
         offsets = torch.tensor([0, 0, 3, 3, 6], dtype=dtypes[1], device=device)
         per_sample_weights = torch.randn_like(input, dtype=torch.double, device=device)
         if device == "cpu":
             with self.assertRaisesRegex(RuntimeError, "have the same type as"):
-                es(input, offsets, per_sample_weights)
-        else:
-            with self.assertRaisesRegex(RuntimeError, "expected scalar type"):
                 es(input, offsets, per_sample_weights)
 
         # Failure 2.1: input/per_sample_weights have different sizes (1d input)

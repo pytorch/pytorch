@@ -48,9 +48,6 @@ TEST_CUDA_IPC = (
 
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
-if TEST_CUDA_IPC:
-    torch.cuda.memory._set_allocator_settings("expandable_segments:False")
-
 
 class SubProcess(mp.Process):
     def __init__(self, tensor):
@@ -309,8 +306,9 @@ class TestMultiprocessing(TestCase):
                 is_set = e.is_set()
 
             self.assertTrue(is_set)
-            self.assertTrue(data[0].eq(4).all())
-            self.assertTrue(data[1].eq(4).all())
+            if device != "meta":
+                self.assertTrue(data[0].eq(4).all())
+                self.assertTrue(data[1].eq(4).all())
 
             p.join(100)
             self.assertFalse(p.is_alive())
@@ -326,12 +324,18 @@ class TestMultiprocessing(TestCase):
 
             t1 = q.get()
             t2 = q.get()
-            self.assertTrue(t1.eq(1).all())
+            if device == "meta":
+                self.assertEqual(t1.size(), t2.size())
+            else:
+                self.assertTrue(t1.eq(1).all())
             s1 = t1.storage()
             s2 = t2.storage()
             self.assertEqual(type(s1), type(s2))
             self.assertEqual(s1.data_ptr(), s1.data_ptr())
-            self.assertEqual(s1, s2)
+            if device == "meta":
+                self.assertEqual(s1.size(), s2.size())
+            else:
+                self.assertEqual(s1, s2)
 
             # We need to delete this tensors to allow producer (child process)
             # collect them properly
@@ -857,6 +861,22 @@ if __name__ == "__main__":
         self._test_empty_tensor_sharing(torch.float32, torch.device("cuda"))
         self._test_empty_tensor_sharing(torch.int64, torch.device("cuda"))
 
+    def test_empty_tensor_sharing_meta(self):
+        self._test_empty_tensor_sharing(torch.float32, torch.device("meta"))
+        self._test_empty_tensor_sharing(torch.int64, torch.device("meta"))
+
+    def test_tensor_sharing_meta(self):
+        dtype = torch.float32
+        device = torch.device("meta")
+        q = mp.Queue()
+        empty = torch.tensor([1], dtype=dtype, device=device)
+        q.put(empty)
+        out = q.get(timeout=1)
+        self.assertEqual(out, empty)
+
+    def test_meta_simple(self):
+        self._test_sharing(mp.get_context("spawn"), "meta", torch.float)
+
     def _test_autograd_sharing(self, var, ctx=mp, is_parameter=False):
         device = "cuda" if var.is_cuda else "cpu"
 
@@ -1060,6 +1080,12 @@ if __name__ == "__main__":
     def test_is_shared_cuda(self):
         t = torch.randn(5, 5).cuda()
         self.assertTrue(t.is_shared())
+
+    @unittest.skipIf(sys.platform != "linux", "Only runs on Linux; requires prctl(2)")
+    def test_set_thread_name(self):
+        name = "test name"
+        mp._set_thread_name(name)
+        self.assertEqual(mp._get_thread_name(), name)
 
 
 if __name__ == "__main__":

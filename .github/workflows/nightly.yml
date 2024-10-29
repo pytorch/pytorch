@@ -17,19 +17,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   docs-build:
     name: docs build
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.8-gcc11
-      docker-image-name: pytorch-linux-jammy-py3.8-gcc11
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      build-environment: linux-jammy-py3.9-gcc11
+      docker-image-name: pytorch-linux-jammy-py3.9-gcc11
 
   docs-push:
     name: docs push
     uses: ./.github/workflows/_docs.yml
-    needs: docs-build
+    needs:
+      - docs-build
+      - get-label-type
     with:
-      build-environment: linux-jammy-py3.8-gcc11
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.9-gcc11
       docker-image: ${{ needs.docs-build.outputs.docker-image }}
       push: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.event.ref, 'refs/tags/v') }}
       run-doxygen: true
@@ -39,10 +54,10 @@ jobs:
   update-vision-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
+    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-vision-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
-        if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: vision
           branch: main
@@ -54,10 +69,10 @@ jobs:
   update-audio-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
+    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-audio-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
-        if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: audio
           branch: main
@@ -69,10 +84,10 @@ jobs:
   update-executorch-commit-hash:
     runs-on: ubuntu-latest
     environment: update-commit-hash
+    if: ${{ github.event_name == 'schedule' && github.repository_owner == 'pytorch' }}
     steps:
       - name: update-executorch-commit-hash
         uses: pytorch/test-infra/.github/actions/update-commit-hash@main
-        if: ${{ github.event_name == 'schedule' }}
         with:
           repo-name: executorch
           branch: main

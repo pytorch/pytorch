@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Utilities for lowering subgraphs used by higher order operators
 
 """
@@ -6,16 +5,20 @@
 import functools
 import operator
 from dataclasses import dataclass
-from typing import List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 
 from . import ir
 from .exc import SubgraphLoweringException
 from .ops_handler import SimpleCSEHandler
+from .sizevars import SizeVarAllocator
 from .virtualized import ops, V, WrapperHandler
 
+
 T = TypeVar("T")
+_P = ParamSpec("_P")
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
@@ -25,24 +28,29 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         self,
         gm: torch.fx.GraphModule,
         root_graph_lowering: "torch._inductor.graph.GraphLowering",
-    ):
+    ) -> None:
         super().__init__(gm)
         self.graph_outputs = None
         self.root_graph = root_graph_lowering
 
     @property
-    def sizevars(self):
+    def sizevars(self) -> SizeVarAllocator:
         return self.root_graph.sizevars
 
-    def mark_buffer_mutated(self, name):
+    def mark_buffer_mutated(self, name: str) -> None:
         raise SubgraphLoweringException("Mutations are not supported in this context")
 
-    def register_buffer(self, data):
+    def register_buffer(self, buffer: ir.Buffer) -> str:
         raise SubgraphLoweringException(
             "Buffer creation is not supported in this context"
         )
 
-    def call_function(self, target, args, kwargs):
+    def call_function(
+        self,
+        target: Callable[[Any], Any],  # type: ignore[override]
+        args: Any,
+        kwargs: Dict[str, Any],
+    ) -> Any:
         from .lowering import lowerings
 
         if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
@@ -62,7 +70,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
         return lowerings[target](*args, **kwargs)
 
-    def output(self, target, args, kwargs):
+    def output(self, target: str, args: Tuple[Any], kwargs: Dict[str, Any]) -> None:  # type: ignore[override]
         assert len(args) == 1
         self.graph_outputs = args[0]
 
@@ -74,7 +82,7 @@ class InputDescriptor:
 
 
 class TracingOpsHandler(WrapperHandler[T]):
-    def __init__(self, tracer, num_inputs):
+    def __init__(self, tracer: torch.fx.Tracer, num_inputs: int) -> None:
         parent = tracer.create_proxy("placeholder", "ops", (), {})
         super().__init__(parent)
         self.tracer = tracer
@@ -84,18 +92,22 @@ class TracingOpsHandler(WrapperHandler[T]):
             for i in range(num_inputs)
         ]
 
-    def placeholder(self, idx):
+    def placeholder(self, idx: int) -> torch.fx.Proxy:
         return self.placeholders[idx]
 
-    def output(self, *args):
+    def output(self, *args: Tuple[object]) -> torch.fx.Node:
         return self.tracer.create_node(
             "output", "output", (tuple(self.tracer.create_arg(a) for a in args),), {}
         )
 
 
-def lower_pointwise_subgraph(subgraph: ir.Subgraph, inputs: List[InputDescriptor]):
+def lower_pointwise_subgraph(
+    subgraph: ir.Subgraph, inputs: List[InputDescriptor]
+) -> Callable[_P, Any]:
     # Lower subgraph to ir.Pointwise nodes
-    def fake_inner_fn(loop_idx, input_idx):
+    def fake_inner_fn(
+        loop_idx: int, input_idx: int
+    ) -> Union[ir.Expr, ir.TensorBox, None]:
         return ops.placeholder(input_idx)
 
     graph_inputs = [
@@ -137,7 +149,7 @@ def lower_pointwise_subgraph(subgraph: ir.Subgraph, inputs: List[InputDescriptor
 
     lowered_gm = torch.fx.GraphModule({}, tracer.graph)
 
-    def inner_fn(*args, **kwargs):
+    def inner_fn(*args: _P.args, **kwargs: _P.kwargs) -> Any:
         return lowered_gm(V.get_ops_handler(), *args, **kwargs)
 
     return inner_fn

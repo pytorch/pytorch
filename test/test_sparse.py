@@ -89,7 +89,7 @@ def gradcheck_semantics(test_name='gradcheck'):
 
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             self.ignore_op, check_strides=False,
             check_aliasing=False,
@@ -320,7 +320,6 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
     @precisionOverride({torch.bfloat16: 1e-2})
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
     def test_coalesce(self, device, dtype, coalesced):
 
         def _test_coalesce(t):
@@ -1452,6 +1451,27 @@ class TestSparse(TestSparseBase):
         test_shape(10, 10, 100, 0, 0)
         test_shape(10, 10, 100, 0, 20)
         test_shape(10, 10, 100, 0, 20)
+
+    @onlyCUDA
+    @unittest.skipIf(
+        IS_WINDOWS and TEST_CUDA,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
+    def test_bmm_oob(self, device):
+        # Targets an out of bounds error when the sparse tensor has no non-zero
+        # values in the first batch dimension (#131977).
+        # NOTE: This test is separated from the other bmm tests to avoid
+        # interference from prior memory allocations on the device. Since CUDA
+        # doesn't perform bounds checking, we need the error to cause an
+        # illegal memory access (by indexing into unallocated memory) for the
+        # test to fail.
+        torch.cuda.empty_cache()
+        indices = torch.tensor([[1], [0], [0]], device=device)
+        values = torch.tensor([1.], device=device)
+        a = torch.sparse_coo_tensor(indices, values, size=(2, 1, 1))
+        b = torch.zeros((2, 1, 1), device=device)
+        ab = torch.bmm(a, b)
+        self.assertEqual(ab, torch.zeros((2, 1, 1), device=device))
 
     @onlyCUDA
     @unittest.skipIf(
@@ -3031,7 +3051,6 @@ class TestSparse(TestSparseBase):
 
     def _test_resize_shape(self, x_i, x_v, x_size, y_i, y_v, y_size, dtype, device):
         x_v_numel = torch.zeros(x_v).numel()
-        y_v_numel = torch.zeros(y_v).numel()
         x = torch.sparse_coo_tensor(torch.zeros(x_i),
                                     torch.arange(x_v_numel).resize_(x_v).to(torch.float),
                                     torch.Size(x_size), dtype=dtype, device=device)
@@ -4267,7 +4286,7 @@ class TestSparseMeta(TestCase):
         self.assertEqual(r.indices(), torch.empty(2, 0, device='meta', dtype=torch.int64))
         self.assertEqual(r.values(), torch.empty(0, 4, device='meta', dtype=dtype))
 
-    def _test_meta_sparse_compressed(self, dtype, index_dtype, layout, batchsize, densesize):
+    def _test_meta_sparse_compressed(self, dtype, layout, batchsize, densesize):
         index_dtype = torch.int64
         blocksize = (2, 3) if layout in {torch.sparse_bsr, torch.sparse_bsc} else ()
         sparsesize = (4, 6)
@@ -4323,9 +4342,8 @@ class TestSparseMeta(TestCase):
         if layout is torch.sparse_coo:
             self._test_meta_sparse_coo(dtype)
         else:
-            index_dtype = torch.int64
             for batchsize, densesize in itertools.product([(), (2,)], [(), (3,)]):
-                self._test_meta_sparse_compressed(dtype, index_dtype, layout, batchsize, densesize)
+                self._test_meta_sparse_compressed(dtype, layout, batchsize, densesize)
 
     def _test_print_meta_data(self, dtype, layout, batchsize, sparsesize, densesize):
         index_dtype = torch.int64
@@ -5339,6 +5357,153 @@ class TestSparseAny(TestCase):
             torch.randn(1).to_sparse(blocksize=[1, 1, 1])
         with self.assertRaisesRegex(RuntimeError, ".*blocksize.*, but got 3"):
             torch.randn(1).to_sparse(blocksize=torch.Size((1, 1, 1)))
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=True)
+    def test_constructor_pin_memory(self, device, layout):
+        """Tests sparse_xyz_tensor(indices, values, pin_memory=True)
+        """
+        self.assertEqual(device, "cpu")
+        for t in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_zero_sized=False,  # pinning zero-sized tensors is a no-op
+                pin_memory=True,
+                enable_batch=False,  # TODO: remove after gh-104868 is resolved
+        ):
+            if layout is torch.sparse_coo:
+                self.assertTrue(t._indices().is_pinned())
+                self.assertTrue(t._values().is_pinned())
+            elif layout in {torch.sparse_csr, torch.sparse_bsr}:
+                self.assertTrue(t.crow_indices().is_pinned())
+                self.assertTrue(t.col_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout in {torch.sparse_csc, torch.sparse_bsc}:
+                self.assertTrue(t.ccol_indices().is_pinned())
+                self.assertTrue(t.row_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout is torch.strided:
+                pass
+            else:
+                assert 0  # unreachable
+            self.assertTrue(t.is_pinned())
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=True)
+    def test_method_pin_memory(self, device, layout):
+        """Tests sparse_xyz_tensor(indices, values, pin_memory=False).pin_memory()
+        """
+
+        for t_ in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_zero_sized=False,  # pinning zero-sized tensors is a no-op
+                pin_memory=False,         # no pinning
+                enable_batch=False,  # TODO: remove after gh-104868 is resolved
+        ):
+            t = t_.pin_memory()
+            self.assertTrue(t.is_pinned())
+
+            # registering a non-pinned tensor with CUDA memory is a
+            # clone operation
+            self.assertFalse(t_.is_pinned())
+
+            # registering already pinned tensor with CUDA memory is an
+            # identity operation:
+            t2 = t.pin_memory()
+            self.assertTrue(t2 is t)
+
+            if layout is torch.sparse_coo:
+                self.assertTrue(t._indices().is_pinned())
+                self.assertTrue(t._values().is_pinned())
+                self.assertFalse(t_._indices().is_pinned())
+                self.assertFalse(t_._values().is_pinned())
+            elif layout in {torch.sparse_csr, torch.sparse_bsr}:
+                self.assertTrue(t.crow_indices().is_pinned())
+                self.assertTrue(t.col_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+                self.assertFalse(t_.crow_indices().is_pinned())
+                self.assertFalse(t_.col_indices().is_pinned())
+                self.assertFalse(t_.values().is_pinned())
+            elif layout in {torch.sparse_csc, torch.sparse_bsc}:
+                self.assertTrue(t.ccol_indices().is_pinned())
+                self.assertTrue(t.row_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+                self.assertFalse(t_.ccol_indices().is_pinned())
+                self.assertFalse(t_.row_indices().is_pinned())
+                self.assertFalse(t_.values().is_pinned())
+            elif layout is torch.strided:
+                pass
+            else:
+                assert 0  # unreachable
+
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=True)
+    def test_constructor_pinned_memory(self, device, layout):
+        """Tests sparse_xyz_tensor(indices.pin_memory(device), values.pin_memory(device))
+        """
+        pin_memory_device = "cuda"
+        for t in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_zero_sized=False,     # pinning zero-sized tensors is a no-op
+                pin_memory=None,             # constructor does not specify pin_memory=...
+                members_pin_memory=True,     # indices and values are pinned
+                enable_batch=False,          # TODO: remove after gh-104868 is resolved
+        ):
+            if layout is torch.sparse_coo:
+                self.assertTrue(t._indices().is_pinned())
+                self.assertTrue(t._values().is_pinned())
+            elif layout in {torch.sparse_csr, torch.sparse_bsr}:
+                self.assertTrue(t.crow_indices().is_pinned())
+                self.assertTrue(t.col_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout in {torch.sparse_csc, torch.sparse_bsc}:
+                self.assertTrue(t.ccol_indices().is_pinned())
+                self.assertTrue(t.row_indices().is_pinned())
+                self.assertTrue(t.values().is_pinned())
+            elif layout is torch.strided:
+                pass
+            else:
+                assert 0  # unreachable
+            self.assertTrue(t.is_pinned())
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'requires cuda')
+    @onlyCPU
+    @all_sparse_layouts('layout', include_strided=False)
+    def test_constructor_mismatched_pinned_memory(self, device, layout):
+        """Test the failure to construct sparse tensor from indices and values
+        that have different pinning states.
+        """
+        def generic_constructor(*args, **kwargs):
+            if layout in {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}:
+                kwargs.update(layout=layout)
+                return torch.sparse_compressed_tensor(*args, **kwargs)
+            elif layout is torch.sparse_coo:
+                return torch.sparse_coo_tensor(*args, **kwargs)
+            else:
+                raise NotImplementedError(layout)
+
+        for args, kwargs in self.generate_simple_inputs(
+                layout, device=device, dtype=torch.float64,
+                enable_zero_sized=False,     # pinning zero-sized tensors is a no-op
+                enable_batch=False,  # TODO: remove after gh-104868 is resolved
+                output_tensor=False):
+
+            # indices are pinned, values is a non-pinned tensor
+            args1 = (args[0].pin_memory(), *args[1:])
+
+            # indices are non-pinned, values is a pinned tensor
+            args2 = (*args[:-1], args[-1].pin_memory())
+
+            with self.assertRaisesRegex(
+                    RuntimeError, r"memory pinning of \w*indices \(=1\) must match memory pinning of values \(=0\)"):
+                generic_constructor(*args1, **kwargs)
+
+            with self.assertRaisesRegex(
+                    RuntimeError, r"memory pinning of \w*indices \(=0\) must match memory pinning of values \(=1\)"):
+                generic_constructor(*args2, **kwargs)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA

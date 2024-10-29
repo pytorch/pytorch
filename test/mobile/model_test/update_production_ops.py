@@ -7,6 +7,7 @@ import sys
 
 import yaml
 
+
 root_operators = {}
 traced_operators = {}
 kernel_metadata = {}

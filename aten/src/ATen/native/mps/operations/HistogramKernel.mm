@@ -163,7 +163,7 @@ template <typename input_t, BIN_SELECTION_ALGORITHM algorithm>
 void histogramdd_kernel_impl(Tensor& hist_output,
                              const TensorList& bin_edges,
                              const Tensor& input,
-                             const c10::optional<Tensor>& weight) {
+                             const std::optional<Tensor>& weight) {
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_INTERNAL_ASSERT(input.dim() == 2);
 
@@ -222,7 +222,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
   thread_hist_sizes[0] = numThreads;
   std::copy(hist_sizes.begin(), hist_sizes.end(), thread_hist_sizes.begin() + 1);
   Tensor thread_histograms = at::zeros(
-      thread_hist_sizes, hist_output.scalar_type(), c10::nullopt /* layout */, kMPS, c10::nullopt /* pin_memory */
+      thread_hist_sizes, hist_output.scalar_type(), std::nullopt /* layout */, kMPS, std::nullopt /* pin_memory */
   );
   TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
 
@@ -247,10 +247,10 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       id<MTLComputePipelineState> stridedIndicesPSO = lib.getPipelineStateForFunc("kernel_index_offset");
 
       [computeEncoder setComputePipelineState:stridedIndicesPSO];
-      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
+      mtl_setBytes(computeEncoder, strides, 0);
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:1];
-      [computeEncoder setBytes:inputShapeData.data() length:sizeof(uint32_t) * inputShape.size() atIndex:2];
-      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
+      mtl_setBytes(computeEncoder, inputShapeData, 2);
+      mtl_setBytes(computeEncoder, nDim, 3);
 
       mtl_dispatch1DJob(computeEncoder, stridedIndicesPSO, stridedIndicesNumThreads);
 
@@ -267,16 +267,14 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       }
       mtl_setBuffer(computeEncoder, thread_histograms, 2);
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:3];
-      [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:4];
+      mtl_setBytes(computeEncoder, D, 4);
       [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset atIndex:5];
-      [computeEncoder setBytes:num_bin_edges.data() length:sizeof(int64_t) * D atIndex:6];
-      [computeEncoder setBytes:leftmost_edge.data() length:sizeof(input_t) * D atIndex:7];
-      [computeEncoder setBytes:rightmost_edge.data() length:sizeof(input_t) * D atIndex:8];
-      [computeEncoder setBytes:thread_histograms.strides().data()
-                        length:sizeof(int64_t) * thread_hist_sizes.size()
-                       atIndex:9];
-      [computeEncoder setBytes:&bin_selection_algorithm length:sizeof(uint8_t) atIndex:10];
-      [computeEncoder setBytes:&has_weight length:sizeof(uint8_t) atIndex:11];
+      mtl_setBytes(computeEncoder, num_bin_edges, 6);
+      mtl_setBytes(computeEncoder, leftmost_edge, 7);
+      mtl_setBytes(computeEncoder, rightmost_edge, 8);
+      mtl_setBytes(computeEncoder, thread_histograms.strides(), 9);
+      mtl_setBytes(computeEncoder, bin_selection_algorithm, 10);
+      mtl_setBytes(computeEncoder, has_weight, 11);
 
       mtl_dispatch1DJob(computeEncoder, histogramPSO, numThreads);
 
@@ -288,7 +286,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
 template <BIN_SELECTION_ALGORITHM bin_algorithm>
 static void histogramdd_out_mps_template(const Tensor& self,
-                                         const c10::optional<Tensor>& weight,
+                                         const std::optional<Tensor>& weight,
                                          bool density,
                                          Tensor& hist,
                                          const TensorList& bin_edges) {
@@ -301,7 +299,7 @@ static void histogramdd_out_mps_template(const Tensor& self,
   const Tensor reshaped_input = self.reshape({M, N});
 
   const auto reshaped_weight =
-      weight.has_value() ? c10::optional<Tensor>(weight.value().reshape({M})) : c10::optional<Tensor>();
+      weight.has_value() ? std::optional<Tensor>(weight.value().reshape({M})) : std::optional<Tensor>();
 
   std::vector<Tensor> bin_edges_contig(bin_edges.size());
   for (const auto dim : c10::irange(bin_edges_contig.size())) {
@@ -336,7 +334,7 @@ static void histogramdd_out_mps_template(const Tensor& self,
 } // namespace mps
 
 static void histogramdd_kernel(const Tensor& self,
-                               const c10::optional<Tensor>& weight,
+                               const std::optional<Tensor>& weight,
                                bool density,
                                Tensor& hist,
                                const TensorList& bin_edges) {
@@ -344,7 +342,7 @@ static void histogramdd_kernel(const Tensor& self,
 }
 
 static void histogramdd_linear_kernel(const Tensor& self,
-                                      const c10::optional<Tensor>& weight,
+                                      const std::optional<Tensor>& weight,
                                       bool density,
                                       Tensor& hist,
                                       const TensorList& bin_edges,
@@ -364,8 +362,7 @@ static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
                                                     const int64_t N,
                                                     std::vector<double>& leftmost_edges,
                                                     std::vector<double>& rightmost_edges) {
-  Tensor min, max;
-  std::tie(min, max) = at::aminmax(input, 0);
+  auto [min, max] = at::aminmax(input, 0);
 
   for (const auto i : c10::irange(N)) {
     leftmost_edges[i] = min[i].item().to<double>();

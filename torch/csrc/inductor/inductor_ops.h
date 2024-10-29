@@ -2,9 +2,17 @@
 
 #include <ATen/Tensor.h>
 
-namespace torch {
-namespace inductor {
+namespace torch::inductor {
 
+TORCH_API at::Tensor _mm_plus_mm_out(
+    at::Tensor& out,
+    const at::Tensor& a,
+    const at::Tensor& b,
+    const at::Tensor& c,
+    const at::Tensor& d);
+
+// After adding _mm_plus_mm_out, this should not be exposed and called by model
+// code. Keeping it around for backward compatibility. Will be deprecated later.
 TORCH_API at::Tensor _mm_plus_mm(
     const at::Tensor& a,
     const at::Tensor& b,
@@ -28,5 +36,4 @@ TORCH_API at::Tensor _reinterpret_tensor(
     at::IntArrayRef stride,
     int64_t offset_increment = 0);
 
-} // namespace inductor
-} // namespace torch
+} // namespace torch::inductor

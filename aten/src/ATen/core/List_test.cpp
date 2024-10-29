@@ -3,7 +3,7 @@
 
 using namespace c10;
 
-// NOLINTBEGIN(performance-move-const-arg, bugprone-use-after-move)
+// NOLINTBEGIN(performance-move-const-arg, bugprone-use-after-move, *analyzer*Move)
 TEST(ListTestIValueBasedList, givenEmptyList_whenCallingEmpty_thenReturnsTrue) {
     List<string> list;
     EXPECT_TRUE(list.empty());
@@ -1127,7 +1127,7 @@ TEST(ListTest, canAccessStringByReference) {
 }
 
 TEST(ListTest, canAccessOptionalStringByReference) {
-  List<std::optional<std::string>> list({"one", "two", c10::nullopt});
+  List<std::optional<std::string>> list({"one", "two", std::nullopt});
   const auto& listRef = list;
   static_assert(
       std::is_same_v<decltype(listRef[1]), std::optional<std::reference_wrapper<const std::string>>>,
@@ -1162,4 +1162,4 @@ TEST(ListTest, toTypedList) {
   genericList = impl::toList(std::move(stringList));
   EXPECT_THROW(c10::impl::toTypedList<int64_t>(std::move(genericList)), c10::Error);
 }
-// NOLINTEND(performance-move-const-arg, bugprone-use-after-move)
+// NOLINTEND(performance-move-const-arg, bugprone-use-after-move, *analyzer*Move)

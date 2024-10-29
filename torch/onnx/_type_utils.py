@@ -1,15 +1,16 @@
 # mypy: allow-untyped-defs
 """Utilities for converting and operating on ONNX, JIT and torch types."""
+
 from __future__ import annotations
 
 import enum
 import typing
-from typing import Dict, Literal, Optional, Union
+from typing import Literal
 
 import torch
 from torch._C import _onnx as _C_onnx
 from torch.onnx import errors
-from torch.onnx._internal import _beartype
+
 
 if typing.TYPE_CHECKING:
     # Hack to help mypy to recognize torch._C.Value
@@ -106,10 +107,7 @@ class JitScalarType(enum.IntEnum):
     UNDEFINED = enum.auto()  # 20
 
     @classmethod
-    @_beartype.beartype
-    def _from_name(
-        cls, name: Union[ScalarName, TorchName, Optional[str]]
-    ) -> JitScalarType:
+    def _from_name(cls, name: ScalarName | TorchName | str | None) -> JitScalarType:
         """Convert a JIT scalar type or torch type name to ScalarType.
 
         Note: DO NOT USE this API when `name` comes from a `torch._C.Value.type()` calls.
@@ -136,8 +134,7 @@ class JitScalarType(enum.IntEnum):
         raise errors.OnnxExporterError(f"Unknown torch or scalar type: '{name}'")
 
     @classmethod
-    @_beartype.beartype
-    def from_dtype(cls, dtype: Optional[torch.dtype]) -> JitScalarType:
+    def from_dtype(cls, dtype: torch.dtype | None) -> JitScalarType:
         """Convert a torch dtype to JitScalarType.
 
         Note: DO NOT USE this API when `dtype` comes from a `torch._C.Value.type()` calls.
@@ -159,9 +156,8 @@ class JitScalarType(enum.IntEnum):
         return _DTYPE_TO_SCALAR_TYPE[dtype]
 
     @classmethod
-    @_beartype.beartype
     def from_onnx_type(
-        cls, onnx_type: Optional[Union[int, _C_onnx.TensorProtoDataType]]
+        cls, onnx_type: int | _C_onnx.TensorProtoDataType | None
     ) -> JitScalarType:
         """Convert a ONNX data type to JitScalarType.
 
@@ -179,9 +175,8 @@ class JitScalarType(enum.IntEnum):
         return _ONNX_TO_SCALAR_TYPE[typing.cast(_C_onnx.TensorProtoDataType, onnx_type)]
 
     @classmethod
-    @_beartype.beartype
     def from_value(
-        cls, value: Union[None, torch._C.Value, torch.Tensor], default=None
+        cls, value: None | torch._C.Value | torch.Tensor, default=None
     ) -> JitScalarType:
         """Create a JitScalarType from an value's scalar type.
 
@@ -247,22 +242,18 @@ class JitScalarType(enum.IntEnum):
             value,
         )
 
-    @_beartype.beartype
     def scalar_name(self) -> ScalarName:
         """Convert a JitScalarType to a JIT scalar type name."""
         return _SCALAR_TYPE_TO_NAME[self]
 
-    @_beartype.beartype
     def torch_name(self) -> TorchName:
         """Convert a JitScalarType to a torch type name."""
         return _SCALAR_TYPE_TO_TORCH_NAME[self]
 
-    @_beartype.beartype
     def dtype(self) -> torch.dtype:
         """Convert a JitScalarType to a torch dtype."""
         return _SCALAR_TYPE_TO_DTYPE[self]
 
-    @_beartype.beartype
     def onnx_type(self) -> _C_onnx.TensorProtoDataType:
         """Convert a JitScalarType to an ONNX data type."""
         if self not in _SCALAR_TYPE_TO_ONNX:
@@ -271,7 +262,6 @@ class JitScalarType(enum.IntEnum):
             )
         return _SCALAR_TYPE_TO_ONNX[self]
 
-    @_beartype.beartype
     def onnx_compatible(self) -> bool:
         """Return whether this JitScalarType is compatible with ONNX."""
         return (
@@ -281,20 +271,18 @@ class JitScalarType(enum.IntEnum):
         )
 
 
-@_beartype.beartype
-def valid_scalar_name(scalar_name: Union[ScalarName, str]) -> bool:
+def valid_scalar_name(scalar_name: ScalarName | str) -> bool:
     """Return whether the given scalar name is a valid JIT scalar type name."""
     return scalar_name in _SCALAR_NAME_TO_TYPE
 
 
-@_beartype.beartype
-def valid_torch_name(torch_name: Union[TorchName, str]) -> bool:
+def valid_torch_name(torch_name: TorchName | str) -> bool:
     """Return whether the given torch name is a valid torch type name."""
     return torch_name in _TORCH_NAME_TO_SCALAR_TYPE
 
 
 # https://github.com/pytorch/pytorch/blob/344defc9733a45fee8d0c4d3f5530f631e823196/c10/core/ScalarType.h
-_SCALAR_TYPE_TO_NAME: Dict[JitScalarType, ScalarName] = {
+_SCALAR_TYPE_TO_NAME: dict[JitScalarType, ScalarName] = {
     JitScalarType.BOOL: "Bool",
     JitScalarType.UINT8: "Byte",
     JitScalarType.INT8: "Char",
@@ -318,11 +306,11 @@ _SCALAR_TYPE_TO_NAME: Dict[JitScalarType, ScalarName] = {
     JitScalarType.UNDEFINED: "Undefined",
 }
 
-_SCALAR_NAME_TO_TYPE: Dict[ScalarName, JitScalarType] = {
+_SCALAR_NAME_TO_TYPE: dict[ScalarName, JitScalarType] = {
     v: k for k, v in _SCALAR_TYPE_TO_NAME.items()
 }
 
-_SCALAR_TYPE_TO_TORCH_NAME: Dict[JitScalarType, TorchName] = {
+_SCALAR_TYPE_TO_TORCH_NAME: dict[JitScalarType, TorchName] = {
     JitScalarType.BOOL: "bool",
     JitScalarType.UINT8: "uint8_t",
     JitScalarType.INT8: "int8_t",
@@ -345,7 +333,7 @@ _SCALAR_TYPE_TO_TORCH_NAME: Dict[JitScalarType, TorchName] = {
     JitScalarType.FLOAT8E4M3FNUZ: "float8_e4m3fnuz",
 }
 
-_TORCH_NAME_TO_SCALAR_TYPE: Dict[TorchName, JitScalarType] = {
+_TORCH_NAME_TO_SCALAR_TYPE: dict[TorchName, JitScalarType] = {
     v: k for k, v in _SCALAR_TYPE_TO_TORCH_NAME.items()
 }
 

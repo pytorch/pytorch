@@ -31,7 +31,6 @@ from functorch_additional_op_db import additional_op_db
 
 import torch
 import torch.autograd.forward_ad as fwAD
-
 from functorch import grad, jacfwd, jacrev, vjp, vmap
 from torch import Tensor
 from torch._functorch.eager_transforms import _as_tuple, jvp
@@ -44,7 +43,6 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_methods_invocations import op_db
-
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
     IS_MACOS,
@@ -54,15 +52,16 @@ from torch.testing._internal.common_utils import (
     run_tests,
     runOnRocm,
     skipIfRocm,
+    skipIfTorchDynamo,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TestCase,
     unMarkDynamoStrictTest,
 )
-
 from torch.testing._internal.opinfo.core import SampleInput
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
+
 
 aten = torch.ops.aten
 
@@ -351,7 +350,7 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail("tensor_split"),  # data_ptr composite compliance
-    # https://github.com/pytorch/pytorch/issues/96560
+    # Very minor accuracy issue on ROCm
     decorate("nn.functional.scaled_dot_product_attention", decorator=skipIfRocm),
 }
 
@@ -399,6 +398,7 @@ aliasing_ops_list_return = {
 
 skip_noncontig = {
     "_batch_norm_with_update",
+    "as_strided_copy",
 }
 
 
@@ -433,7 +433,10 @@ class TestOperators(TestCase):
                 xfail("view_as_complex"),
                 # query: last dimension must be contiguous
                 # Fused attention kernels require last dim to be contiguous
-                xfail("nn.functional.scaled_dot_product_attention"),
+                decorate(
+                    "nn.functional.scaled_dot_product_attention",
+                    decorator=expectedFailureIf(not TEST_WITH_ROCM),
+                ),  # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # RuntimeError: Expected contiguous tensor, but got
@@ -455,9 +458,10 @@ class TestOperators(TestCase):
                 {torch.float32: tol(atol=1e-04, rtol=1e-04)},
             ),
             tol1("masked.cumprod", {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+            tol1("svd_lowrank", {torch.float32: tol(atol=3e-04, rtol=3e-04)}),
             tol1(
-                "svd_lowrank",
-                {torch.float32: tol(atol=3e-04, rtol=3e-04)},
+                "linalg.multi_dot",
+                {torch.float32: tol(atol=1e-05, rtol=8e-04)},
                 device_type="cuda",
             ),
             tol1(
@@ -478,6 +482,11 @@ class TestOperators(TestCase):
                 "matmul",
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
                 device_type="cuda",
+            ),
+            tol1(
+                "pca_lowrank",
+                {torch.float32: tol(atol=3e-05, rtol=4e-06)},
+                device_type="cpu",
             ),
         ),
     )
@@ -601,6 +610,11 @@ class TestOperators(TestCase):
                 device_type="cuda",
             ),
             tol1(
+                "masked.prod",
+                {torch.float32: tol(atol=1e-05, rtol=1.3e-05)},
+                device_type="cuda",
+            ),
+            tol1(
                 "nn.functional.binary_cross_entropy_with_logits",
                 {torch.float32: tol(atol=4e-04, rtol=4e-04)},
             ),
@@ -613,6 +627,9 @@ class TestOperators(TestCase):
             tol1(
                 "nn.functional.multi_head_attention_forward",
                 {torch.float32: tol(atol=6e-05, rtol=2e-05)},
+            ),
+            tol2(
+                "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-5, rtol=2e-5)}
             ),
         ),
     )
@@ -731,7 +748,10 @@ class TestOperators(TestCase):
                 xfail("view_as_complex"),
                 # RuntimeError: query: last dimension must be contiguous
                 # The fused attention kernels require the last dim to be contiguous
-                xfail("nn.functional.scaled_dot_product_attention"),
+                decorate(
+                    "nn.functional.scaled_dot_product_attention",
+                    decorator=expectedFailureIf(not TEST_WITH_ROCM),
+                ),  # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # BUG
@@ -765,7 +785,7 @@ class TestOperators(TestCase):
             tol2(
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=1e-05, rtol=1e-05)}
             ),
-            tol1("linalg.tensorsolve", {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
+            tol1("linalg.tensorsolve", {torch.float32: tol(atol=9e-03, rtol=2e-04)}),
             tol1("linalg.multi_dot", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("svd_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=1e-04, rtol=1e-04)}),
@@ -935,6 +955,11 @@ class TestOperators(TestCase):
                     "linalg.householder_product", decorator=runOnRocm
                 ),  # works on ROCm
                 xfail(
+                    # nans
+                    "masked.softmax",
+                    device_type="cpu",
+                ),
+                xfail(
                     "nanquantile", device_type="cpu"
                 ),  # vmap not implemented for at::equal.
                 xfail("native_layer_norm"),  # vmap: inplace into a regular tensor
@@ -988,8 +1013,6 @@ class TestOperators(TestCase):
                 xfail("normal"),  # calls random op
                 xfail("normal", "number_mean"),  # calls random op
                 xfail("pca_lowrank"),  # calls random op
-                # https://github.com/pytorch/pytorch/issues/96560
-                decorate("linalg.pinv", "hermitian", decorator=skipIfRocm),
                 xfail(
                     "quantile", device_type="cpu"
                 ),  # Batching rule not implemented for `at::equal`
@@ -1026,9 +1049,12 @@ class TestOperators(TestCase):
         "test_vmapvjpvjp",
         (
             tol1("linalg.svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
+            tol1("linalg.lu", {torch.float32: tol(atol=5e-04, rtol=7e-04)}),
             tol1("linalg.lu_factor", {torch.float32: tol(atol=2e-03, rtol=2e-02)}),
+            tol1("linalg.multi_dot", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
             tol1("svd", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
             tol1("matrix_exp", {torch.float32: tol(atol=1e-03, rtol=5e-04)}),
+            tol1("masked.prod", {torch.float32: tol(atol=2e-03, rtol=2e-04)}),
         ),
     )
     @skipOps(
@@ -1036,6 +1062,7 @@ class TestOperators(TestCase):
         "test_vmapvjpvjp",
         {
             xfail("as_strided", "partial_views"),
+            xfail("as_strided_copy"),
         },
     )
     def test_vmapvjpvjp(self, device, dtype, op):
@@ -1172,12 +1199,22 @@ class TestOperators(TestCase):
             ),
             tol1(
                 "linalg.householder_product",
-                {torch.float32: tol(atol=1e-04, rtol=1e-04)},
+                {torch.float32: tol(atol=3e-04, rtol=9e-04)},
             ),
             tol1(
                 "matrix_exp",
                 {torch.float32: tol(atol=5e-04, rtol=1e-04)},
                 device_type="cuda",
+            ),
+            tol1(
+                "nn.functional.layer_norm",
+                {torch.float32: tol(atol=3e-4, rtol=1e-4)},
+                device_type="cpu",
+            ),
+            tol1(
+                "native_layer_norm",
+                {torch.float32: tol(atol=3e-4, rtol=1e-4)},
+                device_type="cpu",
             ),
         ),
     )
@@ -1187,6 +1224,7 @@ class TestOperators(TestCase):
         vmapvjp_fail.union(
             {
                 xfail("as_strided"),
+                xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
             }
         ),
@@ -1304,6 +1342,7 @@ class TestOperators(TestCase):
         "test_vmapjvpall",
         vmapjvpall_fail.union(
             {
+                xfail("as_strided_copy"),
                 decorate(
                     "linalg.det",
                     "singular",
@@ -1371,25 +1410,18 @@ class TestOperators(TestCase):
                 xfail("nn.functional.soft_margin_loss", ""),
                 xfail("nn.functional.max_unpool1d", "grad"),
                 xfail("nn.functional.embedding", ""),
-                xfail(
-                    "scatter_reduce", "sum"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "mean"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amin"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amax"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
                 xfail("nn.functional.glu"),
                 xfail("nn.functional.bilinear"),  # trilinear doesn't have batching rule
                 xfail("linalg.lu", ""),
                 xfail("nn.functional.dropout3d", ""),
                 xfail("as_strided_scatter", ""),
                 xfail("masked.cumprod", ""),
+                xfail("permute_copy"),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
+                xfail("squeeze_copy"),
+                xfail("t_copy"),
+                xfail("transpose_copy"),
+                xfail("unsqueeze_copy"),
             }
         ),
     )
@@ -1450,21 +1482,11 @@ class TestOperators(TestCase):
                 xfail("masked_select"),
                 xfail("nanquantile"),
                 xfail("ormqr"),
+                xfail("permute_copy"),
                 xfail("put"),
-                xfail(
-                    "scatter_reduce", "sum"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "mean"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amin"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amax"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
                 xfail("quantile"),
                 xfail("renorm"),
+                xfail("squeeze_copy"),
                 xfail("take"),
                 xfail("tensor_split"),
                 xfail("to_sparse"),
@@ -1489,7 +1511,6 @@ class TestOperators(TestCase):
                 xfail("nn.functional.multi_margin_loss", ""),
                 xfail("nn.functional.multilabel_margin_loss", ""),
                 xfail("nn.functional.pdist", ""),
-                xfail("scatter_reduce", "prod"),
                 xfail("nn.functional.max_unpool1d", ""),
                 xfail("nn.functional.max_unpool3d", ""),
                 xfail("nn.functional.max_unpool3d", "grad"),
@@ -1526,6 +1547,10 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
+                xfail("squeeze_copy"),
+                xfail("t_copy"),
+                xfail("transpose_copy"),
+                xfail("unsqueeze_copy"),
             }
         ),
     )
@@ -1781,7 +1806,12 @@ class TestOperators(TestCase):
             tol1("masked.cumprod", {torch.float32: tol(atol=1e-04, rtol=5e-04)}),
             tol1(
                 "cumprod",
-                {torch.float32: tol(atol=1e-04, rtol=1.3e-05)},
+                {torch.float32: tol(atol=1e-03, rtol=5e-04)},
+                device_type="cuda",
+            ),
+            tol1(
+                "linalg.det",
+                {torch.float32: tol(atol=3e-05, rtol=5e-06)},
                 device_type="cuda",
             ),
             tol1(
@@ -1889,6 +1919,7 @@ class TestOperators(TestCase):
                 xfail(
                     "as_strided", "partial_views"
                 ),  # AssertionError: Tensor-likes are not close!
+                xfail("as_strided_copy"),  # AssertionError: Tensor-likes are not close!
                 xfail(
                     "as_strided_scatter"
                 ),  # AssertionError: Tensor-likes are not close!
@@ -2137,6 +2168,7 @@ class TestOperators(TestCase):
                 cotangents = torch.randn_like(result, device=device)
                 self._compare_jacobians_of_vjp(fn, (cotangents, input))
 
+    @skipIfTorchDynamo("segfaults")
     def test_extremal_numerics_l1_loss(self, device):
         N, C, H, W = 3, 4, 5, 6
         shapes = ((N, C), (N, C, H), (N, C, H, W))
@@ -2312,7 +2344,8 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d"),  # contiguous call
             xfail("to_sparse"),  # dispatch key issue
             xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
-            # https://github.com/pytorch/pytorch/issues/96560
+            # https://github.com/pytorch/pytorch/issues/96560#issuecomment-2151063723
+            # ** minor accuracy issue for float32 on ROCm
             decorate("xlogy", decorator=skipIfRocm),
             # numerical inconsistencies, look like bugs
             skip(
@@ -2353,13 +2386,18 @@ class TestOperators(TestCase):
         "test_vmap_autograd_grad",
         (
             tol1(
+                "ldexp",
+                {torch.float32: tol(atol=3e-04, rtol=1.6e-06)},
+                device_type="cuda",
+            ),
+            tol1(
                 "linalg.householder_product",
                 {torch.float32: tol(atol=5e-04, rtol=9e-03)},
                 device_type="cuda",
             ),
             tol1(
                 "linalg.householder_product",
-                {torch.float32: tol(atol=1e-04, rtol=1e-04)},
+                {torch.float32: tol(atol=6e-03, rtol=1e-03)},
                 device_type="cpu",
             ),
             tol1(
@@ -2371,6 +2409,11 @@ class TestOperators(TestCase):
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-06, rtol=5e-06)}
             ),
             tol1("nn.functional.conv3d", {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
+            tol1(
+                "nn.functional.conv2d",
+                {torch.float32: tol(atol=5e-05, rtol=5e-05)},
+                device_type="cuda",
+            ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
         ),

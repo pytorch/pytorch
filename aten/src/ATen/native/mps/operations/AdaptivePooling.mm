@@ -88,7 +88,7 @@ Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size
                             IntArrayRef({0, 0}),
                             false,
                             true,
-                            c10::nullopt);
+                            std::nullopt);
   } else {
     Tensor phony_grad = at::ones_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto input_sizes = input.sizes();
@@ -103,7 +103,7 @@ Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size
                                      IntArrayRef({0, 0}),
                                      false,
                                      true,
-                                     c10::nullopt);
+                                     std::nullopt);
     // Multiply output by kernel size
     output = at::mul(output, kernel_sizeH * kernel_sizeW);
   }
@@ -137,7 +137,7 @@ Tensor adaptive_avg_pool2d_mps(at::Tensor const& input, IntArrayRef output_size)
   }
 
   const auto memory_format = input.suggest_memory_format();
-  Tensor output = at::empty(output_shape, input.scalar_type(), c10::nullopt, kMPS, c10::nullopt, memory_format);
+  Tensor output = at::empty(output_shape, input.scalar_type(), std::nullopt, kMPS, std::nullopt, memory_format);
   return adaptive_avg_pool2d_out_mps(input, output_size, output);
 }
 
@@ -162,7 +162,7 @@ Tensor adaptive_avg_pool2d_backward_mps(const Tensor& gradOutput, const Tensor& 
                                           IntArrayRef({0, 0}),
                                           false,
                                           true,
-                                          c10::nullopt);
+                                          std::nullopt);
     } else {
       gradInput = at::avg_pool2d(gradOutput,
                                  IntArrayRef({kernel_sizeH, kernel_sizeW}),
@@ -170,7 +170,7 @@ Tensor adaptive_avg_pool2d_backward_mps(const Tensor& gradOutput, const Tensor& 
                                  IntArrayRef({0, 0}),
                                  false,
                                  true,
-                                 c10::nullopt);
+                                 std::nullopt);
       gradInput = at::mul(gradInput, kernel_sizeH * kernel_sizeW);
     }
   }

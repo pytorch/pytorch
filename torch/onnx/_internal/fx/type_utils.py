@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 """Utilities for converting and operating on ONNX, JIT and torch types."""
+
 from __future__ import annotations
 
 from typing import (
@@ -9,18 +10,18 @@ from typing import (
     Optional,
     Protocol,
     runtime_checkable,
-    Set,
     Tuple,
-    Type,
     TYPE_CHECKING,
     Union,
 )
 
 import numpy
+
 import onnx
 
 import torch
 from torch._subclasses import fake_tensor
+
 
 if TYPE_CHECKING:
     import onnx.defs.OpSchema.AttrType  # type: ignore[import]  # noqa: TCH004
@@ -31,8 +32,7 @@ if TYPE_CHECKING:
 @runtime_checkable
 class TensorLike(Protocol):
     @property
-    def dtype(self) -> Optional[torch.dtype]:
-        ...
+    def dtype(self) -> torch.dtype | None: ...
 
 
 def is_torch_complex_dtype(tensor_dtype: torch.dtype) -> bool:
@@ -52,13 +52,13 @@ def is_optional_onnx_dtype_str(onnx_type_str: str) -> bool:
     return onnx_type_str in _OPTIONAL_ONNX_DTYPE_STR
 
 
-def from_torch_dtype_to_onnx_dtype_str(dtype: Union[torch.dtype, type]) -> Set[str]:
+def from_torch_dtype_to_onnx_dtype_str(dtype: torch.dtype | type) -> set[str]:
     return _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS[dtype]
 
 
 def from_python_type_to_onnx_attribute_type(
     dtype: type, is_sequence: bool = False
-) -> Optional[onnx.defs.OpSchema.AttrType]:
+) -> onnx.defs.OpSchema.AttrType | None:
     import onnx.defs  # type: ignore[import]
 
     _PYTHON_TYPE_TO_ONNX_ATTRIBUTE_TYPE = {
@@ -105,21 +105,19 @@ def is_torch_symbolic_type(value: Any) -> bool:
     return isinstance(value, (torch.SymBool, torch.SymInt, torch.SymFloat))
 
 
-def from_torch_dtype_to_abbr(dtype: Optional[torch.dtype]) -> str:
+def from_torch_dtype_to_abbr(dtype: torch.dtype | None) -> str:
     if dtype is None:
         return ""
     return _TORCH_DTYPE_TO_ABBREVIATION.get(dtype, "")
 
 
-def from_scalar_type_to_torch_dtype(scalar_type: type) -> Optional[torch.dtype]:
+def from_scalar_type_to_torch_dtype(scalar_type: type) -> torch.dtype | None:
     return _SCALAR_TYPE_TO_TORCH_DTYPE.get(scalar_type)
 
 
 # NOTE: this is a mapping from torch dtype to a set of compatible onnx types
 # It's used in dispatcher to find the best match overload for the input dtypes
-_TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
-    Union[torch.dtype, type], Set[str]
-] = {
+_TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: dict[torch.dtype | type, set[str]] = {
     torch.bfloat16: {"tensor(bfloat16)"},
     torch.bool: {"tensor(bool)"},
     torch.float64: {"tensor(double)"},
@@ -144,7 +142,7 @@ _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS: Dict[
     torch.complex128: {"tensor(double)"},
 }
 
-_OPTIONAL_ONNX_DTYPE_STR: Set[str] = {
+_OPTIONAL_ONNX_DTYPE_STR: set[str] = {
     f"optional({value})"
     for value_set in _TORCH_DTYPE_TO_COMPATIBLE_ONNX_TYPE_STRINGS.values()
     for value in value_set
@@ -157,7 +155,7 @@ _PYTHON_TYPE_TO_TORCH_DTYPE = {
     complex: torch.complex64,
 }
 
-_COMPLEX_TO_FLOAT: Dict[torch.dtype, torch.dtype] = {
+_COMPLEX_TO_FLOAT: dict[torch.dtype, torch.dtype] = {
     torch.complex32: torch.float16,
     torch.complex64: torch.float32,
     torch.complex128: torch.float64,  # NOTE: ORT doesn't support torch.float64
@@ -169,9 +167,9 @@ _SYM_TYPE_TO_TORCH_DTYPE = {
     torch.SymBool: torch.bool,
 }
 
-_SCALAR_TYPE_TO_TORCH_DTYPE: Dict[Type, torch.dtype] = {
+_SCALAR_TYPE_TO_TORCH_DTYPE: dict[type, torch.dtype] = {
     **_PYTHON_TYPE_TO_TORCH_DTYPE,
-    **_SYM_TYPE_TO_TORCH_DTYPE,
+    **_SYM_TYPE_TO_TORCH_DTYPE,  # type: ignore[dict-item]
 }
 
 _TORCH_DTYPE_TO_ABBREVIATION = {
@@ -241,6 +239,9 @@ BaseArgumentTypes = Union[
     torch.memory_format,
     torch.layout,
     torch._ops.OpOverload,
+    torch.SymInt,
+    torch.SymFloat,
+    torch.SymBool,
 ]
 Argument = Optional[
     Union[
