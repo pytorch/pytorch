@@ -165,14 +165,7 @@ C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
   const auto temp_vec1 = vec::Vectorized<Half>::loadu(&vec1[registerPairIndex * vec::Vectorized<Half>::size()]);
   const auto temp_vec2 = vec::Vectorized<Half>::loadu(&vec2[registerPairIndex * vec::Vectorized<Half>::size()]);
 
-#ifdef __aarch64__
   const auto [result_low, result_high] = fmadd(temp_vec1, temp_vec2, sum[2 * registerPairIndex], sum[2 * registerPairIndex + 1]);
-#else
-  const auto [temp_vec1_low, temp_vec1_high] = convert_half_float(temp_vec1);
-  const auto [temp_vec2_low, temp_vec2_high] = convert_half_float(temp_vec2);
-  const auto result_low = vec::fmadd(temp_vec1_low, temp_vec2_low, sum[2 * registerPairIndex]);
-  const auto result_high = vec::fmadd(temp_vec1_high, temp_vec2_high, sum[2 * registerPairIndex + 1]);
-#endif
   sum[2 * registerPairIndex] = result_low;
   sum[2 * registerPairIndex + 1] = result_high;
 }
