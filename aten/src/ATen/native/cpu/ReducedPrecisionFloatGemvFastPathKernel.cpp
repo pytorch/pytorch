@@ -154,23 +154,6 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
 }
 
 #ifdef __aarch64__
-float32x4_t to_bfloat16(uint16x4_t u16) {
-  int32x4_t shift = vdupq_n_s32(16);
-  return vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16), shift));
-}
-
-inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
-#ifdef __ARM_FEATURE_FMA
-  return vfmaq_f32(a, b, c);
-#else
-  return vaddq_f32(a, vmulq_f32(b, c));
-#endif
-}
-
-float32x4_t f32_fma_bf16(float32x4_t a, uint16x4_t b, uint16x4_t c) {
-  return f32_fma(a, to_bfloat16(b), to_bfloat16(c));
-}
-
 #if defined(__clang__) && __clang_major__ > 15
 // https://godbolt.org/z/z8P4Yncra
 #define COMPILER_SUPPORTS_BF16_TARGET 1
@@ -182,13 +165,30 @@ float32x4_t f32_fma_bf16(float32x4_t a, uint16x4_t b, uint16x4_t c) {
 #define COMPILER_SUPPORTS_BF16_TARGET 0
 #endif
 
+namespace {
+vec::Vectorized<float> fmadd(
+    const vec::Vectorized<float>& acc,
+    const vec::Vectorized<c10::BFloat16>& a,
+    const vec::Vectorized<c10::BFloat16>& b) {
+  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
+  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
+  return fmadd(a_float_high, b_float_high, fmadd(a_float_low, b_float_low, acc));
+}
+// TODO: move this next to the Half overload below once BFloat16 is
+// enabled for non-aarch64 architectures.
+std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
+    const vec::Vectorized<c10::BFloat16>& a,
+    const vec::Vectorized<c10::BFloat16>& b,
+    const vec::Vectorized<float>& acc_low,
+    const vec::Vectorized<float>& acc_high) {
+  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
+  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
+  return std::make_pair(fmadd(a_float_low, b_float_low, acc_low), fmadd(a_float_high, b_float_high, acc_high));
+}
+} // namespace
+
 #if COMPILER_SUPPORTS_BF16_TARGET
 #define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("arch=armv8.2-a+bf16")))
-
-TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE float32x4_t
-f32_dot_bf16(float32x4_t a, bfloat16x8_t b, bfloat16x8_t c) {
-  return vbfdotq_f32(a, b, c);
-}
 
 TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE void
 dot_with_fp32_arith_main_inner_loop_bfdot(
@@ -196,64 +196,28 @@ dot_with_fp32_arith_main_inner_loop_bfdot(
     const BFloat16* vec2,
     vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
     int registerPairIndex) {
-  const bfloat16x8_t temp_vec1 = vld1q_bf16(reinterpret_cast<const __bf16*>(
-                                                &vec1[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-  const bfloat16x8_t temp_vec2 = vld1q_bf16(reinterpret_cast<const __bf16*>(
-                                                &vec2[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
+  const auto temp_vec1 = vec::Vectorized<BFloat16>::loadu(
+      &vec1[registerPairIndex * vec::Vectorized<BFloat16>::size()]);
+  const auto temp_vec2 = vec::Vectorized<BFloat16>::loadu(
+      &vec2[registerPairIndex * vec::Vectorized<BFloat16>::size()]);
   sum[registerPairIndex] =
-    f32_dot_bf16(sum[registerPairIndex], temp_vec1, temp_vec2);
+    vbfdotq_f32(sum[registerPairIndex], temp_vec1, temp_vec2);
 }
 
-// See NOTE [GCC code duplication] below for why we have _bfdot and
-// _no_bfdot versions of
-// dot_with_fp32_arith_vectorized_tail_inner_loop.
 TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE
 void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
     const at::BFloat16* vec1,
     const at::BFloat16* vec2,
     vec::Vectorized<float>* tail_sum,
     int idx) {
-  const auto temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
-  const auto temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
-  *tail_sum = f32_dot_bf16(*tail_sum, temp_vec1, temp_vec2);
+  const auto temp_vec1 = vec::Vectorized<BFloat16>::loadu(&vec1[idx]);
+  const auto temp_vec2 = vec::Vectorized<BFloat16>::loadu(&vec2[idx]);
+  *tail_sum = vbfdotq_f32(*tail_sum, temp_vec1, temp_vec2);
 }
 
 #else
 #define TARGET_ARM_BF16_ATTRIBUTE
 #endif // COMPILER_SUPPORTS_BF16_TARGET
-
-C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
-    const BFloat16* vec1,
-    const BFloat16* vec2,
-    vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
-    int registerPairIndex) {
-  const uint16x8_t temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(
-                                             &vec1[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-  const uint16x8_t temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(
-                                             &vec2[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-
-  sum[2 * registerPairIndex] = f32_fma_bf16(
-      sum[2 * registerPairIndex],
-      vget_low_u16(temp_vec1),
-      vget_low_u16(temp_vec2));
-  sum[2 * registerPairIndex + 1] = f32_fma_bf16(
-      sum[2 * registerPairIndex + 1],
-      vget_high_u16(temp_vec1),
-      vget_high_u16(temp_vec2));
-}
-
-C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
-    const at::BFloat16* vec1,
-    const at::BFloat16* vec2,
-    vec::Vectorized<float>* tail_sum,
-    int idx) {
-  const auto temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
-  const auto temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
-  *tail_sum = f32_fma_bf16(
-      f32_fma_bf16(*tail_sum, vget_low_u16(temp_vec1), vget_low_u16(temp_vec2)),
-      vget_high_u16(temp_vec1),
-      vget_high_u16(temp_vec2));
-}
 
 #else // __aarch64__
 // TODO: broaden BF16 support beyond aarch64
@@ -275,24 +239,9 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
   return std::make_pair(fmadd(a_float_low, b_float_low, acc_low), fmadd(a_float_high, b_float_high, acc_high));
 #endif
 }
-} // namespace
-
-C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
-  const Half* vec1,
-  const Half* vec2,
-  vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
-  int registerPairIndex) {
-  // Load a pair of f32 registers at a time.
-  const auto temp_vec1 = vec::Vectorized<Half>::loadu(&vec1[registerPairIndex * vec::Vectorized<Half>::size()]);
-  const auto temp_vec2 = vec::Vectorized<Half>::loadu(&vec2[registerPairIndex * vec::Vectorized<Half>::size()]);
-
-  const auto [result_low, result_high] = fmadd(temp_vec1, temp_vec2, sum[2 * registerPairIndex], sum[2 * registerPairIndex + 1]);
-  sum[2 * registerPairIndex] = result_low;
-  sum[2 * registerPairIndex + 1] = result_high;
-}
 
 // Return a + b_low * c_low + b_high * c_high
-vec::Vectorized<float> f32_dot_f16(vec::Vectorized<float> a, vec::Vectorized<Half> b, vec::Vectorized<Half> c) {
+vec::Vectorized<float> fmadd(vec::Vectorized<float> a, vec::Vectorized<Half> b, vec::Vectorized<Half> c) {
 #if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_FML)
   // NOTE: this instruction is an optional instruction in ARM v8.2 and
   // v8.3, but mandatory in v8.4 per
@@ -308,14 +257,33 @@ vec::Vectorized<float> f32_dot_f16(vec::Vectorized<float> a, vec::Vectorized<Hal
 #endif
 }
 
+
+} // namespace
+
+template <typename T>
+C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
+  const T* vec1,
+  const T* vec2,
+  vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
+  int registerPairIndex) {
+  static_assert(std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>);
+  const auto temp_vec1 = vec::Vectorized<T>::loadu(&vec1[registerPairIndex * vec::Vectorized<T>::size()]);
+  const auto temp_vec2 = vec::Vectorized<T>::loadu(&vec2[registerPairIndex * vec::Vectorized<T>::size()]);
+
+  const auto [result_low, result_high] = fmadd(temp_vec1, temp_vec2, sum[2 * registerPairIndex], sum[2 * registerPairIndex + 1]);
+  sum[2 * registerPairIndex] = result_low;
+  sum[2 * registerPairIndex + 1] = result_high;
+}
+
+template <typename T>
 C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
-    const Half* vec1,
-    const Half* vec2,
+    const T* vec1,
+    const T* vec2,
     vec::Vectorized<float>* tail_sum,
     int idx) {
-  const auto temp_vec1 = vec::Vectorized<Half>::loadu(&vec1[idx]);
-  const auto temp_vec2 = vec::Vectorized<Half>::loadu(&vec2[idx]);
-  *tail_sum = f32_dot_f16(*tail_sum, temp_vec1, temp_vec2);
+  const auto temp_vec1 = vec::Vectorized<T>::loadu(&vec1[idx]);
+  const auto temp_vec2 = vec::Vectorized<T>::loadu(&vec2[idx]);
+  *tail_sum = fmadd(*tail_sum, temp_vec1, temp_vec2);
 }
 
 template <typename T>
@@ -443,9 +411,6 @@ float fp16_dot_with_fp32_arith(const Half* vec1, const Half* vec2, int64_t len) 
   return dot_with_fp32_arith_no_bfdot(vec1, vec2, len);
 }
 
-// On my Apple M1 Macbook (which is ARM v8.5 and thus has the
-// instructions f32_fma_{low,high}_f16 is targeting), this kernel has
-// equivalent performance to the fp16-native kernel.
 void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const Half* a, const int lda, const Half *x, const float beta, Half* y, int incy) {
   if (beta == 0.0f) {
     parallel_for(0, n, 1, [&](int begin, int end) {
