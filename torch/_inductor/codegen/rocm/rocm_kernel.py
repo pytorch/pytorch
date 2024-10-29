@@ -2,7 +2,6 @@
 import logging
 from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
-from torch import Tensor
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
@@ -234,9 +233,9 @@ class ROCmTemplateCaller(ChoiceCaller):
         assert self.bmreq is not None
         self.bmreq.precompile()
 
-    def benchmark(self, *args, out, workspace: Optional[Tensor] = None) -> float:
+    def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out, workspace=workspace)
+        return self.bmreq.benchmark(*args, output_tensor=out)
 
     def __str__(self) -> str:
         return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"

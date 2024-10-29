@@ -48,12 +48,8 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
-        self,
-        *input_tensors: torch.Tensor,
-        output_tensor: torch.Tensor,
-        workspace: Optional[torch.Tensor] = None,
+        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
-        assert workspace is None, "workspace is not supported on ROCm yet"
         self.ensure_dll_loaded()
         self.update_workspace_size()
         args = [

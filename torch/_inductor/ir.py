@@ -4055,7 +4055,7 @@ class ChoiceCaller:
         # knowing what autotuning is choosing)
         self.description = description
 
-    def benchmark(self, *args, out, workspace=None) -> float:
+    def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
         return benchmarker.benchmark(algo, args, {"out": out})
 
