@@ -2,7 +2,10 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit::fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 // Prepare binary ops for LLGA
 //
@@ -17,4 +20,7 @@ namespace torch::jit::fuser::onednn {
 //
 void PrepareBinaryForLLGA(const std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit::fuser::onednn
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch

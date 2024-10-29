@@ -6,77 +6,7 @@
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/RankLocal.hpp>
 #include <utility>
-
-namespace {
-
-class WorkRegistry {
- public:
-  void register_work(
-      const at::Tensor& tensor,
-      const c10::intrusive_ptr<c10d::Work>& work) {
-    auto storage = tensor.storage().getWeakStorageImpl();
-    std::unique_lock lock(lock_);
-    auto [it, inserted] = registry_.try_emplace(std::move(storage), work);
-    TORCH_CHECK(
-        inserted || it->second != work,
-        "The tensor storage is already associated with another work.");
-  }
-
-  c10::intrusive_ptr<c10d::Work> pop_work(const at::Tensor& tensor) {
-    const auto storage = tensor.storage().getWeakStorageImpl();
-    std::unique_lock lock(lock_);
-    auto it = registry_.find(storage);
-    if (it == registry_.end()) {
-      return nullptr;
-    }
-    auto work = it->second;
-    registry_.erase(it);
-    return work;
-  }
-
-  ~WorkRegistry() {
-    // If there are still unwaited work objects, their corresponding process
-    // groups should have already been destroyed at this stage. Any attempts to
-    // wait for these work objects or to destroy them will only result in
-    // confusing errors. Therefore, we simply issue a warning and intentionally
-    // allow the unwaited work objects to leak.
-    if (!registry_.empty()) {
-      TORCH_WARN(
-          "At the time of process termination, there are still ",
-          registry_.size(),
-          " unwaited c10d_functional collective calls. "
-          "Please review your program to ensure c10d_functional.wait_tensor() "
-          "is invoked on all tensors returned from c10d_functional collective "
-          "ops before they are used.");
-    }
-    for (auto& it : registry_) {
-      it.second.release();
-    }
-  }
-
- private:
-  std::unordered_map<
-      c10::weak_intrusive_ptr<c10::StorageImpl>,
-      c10::intrusive_ptr<c10d::Work>>
-      registry_;
-  std::mutex lock_;
-};
-
-static WorkRegistry process_registry;
-
-} // namespace
-
-namespace c10d {
-
-void register_work(
-    const at::Tensor& tensor,
-    const c10::intrusive_ptr<c10d::Work>& work) {
-  RankLocal<WorkRegistry>::get().register_work(tensor, work);
-}
-
-} // namespace c10d
 
 namespace {
 
@@ -112,7 +42,6 @@ at::Tensor& all_reduce_(
   std::vector<at::Tensor> inputs{input};
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->allreduce(inputs, opts);
-  c10d::register_work(input, work);
   return input;
 }
 
@@ -135,9 +64,6 @@ std::vector<at::Tensor> all_reduce_coalesced_(
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->allreduce_coalesced(inputs, opts);
-  for (const auto& tensor : inputs) {
-    c10d::register_work(tensor, work);
-  }
   return inputs;
 }
 
@@ -178,9 +104,6 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->allgather_into_tensor_coalesced(outputs, inputs);
-  for (const auto& tensor : outputs) {
-    c10d::register_work(tensor, work);
-  }
   return outputs;
 }
 
@@ -202,7 +125,6 @@ at::Tensor& all_gather_into_tensor_out(
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->_allgather_base(output, input, opts);
-  c10d::register_work(output, work);
   return output;
 }
 
@@ -238,9 +160,6 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
-  for (const auto& tensor : outputs) {
-    c10d::register_work(tensor, work);
-  }
   return outputs;
 }
 
@@ -272,7 +191,6 @@ at::Tensor all_to_all_single(
       const_cast<at::Tensor&>(input),
       output_split_sizes,
       input_split_sizes);
-  c10d::register_work(output, work);
   return output;
 }
 
@@ -284,7 +202,6 @@ at::Tensor& broadcast_(at::Tensor& input, int64_t src, std::string group_name) {
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->broadcast(inputs, opts);
-  c10d::register_work(input, work);
   return input;
 }
 
@@ -294,14 +211,6 @@ at::Tensor broadcast(
     std::string group_name) {
   auto output = input.clone(at::MemoryFormat::Contiguous);
   return broadcast_(output, src, std::move(group_name));
-}
-
-at::Tensor wait_tensor(const at::Tensor& tensor) {
-  auto work = c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
-  if (work != nullptr) {
-    work->wait();
-  }
-  return tensor;
 }
 
 } // namespace
@@ -389,7 +298,7 @@ TORCH_LIBRARY(_c10d_functional, m) {
   m.def(
       "wait_tensor(Tensor tensor) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::CompositeExplicitAutograd, ::wait_tensor),
+          c10::DispatchKey::CompositeExplicitAutograd, c10d::wait_tensor),
       {at::Tag::pt2_compliant_tag});
 }
 
@@ -438,7 +347,7 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
     // TODO: track active cuda stream in wait
     out = c10::Dispatcher::singleton()
               .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
-              .typed<decltype(wait_tensor)>()
+              .typed<decltype(c10d::wait_tensor)>()
               .call(out);
 
     return {out, at::Tensor(), at::Tensor(), at::Tensor()};
@@ -493,7 +402,7 @@ class ReduceScatterTensor
     // TODO: track active cuda stream in wait
     out = c10::Dispatcher::singleton()
               .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
-              .typed<decltype(wait_tensor)>()
+              .typed<decltype(c10d::wait_tensor)>()
               .call(out);
 
     return {
@@ -549,7 +458,7 @@ class AllGatherIntoTensor
     // TODO: track active cuda stream in wait
     out = c10::Dispatcher::singleton()
               .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
-              .typed<decltype(wait_tensor)>()
+              .typed<decltype(c10d::wait_tensor)>()
               .call(out);
 
     return {

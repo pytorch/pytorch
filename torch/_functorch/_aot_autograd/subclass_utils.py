@@ -113,9 +113,12 @@ def create_subclass_meta(
 # NOTE: this function is hot, since we unwrap tensor subclass inputs at runtime
 def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
     def concat_inner_tensors_from_subclasses(xs):
-        xs_inner: List[Tensor] = []
+        xs_inner = []
         for x in xs:
-            get_plain_tensors(x, out_append_list=xs_inner)
+            if is_traceable_wrapper_subclass(x):
+                xs_inner.extend(get_plain_tensors(typing.cast(Tensor, x)))
+            else:
+                xs_inner.append(x)
         return xs_inner
 
     if is_joint_structure:

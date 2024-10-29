@@ -15,7 +15,8 @@
 #include <stack>
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 using graph_rewrite_helper::PatternInfo;
@@ -1840,4 +1841,5 @@ Module InsertQuantDeQuantOnDevicePTQ(
   h.propagateQuantizationOps(module);
   return module;
 }
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

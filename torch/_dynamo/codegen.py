@@ -185,9 +185,7 @@ class PyCodegen:
             # NB: It works to add_graph_output on a computed expression
             # as_tensor here, because we memoize as_tensor calls on
             # SymNodeVariable!
-            graph_outputs_key = self.add_graph_output(
-                value.as_tensor(self.tx, torch.float64)
-            )
+            graph_outputs_key = self.add_graph_output(value.as_tensor(self.tx))
 
             def gen_fn():
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)

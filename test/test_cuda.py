@@ -590,8 +590,10 @@ class TestCuda(TestCase):
             self.assertEqual(torch.cuda.initial_seed(), 2)
 
     def test_specify_improper_device_name(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            fname = os.path.join(tmpdir, "tempfile.pt")
+        import os
+
+        fname = "tempfile.pt"
+        try:
             with self.assertRaisesRegex(RuntimeError, "Invalid device string"):
                 torch.save(
                     [torch.nn.Parameter(torch.randn(10, 10))],
@@ -599,6 +601,9 @@ class TestCuda(TestCase):
                     _use_new_zipfile_serialization=True,
                 )
                 torch.load(fname, "cuda0")
+        finally:
+            if os.path.exists(fname):
+                os.remove(fname)
 
     def test_get_device_index(self):
         from torch.cuda._utils import _get_device_index

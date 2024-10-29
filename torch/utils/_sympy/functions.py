@@ -1200,9 +1200,7 @@ def make_opaque_unary_fn(name):
                 return getattr(sympy, name)(a)
             return None
 
-    nm = "OpaqueUnaryFn_" + name
-    OpaqueUnaryFn.__name__ = nm
-    OpaqueUnaryFn.__qualname__ = nm
+    OpaqueUnaryFn.__name__ = "OpaqueUnaryFn_" + name
 
     return OpaqueUnaryFn
 

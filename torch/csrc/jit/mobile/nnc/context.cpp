@@ -7,7 +7,10 @@
 
 #include <torch/csrc/jit/mobile/nnc/registry.h>
 
-namespace torch::jit::mobile::nnc {
+namespace torch {
+namespace jit {
+namespace mobile {
+namespace nnc {
 
 constexpr int64_t kProducedNNCFileFormatVersion = 0x1L;
 
@@ -339,4 +342,7 @@ Function* CompilationUnit::find_function(const c10::QualifiedName& name) const {
   return it->second.get();
 }
 
-} // namespace torch::jit::mobile::nnc
+} // namespace nnc
+} // namespace mobile
+} // namespace jit
+} // namespace torch

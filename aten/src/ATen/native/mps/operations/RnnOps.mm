@@ -358,9 +358,9 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
   using namespace mps;
   bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
 
-  const Tensor& grad_y_r = grad_y_opt.value_or(Tensor());
-  const Tensor& grad_hy_r = grad_hy_opt.value_or(Tensor());
-  const Tensor& grad_cy_r = grad_cy_opt.value_or(Tensor());
+  const Tensor& grad_y_r = c10::value_or_else(grad_y_opt, [] { return Tensor(); });
+  const Tensor& grad_hy_r = c10::value_or_else(grad_hy_opt, [] { return Tensor(); });
+  const Tensor& grad_cy_r = c10::value_or_else(grad_cy_opt, [] { return Tensor(); });
   const auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx[0], input.options());
   const auto grad_cy = grad_cy_r.defined() ? grad_cy_r : at::zeros_like(hx[1], input.options());
 

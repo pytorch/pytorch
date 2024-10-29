@@ -1384,7 +1384,7 @@ inline void transpose_mxn<BFloat16>(const BFloat16* src, int64_t ld_src, BFloat1
 }
 
 template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same_v<T, BFloat16> && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
+          typename std::enable_if_t<std::is_same<T, BFloat16>::value && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
 inline void transpose_mxn(const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst) {
   transpose_mxn<BFloat16>(src, ld_src, dst, ld_dst, M, N);
 }
@@ -1426,7 +1426,7 @@ inline void transpose_mxn<Half>(const Half* src, int64_t ld_src, Half* dst, int6
 }
 
 template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same_v<T, Half> && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
+          typename std::enable_if_t<std::is_same<T, Half>::value && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
 inline void transpose_mxn(const Half* src, int64_t ld_src, Half* dst, int64_t ld_dst) {
   transpose_mxn<Half>(src, ld_src, dst, ld_dst, M, N);
 }

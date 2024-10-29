@@ -71,7 +71,7 @@ from .utils import (
     proxy_args_kwargs,
 )
 from .variables.base import MutableLocal, typestr, VariableTracker
-from .variables.builder import FrameStateSizeEntry, wrap_fx_proxy
+from .variables.builder import wrap_fx_proxy
 from .variables.builtin import BuiltinVariable
 from .variables.constant import ConstantVariable
 from .variables.ctx_manager import (
@@ -226,9 +226,8 @@ Otherwise, please submit a bug report, ideally including the contents of TORCH_L
 
 @dataclasses.dataclass
 class LocalState:
-    automatic_dynamic: Dict[str, FrameStateSizeEntry] = dataclasses.field(
-        default_factory=dict
-    )
+    input_sizes: Dict[str, List[int]] = dataclasses.field(default_factory=dict)
+    input_strides: Dict[str, List[int]] = dataclasses.field(default_factory=dict)
 
 
 # Mutable box that is shared across restarts
@@ -378,25 +377,6 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
             code_options["co_firstlineno"],
         )
 
-    user_stack_formatted = "".join(traceback.format_list(user_stack))
-    user_stack_trace = (
-        "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s"  # noqa: UP031
-        % (
-            frame_loc[0],
-            frame_loc[1],
-            reason,
-            user_stack_formatted,
-        )
-    )
-    torch._logging.trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "dynamo_graph_break_reason",
-            "encoding": "string",
-        },
-        payload_fn=lambda: f"{user_stack_trace}\n{traceback.format_exc() if exc_info else ''}",
-    )
-
     # torch._dynamo.explain() formats this a little nicer, and presents a slightly
     # more actionable user code pointer
     if (
@@ -404,11 +384,16 @@ def log_graph_break(code_options, reason="", exc_info=False, user_stack=None):
         and not explain
         and graph_break_dup_warning_checker.add(frame_loc)
     ):
+        user_stack_formatted = "".join(traceback.format_list(user_stack))
         # This log line MUST contain the string "Graph break in user code",
         # This log line is exercised from
         #   python test/dynamo/test_exc.py -k test_graph_break_log
         graph_break_log.debug(
-            user_stack_trace,
+            "Graph break in user code at %s:%s\nReason: %s\nUser code traceback:\n%s",
+            frame_loc[0],
+            frame_loc[1],
+            reason,
+            user_stack_formatted,
             exc_info=exc_info,
         )
     else:
@@ -2760,8 +2745,7 @@ class InstructionTranslatorBase(
 
 
 class InstructionTranslator(InstructionTranslatorBase):
-    mutated_closure_cell_ids: Set[int]
-    contents_var_to_mutated_cell: Dict[VariableTracker, Any]
+    mutated_closure_cell_contents: Set[str]
 
     @staticmethod
     def current_tx() -> "InstructionTranslator":
@@ -2789,7 +2773,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         export_constraints,
-        mutated_closure_cell_ids: Set[int],
+        mutated_closure_cell_contents: Set[str],
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
@@ -2834,8 +2818,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         with tracing(self.output.tracing_context), self.set_current_tx():
             self.one_graph: bool = one_graph
             self.export = export
-            self.mutated_closure_cell_ids = mutated_closure_cell_ids
-            self.contents_var_to_mutated_cell = {}
+            self.mutated_closure_cell_contents = mutated_closure_cell_contents
             if self.export:
                 assert (
                     self.one_graph
@@ -3353,15 +3336,19 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     self.symbolic_locals[inst.argval], self.pop()
                 )
             else:
-                root_tx = self.output.root_tx
                 if (
                     maybe_cell is not None
-                    and maybe_cell in root_tx.contents_var_to_mutated_cell
-                    and id(root_tx.contents_var_to_mutated_cell[maybe_cell])
-                    not in root_tx.mutated_closure_cell_ids
+                    and maybe_cell.source.name()
+                    not in self.output.root_tx.mutated_closure_cell_contents
                 ):
-                    self.output.root_tx.mutated_closure_cell_ids.add(
-                        id(root_tx.contents_var_to_mutated_cell[maybe_cell])
+                    # Why is the source name here unique?
+                    # mutated_closure_cell_contents is a per-frame
+                    # concept, and sources identify, e.g., particular
+                    # locals from the frame.  If you had two locals,
+                    # they'll get different source names, and therefore
+                    # differ here.
+                    self.output.root_tx.mutated_closure_cell_contents.add(
+                        maybe_cell.source.name()
                     )
                     raise exc.UnspecializeRestartAnalysis
                 unimplemented("write to __closure__ while inlining")

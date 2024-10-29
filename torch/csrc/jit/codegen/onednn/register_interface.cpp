@@ -1,6 +1,9 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 
-namespace torch::jit::fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 static bool canFuseNode(const Node* node) {
   switch (node->kind()) {
@@ -45,4 +48,7 @@ class RegisterInterface {
 static RegisterInterface register_interface_;
 } // namespace
 
-} // namespace torch::jit::fuser::onednn
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch

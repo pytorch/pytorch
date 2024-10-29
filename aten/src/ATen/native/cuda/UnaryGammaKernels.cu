@@ -13,7 +13,7 @@
 namespace at::native {
 
 #if AT_USE_JITERATOR()
-constexpr char digamma_name[] = "digamma";
+CONSTEXPR_EXCEPT_WIN_CUDA char digamma_name[] = "digamma";
 #endif // AT_USE_JITERATOR()
 // See note [Jiterator]
 void digamma_kernel_cuda(TensorIteratorBase& iter) {
@@ -40,7 +40,7 @@ void digamma_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 // See note [Jiterator]
-constexpr char trigamma_name[] = "trigamma";
+CONSTEXPR_EXCEPT_WIN_CUDA char trigamma_name[] = "trigamma";
 void trigamma_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -64,7 +64,7 @@ void trigamma_kernel_cuda(TensorIteratorBase& iter) {
   #endif // AT_USE_JITERATOR()
 }
 
-constexpr char polygamma_name[] = "polygamma";
+CONSTEXPR_EXCEPT_WIN_CUDA char polygamma_name[] = "polygamma";
 void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
   if (n == 0) {
     digamma_kernel_cuda(iter);
@@ -101,7 +101,7 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
   }
 }
 
-constexpr char lgamma_name[] = "lgamma_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char lgamma_name[] = "lgamma_kernel";
 void lgamma_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES_AND2(

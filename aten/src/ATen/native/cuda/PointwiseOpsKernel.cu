@@ -12,7 +12,7 @@
 namespace at::native {
 
 #if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
-constexpr char addcmul_name[] = "addcmul";
+CONSTEXPR_EXCEPT_WIN_CUDA char addcmul_name[] = "addcmul";
 #endif
 void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   auto dtype = iter.common_dtype();
@@ -59,7 +59,7 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
 
 #if AT_USE_JITERATOR() && CUDA_VERSION >= 11050
 // return a + alpha * (b / static_cast<accscalar_t>(c));
-constexpr char addcdiv_name[] = "addcdiv";
+CONSTEXPR_EXCEPT_WIN_CUDA char addcdiv_name[] = "addcdiv";
 #endif
 void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   auto dtype = iter.common_dtype();

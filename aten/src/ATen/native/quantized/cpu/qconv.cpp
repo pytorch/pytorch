@@ -654,7 +654,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
     if (!per_channel()) {
       w_zp = static_cast<underlying_t>(
           weight_contig.q_zero_point() +
-          (std::is_same_v<underlying_t, uint8_t> ? 128 : 0));
+          (std::is_same<underlying_t, uint8_t>::value ? 128 : 0));
 
       weight_tensor = at::native::empty_affine_quantized(
           weight_contig.sizes(),

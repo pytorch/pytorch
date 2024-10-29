@@ -5,7 +5,10 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
-namespace torch::jit::fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 using opkind = dnnl::graph::op::kind;
 
@@ -612,4 +615,7 @@ bool LlgaNodeWrapper::useOpaqueLayout(size_t offset) const {
   return n->is(attr::output_layouts)[offset] == OPAQUE_LAYOUT;
 }
 
-} // namespace torch::jit::fuser::onednn
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch

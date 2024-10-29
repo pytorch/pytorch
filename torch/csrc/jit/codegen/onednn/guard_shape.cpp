@@ -5,7 +5,10 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
-namespace torch::jit::fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 //! [ Note -- prepareFusionGroupAndGuardOutputs implementation ]
 //! shamelessly copying code from NNC (tensorexpr_fuser)  with very little
@@ -36,4 +39,7 @@ void prepareFusionGroupAndGuardOutputs(Block* block) {
   }
 }
 
-} // namespace torch::jit::fuser::onednn
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch

@@ -5,7 +5,6 @@ import itertools
 import math
 import sys
 from typing import Callable, List, Tuple, Type
-import pickle
 
 import sympy
 
@@ -31,7 +30,6 @@ from torch.utils._sympy.reference import (
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
-from torch.utils._sympy.functions import OpaqueUnaryFn_cos
 
 
 UNARY_OPS = [
@@ -811,13 +809,6 @@ class TestSympySolve(TestCase):
 
         # negative tests
         self.assertEqual(simple_floordiv_gcd(x * y + x + y + 1, x + 1), 1)
-
-
-class TestSympyFunctions(TestCase):
-    def test_pickle(self):
-        x = OpaqueUnaryFn_cos(sympy.Symbol('a'))
-        r = pickle.loads(pickle.dumps(x))
-        self.assertEqual(x, r)
 
 
 class TestSingletonInt(TestCase):

@@ -8,8 +8,6 @@ static bool is_finalizing_ = false;
 
 class AllocatorMap {
  public:
-  AllocatorMap(const AllocatorMap&) = delete;
-  AllocatorMap& operator=(const AllocatorMap&) = delete;
   static AllocatorMap& get() {
     static AllocatorMap instance;
     return instance;
@@ -37,6 +35,8 @@ class AllocatorMap {
 
  private:
   AllocatorMap() = default;
+  AllocatorMap(const AllocatorMap&) = delete;
+  AllocatorMap& operator=(const AllocatorMap&) = delete;
 
   std::unordered_map<
       c10::DeviceType,
@@ -74,8 +74,7 @@ static at::Tensor empty_strided_p2p_persistent(
   const size_t numel = std::accumulate(
       size.begin(),
       size.end(),
-      size_t(1),
-      // NOLINTNEXTLINE(modernize-use-transparent-functors)
+      static_cast<size_t>(1),
       std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
   const size_t alloc_size = numel * element_size;
@@ -109,7 +108,8 @@ static at::Tensor empty_strided_p2p_persistent(
 
 } // namespace
 
-namespace c10d::symmetric_memory {
+namespace c10d {
+namespace symmetric_memory {
 
 bool is_finalizing() {
   return is_finalizing_;
@@ -162,8 +162,7 @@ at::Tensor empty_strided_p2p(
   const size_t numel = std::accumulate(
       size.begin(),
       size.end(),
-      size_t(1),
-      // NOLINTNEXTLINE(modernize-use-transparent-functors)
+      static_cast<size_t>(1),
       std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
   const size_t alloc_size = numel * element_size;
@@ -202,4 +201,5 @@ TORCH_API bool has_multicast_support(
   auto allocator = get_allocator(device_type);
   return allocator->has_multicast_support(device_idx);
 }
-} // namespace c10d::symmetric_memory
+} // namespace symmetric_memory
+} // namespace c10d

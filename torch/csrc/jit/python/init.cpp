@@ -1389,38 +1389,28 @@ void initJITBindings(PyObject* module) {
           "fallback", [](GraphExecutorState& s) { return s.fallback; });
 
   py::class_<PyTorchStreamWriter>(m, "PyTorchFileWriter")
-      .def(
-          py::init<std::string, bool>(),
-          py::arg("file_name"),
-          py::arg("compute_crc32") = true)
-      .def(
-          py::init([](const py::object& buffer, bool compute_crc32 = true) {
-            auto writer_func = [=](const void* data, size_t size) {
-              // Writing an empty file is a noop
-              if (size == 0) {
-                return size;
-              }
-              py::gil_scoped_acquire acquire;
-              if (!data) {
-                // See [Note: write_record_metadata]
-                buffer.attr("seek")(
-                    size, py::module::import("os").attr("SEEK_CUR"));
-              } else {
-                auto memory_view = py::memoryview::from_memory(
-                    reinterpret_cast<const char*>(data), size);
-                buffer.attr("write")(std::move(memory_view));
-              }
-              return size;
-            };
-            return std::make_unique<PyTorchStreamWriter>(
-                std::move(writer_func), compute_crc32);
-          }),
-          py::arg("buffer"),
-          py::arg("compute_crc32") = true)
-      .def(
-          py::init<const std::function<size_t(const void*, size_t)>&, bool>(),
-          py::arg("writer_func"),
-          py::arg("compute_crc32") = true)
+      .def(py::init<std::string>())
+      .def(py::init([](const py::object& buffer) {
+        auto writer_func = [=](const void* data, size_t size) {
+          // Writing an empty file is a noop
+          if (size == 0) {
+            return size;
+          }
+          py::gil_scoped_acquire acquire;
+          if (!data) {
+            // See [Note: write_record_metadata]
+            buffer.attr("seek")(
+                size, py::module::import("os").attr("SEEK_CUR"));
+          } else {
+            auto memory_view = py::memoryview::from_memory(
+                reinterpret_cast<const char*>(data), size);
+            buffer.attr("write")(std::move(memory_view));
+          }
+          return size;
+        };
+        return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
+      }))
+      .def(py::init<const std::function<size_t(const void*, size_t)>&>())
       // [Note: write_record_metadata]
       // The write_record_metadata function is intended to write metadata (i.e.
       // the zipfile header and end of central directory record) for a file

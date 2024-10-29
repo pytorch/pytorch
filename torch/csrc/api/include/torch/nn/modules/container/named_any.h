@@ -39,7 +39,7 @@ class NamedAnyModule {
 
   /// Creates a `NamedAnyModule` from a `Module`, moving or copying it
   /// into a `shared_ptr` internally.
-  // NOTE: We need to use `std::remove_reference_t<M>` to get rid of
+  // NOTE: We need to use `std::remove_reference<M>::type` to get rid of
   // any reference components for make_unique.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   NamedAnyModule(std::string name, M&& module)
