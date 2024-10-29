@@ -100,18 +100,18 @@ DECLARE_DISPATCH(
     dequantize_tensor_per_tensor_affine_stub)
 DECLARE_DISPATCH(
     dequantize_tensor_per_channel_affine_fn,
-    dequantize_tensor_per_channel_affine_stub);
+    dequantize_tensor_per_channel_affine_stub)
 DECLARE_DISPATCH(
     dequantize_tensor_per_channel_float_qparams_fn,
-    dequantize_tensor_per_channel_float_qparams_stub);
+    dequantize_tensor_per_channel_float_qparams_stub)
 
 DECLARE_DISPATCH(
     quantize_tensor_per_tensor_affine_sub_byte_fn,
-    quantize_tensor_per_tensor_affine_sub_byte_stub);
+    quantize_tensor_per_tensor_affine_sub_byte_stub)
 
 DECLARE_DISPATCH(
     dequantize_tensor_per_tensor_affine_sub_byte_fn,
-    dequantize_tensor_per_tensor_affine_sub_byte_stub);
+    dequantize_tensor_per_tensor_affine_sub_byte_stub)
 
 template <typename T>
 TORCH_API Tensor quantize_tensor(
