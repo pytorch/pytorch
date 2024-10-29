@@ -397,7 +397,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
       // ensure we return a shallow copy for things like x[...]
       sliced = at::alias(sliced);
     }
-    return THPVariable_Wrap(std::move(sliced));
+    return THPVariable_Wrap(sliced);
   }
 
   // indexing by tensors ("advanced" indexing)
