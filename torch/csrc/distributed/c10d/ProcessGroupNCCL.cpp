@@ -725,6 +725,11 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
 
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeStream();
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<
+            ProcessGroupNCCL::WorkNCCL>::unsafe_reclaim_from_nonowning(this));
+  }
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
