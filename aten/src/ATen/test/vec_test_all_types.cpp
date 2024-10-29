@@ -557,8 +557,11 @@ namespace {
       for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
         c10::Half val(ii, c10::Half::from_bits());
         bool expected = std::isnan(val);
-        bool actual = vHalf(val).isnan()[0] != 0;
-        EXPECT_EQ(expected, actual) << "fp16 isnan failure for bit pattern " << std::hex << ii << std::dec;
+        CACHE_ALIGN c10::Half actual_vals[vHalf::size()];
+        vHalf(val).isnan().store(actual_vals);
+        for (int jj = 0; jj < vHalf::size(); ++jj) {
+          EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_vals[jj]) != 0) << "fp16 isnan failure for bit pattern " << std::hex << ii << std::dec;
+        }
       }
     }
     TYPED_TEST(LGamma, LGamma) {
