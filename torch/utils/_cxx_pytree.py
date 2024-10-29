@@ -27,7 +27,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, TypeGuard
+from typing_extensions import deprecated, TypeIs
 
 import optree
 from optree import PyTreeSpec as TreeSpec  # direct import for type annotations
@@ -244,7 +244,7 @@ def _private_register_pytree_node(
         )
 
 
-def _is_pytreespec_instance(obj: Any, /) -> TypeGuard[TreeSpec]:
+def _is_pytreespec_instance(obj: Any, /) -> TypeIs[TreeSpec]:
     return isinstance(obj, TreeSpec)
 
 
