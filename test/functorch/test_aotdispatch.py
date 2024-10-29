@@ -6187,7 +6187,6 @@ class TestAOTModuleSimplified(AOTTestCase):
         out_buffer = out.values()
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
-    @unittest.expectedFailure
     def test_wrong_guess_tangent_type(self):
         def fn(x):
             return x.clone()
@@ -6210,7 +6209,11 @@ class TestAOTModuleSimplified(AOTTestCase):
             torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
         )
         y2 = fn_comp(x2)
-        y2.backward(gradient=torch.randn(2, 3))
+        with self.assertRaisesRegex(
+            AssertionError,
+            "We incorrectly attempted to compile the backward with incorrect subclass metadata.",
+        ):
+            y2.backward(gradient=torch.randn(2, 3))
 
     @unittest.skipIf(
         not torch.distributed.is_available(), "test requires torch distributed"
