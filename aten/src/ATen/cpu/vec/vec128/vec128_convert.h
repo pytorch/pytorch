@@ -58,6 +58,7 @@ struct VecConvert<float, 1, BFloat16, 1> {
     return result;
   }
 };
-#endif
+
+#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE256)
 } // namespace CPU_CAPABILITY
 } // namespace at::vec
