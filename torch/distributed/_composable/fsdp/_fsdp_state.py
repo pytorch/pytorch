@@ -29,7 +29,12 @@ from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
 
 from ._fsdp_api import MixedPrecisionPolicy
-from ._fsdp_common import _cast_fp_tensor, compiled_autograd_enabled, TrainingState
+from ._fsdp_common import (
+    _cast_fp_tensor,
+    compiled_autograd_enabled,
+    detect_compiled_autograd,
+    TrainingState,
+)
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 
@@ -153,6 +158,7 @@ class FSDPState(_State):
             raise RuntimeError(
                 f"FSDP requires a single root module but got {self._modules}"
             )
+        detect_compiled_autograd()
         root_module = self._modules[0]
         visited_states: Set[FSDPState] = set()
         for module_name, module in root_module.named_modules():

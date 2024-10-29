@@ -152,6 +152,9 @@ def run_functionalized_fw_and_collect_metadata(
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: Optional[List[int]] = None,
     pre_dispatch: bool = False,
+    # is_export is technically only needed to avoid using functionalization V2
+    # during analysis
+    is_export: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: Dict[Tensor, Tensor] = {}
 
@@ -183,7 +186,7 @@ def run_functionalized_fw_and_collect_metadata(
 
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
-        mode = FunctionalTensorMode(_allow_token_discovery=True)
+        mode = FunctionalTensorMode(_allow_token_discovery=True, export=is_export)
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
@@ -765,7 +768,9 @@ from a multi-output view call"
             traced_tangent_memory_formats=traced_tangent_memory_formats,
             subclass_inp_meta=create_subclass_meta(flat_args),
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
-            subclass_tangent_meta=create_subclass_meta(traced_tangents),
+            subclass_tangent_meta=create_subclass_meta(
+                traced_tangents, count_symints=False
+            ),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,
