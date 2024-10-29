@@ -59,6 +59,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_UBSAN,
     TEST_XPU,
     TestCase,
+    GPU_TYPE,
+    GPU_TYPES,
 )
 
 
@@ -1628,6 +1630,10 @@ def onlyHPU(fn):
     return onlyOn("hpu")(fn)
 
 
+def onlyGPU(fn):
+    return onlyOn(GPU_TYPES)(fn)
+
+
 def onlyPRIVATEUSE1(fn):
     device_type = torch._C._get_privateuse1_backend_name()
     device_mod = getattr(torch, device_type, None)
@@ -1649,8 +1655,7 @@ def onlyCUDAAndPRIVATEUSE1(fn):
     return only_fn
 
 
-def onlyCUDAAndXPU(fn):
-    return onlyOn(["cuda", "xpu"])(fn)
+
 
 
 def disablecuDNN(fn):
@@ -1983,6 +1988,5 @@ def any_common_cpu_device_one():
         else OpDTypes.any_common_cpu_cuda_one
     )
 
-
-def has_gpu_device(devices: List[str]):
+def is_gpu_device(devices: List[str]):
     return "cuda" in devices or "xpu" in devices

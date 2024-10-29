@@ -13,6 +13,7 @@ from torch.testing._internal.common_device_type import (
     precisionOverride,
     tol,
     toleranceOverride,
+    skipXPU,
 )
 from torch.testing._internal.common_dtype import all_types_and, floating_types
 from torch.testing._internal.common_utils import (
@@ -239,6 +240,7 @@ op_db: List[OpInfo] = [
         promotes_int_to_float=True,
         supports_autograd=False,
         supports_one_python_scalar=True,
+        decorators=[skipXPU,],
         skips=(
             # Reference reference_inputs nans and infs on cuda and nan, inf, 0., -inf for cpu
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
@@ -461,6 +463,7 @@ op_db: List[OpInfo] = [
         "special.hermite_polynomial_h",
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
+        decorators=[skipXPU,],
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), "TestCudaFuserOpInfo"),
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
@@ -834,6 +837,7 @@ python_ref_db: List[OpInfo] = [
         torch_opinfo_name="special.zeta",
         supports_one_python_scalar=True,
         op_db=op_db,
+        decorators = [skipXPU,],
         skips=(
             # Reference reference_inputs nans and infs on cuda and nan, inf, 0., -inf for cpu
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),

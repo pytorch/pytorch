@@ -28,6 +28,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfRocm,
     tol,
     toleranceOverride,
+    skipXPU,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex,
@@ -1430,7 +1431,7 @@ op_db: List[OpInfo] = [
         check_batched_gradgrad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+        decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, ],
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -1452,6 +1453,20 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="mps",
                 dtypes=[torch.float32],
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 
+                "TestCommon", 
+                "test_types", 
+                device_type='xpu', 
+                dtypes=None,
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 
+                None, 
+                None, 
+                device_type='xpu', 
+                dtypes=[torch.complex, torch.float64, torch.complex64, torch.complex128, ],
             ),
         ),
     ),
@@ -1874,10 +1889,13 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_lu,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, ],
+
         skips=(
             # linalg.lu_factor: LU without pivoting is not implemented on the CPU
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_types", device_type='xpu', dtypes=None),
+            DecorateInfo(unittest.expectedFailure, None, None, device_type='xpu', dtypes=[torch.complex, torch.float64, torch.complex64, torch.complex128, ]),
         ),
     ),
     OpInfo(
@@ -1890,10 +1908,12 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_lu,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, ],
         skips=(
             # linalg.lu_factor: LU without pivoting is not implemented on the CPU
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_types", device_type='xpu', dtypes=None),
+            DecorateInfo(unittest.expectedFailure, None, None, device_type='xpu', dtypes=[torch.complex, torch.float64, torch.complex64, torch.complex128, ]),
         ),
     ),
     OpInfo(
@@ -1907,10 +1927,12 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_lu,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, ],
         skips=(
             # linalg.lu_factor: LU without pivoting is not implemented on the CPU
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_types", device_type='xpu', dtypes=None),
+            DecorateInfo(unittest.expectedFailure, None, None, device_type='xpu', dtypes=[torch.complex, torch.float64, torch.complex64, torch.complex128, ]),
         ),
     ),
     OpInfo(
@@ -2284,7 +2306,7 @@ op_db: List[OpInfo] = [
         check_batched_grad=False,
         check_batched_gradgrad=False,
         sample_inputs_func=sample_inputs_svd,
-        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off],
+        decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, with_tf32_off,],
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -2322,6 +2344,13 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                None,
+                None,
+                device_type="xpu",
+                dtypes=[torch.float64, torch.complex64, torch.complex128, ],
             ),
         ),
     ),
@@ -2372,6 +2401,13 @@ op_db: List[OpInfo] = [
                 unittest.skip("Unsupported on MPS for now"),
                 "TestCommon",
                 "test_numpy_ref_mps",
+            ),
+            DecorateInfo(
+                unittest.skip("Unsupported on MPS for now"),
+                "TestCommon",
+                "test_numpy_ref",
+                device_type="xpu",
+                dtypes=[torch.float64, torch.complex128,],
             ),
         ),
     ),
@@ -2471,6 +2507,15 @@ python_ref_db: List[OpInfo] = [
         torch_opinfo_name="linalg.svd",
         supports_out=True,
         op_db=op_db,
+        skips=(
+               DecorateInfo(
+                unittest.skip("Skipped!"),
+                None,
+                None,
+                device_type="xpu",
+                dtypes=[torch.float64, torch.complex64, torch.complex128, ],
+            ),
+        ),
     ),
     PythonRefInfo(
         "_refs.linalg.svdvals",
