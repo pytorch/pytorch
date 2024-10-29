@@ -456,6 +456,13 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         ):
             constant_fold_uniform_value(graph)
 
+    # Make sure AutoChunker happens before pad_mm so we don't need
+    # to handle padding when searching for chunking patterns.
+    if config.AutoChunker.enable:
+        from .auto_chunker import AutoChunker
+
+        AutoChunker(graph).chunk_batch_dimension()
+
     if config.pattern_matcher:
         for patterns in pass_patterns:
             count += patterns.apply(graph.graph)  # type: ignore[arg-type]
@@ -469,11 +476,6 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         ):
             config.joint_custom_post_pass(graph.graph)
             count += 1
-
-    if config.AutoChunker.enable:
-        from .auto_chunker import AutoChunker
-
-        AutoChunker(graph).chunk_batch_dimension()
 
     if count:
         stable_topological_sort(graph.graph)

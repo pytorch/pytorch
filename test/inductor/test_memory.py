@@ -148,10 +148,10 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 FileCheck()
                 .check("def call(args):")
                 .check("buf0 = ")
-                .check("buf2 = ")
                 .check("buf1 = ")
-                .check("buf4 = ")
+                .check("buf2 = ")
                 .check("buf3 = ")
+                .check("buf4 = ")
                 .check("buf5 = ")
                 .check("buf7 = ")
                 .run(code)
@@ -204,7 +204,8 @@ class TestOperatorReorderForPeakMemory(TestCase):
             self.assertTrue(same(outp, outp_corr))
 
     @unittest.skipIf(
-        torch.cuda.get_device_properties().total_memory < int(1e10),
+        not torch.cuda.is_available()
+        or torch.cuda.get_device_properties().total_memory < int(1e10),
         "Need 10GB memory to be safe to run the test",
     )
     def test_fusing_reductions_increase_peak_memory(self):

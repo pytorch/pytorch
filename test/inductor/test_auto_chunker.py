@@ -2,6 +2,7 @@ import torch
 from torch._inductor import config, metrics
 from torch._inductor.test_case import TestCase
 from torch._dynamo.utils import same
+from torch import nn
 import os
 
 # TODO: always test with large input. Skip the test if the GPU
@@ -82,6 +83,53 @@ class AutoChunkerTest(TestCase):
     @config.patch("AutoChunker.num_chunk", 4)
     def test_linear_softmax(self):
         self.common_matmul_test(has_softmax=True, use_bias=True)
+
+    # TODO: this is the main target
+    def test_fused_linear_cel(self):
+        B = 32
+        T = 1024
+        C = 768
+        V = 50257
+
+        dtype = torch.bfloat16
+        
+        class LinearAndCEL(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(C, V)
+                self.ce = nn.CrossEntropyLoss()
+        
+            def forward(self, x, y):
+                return self.ce(self.linear(x).view(B * T, V), y.view(-1))
+        
+        mod = LinearAndCEL().cuda().to(dtype)
+        
+        def f(x, y):
+            x = x * 2
+            loss = mod(x, y)
+            loss.backward()
+            return loss
+
+        opt_f = torch.compile(f)
+        
+        x = torch.randn(B, T, C, dtype=dtype, requires_grad=True).cuda()
+        x.retain_grad()
+        y = torch.randint(0, V, (B, T)).cuda()
+
+        expect = (f(x, y), x.grad, mod.linear.weight.grad, mod.linear.bias.grad)
+        x.grad = None
+        mod.linear.weight.grad = None
+        mod.linear.bias.grad = None
+
+        torch.cuda.reset_peak_memory_stats()
+        actual = (opt_f(x, y), x.grad, mod.linear.weight.grad, mod.linear.bias.grad)
+        peak_memory = torch.cuda.max_memory_allocated()
+
+        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
+
+        self.assertEqual(metrics.num_auto_chunking, 1)
+        expected_bound = B * T * V * x.dtype.itemsize
+        self.assertTrue(peak_memory < expected_bound, f"Actual peak_memory {peak_memory}, expected bound {expected_bound}")
 
 
 if __name__ == "__main__":

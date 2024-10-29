@@ -128,9 +128,9 @@ def autotune_hints_to_configs(
                     triton_config(
                         size_hints,
                         *xyz,
-                        num_elements_per_warp=device_props.warp_size
-                        if device_props.warp_size
-                        else 32,
+                        num_elements_per_warp=(
+                            device_props.warp_size if device_props.warp_size else 32
+                        ),
                     )
                 )
 
@@ -246,6 +246,10 @@ class CachingAutotuner(KernelInterface):
 
         self.precompile_time_taken_ns = 0
         self.autotune_time_taken_ns = 0
+        # Dumps the launch configs after autotuning.
+        self.dump_launch_params = (
+            os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", "0") == "1"
+        )
 
     def precompile(self, warm_cache_only=False):
         with self.lock:
@@ -481,13 +485,38 @@ class CachingAutotuner(KernelInterface):
                 raise
             binary._init_handles()
 
+        """
+        https://github.com/pytorch/pytorch/issues/115344
+
+        self.fn.constexprs doesn't properly deal with None args, so when we filter out
+        an arg in UserDefinedTritonKernel.codegen, we need to filter it here as well.
+        We also don't want to modify self.fn.
+
+        We know that we removed something from the signature if:
+            1. It's in compile_meta["constants"]
+            2. It isn't a constant we already know about
+                Note: The value of interest has already been added to compile_meta['constants'],
+                    so we use self.fn.constexprs instead.
+            3. It isn't in the compile_meta signature
+        """
+        none_args = set(compile_meta["constants"].keys())
+        known_constants = {
+            arg for i, arg in enumerate(self.fn.arg_names) if i in self.fn.constexprs
+        }
+        none_args = none_args.difference(known_constants)
+        none_args = none_args.difference(set(compile_meta["signature"].keys()))
+
         call_args = [
             arg
             for i, arg in enumerate(self.fn.arg_names)
-            if i not in self.fn.constexprs
+            if i not in self.fn.constexprs and arg not in none_args
         ]
-        def_args = [name for name in self.fn.arg_names if name not in cfg.kwargs]
 
+        def_args = [
+            name
+            for name in self.fn.arg_names
+            if name not in cfg.kwargs and name not in none_args
+        ]
         binary_shared = (
             binary.shared if hasattr(binary, "shared") else binary.metadata.shared
         )
@@ -497,9 +526,11 @@ class CachingAutotuner(KernelInterface):
             "bin": binary,
             "launch_enter_hook": CompiledKernel.launch_enter_hook,
             "launch_exit_hook": CompiledKernel.launch_exit_hook,
-            "metadata": binary.packed_metadata
-            if hasattr(binary, "packed_metadata")
-            else binary.metadata,
+            "metadata": (
+                binary.packed_metadata
+                if hasattr(binary, "packed_metadata")
+                else binary.metadata
+            ),
             "shared": binary_shared,
         }
 
@@ -830,9 +861,11 @@ class CachingAutotuner(KernelInterface):
         key = self.inductor_meta.get("kernel_name", None)  # unique kernel name
         assert key is not None, "kernel_name can not be None"
         params = {
-            "mangled_name": launcher.bin.metadata.name
-            if hasattr(launcher.bin.metadata, "name")
-            else launcher.bin.metadata["name"],
+            "mangled_name": (
+                launcher.bin.metadata.name
+                if hasattr(launcher.bin.metadata, "name")
+                else launcher.bin.metadata["name"]
+            ),
             "grid_x": grid_x,
             "grid_y": grid_y,
             "grid_z": grid_z,
@@ -840,12 +873,16 @@ class CachingAutotuner(KernelInterface):
             "y_block": launcher.config.kwargs.get("YBLOCK", None),
             "z_block": launcher.config.kwargs.get("ZBLOCK", None),
             "r_block": launcher.config.kwargs.get("RBLOCK", None),
-            "num_warps": launcher.bin.num_warps
-            if hasattr(launcher.bin, "num_warps")
-            else launcher.bin.metadata.num_warps,
-            "shared_mem": launcher.bin.shared
-            if hasattr(launcher.bin, "shared")
-            else launcher.bin.metadata.shared,
+            "num_warps": (
+                launcher.bin.num_warps
+                if hasattr(launcher.bin, "num_warps")
+                else launcher.bin.metadata.num_warps
+            ),
+            "shared_mem": (
+                launcher.bin.shared
+                if hasattr(launcher.bin, "shared")
+                else launcher.bin.metadata.shared
+            ),
             "stream": stream,
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
@@ -937,7 +974,7 @@ class CachingAutotuner(KernelInterface):
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(grid, stream, launcher)
 
-        if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
+        if self.dump_launch_params:
             _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
 
         # it is faster than entering and exiting a context manager, even if the context
@@ -1718,7 +1755,6 @@ def user_autotune(
             )
             for c in configs
         ]
-
     return cached_autotune(
         None,
         configs,

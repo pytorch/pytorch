@@ -64,8 +64,12 @@ struct strided_tensor_iter_fixed {
   int64_t strides_[N] = {0};
 
   strided_tensor_iter_fixed(strided_tensor_iter_fixed const&) = delete;
-  void operator=(strided_tensor_iter_fixed const& x) = delete;
-  strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) = default;
+  strided_tensor_iter_fixed& operator=(strided_tensor_iter_fixed const& x) =
+      delete;
+  strided_tensor_iter_fixed(strided_tensor_iter_fixed&&) noexcept = default;
+  strided_tensor_iter_fixed& operator=(strided_tensor_iter_fixed&& x) noexcept =
+      default;
+  ~strided_tensor_iter_fixed() noexcept = default;
   strided_tensor_iter_fixed(
       Tensor& tensor,
       [[maybe_unused]] bool sort_strides = false)
@@ -93,8 +97,10 @@ struct strided_tensor_iter {
   std::vector<int64_t> strides_;
 
   strided_tensor_iter(strided_tensor_iter const&) = delete;
-  void operator=(strided_tensor_iter const& x) = delete;
-  strided_tensor_iter(strided_tensor_iter&&) = default;
+  strided_tensor_iter& operator=(strided_tensor_iter const& x) = delete;
+  strided_tensor_iter(strided_tensor_iter&&) noexcept = default;
+  strided_tensor_iter& operator=(strided_tensor_iter&&) noexcept = default;
+  ~strided_tensor_iter() noexcept = default;
   strided_tensor_iter(Tensor& tensor)
       : data_(tensor.data_ptr<T>()),
         dim_(tensor.ndimension()),
