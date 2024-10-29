@@ -1949,10 +1949,21 @@ def _export(
             "_load_state_dict_pre_hooks",
             "_load_state_dict_post_hooks",
         ]
+        protected_hooks = [
+            _check_input_constraints_pre_hook,
+        ]
         hooks = {}
         for attr in attrs:
             hooks[attr] = getattr(mod, attr)
-            setattr(mod, attr, OrderedDict())
+            setattr(
+                mod,
+                attr,
+                OrderedDict({
+                    k: v
+                    for k, v in hooks[attr].items()
+                    if v in protected_hooks
+                }),
+            )
         try:
             yield
         finally:
