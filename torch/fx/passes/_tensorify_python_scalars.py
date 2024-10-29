@@ -256,7 +256,7 @@ def tensorify_python_scalars(
         if node.op == "output" or node.op == "placeholder":
             continue
 
-        with graph.inserting_before(nodes[i - 1]):
+        with graph.inserting_before(nodes[i]):
             if len(node.users) == 0 and not node.is_impure():
                 graph.erase_node(node)
                 continue
@@ -303,10 +303,26 @@ def tensorify_python_scalars(
             if transform:
                 # args may not be metaproxy (eg. float) so can't use metaproxy here
                 replacement_node = graph.call_function(node.target, tuple(args), kwargs)
-                replacement_node.meta["val"] = node.target(
-                    *[a.meta["val"] if isinstance(a, fx.Node) else a for a in args],
-                    **kwargs,
-                )
+
+                # Originally I tried doing something like this for meta propagation:
+                #
+                # replacement_node.meta["val"] = node.target(
+                #     *[a.meta["val"] if isinstance(a, fx.Node) else a for a in args],
+                #     **kwargs,
+                # )
+                #
+                # But it turns out that scan_combine_graph_0 doesn't have meta on it
+                # in the following test:
+                #
+                # python test/inductor/test_torchinductor_dynamic_shapes.py DynamicShapesGPUTests.test_custom_scan_op_compiled_dynamic_shapes_cuda
+                #
+                # We should probably have some sort of test suite that ensures all
+                # fx graph nodes have val populated. But since that doesn't exist today,
+                # I decided to just use the meta from the original node. Since we are
+                # only specializing and not changing the actual operation, this should
+                # still be an accurate meta val.
+                replacement_node.meta["val"] = node.meta["val"]
+
                 node.replace_all_uses_with(replacement_node)
                 graph.erase_node(node)
 
