@@ -534,9 +534,11 @@ try:
             ), f"expected boolean expression. Got: {z3expr}"
             return z3expr
 
-        def add_source_expr(self, e: z3.BoolRef) -> None:
+        def add_source_expr(self, e: Union[z3.BoolRef, z3.ArithRef]) -> None:
             if e not in self._source_exprs:
                 log.debug("add source guard: %s", z3str(e))
+            if not isinstance(e, z3.BoolRef):
+                e = e != 0
             self._source_exprs.add(e)
 
         def add_target_expr(self, e: "sympy.logic.boolalg.Boolean") -> None:
