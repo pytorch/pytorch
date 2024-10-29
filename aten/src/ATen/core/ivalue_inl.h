@@ -1728,7 +1728,7 @@ DEFINE_TO(uint64_t, toInt)
 DEFINE_TO(detail::_guarded_unsigned_long, toInt)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(bool, toBool)
-DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob);
+DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
