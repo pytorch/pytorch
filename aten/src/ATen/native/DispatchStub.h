@@ -301,7 +301,7 @@ public:
       return false;
     }
     return true;
-  };
+  }
 
   static TORCH_API FnPtr DEFAULT;
 #ifdef HAVE_AVX512_CPU_DEFINITION

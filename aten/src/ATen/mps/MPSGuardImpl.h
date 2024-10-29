@@ -111,6 +111,8 @@ struct TORCH_API MPSGuardImpl final : public c10::impl::DeviceGuardImplInterface
 
   bool queryEvent(void* event) const override;
 
+  void synchronizeDevice(const DeviceIndex device_index) const override;
+
 };
 
 /// A variant of OptionalDeviceGuard that is specialized for MPS.
