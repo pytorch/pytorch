@@ -5,6 +5,7 @@ import unittest
 
 import torch
 from functorch.experimental.control_flow import map
+from torch._higher_order_ops import InvokeQuant
 from torch.nn.attention.flex_attention import _create_empty_block_mask, flex_attention
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import onlyCUDA
@@ -70,6 +71,7 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "with_effects",
     "strict_mode",
     "_export_tracepoint",
+    "invoke_quant_tracer",
     "call_torchbind",
     "triton_kernel_wrapper_mutation",
     "triton_kernel_wrapper_functional",
@@ -125,6 +127,16 @@ def simple_invoke_subgraph(x):
         return (torch.sin(x),)
 
     return torch._higher_order_ops.invoke_subgraph(fn, None, (x,))
+
+
+quant_tracer = InvokeQuant()
+
+
+def simple_invoke_quant(x):
+    def fn(x):
+        return (torch.sin(x),)
+
+    return quant_tracer(fn, (x,))
 
 
 def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwargs):
@@ -212,6 +224,21 @@ hop_db = [
         name="invoke_subgraph",
         variant_test_name="simple",
         op=simple_invoke_subgraph,
+        sample_inputs_func=sample_inputs_invoke_subgraph,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=True,
+        # "torch.compile with aot_autograd does not currently support double backward."
+        supports_gradgrad=False,
+    ),
+    OpInfo(
+        name="invoke_quant",
+        variant_test_name="simple",
+        op=simple_invoke_quant,
         sample_inputs_func=sample_inputs_invoke_subgraph,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
