@@ -557,8 +557,8 @@ class CppMicroGemmAMX(CppMicroGemm):
         const int64_t init_idx =  n * buf_size_per_nr_block;
         // For simplicity, even if the tail would not be a multiple of block_k,
         // each B tile's dequantized data in the buffer would have 16x32 elements,
-        // so while loading the tail, we would incur unnecessary loads in such a case,
-        // but we would only read the required number of elements while computing dot product.
+        // so while loading such a tail into the buffer, we would incur unnecessary loads of some garbage data,
+        // but it won't be loaded into AMX tiles, and thus won't affect computation.
         const auto last_k_offset = K / {{block_k}} * {{block_k}};
         const auto tail_k_size = K - last_k_offset;
         const auto max_k_idx = tail_k_size ? last_k_offset + {{block_k}} : last_k_offset;
