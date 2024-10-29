@@ -2124,6 +2124,12 @@ class FakeTensorMode(TorchDispatchMode):
             if func in profiles.data:
                 return profiles.generic_fake_kernel(func, self, *args, **kwargs)
 
+        if self.propagate_real_tensors and not library_utils.is_builtin(func):
+            # Automatically infer a Fake kernel if there isn't one.
+            if not library_utils.has_fake_kernel(func):
+                result = inferred_fake_kernel_from_real_out(self, func, real_out)
+                return maybe_propagate_real_tensors(result)
+
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
         maybe_fake_impl = torch._library.simple_registry.singleton.find(
@@ -2589,3 +2595,64 @@ def dump_cache_stats() -> None:
         width = max(len(k) for k in bypasses)
         for k, v in sorted(bypasses.items(), key=lambda i: -i[1]):
             log.info("    %-*s %s", width + 1, f"{k}:", v)
+
+
+def inferred_fake_kernel_from_real_out(
+    mode: FakeTensorMode, op: torch._ops.OpOverload, real_out: Any
+) -> Any:
+    # Only support operators that have all Tensor outputs
+    real_flat_out, spec = pytree.tree_flatten(real_out)
+    if not all(isinstance(t, torch.Tensor) for t in real_flat_out):
+        raise RuntimeError(
+            f"propagate_real_tensors: we don't support operators that return "
+            f"non-Tensors. Got {op._name}"
+        )
+
+    def make_fake(real_out: torch.Tensor) -> torch.Tensor:
+        def unsupported(reason: str) -> None:
+            raise RuntimeError(
+                f"propagate_real_tensors: we cannot infer a Fake kernel "
+                f"(meta kernel) for operator {op._name} because {reason}. "
+                f"Please use torch.library.register_fake to add a Fake kernel."
+            )
+
+        if real_out.storage_offset() != 0:
+            unsupported(
+                f"a return has a non-zero storage offset {real_out.storage_offset()}"
+            )
+
+        # Assume rank specialized. That is, none of the inputs will affect the rank.
+        # This is emperically almost always true. An example of something that
+        # isn't is an `unsqueeze(x, n_times)` operator.
+        # A better thing to do is to *also* insert a runtime assertion for the rank of
+        # the output.
+        fake_shape = [
+            torch._library.fake_impl.allocate_size(mode.shape_env)
+            for _ in range(real_out.dim())
+        ]
+        fake_strides = [-1] * real_out.dim()
+
+        strides = [(s, idx) for idx, s in enumerate(real_out.stride())]
+        strides.sort()
+        expected = 1
+        fake_stride = expected
+        for s, idx in strides:
+            if s != expected:
+                unsupported(
+                    f"a return was not dense in memory (sizes {real_out.shape} strides {real_out.stride()})"
+                )
+            fake_strides[idx] = fake_stride
+            expected = expected * real_out.shape[idx]
+            fake_stride = fake_stride * fake_shape[idx]
+
+        with mode:
+            return torch.empty_strided(
+                fake_shape,
+                fake_strides,
+                device=real_out.device,
+                dtype=real_out.dtype,
+                layout=real_out.layout,
+            )
+
+    fake_flat_out = [make_fake(t) for t in real_flat_out]
+    return pytree.tree_unflatten(fake_flat_out, spec)

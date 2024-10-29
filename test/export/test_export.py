@@ -1175,6 +1175,69 @@ graph():
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             ep = export(model, inputs)
 
+    def test_draft_export_infers_fake_kernel(self):
+        with torch.library._scoped_library("export", "FRAGMENT") as lib:
+            lib.define("bar(Tensor x) -> Tensor")
+            lib.impl("bar", lambda x: x[0].clone(), "CPU")
+
+            @torch.library.custom_op("export::foo", mutates_args={})
+            def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                return x * y
+
+            class Foo(torch.nn.Module):
+                def forward(self, x, y):
+                    return foo(x, y), torch.ops.export.bar(y)
+
+            model = Foo()
+            inputs = (torch.randn(1, 3), torch.randn(2, 1))
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        self.assertExpectedInline(
+            str(ep.graph_module.code).strip(),
+            """\
+def forward(self, x, y):
+    foo = torch.ops.export.foo.default(x, y);  x = None
+    sym_size_int_3 = torch.ops.aten.sym_size.int(foo, 0)
+    sym_size_int_4 = torch.ops.aten.sym_size.int(foo, 1)
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_3);  sym_constrain_range_for_size_default = None
+    ge_3 = sym_size_int_3 >= 0;  sym_size_int_3 = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u0 >= 0 on node 'ge_3'");  ge_3 = _assert_scalar_default = None
+    sym_constrain_range_for_size_default_1 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_4);  sym_constrain_range_for_size_default_1 = None
+    ge_4 = sym_size_int_4 >= 0;  sym_size_int_4 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_4, "Runtime assertion failed for expression u1 >= 0 on node 'ge_4'");  ge_4 = _assert_scalar_default_1 = None
+    bar = torch.ops.export.bar.default(y);  y = None
+    sym_size_int_5 = torch.ops.aten.sym_size.int(bar, 0)
+    sym_constrain_range_for_size_default_2 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_5);  sym_constrain_range_for_size_default_2 = None
+    ge_5 = sym_size_int_5 >= 0;  sym_size_int_5 = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u2 >= 0 on node 'ge_5'");  ge_5 = _assert_scalar_default_2 = None
+    return (foo, bar)""",
+        )
+
+    def test_draft_export_fake_kernel_inference_errors(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x.expand(32, 3).contiguous()[4]
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.randn(1, 3), torch.randn(2, 1))
+
+        with self.assertRaisesRegex(RuntimeError, "non-zero storage offset"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return torch.randn(3, 3).diagonal()
+
+        with self.assertRaisesRegex(RuntimeError, "not dense in memory"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
     @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
     @testing.expectedFailureSerDerNonStrict
     def test_real_tensor_bool_cast(self):
