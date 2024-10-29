@@ -277,6 +277,8 @@ try:
 
             return wrapper
 
+        # Like `lift`, but for bitwise ops. We need to convert to/from BitVec
+        # in order to use z3 bitwise ops. We assume that integers are 64 bit.
         def bitwise_lift(func):
             def wrap(a) -> z3.ExprRef:
                 if isinstance(a, z3.ArithRef):
