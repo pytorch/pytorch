@@ -4393,7 +4393,7 @@ class TestSerialization(TestCase, SerializationMixin):
             with ctx(*args), tempfile.TemporaryDirectory() as temp_dir:
                 with zipfile.ZipFile(f) as zip_file:
                     zip_file.extractall(path=temp_dir)
-    
+
     def test_get_unsafe_globals_in_checkpoint(self):
         t = torch.randn(2, 3)
         tt = TwoTensor(t, t)
