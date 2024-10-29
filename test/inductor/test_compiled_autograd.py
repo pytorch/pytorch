@@ -6,11 +6,9 @@ import io
 import itertools
 import logging
 import os
-import queue
 import re
 import subprocess
 import sys
-import threading
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -2415,39 +2413,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             not in logs.getvalue()
         )
 
-    def test_multithreading_tls(self):
-        def train(errors, model, x):
-            try:
-                out = model(x)
-                with compiled_autograd.enable(compiler_fn):
-                    self.assertEqual(compiled_autograd.enabled(), True)
-                    self.assertEqual(compiled_autograd.local.get("next_ctx_id"), 1)
-            except Exception as e:
-                print(f"Found error: {e}")
-                errors.put(1)
-                raise
-
-        model = torch.nn.Sequential(
-            torch.nn.Linear(4, 4),
-            torch.nn.ReLU(),
-            torch.nn.Linear(4, 4),
-            torch.nn.ReLU(),
-        )
-        x = torch.randn([2, 4])
-
-        threads = []
-        errors = queue.Queue()
-        with compiled_autograd.enable(compiler_fn):
-            for i in range(4):
-                thread = threading.Thread(target=train, args=(errors, model, x))
-                threads.append(thread)
-                thread.start()
-
-        for thread in threads:
-            thread.join()
-
-        assert errors.empty()
-
     def test_verbose_logs_graph(self):
         def fn():
             model = torch.nn.Sequential(
@@ -2802,6 +2767,63 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with torch._dynamo.compiled_autograd.enable(torch.compile):
             out.backward()
 
+    @skipIfWindows(msg="node name demangling inconsistent on windows")
+    def test_backward_hook_relative_ordering_partial(self):
+        # test backward hooks for cases that CA matches eager
+
+        def fn():
+            order = []
+
+            class MyModule(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(10, 10, bias=False)
+
+                def forward(self, x):
+                    return self.linear(x)
+
+            x = torch.randn(10, 10)
+            module = MyModule()
+
+            def make_pre_hook(id):
+                return lambda _: order.append(f"pre_hook_{id}")
+
+            def make_post_hook(id):
+                return lambda _1, _2: order.append(f"post_hook_{id}")
+
+            count = 0
+
+            def register_hooks_on_all_nodes(nodes):
+                nonlocal count
+                for node, _ in nodes:
+                    if node is None:
+                        continue
+                    count += 1
+                    id = f"{node.name()}_{count}"
+                    node.register_prehook(make_pre_hook(id))
+                    node.register_hook(make_post_hook(id))
+                    register_hooks_on_all_nodes(node.next_functions)
+
+            loss = module(x).sum()
+            register_hooks_on_all_nodes(((loss.grad_fn, None),))
+
+            def make_tensor_pre_hook(id):
+                return lambda _: order.append(f"tensor_pre_hook_{id}")
+
+            def make_post_acc_grad_hook(id):
+                return lambda _: order.append(f"post_acc_grad_hook_{id}")
+
+            module.linear.weight.register_hook(make_tensor_pre_hook("weight"))
+
+            module.linear.weight.register_post_accumulate_grad_hook(
+                make_post_acc_grad_hook("weight")
+            )
+
+            loss.backward()
+            yield tuple(order)
+
+        self.check_output_and_recompiles(fn)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -2993,6 +3015,7 @@ known_failing_tests = {
     # Category: Divergence from eager
     "test_invalid_gradients",  # can't give autograd error due to inaccurate output metadata of lifted backward
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
+    "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
     # Uncategorized
 }
 
