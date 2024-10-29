@@ -169,6 +169,7 @@ def _get_allowed_globals():
         "torch.device": torch.device,
         "_codecs.encode": encode,  # for bytes
         "builtins.bytearray": bytearray,  # for bytearray
+        "builtins.set": set,  # for set
     }
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
@@ -281,34 +282,30 @@ class Unpickler:
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()
                 inst = self.stack[-1]
-                BUILD_ERROR_STR = (
-                    "Can only build Tensor, Parameter, OrderedDict or types allowlisted "
-                    f"via `add_safe_globals`, but got {type(inst)}"
-                )
-                slotstate = None
-                if isinstance(state, tuple) and len(state) == 2:
-                    state, slotstate = state
-                if state:
-                    if type(inst) is torch.Tensor:
-                        # Legacy unpickling
-                        inst.set_(*state)
-                    elif type(inst) is torch.nn.Parameter:
+                if type(inst) is torch.Tensor:
+                    # Legacy unpickling
+                    inst.set_(*state)
+                elif type(inst) is torch.nn.Parameter:
+                    inst.__setstate__(state)
+                elif type(inst) is OrderedDict:
+                    inst.__dict__.update(state)
+                elif type(inst) in _get_user_allowed_globals().values():
+                    if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
-                    elif type(inst) is OrderedDict:
-                        inst.__dict__.update(state)
-                    elif type(inst) in _get_user_allowed_globals().values():
-                        if hasattr(inst, "__setstate__"):
-                            inst.__setstate__(state)
-                        else:
+                    else:
+                        slotstate = None
+                        if isinstance(state, tuple) and len(state) == 2:
+                            state, slotstate = state
+                        if state:
                             inst.__dict__.update(state)
-                    else:
-                        raise UnpicklingError(BUILD_ERROR_STR)
-                if slotstate:
-                    if type(inst) in _get_user_allowed_globals().values():
-                        for k, v in slotstate.items():
-                            setattr(inst, k, v)
-                    else:
-                        raise UnpicklingError(BUILD_ERROR_STR)
+                        if slotstate:
+                            for k, v in slotstate.items():
+                                setattr(inst, k, v)
+                else:
+                    raise UnpicklingError(
+                        "Can only build Tensor, Parameter, OrderedDict or types allowlisted "
+                        f"via `add_safe_globals`, but got {type(inst)}"
+                    )
             # Stack manipulation
             elif key[0] == APPEND[0]:
                 item = self.stack.pop()
