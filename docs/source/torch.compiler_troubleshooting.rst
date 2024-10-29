@@ -751,30 +751,30 @@ where it is not immediately obvious where the problem originates from.
 Creating a reproducer
 ---------------------
 
-Creating reproducers is a lot of work, and it is 100% OK if you do not have time to do it.
-But if you are a very motivated user who doesn't know very much about the ``torch.compile`` internals,
+Creating reproducers is a lot of work, and it is perfectly fine if you do not have the time to do it.
+However, if you are a motivated user unfamiliar with the internals of ``torch.compile``,
 creating a standalone reproducer can have a huge impact on our ability to fix the bug.
-Without a reproducer, your bug report has to have enough information that we can root cause the problem and write a reproducer from scratch.
+Without a reproducer, your bug report must contain enough information for us to identify the root cause of the problem and write a reproducer from scratch.
 
-Here's a list of useful reproducers, with the most preferred first.
+Here's a list of useful reproducers, ranked from most to least preferred:
 
-1. A self-contained (no external dependencies), small (less than 100 LOC) reproduction script that when run produces the problem.
-2. A self-contained but large reproducer. Being self-contained is a huge win!
-3. A not self-contained reproducer that is not too sensitive to the dependencies used.
-   For example, if you can reproduce a problem if you first ``pip install transformers``
-   and then run a script and it will produce the problem, that's not too bad,
-   we will probably be able to run it and check things out.
-4. A not self-contained reproducer that requires substantial environmental setup / a Docker image to reproduce.
-   For example, maybe you need us to download a dataset from some URL, or do multiple nontrivial environment setup steps,
-   or the it is very important to have very particular versions of system libraries so a Docker image is required.
-   The more difficult it is to setup the environment, the harder it is for us to recreate it and setup the problem.
+1. **Self-contained, small reproducer:** A script with no external dependencies, under 100 lines of code, that reproduces the problem when run.
+2. **Self-contained, large reproducer:** Even if it's large, being self-contained is a huge advantage!
+3. **Non-self-contained reproducer with manageable dependencies:**
+    For example, if you can reproduce the problem by running a script after ``pip install transformers``,
+   that's manageable. We can likely run it and investigate.
+4. **Non-self-contained reproducer requiring substantial setup:**  This might involve downloading datasets, 
+multiple environment setup steps, or specific system library versions requiring a Docker image. 
+   The more complex the setup, the harder it is for us to recreate the environment. 
+   
+   .. note:: Docker simplifies setup but complicates changes to the environment, so it's not a perfect solution, though we'll use it if necessary.
    NB: Docker makes it "easier" to setup the environment, but it makes it more difficult to change things about the environment
    / use our preferred development environment, so it's not really a magic bullet, although we'll take it in a pinch.
 
 Somewhat orthogonally, a reproducer that can be run in a single process is better than a reproducer
 that requires multiprocess training (but once again, if you only have a multiprocess reproducer, we'll take it!).
 
-Additionally, below is a non-exhaustive list of things that you can check for in your
+Additionally, below is a non-exhaustive list of aspects to check in your
 issue that you can attempt to replicate in your reproducer:
 
 - **Autograd**. Did you have tensor inputs with ``requires_grad=True``? Did you call ``backward()`` on the output?
@@ -795,34 +795,34 @@ Minifier
 The minifier is an early ``torch.compile`` tool that, given an FX graph that crashes when we attempt to run or compile it,
 finds a subgraph that also crashes and outputs the code that performs that subgraph's operations.
 Essentially, the minifier finds a minimal repro for a certain class of ``torch.compile``-related crashes.
-Note that this assumes that we were able to successfully trace through code.
+This assumes that we were able to successfully trace through code.
 
-Unfortunately, most of the time nowadays, the minifier doesn't work and you'll have to do something else
-(we like to think that this is because bugs that can have repros automatically generated this way are all easy to fix,
-so we've fixed them all, and that leaves the hard bugs that don't repro easily).
-But it's very easy to try, so you might as well try it and cry when it doesn't work.
+Unfortunately, most of the time nowadays, the minifier doesn't work as expected, and alternative methods may be necessary.
+This is likely because bugs that can be automatically reproduced in this manner are generally easier to fix
+ and have already been addressed, leaving more complex issues that do not reproduce easily.
+However, it is straightforward to attempt using the minifier, so it is worth trying even if it may not succeed.
 
 Instructions for operating the minifier can be found `here <https://pytorch.org/docs/stable/torch.compiler_troubleshooting_old.html>`__.
 If the compiler is crashing, you can set ``TORCHDYNAMO_REPRO_AFTER="dynamo"`` or ``TORCHDYNAMO_REPRO_AFTER="aot"``
-(``aot`` is more likely to work, but it won't catch AOTAutograd bugs) and then pray that the generated ``repro.py`` actually has your problem.
-If it's an accuracy problem, you can try ``TORCHDYNAMO_REPRO_LEVEL=4`` (and cry when it fails to find the actual subgraph that has a problem).
+The ``aot`` option is more likely to succeed, although it may not identify the ``AOTAutograd`` issues.  This will generate the ``repro.py`` file which may help to diagnose the problem.
+For accuracy-related issues, consider setting ``TORCHDYNAMO_REPRO_LEVEL=4``. Please note that this may not always successfully identify the problematic subgraph.
 
 Debugging Deeper
 ~~~~~~~~~~~~~~~~
 
-This section details tools and techniques if you want to try to debug ``torch.compile`` issues on your own
-or if you want to learn more about the ``torch.compile`` stack.
+This section provides tools and techniques for independently debugging ``torch.compile`` issues
+or for gaining a deeper understanding of the ``torch.compile`` stack.
 These methods are more involved than those presented above and are used by PyTorch developers regularly
 to debug real ``torch.compile`` issues.
 
-Below is a high level view of the stack:
+Below is a high-level overview of the stack:
 
 .. image:: _static/img/dynamo/td_stack.png
 
-There are three main components to this stack; TorchDynamo, AOTAutograd, and Inductor.
-Our debugging strategy will first focus on narrowing down the component in which the error is occurring
-and then individually debugging the component. For identifying the component where your issue is originating,
-first see the `Ablation` section above under `Reporting Issues` above. To debug an individual component, see the sections below.
+The stack comprises three main components: TorchDynamo, AOTAutograd, and Inductor.
+Our debugging strategy involves first identifying the component in which the error occurs
+and then individually debugging the component. To determine the component responsible for the issue,
+see the `Ablation` section under `Reporting Issues` above. For guidance on debugging a specific component, consult the sections below.
 
 TorchDynamo
 -----------
@@ -830,9 +830,9 @@ TorchDynamo
 Logging what Dynamo is tracing
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The ``TORCH_LOGS=trace_bytecode`` option enables you to see the exact bytecode instructions that Dynamo is tracing through,
+The ``TORCH_LOGS=trace_bytecode`` option enables you to view the precise bytecode instructions that Dynamo is tracing,
 as well as a symbolic representation of the Python interpreter stack. When encountering a graph break or crash,
-it is generally good to inspect the last few bytecode instructions traced.
+it is advisable to inspect the last few bytecode instructions traced.
 
 You can also use ``TORCH_LOGS=trace_source`` to see which lines of source code Dynamo is tracing through.
 This is useful in combination with ``trace_bytecode`` to see the line of source code each traced bytecode instruction corresponds to.
@@ -905,19 +905,19 @@ Breakpointing Dynamo tracing
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Inserting a breakpoint in Dynamo/user code is helpful at times to see what the state of Dynamo is when tracing through user code.
-Unfortunately, inserting a breakpoint in the normal python fashion will result in a graph break in TorchDynamo,
+Unfortunately, inserting a breakpoint in the normal Python fashion will result in a graph break in TorchDynamo,
 so we will not be able to view the state of Dynamo at the point where we intended to breakpoint.
 
-The first way to breakpoint is to insert a breakpoint in the Dynamo source. 3 good places to place a breakpoint are:
+The first method for setting a breakpoint is to insert it within the Dynamo source code. Three recommended locations to place a breakpoint are:
 
-- In ``torch/_dynamo/symbolic_convert.py``, breakpoint at functions that are named after the problematic bytecode instruction
-  (e.g. ``def CALL_FUNCTION``, ``def STORE_ATTR``). You can conditionally breakpoint depending on inputs
-  (e.g. the argval of the instruction, or the name of the object at the top of the stack) since some bytecode opcodes are frequently used.
+- In ``torch/_dynamo/symbolic_convert.py``, breakpoint at functions that are named after the problematic bytecode instruction,
+  such as ``def CALL_FUNCTION`` and ``def STORE_ATTR``. You can conditionally breakpoint depending on inputs,
+  for example, the ``argval`` of the instruction, or the name of the object at the top of the stack since some bytecode opcodes are frequently used.
 - Breakpoint where the graph break or error originates from. Typically, graph breaks are emitted from a call to ``unimplemented(...)``.
 - Breakpoint in ``torch/_dynamo/variables/builder.py, function:_wrap``. You will likely have to conditionally breakpoint on the input.
   This function determines how to symbolically represent a given value. Consider breakpointing here if you suspect that a value is represented incorrectly.
 
-The second way to breakpoint is to use ``torch._dynamo.comptime.comptime.breakpoint``:
+The second way to insert a breakpoint is to use ``torch._dynamo.comptime.comptime.breakpoint``:
 
 .. code-block:: py
 
@@ -929,8 +929,8 @@ The second way to breakpoint is to use ``torch._dynamo.comptime.comptime.breakpo
         comptime.breakpoint()
         ...
 
-A comptime breakpoint is convenient because it will allow you to inspect the Dynamo state at a given location in the user code being traced.
-It does not require you to breakpoint in the Dynamo source nor conditionally breakpoint based on variables.
+A comptime breakpoint is convenient as it enables you to inspect the Dynamo state at a specific location within the user code being traced.
+It does not require you to insert a breakpoint in the Dynamo source or to conditionally breakpoint based on variables.
 
 When a comptime breakpoint is triggered, you can do the following:
 
@@ -938,7 +938,7 @@ When a comptime breakpoint is triggered, you can do the following:
 - ``ctx.print_locals()`` to print all current locals
 - ``ctx.print_graph()`` to print the currently traced graph
 - ``ctx.disas()`` to print the currently traced function's bytecode
-- Normal pdb commands like ``bt/u/d/n/s/r`` - you can go up the pdb stack to inspect more Dynamo internals
+- Use standard ``pdb`` commands, such as ``bt/u/d/n/s/r``, - you can go up the ``pdb`` stack to inspect more Dynamo internals
 
 .. code-block:: py
 
@@ -1000,14 +1000,14 @@ When a comptime breakpoint is triggered, you can do the following:
 Bytecode generation errors
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-It is possible (though not common) for Dynamo to generate incorrect bytecode. This might be the case if you determine:
+Although uncommon, Dynamo may generate incorrect bytecode. This may occur if you determine the following:
 
 - Ablation reveals the error is happening at the TorchDynamo level
 - The error is not being emitted from TorchDynamo stack frames
-- The error looks more like a user error rather than a Dynamo error, or is a segfault
+- The error looks more like a user error rather than a Dynamo error, or is a segmentation fault
 - The error does not occur without ``torch.compile``
 
-Bytecode generation bugs are generally tricky to fix and we recommend just submitting an issue.
+Bytecode generation bugs are generally tricky to fix and we recommend submitting an issue instead of trying to fix those yourself.
 If you are interested in seeing the bytecode that Dynamo generates, you can use ``TORCH_LOGS=bytecode``.
 You can see a high-level overview on what bytecode Dynamo generates `here <https://docs.google.com/presentation/d/1tMZOoAoNKF32CAm1C-WfzdVVgoEvJ3lp/edit?usp=sharing&ouid=114922067987692817315&rtpof=true&sd=true>`__.
 
@@ -1027,7 +1027,7 @@ TorchInductor
 Summary of TORCH_LOGS options
 ---------------------------------
 
-A summary of helpful ``TORCH_LOGS`` options are:
+A summary of helpful ``TORCH_LOGS`` options is:
 
 .. list-table::
     :widths: 25 50
