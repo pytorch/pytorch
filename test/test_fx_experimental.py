@@ -6,15 +6,17 @@ import numbers
 import operator
 import pickle
 import sys
-import sympy
 import tempfile
 import unittest
 from types import BuiltinFunctionType
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
+import sympy
+
 import torch
 import torch.fx.experimental.meta_tracer
 import torch.fx.experimental.optimization as optimization
+import torch.utils._pytree as pytree
 from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.accelerator_partitioner import Partitioner
@@ -39,10 +41,10 @@ from torch.fx.operator_schemas import (
     type_matches,
 )
 from torch.fx.passes import graph_manipulation
+from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.passes.split_module import split_module
-from torch.fx.passes.annotate_getitem_nodes import annotate_getitem_nodes
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -50,9 +52,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_Z3, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
-import torch.utils._pytree as pytree
 
 try:
     import torchvision.models
@@ -540,7 +541,9 @@ class TestFXExperimental(JitTestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.conv = torch.nn.Conv2d(32, 64, 3, stride=2)
-                self.bn = torch.nn.BatchNorm2d(64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False)
+                self.bn = torch.nn.BatchNorm2d(
+                    64, eps=1e-05, momentum=0.1, affine=True, track_running_stats=False
+                )
 
             def forward(self, x):
                 x = self.conv(x)
@@ -563,8 +566,18 @@ class TestFXExperimental(JitTestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1, bias=False, dtype=torch.bfloat16)
-                self.bn = torch.nn.BatchNorm2d(16, eps=0.001, momentum=0.1, affine=True, track_running_stats=True)
+                self.conv = torch.nn.Conv2d(
+                    3,
+                    16,
+                    kernel_size=3,
+                    stride=1,
+                    padding=1,
+                    bias=False,
+                    dtype=torch.bfloat16,
+                )
+                self.bn = torch.nn.BatchNorm2d(
+                    16, eps=0.001, momentum=0.1, affine=True, track_running_stats=True
+                )
 
             def forward(self, x):
                 x = self.conv(x)
@@ -619,27 +632,30 @@ class TestFXExperimental(JitTestCase):
 
             def forward(self, x):
                 emb = self.emb(x)
-                emb = emb + torch.arange(emb.shape[-1], dtype=torch.float, device=emb.device)
+                emb = emb + torch.arange(
+                    emb.shape[-1], dtype=torch.float, device=emb.device
+                )
                 lol = self.layernorm(emb)
                 return torch.relu(lol) if lol.shape[0] < 30 else torch.sigmoid(lol)
 
         mttm = MetaTracerTestModule()
         for BS in [15, 35]:
             x = torch.zeros(BS, dtype=torch.long).random_(42)
-            meta_args = {'x' : x.to(device='meta')}
-            gm = torch.fx.experimental.meta_tracer.symbolic_trace(mttm, meta_args=meta_args)
+            meta_args = {"x": x.to(device="meta")}
+            gm = torch.fx.experimental.meta_tracer.symbolic_trace(
+                mttm, meta_args=meta_args
+            )
             torch.testing.assert_close(gm(x), mttm(x))
 
             # Test serialization/deserialization
             with tempfile.TemporaryDirectory() as tmp_dir:
-                with open(f'{tmp_dir}/meta_module.pkl', 'wb') as f:
+                with open(f"{tmp_dir}/meta_module.pkl", "wb") as f:
                     pickle.dump(gm, f)
 
-                with open(f'{tmp_dir}/meta_module.pkl', 'rb') as f:
+                with open(f"{tmp_dir}/meta_module.pkl", "rb") as f:
                     loaded = pickle.load(f)
 
                 torch.testing.assert_close(loaded(x), mttm(x))
-
 
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
@@ -815,15 +831,12 @@ terrible spacing
         split = split_module(traced, mod, split_callback)
 
         x = torch.randn((5,))
-        torch.testing.assert_close(
-            split(x), traced(x)
-        )
-
+        torch.testing.assert_close(split(x), traced(x))
 
     def test_split_module_kwargs_expansion(self):
         class ModuleWithKwargsExpansion(torch.nn.Module):
             def forward(self, x, **kwargs):
-                return x + kwargs['foo']
+                return x + kwargs["foo"]
 
         mod = ModuleWithKwargsExpansion()
         traced = torch.fx.symbolic_trace(mod)
@@ -868,7 +881,7 @@ terrible spacing
                 return x
 
         mtt = ModelToTrace()
-        traced = torch.fx.symbolic_trace(mtt, concrete_args={'targets': None})
+        traced = torch.fx.symbolic_trace(mtt, concrete_args={"targets": None})
 
         split = split_module(traced, mtt, lambda node: 0)
 
@@ -1100,7 +1113,7 @@ class {test_classname}(torch.nn.Module):
                         ("call_function", operator.add),
                         ("call_function", torch.flatten),
                         ("output", "output"),
-                    }
+                    },
                 )
 
         # Smoke test torchscript compilation since now we're emitting type annotations
@@ -1145,7 +1158,12 @@ class {test_classname}(torch.nn.Module):
             y: float
 
         class MyModule(torch.nn.Module):
-            def forward(self, inp: Tuple[CustomType, torch.Tensor], inp2: List[CustomType], inp3: CustomNamedTuple):
+            def forward(
+                self,
+                inp: Tuple[CustomType, torch.Tensor],
+                inp2: List[CustomType],
+                inp3: CustomNamedTuple,
+            ):
                 inp_0 = inp[0]
                 inp_1 = inp[1]
                 inp2_0 = inp2[0]
@@ -1165,7 +1183,9 @@ class {test_classname}(torch.nn.Module):
 
         for node in my_module_traced.graph.nodes:
             if node.target == operator.getitem:
-                self.assertIsNotNone(node.type, f"Node {node} should be annotated but is not.")
+                self.assertIsNotNone(
+                    node.type, f"Node {node} should be annotated but is not."
+                )
 
     def test_subgraph_uniquename(self):
         class MyModule(torch.nn.Module):
@@ -1220,20 +1240,18 @@ class {test_classname}(torch.nn.Module):
 
         part_idx = 0
 
-        def split_callback(n : torch.fx.Node):
+        def split_callback(n: torch.fx.Node):
             nonlocal part_idx
-            if (n.op, n.target) == ('call_module', 'lin'):
+            if (n.op, n.target) == ("call_module", "lin"):
                 part_idx += 1
             return part_idx
 
         # split module in module with submodules
-        qualname_map : Dict[str, str] = {}
+        qualname_map: Dict[str, str] = {}
         module_with_submodules = split_module(
             my_module_traced, my_module, split_callback, qualname_map
         )
-        expected_qualname_map = {
-            'submod_1.lin': 'lin', 'submod_2.lin': 'lin'
-        }
+        expected_qualname_map = {"submod_1.lin": "lin", "submod_2.lin": "lin"}
         self.assertEqual(qualname_map, expected_qualname_map)
 
     def test_traceable_function_with_nonstandard_name(self):
@@ -1254,7 +1272,9 @@ class {test_classname}(torch.nn.Module):
                 self.attr3 = torch.nn.Buffer(torch.ones(2, dtype=torch.int32))
 
             def forward(self, x):
-                return self.linear(self.seq(self.W + self.attr + self.attr2 + self.attr3 + x))
+                return self.linear(
+                    self.seq(self.W + self.attr + self.attr2 + self.attr3 + x)
+                )
 
         mod = symbolic_trace(Test())
         module_name = "Foo"
@@ -1328,6 +1348,7 @@ class {test_classname}(torch.nn.Module):
         A collection of test cases for torch.fx.experimental.merge_matmul,
         a graph transformation that merges matrix multiplication operations.
         """
+
         # Utility function for counting matmuls for test assertions.
         def _count_matmuls(mod):
             gm = torch.fx.symbolic_trace(mod)
@@ -1511,7 +1532,12 @@ class {test_classname}(torch.nn.Module):
             def forward(self, x):
                 return self.model(x) + self.model2(x)
 
-        N, C, H, W, = (
+        (
+            N,
+            C,
+            H,
+            W,
+        ) = (
             1,
             3,
             224,
@@ -1544,7 +1570,11 @@ class {test_classname}(torch.nn.Module):
         with torch.no_grad():
             for model_type in models:
                 model = model_type()
-                C, H, W, = (
+                (
+                    C,
+                    H,
+                    W,
+                ) = (
                     3,
                     224,
                     224,
@@ -1566,7 +1596,16 @@ class TestNormalizeOperators(JitTestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)
-        fx_fail = {"cat", "stack", "hstack", "vstack", "dstack", "linalg.multi_dot", "_upsample_bilinear2d_aa", "_chunk_cat"}
+        fx_fail = {
+            "cat",
+            "stack",
+            "hstack",
+            "vstack",
+            "dstack",
+            "linalg.multi_dot",
+            "_upsample_bilinear2d_aa",
+            "_chunk_cat",
+        }
         sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
         if isinstance(op.op, torch._ops.OpOverload):
             self.skipTest("normalize operator doesn't work on torch.ops")
@@ -1718,17 +1757,26 @@ class TestModule(torch.nn.Module):
         for target in [torch.ops.aten.resize_as_.default, torch.ops.aten.resize_as_]:
             inp1 = torch.rand([1])
             inp2 = torch.rand([4])
-            args, kwargs = normalize_function(target, (inp1,), {"the_template": inp2}, normalize_to_only_use_kwargs=True)
+            args, kwargs = normalize_function(
+                target,
+                (inp1,),
+                {"the_template": inp2},
+                normalize_to_only_use_kwargs=True,
+            )
             self.assertIs(kwargs["input"], inp1)
             self.assertIs(kwargs["the_template"], inp2)
 
 
 if TEST_Z3:
+    import torch._dynamo.config
     import z3
 
-    import torch._dynamo.config
-
-    from torch.fx.experimental.validator import SympyToZ3, TranslationValidator, ValidationException, z3str
+    from torch.fx.experimental.validator import (
+        SympyToZ3,
+        TranslationValidator,
+        ValidationException,
+        z3str,
+    )
     from torch.utils._sympy.functions import FloorDiv, Mod
 
     class TestTranslationValidation(TestCase):
@@ -1844,7 +1892,9 @@ if TEST_Z3:
             # This expression is less restrictive than its counterpart.
             validator.add_target_expr(s1 > s0 + 2)
 
-            with self.assertRaisesRegex(ValidationException, "translation validation failed."):
+            with self.assertRaisesRegex(
+                ValidationException, "translation validation failed."
+            ):
                 validator.validate()
 
         def test_z3str(self):
@@ -1860,14 +1910,11 @@ if TEST_Z3:
                 (special, "this.size()[2]"),
                 # Renamed function fpplications.
                 (a != b, "(!= a b)"),
-                (a ** b, "(pow a b)"),
+                (a**b, "(pow a b)"),
                 # Chain of associative operations.
                 *[
                     (op(op(a, 5), b), f"({opstr} 5 a b)")
-                    for op, opstr in [
-                        (operator.add, "+"),
-                        (operator.mul, "*")
-                    ]
+                    for op, opstr in [(operator.add, "+"), (operator.mul, "*")]
                 ],
                 # Revert 'Not' conversions.
                 (a != b, "(!= a b)"),

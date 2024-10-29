@@ -247,7 +247,7 @@ try:
         # This is needed because the argument of some FX nodes were
         # literal integers, instead of booleans. So, whenever this flag
         # is set, we also convert ints to booleans.
-        boolean_ops = {operator.not_, operator.and_, operator.or_}
+        boolean_ops = {operator.not_}
         as_bool = op in boolean_ops
 
         # Lifts the function into 'z3.ExprRef' domain.
@@ -277,12 +277,35 @@ try:
 
             return wrapper
 
+        def bitwise_lift(func):
+            def wrap(a) -> z3.ExprRef:
+                if isinstance(a, z3.ArithRef):
+                    return z3.Int2BV(a, 64)
+                if isinstance(a, (bool, int, sympy.Integer)):
+                    return z3.Int2BV(z3.IntVal(int(a)), 64)
+                raise ValueError(f"can't lift type for bitwise op: {type(a)}")
+
+            @functools.wraps(func)
+            def wrapper(*args):
+                # Lifts the arguments into a list of Z3 inhabitants.
+                if len(args) == 1 and isinstance(args[0], (list, tuple)):
+                    wrapped_args = (tuple(wrap(a) for a in args[0]),)
+                else:
+                    wrapped_args = tuple(wrap(a) for a in args)
+                # Run the function on the Z3 expressions.
+                breakpoint()
+                return z3.BV2Int(func(*wrapped_args))
+
+            return wrapper
+
         ops = _Z3Ops(validator)
         replacement_map = {
             # Operator module.
             operator.not_: lift(z3.Not),
-            operator.and_: lift(z3.And),
-            operator.or_: lift(z3.Or),
+            operator.and_: bitwise_lift(operator.and_),
+            operator.rshift: bitwise_lift(operator.rshift),
+            operator.lshift: bitwise_lift(operator.lshift),
+            operator.or_: bitwise_lift(operator.or_),
             operator.floordiv: lift(ops.floordiv),
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),

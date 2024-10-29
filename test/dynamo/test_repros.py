@@ -6199,6 +6199,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         def fn(x):
             z = x.shape[0]
             z |= z >> 1
+            z |= z << 1
             z &= z
             return z
 
