@@ -184,7 +184,7 @@ class FakeRootModule(torch.nn.Module):
         for k, v in nn_modules.items():
             setattr(self, k, v)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "FakeRootModule(...)"
 
 
@@ -872,7 +872,7 @@ class OutputGraph:
 
         base = name
         for i in itertools.count():
-            if name not in self.nn_modules:
+            if name not in self.nn_modules and name not in self.global_scope:
                 self.nn_modules[name] = target
                 if isinstance(target, torch.nn.Module):
 
@@ -1349,6 +1349,7 @@ class OutputGraph:
                     fx.GraphModule(root, self.graph),
                     self.shape_env,
                     name,
+                    export=self.export,
                 )
             # NB: deferred runtime asserts can keep graphargs live, so make sure
             # those are inserted before pruning

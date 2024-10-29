@@ -1159,7 +1159,7 @@ def main():
         )
     install_requires = [
         "filelock",
-        "typing-extensions>=4.8.0",
+        "typing-extensions>=4.10.0",
         'setuptools ; python_version >= "3.12"',
         'sympy==1.13.1 ; python_version >= "3.9"',
         "networkx",
@@ -1252,6 +1252,7 @@ def main():
         "include/*.h",
         "include/ATen/*.h",
         "include/ATen/cpu/*.h",
+        "include/ATen/cpu/vec/vec128/*.h",
         "include/ATen/cpu/vec/vec256/*.h",
         "include/ATen/cpu/vec/vec256/vsx/*.h",
         "include/ATen/cpu/vec/vec256/zarch/*.h",

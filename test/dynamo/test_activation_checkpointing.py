@@ -86,7 +86,7 @@ def count_ops(
 
 
 def collect_fwd_graph_outputs(graph: torch.fx.Graph, *, fwd_outputs: Set[str]):
-    if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:  # fwd graph
+    if not torch._dynamo.compiled_autograd.in_compiled_autograd_region():  # fwd graph
         return_node = list(graph.nodes)[-1]
         assert return_node.target == "output"
         for x in return_node.args[0]:
