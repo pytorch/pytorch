@@ -178,6 +178,7 @@ CPU_TEST_FAILURES = {
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(AOTITestCase):
     device = "cpu"
+    device_type = "cpu"
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
@@ -197,6 +198,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterf
     TestCase
 ):
     device = "cpu"
+    device_type = "cpu"
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
