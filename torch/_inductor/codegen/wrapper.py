@@ -839,16 +839,28 @@ class PythonWrapperCodegen(CodeGen):
             kernel_name, args, grid_fn=grid_fn, arg_types=arg_types, raw_args=raw_args
         )
 
-    def generate_tma_descriptor(self, desc):
+    def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
+        dims = desc.dims
+        block_dims = desc.block_dims
+        if apply_size_hints:
+            dims = tuple(V.graph.sizevars.atomically_apply_size_hint(d) for d in dims)
+            block_dims = tuple(
+                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_dims
+            )
+
         ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
-        dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.dims)
-        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.block_dims)
+        dims = ", ".join(self.val_to_arg_str(dim) for dim in dims)
+        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in block_dims)
         element_size = self.val_to_arg_str(desc.element_size)
         prefix = "triton.tools.experimental_descriptor"
-        fn_name = f"create_{desc.rank}d_tma_descriptor"
-        call = f"{prefix}.{fn_name}"
+        fn = f"{prefix}.create_{desc.rank}d_tma_descriptor"
         args = f"{ptr}, {dims}, {block_dims}, {element_size}"
-        line = f"{desc.name} = {call}({args})"
+        call = f"{fn}({args})"
+        return call
+
+    def generate_tma_descriptor(self, desc):
+        call = self._generate_tma_descriptor_call(desc)
+        line = f"{desc.name} = {call}{self.ending}"
         self.writeline(line)
 
     def generate_scatter_fallback(
@@ -1312,6 +1324,8 @@ class PythonWrapperCodegen(CodeGen):
             arg = kwargs[key]
             if idx in kernel.constexprs:
                 constants[key] = arg
+            elif kwargs[key] is None:
+                constants[key] = None
             else:
                 non_constant_indices.append(idx)
                 if isinstance(arg, ir.TMADescriptor):
@@ -1474,7 +1488,7 @@ class PythonWrapperCodegen(CodeGen):
                                 f"{symbol_name}{annotation_code} = {symbol_str}"
                             )
                         else:
-                            compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                            compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
                         symbols_included.add(symbol_name)
                     elif (
                         symbol_name in unqualified_loads
@@ -1650,7 +1664,11 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_example_arg_value(self, arg, arg_type, raw_arg=None, index=None):
         if isinstance(arg_type, torch_dtype):
-            if V.graph.try_get_buffer(arg) is not None:
+            if isinstance(raw_arg, ir.TMADescriptor):
+                # first we generate the underlying buffer
+                buf_name = raw_arg.tensor.get_name()
+                buf = V.graph.get_buffer(buf_name)
+            elif V.graph.try_get_buffer(arg) is not None:
                 buf_name = arg
                 buf = V.graph.get_buffer(arg)
             else:
@@ -1682,6 +1700,17 @@ class PythonWrapperCodegen(CodeGen):
             )
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
+
+            if isinstance(raw_arg, ir.TMADescriptor):
+                # generate another line initializing a host-side TMA
+                # descriptor from the underlying buffer created above
+                value = self._generate_tma_descriptor_call(
+                    desc=raw_arg,
+                    apply_size_hints=True,
+                )
+                buf_name = arg
+                self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
+
             return buf_name
         elif issubclass(arg_type, sympy.Basic) or isinstance(arg, SymbolicCallArg):
             # arg is a symbol or symbolic expression
@@ -2123,6 +2152,14 @@ class PythonWrapperCodegen(CodeGen):
 
         self.codegen_subgraph_suffix(subgraph, outer_inputs, outer_outputs)
 
+    def codegen_invoke_subgraph(self, invoke_subgraph):
+        name = invoke_subgraph.get_name()
+
+        self.writeline(f"{name} = [None] * {len(invoke_subgraph.outputs)}")
+        outer_inputs = [buf.codegen_reference() for buf in invoke_subgraph.inputs]
+        outer_outputs = [f"{name}[{i}]" for i in range(len(invoke_subgraph.outputs))]
+        self.codegen_subgraph(invoke_subgraph.subgraph, outer_inputs, outer_outputs)
+
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
 
@@ -2248,10 +2285,6 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         # This sets up the name of the function containing the launcher code of
         # the subgraph.
         self.launcher_fn_name = self.subgraph_name
-
-    def codegen_input_size_and_nan_asserts(self) -> None:
-        # No need to insert the asserts for the subgraph inputs.
-        pass
 
     def write_header(self) -> None:
         pass
