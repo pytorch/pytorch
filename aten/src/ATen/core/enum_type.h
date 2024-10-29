@@ -28,7 +28,7 @@ struct TORCH_API EnumType : public NamedType {
             std::move(enum_names_values),
             std::move(cu)));
       default:
-        AT_ERROR(
+        TORCH_CHECK(false,
             "Cannot create Enum with value type '",
             value->str(),
             "', only int, float and string are supported");
