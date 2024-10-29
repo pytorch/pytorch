@@ -634,6 +634,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "invoke_subgraph":
             return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "invoke_subgraph_placeholder":
+            return InvokeSubgraphPlaceHolderHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -2709,4 +2711,46 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         )
         return _call_function_and_unflatten_output(
             tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
+        )
+
+
+class InvokeSubgraphPlaceHolderHigherOrderVariable(InvokeSubgraphHigherOrderVariable):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # This flattens the kwargs into lifted args
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            body_gmod,
+            body_name,
+        ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, "invoke_subgraph")
+
+        if len(p_kwargs) > 0:
+            unimplemented("kwargs should have been flattened into lifted args")
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        p_args = (
+            p_args[0],
+            body_name,
+            p_args[1:],
+        )
+        return _call_function_and_unflatten_output(
+            tx,
+            torch._higher_order_ops.invoke_subgraph,
+            tuple(p_args),
+            p_kwargs,
+            flat_example_value,
+            treespec,
         )

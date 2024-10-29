@@ -9,6 +9,7 @@ import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
 from torch._higher_order_ops import invoke_subgraph
+from torch._higher_order_ops.invoke_subgraph import wrap_with_invoke_subgraph
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -21,14 +22,14 @@ from torch.testing._internal.common_utils import (
 class TestInvokeSubgraph(TestCase):
     def test_simple(self):
         def gn(x, y):
-            return (torch.mul(x, y),)
+            return torch.mul(x, y)
 
         def fn(x, y):
-            return invoke_subgraph(gn, None, (x, y))[0]
+            return wrap_with_invoke_subgraph(gn)(x, y)
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
-        ref = gn(x, y)[0]
+        ref = gn(x, y)
 
         x_clone = x.clone().detach().requires_grad_(True)
         y_clone = y.clone().detach().requires_grad_(True)
@@ -44,14 +45,14 @@ class TestInvokeSubgraph(TestCase):
 
     def test_aot_function(self):
         def gn(x, y):
-            return (torch.mul(x, y),)
+            return torch.mul(x, y)
 
         def fn(x, y):
-            return invoke_subgraph(gn, None, (x, y))[0]
+            return wrap_with_invoke_subgraph(gn)(x, y)
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
-        ref = gn(x, y)[0]
+        ref = gn(x, y)
 
         x_clone = x.clone().detach().requires_grad_(True)
         y_clone = y.clone().detach().requires_grad_(True)
@@ -69,16 +70,18 @@ class TestInvokeSubgraph(TestCase):
     def test_multiple(self):
         n_layers = 2
 
+        @wrap_with_invoke_subgraph
         def cos(x):
-            return (torch.cos(x),)
+            return torch.cos(x)
 
+        @wrap_with_invoke_subgraph
         def sin(x):
-            return (torch.sin(x),)
+            return torch.sin(x)
 
         def fn(x):
-            a = invoke_subgraph(cos, None, (x,))[0]
-            b = invoke_subgraph(sin, None, (a,))[0]
-            return invoke_subgraph(cos, None, (b,))[0]
+            a = cos(x)
+            b = sin(a)
+            return cos(b)
 
         x = torch.randn(8, requires_grad=True)
         ref = fn(x)
@@ -237,6 +240,7 @@ class GraphModule(torch.nn.Module):
     def test_nonlocal_update(self):
         counter = 2
 
+        @wrap_with_invoke_subgraph
         def gn(x, y):
             nonlocal counter
             return (torch.mul(x, y) * counter,)
@@ -244,9 +248,9 @@ class GraphModule(torch.nn.Module):
         def fn(x, y):
             nonlocal counter
             counter = 2
-            a = invoke_subgraph(gn, None, (x, y))[0]
+            a = gn(x, y)[0]
             counter = 3
-            return invoke_subgraph(gn, None, (a, y))[0]
+            return gn(a, y)[0]
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
@@ -406,6 +410,22 @@ class GraphModule(torch.nn.Module):
             torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
         ):
             opt_fn(x, y)
+
+    def test_kwargs_only(self):
+        @wrap_with_invoke_subgraph
+        def gn(x, *, y):
+            return x * y
+
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+
+        def fn(x, y):
+            return gn(x, y=y)
+
+        ref = fn(x, y)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
 
     def test_ac(self):
         def fn1(x):

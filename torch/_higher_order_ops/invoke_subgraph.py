@@ -59,7 +59,59 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         return super().__call__(subgraph, identifier, operands)
 
 
+class InvokeSubgraphPlaceholderHOP(HigherOrderOperator):
+    """
+    This Higher Order Primitive (HOP) serves as a placeholder for the frontend
+    of `torch.compile`, allowing it to parse arguments (`args` and `kwargs`) and
+    prepare for the actual `InvokeSubgraphHOP`.
+
+    The `InvokeSubgraphHOP` is designed to accept a list or tuple of operands.
+    This placeholder HOP enables the wrapping of a given function or subgraph
+    with arbitrary arguments and keyword arguments. During the
+    `speculate_subgraph` phase, TorchDynamo flattens these arguments into a list
+    or tuple and calls InvokeSubgraph HOP.
+
+    Note: Directly invoking this operation will raise an exception.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("invoke_subgraph_placeholder")
+
+    def __call__(
+        self,
+        subgraph,
+        args,
+        kwargs,
+    ):
+        raise NotImplementedError(
+            "This placeholder should be replaced by torch.compile"
+        )
+
+
 invoke_subgraph = InvokeSubgraphHOP()
+invoke_subgraph_placeholder = InvokeSubgraphPlaceholderHOP()
+
+
+def wrap_with_invoke_subgraph(fn=None):
+    """
+    This is a user facing API to wrap the function with invoke_subgraph HOP. For
+    PyTorch eager, this is a no-op. For torch.compile, we wrap the given
+    function into invoke_subgraph_placeholder, which is parsed by Dynamo and
+    replaced by invoke_subgraph.
+    """
+
+    def wrap(func):
+        def inner(*args, **kwargs):
+            if torch._dynamo.is_compiling():
+                return invoke_subgraph_placeholder(func, *args, **kwargs)
+            return func(*args, **kwargs)
+
+        return inner
+
+    if fn:
+        return wrap(fn)
+    else:
+        return wrap
 
 
 def get_invoke_subgraph_cache():
