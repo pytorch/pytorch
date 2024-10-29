@@ -2496,8 +2496,11 @@ def forward(self, primals_1, primals_2):
         )
         # Input mutations on subclasses with training graphs fail backward guards today.
         with self.assertRaisesRegex(
-            AssertionError,
-            "attempted to compile the backward with incorrect subclass metadata",
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             self.verify_aot_autograd(
                 f,
@@ -5454,8 +5457,11 @@ def forward(self, tangents_1, tangents_2):
         # but we were wrong: in the below tests, it is a subclass.
         # This will eventually require a repartition + recompile
         with self.assertRaisesRegex(
-            AssertionError,
-            "incorrectly attempted to compile the backward with incorrect subclass metadata",
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             (out_test[0] + out_test[1]).sum().backward()
 
