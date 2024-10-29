@@ -323,6 +323,17 @@ class TestInitialization(FSDPTest):
             )
             self.assertEqual(len(all_structures), 1)
 
+    @skip_if_lt_x_gpu(2)
+    def test_raise_scalar_parameter(self):
+        """Tests raising an exception when the model has scalar parameters."""
+        device = torch.device("cuda")
+        model = CompositeParamModel(device=device)
+        model.register_parameter("scalar_p", nn.Parameter(torch.tensor(1.0).cuda()))
+        with self.assertRaisesRegex(
+            ValueError, "Change scalar_p to a 1D tensor with numel equal to 1."
+        ):
+            fully_shard(model)
+
 
 if __name__ == "__main__":
     run_tests()

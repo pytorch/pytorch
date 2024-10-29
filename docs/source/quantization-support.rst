@@ -154,6 +154,7 @@ PT2 Export (pt2e) Numeric Debugger
     :template: classtemplate.rst
 
     generate_numeric_debug_handle
+    CUSTOM_KEY
     NUMERIC_DEBUG_HANDLE_KEY
     prepare_for_propagation_comparison
     extract_results_from_loggers

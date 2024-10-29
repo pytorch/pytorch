@@ -1,6 +1,6 @@
 #pragma once
 
-namespace at { namespace native {
+namespace at::native {
 #if defined(USE_ROCM)
 // take these out when ROCm implements std:: math functions
 #include <math.h>
@@ -22,4 +22,4 @@ __forceinline__ __device__ double device_sqrt(scalar_t val) {
   return std::sqrt(val);
 }
 #endif
-}}
+} // namespace at::native

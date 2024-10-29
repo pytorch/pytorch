@@ -4,8 +4,8 @@ from typing import List, Optional, Set, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.distributed.device_mesh import _get_device_handle
+from torch.distributed.tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo, HSDPMeshInfo
@@ -58,8 +58,8 @@ def _init_default_fully_shard_mesh() -> DeviceMesh:
     if not dist.distributed_c10d.is_initialized():
         dist.distributed_c10d.init_process_group()
     default_pg = dist.distributed_c10d._get_default_group()
-    device_type = "cuda" if torch.cuda.is_available() else "cpu"
-    mesh = init_device_mesh(device_type, mesh_shape=(default_pg.size(),))
+    device = torch._C._get_accelerator()
+    mesh = init_device_mesh(device.type, mesh_shape=(default_pg.size(),))
     return mesh
 
 
@@ -99,6 +99,19 @@ def _get_managed_modules(root_modules: Tuple[nn.Module, ...]) -> List[nn.Module]
     return modules
 
 
+def _verify_managed_param(name: str, param: nn.Parameter) -> None:
+    """
+    Verify if the parameter is accepted by fully_shard. The only restriction now
+    is that the parameter cannot be a scalar tensor (param.numel == 0) since we
+    need at least one dim to shard.
+    """
+    if len(param.shape) == 0:
+        raise ValueError(
+            "fully_shard doesn't support salar parameters. "
+            f"Change {name} to a 1D tensor with numel equal to 1."
+        )
+
+
 def _get_managed_states(
     modules: List[nn.Module],
 ) -> Tuple[List[nn.Parameter], List[torch.Tensor]]:
@@ -109,8 +122,9 @@ def _get_managed_states(
     visited_params: Set[nn.Parameter] = set()
     visited_buffers: Set[torch.Tensor] = set()
     for module in modules:
-        for param in module.parameters(recurse=False):
+        for name, param in module.named_parameters(recurse=False):
             if param not in visited_params:
+                _verify_managed_param(name, param)
                 params.append(param)
                 visited_params.add(param)
         for buffer in module.buffers(recurse=False):

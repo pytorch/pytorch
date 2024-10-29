@@ -25,11 +25,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_verifier.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-#include <stdexcept>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
-
 namespace torch::jit::tensorexpr {
 
 LoopNest::LoopNest(const LoopNest& other)
@@ -2226,7 +2221,7 @@ ForPtr LoopNest::getLoopAt(ForPtr root, const std::vector<int>& indices) const {
     throw malformed_input("root loop is null");
   }
 
-  ForPtr curr = root;
+  ForPtr curr = std::move(root);
   for (auto i : indices) {
     if (i < 0 || curr->body()->nstmts() <= static_cast<size_t>(i)) {
       return nullptr;

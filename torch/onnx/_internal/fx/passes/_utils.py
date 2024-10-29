@@ -3,6 +3,7 @@
 
 These functions should NOT be directly invoked outside of `passes` package.
 """
+
 from __future__ import annotations
 
 import collections
@@ -60,7 +61,6 @@ def set_node_name(
         new_name: The new name to use.
         name_to_node_cache: A cache of node names to nodes.
     """
-    module = node.graph.owning_module
     node_name_to_set = collections.deque([(node, new_name)])
 
     while node_name_to_set:

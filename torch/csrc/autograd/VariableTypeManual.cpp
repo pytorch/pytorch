@@ -20,8 +20,8 @@ using torch::autograd::as_view;
 using torch::autograd::CreationMeta;
 
 namespace torch {
-namespace autograd {
-namespace VariableType {
+
+namespace autograd::VariableType {
 
 static std::vector<at::DeprecatedTypeProperties*> allTypesForBackends(
     at::ArrayRef<at::Backend> backends) {
@@ -43,7 +43,7 @@ std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
 }
 
 std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
-  at::globalContext().lazyInitCUDA();
+  at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
   return allTypesForBackends({Backend::CUDA, Backend::SparseCUDA});
 }
 
@@ -52,7 +52,7 @@ std::vector<at::DeprecatedTypeProperties*> allXPUTypes() {
 }
 
 std::vector<at::DeprecatedTypeProperties*> allPrivateUser1Types() {
-  at::globalContext().lazyInitPrivateUse1();
+  at::globalContext().lazyInitDevice(c10::DeviceType::PrivateUse1);
   return allTypesForBackends(
       {Backend::PrivateUse1, Backend::SparsePrivateUse1});
 }
@@ -63,7 +63,8 @@ const Variable& checked_cast_variable(
     const char* name,
     int pos) {
   if (!t.defined()) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Expected a proper Tensor but got None (or an undefined Tensor in C++) ",
         "for argument #",
         pos,
@@ -76,7 +77,8 @@ const Variable& checked_cast_variable(
 
 Variable& checked_cast_variable(Tensor& t, const char* name, int pos) {
   if (!t.defined()) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Expected a proper Tensor but got None (or an undefined Tensor in C++) ",
         "for argument #",
         pos,
@@ -243,7 +245,7 @@ const Tensor& resize_(
     std::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
   if (self.requires_grad()) {
-    AT_ERROR("cannot resize variables that require grad");
+    TORCH_CHECK(false, "cannot resize variables that require grad");
   }
   {
     at::AutoDispatchBelowAutograd mode;
@@ -252,7 +254,7 @@ const Tensor& resize_(
   }
 
   if (self._fw_grad(/* level */ 0).defined()) {
-    AT_ERROR("cannot resize variables that has a forward grad");
+    TORCH_CHECK(false, "cannot resize variables that has a forward grad");
   }
 
   return self;
@@ -266,7 +268,7 @@ const Tensor& resize_as_(
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (self.requires_grad()) {
-    AT_ERROR("cannot resize variables that require grad");
+    TORCH_CHECK(false, "cannot resize variables that require grad");
   }
   {
     at::AutoDispatchBelowAutograd mode;
@@ -279,7 +281,7 @@ const Tensor& resize_as_(
 
   // Handle fw grad
   if (self._fw_grad(/* level */ 0).defined()) {
-    AT_ERROR("cannot resize variables that has a forward grad");
+    TORCH_CHECK(false, "cannot resize variables that has a forward grad");
   }
 
   return self;
@@ -303,7 +305,8 @@ Tensor& detach_(c10::DispatchKeySet ks, Tensor& self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
   if (self.is_view()) {
     // See NOTE [ View + Inplace detection ]
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Can't detach views in-place. Use detach() instead. "
         "If you are using DistributedDataParallel (DDP) for training, "
         "and gradient_as_bucket_view is set as True, gradients are "
@@ -372,8 +375,7 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
 }
 
 } // namespace
-} // namespace VariableType
-} // namespace autograd
+} // namespace autograd::VariableType
 
 namespace ADInplaceOrView {
 #define CREATION_META_DEFINITION                            \

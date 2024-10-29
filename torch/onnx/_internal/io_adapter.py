@@ -40,8 +40,7 @@ class InputAdaptStep(Protocol):
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
         model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
-    ) -> tuple[Sequence[Any], Mapping[str, Any]]:
-        ...
+    ) -> tuple[Sequence[Any], Mapping[str, Any]]: ...
 
 
 class InputAdapter:
@@ -98,8 +97,7 @@ class OutputAdaptStep(Protocol):
         self,
         model_outputs: Any,
         model: torch.nn.Module | Callable | torch_export.ExportedProgram | None = None,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
 
 class OutputAdapter:
@@ -138,15 +136,35 @@ class OutputAdapter:
 # TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
 
 
-def _replace_tuple_with_list(spec: pytree.TreeSpec) -> pytree.TreeSpec:
-    _type = list if spec.type == tuple else spec.type
-    return pytree.TreeSpec(
-        _type, spec.context, list(map(_replace_tuple_with_list, spec.children_specs))
+# TODO(XuehaiPan): Dynamo does not support `dummy_leaf = object()` as a sentinel value in the frame.
+class _DummyLeaf:  # use a class instead.
+    pass
+
+
+def _replace_list_with_tuple(spec: pytree.TreeSpec) -> pytree.TreeSpec:
+    def replace_list_with_tuple(x: Any) -> Any:
+        if type(x) is list:
+            return pytree.tree_map(
+                replace_list_with_tuple,
+                tuple(x),
+                is_leaf=lambda x: type(x) is list,
+            )
+        return x
+
+    dummy_leaf = _DummyLeaf()
+    dummy_tree = pytree.tree_unflatten([dummy_leaf] * spec.num_leaves, spec)
+    dummy_tree = pytree.tree_map(
+        replace_list_with_tuple,
+        dummy_tree,
+        is_leaf=lambda x: type(x) is list,
     )
+    return pytree.tree_structure(dummy_tree)
 
 
-def _open_top_level_list_if_single_element(spec: pytree.TreeSpec) -> pytree.TreeSpec:
-    if spec.type == list and spec.num_children == 1:
+def _open_top_level_sequence_if_single_element(
+    spec: pytree.TreeSpec,
+) -> pytree.TreeSpec:
+    if spec.type in (tuple, list) and spec.num_children == 1:
         return spec.children_specs[0]
     return spec
 
@@ -169,10 +187,10 @@ def _assert_identical_pytree_spec(
     pass_if_any_checks: Sequence[Callable[[], bool]] = [
         lambda: spec1 == spec2,
         # FIXME: Bug in `dynamo.export`. Sometimes outputs returned in 'list' instead of 'tuple'.
-        lambda: _replace_tuple_with_list(spec1) == _replace_tuple_with_list(spec2),
+        lambda: _replace_list_with_tuple(spec1) == _replace_list_with_tuple(spec2),
         # FIXME: Bug in `dynamo.export`. Sometimes single function return is wrapped in list.
-        lambda: _open_top_level_list_if_single_element(spec1) == spec2,
-        lambda: spec1 == _open_top_level_list_if_single_element(spec2),
+        lambda: _open_top_level_sequence_if_single_element(spec1) == spec2,
+        lambda: spec1 == _open_top_level_sequence_if_single_element(spec2),
     ]
 
     if not any(check() for check in pass_if_any_checks):
@@ -573,7 +591,8 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
             A tuple of the model args and kwargs.
         """
         ordered_params = tuple(
-            model.state_dict[name] for name in model.graph_signature.parameters  # type: ignore[union-attr,index]
+            model.state_dict[name]  # type: ignore[union-attr,index]
+            for name in model.graph_signature.parameters  # type: ignore[union-attr]
         )
         non_persistent_buffers = set(model.graph_signature.non_persistent_buffers)  # type: ignore[union-attr]
         ordered_buffers = []
@@ -583,7 +602,8 @@ class PrependParamsBuffersConstantAotAutogradInputStep(InputAdaptStep):
             else:
                 ordered_buffers.append(model.state_dict[name])  # type: ignore[union-attr,index]
         ordered_constant_tensors = tuple(
-            model.constants[fqn] for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr,index]
+            model.constants[fqn]  # type: ignore[union-attr,index]
+            for fqn in model.graph_signature.lifted_tensor_constants  # type: ignore[union-attr]
         )
 
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.

@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import unittest
 import weakref
 
 import torch
@@ -372,6 +373,14 @@ num_guards_executed=0)
         self.assertTrue(guard(weakref_x()))
         del x
         self.assertFalse(guard(weakref_x()))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_call_function_no_args_guard(self):
+        x = torch.cuda.current_device()
+        guard = guards.EQUALS_MATCH(x, [0])
+        self.assertTrue(guard(0))
+        self.assertFalse(guard(1))
+        self.assertFalse(guard(2))
 
     def test_guard_manager_leaf_guard(self):
         guard_manager = RootGuardManager()

@@ -64,7 +64,12 @@ def _lazy_init() -> None:
                 "multiprocessing, you must use the 'spawn' start method"
             )
         if not _is_compiled():
-            raise AssertionError("Torch not compiled with MTIA enabled")
+            raise AssertionError(
+                "Torch not compiled with MTIA enabled. "
+                "Ensure you have `import mtia.host_runtime.torch_mtia` in your python "
+                "src file and include `//mtia/host_runtime/torch_mtia:torch_mtia` as "
+                "your target dependency!"
+            )
 
         torch._C._mtia_init()
         # Some of the queued calls may reentrantly call _lazy_init();
@@ -159,6 +164,17 @@ def memory_stats(device: Optional[_device_t] = None) -> Dict[str, Any]:
     if not is_initialized():
         return {}
     return torch._C._mtia_memoryStats(_get_device_index(device, optional=True))
+
+
+def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]:
+    r"""Return capability of a given device as a tuple of (major version, minor version).
+
+    Args:
+        device (torch.device or int, optional) selected device. Returns
+            statistics for the current device, given by current_device(),
+            if device is None (default).
+    """
+    return torch._C._mtia_getDeviceCapability(_get_device_index(device, optional=True))
 
 
 def set_stream(stream: Stream):
@@ -306,7 +322,6 @@ def set_rng_state(
         UserWarning,
         stacklevel=2,
     )
-    pass
 
 
 __all__ = [
@@ -319,6 +334,7 @@ __all__ = [
     "current_stream",
     "default_stream",
     "memory_stats",
+    "get_device_capability",
     "set_device",
     "set_stream",
     "stream",

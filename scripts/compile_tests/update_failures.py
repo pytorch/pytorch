@@ -221,5 +221,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     assert Path(args.filename).exists(), args.filename
     assert Path(args.test_dir).exists(), args.test_dir
-    dynamo38, dynamo311 = download_reports(args.commit, ("dynamo38", "dynamo311"))
-    update(args.filename, args.test_dir, dynamo38, dynamo311, args.also_remove_skips)
+    dynamo39, dynamo311 = download_reports(args.commit, ("dynamo39", "dynamo311"))
+    update(args.filename, args.test_dir, dynamo39, dynamo311, args.also_remove_skips)

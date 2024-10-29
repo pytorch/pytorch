@@ -22,6 +22,7 @@
 #include <ATen/ops/allclose.h>
 #include <ATen/ops/from_blob.h>
 #endif
+#include <fmt/printf.h>
 
 namespace at::cuda::tunable {
 
@@ -30,15 +31,15 @@ enum class BlasOp {
   T = 1
 };
 
-inline std::string BlasOpToString(BlasOp op) {
+inline char BlasOpToString(BlasOp op) {
   switch (op) {
     case BlasOp::N:
-      return "N";
+      return 'N';
     case BlasOp::T:
-      return "T";
+      return 'T';
   }
   TORCH_CHECK(false, "unrecognized BlasOp");
-  return "N";
+  return 'N';
 }
 
 namespace detail {
@@ -81,7 +82,7 @@ struct GemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
   }
 
   size_t GetSizeA() const {
@@ -156,13 +157,79 @@ private:
 };
 
 template <typename T>
+struct GemmAndBiasParams : OpParams {
+  std::string Signature() const override {
+    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
+  }
+
+  size_t GetSize(bool duplicate_inputs) const {
+    size_t size = sizeof(T) * ldc * n;
+    if (duplicate_inputs) {
+      size += sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+      size += sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    }
+    return size;
+  }
+
+  GemmAndBiasParams* DeepCopy(bool duplicate_inputs) const {
+    GemmAndBiasParams* copy = new GemmAndBiasParams;
+    *copy = *this;
+    c10::DeviceIndex device = 0;
+    AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    size_t c_size = ldc * n * sizeof(T);
+    copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
+    AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
+        copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
+    if (duplicate_inputs) {
+      size_t a_size = sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+      size_t b_size = sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+      copy->a = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(a_size));
+      copy->b = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(b_size));
+      copy->duplicate_inputs_ = true;
+    }
+    return copy;
+  }
+
+  // only call on object returned by DeepCopy
+  void Delete() {
+    c10::cuda::CUDACachingAllocator::raw_delete(c);
+    if (duplicate_inputs_) {
+      c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(a));
+      c10::cuda::CUDACachingAllocator::raw_delete(const_cast<T*>(b));
+    }
+  }
+
+  TuningStatus NumericalCheck(GemmAndBiasParams<T> *other) {
+    auto c_dtype = c10::CppTypeToScalarType<T>::value;
+    return detail::NumericalCheck(c_dtype, c, other->c, ldc*n) ? OK : FAIL;
+  }
+
+  char transa;
+  char transb;
+  int64_t m;
+  int64_t n;
+  int64_t k;
+  at::opmath_type<T> alpha;
+  const T* a;
+  int64_t lda;
+  const T* b;
+  int64_t ldb;
+  T* c;
+  int64_t ldc;
+  const T* bias;
+  at::cuda::blas::GEMMAndBiasActivationEpilogue activation;
+private:
+  bool duplicate_inputs_;
+};
+
+template <typename T>
 struct GemmStridedBatchedParams : OpParams {
   GemmStridedBatchedParams() {
     duplicate_inputs_ = false;
   }
 
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k, "_B_", batch);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld_B_%ld", transa, transb, m, n, k, batch);
   }
 
   size_t GetSizeA() const {
@@ -247,7 +314,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+    return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
   }
 
   size_t GetSizeA() const {

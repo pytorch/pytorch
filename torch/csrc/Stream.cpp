@@ -202,7 +202,7 @@ static PyObject* THPStream_record_event(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   auto self = (THPStream*)_self;
-  PyObject* _new_event;
+  PyObject* _new_event = nullptr;
   PyObject* _event = Py_None;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -274,7 +274,7 @@ static PyObject* THPStream_richcompare(
     PyObject* self,
     PyObject* other,
     int op) {
-  PyObject* result = NULL;
+  PyObject* result = nullptr;
   if (other == Py_None) {
     result = Py_False;
   } else {
@@ -331,8 +331,9 @@ static PyMethodDef THPStream_methods[] = {
     {"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
     {nullptr}};
 
-PyTypeObject THPStreamType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.Stream", /* tp_name */
+static PyTypeObject THPStreamType = {
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.Stream", /* tp_name */
     sizeof(THPStream), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPStream_dealloc, /* tp_dealloc */

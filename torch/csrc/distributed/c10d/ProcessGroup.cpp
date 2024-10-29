@@ -1,5 +1,6 @@
 #include <ATen/ThreadLocalState.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/RankLocal.hpp>
 
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
@@ -13,22 +14,6 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
 
 namespace c10d {
-
-static ProcessGroup::BackendType strToBackendType(std::string_view backend) {
-  if (backend == "undefined") {
-    return ProcessGroup::BackendType::UNDEFINED;
-  } else if (backend == "gloo") {
-    return ProcessGroup::BackendType::GLOO;
-  } else if (backend == "nccl") {
-    return ProcessGroup::BackendType::NCCL;
-  } else if (backend == "ucc") {
-    return ProcessGroup::BackendType::UCC;
-  } else if (backend == "mpi") {
-    return ProcessGroup::BackendType::MPI;
-  } else {
-    return ProcessGroup::BackendType::CUSTOM;
-  }
-}
 
 std::string opTypeToString(OpType opType) {
   switch (opType) {
@@ -117,15 +102,13 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
 }
 
 ProcessGroup::ProcessGroup(
-    const c10::intrusive_ptr<::c10d::Store>& store,
+    c10::intrusive_ptr<::c10d::Store> store,
     int rank,
-    int size,
-    c10::intrusive_ptr<Options> options)
-    : store_(store),
+    int size)
+    : store_(std::move(store)),
       rank_(rank),
       size_(size),
-      options_(std::move(options)),
-      backendType_(strToBackendType(options_->backend)),
+      backendType_(BackendType::UNDEFINED),
       dist_debug_level_(debug_level()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }
@@ -142,12 +125,12 @@ void ProcessGroup::init() {
 
 const std::string& ProcessGroup::getGroupName() const {
   TORCH_CHECK(!deviceTypeToBackend_.empty(), "ProcessGroup name not set");
-  return deviceTypeToBackend_.begin()->second->getGroupName();
+  return deviceTypeToBackend_.begin()->second->getGroupUid();
 }
 
 void ProcessGroup::setGroupName(const std::string& name) {
   for (auto& kv : deviceTypeToBackend_) {
-    kv.second->setGroupName(name);
+    kv.second->setGroupUid(name);
   }
 }
 
@@ -173,6 +156,175 @@ void ProcessGroup::release_resources() {
   store_.reset();
   deviceTypeToBackend_.clear();
   backendTypeToBackend_.clear();
+}
+
+} // namespace c10d
+
+namespace {
+
+class WorkRegistry {
+ public:
+  void register_work(
+      const at::Tensor& tensor,
+      const c10::intrusive_ptr<c10d::Work>& work) {
+    if (!tensor.has_storage()) {
+      TORCH_WARN_ONCE(
+          "Registering collective work for tensor without storage is not supported. "
+          "Calling c10d_functional.wait_tensor() on this tensor will not wait for the collective to complete. "
+          "Unsupported tensor type: " +
+          tensor.toString());
+      return;
+    }
+    auto storage = tensor.storage().getWeakStorageImpl();
+    std::unique_lock lock(lock_);
+
+    auto it = registry_.find(storage);
+    if (it == registry_.end()) {
+      registry_.emplace(
+          std::move(storage),
+          std::vector<c10::intrusive_ptr<c10d::Work>>{work});
+    } else {
+      // There is no guarantee that the previous work object for this
+      // tensor storage is completed before the new work object is registered.
+      // Therefore we need to maintain a list of work objects for each tensor
+      // storage.
+
+      // Check if work is already in the list
+      bool work_exists = false;
+      for (const auto& existing_work : it->second) {
+        if (existing_work == work) {
+          work_exists = true;
+          break;
+        }
+      }
+
+      // Only append if work is not already in the list
+      if (!work_exists) {
+        it->second.push_back(work);
+      }
+    }
+  }
+
+  std::vector<c10::intrusive_ptr<c10d::Work>> pop_works(
+      const at::Tensor& tensor) {
+    const auto storage = tensor.storage().getWeakStorageImpl();
+    std::unique_lock lock(lock_);
+    auto it = registry_.find(storage);
+    if (it == registry_.end()) {
+      return {};
+    }
+    auto works = it->second;
+    registry_.erase(it);
+    return works;
+  }
+
+  void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
+    std::unique_lock lock(lock_);
+    for (auto it = registry_.begin(); it != registry_.end();) {
+      std::vector<c10::intrusive_ptr<c10d::Work>> nonmatching_works;
+      for (const auto& _work : it->second) {
+        if (_work != work) {
+          nonmatching_works.push_back(_work);
+        }
+      }
+      if (nonmatching_works.empty()) {
+        it = registry_.erase(it);
+      } else {
+        it->second = std::move(nonmatching_works);
+        ++it;
+      }
+    }
+  }
+
+  size_t get_work_registry_size() {
+    std::unique_lock lock(lock_);
+    size_t total_size = 0;
+    for (const auto& [storage, works] : registry_) {
+      total_size += works.size();
+    }
+    return total_size;
+  }
+
+  void set_allow_inflight_collective_as_graph_input(bool value) {
+    std::unique_lock lock(lock_);
+    allow_inflight_collective_as_graph_input_ = value;
+  }
+
+  bool allow_inflight_collective_as_graph_input() {
+    std::unique_lock lock(lock_);
+    return allow_inflight_collective_as_graph_input_;
+  }
+
+  ~WorkRegistry() {
+    // If there are still unwaited work objects, their corresponding process
+    // groups should have already been destroyed at this stage. Any attempts to
+    // wait for these work objects or to destroy them will only result in
+    // confusing errors. Therefore, we simply issue a warning and intentionally
+    // allow the unwaited work objects to leak.
+    size_t registry_size = get_work_registry_size();
+    if (registry_size > 0) {
+      TORCH_WARN(
+          "At the time of process termination, there are still ",
+          registry_size,
+          " unwaited collective calls. "
+          "Please review your program to ensure that:\n"
+          "1. c10d_functional.wait_tensor() is invoked on all tensors returned from c10d_functional collective,\n"
+          "2. c10d_functional.wait_tensor() is invoked on all output tensors of async_op=True torch.distributed collective "
+          "called under `with allow_inflight_collective_as_graph_input_ctx():`,\n"
+          "before the output tensors of the collective are used.");
+    }
+    for (auto& it : registry_) {
+      for (auto& work : it.second) {
+        work.release();
+      }
+    }
+  }
+
+ private:
+  std::unordered_map<
+      c10::weak_intrusive_ptr<c10::StorageImpl>,
+      std::vector<c10::intrusive_ptr<c10d::Work>>>
+      registry_;
+  bool allow_inflight_collective_as_graph_input_ = false;
+  std::mutex lock_;
+};
+
+static WorkRegistry process_registry;
+
+} // namespace
+
+namespace c10d {
+
+void register_work(
+    const at::Tensor& tensor,
+    const c10::intrusive_ptr<c10d::Work>& work) {
+  RankLocal<WorkRegistry>::get().register_work(tensor, work);
+}
+
+at::Tensor wait_tensor(const at::Tensor& tensor) {
+  auto works = RankLocal<WorkRegistry>::get().pop_works(tensor);
+  for (const auto& work : works) {
+    work->wait();
+  }
+  return tensor;
+}
+
+void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
+  RankLocal<WorkRegistry>::get().unregister_work(work);
+}
+
+size_t get_work_registry_size() {
+  return RankLocal<WorkRegistry>::get().get_work_registry_size();
+}
+
+void set_allow_inflight_collective_as_graph_input(bool value) {
+  return RankLocal<WorkRegistry>::get()
+      .set_allow_inflight_collective_as_graph_input(value);
+}
+
+bool allow_inflight_collective_as_graph_input() {
+  return RankLocal<WorkRegistry>::get()
+      .allow_inflight_collective_as_graph_input();
 }
 
 } // namespace c10d
