@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: export"]
 
-
+import copy
 import unittest
 
 import torch
@@ -1027,6 +1027,30 @@ graph():
     %queue_push_default : [num_users=0] = call_function[target=torch.ops._TorchScriptTesting.queue_push.default](args = (%tq, %x), kwargs = {})
     return (tq,)""",  # noqa: B950
         )
+
+    def test_deepcopy(self):
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq_0 = copy.deepcopy(tq)
+        tq.push(torch.zeros(2, 2))
+        tq.push(torch.ones(2, 2))
+        tq_1 = copy.deepcopy(tq)
+        tq.push(torch.ones(2, 2) * 2)
+        self.assertEqual(tq_0.size(), 0)
+        self.assertEqual(tq_1.size(), 2)
+        self.assertEqual(tq.size(), 3)
+
+        foo = torch.classes._TorchScriptTesting._Foo(1, 2)
+        foo_0 = copy.deepcopy(foo)
+        foo.increment(1)
+        foo_1 = copy.deepcopy(foo)
+        foo.increment(1)
+        self.assertEqual(foo_0.add(1), 3)
+        self.assertEqual(foo_1.add(1), 5)
+        self.assertEqual(foo.add(1), 7)
 
 
 class TestCompileTorchbind(TestCase):
