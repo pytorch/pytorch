@@ -1284,6 +1284,8 @@ def main():
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
         "include/ATen/native/mps/*.h",
+        "include/ATen/native/mkldnn/xpu/*.h",
+        "include/ATen/native/mkldnn/xpu/detail/*.h",
         "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
