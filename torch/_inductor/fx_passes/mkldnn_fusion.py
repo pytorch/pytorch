@@ -729,6 +729,12 @@ if torch._C._has_mkldnn:
 
     def _recover_linear():
         # convert reshape+linear+reshape to a single linear for applying fusion path.
+        def is_recoverable_linear(match):
+            reshape_1 = match.kwargs.get("reshape_1")
+            # For case in huggingface XLNetLMHeadModel, the input reshape is 3D
+            # output reshape is 5D
+            return len(reshape_1) == 2
+
         @register_freezing_graph_pattern(
             CallFunction(
                 aten.reshape.default,
@@ -749,6 +755,7 @@ if torch._C._has_mkldnn:
                 KeywordArg("reshape_2"),
             ),
             pass_number=1,
+            extra_check=is_recoverable_linear,
         )
         def reshape_linear_reshape_pattern(match, *args, **kwargs):
             def get_val(val):
