@@ -24,7 +24,7 @@ static PyObject* THPStream_pynew(
   HANDLE_TH_ERRORS
 
   int64_t stream_id = -1;
-  int64_t device_type = 0;
+  c10::DeviceType device_type{};
   c10::DeviceIndex device_index{};
   int64_t priority = 0;
 
@@ -42,7 +42,7 @@ static PyObject* THPStream_pynew(
     auto default_accelerator = at::getAccelerator(false);
     auto device = r.deviceOptional(0);
     if (device.has_value()) {
-      device_type = static_cast<int64_t>(device->type());
+      device_type = device->type();
       device_index = device->index();
       // Initialize device guard if device is not None.
       device_guard_ptr = std::make_unique<c10::DeviceGuard>(device.value());
@@ -50,10 +50,8 @@ static PyObject* THPStream_pynew(
       // If device is None, we will use the current accelerator and index.
       // If the current accelerator is not set, we will use the CPU as device
       // type.
-      device_type = static_cast<int64_t>(
-          default_accelerator.value_or(c10::DeviceType::CPU));
-      c10::impl::VirtualGuardImpl impl{
-          static_cast<c10::DeviceType>(device_type)};
+      device_type = default_accelerator.value_or(c10::DeviceType::CPU);
+      c10::impl::VirtualGuardImpl impl{device_type};
       const auto current_device = impl.getDevice();
       device_index = current_device.index();
     }
@@ -61,8 +59,8 @@ static PyObject* THPStream_pynew(
   } else if (r.idx == 1) {
     stream_id = r.toInt64WithDefault(0, -1);
     device_index = static_cast<c10::DeviceIndex>(r.toInt64WithDefault(1, 0));
-    device_type =
-        r.toInt64WithDefault(2, static_cast<int64_t>(c10::DeviceType::CPU));
+    device_type = static_cast<c10::DeviceType>(
+        r.toInt64WithDefault(2, static_cast<int64_t>(c10::DeviceType::CPU)));
     priority = r.toInt64WithDefault(3, 0);
   } else {
     TORCH_CHECK(
@@ -84,13 +82,11 @@ static PyObject* THPStream_pynew(
   // manage the lifetime of streams.
   std::optional<c10::Stream> stream_opt;
   if (r.idx == 0) {
-    c10::impl::VirtualGuardImpl impl{static_cast<c10::DeviceType>(device_type)};
+    c10::impl::VirtualGuardImpl impl{device_type};
     stream_opt = impl.getNewStream(
-        c10::Device(static_cast<c10::DeviceType>(device_type), device_index),
-        static_cast<int>(priority));
+        c10::Device(device_type, device_index), static_cast<int>(priority));
   } else {
-    stream_opt = c10::Stream::unpack3(
-        stream_id, device_index, static_cast<c10::DeviceType>(device_type));
+    stream_opt = c10::Stream::unpack3(stream_id, device_index, device_type);
   }
 
   TORCH_CHECK(stream_opt.has_value(), "Failed to create stream");
