@@ -107,11 +107,6 @@ def gen_einsum_strategies(
         placement_list: List[Placement] = [Replicate()] * (len(input_dims) + 1)
         mesh_dim_strategies.append(placement_list)
 
-        if mesh.size(mesh_dim) <= 1:
-            # only replicate strategy for mesh dim with size 1
-            # TODO: see if this is valid for the submesh case
-            continue
-
         # split batch dim
         for batch_dim in edims.batch_dims:
             output_batch_dim = output_dim.index(batch_dim)
@@ -164,6 +159,7 @@ def gen_einsum_strategies(
 
     # generate strategies for entire mesh
     strategy_combs = itertools.product(*all_mesh_dim_strategies)
+    strategy_combs_list = list(itertools.product(*all_mesh_dim_strategies))
 
     # TODO: filter out invalid strategies, at this point we generate
     # all possible strategies without considering the whether the tensor
