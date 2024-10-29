@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 
 
+import dataclasses
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -30,10 +31,7 @@ from torch.fx.graph_module import GraphModule
 invoke_subgraph_counter = 0
 
 
-class InvokeSubgraphHOP(HigherOrderOperator):
-    def __init__(self) -> None:
-        super().__init__("invoke_subgraph")
-
+class InvokeSubgraphHOPImpl(HigherOrderOperator):
     # identifier is setup by upper part of the stack. This helps us in
     # identifying two invoke_subgraph calls have same subgraph.
     def __call__(
@@ -59,6 +57,11 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         return super().__call__(subgraph, identifier, operands)
 
 
+class InvokeSubgraphHOP(InvokeSubgraphHOPImpl):
+    def __init__(self) -> None:
+        super().__init__("invoke_subgraph")
+
+
 invoke_subgraph = InvokeSubgraphHOP()
 
 
@@ -67,6 +70,14 @@ def get_invoke_subgraph_cache():
     if tracing_ctx := torch._guards.TracingContext.try_get():
         cache = tracing_ctx.hop_dispatch_set_cache.get_cache(invoke_subgraph)
     return cache
+
+
+class InvokeQuantTracingHOP(InvokeSubgraphHOPImpl):
+    def __init__(self) -> None:
+        super().__init__("invoke_quant_tracer")
+
+
+invoke_quant_tracer = InvokeQuantTracingHOP()
 
 
 def trace_joint_graph(fn, fw_inputs, fw_outputs):
@@ -173,6 +184,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         return None, None, None, None, *grads
 
 
+@invoke_quant_tracer.py_impl(DispatchKey.CompositeExplicitAutograd)
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
 def _(subgraph, identifier, operands):
     from torch.utils._python_dispatch import _get_current_dispatch_mode
@@ -182,6 +194,7 @@ def _(subgraph, identifier, operands):
     return subgraph(*operands)
 
 
+@invoke_quant_tracer.py_impl(DispatchKey.Autograd)
 @invoke_subgraph.py_impl(DispatchKey.Autograd)
 def _(subgraph, identifier, operands):
     if not torch.is_grad_enabled():
@@ -220,6 +233,7 @@ def _(subgraph, identifier, operands):
     return autograd_fn_callable(*operands)
 
 
+@invoke_quant_tracer.py_functionalize_impl
 @invoke_subgraph.py_functionalize_impl
 def _(ctx, subgraph, identifier, operands):
     unwrapped_operands = ctx.unwrap_tensors(operands)
@@ -232,12 +246,14 @@ def _(ctx, subgraph, identifier, operands):
     return ctx.wrap_tensors(out)
 
 
+@invoke_quant_tracer.py_impl(FakeTensorMode)
 @invoke_subgraph.py_impl(FakeTensorMode)
 def _(mode, subgraph, identifier, operands):
     # TODO(anijain2305) - Implement fake tensor caching.
     return subgraph(*operands)
 
 
+@invoke_quant_tracer.py_impl(ProxyTorchDispatchMode)
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
 def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
     # Check if we have already traced the subgraph.
@@ -264,3 +280,25 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
+
+
+# Moved to invoke_quant in next PR
+
+
+@dataclasses.dataclass
+class InvokeQuant:
+    """
+    TODO - fill in next pr
+    """
+
+    def __call__(
+        self,
+        *args,
+        **kwargs,
+    ):
+        if not torch._utils.is_compiling():
+            return args[0](*args[1])
+
+        from torch._higher_order_ops import invoke_quant_tracer
+
+        return invoke_quant_tracer(*args, **kwargs, quant_options=self)  # type: ignore[call-arg]

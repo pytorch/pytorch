@@ -634,6 +634,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "invoke_subgraph":
             return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "invoke_quant_tracer":
+            return InvokeQuantHigherOrderVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1494,7 +1496,14 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def install_subgraph_in_output_graph(
-        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
+        self,
+        tx,
+        fn_vt,
+        fn_args_vt,
+        kwargs,
+        body_gmod,
+        attr_name="wrap_body",
+        description=None,
     ):
         return add_subgraph(
             tx,
@@ -1530,7 +1539,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
         body_name = self.install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod, description=description
         )
         body_node = make_attr(tx, body_name)
 
@@ -2617,9 +2626,55 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
     return key
 
 
-class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
+class InvokeSubgraphHigherOrderVariableImpl(WrapHigherOrderVariable):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        # This flattens the kwargs into lifted args
+        description = args[1].as_python_constant()
+        description = description if description is not None else "invoke_subgraph"
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            body_gmod,
+            body_name,
+        ) = self.create_wrapped_node(tx, args[0], args[2].items, kwargs, description)
+
+        if len(p_kwargs) > 0:
+            unimplemented("kwargs should have been flattened into lifted args")
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
+        p_args = (
+            p_args[0],
+            body_name,
+            p_args[1:],
+        )
+        return _call_function_and_unflatten_output(
+            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
+        )
+
+
+class InvokeSubgraphHigherOrderVariable(InvokeSubgraphHigherOrderVariableImpl):
     def install_subgraph_in_output_graph(
-        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="invoke_subgraph"
+        self,
+        tx,
+        fn_vt,
+        fn_args_vt,
+        kwargs,
+        body_gmod,
+        attr_name="invoke_subgraph",
+        description=None,
     ):
         # Check if the subgraph from speculate_subgraph (body_gmod) and the fake
         # inputs have already been seen before. If yes, the subgraph is already
@@ -2654,39 +2709,46 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         return body_name
 
+
+class InvokeQuantHigherOrderVariable(InvokeSubgraphHigherOrderVariableImpl):
     def call_function(
         self,
         tx: "InstructionTranslator",
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        # This flattens the kwargs into lifted args
-        (
-            p_args,
-            p_kwargs,
-            example_value,
-            body_r,
-            treespec,
+        scheme = kwargs.pop("scheme", None)
+        quant_options = kwargs.pop("quant_options", None)
+        if scheme:
+            scheme = scheme.guard_as_python_constant()
+        if quant_options:
+            quant_options = quant_options.guard_as_python_constant()
+
+        tc = torch._guards.TracingContext.get()
+        identifier = f"quant_invoke_{next(tc.invoke_subgraph_mapping_counter)}"
+        tc.invoke_subgraph_mapping[identifier] = (scheme, quant_options)
+        return super().call_function(
+            tx,
+            [args[0], variables.ConstantVariable(identifier)] + args[1:],
+            kwargs=kwargs,
+        )
+
+    def install_subgraph_in_output_graph(
+        self,
+        tx,
+        fn_vt,
+        fn_args_vt,
+        kwargs,
+        body_gmod,
+        attr_name="wrap_body",
+        description=None,
+    ):
+        assert description is not None
+        out = add_subgraph(
+            tx,
+            f"{description}",
             body_gmod,
-            body_name,
-        ) = self.create_wrapped_node(
-            tx, args[0], args[2].items, kwargs, "invoke_subgraph"
         )
-
-        if len(p_kwargs) > 0:
-            unimplemented("kwargs should have been flattened into lifted args")
-
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
-
-        p_args = (
-            p_args[0],
-            body_name,
-            p_args[1:],
-        )
-        return _call_function_and_unflatten_output(
-            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
-        )
+        tc = torch._guards.TracingContext.get()
+        tc.invoke_subgraph_mapping[out] = tc.invoke_subgraph_mapping[description]
+        return out
