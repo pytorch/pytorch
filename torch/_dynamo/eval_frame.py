@@ -888,6 +888,7 @@ def _optimize(
             else None
         ),
         rebuild_ctx=rebuild_ctx,
+        enter_exit_hooks=enter_exit_hooks,
     )
 
 
