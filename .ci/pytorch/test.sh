@@ -81,7 +81,7 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   #
   # int main(int argv) {
   #   Tensor b = empty({3, 4});
-  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), c10::nullopt);
+  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), std::nullopt);
   # }
   export VALGRIND=OFF
 fi
@@ -284,7 +284,7 @@ test_python_shard() {
 
   # modify LD_LIBRARY_PATH to ensure it has the conda env.
   # This set of tests has been shown to be buggy without it for the split-build
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   assert_git_not_dirty
 }
@@ -296,7 +296,7 @@ test_python() {
 }
 
 
-test_dynamo_shard() {
+test_dynamo_wrapped_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
@@ -310,7 +310,8 @@ test_dynamo_shard() {
     --exclude-distributed-tests \
     --exclude-torch-export-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
-    --verbose
+    --verbose \
+    --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -378,6 +379,10 @@ test_inductor_cpp_wrapper() {
   export TORCHINDUCTOR_CPP_WRAPPER=1
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+
+  # Run certain inductor unit tests with cpp wrapper. In the end state, we should be able to run all the inductor
+  # unit tests with cpp wrapper.
+  python test/run_test.py --include inductor/test_torchinductor.py --verbose
 
   python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
@@ -801,7 +806,7 @@ test_without_numpy() {
   # Regression test for https://github.com/pytorch/pytorch/issues/66353
   python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch;print(torch.tensor([torch.tensor(0.), torch.tensor(1.)]))"
   # Regression test for https://github.com/pytorch/pytorch/issues/109387
-  if [[ "${TEST_CONFIG}" == *dynamo* ]]; then
+  if [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
     python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch;torch.compile(lambda x:print(x))('Hello World')"
   fi
   popd
@@ -1354,7 +1359,7 @@ test_executorch() {
   echo "Run ExecuTorch regression tests for some models"
   # TODO(huydhn): Add more coverage here using ExecuTorch's gather models script
   # shellcheck disable=SC1091
-  source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
+  source .ci/scripts/test_model.sh mv3 cmake xnnpack-quantization-delegation ''
 
   popd
 
@@ -1474,9 +1479,9 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
       test_inductor_distributed
     fi
   fi
-elif [[ "${TEST_CONFIG}" == *dynamo* ]]; then
+elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
-  test_dynamo_shard "${SHARD_NUMBER}"
+  test_dynamo_wrapped_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi

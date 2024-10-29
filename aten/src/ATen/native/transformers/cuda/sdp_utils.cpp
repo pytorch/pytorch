@@ -68,16 +68,11 @@ bool check_prefer_cudnn_attention() {
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
       SDPBackend::flash_attention,
-      SDPBackend::cudnn_attention,
       SDPBackend::efficient_attention,
-      SDPBackend::math};
-  constexpr std::array<SDPBackend, num_backends> cudnn_order{
+      SDPBackend::math,
       SDPBackend::cudnn_attention,
-      SDPBackend::flash_attention,
-      SDPBackend::efficient_attention,
-      SDPBackend::math};
-  static const bool prefer_cudnn = check_prefer_cudnn_attention();
-  return prefer_cudnn ? cudnn_order : default_order;
+      };
+  return default_order;
 }
 
 bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {
@@ -413,6 +408,12 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       }
       return false;
     }
+  }
+  if (s_q == 1 || s_k == 1) {
+    if (debug) {
+      TORCH_WARN_ONCE("cudnn SDPA does not support sequence length 1.");
+    }
+    return false;
   }
   return true;
 }
