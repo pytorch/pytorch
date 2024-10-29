@@ -49,6 +49,7 @@ def flatten_state_dict(
         state_dict and a mapping from the original keys to the new keys.
 
     Example:
+        >>> import torch
         >>> state_dict = {
         ...     "a": {"b": 1, "c": [2, 3]},
         ...     "d": torch.tensor([4, 5])
@@ -104,6 +105,7 @@ def unflatten_state_dict(
         STATE_DICT_TYPE: The reconstructed nested state_dict.
 
     Example:
+        >>> import torch
         >>> flattened_state_dict = {
         ...     'a.b': 1,
         ...     'a.c': [2, 3],
@@ -115,10 +117,7 @@ def unflatten_state_dict(
         ...     'd': ('d',)
         ... }
         >>> unflatten_state_dict(flattened_state_dict, mapping)
-        {
-            'a': {'b': 1, 'c': [2, 3]},
-            'd': torch.tensor([4, 5])
-        }
+        {'a': {'b': 1, 'c': [2, 3]}, 'd': tensor([4, 5])}
     """
     nested: STATE_DICT_TYPE = {}
     for key, value in state_dict.items():
