@@ -28,9 +28,11 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 
+device_type = "hpu" if TEST_HPU else "cuda"
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -50,7 +52,7 @@ class TestUnshardParamsBase(FSDPTest):
 
     @property
     def device(self) -> torch.device:
-        return torch.device("cuda", self.rank)
+        return "hpu:0" if TEST_HPU else torch.device("cuda", self.rank)
 
     def _test_unshard_params_writeback(
         self,
@@ -126,7 +128,7 @@ class TestUnshardParamsBase(FSDPTest):
             self.process_group,
             FSDPInitMode.NO_FSDP,
             DEVICEInitMode.DEVICE_BEFORE,
-            fsdp_kwargs={},
+            fsdp_kwargs={"device_id": self.device} if TEST_HPU else {},
             deterministic=True,
         )
         # Apply FSDP such that the root module does not have FSDP applied,
@@ -557,7 +559,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
-        ddp_model = DDP(model, device_ids=[self.rank])
+        ddp_model = DDP(model, device_ids=[self.device if TEST_HPU else self.rank])
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -566,6 +568,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             fsdp_kwargs={
                 "use_orig_params": use_orig_params,
                 "sharding_strategy": sharding_strategy,
+                "device_id": self.device,
             },
         )
         with FSDP.summon_full_params(fsdp_model):
@@ -573,7 +576,7 @@ class TestUnshardParams(TestUnshardParamsBase):
                 assert torch.all(torch.isclose(p1, p2))
 
         # Check calling after backward
-        inp = fsdp_model.get_input(torch.device("cuda"))
+        inp = fsdp_model.get_input(torch.device(device_type))
         ddp_out = ddp_model(*inp)
         fsdp_out = fsdp_model(*inp)
         ddp_out.sum().backward()
@@ -583,7 +586,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             _check_grads(ddp_model, fsdp_model, old_fsdp_grads)
 
         # Check calling between forward and backward
-        inp = fsdp_model.get_input(torch.device("cuda"))
+        inp = fsdp_model.get_input(torch.device(device_type))
         ddp_out = ddp_model(*inp)
         fsdp_out = fsdp_model(*inp)
         old_fsdp_grads = _get_fsdp_grads(fsdp_model, is_supported)
@@ -616,6 +619,7 @@ class TestUnshardParams(TestUnshardParamsBase):
             fsdp_kwargs={
                 "use_orig_params": True,
                 "sharding_strategy": sharding_strategy,
+                "device_id": self.device,
             },
         )
         for fsdp_module in FSDP.fsdp_modules(fsdp_model):
@@ -630,7 +634,7 @@ class TestUnshardParams(TestUnshardParamsBase):
         model = nn.Sequential(
             nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16)),
             nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16)),
-        ).cuda()
+        ).to(self.device)
         model = FSDP(model, auto_wrap_policy=ModuleWrapPolicy((nn.Sequential,)))
         with FSDP.summon_full_params(model[0]):
             # Check that the summoned module does not have its flat parameter
@@ -684,7 +688,7 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
                 with fsdp_module.summon_full_params(fsdp_module):
                     pass
 
-        model = FSDP(MyModule()).cuda(self.rank)
+        model = FSDP(MyModule()).to(self.device if TEST_HPU else self.rank)
         with self.assertRaisesRegex(
             AssertionError, "Cannot manually unshard parameters during forward/backward"
         ):
@@ -732,7 +736,6 @@ class TestUnshardParamsErrors(TestUnshardParamsBase):
                 nested_wrapped_module, rank0_only=True, writeback=True
             ):
                 pass
-
 
 if __name__ == "__main__":
     run_tests()

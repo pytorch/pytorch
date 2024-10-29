@@ -16,14 +16,17 @@ from torch.distributed.fsdp.api import (
     ShardingStrategy,
     StateDictType,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import parametrize, run_tests, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    TEST_CUDA,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
-
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 # Simple and boring model to test interface and some corner cases that do not
 # require complicated wrapping strategy.
@@ -110,10 +113,11 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
         device_id = self.device_type if TEST_CUDA else device
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
 
-        model, optim = self._create_model(device_id, mesh_2d)
+        model, optim = self._create_model(device_id,mesh_2d)
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
+            
             state_dict_config=ShardedStateDictConfig(offload_to_cpu=offload_to_cpu),
             optim_state_dict_config=ShardedOptimStateDictConfig(
                 offload_to_cpu=offload_to_cpu
@@ -319,10 +323,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                 self.assertIsInstance(state["exp_avg"], torch.Tensor)
                 self.assertIsInstance(state["exp_avg_sq"], torch.Tensor)
 
-
 devices = ("cuda", "hpu")
-instantiate_device_type_tests(
-    TestHSDPWithDeviceMeshAndDTensor, globals(), only_for=devices
-)
+instantiate_device_type_tests(TestHSDPWithDeviceMeshAndDTensor, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()

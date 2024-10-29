@@ -21,9 +21,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_CUDA,
 )
-
-
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
@@ -37,11 +37,6 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestPureFP16(FSDPTest):
-    @property
-    def world_size(self):
-        # Test fails due to inaccuracies when using more than 4 GPUs
-        return min(4, super().world_size)
-
     @skip_if_lt_x_gpu(2)
     def test_pure_fp16_training(self):
         """Tests pure FP16 training, including when the parameter's dtype is
@@ -68,7 +63,7 @@ class TestPureFP16(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_fp16_dtypes(self):
+    def test_fp16_dtypes(self,device):
         """
         Tests that both user-facing parameter/gradient dtypes and internal
         saved dtype attributes are as expected when using an FP16 model
@@ -76,6 +71,7 @@ class TestPureFP16(FSDPTest):
         """
         self.run_subtests(
             {
+                "device_id": [device],
                 "to_half_before_fsdp_init": [False, True],
                 "use_orig_params": [False, True],
                 "mixed_precision": [
@@ -94,19 +90,28 @@ class TestPureFP16(FSDPTest):
 
     def _test_fp16_dtypes(
         self,
+        device_id,
         to_half_before_fsdp_init: bool,
         use_orig_params: bool,
         mixed_precision: MixedPrecision,
     ):
-        model = NestedWrappedModule.init(
-            self.process_group,
-            FSDPInitMode.NO_FSDP,
-            DEVICEInitMode.DEVICE_NEVER,
-            {},
-        )
+        if TEST_CUDA:
+            device_id=self.device_type
+            model = NestedWrappedModule.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP,
+                DEVICEInitMode.DEVICE_NEVER,
+            )
+        else:
+            model = NestedWrappedModule.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP,
+                DEVICEInitMode.DEVICE_NEVER,
+                {"device_id": device_id,},
+            )
         fsdp_kwargs = {
             "use_orig_params": use_orig_params,
-            "device_id": torch.cuda.current_device(),
+            "device_id": device_id,
             "mixed_precision": mixed_precision,
         }
         if to_half_before_fsdp_init:
@@ -118,7 +123,7 @@ class TestPureFP16(FSDPTest):
             self.assertEqual(param.dtype, torch.float16)
         inp = tuple(
             t.half() if torch.is_tensor(t) else t
-            for t in fsdp_model.module.get_input(torch.device("cuda"))
+            for t in fsdp_model.module.get_input(self.device_type)
         )
         out = fsdp_model(*inp)
         out.sum().backward()
@@ -153,8 +158,8 @@ class TestPureFP16(FSDPTest):
             if param.grad is not None:
                 self.assertEqual(param.grad.dtype, torch.float16)
 
-
-instantiate_parametrized_tests(TestPureFP16)
-
+devices = ("cuda", "hpu")
+instantiate_device_type_tests(TestPureFP16, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
+
