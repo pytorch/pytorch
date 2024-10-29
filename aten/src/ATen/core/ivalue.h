@@ -522,7 +522,7 @@ struct TORCH_API IValue final {
   }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
   c10::intrusive_ptr<ivalue::Tuple> toTuple() const&;
-  C10_NODISCARD ivalue::Tuple& toTupleRef() const;
+  [[nodiscard]] ivalue::Tuple& toTupleRef() const;
 
   // Double
   IValue(double d) : tag(Tag::Double) {
@@ -1163,7 +1163,7 @@ struct TORCH_API IValue final {
   // this value different (e.g. using NaN boxing), and this would make it more
   // costly to determine the tag for all types vs just determining if something
   // is a particular type. Instead we want clients to use the `isX` methods when
-  // possible. If for perf. reasons you really, absolutely, must have a jump
+  // possible. If for performance reasons you really, absolutely, must have a jump
   // table, then we can revisit this.
   enum class Tag : uint32_t {
 #define DEFINE_TAG(x) x,
@@ -1352,8 +1352,13 @@ struct TORCH_API IValue final {
         DeviceIndex index;
       } as_device;
     } u;
+    static_assert(std::is_trivially_copyable_v<TriviallyCopyablePayload>);
     at::Tensor as_tensor;
     Payload() : u() {}
+    Payload(const Payload&) = delete;
+    Payload(Payload&&) = delete;
+    Payload& operator=(const Payload&) = delete;
+    Payload& operator=(Payload&&) = delete;
     ~Payload() {}
   };
 

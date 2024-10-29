@@ -81,11 +81,7 @@ TensorImpl::TensorImpl(
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type)
     // Use std::forward to suppress static analyzer false positive.
-    : TensorImpl(
-          std::forward<Storage>(storage),
-          key_set,
-          data_type,
-          storage.device()) {}
+    : TensorImpl(std::move(storage), key_set, data_type, storage.device()) {}
 
 // [Note: Python key removal]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
