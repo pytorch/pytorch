@@ -662,7 +662,7 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
   // with the main difference being that the when the `mask` is false, the tensor
   // `self` is not indexed using `indices`. This allows `indices` to be out-of-bounds
   // when `mask` is false. When `mask` is true, the `indices` are expected to be
-  // in bounds and is not checked.
+  // in bounds and is not checked. We also assume that the `indices` are non-negative
   //
   // This function is not meant to be executed on eager mode. An unoptimized version
   // is provided here.

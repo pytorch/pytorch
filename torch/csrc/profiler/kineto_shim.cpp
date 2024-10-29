@@ -96,8 +96,6 @@ TraceWrapper::TraceWrapper(const int64_t start_time, const std::string& name)
 }
 #endif // USE_KINETO
 
-TraceWrapper::~TraceWrapper() = default;
-
 activity_t* TraceWrapper::addCPUActivity(
     const std::string& name,
     const libkineto::ActivityType type,
