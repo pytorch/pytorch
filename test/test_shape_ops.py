@@ -35,39 +35,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-# TODO: replace with make_tensor
-def _generate_input(shape, dtype, device, with_extremal):
-    if shape == ():
-        x = torch.tensor((), dtype=dtype, device=device)
-    else:
-        if dtype.is_floating_point or dtype.is_complex:
-            # work around torch.randn not being implemented for bfloat16
-            if dtype == torch.bfloat16:
-                x = torch.randn(*shape, device=device) * random.randint(30, 100)
-                x = x.to(torch.bfloat16)
-            else:
-                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(
-                    30, 100
-                )
-            x[torch.randn(*shape) > 0.5] = 0
-            if with_extremal and dtype.is_floating_point:
-                # Use extremal values
-                x[torch.randn(*shape) > 0.5] = float("nan")
-                x[torch.randn(*shape) > 0.5] = float("inf")
-                x[torch.randn(*shape) > 0.5] = float("-inf")
-            elif with_extremal and dtype.is_complex:
-                x[torch.randn(*shape) > 0.5] = complex("nan")
-                x[torch.randn(*shape) > 0.5] = complex("inf")
-                x[torch.randn(*shape) > 0.5] = complex("-inf")
-        elif dtype == torch.bool:
-            x = torch.zeros(shape, dtype=dtype, device=device)
-            x[torch.randn(*shape) > 0.5] = True
-        else:
-            x = torch.randint(15, 100, shape, dtype=dtype, device=device)
-
-    return x
-
-
 class TestShapeOps(TestCase):
     # TODO: update to work on CUDA, too
     @onlyCPU
@@ -110,7 +77,7 @@ class TestShapeOps(TestCase):
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_movedim_invalid(self, device, dtype):
         shape = self._rand_shape(4, min_size=5, max_size=10)
-        x = _generate_input(shape, dtype, device, False)
+        x = make_tensor(shape, device=device, dtype=dtype)
 
         for fn in [torch.movedim, torch.moveaxis]:
             # Invalid `source` and `destination` dimension
@@ -151,7 +118,7 @@ class TestShapeOps(TestCase):
         for fn in [torch.moveaxis, torch.movedim]:
             for nd in range(5):
                 shape = self._rand_shape(nd, min_size=5, max_size=10)
-                x = _generate_input(shape, dtype, device, with_extremal=False)
+                x = make_tensor(shape, device=device, dtype=dtype)
                 for random_negative in [True, False]:
                     for src_dim, dst_dim in permutations(range(nd), r=2):
                         random_prob = random.random()

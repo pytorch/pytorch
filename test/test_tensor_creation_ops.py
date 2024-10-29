@@ -47,18 +47,12 @@ from torch.testing._internal.common_dtype import (
 
 from torch.utils.dlpack import to_dlpack
 
-# TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
     if shape == ():
-        x = torch.tensor((), dtype=dtype, device=device)
+        x = make_tensor(0, device=device, dtype=dtype)
     else:
+        x = make_tensor(shape, device=device, dtype=dtype, high=100)
         if dtype.is_floating_point or dtype.is_complex:
-            # work around torch.randn not being implemented for bfloat16
-            if dtype == torch.bfloat16:
-                x = torch.randn(*shape, device=device) * random.randint(30, 100)
-                x = x.to(torch.bfloat16)
-            else:
-                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
             x[torch.randn(*shape) > 0.5] = 0
             if with_extremal and dtype.is_floating_point:
                 # Use extremal values
@@ -69,16 +63,10 @@ def _generate_input(shape, dtype, device, with_extremal):
                 x[torch.randn(*shape) > 0.5] = complex('nan')
                 x[torch.randn(*shape) > 0.5] = complex('inf')
                 x[torch.randn(*shape) > 0.5] = complex('-inf')
-        elif dtype == torch.bool:
-            x = torch.zeros(shape, dtype=dtype, device=device)
-            x[torch.randn(*shape) > 0.5] = True
-        else:
-            x = torch.randint(15, 100, shape, dtype=dtype, device=device)
 
     return x
 
 
-# TODO: replace with make_tensor
 def _rand_shape(dim, min_size, max_size):
     shape = []
     for i in range(dim):
