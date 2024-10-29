@@ -82,6 +82,10 @@ struct TORCH_API NoNamesGuard {
   NoNamesGuard() : prev_mode(NamesMode::is_enabled()) {
     NamesMode::set_enabled(false);
   }
+  NoNamesGuard(const NoNamesGuard&) = delete;
+  NoNamesGuard(NoNamesGuard&&) = delete;
+  NoNamesGuard& operator=(const NoNamesGuard&) = delete;
+  NoNamesGuard& operator=(NoNamesGuard&&) = delete;
   ~NoNamesGuard() {
     if (initialized) {
       reset();

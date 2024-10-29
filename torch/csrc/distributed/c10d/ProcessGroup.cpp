@@ -12,7 +12,6 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
-#include <utility>
 
 namespace c10d {
 
@@ -189,7 +188,20 @@ class WorkRegistry {
       // tensor storage is completed before the new work object is registered.
       // Therefore we need to maintain a list of work objects for each tensor
       // storage.
-      it->second.push_back(work);
+
+      // Check if work is already in the list
+      bool work_exists = false;
+      for (const auto& existing_work : it->second) {
+        if (existing_work == work) {
+          work_exists = true;
+          break;
+        }
+      }
+
+      // Only append if work is not already in the list
+      if (!work_exists) {
+        it->second.push_back(work);
+      }
     }
   }
 
@@ -233,6 +245,16 @@ class WorkRegistry {
     return total_size;
   }
 
+  void set_allow_inflight_collective_as_graph_input(bool value) {
+    std::unique_lock lock(lock_);
+    allow_inflight_collective_as_graph_input_ = value;
+  }
+
+  bool allow_inflight_collective_as_graph_input() {
+    std::unique_lock lock(lock_);
+    return allow_inflight_collective_as_graph_input_;
+  }
+
   ~WorkRegistry() {
     // If there are still unwaited work objects, their corresponding process
     // groups should have already been destroyed at this stage. Any attempts to
@@ -247,7 +269,8 @@ class WorkRegistry {
           " unwaited collective calls. "
           "Please review your program to ensure that:\n"
           "1. c10d_functional.wait_tensor() is invoked on all tensors returned from c10d_functional collective,\n"
-          "2. work.wait() is invoked on work object returned from torch.distributed collective with async_op=True,\n"
+          "2. c10d_functional.wait_tensor() is invoked on all output tensors of async_op=True torch.distributed collective "
+          "called under `with allow_inflight_collective_as_graph_input_ctx():`,\n"
           "before the output tensors of the collective are used.");
     }
     for (auto& it : registry_) {
@@ -262,6 +285,7 @@ class WorkRegistry {
       c10::weak_intrusive_ptr<c10::StorageImpl>,
       std::vector<c10::intrusive_ptr<c10d::Work>>>
       registry_;
+  bool allow_inflight_collective_as_graph_input_ = false;
   std::mutex lock_;
 };
 
@@ -291,6 +315,16 @@ void unregister_work(const c10::intrusive_ptr<c10d::Work>& work) {
 
 size_t get_work_registry_size() {
   return RankLocal<WorkRegistry>::get().get_work_registry_size();
+}
+
+void set_allow_inflight_collective_as_graph_input(bool value) {
+  return RankLocal<WorkRegistry>::get()
+      .set_allow_inflight_collective_as_graph_input(value);
+}
+
+bool allow_inflight_collective_as_graph_input() {
+  return RankLocal<WorkRegistry>::get()
+      .allow_inflight_collective_as_graph_input();
 }
 
 } // namespace c10d
