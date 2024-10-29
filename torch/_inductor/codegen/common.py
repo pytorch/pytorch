@@ -244,6 +244,9 @@ class DeviceOpOverrides:
     def cpp_device_ptr(self):
         raise NotImplementedError
 
+    def tma_descriptor_helpers(self):
+        raise NotImplementedError
+
 
 device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 
