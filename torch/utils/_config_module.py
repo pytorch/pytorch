@@ -205,7 +205,7 @@ class ConfigModule(ModuleType):
                 # JK only supports bools and ints
                 return config.justknob_value
 
-            # Note that reference types can still me modified, so we
+            # Note that reference types can still be modified, so we
             # copy them to user_overrides in case the user overrides
             # them
             if isinstance(config.default, (list, set, dict)):
@@ -325,7 +325,7 @@ class ConfigModule(ModuleType):
             config = maybe_pickled_config
         for k, v in config.items():
             if k in self._config:
-                self.__setattr__(k, v)
+                setattr(self, k, v)
             else:
                 warnings.warn(
                     f"key {k} with value {v} is not understood by this config"
