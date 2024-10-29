@@ -12,6 +12,7 @@ concurrency:
 
 jobs:
   get-default-label-prefix:
+    if: github.repository_owner == 'pytorch'
     name: get-default-label-prefix
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
