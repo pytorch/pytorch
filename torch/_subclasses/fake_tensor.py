@@ -32,12 +32,13 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self, TypeGuard, TypeIs
+from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
@@ -152,25 +153,24 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 
 def get_plain_tensors(
-    subclass: Tensor, out_append_list: Optional[List[Tensor]] = None
-) -> List[Tensor]:
+    subclass: Tensor, *, out: List[Union[Tensor, int, SymInt]]
+) -> List[Union[Tensor, int, SymInt]]:
     # This function is used in Runtime, do not add redundant asserts
-    plain_tensors: List[Tensor] = [] if out_append_list is None else out_append_list
     todo = [subclass]
     while todo:
         curr = todo.pop()
         if not is_traceable_wrapper_subclass(curr):
-            plain_tensors.append(curr)
+            out.append(curr)
             continue
 
         inner_keys, _ = curr.__tensor_flatten__()
         for key in reversed(inner_keys):
             todo.append(getattr(curr, key))
 
-    return plain_tensors
+    return out
 
 
-def is_fake(x: object) -> TypeIs[Tensor]:
+def is_fake(x: object) -> TypeGuard[Tensor]:
     if isinstance(x, FakeTensor):
         return True
     if is_traceable_wrapper_subclass(x):
@@ -1947,7 +1947,9 @@ class FakeTensorMode(TorchDispatchMode):
         args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        def maybe_to_real_tensor(t: T) -> Optional[Union[T, Tensor]]:
+        def maybe_to_real_tensor(
+            t: T,
+        ) -> Optional[Union[T, Tensor, torch._C.ScriptObject]]:
             if isinstance(t, FakeTensor):
                 return t.real_tensor
             elif isinstance(t, py_sym_types):
@@ -1957,6 +1959,8 @@ class FakeTensorMode(TorchDispatchMode):
                         self.shape_env.unbacked_var_to_val
                     )
                 )
+            elif isinstance(t, FakeScriptObject):
+                return t.real_obj
             else:
                 return t
 
