@@ -31,6 +31,7 @@ from torch.export import Dim, export
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
+from torch.testing._internal.common_device_type import skipCUDAIf
 from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     skipIfNoFBGEMM,
@@ -1576,6 +1577,7 @@ class AOTInductorTestsTemplate:
         )
         torch._export.aot_compile(Model(), example_inputs)
 
+    @skipCUDAIf(True, "Test for x86 backend")
     def test_buffer_mutation_and_force_mmap_weights(self):
         class Model(nn.Module):
             def __init__(self):
@@ -3915,6 +3917,7 @@ CUDA_TEST_FAILURES = {
 
 class AOTInductorTestABICompatibleCpu(AOTITestCase):
     device = "cpu"
+    device_type = "cpu"
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
@@ -3933,6 +3936,7 @@ copy_tests(
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
 class AOTInductorTestABICompatibleCuda(AOTITestCase):
     device = "cuda"
+    device_type = "cuda"
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
