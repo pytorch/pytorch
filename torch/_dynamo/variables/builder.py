@@ -2026,6 +2026,24 @@ def _dataclasses_fields_lambda(obj):
     return TupleVariable(items)
 
 
+def _clone_input(value, fake_mode):
+    if isinstance(value, torch.Tensor):
+        # tensor subclasses will not be converted to FakeTensors and need to be cloned
+        if not (
+            isinstance(value, FakeTensor)
+            or (
+                # Is functional tensor fakeified by this instance of Dynamo
+                torch._is_functional_tensor(value)
+                and maybe_get_fake_mode(value) is fake_mode
+            )
+            or value.is_nested
+        ):
+            # NB: ensure strides are preserved
+            value = clone_input(value)
+
+    return value
+
+
 def wrap_fx_proxy(
     tx, proxy, example_value=None, subclass_type=None, **options
 ) -> VariableTracker:
@@ -2071,7 +2089,7 @@ def wrap_fx_proxy(
 # instance of Dynamo.
 #
 # Upon closer inspection, you may notice that there are a slurry of non-Tensor
-# output cases.  What gives?  Well, we sometimes trace operations into the
+# output cases in handle_traced_output.  What gives?  Well, we sometimes trace operations into the
 # graph that don't involve tensors.
 #
 #   * Some operators return tuples; we need to recursively handle their
@@ -2091,7 +2109,32 @@ def wrap_fx_proxy(
 def wrap_fx_proxy_cls(
     target_cls, tx, proxy, example_value=None, subclass_type=None, **options
 ):
+    if example_value is None:
+        return _wrap_fx_proxy(
+            target_cls, tx, proxy, example_value, subclass_type, **options
+        )
+    elif isinstance(example_value, torch.Tensor):
+        return _wrap_fx_preexisting_tensor(
+            target_cls, tx, proxy, example_value, subclass_type, **options
+        )
+    else:
+        # This will skip tracing an op and recursively reinvoke wrap_fx_proxy_cls on supported
+        # data structures. In essence this just handles tracing some other value which may
+        # contain Fake Tensors or is otherwise proxyable.
+        return handle_traced_output(
+            example_value, tx, proxy, options, subclass_type, target_cls
+        )
+
+
+# This is 1 above (wrapping a preexisting tensor)
+def _wrap_fx_preexisting_tensor(
+    target_cls, tx, proxy, tensor, subclass_type=None, **options
+):
     from ..symbolic_convert import InstructionTranslatorBase
+
+    assert isinstance(
+        tensor, torch.Tensor
+    ), f"_wrap_fx_preexisting_tensor expected tensor, got {type(tensor)}"
 
     assert isinstance(tx, InstructionTranslatorBase)
     if "guards" in options and options["guards"] is not None:
@@ -2099,45 +2142,19 @@ def wrap_fx_proxy_cls(
 
     assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
 
-    initial_example_value = example_value
-
-    def _clone_input(value):
-        if isinstance(value, torch.Tensor):
-            # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            if not (
-                isinstance(value, FakeTensor)
-                or (
-                    # Is functional tensor fakeified by this instance of Dynamo
-                    torch._is_functional_tensor(value)
-                    and maybe_get_fake_mode(value) is tx.fake_mode
-                )
-                or value.is_nested
-            ):
-                # NB: ensure strides are preserved
-                value = clone_input(value)
-
-        return value
-
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
-        # with preserve_rng_state():
-        if example_value is None:
-            # only allow_non_graph_fake in this instance because we handle the non-fake
-            # cases properly below.
-            example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
-
         # Handle recursive calls here
-        elif maybe_get_fake_mode(example_value) is tx.fake_mode:
+        if maybe_get_fake_mode(tensor) is tx.fake_mode:
             pass
-
-        elif isinstance(example_value, torch.Tensor):
+        else:
             if tx.export:
                 # The legacy behavior for real value cache with subclasses was
                 # to perform a clone WITHOUT preserving the subclass.  It's
                 # not entirely clear this is what you actually want though.
                 with torch._C.DisableTorchFunctionSubclass():
                     proxy.tracer.real_value_cache[proxy.node] = _clone_input(
-                        example_value
+                        tensor, tx.fake_mode
                     )
             # NB: If we're ignoring subclass, then the expectation is you will
             # take the returned TensorVariable and wrap it into a more
@@ -2149,18 +2166,48 @@ def wrap_fx_proxy_cls(
             }
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
-            example_value = wrap_to_fake_tensor_and_record(
-                example_value, tx=tx, **kwargs
-            )
-        if (
-            isinstance(example_value, torch.Tensor)
-            and example_value.device.type != "meta"
-            and (maybe_get_fake_mode(example_value) is not tx.fake_mode)
+            tensor = wrap_to_fake_tensor_and_record(tensor, tx=tx, **kwargs)
+
+        if tensor.device.type != "meta" and (
+            maybe_get_fake_mode(tensor) is not tx.fake_mode
         ):
             raise InternalTorchDynamoError(
-                "`example_value` needs to be a `FakeTensor`"
-                f"wrapped by this instance of Dynamo. Found: {example_value}"
+                "`tensor` needs to be a `FakeTensor`"
+                f"wrapped by this instance of Dynamo. Found: {tensor}"
             )
+
+    return handle_traced_output(tensor, tx, proxy, options, subclass_type, target_cls)
+
+
+# This is 2 in the above comment (wrapping the output of a traced op)
+def _wrap_fx_proxy(
+    target_cls, tx, proxy, example_value=None, subclass_type=None, **options
+):
+    from ..symbolic_convert import InstructionTranslatorBase
+
+    assert isinstance(tx, InstructionTranslatorBase)
+    if "guards" in options and options["guards"] is not None:
+        tx.output.guards.update(options["guards"])
+
+    assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
+
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+    with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
+        # with preserve_rng_state():
+        # only allow_non_graph_fake in this instance because we handle the non-fake
+        # cases properly below.
+        example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
+
+    return handle_traced_output(
+        example_value, tx, proxy, options, subclass_type, target_cls
+    )
+
+
+# This handles wrapping of the output of an op traced into the graph
+def handle_traced_output(example_value, tx, proxy, options, subclass_type, target_cls):
+    import torch._functorch.vmap
+    import torch._subclasses.fake_tensor
+    import torch._utils
 
     if isinstance(example_value, torch.Tensor):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
@@ -2169,7 +2216,7 @@ def wrap_fx_proxy_cls(
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
         # tensor, the stored example value will update too!)
-        example_value = _clone_input(example_value)
+        example_value = _clone_input(example_value, tx.fake_mode)
         set_example_value(proxy.node, example_value)
         specialized_props = target_cls.specialize(example_value)
         # TODO: not sure about this fake mode test
