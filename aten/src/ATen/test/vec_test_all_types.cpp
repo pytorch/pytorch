@@ -682,29 +682,12 @@ namespace {
             createDefaultBinaryTestCase<vec>(TestSeed()),
                 RESOLVE_OVERLOAD(filter_sub_overflow));
     }
-/*The below two tests need to be compiled without SIMD with gcc compiler to avoid failures due to
-accuracy mismatch after 3rd decimal place for complex dtype.
-Arithmetics/2.Multiplication, where TypeParam = at::vec::SVE128::Vectorized<c10::complex<float>>
-Arithmetics/3.Multiplication, where TypeParam = at::vec::SVE128::Vectorized<c10::complex<double>>
-*/
-#if defined(__GNUC__) && defined(CPU_CAPABILITY_SVE128)
-#define SIMD_OPTIMIZED __attribute__((optimize("no-tree-vectorize")))
-#else
-#define SIMD_OPTIMIZED
-#endif
-
-// Separate function to handle multiplication
-template<typename vec>
-SIMD_OPTIMIZED
-vec multiply(const vec& v0, const vec& v1) {
-    return v0 * v1;
-}
     TYPED_TEST(Arithmetics, Multiplication) {
         using vec = TypeParam;
         test_binary<vec>(
             NAME_INFO(mult),
             RESOLVE_OVERLOAD(local_multiply),
-            multiply<vec>,
+            [](const vec& v0, const vec& v1) { return v0 * v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true),
             RESOLVE_OVERLOAD(filter_mult_overflow));
     }
@@ -1857,7 +1840,6 @@ vec multiply(const vec& v0, const vec& v1) {
     #undef TEST_MASK_LOAD
     #undef TEST_MASK_LOAD_N
     }
-#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, MaskedCheck) {
       using VT = ValueType<TypeParam>;
       using vec = TypeParam;
@@ -1881,8 +1863,6 @@ vec multiply(const vec& v0, const vec& v1) {
 
     #undef TEST_MASK_CHECK_N
     }
-#endif
-#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, ToFrom) {
       using vec = TypeParam;
       using VT = ValueType<TypeParam>;
@@ -1908,8 +1888,6 @@ vec multiply(const vec& v0, const vec& v1) {
             << "Failure Details:\nTest Seed to reproduce: " << seed;
       }
     }
-#endif
-#if !defined(CPU_CAPABILITY_SVE)
     TYPED_TEST(VecMaskTests, Cast) {
       using vec = TypeParam;
       using src_t = ValueType<TypeParam>;
@@ -1954,7 +1932,6 @@ vec multiply(const vec& v0, const vec& v1) {
     #undef TEST_MASK_CAST
     #undef TEST_MASK_CAST_N
     }
-#endif
 #else
 #error GTEST does not have TYPED_TEST
 #endif
