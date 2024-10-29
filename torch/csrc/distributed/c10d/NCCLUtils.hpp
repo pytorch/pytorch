@@ -370,7 +370,7 @@ class NCCLComm {
   NCCLComm& operator=(NCCLComm&& other) = delete;
 
   // Move constructable
-  // NOLINTNEXTLINE(.*-noexcept-move-.*)
+  // NOLINTNEXTLINE(*-noexcept-move-*)
   NCCLComm(NCCLComm&& other) {
     // Using other's lock, as it reads other's states
     // Can not use this.mutex_, as this object is being constructed.
