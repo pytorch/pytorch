@@ -272,7 +272,6 @@ char* tensor_repr(const at::Tensor& tensor) {
   // observed that sometimes gdb passes the outer Tensor address exactly as is
   // into this function.
   // See https://github.com/pytorch/pytorch/issues/134762
-  // NOLINTNEXTLINE(performance-unnecessary-value-param)
   pytensor = THPVariable_Wrap(tensor);
   if (!pytensor)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
