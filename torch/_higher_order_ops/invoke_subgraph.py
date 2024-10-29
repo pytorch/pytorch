@@ -287,7 +287,8 @@ def _(ctx, subgraph, identifier, operands):
 @invoke_subgraph.py_impl(FakeTensorMode)
 def _(mode, subgraph, identifier, operands):
     # TODO(anijain2305) - Implement fake tensor caching.
-    return subgraph(*operands)
+    with mode:
+        return subgraph(*operands)
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
