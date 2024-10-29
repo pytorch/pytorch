@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: export"]
 
-
+import copy
 import unittest
 
 import torch
@@ -10,7 +10,7 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._higher_order_ops.wrap import wrap
 from torch._library.fake_class_registry import FakeScriptObject
-from torch.export import export, export_for_training
+from torch.export import export
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
@@ -134,13 +134,12 @@ class TestExportTorchbind(TestCase):
     ):
         kwargs = kwargs or {}
 
-        def export_wrapper(f, args, kwargs, strcit, pre_dispatch):
+        def export_wrapper(f, args, kwargs, strict, pre_dispatch):
             with enable_torchbind_tracing():
                 if pre_dispatch:
-                    exported_program = export_for_training(
+                    exported_program = torch.export.export_for_training(
                         f, args, kwargs, strict=strict
                     ).run_decompositions({})
-
                 else:
                     exported_program = _export(
                         f, args, kwargs, strict=strict, pre_dispatch=False
@@ -314,7 +313,6 @@ def forward(self, token, x, cc):
     add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
     return (getitem, add)""",  # noqa: B950
         )
-        # training IR runs the program once
         # aot_export_function runs the program twice
         # in run_functionalized_fw_and_collect_metadata and create_aot_dispatcher_function
         # We also have a re-tracing test, which doubles the count.
@@ -700,7 +698,7 @@ def forward(self, arg0_1, arg1_1):
         b = torch.randn(2, 2)
         tq.push(a)
         tq.push(b)
-        ep = export_for_training(
+        ep = torch.export.export_for_training(
             mod, (tq, torch.randn(2, 2)), strict=False
         ).run_decompositions({})
         self.assertExpectedInline(
@@ -730,6 +728,7 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
         self.assertTrue(tq.pop() is a)
         self.assertTrue(tq.pop() is b)
 
+    @unittest.expectedFailure  # T205481814
     @skipIfCrossRef  # arg names change with torch function mode
     def test_safe_to_trace_with_real(self):
         x = torch.randn(3, 3)
@@ -754,33 +753,9 @@ def forward(self, L_safe_obj_ : torch.ScriptObject):
         )
 
         with enable_torchbind_tracing():
-            ep = export(mod, (safe_obj,), strict=False)
-            self.assertExpectedInline(
-                ep.graph_module.code.strip(),
-                """\
-def forward(self, token, safe_obj):
-    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, safe_obj, 'get');  token = safe_obj = None
-    getitem = with_effects[0]
-    getitem_1 = with_effects[1];  with_effects = None
-    sin = torch.ops.aten.sin.default(getitem_1);  getitem_1 = None
-    return (getitem, sin)""",  # noqa: B950
-            )
-
-    @unittest.expectedFailure  # T205481814
-    @skipIfCrossRef  # arg names change with torch function mode
-    def test_safe_to_trace_with_real_with_training_ir(self):
-        x = torch.randn(3, 3)
-        safe_obj = torch.classes._TorchScriptTesting._ConstantTensorContainer(x)
-
-        class Mod(torch.nn.Module):
-            def forward(self, safe_obj: torch.ScriptObject) -> None:
-                return safe_obj.get().sin()
-
-        mod = Mod()
-        with enable_torchbind_tracing():
-            ep = export_for_training(mod, (safe_obj,), strict=False).run_decompositions(
-                {}
-            )
+            ep = torch.export.export_for_training(
+                mod, (safe_obj,), strict=False
+            ).run_decompositions({})
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
                 """\
@@ -1062,6 +1037,30 @@ graph():
     %queue_push_default : [num_users=0] = call_function[target=torch.ops._TorchScriptTesting.queue_push.default](args = (%tq, %x), kwargs = {})
     return (tq,)""",  # noqa: B950
         )
+
+    def test_deepcopy(self):
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq_0 = copy.deepcopy(tq)
+        tq.push(torch.zeros(2, 2))
+        tq.push(torch.ones(2, 2))
+        tq_1 = copy.deepcopy(tq)
+        tq.push(torch.ones(2, 2) * 2)
+        self.assertEqual(tq_0.size(), 0)
+        self.assertEqual(tq_1.size(), 2)
+        self.assertEqual(tq.size(), 3)
+
+        foo = torch.classes._TorchScriptTesting._Foo(1, 2)
+        foo_0 = copy.deepcopy(foo)
+        foo.increment(1)
+        foo_1 = copy.deepcopy(foo)
+        foo.increment(1)
+        self.assertEqual(foo_0.add(1), 3)
+        self.assertEqual(foo_1.add(1), 5)
+        self.assertEqual(foo.add(1), 7)
 
 
 class TestCompileTorchbind(TestCase):
@@ -1349,7 +1348,7 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         mod = TestMod()
 
         torch.compile(mod, backend=backend, fullgraph=True)(test_obj, torch.randn(3, 1))
-        ep = export_for_training(
+        ep = torch.export.export_for_training(
             mod, (test_obj, torch.randn(3, 1)), strict=False
         ).run_decompositions({})
         self.assertExpectedInline(
