@@ -131,7 +131,7 @@ else:
         pass
 
 
-def supported_dtype_of_cpp_wrapper(dtype: torch.device, device_type: str) -> bool:
+def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool:
     supported_dtype = {
         torch.float32,
         torch.float64,
@@ -364,9 +364,9 @@ class GraphLowering(torch.fx.Interpreter):
         # you don't start adding new ones in the lowering process
         shape_env.freeze_runtime_asserts()
         # We're going to mutate ras_by_symbol as we finish generating them
-        self.ras_by_symbol: Dict[
-            Optional[sympy.Symbol], List[RuntimeAssert]
-        ] = shape_env.deferred_runtime_asserts.copy()
+        self.ras_by_symbol: Dict[Optional[sympy.Symbol], List[RuntimeAssert]] = (
+            shape_env.deferred_runtime_asserts.copy()
+        )
         self.bound_unbacked_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: List[str] = []
@@ -447,10 +447,10 @@ class GraphLowering(torch.fx.Interpreter):
         self._warned_fallback = {"aten.convolution_backward"}
         mark_nodes_dislike_padding(gm.graph)
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
-        self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
-        self.cache_linemap: List[
-            Tuple[int, str]
-        ] = (
+        self.cache_path: str = (
+            ""  # This is the path in the filesystem where the compiled artifact is stored
+        )
+        self.cache_linemap: List[Tuple[int, str]] = (
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
@@ -2084,9 +2084,9 @@ class SubgraphLowering(GraphLowering):
 
         def get_free_symbols(expr: sympy.Expr) -> OrderedSet[sympy.Symbol]:
             # expr can be s0 + s1, recurse to get s0 and s1
-            symbols: OrderedSet[
-                sympy.Symbol
-            ] = OrderedSet()  # Use a set to avoid duplicates
+            symbols: OrderedSet[sympy.Symbol] = (
+                OrderedSet()
+            )  # Use a set to avoid duplicates
             if isinstance(expr, sympy.Symbol):
                 symbols.add(expr)
             elif isinstance(expr, sympy.Expr):
