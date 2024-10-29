@@ -2093,6 +2093,23 @@ class TritonKernel(SIMDKernel):
                 """
             )
 
+        def welford_combine(masked_value):
+            assert isinstance(masked_value, Sequence)
+            masked_value = [
+                self.reduction_collapse_dims(self.compute, value)
+                for value in masked_value
+            ]
+            mean, m2, weight = masked_value
+            welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
+            mean, m2, weight = (self.cse.newvar() for _ in range(3))
+            self.compute.writeline(f"{mean}, {m2}, {weight} = {welford}")
+
+            result_var = tuple(
+                self.cse.generate(self.compute, self.reduction_resize(var_name))
+                for var_name in (mean, m2, weight)
+            )
+            return result_var
+
         cache_key = (src_dtype, reduction_type, value)
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
@@ -2137,16 +2154,7 @@ class TritonKernel(SIMDKernel):
                 # taking two reductions doesn't increase memory usage.
                 result_var = self.welford_reduce_fallback(dtype, value)
             elif reduction_type == "welford_combine":
-                assert isinstance(masked_value, Sequence)
-                mean, m2, weight = masked_value
-                welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
-                mean, m2, weight = (self.cse.newvar() for _ in range(3))
-                self.compute.writeline(f"{mean}, {m2}, {weight} = {welford}")
-
-                result_var = tuple(
-                    self.cse.generate(self.compute, self.reduction_resize(var_name))
-                    for var_name in (mean, m2, weight)
-                )
+                result_var = welford_combine(masked_value)
             else:
                 result_var = final_reduction_new_var(
                     self.compute, str(masked_value), None

@@ -531,9 +531,8 @@ class TritonBlockPointerTest(InductorTestCase):
         """
         Tests a 2D reduction without an "x" dimension.
         """
-        view = self._discontiguous_tensor(
-            (2, 346)
-        )  # Need to choose a specific size to get no x dim
+        # We need a size to get no x dim.
+        view = self._discontiguous_tensor((2, 346))
 
         # Expect 1 block pointer for the input.
         result, (code,) = self.run_and_compare(
@@ -551,6 +550,46 @@ class TritonBlockPointerTest(InductorTestCase):
         self.assertNotIn("BLOCK", signature_line)
 
         # Check for 2 reduction dimensions in the body.
+        expected_blocks = ["R0_BLOCK", "R1_BLOCK"]
+        for block in expected_blocks:
+            self.assertIn(block, code)
+
+    @parametrize(
+        "size,expected_num_block_pointers,expected_num_triton_kernels,expect_fallback",
+        [
+            ((8, 8), 1, 2, True),  # Persistent Welford fallback
+            ((128, 128), 9, 3, False),  # Looped Welford reduction
+        ],
+    )
+    def test_2d_welford_reduction(
+        self,
+        size: Tuple[int],
+        expected_num_block_pointers: int,
+        expected_num_triton_kernels: int,
+        expect_fallback: bool,
+    ):
+        """
+        Tests a 2D welford reduction.
+
+        NB: the input size should be "nice" in the sense that it's a multiple of the
+        number of processors. Otherwise, we will get more complex indexing that
+        doesn't generate a 2D block pointer.
+        """
+        view = self._discontiguous_tensor(size)
+
+        # We expect many block pointers for this one.
+        result, (code,) = self.run_and_compare(
+            torch.var_mean,
+            view,
+            expected_num_block_pointers=expected_num_block_pointers,
+            expected_num_triton_kernels=expected_num_triton_kernels,
+            config_patches={"triton.prefer_nd_tiling": True},
+        )
+
+        # Check for a Welford reduction.
+        self.assertEqual("welford" in code, not expect_fallback)
+
+        # Check for 2 reduction dimensions.
         expected_blocks = ["R0_BLOCK", "R1_BLOCK"]
         for block in expected_blocks:
             self.assertIn(block, code)
