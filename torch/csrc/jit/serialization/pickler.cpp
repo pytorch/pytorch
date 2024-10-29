@@ -135,7 +135,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     }
     err << ". Please define serialization methods via def_pickle() for "
            "this class.";
-    AT_ERROR(err.str());
+    TORCH_CHECK(false, err.str());
   } else if (ivalue.isRRef()) {
 #ifdef USE_RPC
     TORCH_CHECK(
@@ -154,7 +154,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushIValue(enum_holder->value());
     push<PickleOpCode>(PickleOpCode::REDUCE);
   } else {
-    AT_ERROR("Unknown IValue type for pickling: ", ivalue.tagKind());
+    TORCH_CHECK(false, "Unknown IValue type for pickling: ", ivalue.tagKind());
   }
 }
 

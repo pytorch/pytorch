@@ -111,11 +111,85 @@ def scan(
     if not isinstance(reverse, bool):
         raise RuntimeError("Reverse must be a bool, but got " + str(type(reverse)))
 
+    leaves_init, spec_init = pytree.tree_flatten(init)
+    leaves_xs, spec_xs = pytree.tree_flatten(xs)
+
+    if len(leaves_init) == 0:
+        raise RuntimeError("Init tensors must be provided")
+    for x in leaves_init:
+        if not isinstance(x, torch.Tensor):
+            raise RuntimeError(f"All init leaves must be a Tensor but got {x}")
+    for x in leaves_xs:
+        if not isinstance(x, torch.Tensor):
+            raise RuntimeError(f"All xs leaves must be a Tensor but got {x}")
+        if x.shape[dim] == 0:
+            raise RuntimeError(
+                f"All xs leaves must have a scan dimension > 0 but got {x}"
+            )
+
+    if len(leaves_xs) == 0:
+        return pytree.tree_unflatten(leaves_init, spec_init), xs
+
+    shape = leaves_xs[0].shape
+    ndim = len(shape)
+    dim = utils.canonicalize_dim(ndim, dim)
+
+    out = combine_fn(
+        pytree.tree_unflatten(leaves_init, spec_init),
+        pytree.tree_unflatten([elem.select(dim, 0) for elem in leaves_xs], spec_xs),
+    )
+
+    # The first output needs to have the same pytree as init
+    carry_leaves = pytree.tree_leaves(out[0])
+    if len(carry_leaves) != len(leaves_init):
+        raise RuntimeError(
+            f"The number of leaves of the pytree of the new carry produced by the operator is {len(carry_leaves)}\
+doesn't match the length of the pytree of the init {len(leaves_init)}"
+        )
+
+    def _check_new_carry_match_init(leaves_init, carry_leaves):
+        for i, (init, new_carry) in enumerate(zip(leaves_init, carry_leaves)):
+            if init.shape != new_carry.shape:
+                raise RuntimeError(
+                    f"The shape of the new_carry[{i}] {new_carry.shape} doesn't match that of the init[{i}] {init.shape}."
+                )
+            if init.stride() != new_carry.stride():
+                raise RuntimeError(
+                    f"The stride of the new_carry[{i}] {new_carry.stride()} doesn't match that of the init[{i}] {init.stride()}."
+                )
+            if init.dtype != new_carry.dtype:
+                raise RuntimeError(
+                    f"The dtype of the new_carry[{i}] {new_carry.dtype} doesn't match that of the init[{i}] {init.dtype}."
+                )
+            if init.requires_grad != new_carry.requires_grad:
+                raise RuntimeError(
+                    f"The requires_grad of the new_carry[{i}] {new_carry.requires_grad} doesn't match that of the init[{i}] {init.requires_grad}."  # noqa: B950
+                )
+
+    _check_new_carry_match_init(leaves_init, carry_leaves)
+
+    # There are no pytree restrictions on the second output of the operator
+    out_leaves, tree_out = pytree.tree_flatten(out[1])
+
     # TODO: Support closures/nn_modules in order to be able represent RNNs with scan
     # TODO: Support _inductor lowering
     # TODO: Support Autograd
     # TODO: Unify handling of pytrees for control flow ops, such as cond, while_loop, etc.
     # TODO: Unify the list inputs of control flow ops to tuple.
+
+    combine_fn = functools.partial(
+        wrap_combine_fn_flat,
+        combine_fn=combine_fn,
+        spec_init=spec_init,
+        spec_xs=spec_xs,
+        num_init_leaves=len(leaves_init),
+        num_inp_leaves=len(leaves_xs),
+    )
+
+    def run_flattened_scan(combine_fn, leaves_init, leaves_xs, dim, reverse):
+        return scan_op(
+            combine_fn, leaves_init, leaves_xs, dim, reverse, additional_inputs=[]
+        )
 
     if not torch._dynamo.is_compiling():
         from torch._dynamo.backends.debugging import (
@@ -128,71 +202,26 @@ def scan(
                     backend = make_eager_backend_with_torch_function_mode(metadata_mode)
                 else:
                     backend = "eager"
-                return torch.compile(scan, backend=backend, fullgraph=True)(
-                    combine_fn, init, xs, dim=dim, reverse=reverse
+                result = torch.compile(
+                    run_flattened_scan, backend=backend, fullgraph=True
+                )(
+                    combine_fn,
+                    leaves_init,
+                    leaves_xs,
+                    dim=dim,
+                    reverse=reverse,
                 )
-
-    leaves_init, spec_init = pytree.tree_flatten(init)
-    leaves_xs, spec_xs = pytree.tree_flatten(xs)
-
-    if len(leaves_init) == 0:
-        raise RuntimeError("Init tensors must be provided")
-    if any(not isinstance(x, torch.Tensor) for x in leaves_init):
-        raise RuntimeError("All init leaves must be a Tensor")
-    if any(not isinstance(x, torch.Tensor) for x in leaves_xs):
-        raise RuntimeError("All xs leaves must be a Tensor")
-    if any(x.shape[dim] == 0 for x in leaves_xs):
-        raise RuntimeError("All xs leaves must have a scan dimension > 0")
-
-    if len(leaves_xs) > 0:
-        shape = leaves_xs[0].shape
-        ndim = len(shape)
-        dim = utils.canonicalize_dim(ndim, dim)
-
-        out = combine_fn(
-            pytree.tree_unflatten(leaves_init, spec_init),
-            pytree.tree_unflatten([elem.select(dim, 0) for elem in leaves_xs], spec_xs),
-        )
-
-        # The first output needs to have the same pytree as init
-        carry_leaves = pytree.tree_leaves(out[0])
-        if len(carry_leaves) != len(leaves_init):
-            raise RuntimeError(
-                "The number of leaves of the pytree of the new carry produced by the operator\
- needs to match the length of the pytree of the init"
-            )
-        if any(
-            in_l.shape != out_l.shape for in_l, out_l in zip(leaves_init, carry_leaves)
-        ):
-            raise RuntimeError(
-                "The pytree of the new carry produced by the operator needs to match the pytree of the init"
-            )
-
-        # There are no pytree restrictions on the second output of the operator
-        out_leaves, tree_out = pytree.tree_flatten(out[1])
-
-        combine_fn = functools.partial(
-            wrap_combine_fn_flat,
-            combine_fn=combine_fn,
-            spec_init=spec_init,
-            spec_xs=spec_xs,
-            num_init_leaves=len(leaves_init),
-            num_inp_leaves=len(leaves_xs),
-        )
-
-        result_carry, result_flat = _extract_carry_and_out(
-            scan_op(
-                combine_fn, leaves_init, leaves_xs, dim, reverse, additional_inputs=[]
-            ),
-            len(leaves_init),
-        )
-
-        return pytree.tree_unflatten(result_carry, spec_init), pytree.tree_unflatten(
-            result_flat, tree_out
-        )
-
     else:
-        return pytree.tree_unflatten(leaves_init, spec_init), xs
+        result = run_flattened_scan(combine_fn, leaves_init, leaves_xs, dim, reverse)
+
+    result_carry, result_flat = _extract_carry_and_out(
+        result,
+        len(leaves_init),
+    )
+
+    return pytree.tree_unflatten(result_carry, spec_init), pytree.tree_unflatten(
+        result_flat, tree_out
+    )
 
 
 class ScanOp(HigherOrderOperator):

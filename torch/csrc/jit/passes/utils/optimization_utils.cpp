@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/passes/utils/optimization_utils.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 bool nonConstantParameters(Node* n) {
   // Checks if the parameters, not including the
@@ -14,5 +13,4 @@ bool nonConstantParameters(Node* n) {
   return false;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

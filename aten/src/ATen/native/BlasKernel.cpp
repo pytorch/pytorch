@@ -133,30 +133,50 @@ float bf16_dot_with_fp32_arith(
 #endif
 
 template <typename scalar_t>
-bool scal_use_fast_path(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
+bool scal_use_fast_path(
+    [[maybe_unused]] int64_t n,
+    [[maybe_unused]] int64_t incx) {
   return false;
 }
 
 template <typename scalar_t>
-bool gemv_use_fast_path(C10_UNUSED char trans, C10_UNUSED int64_t m,
-                        C10_UNUSED int64_t n, C10_UNUSED scalar_t alpha,
-                        C10_UNUSED int64_t lda,
-                        C10_UNUSED int64_t incx, C10_UNUSED scalar_t beta,
-                        C10_UNUSED int64_t incy) {
+bool gemv_use_fast_path(
+    [[maybe_unused]] char trans,
+    [[maybe_unused]] int64_t m,
+    [[maybe_unused]] int64_t n,
+    [[maybe_unused]] scalar_t alpha,
+    [[maybe_unused]] int64_t lda,
+    [[maybe_unused]] int64_t incx,
+    [[maybe_unused]] scalar_t beta,
+    [[maybe_unused]] int64_t incy) {
   return false;
 }
 
 template <typename scalar_t>
-void scal_fast_path(C10_UNUSED int *n, C10_UNUSED scalar_t *a, C10_UNUSED scalar_t *x, C10_UNUSED int *incx) {
-  TORCH_INTERNAL_ASSERT(false, "scal_fast_path shouldn't be called for this configuration");
+void scal_fast_path(
+    [[maybe_unused]] int* n,
+    [[maybe_unused]] scalar_t* a,
+    [[maybe_unused]] scalar_t* x,
+    [[maybe_unused]] int* incx) {
+  TORCH_INTERNAL_ASSERT(
+      false, "scal_fast_path shouldn't be called for this configuration");
 }
 
 template <typename scalar_t>
-void gemv_fast_path(C10_UNUSED const char *trans, C10_UNUSED const int *m, C10_UNUSED const int *n,
-                    C10_UNUSED  const scalar_t *alpha, C10_UNUSED const scalar_t *a, C10_UNUSED const int *lda,
-                    C10_UNUSED  const scalar_t *x, C10_UNUSED const int *incx, C10_UNUSED const scalar_t *beta,
-                    C10_UNUSED  scalar_t *y, C10_UNUSED const int *incy) {
-  TORCH_INTERNAL_ASSERT(false, "gemv_fast_path shouldn't be called for this configuration");
+void gemv_fast_path(
+    [[maybe_unused]] const char* trans,
+    [[maybe_unused]] const int* m,
+    [[maybe_unused]] const int* n,
+    [[maybe_unused]] const scalar_t* alpha,
+    [[maybe_unused]] const scalar_t* a,
+    [[maybe_unused]] const int* lda,
+    [[maybe_unused]] const scalar_t* x,
+    [[maybe_unused]] const int* incx,
+    [[maybe_unused]] const scalar_t* beta,
+    [[maybe_unused]] scalar_t* y,
+    [[maybe_unused]] const int* incy) {
+  TORCH_INTERNAL_ASSERT(
+      false, "gemv_fast_path shouldn't be called for this configuration");
 }
 
 #define INSTANTIATE(scalar_t)                                                                                                                                                     \
@@ -188,15 +208,32 @@ void scal_fast_path<float>(int *n, float *a, float *x, int *incx) {
 }
 
 template <>
-bool gemv_use_fast_path<float>(C10_UNUSED char trans, int64_t m, int64_t n, C10_UNUSED float alpha, int64_t lda, int64_t incx, C10_UNUSED float beta, int64_t incy) {
+bool gemv_use_fast_path<float>(
+    [[maybe_unused]] char trans,
+    int64_t m,
+    int64_t n,
+    [[maybe_unused]] float alpha,
+    int64_t lda,
+    int64_t incx,
+    [[maybe_unused]] float beta,
+    int64_t incy) {
   auto intmax = std::numeric_limits<int>::max();
   return (m <= intmax) && (n <= intmax) && (lda <= intmax) &&
          (incx > 0) && (incx <= intmax) && (incy > 0) && (incy <= intmax);
 }
 
 template <>
-bool gemv_use_fast_path<double>(C10_UNUSED char trans, int64_t m, int64_t n, C10_UNUSED double alpha, int64_t lda, int64_t incx, C10_UNUSED double beta, int64_t incy) {
-  return gemv_use_fast_path<float>(trans, m, n, (float)alpha, lda, incx, (float)beta, incy);
+bool gemv_use_fast_path<double>(
+    [[maybe_unused]] char trans,
+    int64_t m,
+    int64_t n,
+    [[maybe_unused]] double alpha,
+    int64_t lda,
+    int64_t incx,
+    [[maybe_unused]] double beta,
+    int64_t incy) {
+  return gemv_use_fast_path<float>(
+      trans, m, n, (float)alpha, lda, incx, (float)beta, incy);
 }
 
 template <>
@@ -220,37 +257,39 @@ INSTANTIATE(int);
 INSTANTIATE(int64_t);
 #if defined(__aarch64__) && !defined(C10_MOBILE)
 template <>
-bool scal_use_fast_path<at::Half>(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
+bool scal_use_fast_path<at::Half>(
+    [[maybe_unused]] int64_t n,
+    [[maybe_unused]] int64_t incx) {
   return false;
 }
 
 template <>
 bool gemv_use_fast_path<at::Half>(
-    C10_UNUSED char trans,
-    C10_UNUSED int64_t m,
-    C10_UNUSED int64_t n,
+    [[maybe_unused]] char trans,
+    [[maybe_unused]] int64_t m,
+    [[maybe_unused]] int64_t n,
     at::Half alpha,
-    C10_UNUSED int64_t lda,
-    C10_UNUSED int64_t incx,
+    [[maybe_unused]] int64_t lda,
+    [[maybe_unused]] int64_t incx,
     at::Half beta,
-    C10_UNUSED int64_t incy) {
+    [[maybe_unused]] int64_t incy) {
   return incx == 1 && c10::detail::fp16_from_bits(alpha.x) == 1.0f &&
-    c10::detail::fp16_from_bits(beta.x) == 0.0f;
+      c10::detail::fp16_from_bits(beta.x) == 0.0f;
 }
 
 template <>
 bool gemv_use_fast_path<at::BFloat16>(
-  C10_UNUSED char trans,
-  C10_UNUSED int64_t m,
-    C10_UNUSED int64_t n,
+    [[maybe_unused]] char trans,
+    [[maybe_unused]] int64_t m,
+    [[maybe_unused]] int64_t n,
     at::BFloat16 alpha,
-    C10_UNUSED int64_t lda,
-    C10_UNUSED int64_t incx,
+    [[maybe_unused]] int64_t lda,
+    [[maybe_unused]] int64_t incx,
     at::BFloat16 beta,
-    C10_UNUSED int64_t incy) {
-  return (trans == 'T' || trans == 't') && incx == 1 && alpha == 1.0 && beta == 0.0;
+    [[maybe_unused]] int64_t incy) {
+  return (trans == 'T' || trans == 't') && incx == 1 && alpha == 1.0 &&
+      beta == 0.0;
 }
-
 
 #ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
 static inline float16_t reduce(float16x4_t x) {

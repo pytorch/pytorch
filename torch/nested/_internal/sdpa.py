@@ -323,7 +323,6 @@ def _cumulative_and_max_seq_len_nnz(qkv: torch.Tensor) -> Tuple[torch.Tensor, in
         cumulative_seqlen = (
             qkv.lengths().cumsum(0).to(dtype=torch.int32, device=qkv.device)
         )
-        batch_size = qkv.size(0)
         max_seqlen = qkv._get_max_seqlen()
         # TODO: Explore performance impact when compiling
         n_elem = int(cumulative_seqlen[-1].item())
@@ -750,10 +749,10 @@ def jagged_scaled_dot_product_attention(
 
         (
             attention,
-            logsumexp,
-            philox_seed,
-            philox_offset,
-            debug_attn_mask,
+            _logsumexp,
+            _philox_seed,
+            _philox_offset,
+            _debug_attn_mask,
         ) = torch.ops.aten._flash_attention_forward(
             query_buffer_reshaped,
             key_buffer_reshaped,

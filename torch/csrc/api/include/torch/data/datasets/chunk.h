@@ -6,12 +6,11 @@
 #include <torch/data/samplers.h>
 #include <queue>
 #include <thread>
+#include <utility>
 
 #include <torch/serialize.h>
 
-namespace torch {
-namespace data {
-namespace datasets {
+namespace torch::data::datasets {
 
 /// Interface for chunk reader, which performs data chunking and reading of
 /// entire chunks.
@@ -138,7 +137,6 @@ class BatchDataBuffer {
 
     // If we still have data remaining after filling the last pushed batch, add
     // them to the queue too.
-    // NOLINTNEXTLINE(bugprone-infinite-loop)
     while (remaining_size > 0) {
       UnwrappedBatchType current_batch;
 
@@ -213,8 +211,8 @@ class BatchDataBuffer {
     explicit UnwrappedBatchData(UnwrappedBatchType data)
         : batch_data(std::move(data)) {}
 
-    // NOLINTNEXTLINE(modernize-pass-by-value)
-    explicit UnwrappedBatchData(std::exception_ptr e) : exception(e) {}
+    explicit UnwrappedBatchData(std::exception_ptr e)
+        : exception(std::move(e)) {}
 
     /// batch data to return
     UnwrappedBatchType batch_data;
@@ -233,6 +231,7 @@ class BatchDataBuffer {
   std::condition_variable cv_read_;
   std::condition_variable cv_write_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   ExampleSampler& example_sampler_;
 
   // configurable maximun number of elements the queue can hold at one time.
@@ -333,11 +332,10 @@ class ChunkDataset final
       : chunk_reader_(std::move(chunk_reader)),
         chunk_sampler_(std::move(chunk_sampler)),
         example_sampler_(std::move(example_sampler)),
-        options_(std::move(options)),
+        options_(options),
         preprocessing_policy_(std::move(preprocessing_policy)),
         quit_worker_(false),
-        running_preloaders_(0),
-        load_checkpoint_(false) {}
+        running_preloaders_(0) {}
 
   ~ChunkDataset() override {
     // stop batch buffer first.
@@ -496,6 +494,7 @@ class ChunkDataset final
   std::vector<std::thread> preload_threads_;
 
   /// The options the Dataset was configured with.
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const ChunkDatasetOptions options_;
 
   // function pointer wrapper to apply custom processing over chunk data. This
@@ -522,8 +521,6 @@ class ChunkDataset final
 
   // boolean value to indicate whether we need to load the checkpoint for
   // chunk_sampler_.
-  bool load_checkpoint_;
+  bool load_checkpoint_{false};
 };
-} // namespace datasets
-} // namespace data
-} // namespace torch
+} // namespace torch::data::datasets

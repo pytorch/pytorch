@@ -94,7 +94,7 @@ if TEST_NUMBA:
     try:
         import numba.cuda
         TEST_NUMBA_CUDA = numba.cuda.is_available()
-    except Exception as e:
+    except Exception:
         TEST_NUMBA_CUDA = False
         TEST_NUMBA = False
 else:
@@ -152,6 +152,23 @@ def tf32_on(self, tf32_precision=1e-5):
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
         self.precision = old_precision
+
+
+@contextlib.contextmanager
+def tf32_enabled():
+    """
+    Context manager to temporarily enable TF32 for CUDA operations.
+    Restores the previous TF32 state after exiting the context.
+    """
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        with torch.backends.cudnn.flags(
+            enabled=None, benchmark=None, deterministic=None, allow_tf32=True
+        ):
+            yield
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
