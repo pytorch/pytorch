@@ -281,7 +281,7 @@ try:
         # in order to use z3 bitwise ops. We assume that integers are 64 bit.
         def bitwise_lift(func):
             def wrap(a) -> z3.ExprRef:
-                if isinstance(a, z3.ArithRef):
+                if isinstance(a, (z3.ArithRef, z3.BoolRef)):
                     return z3.Int2BV(a, 64)
                 if isinstance(a, (bool, int, sympy.Integer)):
                     return z3.Int2BV(z3.IntVal(int(a)), 64)
@@ -295,7 +295,6 @@ try:
                 else:
                     wrapped_args = tuple(wrap(a) for a in args)
                 # Run the function on the Z3 expressions.
-                breakpoint()
                 return z3.BV2Int(func(*wrapped_args))
 
             return wrapper
