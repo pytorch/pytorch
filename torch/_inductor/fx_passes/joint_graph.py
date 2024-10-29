@@ -10,7 +10,10 @@ import torch._guards
 import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
-from torch.fx.experimental.symbolic_shapes import statically_known_true
+from torch.fx.experimental.symbolic_shapes import (
+    guard_size_oblivious,
+    statically_known_true,
+)
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -31,6 +34,7 @@ from .replace_random import replace_random_passes
 
 
 log = logging.getLogger(__name__)
+early_patterns = PatternMatcherPass()
 patterns = PatternMatcherPass()
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -456,6 +460,9 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         ):
             constant_fold_uniform_value(graph)
 
+    if config.pattern_matcher:
+        count += early_patterns.apply(graph.graph)
+
     # Make sure AutoChunker happens before pad_mm so we don't need
     # to handle padding when searching for chunking patterns.
     if config.AutoChunker.enable:
@@ -571,9 +578,48 @@ def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
-    if size == arg_size:
+    if guard_size_oblivious(size == arg_size):
         node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
         match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.view.default,
+        CallFunction(aten.view.default, KeywordArg("arg"), KeywordArg("size1")),
+        KeywordArg("size2"),
+    ),
+    pass_dict=early_patterns,
+)
+def pointless_view_pair(match: Match, arg, size1, size2):
+    """
+    Remove a pair of views that are pointless.
+    """
+    node = match.output_node()
+    arg_size = list(arg.meta["val"].shape)
+    if guard_size_oblivious(arg_size == size2):
+        node.replace_all_uses_with(arg)
+        match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.permute.default,
+        CallFunction(aten.permute.default, KeywordArg("arg"), KeywordArg("perm1")),
+        KeywordArg("perm2"),
+    ),
+    pass_dict=early_patterns,
+)
+def pointless_permute_pair(match: Match, arg, perm1, perm2):
+    rank = len(perm1)
+    assert len(perm2) == rank
+
+    for i in range(rank):
+        if perm1[perm2[i]] != i:
+            return  # bail out
+    node = match.output_node()
+    node.replace_all_uses_with(arg)
+    match.erase_nodes()
 
 
 # When softmax is used with temperature or other scaling, we get the pattern
