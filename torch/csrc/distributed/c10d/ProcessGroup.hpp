@@ -94,7 +94,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   explicit ProcessGroup(int rank, int size);
 
   explicit ProcessGroup(
-      const c10::intrusive_ptr<::c10d::Store>& store,
+      c10::intrusive_ptr<::c10d::Store> store,
       int rank,
       int size);
   ~ProcessGroup() override;

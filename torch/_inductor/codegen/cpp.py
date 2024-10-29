@@ -1487,18 +1487,21 @@ class CppVecOverrides(CppOverrides):
 
         dtype = result.dtype
         body_code = f"{var}()"
-        body_code_vec = (
-            body_code
-            if result.is_vec
-            else f"{V.kernel._get_vec_type(dtype)}({body_code})"
-        )
+
+        def maskify_or_vecify(code):
+            return (
+                f"{V.kernel._get_mask_type()}::from({code})"
+                if dtype == torch.bool
+                else f"{V.kernel._get_vec_type(dtype)}({code})"
+            )
+
+        if result.is_vec:
+            body_code_vec = body_code
+        else:
+            body_code_vec = maskify_or_vecify(body_code)
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
         # loading bool as VecMask<float, N>
-        other_code_vec = (
-            f"{V.kernel._get_mask_type()}::from({other_code})"
-            if dtype == torch.bool
-            else f"{V.kernel._get_vec_type(dtype)}({other_code})"
-        )
+        other_code_vec = maskify_or_vecify(other_code)
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec:
             code = BracesBuffer()
@@ -3088,7 +3091,12 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}];"
+            cpp_dtype = DTYPE_TO_CPP[dtype]
+            # tiling_factor might be smaller than the alignment of cpp_dtype, such as
+            # with a vector that only holds 4 elements due to NEON 128-bit vectors and
+            # cpp_dtype being a 64-bit integer.
+            alignas = f"alignas(std::max(std::size_t({factor}), alignof({cpp_dtype})))"
+            define_line = f"{alignas} {cpp_dtype} {tile_var}[{factor}*{factor}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -3366,15 +3374,14 @@ class TilingSelect:
                             group[tiling_indices[0]],
                         ]
                     )
-                    and group[tiling_indices[0]] < tiling_factor / 2
+                    and group[tiling_indices[0]] < tiling_factor / 4
+                    and op_num < 10
                 ):
-                    # For case of Multi Thread AMP Static shape of pyhpc_isoneutral_mixing,
-                    # the inner loop range doesn't have enough elements to do vectorization
-                    # explicitly and found that `#pragma GCC ivdep` has better performance than
-                    # `#pragma omp simd simdlen(8)`. Disable vectorization for this case.
-                    # <TODO> Leslie: maybe we can always disable vectorization when loop range is less
-                    # than tiling factor and enable `#pragma omp simd simdlen(8)` for scalar kernel
-                    # when needed.
+                    # We found that when the number of elements in the inner loop range is
+                    # relatively small(< tiling_factor / 4) and the number of operations is
+                    # not large(< 10), vectorization is not efficient.
+                    # And found that `#pragma GCC ivdep` has better performance than
+                    # `#pragma omp simd simdlen(8)` for these cases.
                     return [], []
 
             if dtype in DTYPE_LOWP_FP:
@@ -3736,7 +3743,11 @@ class CppKernelProxy(CppKernel):
                     tail_loop.simd_vec = True
                 else:
                     tail_loop.set_kernel(scalar_kernel)
-                    tail_loop.simd_omp = True
+                    if tail_loop.size - tail_loop.offset >= tiling_factors[0] // 2:
+                        # We found that `#pragma GCC ivdep` has better performance than
+                        # `#pragma omp simd simdlen(8)` for some models, such as
+                        # pyhpc_isoneutral_mixing and pyhpc_turbulent_kinetic_energy.
+                        tail_loop.simd_omp = True
                 # We chop the loop into two cubes by the nelements - main loop and tail loop.
                 # Regarding the main loop, it is straightforward that it could be vectorized with
                 # nelements. But for the tail loop, it still could be vectorized. For example,
