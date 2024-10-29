@@ -74,6 +74,7 @@ from torch.testing._internal.common_utils import (
     skipIfMps,
     skipIfNoLapack,
     skipIfTorchDynamo,
+    skipIfWindows,
     slowTest,
     TestCase,
     xfailIfTorchDynamo,
@@ -4591,6 +4592,96 @@ SinBackward0, MulBackward0, torch::autograd::AccumulateGrad
             "expects the current backward to be executed with multithreading disabled",
         ):
             t.backward()
+
+    @skipIfWindows(msg="node name demangling inconsistent on windows")
+    def test_backward_hook_relative_ordering(self):
+        order = []
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        x = torch.randn(10, 10, requires_grad=True)
+        module = MyModule()
+        module.register_full_backward_hook(
+            lambda _1, _2, _3: order.append(
+                "module_full_backward_hook_BackwardHookFunctionBackward0"
+            )
+        )
+
+        def make_pre_hook(id):
+            return lambda _: order.append(f"pre_hook_{id}")
+
+        def make_post_hook(id):
+            return lambda _1, _2: order.append(f"post_hook_{id}")
+
+        count = 0
+
+        def register_hooks_on_all_nodes(nodes):
+            nonlocal count
+            for node, _ in nodes:
+                count += 1
+                id = f"{node.name()}_{count}"
+                node.register_prehook(make_pre_hook(id))
+                node.register_hook(make_post_hook(id))
+                register_hooks_on_all_nodes(node.next_functions)
+
+        loss = module(x).sum()
+        register_hooks_on_all_nodes(((loss.grad_fn, None),))
+
+        def make_tensor_pre_hook(id):
+            return lambda _: order.append(f"tensor_pre_hook_{id}")
+
+        def make_post_acc_grad_hook(id):
+            return lambda _: order.append(f"post_acc_grad_hook_{id}")
+
+        x.register_hook(make_tensor_pre_hook("x"))
+        module.linear.weight.register_hook(make_tensor_pre_hook("weight"))
+        module.linear.bias.register_hook(make_tensor_pre_hook("bias"))
+
+        x.register_post_accumulate_grad_hook(make_post_acc_grad_hook("x"))
+        module.linear.weight.register_post_accumulate_grad_hook(
+            make_post_acc_grad_hook("weight")
+        )
+        module.linear.bias.register_post_accumulate_grad_hook(
+            make_post_acc_grad_hook("bias")
+        )
+
+        loss.backward()
+
+        expected_order = [
+            "pre_hook_SumBackward0_1",
+            "post_hook_SumBackward0_1",
+            "pre_hook_BackwardHookFunctionBackward_2",
+            "post_hook_BackwardHookFunctionBackward_2",
+            "pre_hook_AddmmBackward0_3",
+            "post_hook_AddmmBackward0_3",
+            "tensor_pre_hook_bias",
+            "pre_hook_torch::autograd::AccumulateGrad_4",
+            "post_acc_grad_hook_bias",
+            "post_hook_torch::autograd::AccumulateGrad_4",
+            "pre_hook_TBackward0_7",
+            "post_hook_TBackward0_7",
+            "tensor_pre_hook_weight",
+            "pre_hook_torch::autograd::AccumulateGrad_8",
+            "post_acc_grad_hook_weight",
+            "post_hook_torch::autograd::AccumulateGrad_8",
+            "pre_hook_BackwardHookFunctionBackward_5",
+            "module_full_backward_hook_BackwardHookFunctionBackward0",
+            "post_hook_BackwardHookFunctionBackward_5",
+            "tensor_pre_hook_x",
+            "pre_hook_torch::autograd::AccumulateGrad_6",
+            "post_acc_grad_hook_x",
+            "post_hook_torch::autograd::AccumulateGrad_6",
+        ]
+
+        self.assertEqual(len(expected_order), len(order))
+        for expected, actual in zip(expected_order, order):
+            self.assertEqual(expected, actual)
 
     def test_view_replay_enabled(self):
         def f(x):
