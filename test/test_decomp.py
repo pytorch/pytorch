@@ -592,6 +592,29 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
+    def test_bernoulli_p(self, device):
+        p = 0.3
+        input_t = torch.rand(100,100)
+        torch.manual_seed(123)
+        ref = torch.ops.aten.bernoulli.p(input_t, p)
+        torch.manual_seed(123)
+        res = torch._inductor.decomposition.bernoulli_p(input_t, p)
+        ref_p = ref.sum()/torch.prod(torch.tensor(ref.size()))
+        res_p = res.sum()/torch.prod(torch.tensor(res.size()))
+        self.assertEqual(ref_p, res_p, atol=0.01*p, rtol=0.01)
+
+    def test_bernoulli_default(self, device):
+        p = 0.3
+        p_t = p*torch.ones(5,5)
+        torch.manual_seed(123)
+        ref = torch.ops.aten.bernoulli.default(p_t)
+        torch.manual_seed(123)
+        res = torch._inductor.decomposition.bernoulli(p_t)
+        ref_p = ref.sum()/torch.prod(torch.tensor(ref.size()))
+        res_p = res.sum()/torch.prod(torch.tensor(res.size()))
+        self.assertEqual(ref_p, res_p, atol=0.01*p, rtol=0.01)
+
+
     def test_broadcasting_index_copy(self, device):
         x = torch.zeros([1, 10], device=device)
         xs = torch.ones([2, 10], device=device)
