@@ -376,6 +376,11 @@ struct ExpandableSegment {
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
         &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
   }
+  ExpandableSegment(const ExpandableSegment&) = delete;
+  ExpandableSegment(ExpandableSegment&&) = delete;
+  ExpandableSegment operator=(const ExpandableSegment&) = delete;
+  ExpandableSegment operator=(ExpandableSegment&&) = delete;
+
   // begin must be aligned to segment_size_.
   // returns the actual range mapped, which may be
   // greater than requested if size is not aligned to segment_size_.
@@ -820,6 +825,9 @@ struct PrivatePool {
   PrivatePool(const PrivatePool&) = delete;
   PrivatePool(PrivatePool&&) = delete;
   PrivatePool& operator=(const PrivatePool&) = delete;
+  PrivatePool& operator=(PrivatePool&&) = delete;
+  ~PrivatePool() = default;
+
   // Number of live graphs using this pool
   int use_count{1};
   // Number of unfreed cudaMallocs made for this pool. When use_count and
@@ -1948,9 +1956,9 @@ class DeviceCachingAllocator {
       segment_info.is_expandable = head_block->expandable_segment_;
       segment_info.context_when_allocated =
           head_block->context_when_segment_allocated;
-      auto mempool_id = pool_to_id.find(head_block->pool->owner_PrivatePool);
-      if (mempool_id != pool_to_id.end()) {
-        segment_info.owner_private_pool_id = mempool_id->second;
+      auto id = pool_to_id.find(head_block->pool->owner_PrivatePool);
+      if (id != pool_to_id.end()) {
+        segment_info.owner_private_pool_id = id->second;
       }
 
       const Block* block = head_block;
