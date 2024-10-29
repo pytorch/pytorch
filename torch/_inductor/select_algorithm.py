@@ -1095,7 +1095,10 @@ class DataProcessorChoiceCallerWrapper:
     def __getattr__(self, name):
         return getattr(self._wrapped, name)
 
-    def benchmark(self, *args, out) -> float:
+    def benchmark(self, *args, out, workspace: Optional[torch.Tensor]) -> float:
+        assert (
+            workspace is None
+        ), "DataProcessorChoiceCallerWrapper does not support workspace"
         new_args, new_out = self._preprocessor(args, out)
         result = self._wrapped.benchmark(*new_args, out=new_out)
         new_out = self._postprocessor(new_out)
