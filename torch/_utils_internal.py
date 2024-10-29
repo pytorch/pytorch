@@ -4,7 +4,6 @@ import logging
 import os
 import sys
 import tempfile
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 from typing_extensions import ParamSpec
 
@@ -172,30 +171,55 @@ def capture_pre_autograd_graph_using_training_ir() -> bool:
     return False
 
 
-@dataclass
 class JustKnobsConfig:
-    """Represents a lazily loaded justknob config
+    """Represents a lazily loaded config
 
     This is designed to be used to specify a value in a config.
 
-    i.e.
-    foo = JustknobsConfig(name="//foo:bar")
-    install_config_module(...)
+    i.e. foo.bar = JustknobsConfig(name="//foo:bar", env_name="FORCE_FOO_BAR")
 
-    This configs must be installed with install_config_module to be used
+    Call .get() in order to access the value
+    i.e. if foo.bar.get():
 
-    Arguments:
-        name is the name of the feature / JK. In OSS this is unused.
-        defaults is the value to default this knob to in OSS.
+    Note that the value is fetched once, and then not allowed to change. This
+    means less suprises, at the downside that you may have to restart a job
+    to pick up an update.
 
-    The semantics of this knob, are if no one has manually set it, it will resolve once to the underlying JK value.
-    It will not change the JK value at runtime. If the knob has been manually set, it will ignore JK and use the manually set value.
-    Similarly, if this is a OSS run, there is no JK, and it'll return the default value
+    It can also be set explicitly via set - i.e.
+    foo.bar = JustknobsConfig(name="//foo:bar")
+    foo.bar.set(True)
 
+    Note that this does allow for no JK name (so that you can use this to replace old configurations).
     """
 
-    name: Optional[str] = None
-    default: bool = True
+    def __init__(
+        self, *, name: Optional[str] = None, env_name=None, default: bool = True
+    ):
+        self.name = name
+        self.env_name = env_name
+        self.default = default
+        self.value: Optional[bool] = None
+        self.executed_value = None
+
+    def set(self, value: bool):
+        self.value = value
+
+    def get(self):
+        if self.executed_value is None:
+            self.executed_value = justknobs_feature(
+                self.name,
+                config_value=self.value,
+                env_name=self.env_name,
+                default=self.default,
+            )
+        return self.executed_value
+
+    def __str__(self):
+        v = bool(self)
+        return f"JustknobsConfig(name={self.name}, env_name={self.env_name}, default={self.default} - evals_to={v})"
+
+    def __bool__(self):
+        return self.get()
 
 
 def justknobs_feature(
