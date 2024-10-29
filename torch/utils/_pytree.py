@@ -449,7 +449,7 @@ _T_co = TypeVar("_T_co", covariant=True)
 
 
 # Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
-class structseq(Tuple[_T_co]):
+class structseq(Tuple[_T_co, ...]):
     """A generic type stub for CPython's ``PyStructSequence`` type."""
 
     n_fields: Final[int]  # type: ignore[misc]
