@@ -333,7 +333,11 @@ void gemm(
    }
 #endif
 #if AT_MKLDNN_ENABLED()
-   if (mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   const bool bf16_gemv_trans_fast_path_would_be_beneficial = cpuinfo_initialize() && !cpuinfo_has_x86_avx512bf16();
+   const bool use_bf16_gemv_trans =
+     bf16_gemv_trans_fast_path_would_be_beneficial && transa == TransposeType::Transpose &&
+     transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
+   if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
