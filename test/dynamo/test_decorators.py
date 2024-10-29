@@ -687,6 +687,20 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out1, inp + 2)
         self.assertEqual(out2, inp + 2)
 
+    def test_set_stance_fail_on_recompile_with_disable(self):
+        @torch.compiler.disable
+        def inner(x):
+            return x
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return inner(x)
+
+        f(torch.randn(3, 3))
+        # should not raise error
+        with torch.compiler.set_stance("fail_on_recompile"):
+            f(torch.randn(3, 3))
+
     def test_set_stance_forbid_in_graph(self):
         @torch.compiler.set_stance("force_eager")
         def a(x):

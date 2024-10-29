@@ -167,6 +167,8 @@ def _callback_from_stance(callback):
         # run mode
         return False
     elif _stance.stance == "fail_on_recompile":
+        if callback is False or callback is None:
+            return callback
 
         def fail_callback(*args, **kwargs):
             raise RuntimeError(
