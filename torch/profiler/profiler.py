@@ -245,7 +245,7 @@ class _KinetoProfile:
             fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
             fp.close()
             retvalue = self.profiler.export_chrome_trace(fp.name)
-            with open(fp.name, 'rb') as fin:
+            with open(fp.name, "rb") as fin:
                 with gzip.open(path, "wb") as fout:
                     fout.writelines(fin)
             os.remove(fp.name)
