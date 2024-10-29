@@ -237,11 +237,14 @@ class UnflattenedModule(torch.nn.Module):
         self.ivals = _IVals()
         # record any intermediate value x that is used, with the modules that used it,
         # and generate instructions to read the corresponding attribute
-        seen_modules = _outline_submodules(export_graph, self)
+        seen_modules, seen_attrs = _outline_submodules(export_graph, self)
         # for each read intermediate value x, find the module that created it,
         # and generate instructions to update the corresponding attribute;
         # finally, initialize all these attributes
         self.ivals.create(seen_modules.values())
+        # move attributes that correspond to graph arguments for HOPs
+        # from exported program to unflattened submodules
+        _copy_graph_attrs(export_module._graph_module, self, seen_attrs)
 
         self.range_constraints = export_module.range_constraints
         self.equality_constraints: List = []
@@ -760,6 +763,7 @@ class _ModuleFrame:
         nodes: Tuple[torch.fx.Node, ...],
         seen_nodes,
         seen_modules,
+        seen_attrs,
         parent,
         module_stack: List[Tuple[str, int]],
         module_id,
@@ -770,6 +774,7 @@ class _ModuleFrame:
         self.nodes = nodes
         self.seen_nodes = seen_nodes
         self.seen_modules = seen_modules
+        self.seen_attrs = seen_attrs
         self.parent = parent
         self.module_stack = module_stack
         self.module_id = module_id
@@ -1135,6 +1140,7 @@ class _ModuleFrame:
                     self.nodes,
                     self.seen_nodes,
                     self.seen_modules,
+                    self.seen_attrs,
                     self,
                     self.module_stack + [next_module],
                     next_module_key.split("@")[0],
@@ -1146,6 +1152,11 @@ class _ModuleFrame:
             # The only remaining possibility is that we are in the right stack
             # frame. Copy the node into this frame's graph and increment the node counter.
             assert node_module_stack == self.module_stack
+
+            if node.op == "get_attr":
+                # this must be a graph argument for a HOP
+                self.seen_attrs[self.child_fqn].add(node.target)
+
             self.copy_node(node)
             node_idx += 1
 
@@ -1163,11 +1174,13 @@ class _SubmoduleEntry:
 def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModule):
     seen_nodes: Dict[str, torch.fx.Node] = {}
     seen_modules: Dict[int, List[_SubmoduleEntry]] = defaultdict(list)
+    seen_attrs: Dict[str, Set[str]] = defaultdict(set)
     _ModuleFrame(
         orig_graph,
         tuple(orig_graph.nodes),
         seen_nodes,
         seen_modules,
+        seen_attrs,
         None,
         [("", 0)],
         "",
@@ -1178,7 +1191,7 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
         },
         module=root_module,
     ).run_outer()
-    return seen_modules
+    return seen_modules, seen_attrs
 
 
 def _reorder_submodules(
@@ -1301,6 +1314,18 @@ class _IVals:
                     ival_name,
                     self.storage[name],
                 )
+
+
+def _copy_graph_attrs(
+    gm: torch.fx.GraphModule,
+    root_module: UnflattenedModule,
+    seen_attrs: Dict[str, Set[str]],
+):
+    for child_fqn, names in seen_attrs.items():
+        module = _get_attr(root_module, child_fqn) if child_fqn else root_module
+        for name in names:
+            val = getattr(gm, name)
+            setattr(module, name, val)
 
 
 def _deduplicate_modules(partitions):
