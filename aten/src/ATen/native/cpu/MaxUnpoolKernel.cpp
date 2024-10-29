@@ -37,7 +37,10 @@ void cpu_max_unpool(
 
   // treat batch size and channels as one dimension
   // and the feature map as another dimension
-  [[maybe_unused]] int64_t channels, output_depth, output_height, output_width;
+  int64_t channels = 0;
+  [[maybe_unused]] int64_t output_depth = 0;
+  [[maybe_unused]] int64_t output_height = 0;
+  [[maybe_unused]] int64_t output_width = 0;
   if constexpr (is_3d) {
     TORCH_CHECK(ndim == 4 || ndim == 5, "MaxUnpool3d: expect input to be 4d or 5d tensor.");
     channels = ndim == 4 ? input.size(0) : input.size(0) * input.size(1);
@@ -80,11 +83,11 @@ void cpu_max_unpool(
 
   if (optional_error_index) {
     if constexpr (is_3d) {
-      AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
+      TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
           " (output volumes are of size ", output_depth,
           "x", output_height, "x", output_width);
     } else {
-      AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
+      TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
           " (output volumes are of size ", output_height,
           "x", output_width);
     }
@@ -148,7 +151,7 @@ void cpu_max_unpool_channels_last(
   });
 
   if (optional_error_index) {
-    AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
+    TORCH_CHECK(false, "Found an invalid max index: ", optional_error_index.value(),
         " (output volumes are of size ", output_height,
         "x", output_width, ")");
   }
@@ -174,7 +177,10 @@ void cpu_max_unpool_backward(
 
   // treat batch size and channels as one dimension
   // and the feature map as another dimension
-  int64_t channels, output_depth, output_height, output_width;
+  int64_t channels = 0;
+  [[maybe_unused]] int64_t output_depth = 0;
+  [[maybe_unused]] int64_t output_height = 0;
+  [[maybe_unused]] int64_t output_width = 0;
   if (is_3d) {
     TORCH_CHECK(ndim == 4 || ndim == 5, "MaxUnpool3d_backward: expect grad_output to be 4d or 5d tensor.");
     channels = ndim == 4 ? grad_output.size(0) : grad_output.size(0) * grad_output.size(1);
@@ -217,12 +223,12 @@ void cpu_max_unpool_backward(
 
   if (optional_error_index) {
     if (is_3d) {
-      AT_ERROR("invalid max index ", optional_error_index.value(),
+      TORCH_CHECK(false, "invalid max index ", optional_error_index.value(),
           ", odepth= ", output_depth,
           ", owidth= ", output_width,
           ", oheight= ", output_height);
     } else {
-      AT_ERROR("invalid max index ", optional_error_index.value(),
+      TORCH_CHECK(false, "invalid max index ", optional_error_index.value(),
           ", owidth= ", output_width,
           ", oheight= ", output_height);
     }

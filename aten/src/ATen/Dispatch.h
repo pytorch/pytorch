@@ -38,11 +38,9 @@ inline constexpr bool should_include_kernel_dtype(
  * binary.
  */
 #if defined ENABLE_RECORD_KERNEL_FUNCTION_DTYPE
-namespace at {
-namespace detail {
+namespace at::detail {
 TORCH_API void record_kernel_function_dtype(std::string name);
-}
-} // namespace at
+} // namespace at::detail
 
 #define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type) \
   at::detail::record_kernel_function_dtype(           \
@@ -55,7 +53,8 @@ TORCH_API void record_kernel_function_dtype(std::string name);
   do {                                                \
     if constexpr (!at::should_include_kernel_dtype(   \
                       at_dispatch_name, enum_type)) { \
-      AT_ERROR(                                       \
+      TORCH_CHECK(                                    \
+          false,                                      \
           "dtype '",                                  \
           toString(enum_type),                        \
           "' not selected for kernel tag ",           \
@@ -63,38 +62,38 @@ TORCH_API void record_kernel_function_dtype(std::string name);
     }                                                 \
   } while (0)
 
-#define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...)           \
-  case enum_type: {                                                     \
-    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                        \
-    using HINT C10_UNUSED = c10::impl::ScalarTypeToCPPTypeT<enum_type>; \
-    return __VA_ARGS__();                                               \
+#define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...)                 \
+  case enum_type: {                                                           \
+    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                              \
+    using HINT [[maybe_unused]] = c10::impl::ScalarTypeToCPPTypeT<enum_type>; \
+    return __VA_ARGS__();                                                     \
   }
 
 #define AT_DISPATCH_CASE(enum_type, ...) \
   AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, scalar_t, __VA_ARGS__)
 
-#define AT_DISPATCH_CASE_QINT(enum_type, scalar_type, ...)            \
-  case enum_type: {                                                   \
-    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                      \
-    using scalar_t = scalar_type;                                     \
-    using underlying_t C10_UNUSED = typename scalar_t::underlying;    \
-    const auto& SCALAR_TYPE C10_UNUSED = enum_type;                   \
-    const auto& UNDERLYING_TYPE C10_UNUSED = toUnderlying(enum_type); \
-    return __VA_ARGS__();                                             \
+#define AT_DISPATCH_CASE_QINT(enum_type, scalar_type, ...)                  \
+  case enum_type: {                                                         \
+    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                            \
+    using scalar_t = scalar_type;                                           \
+    using underlying_t [[maybe_unused]] = typename scalar_t::underlying;    \
+    [[maybe_unused]] const auto& SCALAR_TYPE = enum_type;                   \
+    [[maybe_unused]] const auto& UNDERLYING_TYPE = toUnderlying(enum_type); \
+    return __VA_ARGS__();                                                   \
   }
 
-#define AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                           \
-    enum_type, scalar_type, bitwidth, qmin, qmax, ...)                \
-  case enum_type: {                                                   \
-    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                      \
-    using scalar_t = scalar_type;                                     \
-    using underlying_t C10_UNUSED = typename scalar_t::underlying;    \
-    const auto& SCALAR_TYPE C10_UNUSED = enum_type;                   \
-    const auto& UNDERLYING_TYPE C10_UNUSED = toUnderlying(enum_type); \
-    C10_UNUSED int bit_width = bitwidth;                              \
-    C10_UNUSED int64_t quant_min = qmin;                              \
-    C10_UNUSED int64_t quant_max = qmax;                              \
-    return __VA_ARGS__();                                             \
+#define AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                 \
+    enum_type, scalar_type, bitwidth, qmin, qmax, ...)                      \
+  case enum_type: {                                                         \
+    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                            \
+    using scalar_t = scalar_type;                                           \
+    using underlying_t [[maybe_unused]] = typename scalar_t::underlying;    \
+    [[maybe_unused]] const auto& SCALAR_TYPE = enum_type;                   \
+    [[maybe_unused]] const auto& UNDERLYING_TYPE = toUnderlying(enum_type); \
+    [[maybe_unused]] int bit_width = bitwidth;                              \
+    [[maybe_unused]] int64_t quant_min = qmin;                              \
+    [[maybe_unused]] int64_t quant_max = qmax;                              \
+    return __VA_ARGS__();                                                   \
   }
 
 namespace detail {
@@ -220,7 +219,8 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
     switch (_st) {                                                          \
       __VA_ARGS__                                                           \
       default:                                                              \
-        AT_ERROR(                                                           \
+        TORCH_CHECK(                                                        \
+            false,                                                          \
             '"',                                                            \
             at_dispatch_name,                                               \
             "\" not implemented for '",                                     \

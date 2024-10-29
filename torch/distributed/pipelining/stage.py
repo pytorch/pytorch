@@ -695,6 +695,15 @@ class _PipelineStageBase(ABC):
                 self.grads_input = grads_input
                 # Save a placeholder for the dw_runner
                 self.dw_runner[bwd_chunk_id] = lambda: None
+
+        if self.is_last:
+            # Autograd dependencies:
+            #    rest_of_autograd_graph -> stage_output -> loss
+            # stage_output is no longer used in the last stage for backward and only needed
+            # to return to the user in merge_output_chunks, therefore
+            # this should be detached to release autograd graph context and free memory earlier
+            for t in stage_output:
+                t.detach_()
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
     def backward_weight_one_chunk(self, bwd_chunk_id: int):
@@ -719,7 +728,7 @@ class _PipelineStageBase(ABC):
                     "param_groups": param_groups,
                     "full_backward": False,
                 }
-                weight_grads, _ = self.backward_maybe_with_nosync("weight", bwd_kwargs)
+                self.backward_maybe_with_nosync("weight", bwd_kwargs)
             else:
                 # TODO: figure out a better way to do this:
                 # if inputs does not require gradient,
@@ -1320,9 +1329,8 @@ class PipelineStage(_PipelineStageBase):
                 else dist.get_global_rank(self.group, peer_rank)
             )
 
-        # TODO: we name this 'stage' but we really mean 'rank'! this is bad!
-        self.prev_stage = stage_global_rank((self.group_rank - 1) % self.group_size)
-        self.next_stage = stage_global_rank((self.group_rank + 1) % self.group_size)
+        self.prev_rank = stage_global_rank((self.group_rank - 1) % self.group_size)
+        self.next_rank = stage_global_rank((self.group_rank + 1) % self.group_size)
 
         dbg_str = (
             f"Finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
@@ -1370,7 +1378,7 @@ class PipelineStage(_PipelineStageBase):
                 self.stage_index - 1,
             )
             dist.recv_object_list(
-                objects, src=self.prev_stage, group=self.group, device=self.device
+                objects, src=self.prev_rank, group=self.group, device=self.device
             )
             recv_args = objects[0]
             assert isinstance(recv_args, tuple), type(recv_args)
@@ -1425,7 +1433,7 @@ class PipelineStage(_PipelineStageBase):
             )
             dist.send_object_list(
                 [outputs_meta],
-                dst=self.next_stage,
+                dst=self.next_rank,
                 group=self.group,
                 device=self.device,
             )
@@ -1520,15 +1528,15 @@ class PipelineStage(_PipelineStageBase):
         send_tensor = torch.ones(1, device="cuda")
         # forward
         if not self.is_first:
-            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.prev_stage, self.group))
+            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.prev_rank, self.group))
         if not self.is_last:
-            ops.append(dist.P2POp(dist.isend, send_tensor, self.next_stage, self.group))
+            ops.append(dist.P2POp(dist.isend, send_tensor, self.next_rank, self.group))
 
         # backward
         if not self.is_first:
-            ops.append(dist.P2POp(dist.isend, send_tensor, self.prev_stage, self.group))
+            ops.append(dist.P2POp(dist.isend, send_tensor, self.prev_rank, self.group))
         if not self.is_last:
-            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.next_stage, self.group))
+            ops.append(dist.P2POp(dist.irecv, recv_tensor, self.next_rank, self.group))
 
         return True
 
@@ -1604,13 +1612,13 @@ def _validate_stage_shapes(pipeline_stages: List[PipelineStage]):
         ]
 
         logger.debug(
-            f"Rank: {pg_rank}"  # noqa: G004
-            f"Stage id: {stage_id}"
-            f"Stage num stages: {stage.num_stages}"
-            f"Stage rank: {rank}"
-            f"Stage world size: {world_size}"
-            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} input shapes: {stage_input_shapes}"  # noqa: G003
-            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} output shapes: {stage_output_shapes}"  # noqa: G003
+            f"Rank: {pg_rank}",  # noqa: G004
+            f"Stage id: {stage_id}",
+            f"Stage num stages: {stage.num_stages}",
+            f"Stage rank: {rank}",
+            f"Stage world size: {world_size}",
+            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} input shapes: {stage_input_shapes}",  # noqa: G003
+            f"Stage {virtual_id * world_size}-{(virtual_id + 1) * world_size - 1} output shapes: {stage_output_shapes}",  # noqa: G003
         )
 
         all_inputs.extend(stage_input_shapes)

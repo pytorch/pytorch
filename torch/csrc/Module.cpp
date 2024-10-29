@@ -42,6 +42,7 @@
 #include <ATen/ThreadLocalPythonObjects.h>
 #include <torch/csrc/DataLoader.h>
 #include <torch/csrc/Device.h>
+#include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Event.h>
@@ -1733,6 +1734,7 @@ PyObject* initModule() {
 #endif
   torch::mtia::initModule(module);
   torch::cpu::initModule(module);
+  torch::accelerator::initModule(module);
   torch::instruction_counter::initModule(module);
   torch::initVerboseBindings(module);
   ASSERT_TRUE(THPStorage_init(module));
@@ -2079,7 +2081,8 @@ Call this whenever a new thread is created in order to propagate values from
 
   py::enum_<at::BlasBackend>(py_module, "_BlasBackend")
       .value("Cublas", at::BlasBackend::Cublas)
-      .value("Cublaslt", at::BlasBackend::Cublaslt);
+      .value("Cublaslt", at::BlasBackend::Cublaslt)
+      .value("Ck", at::BlasBackend::Ck);
 
   py_module.def("_set_blas_preferred_backend", [](at::BlasBackend b) {
     at::globalContext().setBlasPreferredBackend(b);
@@ -2366,6 +2369,23 @@ Call this whenever a new thread is created in order to propagate values from
       "DisableTorchFunction",
       (PyObject*)THPModule_DisableTorchFunctionType(),
       /* incref= */ false));
+  py::enum_<at::impl::TorchFunctionDisabledState>(
+      py_module, "_TorchFunctionState")
+      .value("ENABLED", at::impl::TorchFunctionDisabledState::ENABLED)
+      .value(
+          "SUBCLASSES_DISABLED",
+          at::impl::TorchFunctionDisabledState::SUBCLASSES_DISABLED)
+      .value(
+          "ALL_DISABLED", at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+
+  py_module.def(
+      "_set_torch_function_state",
+      [](at::impl::TorchFunctionDisabledState state) {
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(state);
+      });
+  py_module.def("_get_torch_function_state", []() {
+    return at::impl::PythonTorchFunctionTLS::get_disabled_state();
+  });
   torch::set_disabled_torch_function_impl(
       PyObject_GetAttrString(module, "_disabled_torch_function_impl"));
   ASSERT_TRUE(torch::disabled_torch_function_impl() != nullptr);

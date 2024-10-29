@@ -753,11 +753,11 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
 namespace {
 #ifdef _MSC_VER
 template<typename T>
-inline typename std::enable_if<std::is_integral<T>::value, bool>::type isnan_(T x) {
+inline std::enable_if_t<std::is_integral_v<T>, bool> isnan_(T x) {
   return false;
 }
 template<typename T>
-inline typename std::enable_if<!std::is_integral<T>::value, bool>::type isnan_(T x) {
+inline std::enable_if_t<!std::is_integral_v<T>, bool> isnan_(T x) {
   return std::isnan(x);
 }
 #else
@@ -931,7 +931,7 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
   bool is_kBool = (self.dtype() == at::kBool);
   n = n > self.sym_size(dim) ? self.sym_size(dim).guard_int(__FILE__, __LINE__) : n;
 
-  for (C10_UNUSED const auto i : c10::irange(n)) {
+  for ([[maybe_unused]] const auto i : c10::irange(n)) {
     if (is_kBool) {
       result = at::logical_xor(
         at::narrow_symint(result, dim, 1, out_len),
@@ -2255,7 +2255,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
             return;
         }
         char* self_data = data[0];
-        for (C10_UNUSED const auto i : c10::irange(dim_size)) {
+        for ([[maybe_unused]] const auto i : c10::irange(dim_size)) {
           if (isnan_(c10::load<scalar_t>(self_data))) {
             result = false;
             return;
@@ -2282,7 +2282,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       }
       char* self_data = data[0];
       char* other_data = data[1];
-      for (C10_UNUSED const auto i : c10::irange(dim_size)) {
+      for ([[maybe_unused]] const auto i : c10::irange(dim_size)) {
         if (c10::load<scalar_t>(self_data) != c10::load<scalar_t>(other_data)) {
           result = false;
           return;
