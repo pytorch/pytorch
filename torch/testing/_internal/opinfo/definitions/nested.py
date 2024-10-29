@@ -132,7 +132,6 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 def reduction_reference(op, sample):
     assert sample.input.is_nested
     dim = sample.kwargs.get("dim", None)
-    keepdim = sample.kwargs.get("keepdim", False)
     assert dim != 0, "reductions over the batch dim are not supported"
     assert "dims" not in sample.kwargs
     assert sample.input._ragged_idx == 1
@@ -384,7 +383,7 @@ def sample_inputs_matmul(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[3]
     ):
         # (B, j1, D) x (D, E) => (B, j1, E)
-        B, D = njt_3d.shape[0], njt_3d.shape[-1]
+        D = njt_3d.shape[-1]
         E = D + 2
         yield SampleInput(
             njt_3d.clone().detach(),
@@ -396,7 +395,7 @@ def sample_inputs_matmul(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[4]
     ):
         # (B, j1, D, E) x (E, F) => (B, j1, D, F)
-        B, E = njt_4d.shape[0], njt_4d.shape[-1]
+        E = njt_4d.shape[-1]
         F = E + 2
         yield SampleInput(
             njt_4d.clone().detach(),

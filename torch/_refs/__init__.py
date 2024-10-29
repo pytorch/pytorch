@@ -285,6 +285,7 @@ __all__ = [
     "native_group_norm",
     "native_layer_norm",
     "permute",
+    "permute_copy",
     "ravel",
     "repeat",
     "reshape",
@@ -4031,7 +4032,10 @@ def _index_fill(
         )  # type: ignore[arg-type]
     else:
         value = torch.scalar_tensor(
-            value, dtype=x.dtype, layout=x.layout, device=x.device  # type: ignore[arg-type]
+            value,
+            dtype=x.dtype,
+            layout=x.layout,
+            device=x.device,  # type: ignore[arg-type]
         )
 
     # index_copy has some unnecessary preconditions when x is a scalar. We do this to work through them
@@ -4068,7 +4072,10 @@ def index_add(
 ):
     # index_add always returns a new contiguous tensor
     return x.clone(memory_format=torch.contiguous_format).index_add_(
-        dim, index, tensor, alpha=alpha  # type: ignore[arg-type]
+        dim,
+        index,
+        tensor,
+        alpha=alpha,  # type: ignore[arg-type]
     )
 
 
@@ -6208,6 +6215,12 @@ def _dot_check(self, other):
         lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
     )
 
+    torch._check(
+        self.dtype == other.dtype,
+        lambda: "dot : expected both vectors to have same dtype, but found "
+        f"{self.dtype} and {other.dtype}",
+    )
+
     def numel_error():
         return (
             f"inconsistent tensor size, expected tensor [{self.numel()}] and src [{other.numel()}] to have the"
@@ -6217,8 +6230,18 @@ def _dot_check(self, other):
     torch._check(self.numel() == other.numel(), numel_error)
 
 
+def _dot_check_wrapper(fn):
+    @wraps(fn)
+    def wrapper(self, other):
+        _dot_check(self, other)
+        return fn(self, other)
+
+    return wrapper
+
+
 @register_decomposition(aten.dot)
 @out_wrapper()
+@_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -6233,12 +6256,12 @@ def dot(self, other):
         elif other.is_conj():
             return torch.vdot(other.conj(), self)
 
-    _dot_check(self, other)
     return (self * other).sum()
 
 
 @register_decomposition(aten.vdot)
 @out_wrapper()
+@_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -6255,7 +6278,6 @@ def vdot(self, other):
     elif other.is_conj():
         return torch.dot(self, other.conj()).conj()
 
-    _dot_check(self, other)
     # The decomposition fails if you do self.conj()... not sure why
     return (self.conj_physical() * other).sum()
 
@@ -6378,6 +6400,7 @@ expand_copy = _make_copy_from_view(aten.expand)
 # no sparse support. See narrow_copy_sparse in core.
 narrow_copy = _make_copy_from_view(aten.narrow)
 squeeze_copy = _make_copy_from_view(aten.squeeze)
+permute_copy = _make_copy_from_view(aten.permute)
 t_copy = _make_copy_from_view(aten.t)
 transpose_copy = _make_copy_from_view(aten.transpose)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)

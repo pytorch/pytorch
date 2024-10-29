@@ -673,9 +673,7 @@ class ComboKernel(Kernel):
             "signature": signature_to_meta(
                 signature, size_dtype=size_dtype, argdefs=argdefs
             ),
-            "device": DeviceProperties.create(
-                V.graph.scheduler.get_current_device_or_throw()
-            ),
+            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -918,10 +916,11 @@ class ComboKernel(Kernel):
                         symval_hint = 0
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
-                    device = V.graph.scheduler.get_current_device_or_throw()
-                    nbytes = V.graph.sizevars.size_hint(arg_sig.nbytes)
+                    device = V.graph.get_current_device_or_throw()
+                    count = V.graph.sizevars.size_hint(arg_sig.count)
+                    # for benchmark harness, we ignore arg_sig.zero_mode and always zero it
                     result.writeline(
-                        f"{var_name} = torch.zeros({nbytes}, device='{device}', dtype=torch.uint8)"
+                        f"{var_name} = torch.zeros({count}, device='{device}', dtype={arg_sig.dtype})"
                     )
                 else:
                     raise KeyError(
@@ -960,7 +959,7 @@ class ComboKernel(Kernel):
             grid_arg = f"{extra_args_str}grid=grid_combo_kernels({grid_str})"
         else:
             grid_arg = f"grid={grid}"
-        index = V.graph.scheduler.get_current_device_or_throw().index
+        index = V.graph.get_current_device_or_throw().index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
             with result.indent():
@@ -1088,7 +1087,7 @@ class ComboKernel(Kernel):
             name,
             call_args,
             grid,
-            V.graph.scheduler.get_current_device_or_throw().index,
+            V.graph.get_current_device_or_throw().index,
             gpu=True,
             triton=True,
             arg_types=arg_types,
