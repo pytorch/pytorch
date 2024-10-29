@@ -128,9 +128,9 @@ def load_derivatives(
         # function schema is the complete declaration including mutability annotation / default value and etc.
         # signature is the canonical schema for a group of functions (in-place/out/functional variants)
         # that are semantically related.
-        functions_by_signature: dict[
-            FunctionSchema, list[NativeFunction]
-        ] = defaultdict(list)
+        functions_by_signature: dict[FunctionSchema, list[NativeFunction]] = (
+            defaultdict(list)
+        )
         functions_by_schema: dict[str, NativeFunction] = {}
         for function in native_functions:
             functions_by_signature[function.func.signature()].append(function)
@@ -991,7 +991,7 @@ def _create_op_prefix(name: str) -> str:
     OP names correspond to classes, hence the change to title case.
 
     Example::
-    >>> _create_op_prefix('add')
+    >>> _create_op_prefix("add")
     'AddBackward'
     """
     camel_case = "".join([p.title() for p in name.split("_")])

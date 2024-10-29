@@ -4,6 +4,8 @@ Utils for caching the outputs of AOTAutograd
 """
 from __future__ import annotations
 
+import base64
+import functools
 import json
 import logging
 import os
@@ -18,8 +20,10 @@ from torch._dynamo.utils import counters, get_chromium_event_logger
 from torch._functorch import config
 from torch._inductor.codecache import (
     _ident,
+    add_ephemeral_timeout_increase_for_distributed,
     BypassFxGraphCache,
     CompiledFxGraph,
+    create_cache,
     extract_tensor_metadata_for_cache_key,
     FxGraphCache,
     FxGraphCachePickler,
@@ -29,6 +33,7 @@ from torch._inductor.codecache import (
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
+from torch._utils_internal import log_cache_bypass
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -43,8 +48,11 @@ from .schemas import AOTAutogradCacheInfo, AOTConfig, ViewAndMutationMeta  # noq
 
 
 if TYPE_CHECKING:
+    from torch._inductor.compile_fx import _CompileFxKwargs
+    from torch._inductor.remote_cache import JsonDataTy, RemoteCache
     from torch._inductor.utils import BoxedBool
     from torch.fx.node import Node
+
 log = logging.getLogger(__name__)
 
 
@@ -199,7 +207,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         gm: torch.fx.GraphModule,
         example_inputs,
         aot_config: AOTConfig,
-        fx_config: Dict[str, BoxedBool],
+        fx_config: _CompileFxKwargs,
     ):
         # FxGraphHashDetails contains all the keys related to inductor. Also includes some system info
         self.aot_config = aot_config
@@ -243,14 +251,8 @@ def _reduce_tensor(tensor):
     """
     Reduce the tensor to a stable key for caching.
     """
-    return (
-        _ident,
-        (
-            extract_tensor_metadata_for_cache_key(
-                FxGraphCachePickler._device_map, tensor
-            ),
-        ),
-    )
+    metadata = extract_tensor_metadata_for_cache_key(tensor)
+    return (_ident, (metadata,))
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
@@ -263,7 +265,7 @@ def autograd_cache_key(
     gm: torch.fx.GraphModule,
     example_inputs,
     config: AOTConfig,
-    fx_config: Dict[str, BoxedBool],
+    fx_config: _CompileFxKwargs,
     # TODO: add args and parameters
 ) -> Tuple[str, List[str]]:
     """
@@ -289,7 +291,7 @@ class FXGraphCacheLoadable:
     def is_backward(self):
         return False
 
-    def load(self, example_inputs, fx_config: Dict[str, BoxedBool]) -> CompiledFxGraph:
+    def load(self, example_inputs, fx_config: _CompileFxKwargs) -> CompiledFxGraph:
         # [Note: AOTAutogradCache and FXGraphCache Guard interactions]
         # As mentioned, AOTAutograd takes in the symint inputs from dynamo's list of arguments.
         # FXGraphCache serializes guards that are needed in the shape_env based on these symint inputs to the graph.
@@ -326,7 +328,7 @@ class FXGraphCacheLoadable:
             payload_fn=lambda: json.dumps(cache_info),
         )
 
-        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])
+        FxGraphCache.post_compile(result, example_inputs, fx_config["cudagraphs"])  # type: ignore[arg-type]
         result._boxed_call = True
         return result
 
@@ -363,6 +365,12 @@ class AOTAutogradCacheEntry:
     compiled_fw: CompiledForward
     compiled_bw: Optional[CompiledBackward]
 
+    # Code of the joint graph using print_readable()
+    # Used for logging purposes
+    aot_joint_graph_str: Optional[str]
+    aot_forward_graph_str: Optional[str]
+    aot_backward_graph_str: Optional[str]
+
     # Runtime_metadata saved right before compilation
     runtime_metadata: ViewAndMutationMeta
 
@@ -387,7 +395,7 @@ class AOTAutogradCacheEntry:
         self,
         args: List[torch.Tensor],
         aot_config: AOTConfig,
-        fx_config: Dict[str, BoxedBool],
+        fx_config: _CompileFxKwargs,
     ) -> Callable:
         """
         This function takes a cache entry and carefully reconstructs the original callable
@@ -405,13 +413,35 @@ class AOTAutogradCacheEntry:
 
         Which we'll handle separately later on, if necessary.
         """
+
+        # Log the output of AOTAutogradCache
+        if aot_config.enable_log:
+            # TODO: maybe also log to aot_graphs_log
+            # Unfortunately aot_graphs_log uses
+            # slightly different formatting though
+            if self.aot_joint_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_joint_graph", payload_fn=lambda: self.aot_joint_graph_str
+                )
+            if self.aot_forward_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_forward_graph", payload_fn=lambda: self.aot_forward_graph_str
+                )
+            if self.aot_backward_graph_str is not None:
+                torch._logging.trace_structured(
+                    "aot_backward_graph", payload_fn=lambda: self.aot_backward_graph_str
+                )
+
         compiled_fw_func = self.compiled_fw.load(args, fx_config)
         compiled_bw_func = None
+        chromium_log = get_chromium_event_logger()
         if self.compiled_bw is not None:
             compiled_bw_func = self.compiled_bw.load(args, fx_config)
             needs_autograd = True
+            chromium_log.add_event_data("backend_compile", dispatch_mode="autograd")
         else:
             needs_autograd = False
+            chromium_log.add_event_data("backend_compile", dispatch_mode="inference")
 
         # Wrap the forward function in post compile wrappers
         compiled_fw_func = AOTDispatchSubclassWrapper(
@@ -421,6 +451,11 @@ class AOTAutogradCacheEntry:
             num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
         ).post_compile(
             compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
+        )
+
+        req_subclass_dispatch = self.maybe_subclass_meta is not None
+        chromium_log.add_event_data(
+            "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
         )
 
         # In autograd case, functionalizedRngWrapper should not modify outs
@@ -535,10 +570,12 @@ class AOTAutogradCache:
         debug_lines: List[str] = []
         cache_event_time = time.time_ns()
         cache_state = None
-        fx_config = {"cudagraphs": cudagraphs}
+        fx_config: _CompileFxKwargs = {"cudagraphs": cudagraphs}
         try:
             cache_key, debug_lines = autograd_cache_key(gm, args, aot_config, fx_config)
-            entry: Optional[AOTAutogradCacheEntry] = AOTAutogradCache._lookup(cache_key)
+            entry: Optional[AOTAutogradCacheEntry] = AOTAutogradCache._lookup(
+                cache_key, local, remote
+            )
             if entry is not None:
                 compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                 log.info("AOTAutograd cache hit for key %s", cache_key)
@@ -554,6 +591,19 @@ class AOTAutogradCache:
                         "time_saved_ms": forward_time_saved + backward_time_saved,
                     }
                 )
+                time_saved_ns = (
+                    entry.forward_time_taken_ns + entry.backward_time_taken_ns
+                )
+                # TODO: should we use the same field for remote cache time saved for both
+                # FXGraphCache and AOTAutogradCache?
+                # add_remote_cache_time_saved(time_saved_ns, is_backward=False)
+                if (
+                    ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
+                        time_saved_ns
+                    )
+                ) != 0:
+                    cache_info["ephemeral_timeout_increase"] = ephemeral_increase
+
             if compiled_fn is None:
                 log.info("AOTAutograd cache miss for key %s", cache_key)
                 counters["aot_autograd"]["autograd_cache_miss"] += 1
@@ -572,6 +622,9 @@ class AOTAutogradCache:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             cache_state = "bypass"
             cache_event_time = time.time_ns()
+            cache_info["cache_bypass_reason"] = str(e)
+            if remote:
+                log_cache_bypass("bypass_aot_autograd", str(e))
             if config.strict_autograd_cache:
                 raise e
         if compiled_fn is None:
@@ -591,6 +644,18 @@ class AOTAutogradCache:
         chromium_log.log_instant_event(
             f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
+
+        chromium_log.add_event_data(
+            "backend_compile",
+            cache_state=cache_state,
+            cache_event_time=cache_event_time,
+            key=cache_info.get("key"),
+            components=cache_info.get("components"),
+            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+            remote_cache_enabled=remote,
+            local_cache_enabled=local,
+        )
+
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
@@ -609,24 +674,53 @@ class AOTAutogradCache:
         return os.path.join(cache_dir(), "aotautograd")
 
     @staticmethod
-    def _lookup(key: str) -> Optional[AOTAutogradCacheEntry]:
+    def _lookup(key: str, local: bool, remote: bool) -> Optional[AOTAutogradCacheEntry]:
         """Given a key generated by AOTAutogradCachePickler, look up its location in the cache."""
-        subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
-        if not os.path.exists(subdir):
-            return None
-        path = os.path.join(subdir, "entry")
-        try:
-            with open(path, "rb") as f:
-                entry: AOTAutogradCacheEntry = pickle.load(f)
-            return entry
-        except Exception as e:
-            log.warning("AOTAutograd cache unable to load compiled graph: %s", e)
-            if config.strict_autograd_cache:
-                raise e
-            return None
+
+        if local:
+            subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
+            # If the directory doesn't exist, we didn't cache this key locally
+            if os.path.exists(subdir):
+                path = os.path.join(subdir, "entry")
+                try:
+                    with open(path, "rb") as f:
+                        entry: AOTAutogradCacheEntry = pickle.load(f)
+                        return entry
+                except Exception as e:
+                    log.warning(
+                        "AOTAutograd cache unable to load compiled graph: %s", e
+                    )
+                    if config.strict_autograd_cache:
+                        raise e
+
+        # Prefer local cache to remote, fallback to remote if local missed
+        if remote:
+            remote_cache: Optional[
+                RemoteCache[JsonDataTy]
+            ] = AOTAutogradCache.get_remote_cache()
+
+            if remote_cache is not None:
+                try:
+                    if (cache_data := remote_cache.get(key)) is not None:
+                        assert isinstance(cache_data, dict)
+                        data = cache_data["data"]
+                        assert isinstance(data, (str, bytes))
+                        content = base64.b64decode(data)
+                        # TODO: we currently don't have a way of logging the AOTAutograd output on a
+                        # cache hit, because we never save it to the cache
+                        # If we need to do that, we should do it here
+                        return pickle.loads(content)
+                except Exception:
+                    log.warning(
+                        "remote autograd cache unable to load compiled graph",
+                        exc_info=True,
+                    )
+
+        # Otherwise both caches missed
+        return None
 
     @staticmethod
-    def save(key: str, entry: AOTAutogradCacheEntry):
+    def save(key: str, entry: AOTAutogradCacheEntry, remote: bool):
         """Save a single entry into the cache."""
         try:
             content = pickle.dumps(entry)
@@ -635,6 +729,7 @@ class AOTAutogradCache:
             if config.strict_autograd_cache:
                 raise e
             return None
+
         subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
         if not os.path.exists(subdir):
             os.makedirs(subdir, exist_ok=True)
@@ -642,3 +737,31 @@ class AOTAutogradCache:
         log.info("Writing AOTAutograd cache entry to %s", path)
         write_atomic(path, content)
         counters["aot_autograd"]["autograd_cache_saved"] += 1
+
+        if remote:
+            remote_cache: Optional[
+                RemoteCache[JsonDataTy]
+            ] = AOTAutogradCache.get_remote_cache()
+            if remote_cache is not None:
+                time_taken_ms = int(
+                    (entry.forward_time_taken_ns + entry.backward_time_taken_ns) // 1e6
+                )
+                cache_data: JsonDataTy = {
+                    "data": base64.b64encode(content).decode("ascii"),
+                    "time_taken_ms": time_taken_ms,
+                }
+                remote_cache.put(key, cache_data)
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
+        """
+        Attempts to load the remote cache, returns None on error.
+        """
+        cache_id = "autograd-experimental"
+        return create_cache(
+            cache_id,
+            config.is_fbcode(),
+            "FbRemoteAOTAutogradCache",
+            "RemoteAOTAutogradCache",
+        )

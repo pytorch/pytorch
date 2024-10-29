@@ -26,9 +26,8 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   // squelch -Werror=non-virtual-dtor
   ~HIPHooksInterface() override = default;
 
-  // Initialize the HIP library state
-  virtual void initHIP() const {
-    AT_ERROR("Cannot initialize HIP without ATen_hip library.");
+  void init() const override {
+    TORCH_CHECK(false, "Cannot initialize HIP without ATen_hip library.");
   }
 
   virtual std::unique_ptr<c10::GeneratorImpl> initHIPGenerator(Context*) const {
@@ -48,7 +47,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   }
 
   Allocator* getPinnedMemoryAllocator() const override {
-    AT_ERROR("Pinned memory requires HIP.");
+    TORCH_CHECK(false, "Pinned memory requires HIP.");
   }
 
   virtual void registerHIPTypes(Context*) const {
@@ -60,7 +59,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   }
 
   bool hasPrimaryContext(DeviceIndex device_index) const override {
-    AT_ERROR("Cannot check primary context without ATen_hip library.");
+    TORCH_CHECK(false, "Cannot check primary context without ATen_hip library.");
   }
 };
 
