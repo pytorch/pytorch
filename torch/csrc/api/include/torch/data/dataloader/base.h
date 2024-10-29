@@ -17,7 +17,6 @@
 #include <exception>
 #include <memory>
 #include <thread>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -217,7 +216,7 @@ class DataLoaderBase {
   }
 
   /// The options the DataLoader was configured with.
-  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const FullDataLoaderOptions options_;
 
   /// The dataset for the main thread, only has a value if the number of
