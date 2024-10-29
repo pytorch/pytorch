@@ -31,9 +31,10 @@ class CooperativeReductionTests(TestCase):
         result, (source_code,) = run_and_get_code(fn, *args)
         self.assertEqual(result, expected)
         self.assertIn("@triton_heuristics.cooperative_reduction", source_code)
-        self.assertEqual(
-            torch._inductor.metrics.generated_kernel_count, expect_kernel_count
-        )
+        if "async_compile.multi_kernel" not in source_code:
+            self.assertEqual(
+                torch._inductor.metrics.generated_kernel_count, expect_kernel_count
+            )
         return source_code
 
     @parametrize(
@@ -75,6 +76,8 @@ class CooperativeReductionTests(TestCase):
 
         args = [torch.randn(1024, device="cuda") for _ in range(2)]
         source_code = self.run_and_check(fn, args)
+        if "async_compile.multi_kernel" in source_code:
+            return
         before, after = source_code.split("triton_helpers.x_grid_barrier")
         self.assertEqual(before.count("if rsplit_id == ("), 0)
         self.assertEqual(after.count("if rsplit_id == ("), 6)
@@ -98,6 +101,8 @@ class CooperativeReductionTests(TestCase):
 
         args = [torch.randn(4, 100000, device="cuda")]
         source_code = self.run_and_check(fn, args)
+        if "async_compile.multi_kernel" in source_code:
+            return
         self.assertEqual(source_code.count("triton_helpers.x_grid_barrier"), 16)
         self.assertEqual(source_code.count("empty_strided_cuda"), 8)
 
@@ -117,6 +122,11 @@ class CooperativeReductionTests(TestCase):
 
 @config.patch("triton.persistent_reductions", not config.triton.persistent_reductions)
 class NoPersistCooperativeReductionTests(CooperativeReductionTests):
+    pass
+
+
+@config.patch("triton.multi_kernel", int(not config.triton.multi_kernel))
+class MultiKernelCooperativeReductionTests(CooperativeReductionTests):
     pass
 
 
