@@ -376,6 +376,11 @@ struct ExpandableSegment {
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
         &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
   }
+  ExpandableSegment(const ExpandableSegment&) = delete;
+  ExpandableSegment(ExpandableSegment&&) = delete;
+  ExpandableSegment operator=(const ExpandableSegment&) = delete;
+  ExpandableSegment operator=(ExpandableSegment&&) = delete;
+
   // begin must be aligned to segment_size_.
   // returns the actual range mapped, which may be
   // greater than requested if size is not aligned to segment_size_.
@@ -820,6 +825,9 @@ struct PrivatePool {
   PrivatePool(const PrivatePool&) = delete;
   PrivatePool(PrivatePool&&) = delete;
   PrivatePool& operator=(const PrivatePool&) = delete;
+  PrivatePool& operator=(PrivatePool&&) = delete;
+  ~PrivatePool() = default;
+
   // Number of live graphs using this pool
   int use_count{1};
   // Number of unfreed cudaMallocs made for this pool. When use_count and
@@ -1897,16 +1905,41 @@ class DeviceCachingAllocator {
 
     std::unordered_map<PrivatePool*, MempoolId_t> pool_to_id;
     pool_to_id.reserve(graph_pools.size() + graph_pools_freeable.size());
-    for (const auto& pair : graph_pools) {
-      pool_to_id[pair.second.get()] = pair.first;
+    std::vector<Block*> all_blocks;
+    MempoolId_t mempool_id = {0, 0};
+
+    auto active_mempool = MemPoolContext::getActiveMemPool();
+    if (active_mempool) {
+      mempool_id = active_mempool->id();
     }
-    for (const auto& pair : graph_pools_freeable) {
-      pool_to_id[pair.second] = pair.first;
+
+    if (mempool_id.first != 0 || mempool_id.second != 0) {
+      // If there is an active mempool, we find the corresponding PrivatePool
+      // in graph_pools and only return the blocks from it.
+      auto pool = graph_pools.find(mempool_id);
+      if (pool != graph_pools.end()) {
+        pool_to_id[pool->second.get()] = pool->first;
+        all_blocks = get_private_pool_head_blocks(pool->second.get());
+      }
+      auto pool_freeable = graph_pools_freeable.find(mempool_id);
+      if (pool_freeable != graph_pools_freeable.end()) {
+        pool_to_id[pool_freeable->second] = pool_freeable->first;
+      }
+    } else {
+      // When snapshot is called outside a MemPoolContext, we return
+      // all the blocks in the CUDACachingAllocator (as returned by
+      // get_all_blocks).
+      for (const auto& pair : graph_pools) {
+        pool_to_id[pair.second.get()] = pair.first;
+      }
+      for (const auto& pair : graph_pools_freeable) {
+        pool_to_id[pair.second] = pair.first;
+      }
+      all_blocks = get_all_blocks();
     }
 
     size_t total_active = 0;
     std::vector<SegmentInfo> result;
-    const auto all_blocks = get_all_blocks();
 
     for (const Block* const head_block : all_blocks) {
       // For expandable segments, we report one segment for each contiguous
@@ -1923,9 +1956,9 @@ class DeviceCachingAllocator {
       segment_info.is_expandable = head_block->expandable_segment_;
       segment_info.context_when_allocated =
           head_block->context_when_segment_allocated;
-      auto mempool_id = pool_to_id.find(head_block->pool->owner_PrivatePool);
-      if (mempool_id != pool_to_id.end()) {
-        segment_info.owner_private_pool_id = mempool_id->second;
+      auto id = pool_to_id.find(head_block->pool->owner_PrivatePool);
+      if (id != pool_to_id.end()) {
+        segment_info.owner_private_pool_id = id->second;
       }
 
       const Block* block = head_block;
@@ -2109,8 +2142,8 @@ class DeviceCachingAllocator {
  private:
   // All private methods do not acquire the allocator mutex.
 
-  std::vector<const Block*> get_all_blocks() const {
-    std::vector<const Block*> blocks;
+  std::vector<Block*> get_all_blocks() const {
+    std::vector<Block*> blocks;
     blocks.insert(
         blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
     blocks.insert(
