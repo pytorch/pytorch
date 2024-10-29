@@ -15,6 +15,7 @@
 
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/cuda/AsyncMM.h>
 
 #define INT_SWITCH_CASE(name, val, ...) \
   case val: {                           \
@@ -521,6 +522,12 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::two_shot_all_reduce_),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
+      "async_input_mm(Tensor a, Tensor b, Tensor a_chunk_signals, int a_chunk_pivot) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CUDA, c10d::symmetric_memory::cuda::async_input_mm),
       {at::Tag::pt2_compliant_tag});
 }
 
