@@ -15,13 +15,6 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-
-# from torch.distributed.tensor.placement_types import (
-#     Partial,
-#     Placement,
-#     Replicate,
-#     Shard,
-# )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (

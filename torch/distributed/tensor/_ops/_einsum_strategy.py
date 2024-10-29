@@ -159,7 +159,6 @@ def gen_einsum_strategies(
 
     # generate strategies for entire mesh
     strategy_combs = itertools.product(*all_mesh_dim_strategies)
-    strategy_combs_list = list(itertools.product(*all_mesh_dim_strategies))
 
     # TODO: filter out invalid strategies, at this point we generate
     # all possible strategies without considering the whether the tensor
