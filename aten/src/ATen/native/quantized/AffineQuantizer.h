@@ -87,17 +87,17 @@ using dequantize_tensor_per_tensor_affine_sub_byte_fn =
 
 DECLARE_DISPATCH(
     quantize_tensor_per_tensor_affine_fn,
-    quantize_tensor_per_tensor_affine_stub);
+    quantize_tensor_per_tensor_affine_stub)
 DECLARE_DISPATCH(
     quantize_tensor_per_channel_affine_fn,
-    quantize_tensor_per_channel_affine_stub);
+    quantize_tensor_per_channel_affine_stub)
 DECLARE_DISPATCH(
     quantize_tensor_per_channel_float_qparams_fn,
-    quantize_tensor_per_channel_float_qparams_stub);
+    quantize_tensor_per_channel_float_qparams_stub)
 
 DECLARE_DISPATCH(
     dequantize_tensor_per_tensor_affine_fn,
-    dequantize_tensor_per_tensor_affine_stub);
+    dequantize_tensor_per_tensor_affine_stub)
 DECLARE_DISPATCH(
     dequantize_tensor_per_channel_affine_fn,
     dequantize_tensor_per_channel_affine_stub);
