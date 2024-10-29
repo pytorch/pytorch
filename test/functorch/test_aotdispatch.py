@@ -15,12 +15,12 @@ from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
 
+from common_utils import decorate, decorateForModules, skip, skipOps, xfail
+
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
-
-from common_utils import decorate, decorateForModules, skip, skipOps, xfail
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
@@ -6212,7 +6212,7 @@ class TestAOTModuleSimplified(AOTTestCase):
     @unittest.skipIf(
         not torch.distributed.is_available(), "test requires torch distributed"
     )
-    @skipIfTorchDynamo
+    @skipIfTorchDynamo()
     def test_unwrap_async_collective_tensor_tangent(self):
         from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
