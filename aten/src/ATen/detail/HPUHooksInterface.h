@@ -21,7 +21,7 @@ struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
   }
 
   const Generator& getDefaultGenerator(
-      C10_UNUSED DeviceIndex device_index = -1) const override {
+      [[maybe_unused]] DeviceIndex device_index = -1) const override {
     TORCH_CHECK(false, "Cannot get default HPU generator without HPU backend");
   }
 
@@ -40,7 +40,7 @@ struct TORCH_API HPUHooksInterface : AcceleratorHooksInterface {
         "You should register `HPUHooksInterface` for HPU before call `getPinnedMemoryAllocator`.");
   }
 
-  bool hasPrimaryContext(C10_UNUSED DeviceIndex device_index) const override {
+  bool hasPrimaryContext([[maybe_unused]] DeviceIndex device_index) const override {
     TORCH_CHECK(
         false,
         "You should register `HPUHooksInterface` for HPU before call `hasPrimaryContext`.");
