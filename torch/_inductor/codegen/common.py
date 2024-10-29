@@ -327,8 +327,7 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
             if cpp_wrapper
             else wrapper_codegen_obj.wrapper_codegen
         )
-    else:
-        return None
+    return None
 
 
 @functools.lru_cache(None)
@@ -678,8 +677,7 @@ class ExprPrinter(Printer):
         assert exp >= 0
         if exp > 0:
             return "*".join([self.paren(base)] * exp)
-        else:  # exp == 0
-            return "1"
+        return "1"
 
     # Explicit NotImplemented functions are to prevent default sympy printing
     # behavior, which will just barf out ToFloat(...) to your IR.  The error
@@ -1631,11 +1629,17 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name, bounds: ValueRanges[Any]):
+    def __init__(
+        self,
+        name,
+        bounds: ValueRanges[Any],
+        dtype: Optional[torch.dtype] = None,
+    ):
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
         self.use_count = 1  # track how many tims this expression is used
+        self.dtype = dtype
 
     def __str__(self):
         return self.name
@@ -1707,6 +1711,7 @@ class CSE:
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write=True,
         assignment=True,
+        dtype: Optional[torch.dtype] = None,
     ) -> CSEVariable:
         if isinstance(expr, OpsValue):
             expr = expr.value
@@ -1723,7 +1728,7 @@ class CSE:
         cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
         var = self.cache.get(cache_key, None)
         if not var:
-            var = self.newvar(bounds)
+            var = self.newvar(bounds, dtype)
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
@@ -1747,11 +1752,215 @@ class CSE:
 
         return var
 
-    def newvar(self, bounds: ValueRanges[Any] = ValueRanges.unknown()) -> CSEVariable:
+    def newvar(
+        self,
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
+        dtype: Optional[torch.dtype] = None,
+    ) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name, bounds)
+        var = V.kernel.create_cse_var(var_name, bounds, dtype)
         self.varname_map[var_name] = var
         return var
+
+
+@functools.lru_cache(None)
+def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
+    def construct_input(inp):
+        if isinstance(inp, torch._prims_common.Number):
+            return inp
+        else:
+            assert hasattr(inp, "dtype")
+
+            # construct a tmp tensor to use dtype promotion util function
+            return torch.empty([1], dtype=inp.dtype)
+
+    inps = [construct_input(arg) for arg in args]
+    _, dtype = torch._prims_common.elementwise_dtypes(
+        *inps, type_promotion_kind=type_promotion_kind
+    )
+    return dtype
+
+
+def promote_types(args):
+    dtype_prop_candidates = []
+
+    # CSEVariable and scalar will be included in dtype_prop_candidates
+    for arg in args:
+        if isinstance(arg, str):
+            continue
+        elif (
+            isinstance(arg, OpsValue)
+            and isinstance(arg.value, CSEVariable)
+            and arg.value.dtype is not None
+        ):
+            dtype_prop_candidates.append(arg.value)
+        elif (isinstance(arg, CSEVariable) and arg.dtype is not None) or isinstance(
+            arg, torch._prims_common.Number
+        ):
+            dtype_prop_candidates.append(arg)  # type: ignore[arg-type]
+
+    dtype = get_promoted_dtype(
+        *dtype_prop_candidates,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+
+    return dtype
+
+
+class DtypePropagationOpsHandler:
+    """
+    Propagate dtype from args to output
+    """
+
+    @staticmethod
+    def default_handler(*args):
+        # Fallback to FP32 dtype
+        return torch.float32
+
+    @staticmethod
+    def randint64(seed, offset, low, high):
+        return torch.int64
+
+    @staticmethod
+    def where(a, b, c):
+        return promote_types([b, c])
+
+    @staticmethod
+    def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
+        return dtype
+
+    @staticmethod
+    def load_seed(name, offset):
+        return torch.float32
+
+    @staticmethod
+    def masked(mask, body, other):
+        # TODO: inspect body to propagate dtype
+        return torch.float32
+
+    @staticmethod
+    def index_expr(expr, dtype):
+        return dtype
+
+    @staticmethod
+    def isnan(x):
+        return torch.bool
+
+    @staticmethod
+    def lt(a, b):
+        return torch.bool
+
+    @staticmethod
+    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
+        return dtype
+
+    @staticmethod
+    def constant(value, dtype):
+        return dtype
+
+    @staticmethod
+    def mul(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def sub(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def add(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def div(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def abs(x):
+        return promote_types([x])
+
+    @staticmethod
+    def exp(x):
+        return promote_types([x])
+
+    @staticmethod
+    def truediv(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def pow(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def sqrt(x):
+        return promote_types([x])
+
+    @staticmethod
+    def rsqrt(x):
+        return promote_types([x])
+
+    @staticmethod
+    def sigmoid(x):
+        return promote_types([x])
+
+    @staticmethod
+    def gelu(x):
+        return promote_types([x])
+
+    @staticmethod
+    def neg(x):
+        return promote_types([x])
+
+    @staticmethod
+    def minimum(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def maximum(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def log(x):
+        return promote_types([x])
+
+    @staticmethod
+    def log1p(x):
+        return promote_types([x])
+
+    @staticmethod
+    def gt(a, b):
+        return torch.bool
+
+    @staticmethod
+    def ge(a, b):
+        return torch.bool
+
+    @staticmethod
+    def reciprocal(x):
+        return promote_types([x])
+
+    @staticmethod
+    def and_(a, b):
+        return torch.bool
+
+    @staticmethod
+    def bitwise_right_shift(a, b):
+        return a.dtype
+
+    @staticmethod
+    def bitwise_left_shift(a, b):
+        return a.dtype
+
+    @staticmethod
+    def sin(x):
+        return promote_types([x])
+
+    @staticmethod
+    def cos(x):
+        return promote_types([x])
+
+    @staticmethod
+    def mod(a, b):
+        return promote_types([a, b])
 
 
 class CodeGen:
@@ -1989,8 +2198,17 @@ class Kernel(CodeGen):
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
 
                     def do_cse(v):
+                        output_dtype = getattr(
+                            DtypePropagationOpsHandler,
+                            name,
+                            DtypePropagationOpsHandler.default_handler,
+                        )(*args)
+
                         csevar = V.kernel.cse.generate(
-                            V.kernel.compute, v, bounds=bounds
+                            V.kernel.compute,
+                            v,
+                            bounds=bounds,
+                            dtype=output_dtype,
                         )
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
@@ -2039,8 +2257,7 @@ class Kernel(CodeGen):
 
                     arg_bounds = list(map(arg_to_bound, args))
                     return getattr(CSEProxy.vr_analysis, name)(*arg_bounds)
-                else:
-                    return ValueRanges.unknown()
+                return ValueRanges.unknown()
 
             @staticmethod
             def indirect_indexing(
@@ -2134,8 +2351,7 @@ class Kernel(CodeGen):
                     CSEProxy._update_store_cache(name, value)
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
-                else:
-                    return None  # type: ignore[return-value]
+                return None  # type: ignore[return-value]
 
             @staticmethod
             def store_reduction(name: str, index: sympy.Expr, value: CSEVariable):
@@ -2339,47 +2555,46 @@ class KernelTemplate:
     @staticmethod
     def _template_from_string(source):
         env = jinja2_env()
-        if env is not None:
-            env.filters["indent_except_first"] = KernelTemplate.indent_except_first
-            from jinja2 import TemplateSyntaxError
+        if env is None:
+            return None
+        env.filters["indent_except_first"] = KernelTemplate.indent_except_first
+        from jinja2 import TemplateSyntaxError
 
-            class DetailedTemplateSyntaxError(TemplateSyntaxError):
-                def __init__(self, original_error):
-                    super().__init__(
-                        original_error.message,
-                        original_error.lineno,
-                        original_error.name,
-                        original_error.filename,
-                    )
-                    self.original_error = original_error
+        class DetailedTemplateSyntaxError(TemplateSyntaxError):
+            def __init__(self, original_error):
+                super().__init__(
+                    original_error.message,
+                    original_error.lineno,
+                    original_error.name,
+                    original_error.filename,
+                )
+                self.original_error = original_error
 
-                def __str__(self):
-                    error_info = f"Error in template at line {self.lineno}\n"
-                    error_info += f"Error message: {self.message}\n"
-                    if hasattr(self.original_error, "source"):
-                        lines = self.original_error.source.split("\n")
-                        error_info += "Context:\n"
-                        start = max(0, self.lineno - 2)
-                        end = min(len(lines), self.lineno + 2)
-                        for i in range(start, end):
-                            if i == self.lineno - 1:
-                                error_info += f"{i + 1}: --> {lines[i]}\n"
-                                if hasattr(self.original_error, "column"):
-                                    error_info += (
-                                        "     "
-                                        + " " * (self.original_error.column - 1)
-                                        + "^\n"
-                                    )
-                            else:
-                                error_info += f"{i + 1}:     {lines[i]}\n"
-                    return error_info
+            def __str__(self):
+                error_info = f"Error in template at line {self.lineno}\n"
+                error_info += f"Error message: {self.message}\n"
+                if hasattr(self.original_error, "source"):
+                    lines = self.original_error.source.split("\n")
+                    error_info += "Context:\n"
+                    start = max(0, self.lineno - 2)
+                    end = min(len(lines), self.lineno + 2)
+                    for i in range(start, end):
+                        if i == self.lineno - 1:
+                            error_info += f"{i + 1}: --> {lines[i]}\n"
+                            if hasattr(self.original_error, "column"):
+                                error_info += (
+                                    "     "
+                                    + " " * (self.original_error.column - 1)
+                                    + "^\n"
+                                )
+                        else:
+                            error_info += f"{i + 1}:     {lines[i]}\n"
+                return error_info
 
-            try:
-                return env.from_string(source)
-            except TemplateSyntaxError as e:
-                raise DetailedTemplateSyntaxError(e) from e
-
-        return None
+        try:
+            return env.from_string(source)
+        except TemplateSyntaxError as e:
+            raise DetailedTemplateSyntaxError(e) from e
 
     @staticmethod
     def _fake_get_dtype(fake_out):
