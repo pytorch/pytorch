@@ -120,7 +120,7 @@ dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
       get_onednn_strides(tensor)};
 }
 
-inline bool onednn_strides_check(const Tensor& src) {
+bool onednn_strides_check(const Tensor& src) {
   auto adims = get_onednn_dims(src);
   int ndims = (int)adims.size();
   auto dims = adims.data();
