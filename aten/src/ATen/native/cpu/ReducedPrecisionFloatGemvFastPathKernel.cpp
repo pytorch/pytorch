@@ -153,17 +153,16 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
   return reduce(x[0]);
 }
 
-#ifdef __aarch64__
-#if defined(__clang__) && __clang_major__ > 15
+#if defined(__aarch64__) && defined(__clang__) && __clang_major__ > 15
 // https://godbolt.org/z/z8P4Yncra
 #define COMPILER_SUPPORTS_BF16_TARGET 1
-#elif !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
+#elif defined(__aarch64__) && !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
 // https://gcc.gnu.org/gcc-10/changes.html
 // https://godbolt.org/z/cdGG7vn8o
 #define COMPILER_SUPPORTS_BF16_TARGET 1
 #else
 #define COMPILER_SUPPORTS_BF16_TARGET 0
-#endif
+#endif // defined(__aarch64__) && defined(__clang__) && __clang_major__ > 15
 
 namespace {
 vec::Vectorized<float> fmadd(
@@ -173,17 +172,6 @@ vec::Vectorized<float> fmadd(
   const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
   const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
   return fmadd(a_float_high, b_float_high, fmadd(a_float_low, b_float_low, acc));
-}
-// TODO: move this next to the Half overload below once BFloat16 is
-// enabled for non-aarch64 architectures.
-std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
-    const vec::Vectorized<c10::BFloat16>& a,
-    const vec::Vectorized<c10::BFloat16>& b,
-    const vec::Vectorized<float>& acc_low,
-    const vec::Vectorized<float>& acc_high) {
-  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
-  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
-  return std::make_pair(fmadd(a_float_low, b_float_low, acc_low), fmadd(a_float_high, b_float_high, acc_high));
 }
 } // namespace
 
@@ -219,11 +207,6 @@ void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
 #define TARGET_ARM_BF16_ATTRIBUTE
 #endif // COMPILER_SUPPORTS_BF16_TARGET
 
-#else // __aarch64__
-// TODO: broaden BF16 support beyond aarch64
-#define COMPILER_SUPPORTS_BF16_TARGET 0
-#endif // __aarch64__
-
 namespace {
 // Returns (acc_low + a_low_half * b_low_half, acc_high + a_high_half * b_high_half)
 std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
@@ -238,6 +221,16 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
   const auto [b_float_low, b_float_high] = convert_half_float(b);
   return std::make_pair(fmadd(a_float_low, b_float_low, acc_low), fmadd(a_float_high, b_float_high, acc_high));
 #endif
+}
+
+std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
+    const vec::Vectorized<c10::BFloat16>& a,
+    const vec::Vectorized<c10::BFloat16>& b,
+    const vec::Vectorized<float>& acc_low,
+    const vec::Vectorized<float>& acc_high) {
+  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
+  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
+  return std::make_pair(fmadd(a_float_low, b_float_low, acc_low), fmadd(a_float_high, b_float_high, acc_high));
 }
 
 // Return a + b_low * c_low + b_high * c_high
@@ -256,8 +249,6 @@ vec::Vectorized<float> fmadd(vec::Vectorized<float> a, vec::Vectorized<Half> b, 
   return vec::fmadd(b_float_high, c_float_high, first);
 #endif
 }
-
-
 } // namespace
 
 template <typename T>
@@ -454,7 +445,6 @@ void fp16_gemv_trans(
   return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
 }
 
-#ifdef __aarch64__
 float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec2, int64_t len) {
 #if COMPILER_SUPPORTS_BF16_TARGET
   if (cpuinfo_has_arm_bf16()) {
@@ -488,17 +478,14 @@ void bf16_gemv_trans(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
   return bf16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
 }
-#endif // __aarch64__
 #endif // !defined(C10_MOBILE)
 } // namespace CPU_CAPABILITY
 
 #if !defined(C10_MOBILE)
 REGISTER_DISPATCH(fp16_dot_with_fp32_arith_stub, &fp16_dot_with_fp32_arith);
 REGISTER_DISPATCH(fp16_gemv_trans_stub, &fp16_gemv_trans);
-#ifdef __aarch64__
 REGISTER_DISPATCH(bf16_dot_with_fp32_arith_stub, &bf16_dot_with_fp32_arith);
 REGISTER_DISPATCH(bf16_gemv_trans_stub, &bf16_gemv_trans);
-#endif
 #endif //!defined(C10_MOBILE)
 
 } // namespace at::native

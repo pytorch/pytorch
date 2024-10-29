@@ -87,10 +87,8 @@ namespace at::native {
 #if !defined(C10_MOBILE)
 DEFINE_DISPATCH(fp16_dot_with_fp32_arith_stub);
 DEFINE_DISPATCH(fp16_gemv_trans_stub);
-#ifdef __aarch64__
 DEFINE_DISPATCH(bf16_dot_with_fp32_arith_stub);
 DEFINE_DISPATCH(bf16_gemv_trans_stub);
-#endif // __aarch64__
 #endif // !defined(C10_MOBILE)
 
 namespace blas_impl {
@@ -132,20 +130,6 @@ void fp16_gemv_trans(
     const int incy) {
   fp16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
-#endif // !defined(C10_MOBILE)
-
-#if defined(__aarch64__) && !defined(C10_MOBILE)
-void fp16_gemv_notrans(
-    const int m,
-    const int n,
-    const float alpha,
-    const Half* a,
-    const int lda,
-    const Half* x,
-    const int incx,
-    const float beta,
-    Half* y,
-    const int incy);
 
 void bf16_gemv_trans(
     const int m,
@@ -170,6 +154,21 @@ float bf16_dot_with_fp32_arith(
     int64_t len) {
   return bf16_dot_with_fp32_arith_stub(kCPU, vec1, vec2, len);
 }
+#endif // !defined(C10_MOBILE)
+
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const Half* a,
+    const int lda,
+    const Half* x,
+    const int incx,
+    const float beta,
+    Half* y,
+    const int incy);
+
 #endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
 template <typename scalar_t>
@@ -296,6 +295,60 @@ INSTANTIATE(int16_t);
 INSTANTIATE(int);
 INSTANTIATE(int64_t);
 #if !defined(C10_MOBILE)
+template <>
+bool gemv_use_fast_path<at::BFloat16>(
+    [[maybe_unused]] char trans,
+    [[maybe_unused]] int64_t m,
+    [[maybe_unused]] int64_t n,
+    at::BFloat16 alpha,
+    [[maybe_unused]] int64_t lda,
+    [[maybe_unused]] int64_t incx,
+    at::BFloat16 beta,
+    [[maybe_unused]] int64_t incy) {
+  return (trans == 'T' || trans == 't') && incx == 1 && alpha == 1.0 &&
+      beta == 0.0;
+}
+
+void bf16_gemv_trans(
+  const int m,
+  const int n,
+  const at::BFloat16 alpha,
+  const at::BFloat16* a,
+  const int lda,
+  const at::BFloat16* x,
+  const int incx,
+  const at::BFloat16 beta,
+  at::BFloat16* y,
+  const int incy) {
+  return bf16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
+}
+
+template <>
+void gemv_fast_path<at::BFloat16>(
+    const char* trans,
+    const int* m,
+    const int* n,
+    const at::BFloat16* alpha,
+    const at::BFloat16* a,
+    const int* lda,
+    const at::BFloat16* x,
+    const int* incx,
+    const at::BFloat16* beta,
+    at::BFloat16* y,
+    const int* incy) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(trans[0] == 'T' || trans[0] == 't');
+  bf16_gemv_trans(
+    *m,
+    *n,
+    *alpha,
+    a,
+    *lda,
+    x,
+    *incx,
+    *beta,
+    y,
+    *incy);
+}
 #if !defined(__aarch64__)
 // Currently, only fp16_gemv_trans is built for non-aarch64.
 template <>
@@ -341,7 +394,6 @@ void gemv_fast_path<at::Half>(
       y,
       *incy);
 }
-INSTANTIATE(c10::BFloat16);
 #else
 template <>
 bool scal_use_fast_path<at::Half>(
@@ -364,35 +416,6 @@ bool gemv_use_fast_path<at::Half>(
       // TODO: enable nonzero beta for fp16_gemv_notrans
       (c10::detail::fp16_from_bits(beta.x) == 0.0f || trans == 't' || trans == 'T');
 }
-
-template <>
-bool gemv_use_fast_path<at::BFloat16>(
-    [[maybe_unused]] char trans,
-    [[maybe_unused]] int64_t m,
-    [[maybe_unused]] int64_t n,
-    at::BFloat16 alpha,
-    [[maybe_unused]] int64_t lda,
-    [[maybe_unused]] int64_t incx,
-    at::BFloat16 beta,
-    [[maybe_unused]] int64_t incy) {
-  return (trans == 'T' || trans == 't') && incx == 1 && alpha == 1.0 &&
-      beta == 0.0;
-}
-
-void bf16_gemv_trans(
-  const int m,
-  const int n,
-  const at::BFloat16 alpha,
-  const at::BFloat16* a,
-  const int lda,
-  const at::BFloat16* x,
-  const int incx,
-  const at::BFloat16 beta,
-  at::BFloat16* y,
-  const int incy) {
-  return bf16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
-}
-
 
 #ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
 static void fp16_gemv_notrans_fp16_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
@@ -508,32 +531,6 @@ void gemv_fast_path<at::Half>(
   }
 }
 
-template <>
-void gemv_fast_path<at::BFloat16>(
-    const char* trans,
-    const int* m,
-    const int* n,
-    const at::BFloat16* alpha,
-    const at::BFloat16* a,
-    const int* lda,
-    const at::BFloat16* x,
-    const int* incx,
-    const at::BFloat16* beta,
-    at::BFloat16* y,
-    const int* incy) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(trans[0] == 'T' || trans[0] == 't');
-  bf16_gemv_trans(
-    *m,
-    *n,
-    *alpha,
-    a,
-    *lda,
-    x,
-    *incx,
-    *beta,
-    y,
-    *incy);
-}
 // Note that the above block was an else, so it's active if __aarch64__ *is* defined.
 #endif // !defined(__aarch64__)
 #else // !defined(C10_MOBILE))
