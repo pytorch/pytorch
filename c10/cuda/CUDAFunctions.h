@@ -107,7 +107,8 @@ C10_CUDA_API void __inline__ memcpy2d_and_sync(
     cudaMemcpyKind kind,
     cudaStream_t stream) {
 
-  if (C10_UNLIKELY(warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
+  if (C10_UNLIKELY(
+          warning_state().get_sync_debug_mode() != SyncDebugMode::L_DISABLED)) {
     warn_or_error_on_sync();
   }
 
