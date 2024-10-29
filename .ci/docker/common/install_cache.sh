@@ -24,6 +24,10 @@ install_ubuntu() {
   rm -rf sccache
   apt-get remove -y cargo rustc
   apt-get autoclean && apt-get clean
+
+  echo "Downloading old sccache binary from S3 repo for PCH builds"
+  curl --retry 3 https://s3.amazonaws.com/ossci-linux/sccache -o /opt/cache/bin/sccache-0.2.14a
+  chmod 755 /opt/cache/bin/sccache-0.2.14a
 }
 
 install_binary() {
