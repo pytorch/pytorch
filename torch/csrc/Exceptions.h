@@ -362,7 +362,7 @@ auto wrap_pybind_function_impl_(
   return [f = std::forward<Func>(f)](Arg<Func, Is>... args) {
     HANDLE_TH_ERRORS
     conditional_gil_scoped_release<release_gil> no_gil;
-    return c10::guts::invoke(f, std::forward<Arg<Func, Is>>(args)...);
+    return std::invoke(f, std::forward<Arg<Func, Is>>(args)...);
     END_HANDLE_TH_ERRORS_PYBIND
   };
 }
