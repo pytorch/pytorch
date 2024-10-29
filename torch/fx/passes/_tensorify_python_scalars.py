@@ -256,9 +256,7 @@ def tensorify_python_scalars(
         if node.op == "output" or node.op == "placeholder":
             continue
 
-        with graph.inserting_before(
-            nodes[i - 1] if node not in placeholders else first_non_placeholder
-        ):
+        with graph.inserting_before(nodes[i - 1]):
             if len(node.users) == 0 and not node.is_impure():
                 graph.erase_node(node)
                 continue
