@@ -43,7 +43,7 @@ class C10_API SymInt {
       // Large negative number, heap allocate it
       promote_to_negative();
     }
-  };
+  }
   SymInt() : data_(0) {}
   SymInt(SymNode n);
 
@@ -93,7 +93,7 @@ class C10_API SymInt {
     // https://stackoverflow.com/questions/42534749/signed-extension-from-24-bit-to-32-bit-in-c
     uint64_t extended_bits = (unextended_bits ^ sign_bit_mask) - sign_bit_mask;
     return static_cast<SymNodeImpl*>(
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        // NOLINTNEXTLINE(performance-no-int-to-ptr, bugprone*)
         reinterpret_cast<void*>(static_cast<uintptr_t>(extended_bits)));
   }
 
