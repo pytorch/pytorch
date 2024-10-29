@@ -91,7 +91,7 @@ class AOTInductorModelContainer {
         auto folded_const_map = model->run_const_fold(
             stream, proxy_executor, /* initialization = */ true);
         update_constant_buffer(
-            folded_const_map,
+            std::move(folded_const_map),
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
         constant_folded_ = true;
@@ -177,7 +177,7 @@ class AOTInductorModelContainer {
       try {
         auto folded_const_map = model->run_const_fold(stream, proxy_executor);
         update_constant_buffer(
-            folded_const_map,
+            std::move(folded_const_map),
             /* use_inactive = */ false,
             /* validate_full_update = */ false);
       } catch (...) {
@@ -200,7 +200,7 @@ class AOTInductorModelContainer {
 
         auto folded_const_map = model->run_const_fold(stream, proxy_executor);
         update_constant_buffer(
-            folded_const_map,
+            std::move(folded_const_map),
             /* use_inactive = */ true,
             /* validate_full_update = */ false);
 
@@ -232,7 +232,7 @@ class AOTInductorModelContainer {
   // This function updates the buffer for storing constants.
   // It will update the buffer, the mapping and the array mapping.
   void update_constant_buffer(
-      const std::unordered_map<std::string, AtenTensorHandle>& constants_map,
+      std::unordered_map<std::string, AtenTensorHandle>&& constants_map,
       bool use_inactive,
       bool validate_full_update) {
     if (this->num_models() == 0) {

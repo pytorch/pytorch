@@ -189,7 +189,7 @@ AOTIRuntimeError AOTInductorModelContainerUpdateConstantBuffer(
   auto input_map = reinterpret_cast<std::unordered_map<std::string, AtenTensorHandle>*>(constant_map_handle);
   CONVERT_EXCEPTION_TO_ERROR_CODE({
     container->update_constant_buffer(
-        *input_map, use_inactive, validate_full_update);
+        std::move(*input_map), use_inactive, validate_full_update);
   })
 }
 
