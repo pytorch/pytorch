@@ -81,7 +81,7 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   #
   # int main(int argv) {
   #   Tensor b = empty({3, 4});
-  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), c10::nullopt);
+  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), std::nullopt);
   # }
   export VALGRIND=OFF
 fi
@@ -379,6 +379,10 @@ test_inductor_cpp_wrapper() {
   export TORCHINDUCTOR_CPP_WRAPPER=1
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
+
+  # Run certain inductor unit tests with cpp wrapper. In the end state, we should be able to run all the inductor
+  # unit tests with cpp wrapper.
+  python test/run_test.py --include inductor/test_torchinductor.py --verbose
 
   python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \

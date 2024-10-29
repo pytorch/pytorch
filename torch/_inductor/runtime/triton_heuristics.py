@@ -246,6 +246,10 @@ class CachingAutotuner(KernelInterface):
 
         self.precompile_time_taken_ns = 0
         self.autotune_time_taken_ns = 0
+        # Dumps the launch configs after autotuning.
+        self.dump_launch_params = (
+            os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", "0") == "1"
+        )
 
     def precompile(self, warm_cache_only=False):
         with self.lock:
@@ -970,7 +974,7 @@ class CachingAutotuner(KernelInterface):
         if launcher.store_cubin and (not benchmark_run or not self.cuda_kernel_saved):
             self.save_gpu_kernel(grid, stream, launcher)
 
-        if os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", 0) == "1":
+        if self.dump_launch_params:
             _dump_launch_params(args, kwargs, launcher, self.fn.__name__)
 
         # it is faster than entering and exiting a context manager, even if the context
@@ -1360,6 +1364,7 @@ def triton_config(
     x *= math.ceil(block_size / conditional_product(x, y, z))
 
     x, _num_blocks = _check_max_grid_x(size_hints, x, num_warps)
+    x = min(x, size_hints[0])
 
     cfg = {"XBLOCK": x}
     if y:
