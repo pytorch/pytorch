@@ -2,8 +2,7 @@
 from collections import namedtuple
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type
 
-import torch.return_types
-from torch.utils._pytree import PyTree, TreeSpec
+from torch.utils._pytree import PyTree, structseq, TreeSpec
 
 
 FlattenFuncSpec = Callable[[PyTree, TreeSpec], List]
@@ -90,12 +89,11 @@ register_pytree_flatten_spec(
     _tuple_flatten_spec,
     _tuple_flatten_spec_exact_match,
 )
-for return_type in torch.return_types.all_return_types:
-    register_pytree_flatten_spec(
-        return_type,
-        _tuple_flatten_spec,
-        _tuple_flatten_spec_exact_match,
-    )
+register_pytree_flatten_spec(
+    structseq,
+    _tuple_flatten_spec,
+    _tuple_flatten_spec_exact_match,
+)
 register_pytree_flatten_spec(
     namedtuple,  # type: ignore[arg-type]
     _namedtuple_flatten_spec,
