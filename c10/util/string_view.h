@@ -595,7 +595,8 @@ using string_view = basic_string_view<char>;
 constexpr bool string_view_starts_with(
     std::string_view str,
     std::string_view prefix) noexcept {
-  return str.find(prefix) == 0;
+  return (prefix.size() > str.size()) ? false
+                                      : prefix == str.substr(0, prefix.size());
 }
 
 // NOTE: In C++20, this function should be replaced by str.ends_with
@@ -604,7 +605,7 @@ constexpr bool string_view_ends_with(
     std::string_view suffix) noexcept {
   return (suffix.size() > str.size())
       ? false
-      : (str.rfind(suffix) == (str.size() - suffix.size()));
+      : suffix == (str.substr(str.size() - suffix.size(), suffix.size()));
 }
 } // namespace c10
 
