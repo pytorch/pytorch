@@ -430,7 +430,7 @@ class SymNode:
     # functions consider factoring it out to be metaprogrammed too.  Note that
     # some load bearing logic is directly in torch.sym_sum
 
-    def sym_sum(self, args) -> "SymNode":
+    def sym_sum(self, args) -> SymNode:
         import sympy
 
         # Inner impl
