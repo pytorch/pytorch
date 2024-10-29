@@ -3,6 +3,7 @@ import copy
 import hashlib
 import inspect
 import io
+import os
 import pickle
 import tokenize
 import unittest
@@ -26,17 +27,51 @@ class Config:
 
     This configs must be installed with install_config_module to be used
 
+    Environment Variables:
+        These are interpreted to be true / false variables.
+
     Arguments:
         justknob: the name of the feature / JK. In OSS this is unused.
         default: is the value to default this knob to in OSS.
+        env_name_force: The environment variable to read that is a FORCE
+            enviornment variable. I.e. it overrides everything
+        env_name_default: The environment variable to read that changes the
+            default behaviour. I.e. user overrides take preference.
+
+
+    Evaluation Priority (hightest to lowest):
+        env_name_force
+        user_override
+        env_name
+        justknob
+        default
+
+    i.e. if set, env_name_force would override a user override, but a user override will override a JK.
     """
 
     default: bool = True
     justknob: Optional[str] = None
+    env_name_literal: bool = False
+    env_name_default: Optional[str] = None
+    env_name_force: Optional[str] = None
 
 
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+
+
+def _read_env_variable(name: str) -> Optional[bool]:
+    if (env := os.getenv(name)) is not None:
+        env = env.upper()
+        if env in ("1", "TRUE"):
+            return True
+        if env in ("0", "FALSE"):
+            return False
+        warnings.warn(
+            f"Difficulty parsing env variable {name}={env} - Assuming env variable means true and returning True",
+        )
+        return True
+    return None
 
 
 def install_config_module(module: ModuleType) -> None:
@@ -72,6 +107,7 @@ def install_config_module(module: ModuleType) -> None:
                     delattr(module, key)
             elif isinstance(value, Config):
                 config[name] = _ConfigEntry(value)
+
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -152,6 +188,9 @@ class _ConfigEntry:
     user_override: Any = _UNSET_SENTINEL
     # The justknob to check for this config
     justknob: Optional[str] = None
+    # environment variables are read at install time
+    env_value_force: Any = _UNSET_SENTINEL
+    env_value_default: Any = _UNSET_SENTINEL
 
     def __init__(self, config: Any):
         if not isinstance(config, Config):
@@ -159,6 +198,12 @@ class _ConfigEntry:
             return
         self.default = config.default
         self.justknob = config.justknob
+        if config.env_name_default is not None:
+            if (env_value := _read_env_variable(config.env_name_default)) is not None:
+                self.env_value_default = env_value
+        if config.env_name_force is not None:
+            if (env_value := _read_env_variable(config.env_name_force)) is not None:
+                self.env_value_force = env_value
 
 
 class ConfigModule(ModuleType):
@@ -190,8 +235,15 @@ class ConfigModule(ModuleType):
     def __getattr__(self, name: str) -> Any:
         try:
             config = self._config[name]
+
+            if config.env_value_force is not _UNSET_SENTINEL:
+                return config.env_value_force
+
             if config.user_override is not _UNSET_SENTINEL:
                 return config.user_override
+
+            if config.env_value_default is not _UNSET_SENTINEL:
+                return config.env_value_default
 
             if config.justknob is not None:
                 # JK only supports bools and ints
