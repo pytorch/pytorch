@@ -5,7 +5,7 @@ import dataclasses
 import functools
 import inspect
 import sys
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
 
@@ -16,7 +16,7 @@ from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, is_from_local_source
 from ..utils import dict_keys, dict_values, istype, specialize_symnode
-from .base import MutableLocal, VariableTracker, VariableTrackerContainer
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -59,7 +59,7 @@ def is_hashable(x):
         )
 
 
-class ConstDictVariable(VariableTrackerContainer):
+class ConstDictVariable(VariableTracker):
     _nonvar_fields = {
         "user_cls",
         *VariableTracker._nonvar_fields,
@@ -173,17 +173,14 @@ class ConstDictVariable(VariableTrackerContainer):
             + "}"
         )
 
-    def _as_python_constant(self, visited: list[VariableTracker]) -> Any:
-        # It would be fine if a key in this dict were also a value, so we
-        # as_constant the keys separately from the values
-        kc = self.keys_as_python_constant()
-        return {k: self._as_constant(v, visited) for k, v in kc.items()}
+    def as_python_constant(self):
+        return {
+            k.vt.as_python_constant(): v.as_python_constant()
+            for k, v in self.items.items()
+        }
 
     def keys_as_python_constant(self):
-        return self._keys_as_python_constant([])
-
-    def _keys_as_python_constant(self, visited: list[VariableTracker]) -> Any:
-        return {self._as_constant(k.vt, visited): v for k, v in self.items.items()}
+        return {k.vt.as_python_constant(): v for k, v in self.items.items()}
 
     def python_type(self):
         return self.user_cls
@@ -206,10 +203,13 @@ class ConstDictVariable(VariableTrackerContainer):
             ]
         )
 
-    def _maybe_realize(self, item):
-        return item.realize() if item else item
-
     def reconstruct(self, codegen):
+        def is_new_item(value, other):
+            # compare the id of the realized values if both values are not lazy VTs
+            if value and value.is_realized() and other.is_realized():
+                return id(value.realize()) != id(other.realize())
+            return id(value) != id(other)
+
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.add_push_null(
@@ -224,11 +224,8 @@ class ConstDictVariable(VariableTrackerContainer):
         num_args = 0
         for key, value in self.items.items():
             # We can safely call realize() here as it won't introduce any new guards
-            is_new_item = (
-                self._maybe_realize(self.original_items.get(key.vt)) != value.realize()
-            )
-
-            if is_new_item or self.should_reconstruct_all:
+            item = self.original_items.get(key.vt)
+            if is_new_item(item, value) or self.should_reconstruct_all:
                 codegen(key.vt)
                 codegen(value)
                 num_args += 1
