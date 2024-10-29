@@ -69,8 +69,6 @@ dnnl::memory::dims compatible_weight_dims(
     const int64_t ic,
     const IntArrayRef wsizes);
 
-// dnnl::memory::dims compatible_dilation(IntArrayRef& dilation);
-
 dnnl::memory::format_tag conv_weight_fmt(
     const int64_t ndim,
     const bool grouped = false,

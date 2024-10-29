@@ -6,9 +6,7 @@
 #include <iostream>
 
 using namespace at::native::onednn;
-namespace at {
-namespace native{
-namespace xpu {
+namespace at::native::xpu {
 
 at::Tensor qconv_prepack_xpu(
     at::Tensor weight,
@@ -199,8 +197,6 @@ class QConvoneDNNXPU final {
 
 };
 
-
-
 TORCH_LIBRARY_IMPL(onednn, XPU, m){
     m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_prepack"), TORCH_FN(xpu::qconv_prepack_xpu));
     m.impl(TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise"), QConvoneDNNXPU::run_pointwise);
@@ -209,6 +205,4 @@ TORCH_LIBRARY_IMPL(onednn, XPU, m){
     m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"), QConvoneDNNXPU::run_pointwise_binary);
 }
 
-}
-}
-}
+} // namespace at::native::xpu
