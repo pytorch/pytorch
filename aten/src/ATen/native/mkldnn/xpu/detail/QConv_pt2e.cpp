@@ -122,7 +122,7 @@ at::Tensor quantized_convolution_pt2(
   // Per-channel quantization is on weight output channel mostly, mask_weight=
   // 1 here means 2^0. 0 means the 0th dimension of weight tensor, aka output
   // channel. DNN requires mask = 2^k for the kth axis to be quantized. Only
-  // one axis quantization is supported in IPEX. Multi channel quantization
+  // one axis quantization is supported in XPU. Multi channel quantization
   // is not supported. In addition, src, output should still be per-tensor
   // quant, aka mask=0. Per-channel quantization on activation is not
   // supported in conv.
@@ -221,4 +221,4 @@ at::Tensor quantized_convolution_pt2(
   return output;
 }
 
-}
+} // namespace at::native::onednn
