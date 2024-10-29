@@ -1309,7 +1309,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
-          push(stack, autograd::Variable(a).variable_data());
+          push(stack, a.variable_data());
         },
         aliasAnalysisFromSchema()),
 // these ops are not defined for Tensor
