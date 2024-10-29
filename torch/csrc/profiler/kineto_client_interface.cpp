@@ -74,7 +74,7 @@ class LibKinetoClient : public libkineto::ClientInterface {
 
 void global_kineto_init() {
 #if ENABLE_GLOBAL_OBSERVER
-  if (std::getenv("KINETO_USE_DAEMON") != nullptr) {
+  if (c10::utils::get_env("KINETO_USE_DAEMON").has_value()) {
     libkineto_init(
         /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
         /*logOnError=*/true);
