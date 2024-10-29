@@ -738,6 +738,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
 
         arg_list = [*input_tensors, output_tensor]
         if workspace is not None:
+            assert self.workspace_arg is not None, "Mismatch: workspace passed in while the template doesn't have a workspace arg"
             arg_list.append(workspace)
 
         return functools.partial(
