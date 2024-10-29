@@ -705,7 +705,7 @@ from a multi-output view call"
         ]
         nonlocal static_input_indices
         static_input_indices = static_input_indices or []
-        if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
             passed_indices = set(static_input_indices)
             static_input_indices = [
                 i
@@ -766,7 +766,7 @@ from a multi-output view call"
             subclass_inp_meta=create_subclass_meta(flat_args),
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
             subclass_tangent_meta=create_subclass_meta(
-                traced_tangents, with_memory_format=True
+                traced_tangents, count_symints=False, with_memory_format=True
             ),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,

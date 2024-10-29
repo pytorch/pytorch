@@ -54,7 +54,7 @@ from .schemas import (
 )
 from .subclass_utils import (
     requires_subclass_dispatch,
-    unwrap_tensor_subclasses,
+    runtime_unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
 )
 from .traced_function_transforms import aot_dispatch_subclass
@@ -627,8 +627,10 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
-            unwrapped_args = unwrap_tensor_subclasses(
-                args, is_joint_structure=self.trace_joint
+            unwrapped_args = runtime_unwrap_tensor_subclasses(
+                args,
+                subclass_metas=runtime_metadata.subclass_inp_meta,
+                append_symints=True,
             )
             args.clear()
             # expectation: runtime_fn is a boxed fn
@@ -638,6 +640,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 subclass_metas=subclass_metas,
                 num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 is_runtime=True,
+                included_subclass_symints=True,
             )
             return wrapped_outs
 
@@ -1846,12 +1849,20 @@ class AOTDispatchAutograd:
                     )
 
                     all_args = (
-                        unwrap_tensor_subclasses(
-                            all_args[:tangents_start_idx], is_joint_structure=False
+                        runtime_unwrap_tensor_subclasses(
+                            all_args[:tangents_start_idx],
+                            # SymInts that are inputs to the backward graph are
+                            # already included in the "all_args" list.
+                            # Any symints coming from tensor subclasses should always
+                            # come from primals, and so they will show up as extra
+                            # arguments to the forward graph, and they will be saved
+                            # as activation in the backward graph.
+                            append_symints=False,
                         )
                         + flat_processed_tangents
-                        + unwrap_tensor_subclasses(
-                            all_args[tangents_end_idx:], is_joint_structure=False
+                        + runtime_unwrap_tensor_subclasses(
+                            all_args[tangents_end_idx:],
+                            append_symints=False,
                         )
                     )
                 else:
@@ -2015,6 +2026,7 @@ class AOTDispatchAutograd:
                                 outs_wrapped = wrap_tensor_subclasses(
                                     outs,
                                     subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
+                                    included_subclass_symints=False,
                                 )
                                 return outs_wrapped
                             return outs
@@ -2043,6 +2055,8 @@ class AOTDispatchAutograd:
                     outs_wrapped = wrap_tensor_subclasses(
                         out,
                         subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
+                        included_subclass_symints=True,
+                        is_runtime=True,
                     )
                     return outs_wrapped
                 return out
@@ -2145,3 +2159,7 @@ def make_runtime_safe(
     fw_metadata.make_runtime_safe()
     if maybe_subclass_meta is not None:
         maybe_subclass_meta.fw_metadata.make_runtime_safe()
+        if maybe_subclass_meta.grad_input_metas:
+            for meta in maybe_subclass_meta.grad_input_metas:
+                if isinstance(meta, SubclassCreationMeta):
+                    meta.make_runtime_safe()
