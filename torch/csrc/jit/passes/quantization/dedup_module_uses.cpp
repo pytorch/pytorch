@@ -5,7 +5,8 @@
 
 #include <stack>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 namespace {
 class ModuleUseDeduper {
  public:
@@ -124,4 +125,5 @@ void DedupModuleUses(Module& module) {
   d.dedup();
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

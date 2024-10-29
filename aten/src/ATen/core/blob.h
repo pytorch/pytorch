@@ -95,7 +95,7 @@ class TORCH_API Blob final : public c10::intrusive_ptr_target {
   template <class T>
   T* GetMutable() {
     static_assert(
-        std::is_default_constructible_v<T>,
+        std::is_default_constructible<T>::value,
         "GetMutable can't be called with non-default-constructible types. "
         "Try using specialized methods");
     if (IsType<T>()) {

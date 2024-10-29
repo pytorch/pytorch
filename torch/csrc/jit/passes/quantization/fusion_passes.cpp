@@ -1,7 +1,8 @@
 #include <torch/csrc/jit/passes/quantization/fusion_passes.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 void fuseQuantizeAddReluImpl(std::shared_ptr<Graph>& graph) {
@@ -58,4 +59,5 @@ void FuseQuantizedAddRelu(std::shared_ptr<Graph>& graph) {
   fuseQuantizeAddReluImpl(graph);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

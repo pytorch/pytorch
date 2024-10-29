@@ -10,7 +10,8 @@
 #include <unordered_map>
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct QuantFusionInfo {
   std::string quantized_op_name;
@@ -1259,4 +1260,5 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %di
        std::move(conv_transpose2d_with_quant_prepack)}};
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

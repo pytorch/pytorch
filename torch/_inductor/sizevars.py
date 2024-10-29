@@ -247,11 +247,9 @@ class SizeVarAllocator:
             # for which "strides" don't make sense so we ignore them here.
             # NOTE: These expressions may still block merging dims in the sound
             # substitution test performed in can_merge_dims.
-            (
-                self.stride_vars(x, index_vars)
-                if isinstance(x, sympy.Expr)
-                else [0] * len(index_vars)
-            )
+            self.stride_vars(x, index_vars)
+            if isinstance(x, sympy.Expr)
+            else [0] * len(index_vars)
             for x in index_formulas
         ]
         assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
@@ -417,29 +415,14 @@ class SizeVarAllocator:
             left = sympy_subs(left, self.inv_precomputed_replacements)  # type: ignore[arg-type]
         if isinstance(right, Expr):
             right = sympy_subs(right, self.inv_precomputed_replacements)  # type: ignore[arg-type]
-
-        expr = sympy.Eq(left, right)
-        static_expr = self.shape_env._maybe_evaluate_static(expr)
-
-        if static_expr is not None:
-            assert bool(static_expr)
-            return left
-
-        assert self.shape_env.defer_runtime_assert(expr, "guard_equals")
+        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
     def guard_leq(self, left: Expr, right: Expr) -> None:
         return self.guard_lt(left, right + 1)
 
     def guard_lt(self, left: Expr, right: Expr) -> None:
-        expr = sympy.Lt(left, right)
-        static_expr = self.shape_env._maybe_evaluate_static(expr)
-
-        if static_expr is not None:
-            assert bool(static_expr)
-            return
-
-        assert self.shape_env.defer_runtime_assert(expr, "guard_lt")
+        assert self.shape_env.evaluate_expr(sympy.Lt(left, right))
 
     def guarded_order(self, seq):
         """

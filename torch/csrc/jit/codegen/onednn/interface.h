@@ -3,8 +3,10 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 
-namespace torch::jit {
-namespace fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 static std::atomic<bool> onednn_enabled{false};
 
@@ -14,7 +16,8 @@ static std::atomic<bool>& getLlgaEnabled() {
 
 C10_EXPORT void fuseGraph(std::shared_ptr<Graph>& g);
 
-} // namespace fuser::onednn
+} // namespace onednn
+} // namespace fuser
 
 struct C10_EXPORT RegisterLlgaFuseGraph
     : public PassManager<RegisterLlgaFuseGraph> {
@@ -55,4 +58,5 @@ struct C10_EXPORT RegisterLlgaFuseGraph
   }
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

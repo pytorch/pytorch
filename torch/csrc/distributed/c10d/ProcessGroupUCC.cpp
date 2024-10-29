@@ -2,6 +2,7 @@
 
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/util/env.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
@@ -273,6 +274,9 @@ bool ProcessGroupUCC::WorkUCC::wait(std::chrono::milliseconds /* unused */) {
     Work::recordFunctionEndCallback_();
     Work::recordFunctionEndCallback_ = nullptr;
   }
+  c10d::unregister_work(
+      c10::intrusive_ptr<
+          ProcessGroupUCC::WorkUCC>::unsafe_reclaim_from_nonowning(this));
   return true;
 }
 

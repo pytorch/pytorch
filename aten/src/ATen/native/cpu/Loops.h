@@ -172,7 +172,7 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
   using traits = function_traits<func_t>;
 
   using result_type = typename traits::result_type;
-  constexpr int num_outputs = std::tuple_size_v<result_type>;
+  constexpr int num_outputs = std::tuple_size<result_type>::value;
   constexpr int ntensors = traits::arity + num_outputs;
 
   // Copying strides to temporary array helps auto vectorization in older GCC

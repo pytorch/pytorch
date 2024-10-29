@@ -2095,9 +2095,11 @@ def should_use_remote_fx_graph_cache():
     except ModuleNotFoundError:
         return False
 
-    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
-        "pytorch/remote_cache:fx_graph_memcache_version"
-    )
+    jk_name = "pytorch/remote_cache:fx_graph_memcache_version"
+    if torch.version.hip is not None:
+        jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
+
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
 
 
 def normalize_name(name: str) -> str:

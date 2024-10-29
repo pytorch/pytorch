@@ -634,8 +634,6 @@ def node_inline_(call_mod_node: torch.fx.Node) -> None:
     with gm.graph.inserting_before(call_mod_node):
         for node in body:
             new_node = gm.graph.node_copy(node)
-            if node.op == "get_attr":
-                setattr(gm, node.target, getattr(sub_gm, node.target))
             node_replace_(node, new_node)
 
         if len(output) > 0:

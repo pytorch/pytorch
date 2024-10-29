@@ -2,8 +2,14 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit::fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 void PropagateLayout(const std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit::fuser::onednn
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch

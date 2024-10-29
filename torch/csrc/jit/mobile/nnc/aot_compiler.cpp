@@ -25,7 +25,10 @@
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
-namespace torch::jit::mobile::nnc {
+namespace torch {
+namespace jit {
+namespace mobile {
+namespace nnc {
 
 // TODO(mvz): temporarily disable NNC backend in mobile builds.
 /*
@@ -443,4 +446,7 @@ static c10::IValue preprocess(
 
 // static auto reg = torch::jit::backend_preprocess_register("nnc", preprocess);
 
-} // namespace torch::jit::mobile::nnc
+} // namespace nnc
+} // namespace mobile
+} // namespace jit
+} // namespace torch

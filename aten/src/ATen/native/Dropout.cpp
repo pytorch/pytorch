@@ -25,7 +25,7 @@ namespace at::native {
 namespace {
 
 template<bool inplace>
-using Ctype = typename std::conditional_t<inplace, Tensor&, Tensor>;
+using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
 
 Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sym_sizes();

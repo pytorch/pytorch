@@ -365,8 +365,19 @@ def _fix_input_output_signature(
     old_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
 
     new_placeholders = []
-    assert signature.forward_arg_names is not None
-    for arg in signature.forward_arg_names:
+    forward_arg_names = signature.forward_arg_names
+    if forward_arg_names is None:
+        forward_arg_names = []
+        assert signature.in_spec.num_children == 2
+        arg_spec = signature.in_spec.children_specs[0]
+        kwarg_spec = signature.in_spec.children_specs[1]
+        assert arg_spec.type == tuple
+        assert kwarg_spec.type == dict
+        for i in range(arg_spec.num_children):
+            forward_arg_names.append(f"arg_{i}")
+        forward_arg_names.extend(kwarg_spec.context)
+
+    for arg in forward_arg_names:
         with gm.graph.inserting_before(old_placeholders[0]):
             new_placeholders.append(gm.graph.placeholder(arg))
 

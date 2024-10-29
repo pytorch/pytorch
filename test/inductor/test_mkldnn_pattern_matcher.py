@@ -1896,12 +1896,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     mod,
                     (v,),
                     [
-                        "aoti_torch_cpu__qlinear_pointwise_tensor",
-                        "aoti_torch_cpu__qlinear_pointwise_binary_tensor",
+                        "torch.ops.onednn.qlinear_pointwise.tensor",
+                        "torch.ops.onednn.qlinear_pointwise.binary",
                     ],
                     [],
                     check_quantization=True,
-                    num_include_ops=[2, 2],
+                    num_include_ops=[4, 4],
                 )
             else:
                 # For python wrapper

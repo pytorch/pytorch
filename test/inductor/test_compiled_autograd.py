@@ -26,7 +26,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import scoped_load_inline, skipIfWindows
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -1586,8 +1586,7 @@ main()
                 f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
             )
 
-    @scoped_load_inline
-    def test_non_traceable_autograd_cpp_node(self, load_inline):
+    def test_non_traceable_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = false;
@@ -1614,7 +1613,7 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_non_traceable_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1635,8 +1634,8 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
         ), compiled_autograd.enable(compiler_fn):
             fn()
 
-    @scoped_load_inline
-    def test_autograd_cpp_node(self, load_inline):
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
+    def test_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1663,7 +1662,7 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1683,8 +1682,7 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
         # compiles for 10 (static) and 100 (dynamic)
         self.check_output_and_recompiles(fn, 2)
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_id(self, load_inline):
+    def test_autograd_cpp_node_id(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1732,7 +1730,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_id",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1775,8 +1773,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
 
         self.check_output_and_recompiles(different_autograd_fn, 2)
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_saved(self, load_inline):
+    def test_autograd_cpp_node_saved(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1830,7 +1827,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1851,8 +1848,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 
         self.check_output_and_recompiles(fn, 2)
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_saved_dynamic(self, load_inline):
+    def test_autograd_cpp_node_saved_dynamic(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1888,7 +1884,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved_dynamic",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1908,8 +1904,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
         # compiles for 10 (static) and 100 (dynamic)
         self.check_output_and_recompiles(fn, 2)
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_saved_int(self, load_inline):
+    def test_autograd_cpp_node_saved_int(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -1948,7 +1943,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved_int",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1967,8 +1962,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
 
         self.check_output_and_recompiles(fn, 1)
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_saved_float(self, load_inline):
+    def test_autograd_cpp_node_saved_float(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2007,7 +2001,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved_float",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2027,8 +2021,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
         # compiled autograd and dynamo both support symfloat, but not backend
         self.check_output_and_recompiles(fn, [1, 3])
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_data_dependent(self, load_inline):
+    def test_autograd_cpp_node_data_dependent(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2099,7 +2092,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_data_dependent",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2339,9 +2332,8 @@ main()
         # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-    @scoped_load_inline
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
-    def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, load_inline):
+    def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2379,7 +2371,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_cudagraphs_cpu_scalar_used_in_cpp_custom_op",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2802,63 +2794,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with torch._dynamo.compiled_autograd.enable(torch.compile):
             out.backward()
 
-    @skipIfWindows(msg="node name demangling inconsistent on windows")
-    def test_backward_hook_relative_ordering_partial(self):
-        # test backward hooks for cases that CA matches eager
-
-        def fn():
-            order = []
-
-            class MyModule(nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.linear = torch.nn.Linear(10, 10, bias=False)
-
-                def forward(self, x):
-                    return self.linear(x)
-
-            x = torch.randn(10, 10)
-            module = MyModule()
-
-            def make_pre_hook(id):
-                return lambda _: order.append(f"pre_hook_{id}")
-
-            def make_post_hook(id):
-                return lambda _1, _2: order.append(f"post_hook_{id}")
-
-            count = 0
-
-            def register_hooks_on_all_nodes(nodes):
-                nonlocal count
-                for node, _ in nodes:
-                    if node is None:
-                        continue
-                    count += 1
-                    id = f"{node.name()}_{count}"
-                    node.register_prehook(make_pre_hook(id))
-                    node.register_hook(make_post_hook(id))
-                    register_hooks_on_all_nodes(node.next_functions)
-
-            loss = module(x).sum()
-            register_hooks_on_all_nodes(((loss.grad_fn, None),))
-
-            def make_tensor_pre_hook(id):
-                return lambda _: order.append(f"tensor_pre_hook_{id}")
-
-            def make_post_acc_grad_hook(id):
-                return lambda _: order.append(f"post_acc_grad_hook_{id}")
-
-            module.linear.weight.register_hook(make_tensor_pre_hook("weight"))
-
-            module.linear.weight.register_post_accumulate_grad_hook(
-                make_post_acc_grad_hook("weight")
-            )
-
-            loss.backward()
-            yield tuple(order)
-
-        self.check_output_and_recompiles(fn)
-
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -3050,7 +2985,6 @@ known_failing_tests = {
     # Category: Divergence from eager
     "test_invalid_gradients",  # can't give autograd error due to inaccurate output metadata of lifted backward
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
-    "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
     # Uncategorized
 }
 

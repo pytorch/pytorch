@@ -70,7 +70,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self, TypeIs
+from typing_extensions import Self, TypeGuard
 
 import torch
 import torch._guards
@@ -305,10 +305,10 @@ class FailedMatch(RuntimeError):
 MatchResult = Union[Match, FailedMatch]
 
 
-def is_match(m: MatchResult) -> TypeIs[Match]:
+def is_match(m: MatchResult) -> TypeGuard[Match]:
     """
-    TypeIs cannot act on `self`. Thus this function exists to let mypy
-    recognize FailedMatch.__bool__ as a TypeIs.
+    TypeGuards cannot act on `self`. Thus this function exists to let mypy
+    recognize FailedMatch.__bool__ as a TypeGuard.
     """
     return bool(m)
 
@@ -582,25 +582,18 @@ class _TargetArgsExpr(_TargetExpr):
     def pytree_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
     ) -> Tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
-        type_mapping = {immutable_list: tuple, list: tuple, immutable_dict: dict}
+        def norm_spec(s: pytree.TreeSpec) -> pytree.TreeSpec:
+            if s.type is None:
+                return s
+            mapping = {immutable_list: list, tuple: list, immutable_dict: dict}
+            return pytree.TreeSpec(
+                mapping.get(s.type, s.type),
+                s.context,
+                list(map(norm_spec, s.children_specs)),
+            )
 
-        def convert_type(x: Any) -> Any:
-            cls = type(x)
-            convert_fn = type_mapping.get(cls)
-            if convert_fn is not None:
-                return pytree.tree_map(
-                    convert_type,
-                    convert_fn(x),
-                    is_leaf=lambda x: type(x) in type_mapping,
-                )
-            return x
-
-        normalized_args_tree = pytree.tree_map(
-            convert_type,
-            (args, kwargs),
-            is_leaf=lambda x: type(x) in type_mapping,
-        )
-        flat, spec = pytree.tree_flatten(normalized_args_tree)
+        flat, spec = pytree.tree_flatten([args, kwargs])
+        spec = norm_spec(spec)
         return flat, spec
 
     def __repr__(self) -> str:

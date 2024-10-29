@@ -1234,7 +1234,6 @@ class TestPatternMatcher(TestCase):
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
-    @skipIfXpu
     @inductor_config.patch(
         {
             "triton.unique_kernel_names": "original_aten",

@@ -280,7 +280,7 @@ index_select_add(
           for (int64_t i = start_idx; i < end_idx; i++) {
             // Convert FP32 intermediate buffer result back to 16 bit for
             // output dtype
-            if constexpr (std::is_same_v<data_t, at::Half>) {
+            if constexpr (std::is_same<data_t, at::Half>::value) {
               // FP16
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =
@@ -662,7 +662,7 @@ index_select_scale_add(
           for (int64_t i = start_idx; i < end_idx; i++) {
             // Convert FP32 intermediate buffer result back to 16 bit for
             // output dtype
-            if constexpr (std::is_same_v<data_t, at::Half>) {
+            if constexpr (std::is_same<data_t, at::Half>::value) {
               // FP16
               for (const auto d : c10::irange(ddim)) {
                 (output_data + i * ddim)[d] =

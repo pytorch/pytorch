@@ -211,8 +211,8 @@ void spgemm_cutlass(
 
     AlphaArguments alpha_arguments{
         [&]() -> AlphaArguments {
-            if constexpr (std::is_same_v<ElementComputeEpilogue, cutlass::half_t> ||
-                          std::is_same_v<ElementComputeEpilogue, cutlass::bfloat16_t>) {
+            if constexpr (std::is_same<ElementComputeEpilogue, cutlass::half_t>::value ||
+                          std::is_same<ElementComputeEpilogue, cutlass::bfloat16_t>::value) {
                 return {ElementComputeEpilogue{alpha.to<float>()}};
             } else {
                 return {alpha.to<ElementComputeEpilogue>()};
@@ -221,8 +221,8 @@ void spgemm_cutlass(
     };
     BetaArguments beta_arguments{
         [&]() -> BetaArguments {
-            if constexpr (std::is_same_v<ElementComputeEpilogue, cutlass::half_t> ||
-                          std::is_same_v<ElementComputeEpilogue, cutlass::bfloat16_t>) {
+            if constexpr (std::is_same<ElementComputeEpilogue, cutlass::half_t>::value ||
+                          std::is_same<ElementComputeEpilogue, cutlass::bfloat16_t>::value) {
                 return {ElementComputeEpilogue{beta.to<float>()}};
             } else {
                 return {beta.to<ElementComputeEpilogue>()};

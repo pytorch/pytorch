@@ -103,6 +103,8 @@ def semi_sparse_detach(func, types, args, kwargs) -> torch.Tensor:
         packed_t=self.packed_t,
         meta_t=self.meta_t,
         compressed_swizzled_bitmask=self.compressed_swizzled_bitmask,
+        fuse_transpose_cusparselt=self.fuse_transpose_cusparselt,
+        alg_id_cusparselt=self.alg_id_cusparselt,
         requires_grad=False,
     )
 
@@ -177,19 +179,37 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
 
     assert A.dtype == torch.float8_e4m3fn
     assert B.dtype == torch.float8_e4m3fn
-    # only cuSPARSELt supports float8_e4m3fn currentl
-    assert isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT)
-    assert A.packed is not None
-    # Currently we only support per-tensor scaling, with float32 scales
-    assert A_scale.numel() == 1 and B_scale.numel() == 1
-    assert A_scale.dtype == torch.float32 and B_scale.dtype == torch.float32
-
     # cuSPARSELt lacks the A and B operand scaling support, so instead we use alpha to scale the result.
     # Note that this limits us to per-tensor scalig only.
-    sparse_result = torch._cslt_sparse_mm(
-        A.packed,
-        B,
-        alpha=A_scale * B_scale,
-        out_dtype=out_dtype,
-    )
-    return sparse_result
+    assert A_scale.numel() == 1 and B_scale.numel() == 1
+    assert A_scale.dtype == torch.float32 and B_scale.dtype == torch.float32
+    # only cuSPARSELt supports float8_e4m3fn currentl
+    if isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT):
+        assert A.packed is not None
+        row, col = B.shape
+        B_padded = A._pad_dense_input(B).contiguous().t()
+        sparse_result = torch._cslt_sparse_mm(
+            A.packed,
+            B_padded,
+            alpha=A_scale * B_scale,
+            out_dtype=out_dtype,
+            bias=bias,
+        )
+        return sparse_result[:, :col]
+    else:
+        assert isinstance(B, torch.sparse.SparseSemiStructuredTensor)
+        assert B.packed is not None
+        row, col = A.shape
+        A_padded = B._pad_dense_input(A)
+        sparse_result = torch._cslt_sparse_mm(
+            B.packed,
+            A_padded.t(),
+            alpha=A_scale * B_scale,
+            out_dtype=out_dtype,
+            bias=bias,
+            transpose_result=B.fuse_transpose_cusparselt,
+        )
+        sparse_result = (
+            sparse_result if B.fuse_transpose_cusparselt else sparse_result.t()
+        )
+        return sparse_result[:row, :]

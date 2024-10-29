@@ -2,7 +2,8 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Introduction
 //
@@ -29,4 +30,5 @@ namespace torch::jit {
 // pattern is stored as attr::name.
 TORCH_API std::optional<Node*> EncapsulatePatternIntoSubblock(Node* n);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -1,8 +1,6 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
 import logging
-from typing import Any, Callable, List, Tuple, Union
 
 import torch
 import torch._subclasses.functional_tensor
@@ -64,12 +62,7 @@ cond_op = CondOp()
 
 
 @exposed_in("torch")
-def cond(
-    pred: Union[bool, int, float, torch.Tensor],
-    true_fn: Callable,
-    false_fn: Callable,
-    operands: Union[Tuple, List] = (),
-) -> Any:
+def cond(pred, true_fn, false_fn, operands):
     r"""
     Conditionally applies `true_fn` or `false_fn`.
 
@@ -102,8 +95,7 @@ def cond(
           have consistent input and outputs, meaning the inputs have to be
           the same, and the outputs have to be the same type and shape.
 
-        operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the
-          true/false functions. It can be empty if true_fn/false_fn doesn't require input. Defaults to ().
+        operands (Tuple of possibly nested dict/list/tuple of torch.Tensor): A tuple of inputs to the true/false functions.
 
     Example::
 
@@ -164,7 +156,7 @@ def cond(
             )
 
         if not callable(true_fn) or not callable(false_fn):
-            raise RuntimeError("Expect both branches to be callable.")
+            raise RuntimeError("Expect both branches to be callbale.")
 
         if not isinstance(operands, (tuple, list)) or pytree.tree_any(
             lambda t: not isinstance(t, torch.Tensor), operands
@@ -452,14 +444,6 @@ def cond_fake_tensor_mode(mode, pred, true_fn, false_fn, operands):
         raise RuntimeError("Unmatched number of outputs from cond() branches.")
 
     for true_out, false_out in zip(flat_true_outs, flat_false_outs):
-        if true_out is None or false_out is None:
-            if true_out is None and false_out is None:
-                continue
-            raise torch._dynamo.exc.CondOpArgsMismatchError(
-                f"Expected both branches to return None:"
-                f"\n  {true_fn.__name__} returns {true_out}"
-                f"\n  {false_fn.__name__} returns {false_out}"
-            )
         true_meta = _extract_tensor_metadata(true_out)
         false_meta = _extract_tensor_metadata(false_out)
         if true_meta != false_meta:
@@ -484,17 +468,14 @@ def cond_func(ctx, pred, true_fn, false_fn, inputs):
                 branch, unwrapped_inputs, pre_dispatch=pre_dispatch
             ):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be modifying the input! "
-                    "Consider cloning the input before modifying it. "
+                    "One of torch.cond branch might be modifying the input!"
                 )
         for branch in [true_fn, false_fn]:
             if _has_potential_branch_input_alias(
                 branch, unwrapped_inputs, pre_dispatch=pre_dispatch
             ):
                 raise UnsupportedAliasMutationException(
-                    "One of torch.cond branch might be aliasing the input! "
-                    "If you are returning a view of the input, please make sure "
-                    "to clone it. "
+                    "One of torch.cond branch might be aliasing the input!"
                 )
 
         cond_return = cond_op(
