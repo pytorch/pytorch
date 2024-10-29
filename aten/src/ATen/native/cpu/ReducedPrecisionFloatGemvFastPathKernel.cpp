@@ -2,6 +2,7 @@
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
 #include <c10/macros/Macros.h>
@@ -16,7 +17,7 @@
 
 namespace at::native {
 inline namespace CPU_CAPABILITY {
-#if defined(__aarch64__) && !defined(C10_MOBILE)
+#if !defined(C10_MOBILE)
 
 constexpr auto kF32RegisterPairsPerIteration = 4;
 constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration * 2;
@@ -58,12 +59,12 @@ constexpr int IntegerLog2(T n, int p = 0) {
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+#if !defined(__aarch64__) || defined( __ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
 constexpr auto kF16RegistersPerIteration = 16;
 constexpr auto kF16ElementsPerRegister = vec::Vectorized<Half>::size();
 constexpr auto kF16ElementsPerIteration = kF16RegistersPerIteration * kF16ElementsPerRegister;
 
-static inline float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
+float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
   int offset = kF16RegistersPerIteration;
   c10::ForcedUnroll<IntegerLog2(kF16RegistersPerIteration)>{}([&offset, &x](auto idx) {
     offset /= 2;
@@ -72,7 +73,13 @@ static inline float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x)
     }
   });
   const auto [t0, t1] = vec::convert_half_float(x[0]);
+#if defined(__aarch64__)
   return vaddvq_f32(t0 + t1);
+#else
+  return vec::vec_reduce_all<float>(
+      std::plus<vec::Vectorized<float>>(),
+      t0 + t1);
+#endif
 }
 
 float fp16_dot_with_fp16_arith(const Half* x, const Half* a, int len) {
@@ -105,21 +112,31 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
   });
 }
 
-#endif // __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+#endif // !defined(__aarch64__) || defined( __ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
+
+float reduce(vec::Vectorized<float> x) {
+#if defined(__aarch64__)
+  return vaddvq_f32(x);
+#else
+  return vec::vec_reduce_all<float>(
+      std::plus<vec::Vectorized<float>>(),
+      x);
+#endif
+}
 
 // The below reduce overload and fp16_dot_with_fp32_arith are adapted
 // from llama.cpp's ggml_vec_dot_f32 and surrounding utility
 // functions. See NOTE [ GGML Copyright Notice ] above for the
 // required notice.
-static inline float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
+float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
   int offset = kF32RegistersPerIteration;
   c10::ForcedUnroll<IntegerLog2(kF32RegistersPerIteration)>{}([&offset, &x](auto idx) {
     offset /= 2;
     for (int i = 0; i < offset; ++i) {
-      x[i] = vaddq_f32(x[i], x[offset + i]);
+      x[i] = x[i] + x[offset + i];
     }
   });
-  return vaddvq_f32(x[0]);
+  return reduce(x[0]);
 }
 
 namespace {
@@ -154,8 +171,8 @@ C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
 }
 
 // Return a + b_low * c_low + b_high * c_high
-inline vec::Vectorized<float> f32_dot_f16(vec::Vectorized<float> a, vec::Vectorized<Half> b, vec::Vectorized<Half> c) {
-#ifdef __ARM_FEATURE_FP16_FML
+vec::Vectorized<float> f32_dot_f16(vec::Vectorized<float> a, vec::Vectorized<Half> b, vec::Vectorized<Half> c) {
+#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_FML)
   // NOTE: this instruction is an optional instruction in ARM v8.2 and
   // v8.3, but mandatory in v8.4 per
   // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
@@ -237,8 +254,7 @@ static_assert(
   for (int j = len_aligned; j < len_aligned_vec; j += vec::Vectorized<Half>::size()) { \
     dot_with_fp32_arith_vectorized_tail_inner_loop##bfdot_suffix(vec1, vec2, &tail_sum, j); \
   }                                                                     \
-  auto reduced_tail = vpaddq_f32(tail_sum, tail_sum);                   \
-  reduced_sum += vgetq_lane_f32(vpaddq_f32(reduced_tail, reduced_tail), 0); \
+  reduced_sum += reduce(tail_sum);                                      \
                                                                         \
   /* Second-tier tail fixup: handle all workloads. */                   \
   for (int j = len_aligned_vec; j < len; ++j) {                         \
@@ -288,18 +304,18 @@ void fp16_gemv_trans(
     Half* y,
     const int incy) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
-#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+#if !defined(__aarch64__) || defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
   if (at::globalContext().allowFP16ReductionCPU()) {
     return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, y, incy);
   }
 #endif
   return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
 }
-#endif // defined(__aarch64__) && !defined(C10_MOBILE)
+#endif // !defined(C10_MOBILE)
 
 } // namespace CPU_CAPABILITY
 
-#if defined(__aarch64__) && !defined(C10_MOBILE)
+#if !defined(C10_MOBILE)
 // NOTE: we don't *need* to go through dispatch for the ARM-only
 // implementation right now, but we will need it when we cover x86.
 REGISTER_DISPATCH(fp16_dot_with_fp32_arith_stub, &fp16_dot_with_fp32_arith);
