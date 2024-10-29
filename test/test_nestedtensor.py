@@ -7824,7 +7824,8 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             self.assertEqualIgnoringNestedInts(out, out_ref)
 
             # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
-            if op.inplace_variant:
+            # TODO: Add xfails for other inplace ops instead of hardcoding
+            if op.inplace_variant and "index_put" in op.full_name:
                 op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
                 self.assertEqualIgnoringNestedInts(sample.input, out_ref)
 
@@ -7884,7 +7885,8 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 self.assertEqual(out_compile, out_ref)
 
             # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
-            if op.inplace_variant:
+            # TODO: Add xfails for other inplace ops instead of hardcoding
+            if op.inplace_variant and "index_put" in op.full_name:
                 op_fn = op.inplace_variant
 
                 def in_f(*args, **kwargs):
@@ -7901,7 +7903,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     else:
                         self.assertEqual(sample.input, out_ref)
                 else:
-                    # see https://github.com/pytorch/pytorch/blob/a762dc0357d6c78bbb8be942355cad21b704debe/torch/_functorch/_aot_autograd/collect_metadata_analysis.py#L216-L229
+                    # see https://github.com/pytorch/pytorch/issues/106456
                     with self.assertRaisesRegex(
                         RuntimeError,
                         "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
