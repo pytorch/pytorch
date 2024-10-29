@@ -2165,6 +2165,7 @@ coverage_ignore_classes = [
     "SynchronizationError",
     "UnsynchronizedAccessError",
     # torch.cuda.memory
+    "MemPool",
     "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
@@ -3352,7 +3353,7 @@ master_doc = "index"
 
 # General information about the project.
 project = "PyTorch"
-copyright = "2023, PyTorch Contributors"
+copyright = "2024, PyTorch Contributors"
 author = "PyTorch Contributors"
 torch_version = str(torch.__version__)
 

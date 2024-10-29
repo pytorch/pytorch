@@ -20,6 +20,7 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   VirtualGuardImpl& operator=(const VirtualGuardImpl&) = default;
   VirtualGuardImpl(VirtualGuardImpl&&) noexcept = default;
   VirtualGuardImpl& operator=(VirtualGuardImpl&&) noexcept = default;
+  ~VirtualGuardImpl() override = default;
 
   DeviceType type() const override {
     return impl_->type();
@@ -94,6 +95,10 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
 
   void synchronizeEvent(void* event) const override {
     return impl_->synchronizeEvent(event);
+  }
+
+  void synchronizeDevice(const DeviceIndex device_index) const override {
+    return impl_->synchronizeDevice(device_index);
   }
 
  private:
