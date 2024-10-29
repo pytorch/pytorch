@@ -318,7 +318,7 @@ std::string ivalueToStr(const c10::IValue& val, bool isString) {
 
     // A double quote can cause issues with the chrome tracing so force
     // all inputs to not contain more than the 2 we add in this function
-    auto count = std::count(mystr.begin(), mystr.end(), '\"');
+    auto count = std::count(mystr.begin(), mystr.end(), '"');
     return count > 2 ? "\"None\"" : mystr;
   }
 }
