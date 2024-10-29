@@ -84,7 +84,7 @@ struct TORCH_XPU_API GpuStreamManager {
   using stream_hash_map =
       ska::flat_hash_map<c10::xpu::XPUStream, std::shared_ptr<dnnl::stream>>;
   std::vector<
-      std::array<stream_map, c10::xpu::max_compile_time_stream_priorities>>
+      std::array<stream_hash_map, c10::xpu::max_compile_time_stream_priorities>>
       stream_pool;
 };
 
