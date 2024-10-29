@@ -1190,7 +1190,7 @@ Alias for :func:`torch.atanh`.
 add_docstr(
     torch.asarray,
     r"""
-asarray(obj: Any, *, dtype: Optional[dtype], device: Optional[DeviceLikeType], copy: Optional[bool] = None, requires_grad: bool = False) -> Tensor # noqa: B950
+asarray(obj: Any, *, dtype: Optional[dtype], device: Optional[DeviceLikeType], copy: Optional[bool], requires_grad: bool = False) -> Tensor # noqa: B950
 
 Converts :attr:`obj` to a tensor.
 
@@ -1836,7 +1836,7 @@ Example::
 add_docstr(
     torch.tensor_split,
     r"""
-tensor_split(input: Tensor, indices_or_sections: Tensor, dim: int = 0) -> List of Tensors
+tensor_split(input: Tensor, indices_or_sections: Union[int, Sequence[int], Tensor], dim: int = 0) -> List of Tensors
 
 Splits a tensor into multiple sub-tensors, all of which are views of :attr:`input`,
 along dimension :attr:`dim` according to the indices or number of sections specified
@@ -2740,7 +2740,7 @@ Keyword args:
 add_docstr(
     torch.clamp,
     r"""
-clamp(input: Tensor, min: Optional[Tensor], max: Optional[Tensor], *, out: Optional[Tensor]) -> Tensor
+clamp(input: Tensor, min: Optional[Union[Tensor, Number, _complex]], max: Optional[Union[Tensor, Number, _complex]], *, out: Optional[Tensor]) -> Tensor # noqa: B950
 
 Clamps all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]`.
 Letting min_value and max_value be :attr:`min` and :attr:`max`, respectively, this returns:
@@ -2783,7 +2783,7 @@ Example::
 add_docstr(
     torch.clip,
     r"""
-clip(input: Tensor, min: Optional[Tensor], max: Optional[Tensor], *, out: Optional[Tensor]) -> Tensor
+clip(input: Tensor, min: Optional[Union[Tensor, Number, _complex]], max: Optional[Union[Tensor, Number, _complex]], *, out: Optional[Tensor]) -> Tensor # noqa: B950
 
 Alias for :func:`torch.clamp`.
 """,
@@ -3358,7 +3358,7 @@ Example::
 add_docstr(
     torch.count_nonzero,
     r"""
-count_nonzero(input: Tensor, dim: Optional[int]) -> Tensor
+count_nonzero(input: Tensor, dim: Optional[Union[int, Sequence[int]]]) -> Tensor
 
 Counts the number of non-zero values in the tensor :attr:`input` along the given :attr:`dim`.
 If no dim is specified then all non-zeros in the tensor are counted.
@@ -3833,7 +3833,7 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 Always promotes integer types to the default scalar type.
 
 Args:
-    input (Tensor): the dividend
+    input (Tensor or Number): the dividend
     other (Tensor or Number): the divisor
 
 Keyword args:
@@ -4189,7 +4189,7 @@ Example::
 add_docstr(
     torch.fmod,
     r"""
-fmod(input: Tensor, other: Tensor, *, out: Optional[Tensor]) -> Tensor
+fmod(input: Tensor, other: Union[Tensor, Number, _complex], *, out: Optional[Tensor]) -> Tensor
 
 Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_ entrywise.
 The result has the same sign as the dividend :attr:`input` and its absolute value
@@ -4481,7 +4481,7 @@ Args:
     {input}
     dim (int): Dimension to be unflattened, specified as an index into
          ``input.shape``.
-    sizes (Tuple[int]): New shape of the unflattened dimension.
+    sizes (Sequence[int]): New shape of the unflattened dimension.
          One of its elements can be `-1` in which case the corresponding output
          dimension is inferred. Otherwise, the product of ``sizes`` *must*
          equal ``input.shape[dim]``.
@@ -4520,7 +4520,7 @@ Note that ``input`` and ``index`` do not broadcast against each other.
 Args:
     input (Tensor): the source tensor
     dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to gather
+    index (Tensor): the indices of elements to gather
 
 Keyword arguments:
     sparse_grad (bool, optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
@@ -8608,7 +8608,7 @@ Example::
 add_docstr(
     torch.qr,
     r"""
-qr(input: Tensor, some: bool = True, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor], None]) -> (Tensor, Tensor)
+qr(input: Tensor, some: bool = True, *, out: Union[Tensor, Tuple[Tensor, ...], List[Tensor]]) -> (Tensor, Tensor)
 
 Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
 and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
@@ -12614,7 +12614,7 @@ Example::
 add_docstr(
     torch.combinations,
     r"""
-combinations(input: Tensor, r: int = 2, with_replacement: bool = False) -> seq
+combinations(input: Tensor, r: int = 2, with_replacement: bool = False) -> Tensor
 
 Compute combinations of length :math:`r` of the given tensor. The behavior is similar to
 python's `itertools.combinations` when `with_replacement` is set to `False`, and
