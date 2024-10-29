@@ -3743,11 +3743,6 @@ class CppKernelProxy(CppKernel):
                     tail_loop.simd_vec = True
                 else:
                     tail_loop.set_kernel(scalar_kernel)
-                    if tail_loop.size - tail_loop.offset >= tiling_factors[0] // 2:
-                        # We found that `#pragma GCC ivdep` has better performance than
-                        # `#pragma omp simd simdlen(8)` for some models, such as
-                        # pyhpc_isoneutral_mixing and pyhpc_turbulent_kinetic_energy.
-                        tail_loop.simd_omp = True
                 # We chop the loop into two cubes by the nelements - main loop and tail loop.
                 # Regarding the main loop, it is straightforward that it could be vectorized with
                 # nelements. But for the tail loop, it still could be vectorized. For example,
