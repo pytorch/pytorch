@@ -31,7 +31,6 @@ from torch.cuda._memory_viz import (
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
-    _get_torch_cuda_version,
     TEST_CUDNN,
     TEST_MULTIGPU,
 )
@@ -63,6 +62,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    setBlasBackendsToDefaultFinally,
     skipCUDAMemoryLeakCheckIf,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
@@ -417,19 +417,23 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "temporarily disabled for async"
-    )
-    @unittest.skipIf(
-        _get_torch_cuda_version() >= (12, 2),
-        "skipped as explicit workspace allocation is removed",
-    )
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
+    @setBlasBackendsToDefaultFinally
     def test_cublas_workspace_explicit_allocation(self):
+        torch.backends.cuda.preferred_blas_library("cublas")
         a = torch.randn(7, 7, device="cuda", requires_grad=False)
-        default_workspace_size = 4096 * 2 * 1024 + 16 * 8 * 1024  # :4096:2:16:8
-        # different size (32 MiB) expected on Hopper GPU
-        if torch.cuda.get_device_capability() == (9, 0):
-            default_workspace_size = 4096 * 8 * 1024
+        if torch.version.hip:
+            default_workspace_size = 1024 * 32 * 1024  # :1024:32  32MiB
+            # different size (128 MiB) expected on MI300 GPU
+            if torch.cuda.get_device_capability() >= (9, 4):
+                default_workspace_size = 1024 * 128 * 1024  # :1024:128
+        else:
+            default_workspace_size = (
+                4096 * 2 * 1024 + 16 * 8 * 1024
+            )  # :4096:2:16:8  8MiB
+            # different size (32 MiB) expected on Hopper GPU
+            if torch.cuda.get_device_capability() == (9, 0):
+                default_workspace_size = 4096 * 8 * 1024
 
         def check_workspace_size(inp):
             torch._C._cuda_clearCublasWorkspaces()
@@ -1919,7 +1923,9 @@ exit(2)
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     @serialTest()
+    @setBlasBackendsToDefaultFinally
     def test_repeat_graph_capture_cublas_workspace_memory(self):
+        torch.backends.cuda.preferred_blas_library("cublas")
         (x, y, z) = 1024, 512, 64
         a = torch.rand((x, y), device="cuda")
         b = torch.rand((y, z), device="cuda")
