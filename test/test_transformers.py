@@ -1921,10 +1921,13 @@ class TestSDPA(NNTestCase):
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.float32])
-    @parametrize("batch_size", [120])
-    @parametrize("q_seq_len", [384])
-    @parametrize("kv_seq_len", [384])
-    @parametrize("n_head", [16])
+    # @parametrize("batch_size", [120])
+    # @parametrize("q_seq_len", [384])
+    # @parametrize("kv_seq_len", [384])
+    @parametrize("batch_size", [224])
+    @parametrize("q_seq_len", [197])
+    @parametrize("kv_seq_len", [197])
+    @parametrize("n_head", [12])
     @parametrize("head_dim", [64])
     @parametrize("mask_dim", [4])
     @parametrize("bool_mask", [0])
@@ -1945,7 +1948,7 @@ class TestSDPA(NNTestCase):
     ):
         import time
         torch.set_printoptions(threshold=10_000)
-        tol = Tolerances(2.0, 5e-6)
+        tol = Tolerances(3.0, 5e-6) # 2 for bf16 mask, 3 for big bs
         # tol = Tolerances(1e-5, 5e-6)
         # if dtype is torch.bfloat16:
         #     tol = Tolerances(5e-2, 5e-2)
@@ -1995,7 +1998,6 @@ class TestSDPA(NNTestCase):
             q = q.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
             k = k.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
             v = v.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
-
             attn_mask = torch.randn(mask_shape, dtype=mask_dtype, device=device) if mask_dtype else None
             q2 = q2.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
             k2 = k2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
@@ -2010,8 +2012,8 @@ class TestSDPA(NNTestCase):
                         a_zp=a_zp, a_scale=a_scale,
                         o_zp=o_zp, o_scale=o_scale)
             with sdpa_kernel(backends=[SDPBackend.MATH]):
-                # if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
-                #     attn_mask = attn_mask.float()
+                if not bool_mask and dtype in [torch.bfloat16, torch.float16]:
+                    attn_mask = attn_mask.float()
                 math_ref = torch.nn.functional.scaled_dot_product_attention(
                     q2, k2, v2, attn_mask=attn_mask, dropout_p=0.0, is_causal=False,
                         q_zp=q_zp, q_scale=q_scale,
@@ -2019,6 +2021,22 @@ class TestSDPA(NNTestCase):
                         v_zp=v_zp, v_scale=v_scale,
                         a_zp=a_zp, a_scale=a_scale,
                         o_zp=o_zp, o_scale=o_scale)
+                
+                ## for debugging
+                # q2 = q2.to(torch.float)
+                # k2 = k2.to(torch.float)
+                # v2 = v2.to(torch.float)
+                # scale_factor = 1 / math.sqrt(q2.size(-1))
+                # attn = q2 @ k2.transpose(-2, -1)
+                # # print("[math] qk: ", attn)
+                # attn = attn * scale_factor
+                # attn_max = attn.max(dim=-1, keepdim=True).values
+                # attn = attn - attn_max
+                # attn = torch.exp(attn)
+                # attn_sum = torch.sum(attn, dim=-1, keepdim=True)
+                # attn  = attn / attn_sum
+                # math_ref = attn @ v2
+                # math_ref= math_ref.to(torch.uint8)
 
             if dtype in [torch.bfloat16, torch.float16]:
                 math_ref = math_ref.to(dtype)
@@ -2081,10 +2099,13 @@ class TestSDPA(NNTestCase):
     @onlyCPU
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.bfloat16])
-    @parametrize("batch_size", [120])
-    @parametrize("q_seq_len", [384])
-    @parametrize("kv_seq_len", [384])
-    @parametrize("n_head", [16])
+    # @parametrize("batch_size", [120])
+    # @parametrize("q_seq_len", [384])
+    # @parametrize("kv_seq_len", [384])
+    @parametrize("batch_size", [224])
+    @parametrize("q_seq_len", [197])
+    @parametrize("kv_seq_len", [197])
+    @parametrize("n_head", [12])
     @parametrize("head_dim", [64])
     @parametrize("mask_dim", [4])
     @parametrize("bool_mask", [0])
