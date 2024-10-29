@@ -162,6 +162,11 @@ void bf16_gemv_trans(
 float bf16_dot_with_fp32_arith(
     const at::BFloat16* vec1,
     const at::BFloat16* vec2,
+    int64_t len);
+
+float bf16_dot_with_fp32_arith(
+    const at::BFloat16* vec1,
+    const at::BFloat16* vec2,
     int64_t len) {
   return bf16_dot_with_fp32_arith_stub(kCPU, vec1, vec2, len);
 }
