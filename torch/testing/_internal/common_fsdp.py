@@ -940,11 +940,9 @@ class MLPStack(nn.Sequential):
             "1.in_proj": ColwiseParallel(use_local_output=False),
             "1.out_proj": RowwiseParallel(use_local_output=False),
             "2.in_proj": ColwiseParallel(use_local_output=False),
-            "2.out_proj": (
-                RowwiseParallel(output_layouts=Shard(1))
-                if self.with_seq_parallel
-                else RowwiseParallel()
-            ),
+            "2.out_proj": RowwiseParallel(output_layouts=Shard(1))
+            if self.with_seq_parallel
+            else RowwiseParallel(),
         }
         if self.with_seq_parallel:
             parallelize_plan["3"] = SequenceParallel(sequence_dim=1)
@@ -1372,7 +1370,10 @@ class FSDPTest(MultiProcessTestCase):
             **init_kwargs,
         )
         if ref_init_fn is None:
-            ref_model = DDP(model, device_ids=[rank], output_device=rank)
+            if TEST_HPU:
+                ref_model = DDP(model, device_ids=[DEVICE_TYPE], output_device=DEVICE_TYPE)
+            else:
+                ref_model = DDP(model, device_ids=[rank], output_device=rank)
         else:
             ref_model = ref_init_fn(model)
         if use_pure_fp16:

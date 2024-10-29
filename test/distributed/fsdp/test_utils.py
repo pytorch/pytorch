@@ -2,6 +2,7 @@
 
 import random
 import sys
+import unittest
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import List
@@ -10,17 +11,16 @@ import torch
 import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     subtest,
-    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
+    TEST_HPU,
 )
-
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -35,20 +35,14 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 list_device = "hpu" if TEST_HPU else "cuda"
 
-
 class TestUtils(TestCase):
     @parametrize(
-        "device_list",
-        [
-            ["cpu"],
-            [list_device],
-            subtest(["cpu", list_device], name=f"cpu_{list_device}"),
-        ],
+        "device_list", [["cpu"], [list_device], subtest(["cpu", list_device], name=f"cpu_{list_device}")]
     )
     @skip_if_lt_x_gpu(1)
     def test_apply_to_tensors(self, device_list):
         expected = 0
-
+    
         def get_a_tensor():
             """Return a random tensor on random device."""
             dev = random.choice(device_list)
@@ -57,7 +51,7 @@ class TestUtils(TestCase):
             nonlocal expected
             expected += t.numel()
             return t
-
+    
         @dataclass
         class NonFrozenDataClass:
             some_key: str
@@ -82,19 +76,19 @@ class TestUtils(TestCase):
         od = OrderedDict()
         od["k"] = "value"
         data.append(od)
-
+    
         total = 0
-
+    
         def fn(t):
             nonlocal total
             total += t.numel()
             return t
-
+    
         new_data = _apply_to_tensors(fn, data)
         self.assertEqual(total, expected)
         for i, v in enumerate(data):
             self.assertEqual(type(new_data[i]), type(v))
-
+    
     @skip_if_lt_x_gpu(1)
     def test_replace_by_prefix(self):
         state_dict = {
@@ -111,18 +105,18 @@ class TestUtils(TestCase):
         }
         _replace_by_prefix(state_dict, "module.layer.", "layer.")
         assert state_dict == original_state_dict
-
+    
     @skip_if_lt_x_gpu(1)
     def test_packed_sequence(self):
         """Test to ensure RNN packed sequences are modified correctly."""
         rnn = nn.RNN(5, 5)
-
+    
         x = torch.rand((5, 1, 5), dtype=torch.float)
         seq_length = torch.tensor([4], dtype=torch.int)
-
+    
         def fill_fn(x):
             x.fill_(0)
-
+    
         x = nn.utils.rnn.pack_padded_sequence(x, seq_length)
         x, h = rnn(x)
         x = _apply_to_tensors(fill_fn, x)

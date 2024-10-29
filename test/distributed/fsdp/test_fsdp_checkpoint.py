@@ -1,10 +1,8 @@
 # Owner(s): ["oncall: distributed"]
-
 import contextlib
 import sys
 from copy import deepcopy
 from functools import partial
-
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -23,39 +21,31 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.utils.checkpoint import checkpoint
-
-
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+device_id = "hpu:0"
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
-
 if TEST_WITH_DEV_DBG_ASAN:
     print(
         "Skip dev-asan as torch + multiprocessing spawn have known issues",
         file=sys.stderr,
     )
     sys.exit(0)
-
-
 _save_on_cpu_called = False
-
-
 def get_patched_save_on_cpu():
     orig_save_on_cpu = (
         torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu
     )
-
     def patched_save_on_cpu(*args, **kwargs):
         global _save_on_cpu_called
         _save_on_cpu_called = True
         return orig_save_on_cpu(*args, **kwargs)
-
     return patched_save_on_cpu
-
-
 @contextlib.contextmanager
 def patch_save_on_cpu(new_save_on_cpu):
     orig_save_on_cpu = (
@@ -70,8 +60,6 @@ def patch_save_on_cpu(new_save_on_cpu):
         torch.distributed.algorithms._checkpoint.checkpoint_wrapper.save_on_cpu = (
             orig_save_on_cpu
         )
-
-
 class TestFSDPCheckpoint(FSDPTest):
     class SequentialModule(nn.Module):
         def __init__(
@@ -83,22 +71,18 @@ class TestFSDPCheckpoint(FSDPTest):
             **fsdp_kwargs,
         ):
             torch.manual_seed(0)
-            torch.cuda.manual_seed(0)
             super().__init__()
-            l1 = nn.Linear(3, 3).cuda()
-            l2 = nn.Linear(3, 3).cuda()
-            l3 = nn.Linear(3, 3).cuda()
-
+            l1 = nn.Linear(3, 3).to(device_id if TEST_HPU else torch.cuda.current_device())
+            l2 = nn.Linear(3, 3).to(device_id if TEST_HPU else torch.cuda.current_device())
+            l3 = nn.Linear(3, 3).to(device_id if TEST_HPU else torch.cuda.current_device())
             if checkpoint_layer:
                 if offload_activations:
                     ckpt_wrapper = offload_wrapper
                 else:
                     ckpt_wrapper = checkpoint_wrapper
-
                 l1 = ckpt_wrapper(l1)
                 l2 = ckpt_wrapper(l2)
                 l3 = ckpt_wrapper(l3)
-
             fsdp_wrapper = partial(
                 _maybe_wrap_fsdp, *fsdp_args, wrap_fsdp=wrap_fsdp, **fsdp_kwargs
             )
@@ -107,19 +91,15 @@ class TestFSDPCheckpoint(FSDPTest):
                 fsdp_wrapper(l2),
                 fsdp_wrapper(l3),
             )
-
         def forward(self, x):
             return self.ffn(x)
-
     def _verify_parity(self, losses, outputs, models):
         assert losses
         assert outputs
         assert models
-
         for l, o in zip(losses[1:], outputs[1:]):
             self.assertEqual(losses[0], l)
             self.assertEqual(outputs[0], o)
-
         # Verify grads
         ref_model = models[0]
         ref_grads = [p.grad for p in ref_model.parameters()]
@@ -127,7 +107,6 @@ class TestFSDPCheckpoint(FSDPTest):
             grads = [p.grad for p in m.parameters()]
             for ref_g, g in zip(ref_grads, grads):
                 self.assertEqual(ref_g, g)
-
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
@@ -146,7 +125,6 @@ class TestFSDPCheckpoint(FSDPTest):
             wrapper_to_use = offload_wrapper
         else:
             wrapper_to_use = checkpoint_wrapper
-
         fsdp_kwargs = {"cpu_offload": cpu_offload, "use_orig_params": use_orig_params}
         ckpt_sequential_wrapped_fsdp = wrapper_to_use(
             TestFSDPCheckpoint.SequentialModule(
@@ -161,16 +139,13 @@ class TestFSDPCheckpoint(FSDPTest):
             wrap_fsdp=True,
             **fsdp_kwargs,
         )
-
         baseline = TestFSDPCheckpoint.SequentialModule(
             wrap_fsdp=True,
             **fsdp_kwargs,
         )
-
         # note that reentrant-based checkpointing requires inputs to have grad
         # flag set.
-        inp = torch.randn(10, 3, device=torch.cuda.current_device(), requires_grad=True)
-
+        inp = torch.randn(10, 3, device=device_id if TEST_HPU else torch.cuda.current_device(), requires_grad=True)
         global _save_on_cpu_called
         models = [ckpt_sequential_wrapped_fsdp, inner_ckpt, baseline]
         with patch_save_on_cpu(get_patched_save_on_cpu()):
@@ -189,11 +164,8 @@ class TestFSDPCheckpoint(FSDPTest):
                     loss.backward()
                     losses.append(loss)
                     outputs.append(out)
-
                 self._verify_parity(losses, outputs, models)
-
         dist.barrier()
-
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
@@ -210,7 +182,7 @@ class TestFSDPCheckpoint(FSDPTest):
         fsdp_kwargs = {"cpu_offload": cpu_offload, "use_orig_params": use_orig_params}
         global _save_on_cpu_called
         with patch_save_on_cpu(get_patched_save_on_cpu()):
-            seq = TestFSDPCheckpoint.SequentialModule().to(torch.cuda.current_device())
+            seq = TestFSDPCheckpoint.SequentialModule().to(device_id if TEST_HPU else torch.cuda.current_device())
             # Runs FSDP with no checkpointing
             fsdp_only_seq = FSDP(deepcopy(seq), **fsdp_kwargs)
             # Runs checkpoint-wrapped FSDP
@@ -218,7 +190,6 @@ class TestFSDPCheckpoint(FSDPTest):
                 wrapper_to_use = offload_wrapper
             else:
                 wrapper_to_use = checkpoint_wrapper
-
             checkpointed_fsdp = wrapper_to_use(
                 FSDP(deepcopy(seq), **fsdp_kwargs),
             )
@@ -231,11 +202,9 @@ class TestFSDPCheckpoint(FSDPTest):
             fsdp_call_checkpoint = FSDP(deepcopy(seq), **fsdp_kwargs)
             # note that reentrant-based checkpointing requires inputs to have grad
             # flag set.
-
             inp = torch.randn(
-                10, 3, device=torch.cuda.current_device(), requires_grad=True
+                10, 3, device=device_id if TEST_HPU else torch.cuda.current_device(), requires_grad=True
             )
-
             models = [
                 fsdp_only_seq,
                 checkpointed_fsdp,
@@ -265,7 +234,6 @@ class TestFSDPCheckpoint(FSDPTest):
                         # _save_on_cpu should not be called yet
                         self.assertFalse(_save_on_cpu_called)
                         out = m(inp)
-
                     if check_offload:
                         self.assertTrue(_save_on_cpu_called)
                     loss = out.sum()
@@ -273,14 +241,10 @@ class TestFSDPCheckpoint(FSDPTest):
                     losses.append(loss)
                     outputs.append(out)
                     _save_on_cpu_called = False
-
                 self._verify_parity(losses, outputs, models)
-
         dist.barrier()
 
-
 instantiate_parametrized_tests(TestFSDPCheckpoint)
-
 
 class CheckpointModule(nn.Module):
     def __init__(self, checkpoint: bool = False, use_reentrant: bool = True):
@@ -288,15 +252,12 @@ class CheckpointModule(nn.Module):
         self.seq = nn.Sequential(*[nn.Linear(100, 100) for _ in range(4)])
         self.checkpoint = checkpoint
         self.use_reentrant = use_reentrant
-
     def forward(self, x):
         return (
             checkpoint(self.seq, x, use_reentrant=self.use_reentrant)
             if self.checkpoint
             else self.seq(x)
         )
-
-
 class ModelWithCheckpointSubmodule(nn.Module):
     def __init__(self, checkpoint: bool = False, use_reentrant: bool = True):
         super().__init__()
@@ -305,11 +266,8 @@ class ModelWithCheckpointSubmodule(nn.Module):
         self.s2 = CheckpointModule(checkpoint, use_reentrant)
         self.relu = nn.ReLU()
         self.l2 = nn.Linear(100, 100)
-
     def forward(self, x):
         return self.l2(self.relu(self.s2(self.s1(self.l1(x)))))
-
-
 class TestModel(nn.Module):
     def __init__(self, checkpoint: bool = False, use_reentrant: bool = True):
         super().__init__()
@@ -318,53 +276,43 @@ class TestModel(nn.Module):
         self.checkpoint1 = ModelWithCheckpointSubmodule(checkpoint, use_reentrant)
         self.checkpoint2 = ModelWithCheckpointSubmodule(checkpoint, use_reentrant)
         self.l2 = nn.Linear(100, 100)
-
     def forward(self, x):
         return self.l2(self.relu(self.checkpoint2(self.checkpoint1(self.l1(x)))))
-
-
 class TestFSDPCheckpointSubmodule(FSDPTest):
     # TODO: grad value checks occasionally fails when use_reentrant = True
     @skip_if_lt_x_gpu(2)
     @parametrize("use_reentrant", [False])
-    def test_checkpoint_submodule(self, use_reentrant: bool):
-        model = TestModel(use_reentrant=use_reentrant).cuda()
+    def test_checkpoint_submodule(self, device, use_reentrant: bool):
+        if TEST_HPU:
+            model = TestModel(use_reentrant=use_reentrant).to(device)
+        else:
+            model = TestModel(use_reentrant=use_reentrant).to(self.rank)
         model_ac = deepcopy(model)
-
         for _, m in model_ac.named_modules():
             if isinstance(m, CheckpointModule):
                 m.checkpoint = True
-
         self.assertTrue(model_ac.checkpoint1.s1.checkpoint)
         self.assertTrue(model_ac.checkpoint2.s2.checkpoint)
-
         fsdp_kwargs = {
-            "device_id": torch.cuda.current_device(),
+            "device_id": device if TEST_HPU else self.rank,
             "sharding_strategy": ShardingStrategy.NO_SHARD,
         }
-
         # Wrap no checkpointing model submodules with FSDP
         model.checkpoint1 = FSDP(module=model.checkpoint1, **fsdp_kwargs)
         model.checkpoint2 = FSDP(module=model.checkpoint2, **fsdp_kwargs)
-
         # Wrap checkpointing model submodules with FSDP
         model_ac.checkpoint1 = FSDP(module=model_ac.checkpoint1, **fsdp_kwargs)
         model_ac.checkpoint2 = FSDP(module=model_ac.checkpoint2, **fsdp_kwargs)
-
-        x = torch.randn(2, 100, device="cuda")
-
+        x = torch.randn(2, 100, device=self.device_type)
         model(x).sum().backward()
         model_ac(x).sum().backward()
-
         for (n1, p1), (n2, p2) in zip(
             model.named_parameters(), model_ac.named_parameters()
         ):
             self.assertEqual(n1, n2)
             self.assertTrue(p1.grad.allclose(p2.grad))
 
-
-instantiate_parametrized_tests(TestFSDPCheckpointSubmodule)
-
-
+devices = ("hpu" if TEST_HPU else "cuda")
+instantiate_device_type_tests(TestFSDPCheckpointSubmodule, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
