@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Literal, TYPE_CHECKING
-from typing_extensions import TypeGuard
+from typing_extensions import TypeIs
 
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import BUILTIN_TYPES
@@ -217,7 +217,7 @@ if python_pytree._cxx_pytree_exists:
 
     _LEAF_SPEC = PyTreeSpec((), None, None, (), None)
 
-    def _is_pytreespec_instance(obj: Any, /) -> TypeGuard[PyTreeSpec]:
+    def _is_pytreespec_instance(obj: Any, /) -> TypeIs[PyTreeSpec]:
         return isinstance(obj, PyTreeSpec)
 
     @substitute_in_graph(  # type: ignore[arg-type]
