@@ -454,7 +454,7 @@ def sample_inputs_index_put(
                 ],
             ]
             yield SampleInput(
-                njt,
+                njt.clone().detach(),
                 kwargs={
                     "indices": indices,
                     "values": torch.tensor(1.0, device=njt.device),
@@ -474,7 +474,8 @@ def sample_inputs_index_put(
     )
 
     yield SampleInput(
-        a, kwargs={"indices": indices, "values": torch.tensor(1.0, device=a.device)}
+        a.clone().detach(),
+        kwargs={"indices": indices, "values": torch.tensor(1.0, device=a.device)},
     )
 
 

@@ -7823,6 +7823,11 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_ref = op.ref(op, sample)
             self.assertEqualIgnoringNestedInts(out, out_ref)
 
+            # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
+            if op.inplace_variant:
+                op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
+                self.assertEqualIgnoringNestedInts(sample.input, out_ref)
+
     @withXFails(BACKWARD_FAILURES)
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
@@ -7877,6 +7882,31 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 self.assertEqualIgnoringNestedInts(out_compile, out_ref)
             else:
                 self.assertEqual(out_compile, out_ref)
+
+            # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
+            if op.inplace_variant:
+                op_fn = op.inplace_variant
+
+                def in_f(*args, **kwargs):
+                    return op_fn(*args, **kwargs)
+
+                compiled_in_f = torch.compile(
+                    in_f, fullgraph=True, backend="aot_eager_decomp_partition"
+                )
+
+                if sample.input.is_contiguous():
+                    compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                    if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                        self.assertEqualIgnoringNestedInts(sample.input, out_ref)
+                    else:
+                        self.assertEqual(sample.input, out_ref)
+                else:
+                    # see https://github.com/pytorch/pytorch/blob/a762dc0357d6c78bbb8be942355cad21b704debe/torch/_functorch/_aot_autograd/collect_metadata_analysis.py#L216-L229
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
+                    ):
+                        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
 
     @withXFails(COMPILE_BACKWARD_FAILURES)
     @ops(

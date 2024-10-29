@@ -1641,7 +1641,7 @@ def index_put_(func, *args, **kwargs):
     )
 
     if func == torch.ops.aten.index_put_.default:
-        func(inp._values, func_indices, **new_kwargs)
+        inp._values = func(inp._values, func_indices, **new_kwargs)
         return inp
 
     return NestedTensor(
