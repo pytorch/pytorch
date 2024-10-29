@@ -845,7 +845,7 @@ class CppMicroBrgemm(CppMicroGemm):
         return "at::native::cpublas::brgemm_release();"
 
     def get_b_layout(self):
-        assert self.input_dtype == torch.half
+        assert self.input_dtype == torch.half and torch.cpu._is_amx_fp16_supported()
         return LayoutType.VNNI2
 
 

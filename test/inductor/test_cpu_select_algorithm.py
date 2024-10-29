@@ -823,6 +823,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
+        # Currently brgemm config is only added for half
         if dtype == torch.half:
             self._check_brgemm_counter(vec_amx)
         else:
