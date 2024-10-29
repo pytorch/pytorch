@@ -183,76 +183,6 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
 
-  libtorch-cuda12_1-shared-with-deps-cxx11-abi-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
-    uses: ./.github/workflows/_binary-build-linux.yml
-    needs: get-label-type
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-main
-      LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build_name: libtorch-cuda12_1-shared-with-deps-cxx11-abi
-      build_environment: linux-binary-libtorch-cxx11-abi
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_1-shared-with-deps-cxx11-abi-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
-    needs:
-      - libtorch-cuda12_1-shared-with-deps-cxx11-abi-build
-      - get-label-type
-    uses: ./.github/workflows/_binary-test-linux.yml
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-main
-      LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-cuda12_1-shared-with-deps-cxx11-abi
-      build_environment: linux-binary-libtorch-cxx11-abi
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-  libtorch-cuda12_1-shared-with-deps-cxx11-abi-upload:  # Uploading
-    if: ${{ github.repository_owner == 'pytorch' }}
-    permissions:
-      id-token: write
-      contents: read
-    needs: libtorch-cuda12_1-shared-with-deps-cxx11-abi-test
-    with:
-      PYTORCH_ROOT: /pytorch
-      BUILDER_ROOT: /builder
-      PACKAGE_TYPE: libtorch
-      # TODO: This is a legacy variable that we eventually want to get rid of in
-      #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu121
-      GPU_ARCH_VERSION: 12.1
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cuda12.1-main
-      LIBTORCH_VARIANT: shared-with-deps
-      DESIRED_DEVTOOLSET: cxx11-abi
-      build_name: libtorch-cuda12_1-shared-with-deps-cxx11-abi
-    secrets:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
-      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
-    uses: ./.github/workflows/_binary-upload.yml
-
   libtorch-cuda12_4-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_binary-build-linux.yml
@@ -454,15 +384,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: conda-12.6-build
           submodules: recursive
-          repository: pytorch/builder
+          repository: tinglvv/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean tinglvv/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -564,15 +494,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout tinglvv/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: conda-12.6-build
           submodules: recursive
-          repository: pytorch/builder
+          repository: tinglvv/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean tinglvv/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
