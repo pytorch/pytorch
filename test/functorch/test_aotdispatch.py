@@ -2466,6 +2466,7 @@ def forward(self, primals_1, primals_2):
         # Not checking equality of ref and x as Exception is expected
 
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
+    @skipIfTorchDynamo()
     def test_input_mutation_false_aliasing(self):
         def f(a, b):
             a.mul_(3)
@@ -5416,6 +5417,7 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(out_ref.a, out_test.a)
         self.assertEqual(out_ref.b, out_test.b)
 
+    @skipIfTorchDynamo()
     def test_aot_dispatch_incorrect_backward(self):
         # a is a subclass, b is not
         def f(a, b):
@@ -6193,6 +6195,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         out_buffer = out.values()
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
+    @skipIfTorchDynamo()
     def test_wrong_guess_tangent_type(self):
         def fn(x):
             return x.clone()
