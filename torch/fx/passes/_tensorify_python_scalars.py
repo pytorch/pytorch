@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Union
+from typing import Any, List, Union
 
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
@@ -251,80 +251,38 @@ def tensorify_python_scalars(
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
-    nodes = list(graph.nodes)
-    for i, node in reversed(list(enumerate(nodes))):
+    for node in reversed(graph.nodes):
         if node.op == "output" or node.op == "placeholder":
             continue
 
-        with graph.inserting_before(nodes[i]):
+        with graph.inserting_before(node):
             if len(node.users) == 0 and not node.is_impure():
                 graph.erase_node(node)
                 continue
 
-            args = []
-            kwargs: Dict[str, Any] = {}
-            transform = False
-            for a in node.args:
-                if (
-                    isinstance(a, fx.Node)
-                    and (zf := a.meta.get("val")) is not None
-                    and isinstance(zf, (torch.SymFloat, torch.SymInt))
-                    and (node_hint := zf.node.hint) is not None
-                    # The high level idea here is to specialize if we have
-                    # a node that has exclusively SymFloat free symbols.
-                    # This is because we don't want to specialize cases like
-                    # math.floor(math.sqrt(x.size(0))).
-                    and all(
-                        symbol_is_type(s, SymT.FLOAT) for s in zf.node.expr.free_symbols
-                    )
+            if isinstance(
+                (val := node.meta.get("val")),
+                (torch.SymFloat, torch.SymInt, torch.SymBool),
+            ):
+                if all(
+                    symbol_is_type(s, SymT.FLOAT) for s in val.node.expr.free_symbols
                 ):
-                    transform = True
-                    args.append(
-                        float(zf) if isinstance(zf, torch.SymFloat) else int(zf)
-                    )
-                else:
-                    args.append(a)
+                    # If all symbols are backed symfloats, we can just specialize the whole node
+                    # and get more precise guards. eg.
+                    #
+                    # zf = a.item()
+                    # zf2 = zf // 2
+                    # op(.. zf2 ..)
+                    #
+                    # It's better to guard on zf // 2 == 2.0 than zf == 5.0
+                    if isinstance(val, torch.SymFloat):
+                        node.replace_all_uses_with(float(val))
+                    elif isinstance(val, torch.SymInt):
+                        node.replace_all_uses_with(int(val))
+                    elif isinstance(val, torch.SymBool):
+                        node.replace_all_uses_with(bool(val))
 
-            for k, v in node.kwargs.items():
-                if (
-                    isinstance(v, fx.Node)
-                    and (zf := v.meta.get("val")) is not None
-                    and isinstance(zf, (torch.SymFloat, torch.SymInt))
-                    and (node_hint := zf.node.hint) is not None
-                    and all(
-                        symbol_is_type(s, SymT.FLOAT) for s in zf.node.expr.free_symbols
-                    )
-                ):
-                    transform = True
-                    kwargs[k] = float(zf) if isinstance(zf, torch.SymFloat) else int(zf)
-                else:
-                    kwargs[k] = v
-
-            if transform:
-                # args may not be metaproxy (eg. float) so can't use metaproxy here
-                replacement_node = graph.call_function(node.target, tuple(args), kwargs)
-
-                # Originally I tried doing something like this for meta propagation:
-                #
-                # replacement_node.meta["val"] = node.target(
-                #     *[a.meta["val"] if isinstance(a, fx.Node) else a for a in args],
-                #     **kwargs,
-                # )
-                #
-                # But it turns out that scan_combine_graph_0 doesn't have meta on it
-                # in the following test:
-                #
-                # python test/inductor/test_torchinductor_dynamic_shapes.py DynamicShapesGPUTests.test_custom_scan_op_compiled_dynamic_shapes_cuda # noqa: B950
-                #
-                # We should probably have some sort of test suite that ensures all
-                # fx graph nodes have val populated. But since that doesn't exist today,
-                # I decided to just use the meta from the original node. Since we are
-                # only specializing and not changing the actual operation, this should
-                # still be an accurate meta val.
-                replacement_node.meta["val"] = node.meta["val"]
-
-                node.replace_all_uses_with(replacement_node)
-                graph.erase_node(node)
+                    graph.erase_node(node)
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
