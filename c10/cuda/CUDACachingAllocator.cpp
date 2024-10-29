@@ -153,47 +153,50 @@ static bool BlockComparatorSize(const Block* a, const Block* b);
 static bool BlockComparatorAddress(const Block* a, const Block* b);
 static nvtxDomainHandle_t g_nvtxDomain = nullptr;
 
-nvtxMemHeapHandle_t registerNVTXMemoryBlock(void* ptr, size_t size, nvtxMemHeapHandle_t parent_handle = nullptr) {
-    if (g_nvtxDomain == nullptr) {
-        g_nvtxDomain = nvtxDomainCreateA("pytorch-allocator");
-    }
+nvtxMemHeapHandle_t registerNVTXMemoryBlock(
+    void* ptr,
+    size_t size,
+    nvtxMemHeapHandle_t parent_handle = nullptr) {
+  if (g_nvtxDomain == nullptr) {
+    g_nvtxDomain = nvtxDomainCreateA("pytorch-allocator");
+  }
 
-    if (parent_handle == nullptr) {
-        // This is a new allocation from CUDA, register it as a heap
-        nvtxMemVirtualRangeDesc_t range_desc = {};
-        range_desc.size = size;
-        range_desc.ptr = ptr;
+  if (parent_handle == nullptr) {
+    // This is a new allocation from CUDA, register it as a heap
+    nvtxMemVirtualRangeDesc_t range_desc = {};
+    range_desc.size = size;
+    range_desc.ptr = ptr;
 
-        nvtxMemHeapDesc_t heap_desc = {};
-        heap_desc.extCompatID = NVTX_EXT_COMPATID_MEM;
-        heap_desc.structSize = sizeof(nvtxMemHeapDesc_t);
-        heap_desc.usage = NVTX_MEM_HEAP_USAGE_TYPE_SUB_ALLOCATOR;
-        heap_desc.type = NVTX_MEM_TYPE_VIRTUAL_ADDRESS;
-        heap_desc.typeSpecificDescSize = sizeof(nvtxMemVirtualRangeDesc_t);
-        heap_desc.typeSpecificDesc = &range_desc;
+    nvtxMemHeapDesc_t heap_desc = {};
+    heap_desc.extCompatID = NVTX_EXT_COMPATID_MEM;
+    heap_desc.structSize = sizeof(nvtxMemHeapDesc_t);
+    heap_desc.usage = NVTX_MEM_HEAP_USAGE_TYPE_SUB_ALLOCATOR;
+    heap_desc.type = NVTX_MEM_TYPE_VIRTUAL_ADDRESS;
+    heap_desc.typeSpecificDescSize = sizeof(nvtxMemVirtualRangeDesc_t);
+    heap_desc.typeSpecificDesc = &range_desc;
 
-        auto handle = nvtxMemHeapRegister(g_nvtxDomain, &heap_desc);
+    auto handle = nvtxMemHeapRegister(g_nvtxDomain, &heap_desc);
 
-        return handle;
-    } else {
-        // This is a suballocation from an existing block, register it as a region
-        nvtxMemVirtualRangeDesc_t subrange = {};
-        subrange.size = size;
-        subrange.ptr = ptr;
-        
-        nvtxMemRegionsRegisterBatch_t regions_desc = {};
-        regions_desc.extCompatID = NVTX_EXT_COMPATID_MEM;
-        regions_desc.structSize = sizeof(nvtxMemRegionsRegisterBatch_t);
-        regions_desc.regionType = NVTX_MEM_TYPE_VIRTUAL_ADDRESS;
-        regions_desc.heap = parent_handle;
-        regions_desc.regionCount = 1;
-        regions_desc.regionDescElementSize = sizeof(nvtxMemVirtualRangeDesc_t);
-        regions_desc.regionDescElements = &subrange;
-        
-        nvtxMemRegionsRegister(g_nvtxDomain, &regions_desc);
+    return handle;
+  } else {
+    // This is a suballocation from an existing block, register it as a region
+    nvtxMemVirtualRangeDesc_t subrange = {};
+    subrange.size = size;
+    subrange.ptr = ptr;
 
-        return parent_handle;
-    }
+    nvtxMemRegionsRegisterBatch_t regions_desc = {};
+    regions_desc.extCompatID = NVTX_EXT_COMPATID_MEM;
+    regions_desc.structSize = sizeof(nvtxMemRegionsRegisterBatch_t);
+    regions_desc.regionType = NVTX_MEM_TYPE_VIRTUAL_ADDRESS;
+    regions_desc.heap = parent_handle;
+    regions_desc.regionCount = 1;
+    regions_desc.regionDescElementSize = sizeof(nvtxMemVirtualRangeDesc_t);
+    regions_desc.regionDescElements = &subrange;
+
+    nvtxMemRegionsRegister(g_nvtxDomain, &regions_desc);
+
+    return parent_handle;
+  }
 }
 struct BlockPool {
   BlockPool(bool small, PrivatePool* private_pool = nullptr)
@@ -242,7 +245,7 @@ struct Block {
   // whereas context_when_allocated records the last time we handed this
   // memory out from our cache.
   std::shared_ptr<GatheredContext> context_when_segment_allocated;
-  nvtxMemHeapHandle_t nvtx_handle;  
+  nvtxMemHeapHandle_t nvtx_handle;
 
   ExpandableSegment* expandable_segment_{nullptr};
 
@@ -1214,7 +1217,7 @@ class DeviceCachingAllocator {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
-    
+
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
     if (C10_LIKELY(captures_underway.empty())) {
@@ -1234,9 +1237,7 @@ class DeviceCachingAllocator {
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
     AllocParams params(device, size, stream, &pool, alloc_size, stats);
-    
 
-    
     params.stat_types = get_stat_types_for_pool(pool);
 
     // First, try to get a block from the existing pool.
@@ -1433,9 +1434,7 @@ class DeviceCachingAllocator {
 
       if (remaining->nvtx_handle) {
         block->nvtx_handle = registerNVTXMemoryBlock(
-            block->ptr, 
-            block->size, 
-            remaining->nvtx_handle);
+            block->ptr, block->size, remaining->nvtx_handle);
       }
 
       if (already_split && !block->expandable_segment_) {
@@ -2266,13 +2265,13 @@ class DeviceCachingAllocator {
   }
 
   bool map_block(
-    Block* to_map,
-    size_t size,
-    const std::shared_ptr<GatheredContext>& ctx) {
+      Block* to_map,
+      size_t size,
+      const std::shared_ptr<GatheredContext>& ctx) {
     TORCH_INTERNAL_ASSERT(!to_map->mapped && size <= to_map->size);
     TORCH_INTERNAL_ASSERT(
         !to_map->context_when_allocated); // unmapped blocks should not keep
-                                         // history
+                                          // history
     auto mapped_range =
         to_map->expandable_segment_->map(SegmentRange{to_map->ptr, size});
     // failed to map the memory
@@ -2302,8 +2301,9 @@ class DeviceCachingAllocator {
     }
 
     if (mapped_range.size > 0) {
-        // Register the newly mapped memory
-        to_map->nvtx_handle = registerNVTXMemoryBlock(mapped_range.ptr, mapped_range.size);
+      // Register the newly mapped memory
+      to_map->nvtx_handle =
+          registerNVTXMemoryBlock(mapped_range.ptr, mapped_range.size);
     }
 
     try_merge_blocks(to_map, to_map->prev, pool);
@@ -2336,7 +2336,7 @@ class DeviceCachingAllocator {
     }
 
     return true;
-}
+  }
 
   Block* try_allocate_expandable_block(
       c10::DeviceIndex device,
@@ -2367,10 +2367,11 @@ class DeviceCachingAllocator {
       }
       candidate = new_candidate;
     }
-    
+
     if (candidate->mapped) {
-        // Register the newly mapped block
-        candidate->nvtx_handle = registerNVTXMemoryBlock(candidate->ptr, candidate->size);
+      // Register the newly mapped block
+      candidate->nvtx_handle =
+          registerNVTXMemoryBlock(candidate->ptr, candidate->size);
     }
     pool->blocks.erase(candidate);
     return candidate;
@@ -2384,7 +2385,7 @@ class DeviceCachingAllocator {
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
     if (block->nvtx_handle) {
-        block->nvtx_handle = nullptr;
+      block->nvtx_handle = nullptr;
     }
     record_trace(
         TraceEntry::FREE_COMPLETED,
@@ -2764,7 +2765,8 @@ class DeviceCachingAllocator {
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
 
     if (p.err == cudaSuccess) {
-        p.block->nvtx_handle = registerNVTXMemoryBlock(p.block->ptr, p.block->size);
+      p.block->nvtx_handle =
+          registerNVTXMemoryBlock(p.block->ptr, p.block->size);
     }
 
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
@@ -2931,9 +2933,9 @@ class DeviceCachingAllocator {
       Block* block,
       const std::shared_ptr<GatheredContext>& context) {
     if (block->nvtx_handle) {
-        // TODO: Need to implement proper NVTX cleanup
-        // Note: Current NVTX API documentation doesn't clearly specify cleanup
-        block->nvtx_handle = nullptr;
+      // TODO: Need to implement proper NVTX cleanup
+      // Note: Current NVTX API documentation doesn't clearly specify cleanup
+      block->nvtx_handle = nullptr;
     }
     auto unmapped = block->expandable_segment_->unmap(
         SegmentRange{block->ptr, block->size});

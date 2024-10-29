@@ -205,10 +205,7 @@ endif()
 # ---[ Options. Note to developers: if you add an option below, make sure you
 # also add it to cmake/Summary.cmake so that the summary prints out the option
 # values.
-# Add this line to include the NVTX library
-add_subdirectory(third_party/NVTX/c/)
-get_property(targets DIRECTORY "${CMAKE_SOURCE_DIR}/third_party/NVTX/c" PROPERTY BUILDSYSTEM_TARGETS)
-message("Available targets after NVTX: ${targets}")
+
 include(CMakeDependentOption)
 option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 option(BUILD_BINARY "Build C++ binaries" OFF)
@@ -441,11 +438,6 @@ if(USE_GLOO_WITH_OPENSSL)
   set(USE_TCP_OPENSSL_LOAD
       ON
       CACHE STRING "")
-endif()
-if(USE_SYSTEM_NVTX)
-message("=== SENTINEL USE_SYSTEM_NVTX is ON ===")
-else()
-message("=== SENTINEL USE_SYSTEM_NVTX is OFF ===")
 endif()
 
 # Linux distributions do not want too many embedded sources, in that sense we
@@ -1247,9 +1239,6 @@ if(USE_MIMALLOC)
 endif()
 
 # ---[ Main build
-foreach(target IN LISTS targets)
-  message("Available target: ${target}")
-endforeach()
 add_subdirectory(c10)
 add_subdirectory(caffe2)
 

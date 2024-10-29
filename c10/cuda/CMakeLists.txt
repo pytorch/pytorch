@@ -65,7 +65,6 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
 
   # ---[ Dependency of c10_cuda
-
   target_link_libraries(c10_cuda PUBLIC ${C10_LIB} torch::cudart torch::nvtx3)
 
   if(NOT WIN32)
