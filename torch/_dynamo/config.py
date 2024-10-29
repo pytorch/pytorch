@@ -369,8 +369,8 @@ numpy_default_int = "int64"
 # use numpy's PRNG if True, pytorch otherwise
 use_numpy_random_stream = False
 
-# Use C++ guard manager
-enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") == "1"
+# Use C++ guard manager (deprecated: always true)
+enable_cpp_guard_manager = True
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
@@ -467,11 +467,6 @@ compiled_autograd = False
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: Dict[str, Any] = {}
-
-# Compiled Autograd will attempt to automatically wrap C++ autograd functions found in the autograd graph,
-# and make them opaque to the compiler. This does not work when the C++ backward implementation involves
-# other dispatcher subsystems e.g. custom subclasses, autocast, vmap.
-compiled_autograd_opaque_cpp_node = False
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
