@@ -2417,54 +2417,75 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
 
 class AssociativeScanModels:
-    class Simple(torch.nn.Module):
-        def forward(self, scan_fct, inputs, **kwargs):
-            results = []
-            for op in [
-                get_scan_combine_fn("add", True),
-                get_scan_combine_fn("mul", True),
-            ]:
-                results.append(scan_fct(op, inputs, **kwargs))
-
-            return results
-
+    
+    @staticmethod
+    def get_scan_fct(compile_mode, combine_mode):
+        # Compile the associative_scan according to the provided compile_mode
+        if compile_mode != 'fake':
+            compile_mode = 'none'
+            assoc_scan_comp = compile_mode_helper(associative_scan, compile_mode)
+            scan_fct = lambda combine_fn, xs, dim, reverse: assoc_scan_comp(combine_fn, xs, dim, reverse, combine_mode)
+        else:
+            scan_fct = _fake_associative_scan
+        return scan_fct
+                
     class CombineFn(torch.nn.Module):
-        def forward(self, scan_fct, inputs, **kwargs):
-            combine_fn = kwargs["combine_fn"]
+        def __init__(self, combine_fn, dim, reverse, combine_mode, compile_mode):
+            super().__init__()
 
-            # Remove combine_fn from kwargs
-            del kwargs["combine_fn"]
-
-            results = scan_fct(combine_fn, inputs, **kwargs)
-
+            self.scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, combine_mode)
+            self.combine_fn = combine_fn
+            self.dim = dim
+            self.reverse = reverse
+            
+        def forward(self, inputs):
+            results = self.scan_fct(self.combine_fn, inputs, self.dim, self.reverse)
             return results
+        
+    class Simple(torch.nn.Module):
+        def __init__(self, dim, reverse, combine_mode, compile_mode):
+            super().__init__()
+            
+            kwargs = {'dim': dim, 'reverse': reverse, 'combine_mode': combine_mode, 'compile_mode': compile_mode}
+            self.combine_fns = [AssociativeScanModels.CombineFn(get_scan_combine_fn("add", True), **kwargs),
+                                AssociativeScanModels.CombineFn(get_scan_combine_fn("mul", True), **kwargs)]
+        
+        def forward(self, inputs):
+            results = []
+            for combine_fn in self.combine_fns:
+                results.append(combine_fn(inputs))
+            return results    
 
     class ChainFn(torch.nn.Module):
-        def forward(self, scan_fct, inputs, **kwargs):
-            combine_fns = kwargs["combine_fn"]
-            chain_len = len(combine_fns)
-
-            # Remove combine_fn from kwargs
-            del kwargs["combine_fn"]
+        def __init__(self, combine_fn, dim, reverse, combine_mode, compile_mode):
+            super().__init__()
+            
+            chain_len = len(combine_fn)
+            kwargs = {'combine_fn': combine_fn, 'dim': dim, 'reverse': reverse, 'combine_mode': combine_mode}
 
             # Prepare the kwargs as a list.
-            kwargs_li = []
+            self.nested_tuple = []
             for ind in range(chain_len):
                 kwargs_el = {}
                 for key, val in kwargs.items():
-                    # Check if dims is a list and if it has the same length as combine_fn
+                    # Check if val is a list and if it has the same length as combine_fn
                     # If so, then use the individual elements.
                     # If not, duplicate the first element.
-                    if type(kwargs["dim"]) == list and len(kwargs["dim"]) == chain_len:
+                    if type(val) == list and len(val) == chain_len:
                         kwargs_el[key] = val[ind]
                     else:
                         kwargs_el[key] = val
-                kwargs_li.append(kwargs_el)
-
+                        
+                scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, kwargs_el['combine_mode'])
+                combine_fn = kwargs_el['combine_fn']
+                del kwargs_el['combine_fn']
+                del kwargs_el['combine_mode']
+                self.nested_tuple.append((combine_fn, scan_fct, kwargs_el))
+            
+        def forward(self, inputs):
             results = inputs
-            for fct, kwargs_el in zip(combine_fns, kwargs_li):
-                results = fct(scan_fct, results, **kwargs_el)
-
+            for combine_fn, scan_fct, kwargs in self.nested_tuple:
+                results = combine_fn(scan_fct, results, **kwargs)
             return results
 
     class NestedFn(torch.nn.Module):
@@ -2486,27 +2507,9 @@ class AssociativeScanTests(TestCase):
         torch._dynamo.reset()
         super().setUp()
 
-    def _run_test(self, model, inputs, **kwargs):
-        scan_fct = compile_mode_helper(associative_scan, kwargs["compile_mode"])
-
-        # If a separate fake combine_fn is provided, use this for the fake implementation
-        fake_combine_fn = None
-        if "combine_fn" in kwargs and "fake_combine_fn" in kwargs:
-            fake_combine_fn = kwargs["fake_combine_fn"]
-            del kwargs["fake_combine_fn"]
-
-        # Remove the compile_mode keyword from the dictionary
-        del kwargs["compile_mode"]
-        result = model(scan_fct, inputs, **kwargs)
-
-        # Remove the combine_mode keyword from the dictionary for the fake implementation
-        del kwargs["combine_mode"]
-
-        # Replace the combine_fn with the fake_combine_fn if needed
-        if fake_combine_fn is not None:
-            kwargs["combine_fn"] = fake_combine_fn
-
-        result_exp = model(_fake_associative_scan, inputs, **kwargs)
+    def _run_test(self, model, model_fake, inputs):
+        result = model(inputs)
+        result_exp = model_fake(inputs)
         self.assertEqual(result, result_exp)
 
         # Return the result of the functions under test for further investigations
@@ -2532,13 +2535,17 @@ class AssociativeScanTests(TestCase):
         self, combine_mode, reverse, compile_mode, device
     ):
         x = torch.randn(3, 10, 2, device=device)
+        kwargs = {'dim': 0,
+                  'reverse': reverse,
+                  'compile_mode': compile_mode,
+                  'combine_mode': combine_mode,
+                  }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake['compile_mode'] = 'fake'
         results = self._run_test(
-            model=AssociativeScanModels.Simple(),
+            model=AssociativeScanModels.Simple(**kwargs),
+            model_fake=AssociativeScanModels.Simple(**kwargs_fake),
             inputs=x,
-            combine_mode=combine_mode,
-            dim=0,
-            reverse=reverse,
-            compile_mode=compile_mode,
         )
 
         if not reverse:
@@ -2549,14 +2556,19 @@ class AssociativeScanTests(TestCase):
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
+        kwargs = {'dim': 0,
+                  'reverse': reverse,
+                  'compile_mode': compile_mode,
+                  'combine_fn': get_scan_combine_fn("add", True),
+                  'combine_mode': combine_mode,
+                  }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake['compile_mode'] = 'fake'
+        
         result = self._run_test(
-            model=AssociativeScanModels.CombineFn(),
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=x,
-            combine_mode=combine_mode,
-            dim=0,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=get_scan_combine_fn("add", True),
         )
 
         if not reverse:
@@ -2768,15 +2780,19 @@ class AssociativeScanTests(TestCase):
             return inp @ W
 
         inp = torch.randn(3, 10, 2, device=device)
+        kwargs = {'dim': 1,
+                  'reverse': reverse,
+                  'compile_mode': compile_mode,
+                  'combine_fn': [first_chain_fct, second_chain_fct],
+                  'combine_mode': combine_mode,
+                  }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake['compile_mode'] = 'fake'
 
         self._run_test(
-            model=AssociativeScanModels.ChainFn(),
-            inputs=inp,
-            combine_mode=combine_mode,
-            dim=1,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=[first_chain_fct, second_chain_fct],
+            model=AssociativeScanModels.ChainFn(**kwargs),
+            model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
+            inputs=inp
         )
 
     @skipIfRocm(msg="Unsupported on ROCM yet")
@@ -2912,6 +2928,7 @@ class AssociativeScanTests(TestCase):
 
         inp = torch.randn(3, 10, 2, device=device)
 
+        # TODO: FIXME!
         self._run_test(
             model=AssociativeScanModels.NestedFn(),
             inputs=inp,

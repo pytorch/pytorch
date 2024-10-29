@@ -193,12 +193,26 @@ def associative_scan(
         for x, x_sliced in zip(out_leaves, sliced_leaves)
     ):
         raise RuntimeError(
-            "The pytree of the output of the operator needs to match the xs pytree"
+            f"The metadata of the output of the operator needs to match the meta data of the xs pytree"
+            f"\n  xs metadata             : {[(x.shape, x.dtype, x.device, x.stride()) for x in sliced_leaves]}"
+            f"\n  operator output metadata: {[(x.shape, x.dtype, x.device, x.stride()) for x in out_leaves]}"
         )
 
     if combine_mode == "generic":
-        # The generic_associative_scan implementation calls the combine_fn with a batch long the scan dimension
-        # Therefore, the paralellization is realized with vmap on `dim`
+        # The generic_associative_scan implementation calls the combine_fn with a `batch` along the scan dimension
+        # For example, consider:
+        # def add(x: torch.Tensor, y: torch.Tensor):
+        #     return x + y
+        # leaves = torch.tensor([[0.0, 1.0, 2.0, 3.0]
+        #                        [0.0, 1.0, 2.0, 3.0]])
+        # which has shape 2 x 4;
+        # dim = 1;
+        # In the first iteration of `_scan` the combine_fn gets invoked with
+        # combine_fn([torch.tensor([[0.0, 2.0],
+        #                           [0.0, 2.0]])],
+        #            [torch.tensor([[1.0, 3.0],
+        #                           [1.0, 3.0]])])
+        # The arguments are of shape 2 x 2, but can be evaluated in parallel along the scan dimension.
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
             combine_fn=torch.vmap(combine_fn, dim, dim),
@@ -243,7 +257,7 @@ def generic_associative_scan(operator, leaves, dim=0):
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
-        elems_flat = torch.tensor([0.0, 1.0, 2.0, 3.0])
+        leaves = torch.tensor([0.0, 1.0, 2.0, 3.0])
 
         First iteration of _scan ->
             # odd_elems -> apply operator on all neighbours
