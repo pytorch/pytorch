@@ -25,7 +25,7 @@ static PyObject* THPStream_pynew(
 
   int64_t stream_id = -1;
   int64_t device_type = 0;
-  int64_t device_index = 0;
+  c10::DeviceIndex device_index{};
   int64_t priority = 0;
 
   static torch::PythonArgParser parser({
@@ -43,7 +43,7 @@ static PyObject* THPStream_pynew(
     auto device = r.deviceOptional(0);
     if (device.has_value()) {
       device_type = static_cast<int64_t>(device->type());
-      device_index = static_cast<int64_t>(device->index());
+      device_index = device->index();
       // Initialize device guard if device is not None.
       device_guard_ptr = std::make_unique<c10::DeviceGuard>(device.value());
     } else {
@@ -60,7 +60,7 @@ static PyObject* THPStream_pynew(
     priority = r.toInt64WithDefault(1, 0);
   } else if (r.idx == 1) {
     stream_id = r.toInt64WithDefault(0, -1);
-    device_index = r.toInt64WithDefault(1, 0);
+    device_index = static_cast<c10::DeviceIndex>(r.toInt64WithDefault(1, 0));
     device_type =
         r.toInt64WithDefault(2, static_cast<int64_t>(c10::DeviceType::CPU));
     priority = r.toInt64WithDefault(3, 0);
@@ -90,13 +90,12 @@ static PyObject* THPStream_pynew(
         static_cast<int>(priority));
   } else {
     stream_opt = c10::Stream::unpack3(
-        stream_id,
-        static_cast<c10::DeviceIndex>(device_index),
-        static_cast<c10::DeviceType>(device_type));
+        stream_id, device_index, static_cast<c10::DeviceType>(device_type));
   }
 
   TORCH_CHECK(stream_opt.has_value(), "Failed to create stream");
   self->stream_id = static_cast<int64_t>(stream_opt->id());
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream_opt->device_index());
   self->device_type = static_cast<int64_t>(stream_opt->device_type());
 
@@ -139,7 +138,7 @@ static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
 
   return PyBool_FromLong(c10::Stream::unpack3(
                              self->stream_id,
-                             self->device_index,
+                             static_cast<c10::DeviceIndex>(self->device_index),
                              static_cast<c10::DeviceType>(self->device_type))
                              .query());
 
@@ -153,7 +152,7 @@ static PyObject* THPStream_synchronize(PyObject* _self, PyObject* noargs) {
 
     c10::Stream::unpack3(
         self->stream_id,
-        self->device_index,
+        static_cast<c10::DeviceIndex>(self->device_index),
         static_cast<c10::DeviceType>(self->device_type))
         .synchronize();
   }
@@ -167,7 +166,7 @@ static PyObject* THPStream_wait_event(PyObject* _self, PyObject* _event) {
     auto event = (THPEvent*)_event;
     c10::Stream::unpack3(
         self->stream_id,
-        self->device_index,
+        static_cast<c10::DeviceIndex>(self->device_index),
         static_cast<c10::DeviceType>(self->device_type))
         .wait(event->event);
   }
@@ -184,11 +183,11 @@ static PyObject* THPStream_wait_stream(PyObject* _self, PyObject* _other) {
         c10::EventFlag::PYTORCH_DEFAULT);
     new_event.record(c10::Stream::unpack3(
         other_stream->stream_id,
-        other_stream->device_index,
+        static_cast<c10::DeviceIndex>(other_stream->device_index),
         static_cast<c10::DeviceType>(other_stream->device_type)));
     c10::Stream::unpack3(
         self->stream_id,
-        self->device_index,
+        static_cast<c10::DeviceIndex>(self->device_index),
         static_cast<c10::DeviceType>(self->device_type))
         .wait(new_event);
   }
@@ -229,7 +228,7 @@ static PyObject* THPStream_record_event(
   TORCH_CHECK(new_event, "event must not be null");
   new_event->event.record(c10::Stream::unpack3(
       self->stream_id,
-      self->device_index,
+      static_cast<c10::DeviceIndex>(self->device_index),
       static_cast<c10::DeviceType>(self->device_type)));
   return (PyObject*)new_event;
   END_HANDLE_TH_ERRORS
