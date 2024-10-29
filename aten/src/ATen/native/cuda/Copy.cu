@@ -309,6 +309,83 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
   return at::cuda::get_p2p_access(src_device.index(), dst_device.index());
 }
 
+/**
+ * @brief Copies data from a non-contiguous CPU tensor to a GPU tensor directly, 
+ * handling 1D and 2D cases without creating temporary contiguous buffers.
+ * 
+ * This function leverages `cudaMemcpy2DAsync` to efficiently perform 2D memory 
+ * transfers by specifying pitch (stride) information, which eliminates the need 
+ * for temporary contiguous buffers for non-contiguous tensors. 
+ * 
+ * @param dst           Destination pointer on the GPU.
+ * @param src           Source pointer on the CPU.
+ * @param iter          TensorIterator containing tensor details, such as dimensions, 
+ *                      strides, and element size.
+ * @param kind          Type of memory transfer (cudaMemcpyHostToDevice or cudaMemcpyDeviceToHost).
+ * @param stream        CUDA stream to use for asynchronous execution.
+ * 
+ * This function is optimized to handle 1D and 2D non-contiguous tensors only:
+ * - **1D tensors**: Treated as a single row (height = 1) with width equal to the tensor size.
+ * - **2D tensors**: Uses the specified strides and dimensions to set up pitched memory copy, 
+ *   allowing efficient copying without reshaping or reallocating memory.
+ * 
+ * Preconditions:
+ * - `iter` must represent a non-contiguous tensor with 1 or 2 dimensions.
+ * - The `src` and `dst` tensors must have valid stride and size information.
+ * - Appropriate error checks ensure pitch (stride) values are compatible with the width of each row.
+ */
+static void copy_non_contiguous_2d(
+  void* dst,
+  const void* src,
+  const TensorIterator& iter,
+  cudaMemcpyKind kind,
+  cudaStream_t stream) {
+
+  const auto& dst_tensor = iter.tensor(0);
+  const auto& src_tensor = iter.tensor(1);
+  auto src_sizes = src_tensor.sizes();
+  auto src_strides = src_tensor.strides();
+  auto dst_strides = dst_tensor.strides();
+  size_t element_size = src_tensor.element_size();
+
+  // Set dimensions and strides for 1D or 2D cases
+  int64_t dim0 = src_sizes[0];
+  int64_t dim1 = iter.ndim() == 1 ? 1 : src_sizes[1];
+  int64_t stride0 = src_strides[0];
+  int64_t stride1 = iter.ndim() == 1 ? 1 : src_strides[1];
+  int64_t dst_stride0 = dst_strides[0];
+  int64_t dst_stride1 = iter.ndim() == 1 ? 1 : dst_strides[1];
+
+  bool is_column_major = (stride0 == 1 && stride1 >= dim0);
+
+  size_t src_pitch, dst_pitch, width_in_bytes, height;
+  if (is_column_major) {
+      src_pitch = stride1 * element_size;
+      dst_pitch = dst_stride1 * element_size;
+      width_in_bytes = dim0 * element_size;
+      height = dim1;
+  } else {
+      src_pitch = stride0 * element_size;
+      dst_pitch = dst_stride0 * element_size;
+      width_in_bytes = dim1 * element_size;
+      height = dim0;
+  }
+
+  TORCH_CHECK(src_pitch >= width_in_bytes, "Source pitch must be >= width_in_bytes");
+  TORCH_CHECK(dst_pitch >= width_in_bytes, "Destination pitch must be >= width_in_bytes");
+
+  at::cuda::memcpy2d_and_sync(
+      dst,
+      src,
+      src_pitch,
+      dst_pitch,
+      width_in_bytes,
+      height,
+      kind,
+      stream
+  );
+}
+
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   TORCH_CHECK(iter.ntensors() == 2);
 
@@ -406,51 +483,7 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
   } else { 
     if (iter.ndim() <= 2 && !iter.is_contiguous()) {       
-
-      const auto& dst_tensor = iter.tensor(0);
-      const auto& src_tensor = iter.tensor(1);      
-      auto src_sizes = src_tensor.sizes();
-      auto src_strides = src_tensor.strides();
-      auto dst_strides = dst_tensor.strides();
-      size_t element_size = src_tensor.element_size();
-
-      // Set dimensions and strides for 1D or 2D cases
-      int64_t dim0 = src_sizes[0];
-      int64_t dim1 = iter.ndim() == 1 ? 1 : src_sizes[1];
-      int64_t stride0 = src_strides[0];
-      int64_t stride1 = iter.ndim() == 1 ? 1 : src_strides[1];
-      int64_t dst_stride0 = dst_strides[0];
-      int64_t dst_stride1 = iter.ndim() == 1 ? 1 : dst_strides[1];
-
-      bool is_column_major = (stride0 == 1 && stride1 >= dim0);
-
-      size_t src_pitch, dst_pitch, width_in_bytes, height;
-      if (is_column_major) {
-          src_pitch = stride1 * element_size;
-          dst_pitch = dst_stride1 * element_size;
-          width_in_bytes = dim0 * element_size;
-          height = dim1;
-      } else {
-          src_pitch = stride0 * element_size;
-          dst_pitch = dst_stride0 * element_size;
-          width_in_bytes = dim1 * element_size;
-          height = dim0;
-      }
-      
-      // Ensure pitch is valid
-      TORCH_CHECK(src_pitch >= width_in_bytes, "Source pitch must be >= width_in_bytes");
-      TORCH_CHECK(dst_pitch >= width_in_bytes, "Destination pitch must be >= width_in_bytes");
-
-      at::cuda::memcpy2d_and_sync(
-          dst,        
-          src,        
-          src_pitch,  
-          dst_pitch, 
-          width_in_bytes,
-          height,                               // Number of rows
-          kind,                                 // Copy direction
-          stream         
-        );
+      copy_non_contiguous_2d(dst, src, iter, kind, stream);      
     } else {
       at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
     }
