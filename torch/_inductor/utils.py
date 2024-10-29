@@ -46,6 +46,7 @@ from unittest import mock
 import sympy
 
 import torch
+from torch._prims_common import clone_preserve_strides
 from torch.utils._pytree import tree_map_only
 
 
@@ -2006,14 +2007,6 @@ def align_inputs_from_check_idxs(
         return model(new_inputs)
 
     return run
-
-
-def clone_preserve_strides(x: torch.Tensor):
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-    )
-    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
-    return torch.as_strided(buffer, x.size(), x.stride())
 
 
 def copy_misaligned_inputs(

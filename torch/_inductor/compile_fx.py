@@ -76,6 +76,7 @@ from torch._inductor.utils import (
     tensor_is_aligned,
 )
 from torch._logging import trace_structured
+from torch._prims_common import clone_preserve_strides
 from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
@@ -95,7 +96,6 @@ from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .utils import (
     align_inputs_from_check_idxs,
-    clone_preserve_strides,
     copy_misaligned_inputs,
     get_cloned_parameter_buffer_name,
     get_first_incompatible_cudagraph_node,
