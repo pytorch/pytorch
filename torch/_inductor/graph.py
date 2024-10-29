@@ -339,6 +339,7 @@ class GraphLowering(torch.fx.Interpreter):
         name: Optional[str] = None,
     ) -> None:
         super().__init__(gm)
+        # print(f"Postgrad graph:\n{gm.print_readable(False)}") # TODO
         self.example_inputs = example_inputs
         self.layout_opt = (
             layout_opt
