@@ -25,11 +25,6 @@
 #include <torch/csrc/jit/tensorexpr/ir_verifier.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
-#include <stdexcept>
-#include <unordered_map>
-#include <unordered_set>
-#include <vector>
-
 namespace torch::jit::tensorexpr {
 
 LoopNest::LoopNest(const LoopNest& other)
