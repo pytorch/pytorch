@@ -222,6 +222,10 @@ class MicroPipelineTPTest(TestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, A_shard, B)
 
+            eager_stride = func(A_shard, B).stride()
+            compiled_stride = compiled(A_shard, B).stride()
+            self.assertEqual(eager_stride, compiled_stride)
+
         if gather_dim == A_dims - 1:
             self.assertNotIn("fused_all_gather_matmul", code)
             self.assertIn("all_gather_into_tensor", code)

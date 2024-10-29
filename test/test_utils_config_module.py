@@ -8,6 +8,7 @@ os.environ["ENV_FALSE"] = "FALSE"
 
 from torch.testing._internal import fake_config_module as config
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.utils._config_module import _UNSET_SENTINEL
 
 
 class TestConfigModule(TestCase):
@@ -55,21 +56,14 @@ class TestConfigModule(TestCase):
         ):
             config.does_not_exist = 0
         # Config changes get persisted between test cases
-        del config.e_bool
-        del config.nested.e_bool
-        del config.e_int
-        del config.e_float
-        del config.e_string
-        del config.e_list
-        del config.e_set
-        del config.e_tuple
-        del config.e_dict
-        del config.e_none
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_none_override_semantics(self):
         config.e_bool = None
         self.assertIsNone(config.e_bool)
-        del config.e_bool
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_reference_semantics(self):
         config.e_list.append(2)
@@ -78,9 +72,8 @@ class TestConfigModule(TestCase):
         self.assertEqual(config.e_set, {1, 2})
         config.e_dict[2] = 3
         self.assertEqual(config.e_dict, {1: 2, 2: 3})
-        del config.e_list
-        del config.e_set
-        del config.e_dict
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_env_name_semantics(self):
         self.assertTrue(config.e_env_default)
@@ -90,16 +83,9 @@ class TestConfigModule(TestCase):
         self.assertFalse(config.e_env_default)
         config.e_env_force = False
         self.assertTrue(config.e_env_force)
-        del config.e_env_default
-        del config.e_env_force
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
-    def test_delete(self):
-        self.assertTrue(config.e_bool)
-        del config.e_bool
-        self.assertTrue(config.e_bool)
-        config.e_bool = False
-        del config.e_bool
-        self.assertTrue(config.e_bool)
 
     def test_save_config(self):
         p = config.save_config()
@@ -134,7 +120,8 @@ class TestConfigModule(TestCase):
         config.load_config(p)
         self.assertTrue(config.e_bool)
         self.assertFalse(config.e_ignored)
-        del config.e_ignored
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_save_config_portable(self):
         p = config.save_config_portable()
@@ -167,7 +154,8 @@ class TestConfigModule(TestCase):
         self.assertTrue(config.e_bool)
         self.assertFalse(config._e_ignored)
         # Config changes get persisted between test cases
-        del config._e_ignored
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_codegen_config(self):
         config.e_bool = False
@@ -182,8 +170,8 @@ torch.testing._internal.fake_config_module.e_dict = {1: 2}
 torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""",
         )
         # Config changes get persisted between test cases
-        del config.e_bool
-        del config.e_ignored
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_get_hash(self):
         self.assertEqual(
@@ -210,7 +198,8 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
         self.assertEqual(
             config.get_hash(), b"U\x8bi\xc2~PY\x98\x18\x9d\xf8<\xe4\xbc%\x0c"
         )
-        del config.e_compile_ignored
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_dict_copy_semantics(self):
         p = config.shallow_copy_dict()
@@ -303,9 +292,11 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
         self.assertEqual(p["e_dict"], {1: 2})
         self.assertEqual(p2["e_dict"], {1: 2})
         self.assertEqual(p3["e_dict"], {1: 2})
-        del config.e_dict
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_patch(self):
+        self.assertTrue(config.e_bool)
         with config.patch("e_bool", False):
             self.assertFalse(config.e_bool)
         self.assertTrue(config.e_bool)
