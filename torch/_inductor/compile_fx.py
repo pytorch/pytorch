@@ -350,7 +350,8 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
 
 def split_const_gm(
     gm: GraphModule,
-    lifted_constants: Optional[Dict[str, Any]] = None,
+    skip_constructor: bool = True,
+    lifted_constant_names: Optional[List[str]] = None,
     skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
 ) -> Tuple[GraphModule, Dict[str, int]]:
     """
@@ -377,9 +378,10 @@ def split_const_gm(
         run_and_get_constant_graph,
     )
 
-    const_gm, const_result = run_and_get_constant_graph(
-        gm, lifted_constants, skip_folding_node_fn
+    const_gm = run_and_get_constant_graph(
+        gm, skip_constructor, lifted_constant_names, skip_folding_node_fn
     )
+    const_result = const_gm() if lifted_constant_names is None else None
 
     const_outputs = {
         x.name: idx for idx, x in enumerate(tuple(const_gm.graph.nodes)[-1].args[0])
@@ -399,7 +401,11 @@ def split_const_gm(
         replace_node_with_constant(
             gm,
             node,
-            const_result[const_outputs[node.name]],
+            (
+                const_result[const_outputs[node.name]]
+                if lifted_constant_names is None
+                else None
+            ),
             new_const_name,
         )
         const_output_index[new_const_name] = const_outputs[node.name]
@@ -632,81 +638,86 @@ def _compile_fx_inner(
         This function calls fx_codegen_and_compile and also adds some extra metadata to the resulting
         compiled fx graph. The metadata is saved to FXGraphCache.
         """
-        compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
-        if isinstance(compiled_graph, str):
-            # We only return a string in aot mode, in which case we don't
-            # need to do any post-compilation steps: we just return the string,
-            # which is the filename of the compiled code.
-            return compiled_graph
-        cudagraph_info = None
-        if cudagraphs:
-            # check cudagraph disabling reasons from inductor lowering
-            if compiled_graph.disabled_cudagraphs_reason:
-                if "cuda" in compiled_graph.device_types:
-                    log_cudagraph_skip_and_bump_counter(
-                        f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
-                    )
-                else:
-                    counters["inductor"]["cudagraph_skips"] += 1
-                BoxedBool.disable(cudagraphs)
-            else:
-                complex_memory_overlap_inputs = any(
-                    complex_memory_overlap(t)
-                    for t in example_inputs
-                    if isinstance(t, torch.Tensor)
-                )
-
-                if not config.triton.cudagraph_support_input_mutation:
-                    # Skip supports for cudagraph-managed tensors
-                    from torch._inductor.cudagraph_utils import (
-                        check_for_mutation_ignore_cuda_graph_managed_tensor,
-                    )
-
-                    has_mutation_str = (
-                        check_for_mutation_ignore_cuda_graph_managed_tensor(
-                            gm,
-                            compiled_graph,
-                            static_input_idxs,
+        with _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard():
+            compiled_graph = fx_codegen_and_compile(gm, example_inputs, **fx_kwargs)
+            if isinstance(compiled_graph, str):
+                # We only return a string in aot mode, in which case we don't
+                # need to do any post-compilation steps: we just return the string,
+                # which is the filename of the compiled code.
+                return compiled_graph
+            cudagraph_info = None
+            if cudagraphs:
+                # check cudagraph disabling reasons from inductor lowering
+                if compiled_graph.disabled_cudagraphs_reason:
+                    if "cuda" in compiled_graph.device_types:
+                        log_cudagraph_skip_and_bump_counter(
+                            f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
                         )
-                    )
-                    has_mutation = has_mutation_str is not None
-
-                    if has_mutation:
-                        compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+                    else:
+                        counters["inductor"]["cudagraph_skips"] += 1
+                    BoxedBool.disable(cudagraphs)
                 else:
-                    # Check mutation later to support cudagraph-managed tensors
-                    has_mutation = None
+                    complex_memory_overlap_inputs = any(
+                        complex_memory_overlap(t)
+                        for t in example_inputs
+                        if isinstance(t, torch.Tensor)
+                    )
 
-                cudagraph_tests = [
-                    (not has_mutation, "mutated inputs"),
-                    (not complex_memory_overlap_inputs, "complex memory overlap"),
-                    (
-                        all(
-                            isinstance(t, (torch.Tensor, torch.SymInt))
-                            for t in example_inputs
+                    if not config.triton.cudagraph_support_input_mutation:
+                        # Skip supports for cudagraph-managed tensors
+                        from torch._inductor.cudagraph_utils import (
+                            check_for_mutation_ignore_cuda_graph_managed_tensor,
+                        )
+
+                        has_mutation_str = (
+                            check_for_mutation_ignore_cuda_graph_managed_tensor(
+                                gm,
+                                compiled_graph,
+                                static_input_idxs,
+                            )
+                        )
+                        has_mutation = has_mutation_str is not None
+
+                        if has_mutation:
+                            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
+                    else:
+                        # Check mutation later to support cudagraph-managed tensors
+                        has_mutation = None
+
+                    cudagraph_tests = [
+                        (not has_mutation, "mutated inputs"),
+                        (not complex_memory_overlap_inputs, "complex memory overlap"),
+                        (
+                            all(
+                                isinstance(t, (torch.Tensor, torch.SymInt))
+                                for t in example_inputs
+                            ),
+                            "non-Tensor inputs",
                         ),
-                        "non-Tensor inputs",
-                    ),
-                ]
-                output = output_node(gm)
-                # output args are tuple of first argument
-                assert len(output.args) == 1
-                stack_traces = [
-                    (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
-                    for arg in output.args[0]
-                ]
-                cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
-                placeholders = tuple(get_placeholder_info(gm.graph))
-                cudagraph_info = CudagraphCachedInfo(
-                    placeholders, stack_traces, cudagraph_fail_reasons
-                )
+                    ]
+                    output = output_node(gm)
+                    # output args are tuple of first argument
+                    assert len(output.args) == 1
+                    stack_traces = [
+                        (
+                            arg.stack_trace
+                            if isinstance(arg, torch.fx.node.Node)
+                            else None
+                        )
+                        for arg in output.args[0]
+                    ]
+                    cudagraph_fail_reasons = [s for b, s in cudagraph_tests if not b]
+                    placeholders = tuple(get_placeholder_info(gm.graph))
+                    cudagraph_info = CudagraphCachedInfo(
+                        placeholders, stack_traces, cudagraph_fail_reasons
+                    )
 
-        compiled_graph.cudagraph_info = cudagraph_info
-        compiled_graph.inputs_to_check = inputs_to_check
-        compiled_graph.fx_kwargs = fx_kwargs
-        # TODO: should this be part of fx_kwargs
-        compiled_graph.boxed_forward_device_index = boxed_forward_device_index
-        return compiled_graph
+            compiled_graph.cudagraph_info = cudagraph_info
+            compiled_graph.inputs_to_check = inputs_to_check
+            compiled_graph.fx_kwargs = fx_kwargs
+            # TODO: should this be part of fx_kwargs
+            compiled_graph.boxed_forward_device_index = boxed_forward_device_index
+            return compiled_graph
 
     with _WaitCounter("pytorch.wait_counter.fx_codegen_and_compile").guard() as _:
         if (
@@ -1217,7 +1228,11 @@ def compile_fx_aot(
         }
 
     extern_node_serializer = config_patches.pop("extern_node_serializer", None)
-    with V.set_aot_compilation(True):
+    saved_compile_id = model_.meta.get("dynamo_compile_id", None)
+    saved_compile_context = torch._guards.CompileContext(saved_compile_id)
+    with V.set_aot_compilation(True), torch._guards.compile_context(
+        saved_compile_context
+    ):
         compiled_lib_path = compile_fx(
             model_,
             example_inputs_,
@@ -1653,6 +1668,9 @@ def compile_fx(
                 unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                     "dynamo_flat_name_to_original_fqn"
                 ]
+
+            if "dynamo_compile_id" in model_.meta:
+                unlifted_gm.meta["dynamo_compile_id"] = model_.meta["dynamo_compile_id"]
 
             # Disable amp as in aot_dispatch_autograd (https://github.com/pytorch/pytorch/pull/86515)
             # In inference_compiler (fw_compiler_base), _recursive_joint_graph_passes will call into
