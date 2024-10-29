@@ -656,15 +656,14 @@ class _BaseDataLoaderIter:
         # If pin_memory_device is set but pin_memory is not set, the default
         # behaviour false.
         if len(loader.pin_memory_device) == 0:
-            cur_accelerator = torch._C._get_accelerator().type
-            if loader.pin_memory and cur_accelerator == "cpu":
+            if loader.pin_memory and not torch.accelerator.is_available():
                 warn_msg = (
                     "'pin_memory' argument is set as true but no accelerator is found, "
                     "then device pinned memory won't be used."
                 )
                 warnings.warn(warn_msg)
 
-            self._pin_memory = loader.pin_memory and cur_accelerator != "cpu"
+            self._pin_memory = loader.pin_memory and torch.accelerator.is_available()
             self._pin_memory_device = None
         else:
             if not loader.pin_memory:
@@ -1173,7 +1172,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 )
                 current_device = custom_device_mod.current_device()
             elif self._pin_memory_device is None:
-                current_device = torch._C._accelerator_hooks_get_current_device()
+                current_device = torch.accelerator.current_device_idx()
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(

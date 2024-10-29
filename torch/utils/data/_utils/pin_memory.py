@@ -30,7 +30,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
         custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name())
         custom_device_mod.set_device(device_id)
     elif device is None:
-        torch._C._accelerator_hooks_set_current_device(device_id)
+        torch.accelerator.set_device_idx(device_id)
 
     def do_one_step():
         try:
