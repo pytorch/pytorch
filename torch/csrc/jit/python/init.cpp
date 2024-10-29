@@ -1732,7 +1732,7 @@ void initJITBindings(PyObject* module) {
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
           const auto overloads = getAllSortedOperatorsFor(symbol);
-          auto opWithStack = getOpWithStack(overloads, std::move(args), kwargs);
+          auto opWithStack = getOpWithStack(overloads, args, kwargs);
           std::shared_ptr<Operator> overload = std::get<0>(opWithStack);
           auto result = overload->schema().overload_name();
           if (result.empty()) {
