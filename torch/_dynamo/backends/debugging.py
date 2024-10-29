@@ -118,6 +118,23 @@ def boxed_nop(fx_g, example_inputs):
     return run
 
 
+def fake_crossref_boxed_nop(fx_g, example_inputs):
+    def run(args):
+        with torch._subclasses.CrossRefFakeMode():
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
+
+    run._boxed_call = True
+    return run
+
+
+def get_nop_func():
+    return (
+        boxed_nop
+        if not torch._functorch.config.fake_tensor_crossref
+        else fake_crossref_boxed_nop
+    )
+
+
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
 def aot_eager(
@@ -166,8 +183,8 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
     with functorch_config.patch(config_patches):
         return aot_autograd(
             # these are taken from memory_efficient_fusion()
-            fw_compiler=boxed_nop,
-            bw_compiler=boxed_nop,
+            fw_compiler=get_nop_func(),
+            bw_compiler=get_nop_func(),
             # NB: lambda here is to delay import of inductor
             decompositions=lambda: import_module(
                 "torch._inductor.compile_fx"
@@ -180,6 +197,17 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
 
 register_backend(
     name="aot_eager_decomp_partition", compiler_fn=aot_eager_decomp_partition
+)
+
+
+def aot_eager_decomp_partition_crossref(gm, fake_tensor_inputs, **kwargs):
+    with functorch_config.patch(fake_tensor_crossref=True):
+        return aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs)
+
+
+register_backend(
+    name="aot_eager_decomp_partition_crossref",
+    compiler_fn=aot_eager_decomp_partition_crossref,
 )
 
 
