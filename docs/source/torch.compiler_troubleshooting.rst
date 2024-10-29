@@ -286,7 +286,7 @@ Also, you can programmatically set logging options using ``torch._logging.set_lo
     torch._logging.set_logs(graph_breaks=True)
     ...
 
-More ``TORCH_LOGS`` options are :ref:`detailed below <_troubleshooting_torch_logs_options>`.
+More ``TORCH_LOGS`` options are :ref:`detailed below <troubleshooting_torch_logs_options>`.
 For the full list of options, see `torch._logging <https://pytorch.org/docs/stable/logging.html>`__
 and `torch._logging.set_logs <https://pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs>`__.
 
