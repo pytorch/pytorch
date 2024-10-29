@@ -1097,35 +1097,7 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
   return Vectorized<type>::loadu(arr2); \
 }
 CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
-#if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256)
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(const Vectorized<Half>& a) {
-  static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
-#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
-  float16x8_t x = a;
-#else
-  auto arr = reinterpret_cast<const float16_t*>(a.operator const Half*());
-  float16x8_t x = vld1q_f16(arr);
-#endif
-  float32x4_t x1 = vcvt_f32_f16(vget_low_f16(x));
-  float32x4_t x2 = vcvt_f32_f16(vget_high_f16(x));
-  return { Vectorized<float>(x1), Vectorized<float>(x2) };
-}
-inline Vectorized<Half> convert_float_half(const Vectorized<float>& a, const Vectorized<float>& b) {
-  static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
-  float32x4_t x = a;
-  float32x4_t y = b;
-  float16x4_t x1 = vcvt_f16_f32(x);
-  float16x4_t x2 = vcvt_f16_f32(y);
-#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
-  return Vectorized<Half>(vcombine_f16(x1, x2));
-#else
-  Vectorized<Half> rc;
-  auto arr = reinterpret_cast<float16_t*>(rc.operator Half*());
-  vst1q_f16(arr, vcombine_f16(x1, x2));
-  return rc;
-#endif
-}
-#else
+#if !(defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256))
 CONVERT_NON_VECTORIZED_INIT(Half, half);
 #endif
 
