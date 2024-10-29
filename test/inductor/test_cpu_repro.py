@@ -4170,6 +4170,47 @@ class CPUReproTests(TestCase):
         x = torch.randn(1, 4, 2, 2)
         self.common(fn, (x,))
 
+    @parametrize("is_inference", (True, False))
+    def test_disabled_amp(self, is_inference):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.all_head_size = 12 * 64
+                self.dense = nn.Linear(self.all_head_size, self.all_head_size)
+
+            def forward(self, q, k, v):
+                context_layer = F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=None, dropout_p=0.2
+                )
+                context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+                new_context_layer_shape = context_layer.size()[:-2] + (
+                    self.all_head_size,
+                )
+                context_layer = context_layer.view(new_context_layer_shape)
+                return self.dense(context_layer)
+
+        mod = M().to(torch.bfloat16).eval()
+
+        q = torch.randn((4, 12, 512, 64), dtype=torch.bfloat16) / 10.0
+        k = torch.randn((4, 12, 512, 64), dtype=torch.bfloat16) / 10.0
+        v = torch.randn((4, 12, 512, 64), dtype=torch.bfloat16) / 10.0
+        inputs = (
+            q,
+            k,
+            v,
+        )
+        compiler_mode = torch.compile(mod)
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+
+        context = contextlib.nullcontext if not is_inference else torch.no_grad
+        with config.patch(
+            {"fallback_random": True}
+        ), torch.cpu.amp.autocast(), context(), sdpa_kernel(SDPBackend.MATH):
+            torch.manual_seed(0)
+            eager = mod(*inputs)
+            torch.manual_seed(0)
+            self.assertEqual(compiler_mode(*inputs), eager)
+
     @requires_vectorization
     def test_vec_indirect_load_cse_cache(self):
         # https://github.com/pytorch/pytorch/issues/123502
@@ -4357,6 +4398,34 @@ class CPUReproTests(TestCase):
                 funcs, example_shapes, mixed_types, check_vecns
             ):
                 check_use_full_bits(func, shapes, dtype, mixed, check_vecn)
+
+    @config.patch("cpp.simdlen", 256)
+    @requires_vectorization
+    def test_avx2_bool_constant_pad_nd(self):
+        # NOTE: I tried using (0, 12, 12) and removing the cpp.simdlen=256 override, but
+        # that didn't repro the issue.
+        result = torch.testing.make_tensor(
+            (0, 6, 6), dtype=torch.bool, device=torch.device("cpu")
+        )
+
+        def fn(arg):
+            return torch.constant_pad_nd(arg, (1, 1, 1, 1, 1, 1))
+
+        self.common(fn, (result,))
+
+    @config.patch(unroll_reductions_threshold=9999)
+    @requires_vectorization
+    def test_unrolled_bool_prod_vectorized(self):
+        result = torch.zeros((37, 37, 37), dtype=torch.bool)
+        dim_select = [0, 1]
+        result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
+        result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
+        result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
+
+        def fn(arg):
+            return torch.prod(arg, 1, dtype=torch.bool)
+
+        self.common(fn, (result,))
 
 
 if __name__ == "__main__":
