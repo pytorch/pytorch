@@ -2902,6 +2902,10 @@ class DeviceCachingAllocator {
     auto* pool = block->pool;
     auto active_pool = MemPoolContext::getActiveMemPool();
     if (active_pool && active_pool->allocator() && pool->owner_PrivatePool) {
+      // Ensure that active_pool and pool are the same
+      auto pp = get_private_pool(active_pool->id());
+      TORCH_INTERNAL_ASSERT(pp == pool->owner_PrivatePool);
+
       // If there is an active mempool with a given allocator,
       // we use the given allocator's delete function.
       active_pool->allocator()->raw_delete((void*)block->ptr);
