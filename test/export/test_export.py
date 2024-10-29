@@ -72,6 +72,7 @@ from torch.testing._internal.common_utils import (
     TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
+from torch.testing._internal.triton_utils import requires_cuda
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -209,6 +210,20 @@ def get_hop_schema(ep: torch.export.ExportedProgram):
         if isinstance(node.target, torch._ops.HigherOrderOperator)
     )
     return torch._library.utils.hop_schema_from_fx_node(hop_node)
+
+
+def get_call_function_ops(ep):
+    ops = []
+    for node in ep.graph.nodes:
+        if node.op == "call_function":
+            ops.append(node.target)
+    return ops
+
+
+def compute_outputs(ep, m, inps):
+    inps_copy = copy.deepcopy(inps)
+    inps_copy_2 = copy.deepcopy(inps)
+    return ep.module()(*inps_copy), m(*inps_copy_2)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
@@ -4022,7 +4037,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ):
                 _ = export(mod, inp, strict=True)
 
-    def test_device_to_static(self):
+    def test_aten_to_static(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 return x.to("cpu")
@@ -4036,7 +4051,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
-    def test_device_to_dynamic(self):
+    def test_aten_to_dynamic(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 return x.to("cpu")
@@ -4054,17 +4069,196 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
-    def test_device_to_mutation(self):
+    def test_aten_to_mutation_not_aliasing(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                z = x + 1
+                y = z.to(torch.int64)
+                z.add_(1)
+                return z, y
+
+        inps = (torch.tensor(1, device="cpu"),)
+        ep = torch.export.export_for_training(Module(), inps)
+        ops = get_call_function_ops(ep)
+        self.assertIn(torch.ops.aten.to.dtype, ops)
+        out, out_exp = compute_outputs(ep, Module(), inps)
+        self.assertEqual(out, out_exp, inps)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot return on mutated frozen tensor"
+        ):
+            export(Module(), inps)
+
+    def test_aten_to_mutation_before(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                z = x + 1
+                y = z.to(torch.int64)
+                z.add_(1)
+                return z, y
+
+        inps = (torch.tensor(1, device="cpu"),)
+        ep = torch.export.export_for_training(Module(), inps)
+        ops = get_call_function_ops(ep)
+        self.assertIn(torch.ops.aten.to.dtype, ops)
+        out, out_exp = compute_outputs(ep, Module(), inps)
+        self.assertEqual(out, out_exp, inps)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot return on mutated frozen tensor"
+        ):
+            export(Module(), inps)
+
+    def test_aten_to_mutation_before(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                x.add_(1)
+                y = x.to("cpu")
+                return x
+
+        inps = (torch.tensor(1, device="cpu"),)
+        ep = export(Module(), inps)
+        out, out_exp = compute_outputs(ep, Module(), inps)
+        self.assertEqual(out, out_exp, inps)
+
+    def test_aten_to_mutation_input(self):
+        # y is not a graph input, but it's storage is part of a graph input
+        # under export rule (aten.to() should always return a FunctionalTensor
+        # that aliases its input storage).
+        class Module(torch.nn.Module):
+            def forward(self, x, z):
+                y = x.to("cpu")
+                y.add_(1)
+                return z
+
+        inps = (torch.tensor(1, device="cpu"), torch.tensor(2, device="cpu"))
+        ep = torch.export.export_for_training(Module(), inps)
+        out, out_exp = compute_outputs(ep, Module(), inps)
+        self.assertEqual(out, out_exp, inps)
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot mutate frozen input tensor"):
+            export(
+                Module(), (torch.tensor(1, device="cpu"), torch.tensor(2, device="cpu"))
+            )
+
+    def test_aten_to_mutation_return(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                z = x + 1
+                y = z.to("cpu")
+                z.add_(1)
+                return y
+
+        inps = (torch.tensor(1, device="cpu"),)
+        ep = torch.export.export_for_training(Module(), inps)
+        ops = get_call_function_ops(ep)
+        self.assertIn(torch.ops.aten.to.dtype_layout, ops)
+        out, out_exp = compute_outputs(ep, Module(), inps)
+        self.assertEqual(out, out_exp, inps)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot return on mutated frozen tensor"
+        ):
+            export(Module(), (torch.tensor(1, device="cpu"),)).run_decompositions({})
+
+    def test_aten_to_mutation_return_float(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                z = x + 1
+                y = z.float()
+                z.add_(1)
+                return y
+
+        inps = (torch.tensor(1, device="cpu"),)
+        ep = torch.export.export_for_training(Module(), inps)
+        ops = get_call_function_ops(ep)
+        self.assertIn(torch.ops.aten.to.dtype, ops)
+        out, out_exp = compute_outputs(ep, Module(), inps)
+        self.assertEqual(out, out_exp, inps)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot return on mutated frozen tensor"
+        ):
+            export(Module(), (torch.tensor(1, device="cpu"),))
+
+    def test_aten_to_mutation_computation(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 y = x.to("cpu")
                 y.add_(1)
-                return y, x
+                l = x + 1
+                return l
+
+        inps = (torch.tensor(1, device="cpu"),)
+        ep = torch.export.export_for_training(Module(), inps)
+        ops = get_call_function_ops(ep)
+        self.assertIn(torch.ops.aten.to.dtype_layout, ops)
+        out, out_exp = compute_outputs(ep, Module(), inps)
+        self.assertEqual(out, out_exp, inps)
 
         with self.assertRaisesRegex(
-            RuntimeError, "cannot mutate tensors with frozen storage"
+            RuntimeError, "Cannot do computation on mutated frozen tensor"
         ):
-            export(Module(), (torch.tensor(1, device="cpu"),)).run_decompositions({})
+            m = export(Module(), (torch.tensor(1, device="cpu"),))
+
+    def test_aten_to_mutation_no_computation(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                z = x + 1
+                y = z.to("cpu")
+                y.add_(1)
+                w = x + 2
+                return w
+
+        inps = (torch.tensor(1, device="cpu"),)
+        ep = torch.export.export_for_training(
+            Module(), (torch.tensor(1, device="cpu"),)
+        )
+        ops = get_call_function_ops(ep)
+        self.assertIn(torch.ops.aten.to.dtype_layout, ops)
+
+        ep = export(Module(), (torch.tensor(1, device="cpu"),))
+        out, out_exp = compute_outputs(ep, Module(), inps)
+        self.assertEqual(out, out_exp, inps)
+
+    def test_aten_to_mutation_no_op(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                # fp32.to(fp32) becomes a no-op
+                z = y.to(dtype=torch.float32)
+                z.mul_(2)
+                return y
+
+        inps = (torch.randn(4, dtype=torch.float32),)
+        inps_copy = copy.deepcopy(inps)
+        ep = torch.export.export_for_training(
+            Module(),
+            inps_copy,
+        )
+        ops = get_call_function_ops(ep)
+        self.assertIn(torch.ops.aten.to.dtype, ops)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot return on mutated frozen tensor"
+        ):
+            export(Module(), inps)
+
+    @requires_cuda
+    def test_multi_device(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                x = x + 1
+                x = x.cpu()
+                x = x + 2
+                x = x.cuda()
+                return x
+
+        for device in ["cpu", "cuda"]:
+            inps = (torch.randn(32, 64, device=device),)
+            ep = export(Module(), inps)
+            out, out_exp = compute_outputs(ep, Module(), inps)
+            self.assertEqual(out, out_exp, inps)
 
     def test_float_conversion(self):
         class Module(torch.nn.Module):
@@ -4082,16 +4276,14 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         for op in ops:
             self.assertIn(op, (torch.ops.aten._to_copy.default,))
 
-    def test_device_to_mutation_float(self):
+    def test_aten_to_mutation_float(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 y = x.float()
                 y.add_(1)
                 return y, x
 
-        with self.assertRaisesRegex(
-            RuntimeError, "cannot mutate tensors with frozen storage"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "Cannot mutate frozen input tensor"):
             export(Module(), (torch.tensor(1, dtype=torch.float),)).run_decompositions(
                 {}
             )

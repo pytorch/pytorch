@@ -228,6 +228,12 @@ def run_functionalized_fw_and_collect_metadata(
                     "tensor subclasses"
                 )
 
+            if is_export and mode.is_partial_frozen_and_mutated(f_arg):
+                raise RuntimeError(
+                    "Cannot mutate frozen input tensor. We do not allow input tensor that has been "
+                    "mutated after aten.to method. Please consider adding .clone() to work around this issue."
+                )
+
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
@@ -301,6 +307,12 @@ def run_functionalized_fw_and_collect_metadata(
             if isinstance(o, torch.Tensor):
                 curr_storage = StorageWeakRef(o.untyped_storage())
                 out_tensor_alias_counts[curr_storage] += 1
+
+                if is_export and mode.is_partial_frozen_and_mutated(o):
+                    raise RuntimeError(
+                        "Cannot return on mutated frozen tensor. We cannot return output tensor that "
+                        "has been mutated after aten.to method. Please consider adding .clone() to work around this issue."
+                    )
                 # Note: [AOTAutograd: differentiable outputs that alias each other from a multi-output view call]
                 # This is an optimization on top of the "alias of intermediates" logic,
                 # which you can read more about under Note [AOT Autograd: outputs aliasing inputs or intermediates!]

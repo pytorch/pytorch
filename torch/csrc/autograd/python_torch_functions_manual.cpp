@@ -748,6 +748,9 @@ void initTorchFunctions(PyObject* module) {
   py_module.def("_freeze_functional_tensor", [](const at::Tensor& t) {
     at::functionalization::impl::freeze_functional_tensor(t);
   });
+  py_module.def("_mutation_counter", [](const at::Tensor& t) {
+    return at::functionalization::impl::mutation_counter(t);
+  });
   py_module.def(
       "_enable_functionalization",
       [](bool reapply_views = false) {
