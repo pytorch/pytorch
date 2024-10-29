@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import builtins
 import contextlib
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -34,12 +35,7 @@ from .autotune_process import (
     TritonGPUBenchmarkRequest,
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
-from .codegen.common import (
-    IndentedBuffer,
-    KernelTemplate,
-    WorkspaceArg,
-    WorkspaceZeroMode,
-)
+from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -79,6 +75,55 @@ class KernelNamespace:
 
 # these objects are imported from the generated wrapper code
 extern_kernels = KernelNamespace()
+
+
+@dataclasses.dataclass
+class BenchmarkTensors:
+    """Represents a set of inputs and outputs for autotuining with a template"""
+
+    input_tensors: List[torch.Tensor]
+    output_tensor: Optional[torch.Tensor]
+
+    def unpack(self):
+        return dataclasses.astuple(self)
+
+
+@dataclasses.dataclass
+class AutotuneArgs:
+    """During autotuning, we need to pass the same inputs to all choices.
+    Note:
+        Since we typically have a mix of external choices and triton choices, we create
+        two lists of inputs, one for external inputs and one for triton inputs.
+    """
+
+    triton: BenchmarkTensors
+    extern: BenchmarkTensors
+    expected: Optional[torch.Tensor] = None
+
+    def get_benchmark_tensors(self, extern=False) -> BenchmarkTensors:
+        """Returns the inputs and output tensors for a given choice."""
+        bench_tensors = self.extern if extern else self.triton
+        return bench_tensors
+
+    @classmethod
+    def from_choice_args(
+        cls,
+        example_inputs: List[torch.Tensor],
+        example_inputs_extern: List[torch.Tensor],
+        out: torch.Tensor,
+        out_extern: torch.Tensor,
+        expected: Optional[torch.Tensor] = None,
+    ) -> "AutotuneArgs":
+        """Factory method to create AutotuneInputs from separate inputs/outputs"""
+        return cls(
+            triton=BenchmarkTensors(example_inputs, out),
+            extern=BenchmarkTensors(example_inputs_extern, out_extern),
+            expected=expected,
+        )
+
+    def verify(self, **kwargs):
+        """Verify the correctness of the benchmarking results"""
+        torch.testing.assert_close(self.extern.output_tensor, self.expected, **kwargs)
 
 
 class PartialRender:
@@ -1461,7 +1506,9 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is None:
             input_gen_fns = {}
 
-        def get_inputs(choices: List[ChoiceCaller]):
+        def get_inputs(
+            choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]]
+        ) -> AutotuneArgs:
             # de-duplicate args
             unique_example_inputs = {
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
@@ -1494,42 +1541,18 @@ class AlgorithmSelectorCache(PersistentCache):
             out_extern = torch.as_strided(
                 out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
             )
-            # Make sure that all workspace sizes for each choice are the same
-            triton_templates_choices = [
-                choice for choice in choices if isinstance(choice, TritonTemplateCaller)
-            ]
-            needs_workspace = any(
-                choice.workspace_arg is not None for choice in triton_templates_choices
-            )
-            if needs_workspace:
-                # TODO right now we only support the same workspace arg for all choices
-                # TODO 2 Currently we not benchmark the workspace creation time
-                assert (
-                    triton_templates_choices[0].workspace_arg is not None
-                ), "Expected all triton templates choices to have the same workspace arg."
-                workspace: WorkspaceArg = triton_templates_choices[0].workspace_arg
-                assert all(
-                    WorkspaceArg.can_join(choice.workspace_arg, workspace)
-                    for choice in triton_templates_choices
-                ), "All choices must have the same workspace argument."
-                size, zero_mode = workspace.count, workspace.zero_mode
-                workspace_tensor = torch.empty_strided(
-                    (size,), (1,), dtype=torch.uint8, device=out.device
-                )
-                assert zero_mode in (
-                    WorkspaceZeroMode.ZERO_ON_CALL,
-                    WorkspaceZeroMode.UNINITIALIZED,
-                )
-                if zero_mode == WorkspaceZeroMode.ZERO_ON_CALL:
-                    workspace_tensor.zero_()
-                example_inputs.append(workspace_tensor)
-
             expected = None
             if VERIFY:
                 choices[0].benchmark(*example_inputs_extern, out=out_extern)
                 expected = out_extern.clone()
 
-            return example_inputs, example_inputs_extern, out, out_extern, expected
+            return AutotuneArgs.from_choice_args(
+                example_inputs,
+                example_inputs_extern,
+                out,
+                out_extern,
+                expected,
+            )
 
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
@@ -1550,28 +1573,27 @@ class AlgorithmSelectorCache(PersistentCache):
             return "\n".join(lines)
 
         def benchmark_choice_in_current_process(
-            choice, example_inputs, example_inputs_extern, out, out_extern, expected
-        ):
-            out.zero_()
-            if isinstance(choice, ExternKernelCaller):
-                # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)
-            else:
-                # triton templates want the base pointer for sliced tensors
-                result = choice.benchmark(*example_inputs, out=out)
-            if VERIFY and expected is not None:
-                torch.testing.assert_close(out_extern, expected, **VERIFY)
+            choice: ChoiceCaller, autotune_args: AutotuneArgs
+        ) -> float:
+            is_extern = isinstance(choice, ExternKernelCaller)
+            benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
+            inpts, output = benchmark_tensors.unpack()
+            output.zero_()
+            result = choice.benchmark(*inpts, out=output)
+            if VERIFY and autotune_args.expected is not None:
+                autotune_args.verify(**VERIFY)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()  # shake out any CUDA errors
             return result
 
-        def benchmark_in_current_process(choices):
+        def benchmark_in_current_process(
+            choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]],
+        ) -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
             inputs = get_inputs(choices)
-            example_inputs, _, out, _, _ = inputs
             timings = {}
             for choice in choices:
                 try:
-                    timing = benchmark_choice_in_current_process(choice, *inputs)
+                    timing = benchmark_choice_in_current_process(choice, inputs)
                 except CUDACompileError as e:
                     log.error(
                         "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
@@ -1613,7 +1635,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
             return timings
 
-        def benchmark_in_sub_process(choices):
+        def benchmark_in_sub_process(
+            choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]]
+        ):
             from . import autotune_process
 
             # only benchmark triton kernel in sub process for now.
@@ -1622,7 +1646,7 @@ class AlgorithmSelectorCache(PersistentCache):
             triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
 
             timings = benchmark_in_current_process(extern)
-            timings.update(autotune_process.benchmark_in_sub_process(triton))
+            timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
             return timings
 
         benchmark = (
