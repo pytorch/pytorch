@@ -623,10 +623,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 is_inplace = binary_list[binary_fn][2]
                 # view + linear + view(joint_graph+freeze pass)
                 match_count = match_count + 5 if is_inplace else match_count + 3
-                match_nodes = match_nodes + 7 if is_inplace else match_nodes + 5
+                match_nodes = match_nodes + 8 if is_inplace else match_nodes + 5
             mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
             v = torch.randn(input_shape)
             other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
+
             self._test_common(
                 mod,
                 (
