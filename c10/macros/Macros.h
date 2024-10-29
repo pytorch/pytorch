@@ -33,12 +33,15 @@
 #define __ubsan_ignore_pointer_overflow__ \
   __attribute__((no_sanitize("pointer-overflow")))
 #define __ubsan_ignore_function__ __attribute__((no_sanitize("function")))
+#define __ubsan_ignore_float_cast_overflow__ \
+  __attribute__((no_sanitize("float-cast-overflow")))
 #else
 #define __ubsan_ignore_float_divide_by_zero__
 #define __ubsan_ignore_undefined__
 #define __ubsan_ignore_signed_int_overflow__
 #define __ubsan_ignore_pointer_overflow__
 #define __ubsan_ignore_function__
+#define __ubsan_ignore_float_cast_overflow__
 #endif
 
 // Detect address sanitizer as some stuff doesn't work with it
@@ -115,46 +118,13 @@
 #define C10_HAS_CPP_ATTRIBUTE(x) (0)
 #endif
 
-/// C10_NODISCARD - Warn if a type or return value is discarded.
-
-// Technically, we should check if __cplusplus > 201402L here, because
-// [[nodiscard]] is only defined in C++17.  However, some compilers
-// we care about don't advertise being C++17 (e.g., clang), but
-// support the attribute anyway.  In fact, this is not just a good idea,
-// it's the law: clang::warn_unused_result doesn't work on nvcc + clang
-// and the best workaround for this case is to use [[nodiscard]]
-// instead; see https://github.com/pytorch/pytorch/issues/13118
-//
-// Note to future editors: if you have noticed that a compiler is
-// misbehaving (e.g., it advertises support, but the support doesn't
-// actually work, or it is emitting warnings).  Some compilers which
-// are strict about the matter include MSVC, which will complain:
-//
-//  error C2429: attribute 'nodiscard' requires compiler flag '/std:c++latest'
-//
-// Exhibits:
-//  - MSVC 19.14: https://godbolt.org/z/Dzd7gn (requires /std:c++latest)
-//  - Clang 8.0.0: https://godbolt.org/z/3PYL4Z (always advertises support)
-//  - gcc 8.3: https://godbolt.org/z/4tLMQS (always advertises support)
-#if C10_HAS_CPP_ATTRIBUTE(nodiscard)
+#ifndef FBCODE_CAFFE2
+/// DEPRECATED: Warn if a type or return value is discarded.
 #define C10_NODISCARD [[nodiscard]]
-// Workaround for llvm.org/PR23435, since clang 3.6 and below emit a spurious
-// error when __has_cpp_attribute is given a scoped attribute in C mode.
-#elif __cplusplus && C10_HAS_CPP_ATTRIBUTE(clang::warn_unused_result)
-// TODO: It's possible this is still triggering
-// https://github.com/pytorch/pytorch/issues/13118 on Windows; if it is, better
-// fix it.
-#define C10_NODISCARD [[clang::warn_unused_result]]
-#else
-#define C10_NODISCARD
-#endif
 
-// suppress an unused variable.
-#if defined(_MSC_VER) && !defined(__clang__)
-#define C10_UNUSED __pragma(warning(suppress : 4100 4101))
-#else
-#define C10_UNUSED __attribute__((__unused__))
-#endif //_MSC_VER
+/// DEPRECATED: Suppress an unused variable.
+#define C10_UNUSED [[maybe_unused]]
+#endif
 
 #if !defined(__has_attribute)
 #define __has_attribute(x) 0
@@ -475,66 +445,14 @@ __host__ __device__
 #define C10_ALWAYS_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
 #endif
 
-#if defined(__CUDA_ARCH__)
-#if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA const
-#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
-
-// Note [static constexpr char* members for windows NVCC]
-// The Windows NVCC compiler doesn't handle static constexpr class members,
-// although it's fixed in a later version.
-// (see
-// https://developercommunity.visualstudio.com/t/intellisense-error-c11-static-constexpr-member-ini/245425)
-//
-// If we want to ensure that our field is static under all builds, then we need
-// to work around it specifically for windows NVCC by making it (a) const, (b)
-// defined outside of the class definition We need to define it outside of the
-// class definition because of the C++ standard; char* is not an integral type
-// (see
-// https://stackoverflow.com/questions/24278473/intellisense-a-member-of-type-const-char-const-cannot-have-an-in-class-in)
-//
-// So instead of this:
-// struct Foo {
-//     static constexpr const char* name = "foo";
-// }
-// In Windows NVCC, we end up with this:
-// struct Foo {
-//     static const char* name;
-// }
-// const char* Foo::name = "foo";
-//
-// This gives us a small perf hit for any code that wants to access these field
-// members, but right now it isn't used in any perf-critical code paths.
-#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static const char* field;
-#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
-  const char* cls::field = val;
-#else
-#define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
-#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
-
-#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static constexpr const char* field = val;
-#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
-#endif
-#else
-#if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA const
-#define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
-
-#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static const char* field;
-#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
-  const char* cls::field = val;
-#else
+#if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 
 #define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
-  static constexpr const char* field = val;
+  static constexpr const char field[] = val;
 #define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
-#endif
-#endif
+#endif // !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
 
 #ifndef HAS_DEMANGLE
 #if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__)

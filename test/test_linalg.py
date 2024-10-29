@@ -4578,6 +4578,14 @@ class TestLinalg(TestCase):
     def test_matmul_offline_tunableop(self, device, dtype):
         import os
         os.putenv('PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE', '0')
+
+        # Pointing to temp files. The test cannot remove them on Windows because
+        # they are in use and locked
+        import tempfile
+        tmp_dir = tempfile.mkdtemp()
+        os.putenv("PYTORCH_TUNABLEOP_UNTUNED_FILENAME", os.path.join(tmp_dir, "tunableop_untuned.csv"))
+        os.putenv("PYTORCH_TUNABLEOP_FILENAME", os.path.join(tmp_dir, "tunableop_results.csv"))
+
         torch.cuda.tunable.enable()
         # record GEMM
         torch.cuda.tunable.tuning_enable(False)
@@ -4593,7 +4601,7 @@ class TestLinalg(TestCase):
         assert torch.cuda.tunable.is_enabled()
         assert torch.cuda.tunable.tuning_is_enabled() is False
         ordinal = torch.cuda.current_device()
-        untuned_filename = f"tunableop_untuned{ordinal}.csv"
+        untuned_filename = os.path.join(tmp_dir, f"tunableop_untuned{ordinal}.csv")
         assert os.path.exists(untuned_filename)
 
         # tuning the untuned GEMMs in file
@@ -4609,14 +4617,15 @@ class TestLinalg(TestCase):
         assert len(torch.cuda.tunable.get_results()) > 0
         assert torch.cuda.tunable.write_file()
 
-        result_filename = f"tunableop_results{ordinal}.csv"
+        result_filename = os.path.join(tmp_dir, f"tunableop_results{ordinal}.csv")
         assert os.path.exists(result_filename)
 
         # remove the files created above to avoid error 'Build left local git repository checkout dirty', ignore errors
         for filename in [untuned_filename, result_filename]:
             try:
                 os.remove(filename)
-            finally:
+            # NB: The file is locked on Windows
+            except (FileNotFoundError, PermissionError):
                 pass
 
         # disables TunableOp, no file will be written, restore to default values
@@ -4858,6 +4867,71 @@ class TestLinalg(TestCase):
             # the this test and verify that it agrees with the number of
             # GEMMs.
             self.assertEqual((total_num_results - ref_num_results), count_matmul)
+
+        finally:
+            # disable TunableOp
+            torch.cuda.tunable.enable(False)
+
+            # clean up, remove any file that was generated
+            try:
+                import os
+                filename = torch.cuda.tunable.get_filename()
+                os.remove(filename)
+            except FileNotFoundError:
+                pass
+
+    @onlyCUDA
+    @dtypes(torch.float)
+    def test_disable_tuning_tunableop(self, device, dtype):
+        # Test that the Python API for disabling tuning stops
+        # additional tunings even when TunableOp is enabled.
+        # In other words, test that:
+        # PYTORCH_TUNABLEOP_ENABLED=1
+        # PYTORCH_TUNABLEOP_TUNING=0
+        # is no longer tuning GEMMs.
+
+        try:
+            set_tunableop_defaults()
+            torch.cuda.tunable.enable()
+            # set these to single iterations to keep it short but still exercise the code
+            torch.cuda.tunable.set_max_tuning_iterations(1)
+
+            # Reference number of results
+            ref_num_results = len(torch.cuda.tunable.get_results())
+
+            # Tune one GEMMs to make sure TunableOp is enabled
+            M = 3
+            N = 3
+            K = 3
+            A = torch.randn(N, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            C = torch.matmul(A, B)
+
+            # This stores total number of cummulative results
+            total_num_results = len(torch.cuda.tunable.get_results())
+
+            # Take the difference to calculate the number of results from
+            # this test. There should be one additional tuned GEMM
+            self.assertEqual((total_num_results - ref_num_results), 1)
+
+            # New total number of results becomes new reference result
+            ref_num_results = total_num_results
+
+            # Now disable further tuning, while keeping TunableOp Enabled
+            torch.cuda.tunable.tuning_enable(False)
+
+            # Try to tune one more GEMM
+            M = 3
+            N = 3
+            K = 4
+            A = torch.randn(N, K, device=device, dtype=dtype)
+            B = torch.randn(K, M, device=device, dtype=dtype)
+            C = torch.matmul(A, B)
+
+            # Take the difference to calculate the number of results from
+            # this test. There should be no change in the number of results
+            # since tuning is disabe.
+            self.assertEqual((total_num_results - ref_num_results), 0)
 
         finally:
             # disable TunableOp
@@ -5156,44 +5230,6 @@ class TestLinalg(TestCase):
         m1 = torch.randn(32, 131071 , device=device).to(dtype)
         m2 = torch.randn(16, 131071, device=device).to(dtype)
         torch.nn.functional.linear(m1, m2, M)
-
-    @onlyCUDA
-    @skipCUDAIfNotRocm
-    @dtypes(*floating_types_and(torch.bfloat16, torch.half))
-    def test_hipblaslt_corner_cases_rocm(self, device, dtype):
-        if dtype == torch.double:
-            raise unittest.SkipTest("hipblasLt doesn't support doubles yet")
-
-        # enable hipblaslt path via env variable.
-        import os
-        DISABLE_ADDMM_HIP_LT = "DISABLE_ADDMM_HIP_LT"
-        prev_val = os.getenv(DISABLE_ADDMM_HIP_LT)
-        try:
-            os.environ[DISABLE_ADDMM_HIP_LT] = "0"
-            # common case
-            M = torch.randn(128, device=device, dtype=dtype)
-            m1 = torch.randn(2048, 2400, device=device, dtype=dtype)
-            m2 = torch.randn(128, 2400, device=device, dtype=dtype)
-            out1 = torch.nn.functional.linear(m1, m2, M)
-            M_cpu = M.to('cpu')
-            m1_cpu = m1.to('cpu')
-            m2_cpu = m2.to('cpu')
-            out1_cpu = torch.nn.functional.linear(m1_cpu, m2_cpu, M_cpu)
-            self.assertTrue(torch.allclose(out1_cpu, out1.cpu(), rtol=1e-2, atol=1e-2))
-
-            # common case without bias
-            m1 = torch.randn(2048, 2400, device=device, dtype=dtype)
-            m2 = torch.randn(128, 2400, device=device, dtype=dtype)
-            out2 = torch.nn.functional.linear(m1, m2, bias=None)
-            m1_cpu = m1.to('cpu')
-            m2_cpu = m2.to('cpu')
-            out2_cpu = torch.nn.functional.linear(m1_cpu, m2_cpu, bias=None)
-            self.assertTrue(torch.allclose(out2_cpu, out2.cpu(), rtol=1e-2, atol=1e-2))
-        finally:
-            if prev_val is None:
-                del os.environ[DISABLE_ADDMM_HIP_LT]
-            else:
-                os.environ[DISABLE_ADDMM_HIP_LT] = prev_val
 
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   torch.half,
@@ -6361,7 +6397,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 x, y = y, x
             if non_contig_type != 0:
                 y = y * 2
-            x_int8 = torch.randint(-10, 10, (x, y), dtype=torch.int8, device=device)
+            x_int8 = torch.randint(-128, 127, (x, y), dtype=torch.int8, device=device)
             x_float = x_int8.to(torch.float32)
             if non_contig_type == 1:
                 x_int8 = x_int8[:, : y // 2]
@@ -8412,6 +8448,22 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         self.assertEqual(out1, out2)
         self.assertEqual(out_ref, out2.cpu())
+
+    @skipCUDAIfNotRocm
+    @unittest.skipIf(not blaslt_supported_device(), "blasLt not supported on current device")
+    @setBlasBackendsToDefaultFinally
+    def test_ck_blas_library(self):
+        m1 = torch.randint(2, 5, (7168, 8192), device='cuda', dtype=torch.float)
+        m2 = torch.randint(2, 5, (1280, 8192), device='cuda', dtype=torch.float)
+
+        torch.backends.cuda.preferred_blas_library('ck')
+        ck_out = torch.nn.functional.linear(m1, m2)
+
+        cpu_out = torch.nn.functional.linear(m1.cpu(), m2.cpu())
+
+        self.assertEqual(ck_out, cpu_out)
+
+
 
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])

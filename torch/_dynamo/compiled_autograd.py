@@ -44,10 +44,6 @@ def snapshot_verbose_logging_enabled():
     )
 
 
-def cpp_verbose_log_fn(msg: str) -> None:
-    verbose_log.debug(msg)
-
-
 def snapshot_cudagraph_enabled():
     return torch._inductor.config.triton.cudagraphs
 
@@ -517,30 +513,45 @@ class AutogradCompilerInstance:
 # state of the autograd engine dispatch, kept in sync by enable/disable context managers
 compiled_autograd_enabled = False
 
+# global flag to check if compiled autograd is enabled but Dynamo stance is "force_eager"
+compiled_autograd_enabled_force_eager = False
+
 # global flag to check if we are processing graphs produced from a compiled autograd graph
 in_compiled_autograd_region = False
 
 
 @contextlib.contextmanager
 def enable(compiler_fn):
-    # we need to import this, because user might not have imported it if they directly use this context manager
-    # we need to lazily import it, because of circular dependencies
-    import torch._inductor.cudagraph_trees
+    from torch._dynamo import eval_frame
 
-    prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
-        functools.partial(AutogradCompilerInstance, compiler_fn)
-    )
-    if snapshot_verbose_logging_enabled():
-        torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
-    global compiled_autograd_enabled
-    compiled_autograd_enabled = True
-    try:
-        with torch.autograd.set_multithreading_enabled(False):
+    if eval_frame._stance.stance == "force_eager":
+        # If user explicitly sets Dynamo stance to "force_eager", we want Compiled Autograd
+        # to fall back to eager as well.
+        global compiled_autograd_enabled_force_eager
+        compiled_autograd_enabled_force_eager = True
+        try:
             yield
-    finally:
-        if not prior:
-            compiled_autograd_enabled = False
-        torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+        finally:
+            compiled_autograd_enabled_force_eager = False
+    else:
+        # we need to import this, because user might not have imported it if they directly use this context manager
+        # we need to lazily import it, because of circular dependencies
+        import torch._inductor.cudagraph_trees
+
+        prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
+            functools.partial(AutogradCompilerInstance, compiler_fn)
+        )
+        if snapshot_verbose_logging_enabled():
+            torch._C._dynamo.compiled_autograd.set_verbose_logger(verbose_log)
+        global compiled_autograd_enabled
+        compiled_autograd_enabled = True
+        try:
+            with torch.autograd.set_multithreading_enabled(False):
+                yield
+        finally:
+            if not prior:
+                compiled_autograd_enabled = False
+            torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
 
 
 @contextlib.contextmanager
@@ -558,7 +569,8 @@ def disable():
 
 # return to starting state of a new process
 def reset() -> None:
-    compiled_autograd_enable = False
+    global compiled_autograd_enabled
+    compiled_autograd_enabled = False
     assert not in_compiled_autograd_region
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)

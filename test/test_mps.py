@@ -95,6 +95,7 @@ def mps_ops_grad_modifier(ops):
         'index_fill': [torch.float16, torch.float32],  # missing `aten::_unique`.
         'linalg.lu_factor': [torch.float16, torch.float32],  # missing `aten::lu_unpack`.
         'aminmax': [torch.float32, torch.float16],
+        'i0': None,  # missing `aten::i1`.
 
         # Correctness issues
         'atanh': [torch.float32],
@@ -318,6 +319,7 @@ def mps_ops_modifier(ops):
         'ones',
         'outer',
         'permute',
+        'permute_copy',
         'positive',
         'randn',
         'ravel',
@@ -691,7 +693,6 @@ def mps_ops_modifier(ops):
         'geqrf': None,
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
-        'i0': None,
         'igamma': None,
         'igammac': None,
         'index_copy': None,
@@ -989,9 +990,6 @@ def mps_ops_modifier(ops):
         # Failures due to lack of implementation of downstream functions on MPS backend
         # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
         'linalg.matrix_rank': None,
-
-        # TODO: remove these once downstream function 'aten::i0.out' have been implemented
-        'signal.windows.kaiser': [torch.float32],
 
         # Exception: Caused by `torch.arange(-8.001, -4.0, dtype=torch.uint8, device="mps")`
         'arange': [torch.uint8],
@@ -7386,7 +7384,7 @@ class TestMPS(TestCaseMPS):
     def test_embedding_dense_backward(self):
         def helper(n, d, m, idx):
             embeddingMPS = nn.Embedding(n, d, max_norm=True, device='mps')
-            emedding_weight = embeddingMPS.weight.detach().cpu()
+            embedding_weight = embeddingMPS.weight.detach().cpu()
             W_MPS = torch.randn((m, d), requires_grad=True, device='mps')
             idx_MPS = torch.tensor(idx, device='mps')
             a_MPS = embeddingMPS.weight.clone() @ W_MPS.t()  # weight must be cloned for this to be differentiable
@@ -7397,7 +7395,7 @@ class TestMPS(TestCaseMPS):
             loss_MPS = out_MPS.sigmoid().prod()
             loss_MPS.backward()
 
-            embeddingCPU = nn.Embedding(n, d, max_norm=True, _weight=emedding_weight)
+            embeddingCPU = nn.Embedding(n, d, max_norm=True, _weight=embedding_weight)
             W_CPU = W_MPS.to('cpu')
             idx_CPU = torch.tensor(idx)
             a_CPU = embeddingCPU.weight.clone() @ W_CPU.t()  # weight must be cloned for this to be differentiable
@@ -8124,6 +8122,7 @@ class TestMPS(TestCaseMPS):
             self.assertNotEqual(x.max().item(), 0)
 
     # Test exponential
+    @unittest.skip("This does not test anything")
     def test_exponential(self):
         def helper(shape, lamda, dtype=torch.float32):
 
@@ -8327,6 +8326,7 @@ class TestMPS(TestCaseMPS):
         helper(10000)
         helper((10000, 40))
 
+    @unittest.skip("This does not test anything")
     def test_multinomial(self):
         # Test with num_dist = 1
         def helper(probs, compare_mean, compare_var, num_samples=5, replacement=True):
@@ -8856,8 +8856,10 @@ class TestNNMPS(NNTestCase):
 
     # Printing of non_contiguous should not crash
     def test_print_non_contiguous(self):
-        print(torch.ones(100, 100, device='mps').nonzero())
-        print(torch.ones(100, 100, device='mps').nonzero().contiguous())
+        # print(obj) is equivalent to calling `x=str(obj); print(x)`
+        # Use assertTrue in case to make sure non-empty string is returned
+        self.assertTrue(str(torch.ones(100, 100, device='mps').nonzero()))
+        self.assertTrue(str(torch.ones(100, 100, device='mps').nonzero().contiguous()))
 
     def test_zero_grad(self):
         i = torch.randn(2, 5, requires_grad=True)
@@ -11002,6 +11004,12 @@ class TestAdvancedIndexing(TestCaseMPS):
         t1.start()
         t2.start()
 
+    def test_sliced_view_cast(self):
+        # This used to crash on MacOS Sequoia
+        # See https://github.com/pytorch/pytorch/issues/137800
+        x = torch.rand(16, 16, device='mps', dtype=torch.float16)
+        y = x[:, 0:2].view(torch.float32) + 1
+
     def test_masked_select(self):
         x = torch.randn(3, 4)
         x_mps = x.to("mps")
@@ -12073,6 +12081,10 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'nn.functional.batch_norm',
+        # NOTE: nn.functional.group_norm is here because 1 ULP difference in the mean
+        # output from the forward pass (tolerable) blew up into 8 ULP difference from
+        # the backward pass, and MPS uses fp16 accumulation anyway.
+        'nn.functional.group_norm',
         'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
         'nn.functional.cross_entropy',

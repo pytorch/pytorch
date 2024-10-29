@@ -230,6 +230,8 @@ class MemoryDep(Dep):
         return len(free_unbacked_symbols(self.get_numel())) > 0
 
     def is_contiguous(self) -> bool:
+        if isinstance(self.index, sympy.Integer):
+            return True
         return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
 
     def stride1_for_last_dim(self, result_for_complex_expression=True) -> bool:

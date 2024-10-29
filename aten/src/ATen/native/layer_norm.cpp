@@ -51,7 +51,7 @@ static void layer_norm_with_mean_rstd_out(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.emplace_back(input_shape[idx]);
   }
-  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
+  for ([[maybe_unused]] const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.emplace_back(1);
   }
 
@@ -256,7 +256,7 @@ std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
   for (const auto idx : c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  for (const auto idx C10_UNUSED : c10::irange(axis, input.dim())) {
+  for ([[maybe_unused]] const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.push_back(1);
   }
   mean = mean.view(stat_shape);

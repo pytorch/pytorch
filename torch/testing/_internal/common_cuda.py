@@ -94,7 +94,7 @@ if TEST_NUMBA:
     try:
         import numba.cuda
         TEST_NUMBA_CUDA = numba.cuda.is_available()
-    except Exception as e:
+    except Exception:
         TEST_NUMBA_CUDA = False
         TEST_NUMBA = False
 else:
@@ -252,6 +252,8 @@ def _check_cusparse_generic_available():
 
 def _check_hipsparse_generic_available():
     if not TEST_WITH_ROCM:
+        return False
+    if not torch.version.hip:
         return False
 
     rocm_version = str(torch.version.hip)
