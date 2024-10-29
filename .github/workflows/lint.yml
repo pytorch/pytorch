@@ -16,6 +16,7 @@ permissions: read-all
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
