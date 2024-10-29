@@ -2124,7 +2124,11 @@ class FakeTensorMode(TorchDispatchMode):
             if func in profiles.data:
                 return profiles.generic_fake_kernel(func, self, *args, **kwargs)
 
-        if self.propagate_real_tensors and not library_utils.is_builtin(func):
+        if (
+            self.propagate_real_tensors
+            and not library_utils.is_builtin(func)
+            and self.shape_env is not None
+        ):
             # Automatically infer a Fake kernel if there isn't one.
             if not library_utils.has_fake_kernel(func):
                 result = inferred_fake_kernel_from_real_out(self, func, real_out)
@@ -2600,6 +2604,8 @@ def dump_cache_stats() -> None:
 def inferred_fake_kernel_from_real_out(
     mode: FakeTensorMode, op: torch._ops.OpOverload, real_out: Any
 ) -> Any:
+    assert mode.shape_env is not None
+
     # Only support operators that have all Tensor outputs
     real_flat_out, spec = pytree.tree_flatten(real_out)
     if not all(isinstance(t, torch.Tensor) for t in real_flat_out):

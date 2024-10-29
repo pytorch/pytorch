@@ -421,7 +421,7 @@ class MutationChecker:
 
 def hash_tensor(t: torch.Tensor) -> torch.Tensor:
     """Some inexpensive hash. Used as a quick and dirty indicator for tensor mutation"""
-    return t.detach().mean()
+    return t.detach().float().mean()
 
 
 def has_fake_kernel(op: torch._ops.OpOverload) -> bool:
