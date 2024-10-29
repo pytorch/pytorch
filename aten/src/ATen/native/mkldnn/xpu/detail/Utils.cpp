@@ -132,11 +132,6 @@ bool onednn_strides_check(const Tensor& src) {
 
   dnnl_memory_desc_t md;
   dnnl_memory_desc_create_with_strides(&md, ndims, dims, data_type, strides);
-  // md->get_ndims() = ndims;
-  // array_copy(md->dims, dims, ndims);
-  // md->get_data_type() = data_type;
-  // array_copy(md->padded_dims, dims, ndims);
-  // md->get_format_kind() = dnnl_format_kind_t::dnnl_blocked;
   dnnl_format_kind_t md_fmt_kind;
   int md_ndims;
   int md_inner_nblks;
