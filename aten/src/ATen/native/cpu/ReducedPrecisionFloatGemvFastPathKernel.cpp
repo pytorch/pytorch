@@ -249,9 +249,10 @@ C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
     int idx) {
   const auto temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
   const auto temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
-  *tail_sum = vaddq_f32(
+  *tail_sum = f32_fma_bf16(
       f32_fma_bf16(*tail_sum, vget_low_u16(temp_vec1), vget_low_u16(temp_vec2)),
-      f32_fma_bf16(*tail_sum, vget_high_u16(temp_vec1), vget_high_u16(temp_vec2)));
+      vget_high_u16(temp_vec1),
+      vget_high_u16(temp_vec2));
 }
 
 #else // __aarch64__
