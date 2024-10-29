@@ -221,7 +221,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
 
     # This is really weird, but newer sccache somehow produces broken binary
     # see https://github.com/pytorch/pytorch/issues/139188
-    sudo mv /opt/sccache/bin/sccache-0.2.14a /opt/sccache/bin/sccache
+    sudo mv /opt/cache/bin/sccache-0.2.14a /opt/cache/bin/sccache
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
