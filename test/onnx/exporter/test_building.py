@@ -33,7 +33,7 @@ class TestOpRecorder(common_utils.TestCase):
             producer_version=torch.__version__,
         )
 
-    def test_skippable_castlike(self):
+    def test_skippable_castlike_is_ommited(self):
         input_x = _tensors.SymbolicTensor(opset=self.opset, name="input_x")
         input_x.dtype = ir.DataType.FLOAT
 
@@ -49,7 +49,7 @@ class TestOpRecorder(common_utils.TestCase):
         self.assertEqual(len(tracer.nodes), 1)
         self.assertEqual(tracer.nodes[0].op_type, "Add")
 
-    def test_castlike_to_cast(self):
+    def test_castlike_is_replaced_with_cast_when_it_is_traced(self):
         input_x = _tensors.SymbolicTensor(opset=self.opset, name="input_x")
         input_x.dtype = ir.DataType.FLOAT
 
@@ -66,7 +66,7 @@ class TestOpRecorder(common_utils.TestCase):
         self.assertEqual(tracer.nodes[0].op_type, "Cast")
         self.assertEqual(tracer.nodes[1].op_type, "Add")
 
-    def test_process_python_constant(self):
+    def test_python_constant_added_as_constant_nodes(self):
         input_x = _tensors.SymbolicTensor(
             opset=self.opset, name="input_x", shape=ir.Shape([2, 3, 4])
         )
