@@ -43,10 +43,11 @@ def main() -> None:
         sys.exit("No files selected")
 
     for f in python_files:
-        lint_file(f, args)
+        error_code = lint_file(f, args)
+        sys.exit(error_code)
 
 
-def lint_file(path: Path, args: Namespace) -> None:
+def lint_file(path: Path, args: Namespace) -> int:
     def source_line(lineno: Any, text: Any = None) -> None:
         if text is None:
             lineno = text = ""
@@ -59,25 +60,30 @@ def lint_file(path: Path, args: Namespace) -> None:
     if not pl.sets or pl.braced_sets:
         if args.verbose:
             print(path, "OK")
-        return
+        return 0
 
-    if args.fix:
-        fix_set_tokens(pl, args.add_any)
-        with path.open("w") as fp:
-            fp.writelines(pl.lines)
+    if not args.fix:
+        return len(pl.sets) + len(pl.braced_sets)
 
-        count = len(pl.sets)
-        print(f"{path}: Fixed {count} error{'s' * (count != 1)}")
-        if not args.verbose:
-            return
+    fix_set_tokens(pl, args.add_any)
+    with path.open("w") as fp:
+        fp.writelines(pl.lines)
+
+    count = len(pl.sets)
+    print(f"{path}: Fixed {count} error{'s' * (count != 1)}")
+
+    if not args.verbose:
+        return len(pl.braced_sets)
 
     padded = [None] * ErrorLines.BEFORE + pl.lines + [None] * ErrorLines.AFTER
     padded_line = list(enumerate(padded))
-    for i, t in enumerate(pl.sets):
+
+    errors = pl.sets + [b[0] for b in pl.braced_sets]
+    errors.sort(key=lambda t: t.start)
+    for t in errors:
         print()
         (line, start), (line2, end) = t.start, t.end
-        assert line == line2
-        assert start + 3 == end
+
         window = padded_line[line - 1 : line - 1 + ErrorLines.WINDOW]
         before, after = window[: ErrorLines.BEFORE + 1], window[ErrorLines.BEFORE + 1 :]
 
@@ -86,10 +92,11 @@ def lint_file(path: Path, args: Namespace) -> None:
         for j, text in before:
             source_line(j + line - ErrorLines.BEFORE, text)
 
-        source_line("", " " * start + "^^^\n")
+        source_line("", " " * start + "^" * len(t.string) + "\n")
 
         for j, text in after:
             source_line(j + line - ErrorLines.BEFORE, text)
+        return len(pl.braced_sets)
 
 
 class ErrorLines:
