@@ -347,8 +347,7 @@ class TritonTemplateKernel(TritonKernel):
 
         if isinstance(index, int):
             return texpr(self.rename_indexing(val[index]))
-        else:
-            return ", ".join([texpr(self.rename_indexing(i)) for i in val])
+        return ", ".join([texpr(self.rename_indexing(i)) for i in val])
 
     def modification(
         self, subgraph_number: int, output_name: str, **fixed_inputs
@@ -376,7 +375,13 @@ class TritonTemplateKernel(TritonKernel):
             subgraph = self.subgraphs[subgraph_number]
 
             def add_input(name):
+                # This also implicitly adds name as an input to the kernel
                 return self.args.input(name)
+
+            def print_and_rename_indexing(index):
+                # This also implicitly adds the indexing symbols as an input to
+                # the kernel
+                return self.kexpr(self.rename_indexing(index))
 
             name = f"PlaceholderSubstitution_{subgraph_number}"
 
@@ -387,7 +392,7 @@ class TritonTemplateKernel(TritonKernel):
                     if name not in fixed_inputs:
                         # If it's not a fixed input, it's a load from a captured
                         # tensor
-                        index_str = outer_self.kexpr(index)
+                        index_str = print_and_rename_indexing(index)
                         var = add_input(name)
                         return f"tl.load({var} + {index_str})"
 
@@ -971,8 +976,7 @@ class ExternKernelCaller(ChoiceCaller):
         fn = self.choice.to_callable()
         if self.kwargs:
             return functools.partial(fn, **self.kwargs)
-        else:
-            return fn
+        return fn
 
     def hash_key(self):
         return "-".join(

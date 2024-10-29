@@ -23,7 +23,7 @@ def make_dynamic_cls(cls):
     test_class = testing.make_test_cls_with_mocked_export(
         cls,
         cls_prefix,
-        "training_ir",
+        "_training_ir",
         mocked_training_ir_export,
         xfail_prop="_expected_failure_training_ir",
     )
