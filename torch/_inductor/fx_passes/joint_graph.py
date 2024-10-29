@@ -601,7 +601,7 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
 
     for i in range(rank):
         if perm1[perm2[i]] != i:
-            return False
+            return  # bail out
     node = match.output_node()
     node.replace_all_uses_with(arg)
     match.erase_nodes()
