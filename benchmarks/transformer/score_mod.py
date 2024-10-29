@@ -223,27 +223,17 @@ def run_single_backend_sdpa(
     backend_context = get_backend_context(backend)
     with backend_context:
         device = torch.device("cuda")
-        if backend == "og-eager":
-            from score_mod_helper import generate_OG_pytorch
-
-            eager_sdpa = generate_OG_pytorch(
-                config.attn_type, config.shape, config.dtype, block_mask
-            )
-        else:
-            eager_sdpa = generate_eager_sdpa(
-                config.attn_type, config.shape, config.dtype, block_mask
-            )
+        eager_sdpa = generate_eager_sdpa(
+            config.attn_type, config.shape, config.dtype, block_mask
+        )
 
         if config.attn_type == "document_mask":
-            if backend in ["og-eager"]:
-                print(f"Backend {backend} not supported for document mask")
-            else:  # sdpa
-                q_eager, k_eager, v_eager = generate_jagged_inputs(
-                    config.shape, query, key, value, **mask_kwargs
-                )
-                q_eager = q_eager.transpose(1, 2).requires_grad_(query.requires_grad)
-                k_eager = k_eager.transpose(1, 2).requires_grad_(key.requires_grad)
-                v_eager = v_eager.transpose(1, 2).requires_grad_(value.requires_grad)
+            q_eager, k_eager, v_eager = generate_jagged_inputs(
+                config.shape, query, key, value, **mask_kwargs
+            )
+            q_eager = q_eager.transpose(1, 2).requires_grad_(query.requires_grad)
+            k_eager = k_eager.transpose(1, 2).requires_grad_(key.requires_grad)
+            v_eager = v_eager.transpose(1, 2).requires_grad_(value.requires_grad)
         else:
             q_eager, k_eager, v_eager = query_key_value_clones(query, key, value)
 
@@ -639,7 +629,6 @@ def generate_score_mod(attn_type: str, shape: Tuple[int]) -> Callable | None:
         "document_mask": None,
         "prefix_lm": None,
         "softcap": generate_tanh_softcap(softcap_value, approx=True),
-        "transfusion": generate_tanh_softcap(softcap_value, approx=True),
     }
     return function_dict[attn_type]
 
@@ -661,38 +650,6 @@ def generate_block_mask(attn_type: str, shape: Tuple[int]):
 
         return offset
 
-    import jaxtyping
-
-    class TorchTyping:
-        def __init__(self, abstract_dtype):
-            self.abstract_dtype = abstract_dtype
-
-        def __getitem__(self, shapes: str):
-            return self.abstract_dtype[torch.Tensor, shapes]
-
-    Int = TorchTyping(jaxtyping.Int)
-
-    def transfusion_attn_mask(modalities: Int["b m 3"]):
-        def modality(offset, length):
-            def mask_fn(b, h, q_idx, kv_idx):
-                return (q_idx >= offset) & (kv_idx < (offset + length))
-
-            return mask_fn
-
-        modalities = modalities.long()
-
-        def mask_mod(b, h, q_idx, kv_idx):
-            mask = causal(b, h, q_idx, kv_idx)
-
-            modality_batch = modalities[b]
-
-            for _, offset, length in modality_batch:
-                mask = mask | modality(offset, length)(b, h, q_idx, kv_idx)
-
-            return mask
-
-        return mask_mod
-
     from attn_gym.masks import (
         generate_doc_mask_mod,
         generate_prefix_lm_mask,
@@ -711,37 +668,6 @@ def generate_block_mask(attn_type: str, shape: Tuple[int]):
             lengths[index] += 1
         return lengths
 
-    def generate_randome_modalities(num_modalities, max_length):
-        lengths = generate_random_lengths(max_length, num_modalities * 2 + 1)
-        modalities = []
-        acc_offset = 0
-        for modality_id in range(num_modalities):
-            acc_offset += lengths[modality_id * 2]
-            offset = acc_offset
-            length = lengths[modality_id * 2 + 1]
-            acc_offset += length
-            modalities.append((0, offset, length))
-        return modalities
-
-    RawModalityPositions = list[list[tuple[int, int, int]]]
-
-    def modality_positions_to_tensor(
-        modalities: RawModalityPositions, pad_value=0, device=None
-    ) -> Int["b m 2"] | Int["b m 3"]:
-        from torch.nn.utils.rnn import pad_sequence
-
-        pad_sequence = partial(pad_sequence, batch_first=True)
-
-        modalities: list[torch.Tensor] = [
-            torch.tensor(modality, device=device) for modality in modalities
-        ]
-        modalities = pad_sequence(modalities, padding_value=pad_value)
-
-        if modalities.ndim == 2:
-            modalities = modalities.reshape(*modalities.shape, 3)
-
-        return modalities.long()
-
     mask_mod_kwargs = {}
 
     assert attn_type != "document_mask" or not is_decoding
@@ -749,12 +675,6 @@ def generate_block_mask(attn_type: str, shape: Tuple[int]):
         random.seed(0)
         lengths = generate_random_lengths(N * B, B)
         mask_mod_kwargs = dict(offsets=length_to_offsets(lengths, "cuda"))
-    elif attn_type == "transfusion":
-        random.seed(0)
-        modalities = modality_positions_to_tensor(
-            [generate_randome_modalities(2, N) for i in range(B)], device="cuda"
-        )
-        mask_mod_kwargs = dict(modalities=modalities)
 
     mask_mod_dict = {
         "noop": None,
@@ -766,7 +686,6 @@ def generate_block_mask(attn_type: str, shape: Tuple[int]):
         "document_mask": partial(generate_doc_mask_mod, mask_mod=causal),
         "prefix_lm": generate_prefix_lm_mask(prefix_length),
         "softcap": causal,
-        "transfusion": transfusion_attn_mask,
     }
 
     mask_mod = mask_mod_dict[attn_type]
@@ -814,7 +733,6 @@ def get_kernel_options(attn_type: str, shape: Tuple[int]):
         else None,
         "prefix_lm": None,
         "softcap": None,
-        "transfusion": None,
     }
 
     def get_default_split_k(B: int, H: int, Mk: int) -> int:
@@ -836,7 +754,6 @@ def get_kernel_options(attn_type: str, shape: Tuple[int]):
         "document_mask": None,
         "prefix_lm": None,
         "softcap": {"SPLIT_KV": get_default_split_k(B, Hkv, N) * 2},
-        "transfusion": None,
     }
 
     return (
@@ -940,7 +857,6 @@ def generate_FA_callable(
         "document_mask": partial(flash_attn_varlen_func, causal=True, **FA_kwargs),
         "prefix_lm": None,
         "softcap": partial(flash_attn_func, softcap=softcap_value, causal=True),
-        "transfusion": None,
     }
 
     return FA_dict[attn_type]
@@ -988,7 +904,6 @@ def generate_FD_callable(
         "document_mask": None,
         "prefix_lm": None,
         "softcap": partial(flash_attn_with_kvcache_renamed, softcap=softcap_value),
-        "transfusion": None,
     }
 
     return FD_dict[attn_type]
@@ -1054,7 +969,6 @@ def generate_eager_sdpa(
             F.scaled_dot_product_attention, is_causal=False, enable_gqa=(Hq != Hkv)
         ),
         "softcap": None,
-        "transfusion": None,
     }
 
     if is_decoding:
@@ -1243,7 +1157,7 @@ Ignores -b batch size and calculate batch size from kv size instead when specifi
         "--backend",
         type=str,
         nargs="+",
-        choices=["math", "efficient", "cudnn", "fav2", "fav3", "fakv", "og-eager"],
+        choices=["math", "efficient", "cudnn", "fav2", "fav3", "fakv"],
         default=["cudnn"],
         help="Backend to use for attention computation",
     )
