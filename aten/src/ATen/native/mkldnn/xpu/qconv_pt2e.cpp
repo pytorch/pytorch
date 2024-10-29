@@ -75,9 +75,6 @@ class QConvoneDNNXPU final {
         stride.vec(),
         dilation.vec());
 
-    // TODO: handle difference of this dtype with argument dtype
-    // auto dtype =
-    //     (act.scalar_type() == c10::ScalarType::Byte) ? c10::kByte : c10::kChar;
     Tensor output = at::empty(
         dst_tz, device(c10::kXPU).dtype(output_dtype).memory_format(mfmt));
 

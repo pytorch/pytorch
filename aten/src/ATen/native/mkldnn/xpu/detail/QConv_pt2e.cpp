@@ -11,8 +11,6 @@
 
 namespace at::native::onednn {
 
-
-
 static std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc> qconv_get_md(
     const at::Tensor& src,
     const at::Tensor& wgh,
