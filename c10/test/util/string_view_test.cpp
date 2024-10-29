@@ -37,17 +37,13 @@ using testutils::expectThrows;
 using testutils::string_equal;
 
 namespace test_typedefs {
-static_assert(std::is_same<char, string_view::value_type>::value, "");
-static_assert(std::is_same<char*, string_view::pointer>::value, "");
-static_assert(std::is_same<const char*, string_view::const_pointer>::value, "");
-static_assert(std::is_same<char&, string_view::reference>::value, "");
-static_assert(
-    std::is_same<const char&, string_view::const_reference>::value,
-    "");
-static_assert(std::is_same<std::size_t, string_view::size_type>::value, "");
-static_assert(
-    std::is_same<std::ptrdiff_t, string_view::difference_type>::value,
-    "");
+static_assert(std::is_same_v<char, string_view::value_type>, "");
+static_assert(std::is_same_v<char*, string_view::pointer>, "");
+static_assert(std::is_same_v<const char*, string_view::const_pointer>, "");
+static_assert(std::is_same_v<char&, string_view::reference>, "");
+static_assert(std::is_same_v<const char&, string_view::const_reference>, "");
+static_assert(std::is_same_v<std::size_t, string_view::size_type>, "");
+static_assert(std::is_same_v<std::ptrdiff_t, string_view::difference_type>, "");
 } // namespace test_typedefs
 
 namespace test_default_constructor {
