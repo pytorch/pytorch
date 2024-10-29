@@ -521,11 +521,7 @@ def create_fw_bw_graph(
 
             assert all(
                 isinstance(t, (FakeTensor, int, torch.SymInt))
-                for t in unwrapped_score_mod_indexes
-            )
-            assert all(
-                isinstance(t, (FakeTensor, int, torch.SymInt))
-                for t in unwrapped_other_buffers
+                for t in unwrapped_score_mod_indexes + unwrapped_other_buffers
             )
 
             example_flat_out = pytree.tree_map(
