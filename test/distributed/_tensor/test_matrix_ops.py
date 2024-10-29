@@ -6,7 +6,7 @@ from typing import cast, List, Optional
 
 import torch
 import torch.nn.functional as F
-from torch.distributed import init_device_mesh
+from torch.distributed import DeviceMesh, init_device_mesh
 from torch.distributed.tensor import (
     distribute_tensor,
     DTensor,
