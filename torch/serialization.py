@@ -5,7 +5,6 @@ import functools
 import io
 import os
 import pickle
-import pickletools
 import re
 import shutil
 import struct
@@ -349,17 +348,9 @@ def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
                         "Expected input to be a checkpoint returned by torch.save but got a torchscript checkpoint"
                     )
                 data_file = io.BytesIO(zip_file.get_record("data.pkl"))
-                instructions = pickletools.genops(data_file)
-                global_instructions = [
-                    inst for inst in instructions if inst[0].name == "GLOBAL"
-                ]
-                # GLOBALs will always have non-None arg that is a string so we can safely .split(" ")
-                global_instruction_module_fn = [
-                    ".".join(inst[1].split(" "))  # type: ignore[union-attr]
-                    for inst in global_instructions
-                ]
+                all_globals = _weights_only_unpickler.get_globals_in_pkl(data_file)
                 return list(
-                    set(global_instruction_module_fn).difference(safe_global_strings)
+                    all_globals.difference(safe_global_strings)
                 )
         else:
             raise ValueError("Expected input to be a checkpoint returned by torch.save")
