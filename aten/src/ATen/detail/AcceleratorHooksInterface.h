@@ -19,6 +19,10 @@ struct TORCH_API AcceleratorHooksInterface {
   // Whether the device at device_index is fully initialized or not.
   virtual bool hasPrimaryContext(DeviceIndex device_index) const = 0;
 
+  virtual void init() const {
+    TORCH_CHECK(false, "Backend doesn`t support init()");
+  }
+
   virtual DeviceIndex deviceCount() const {
     return 0;
   }
@@ -50,7 +54,11 @@ struct TORCH_API AcceleratorHooksInterface {
     TORCH_CHECK(false, "Backend doesn't support getPinnedMemoryAllocator()");
     return nullptr;
   }
+
+  virtual Device getDeviceFromPtr(void* data) const {
+    TORCH_CHECK(false, "Backend doesn't support getDeviceFromPtr()");
+  }
 };
 
 } // namespace at
-C10_CLANG_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()

@@ -92,6 +92,11 @@ SRC_NAMES = {
     # add non-prod microkernel sources here:
 }
 
+# Source files not needed in buck build.
+IGNORED_SOURCES = set((
+    "\"${PROJECT_BINARY_DIR}/build_identifier.c\"", # Not currently used and requires build-time codegen.
+))
+
 def handle_singleline_parse(line):
     start_index = line.find("(")
     end_index = line.find(")")
@@ -131,12 +136,14 @@ def update_sources(xnnpack_path, cmakefile = "XNNPACK/CMakeLists.txt"):
                 while i < len(lines) and len(lines[i]) > 0 and ')' not in lines[i]:
                     # remove "src/" at the beginning, remove whitespaces and newline
                     value = lines[i].strip(' \t\n\r')
-                    sources[name].append(value[4:])
+                    if value not in IGNORED_SOURCES:
+                        sources[name].append(value[4:])
                     i += 1
                 if i < len(lines) and len(lines[i]) > 4:
                     # remove "src/" at the beginning, possibly ')' at the end
                     value = lines[i].strip(' \t\n\r)')
-                    sources[name].append(value[4:])
+                    if value not in IGNORED_SOURCES:
+                        sources[name].append(value[4:])
             else:
                 i += 1
     return sources

@@ -12,7 +12,7 @@ from ..utils import istype
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from .symbolic_convert import InstructionTranslator, InstructionTranslatorBase
 
 
 class MutableLocalSource(Enum):
@@ -121,6 +121,8 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     VariableTracker instances are immutable and should be copied in
     order to change them.
+
+    Prefer the factory function VariableTracker.build() over VariableTracker.__init__().
     """
 
     # fields to leave unmodified in apply()
@@ -207,7 +209,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Raises:
             NotImplementedError: If the method is not implemented in a subclass.
         """
-        raise NotImplementedError(f"{self} has no type")
+        try:
+            return type(self.as_python_constant())
+        except NotImplementedError:
+            raise NotImplementedError(f"{self} has no type") from None
 
     def as_python_constant(self):
         """For constants"""
@@ -241,9 +246,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError
-        source = None
-        if self.source:
-            source = AttrSource(self.source, name)
+        source = self.source and AttrSource(self.source, name)
         return variables.ConstantVariable.create(value, source=source)
 
     def is_proxy(self):
@@ -286,12 +289,25 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
         raise NotImplementedError
 
+    def force_unpack_var_sequence(self, tx) -> List["VariableTracker"]:
+        # like unpack_var_sequence, but should only be used when it is
+        # safe to eagerly (vs. lazily) unpack this variable.
+        # e.g. map(f, x) is normally evaluated lazily but sometimes
+        # we want to force eager unpacking, e.g. when converting to a list.
+        # NOTE: this method is allowed to mutate the VariableTracker, so
+        # it should only be called once.
+        return self.unpack_var_sequence(tx)
+
     def has_unpack_var_sequence(self, tx) -> bool:
         try:
             self.unpack_var_sequence(tx)
             return True
         except NotImplementedError:
             return False
+
+    # NB: don't call force_unpack_var_sequence, especially if it mutates!
+    def has_force_unpack_var_sequence(self, tx) -> bool:
+        return self.has_unpack_var_sequence(tx)
 
     def inspect_parameter_names(self) -> List[str]:
         unimplemented(f"inspect_parameter_names: {self}")
@@ -346,6 +362,20 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def is_strict_mode(self, tx):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
+
+    @staticmethod
+    def build(
+        tx: "InstructionTranslatorBase",
+        value: Any,
+        source: Optional[Source] = None,
+    ) -> Any:
+        """Create a new VariableTracker from a value and optional Source"""
+        from . import builder
+
+        if source is None:
+            return builder.SourcelessBuilder.create(tx, value)
+        else:
+            return builder.VariableBuilder(tx, source)(value)
 
     def __init__(
         self,

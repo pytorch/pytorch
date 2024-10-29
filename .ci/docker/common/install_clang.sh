@@ -13,11 +13,18 @@ if [ -n "$CLANG_VERSION" ]; then
   elif [[ $UBUNTU_VERSION == 22.04 ]]; then
     # work around ubuntu apt-get conflicts
     sudo apt-get -y -f install
+    wget --no-check-certificate -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add  -
+    if [[ $CLANG_VERSION == 18 ]]; then
+      apt-add-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main"
+    fi
   fi
 
   sudo apt-get update
-  apt-get install -y --no-install-recommends clang-"$CLANG_VERSION"
-  apt-get install -y --no-install-recommends llvm-"$CLANG_VERSION"
+  if [[ $CLANG_VERSION -ge 18 ]]; then
+    apt-get install -y libomp-${CLANG_VERSION}-dev libclang-rt-${CLANG_VERSION}-dev clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION"
+  else
+    apt-get install -y --no-install-recommends clang-"$CLANG_VERSION" llvm-"$CLANG_VERSION"
+  fi
 
   # Install dev version of LLVM.
   if [ -n "$LLVMDEV" ]; then

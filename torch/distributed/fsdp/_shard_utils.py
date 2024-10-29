@@ -15,7 +15,7 @@ from torch.distributed._shard.sharded_tensor import (
     TensorProperties,
 )
 from torch.distributed._shard.sharding_spec import ShardMetadata
-from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
+from torch.distributed.tensor import DeviceMesh, DTensor, Replicate, Shard as DShard
 
 
 def _get_remote_device_str(rank, device_type, num_devices_per_node):

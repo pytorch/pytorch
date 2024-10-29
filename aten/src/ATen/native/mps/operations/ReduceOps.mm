@@ -153,13 +153,16 @@ static void reduction_out_mps(const Tensor& input_t,
                               const std::string& func_name) {
   bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   MPS_CHECK_INT64_OP_SUPPORTED(input_t, macOS13_3_plus, func_name);
+  // NS: TODO: get rid of all those shenanigans and just call reduction_op with view tensor
   bool canSqueezeLastDim = true;
   IntArrayRef input_shape = input_t.sizes();
   if (opt_dim.has_value()) {
     IntArrayRef dim = opt_dim.value();
     for (const auto dim_val : dim) {
       auto wrap_dim = maybe_wrap_dim(dim_val, input_shape.size());
-      if (wrap_dim >= 4) {
+      // canSqueeze logic is broken when dim is negative, it introduces off-by-one-erros or crashes
+      // See https://github.com/pytorch/pytorch/issues/136132#issuecomment-2354482608
+      if (wrap_dim >= 4 || dim_val < 0) {
         canSqueezeLastDim = false;
       }
       TORCH_CHECK(

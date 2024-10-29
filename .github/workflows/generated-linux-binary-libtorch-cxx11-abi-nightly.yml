@@ -38,8 +38,9 @@ concurrency:
 
 jobs:
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: ./.github/workflows/_runner-determinator.yml
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -366,7 +367,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: libtorch-rocm6_1-shared-with-deps-cxx11-abi
@@ -476,7 +477,7 @@ jobs:
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4.1.7
         name: Download Build Artifacts
         with:
           name: libtorch-rocm6_2-shared-with-deps-cxx11-abi

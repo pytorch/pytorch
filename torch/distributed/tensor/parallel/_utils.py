@@ -2,9 +2,9 @@
 import warnings
 from typing import Tuple, Union
 
-from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.device_mesh import _mesh_resources
+from torch.distributed.tensor import DeviceMesh
+from torch.distributed.tensor.placement_types import Placement
 
 
 try:

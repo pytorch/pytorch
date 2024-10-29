@@ -51,6 +51,14 @@ class TestOpenReg(TestCase):
         b = a.to(device="openreg").add(2).to(device="cpu")
         self.assertEqual(b, a + 2)
 
+    def test_copy_same_device(self):
+        a = torch.ones(10, device="openreg").clone()
+        self.assertEqual(a, torch.ones(10, device="openreg"))
+
+    def test_cross_diff_devices_copy(self):
+        a = torch.ones(10, device="openreg:0").to(device="openreg:1").to(device="cpu")
+        self.assertEqual(a, torch.ones(10))
+
     def test_data_dependent_output(self):
         cpu_a = torch.randn(10)
         a = cpu_a.to(device="openreg")
@@ -58,6 +66,14 @@ class TestOpenReg(TestCase):
         out = torch.masked_select(a, mask)
 
         self.assertEqual(out, cpu_a.masked_select(cpu_a.gt(0)))
+
+    def test_pin_memory(self):
+        cpu_a = torch.randn(10)
+        self.assertFalse(cpu_a.is_pinned())
+        pinned_a = cpu_a.pin_memory()
+        self.assertTrue(pinned_a.is_pinned())
+        slice_a = pinned_a[2:5]
+        self.assertTrue(slice_a.is_pinned())
 
 
 if __name__ == "__main__":

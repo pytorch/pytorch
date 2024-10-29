@@ -261,7 +261,7 @@ class OutputComparisonLogger(OutputLogger):
         self.comparisons = []
         # precalculated comparisons function
 
-    def forward(self, x, x_ref):
+    def forward(self, x, x_ref):  # type: ignore[override]
         # fmt: off
         """
         """  # blank docblock to make autodoc happy

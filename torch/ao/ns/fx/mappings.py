@@ -410,7 +410,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     # Add function swaps from default lowering path
     #
 
-    for source, (
+    for source, (  # type:ignore[assignment]
         target1,
         target2,
     ) in _lower_to_native_backend.STATIC_LOWER_FUNCTIONAL_MAP.items():
@@ -422,7 +422,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         _lower_to_native_backend.QBIN_RELU_OP_MAPPING,
         quantization_mappings.DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS,
     ):
-        for source, target in source_to_target.items():
+        for source, target in source_to_target.items():  # type:ignore[assignment]
             new_connections.append((source, target))
 
     #
@@ -432,7 +432,7 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
     for source_to_target in (
         quantization_mappings.DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS,
     ):
-        for source, target in source_to_target.items():
+        for source, target in source_to_target.items():  # type:ignore[assignment]
             new_connections.append((source, target))
 
     # add the new connections from backend_config

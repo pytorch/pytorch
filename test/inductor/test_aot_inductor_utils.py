@@ -67,7 +67,7 @@ class AOTIRunnerUtil:
     @staticmethod
     def load_runner(device, so_path):
         if IS_FBCODE:
-            from .fb import test_aot_inductor_model_runner_pybind
+            from .fb import test_aot_inductor_model_runner_pybind  # @manual
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 # copy *.so file to a unique path just before loading

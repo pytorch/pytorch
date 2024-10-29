@@ -32,6 +32,10 @@
   then:
   - "module: higher order operators"
 - any:
+  - "module: aotinductor"
+  then:
+  - "oncall: export"
+- any:
   - "module: dynamo"
   - "module: pt2-dispatcher"
   - "module: inductor"

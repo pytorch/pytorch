@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 
+# See also the TYPE_CHECKING block in torch/_dynamo/polyfills/__init__.py
 POLYFILLED_MODULE_NAMES: Tuple[str, ...] = (
     "builtins",
     "functools",
@@ -32,9 +33,3 @@ for polyfill_module in POLYFILLED_MODULES:
         polyfill_handler = getattr(polyfill_module, polyfill_name)
         original_fn = polyfill_handler.__torch_dynamo_original__
         trace_rules._builtin_function_ids.remove(id(original_fn))
-
-        # Unregister the class object if the original function is its __new__ method
-        if original_fn.__name__ == "__new__" and isinstance(
-            getattr(original_fn, "__self__", None), type
-        ):
-            trace_rules._builtin_function_ids.remove(id(original_fn.__self__))

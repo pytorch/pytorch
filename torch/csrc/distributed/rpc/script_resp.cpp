@@ -6,7 +6,7 @@
 
 namespace torch::distributed::rpc {
 
-ScriptResp::ScriptResp(at::IValue&& value) : value_(value) {}
+ScriptResp::ScriptResp(at::IValue&& value) : value_(std::move(value)) {}
 
 const at::IValue& ScriptResp::value() {
   return value_;

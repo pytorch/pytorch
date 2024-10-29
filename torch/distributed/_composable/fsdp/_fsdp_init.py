@@ -4,8 +4,8 @@ from typing import List, Optional, Set, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.distributed.device_mesh import _get_device_handle
+from torch.distributed.tensor import DeviceMesh, DTensor, init_device_mesh
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ._fsdp_common import _is_composable_with_fsdp, FSDPMeshInfo, HSDPMeshInfo
@@ -58,8 +58,8 @@ def _init_default_fully_shard_mesh() -> DeviceMesh:
     if not dist.distributed_c10d.is_initialized():
         dist.distributed_c10d.init_process_group()
     default_pg = dist.distributed_c10d._get_default_group()
-    device_type = "cuda" if torch.cuda.is_available() else "cpu"
-    mesh = init_device_mesh(device_type, mesh_shape=(default_pg.size(),))
+    device = torch._C._get_accelerator()
+    mesh = init_device_mesh(device.type, mesh_shape=(default_pg.size(),))
     return mesh
 
 
