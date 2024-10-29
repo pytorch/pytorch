@@ -177,7 +177,7 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
@@ -251,14 +251,8 @@ def _reduce_tensor(tensor):
     """
     Reduce the tensor to a stable key for caching.
     """
-    return (
-        _ident,
-        (
-            extract_tensor_metadata_for_cache_key(
-                FxGraphCachePickler._device_map, tensor
-            ),
-        ),
-    )
+    metadata = extract_tensor_metadata_for_cache_key(tensor)
+    return (_ident, (metadata,))
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
