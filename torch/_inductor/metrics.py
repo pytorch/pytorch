@@ -411,10 +411,12 @@ def purge_old_log_files():
             table.write_header()
 
 
-@lru_cache
 def enabled_metric_tables() -> Set[str]:
-    config_str = config.enabled_metric_tables
+    return enabled_metric_tables_impl(config.enabled_metric_tables)
 
+
+@lru_cache
+def enabled_metric_tables_impl(config_str: str) -> Set[str]:
     enabled = set()
     for name in config_str.split(","):
         name = name.strip()
