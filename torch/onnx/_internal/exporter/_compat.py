@@ -132,6 +132,7 @@ def export_compat(
     keep_initializers_as_inputs: bool = False,
     external_data: bool = True,
     report: bool = False,
+    optimize: bool = False,
     verify: bool = False,
     profile: bool = False,
     dump_exported_program: bool = False,
@@ -196,6 +197,11 @@ def export_compat(
                 keep_initializers_as_inputs=keep_initializers_as_inputs,
             )
             onnx_program = _onnx_program.ONNXProgram(ir.load(f), None)
+
+            # NOTE: It it's falling back to the legacy exporter, we don't need to
+            # optimize the model, so we return it here. Users can still optimize
+            # the model using the optimize() if they want.
+            return onnx_program
         else:
             raise
 
@@ -203,7 +209,8 @@ def export_compat(
     onnx_program.model = onnxscript_apis.convert_version(
         onnx_program.model, opset_version
     )
-    onnx_program.model = onnxscript_apis.optimize(onnx_program.model)
+    if optimize:
+        onnx_program.optimize()
 
     if f is not None:
         onnx_program.save(

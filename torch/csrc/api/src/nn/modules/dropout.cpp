@@ -5,10 +5,8 @@
 
 #include <c10/util/Exception.h>
 
-#include <cstddef>
 #include <ostream>
 #include <utility>
-#include <vector>
 
 namespace F = torch::nn::functional;
 

@@ -2,7 +2,6 @@
 #include <ATen/TensorGeometry.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
-#include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/input_metadata.h>
@@ -17,21 +16,6 @@
 
 namespace torch::dynamo::autograd {
 using namespace torch::autograd;
-
-// Fallback to eager autograd
-class EagerFallbackException : public std::exception {
- public:
-  EagerFallbackException() = delete;
-  EagerFallbackException(const std::exception& orig)
-      : msg(std::string(orig.what())) {}
-
-  const char* what() const noexcept override {
-    return msg.c_str();
-  }
-
- private:
-  std::string msg;
-};
 
 struct SizeInput {
   // Note: int value is still needed when dynamic to pass as an arg
@@ -240,13 +224,29 @@ struct LiftedIValueArgs {
   const std::optional<size_t>& active_node_call_idx;
 };
 
+// Hold GIL while using
+struct PyTLSWrapper {
+  PyTLSWrapper(PyObject* state) : state(state) {}
+  PyTLSWrapper(const PyTLSWrapper&) = delete;
+  PyTLSWrapper& operator=(const PyTLSWrapper&) = delete;
+  PyTLSWrapper(PyTLSWrapper&&) = default;
+  PyTLSWrapper& operator=(PyTLSWrapper&&) = default;
+
+  static PyTLSWrapper create();
+
+  PyObject* get(std::string_view key) const;
+
+ private:
+  PyObject* state;
+};
+
 struct AutogradCompilerCall {
   AutogradCompilerCall() = delete;
-  AutogradCompilerCall(bool opaque_cpp_node, bool fallback_on_error)
-      : tensor_args(active_node_call_idx),
+  AutogradCompilerCall(PyTLSWrapper&& state)
+      : active_node_call_idx(std::nullopt),
+        tensor_args(active_node_call_idx),
         lifted_ivalue_args(active_node_call_idx),
-        opaque_cpp_node(opaque_cpp_node),
-        fallback_on_error(fallback_on_error) {}
+        state(std::move(state)) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
@@ -264,6 +264,7 @@ struct AutogradCompilerCall {
     active_node_call_idx = node_call_idx;
   }
 
+  std::optional<size_t> active_node_call_idx;
   TensorArgs tensor_args;
   std::vector<SizeInput> all_size_inputs;
   LiftedIValueArgs lifted_ivalue_args;
@@ -271,23 +272,11 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
-  const bool opaque_cpp_node;
-  bool fallback_on_error;
-
-  // Currently, these lift untraceable CppNodes as one-time use custom ops
-  std::function<at::IValue*(
-      CompiledNodeArgs&,
-      Node*,
-      std::function<variable_list(variable_list)>,
-      const std::vector<bool>&,
-      const std::vector<VariableInfo>&)>
-      collect;
-  std::function<variable_list(SwapSavedVariables&, PyObject*, variable_list)>
-      lift;
 
   // NodeCall id of each size, only when verbose logging is enabled
   std::vector<uint32_t> size_input_origins;
-  std::optional<size_t> active_node_call_idx;
+
+  const PyTLSWrapper state;
 };
 
 class CompiledNodeArgs {
@@ -314,10 +303,6 @@ class CompiledNodeArgs {
     collect(_compiler.tensor_args.add(t));
   }
   void collect(const SavedVariable& sv, bool is_output) {
-    // TODO: remove this once we lift unpack hooks
-    if (sv.has_hooks()) {
-      _compiler.fallback_on_error = false;
-    }
     collect(
         _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
   }
@@ -380,16 +365,6 @@ class CompiledNodeArgs {
       collect(k);
       collect(m.at(k));
     }
-  }
-  void collect(
-      Node* fn,
-      std::function<variable_list(variable_list)>&& lambda,
-      const std::vector<bool>& is_variable_input,
-      const std::vector<VariableInfo>& output_metas) {
-    at::IValue* ptr = _compiler.collect(
-        *this, fn, std::move(lambda), is_variable_input, output_metas);
-    TORCH_INTERNAL_ASSERT(ptr->isInt(), "Unexpected non-int index");
-    _compiler.lifted_ivalue_args.args.emplace_back(ptr);
   }
   void collect(const at::IValue& iv, bool nested = false) {
     // used by AutogradContext::saved_data from CppNode
@@ -638,14 +613,6 @@ class CompiledNodeArgs {
   }
   CompiledNodeArgs(const CompiledNodeArgs&) = delete;
 
-  NodeCall* get_node_call() {
-    return &_node_call;
-  }
-
-  bool opaque_cpp_node() {
-    return _compiler.opaque_cpp_node;
-  }
-
  private:
   template <typename T>
   void specialize_on_bytes(const T& t) {
@@ -725,9 +692,7 @@ class SwapSavedVariables {
   void after(c10::SymInt& t) {
     stashed_symints.restore(&t);
   }
-  variable_list lift(variable_list&& inputs) {
-    return compiler.lift(*this, py_compiler, std::move(inputs));
-  }
+
   void before(at::IValue& iv) {
     if (iv.isTensor()) {
       before(iv.toTensor());
@@ -895,10 +860,6 @@ class SwapSavedVariables {
     stashed_variables.debug_assert();
     stashed_tensors.debug_assert();
     stashed_symints.debug_assert();
-  }
-
-  bool opaque_cpp_node() {
-    return compiler.opaque_cpp_node;
   }
 
  private:

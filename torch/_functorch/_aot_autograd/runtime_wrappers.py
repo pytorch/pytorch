@@ -1503,6 +1503,21 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
         try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
+        num_intermediate_bases = (
+            fw_metadata.num_intermediate_bases
+        )
+        num_mutated_runtime_inps = (
+            fw_metadata.num_mutated_inp_runtime_indices
+        )
+        expected_grad_outs = (
+            fw_metadata.num_outputs
+            + num_mutated_runtime_inps
+            + num_intermediate_bases
+        )
+
+        inp_tangents_idx = num_mutated_runtime_inps
+        out_tangents_idx = num_mutated_runtime_inps + fw_metadata.num_outputs
+
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
             compiled_bw = compiled_bw_func
@@ -1652,44 +1667,23 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # - updated inputs due to metadata-only mutations.
                 # We need to return them in the forward, but ensure that they all do not get gradients in the backward,
                 # and we filter them out here before passing the remaining grad_outputs into the compiled backward.
-                num_intermediate_bases = (
-                    CompiledFunction.metadata.num_intermediate_bases
-                )
-                num_mutated_runtime_inps = (
-                    CompiledFunction.metadata.num_mutated_inp_runtime_indices
-                )
-                expected_grad_outs = (
-                    CompiledFunction.metadata.num_outputs
-                    + num_mutated_runtime_inps
-                    + num_intermediate_bases
-                )
-                deterministic = CompiledFunction.metadata.deterministic
-                global_deterministic = torch.are_deterministic_algorithms_enabled()
-                if deterministic is not None:
-                    torch._check(
-                        not (not deterministic and global_deterministic),
-                        lambda: (
-                            "This compiled backward function is being run with "
-                            "torch.use_deterministic_algorithms(True), "
-                            "but it was previously generated during the forward function while "
-                            "torch.use_deterministic_algorithms(False) was set."
-                        ),
-                    )
+                # deterministic = CompiledFunction.metadata.deterministic
+                # global_deterministic = torch.are_deterministic_algorithms_enabled()
+                # if not deterministic and global_deterministic:
+                #     raise RuntimeError(
+                #         "This compiled backward function is being run with " \
+                #         "torch.use_deterministic_algorithms(True), " \
+                #         "but it was previously generated during the forward function while " \
+                #         "torch.use_deterministic_algorithms(False) was set." \
+                #     )
 
                 assert len(flat_args) == expected_grad_outs
                 out_info = CompiledFunction.metadata.output_info
 
-                inp_tangents, out_tangents, intermediate_base_tangents = (
-                    flat_args[:num_mutated_runtime_inps],
-                    flat_args[
-                        num_mutated_runtime_inps : num_mutated_runtime_inps
-                        + CompiledFunction.metadata.num_outputs
-                    ],
-                    flat_args[
-                        num_mutated_runtime_inps
-                        + CompiledFunction.metadata.num_outputs :
-                    ],
-                )
+                inp_tangents = flat_args[:inp_tangents_idx]
+                out_tangents = flat_args[inp_tangents_idx:out_tangents_idx]
+                intermediate_base_tangents = flat_args[:out_tangents_idx]
+
                 # input_info contains info on *every* input,
                 # But in the backward(), we are only given grad outputs for every mutated input
                 # We then need to filter out the grad outputs that correspond to metadata-only mutations or don't require grad
@@ -1779,10 +1773,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # In the future, we should add backward guards that would allow us to
                 # properly handle this case instead of erroring: we would need to retrace the backward graph,
                 # since we might produce an entirely different trace if our grad_outputs are subclass or not.
+                # ??? mismatch length
                 assert (
                     len(CompiledFunction.metadata.output_types)
                     == num_flat_bw_args_with_grads
-                )
+                ), f"{len(CompiledFunction.metadata.output_types)} vs {num_flat_bw_args_with_grads}"
 
                 grad_output_types = [type(x) for x in flat_bw_args_with_grads]
                 # In general, we can add more asserts/guards here for when we partitioned
@@ -1853,13 +1848,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                     "The grad inputs should be same tensor subclass type as forward output"
                                 )
 
-                    # Get the number of tangents after unwrapping
-                    len_tangents = len(
-                        unwrap_tensor_subclasses(
-                            tangents,
-                            is_joint_structure=False,
-                        )
-                    )
                     assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
                         (
@@ -1920,7 +1908,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         if lazy_backward_info is None:
                             raise RuntimeError(
                                 """This compiled backward function was saved by AOTAutogradCache, which does not support
-                            compiled autograd. Please turn off AOTAutogradCache using `ENABLE_AOT_AUTOGRAD_CACHE=0` to continue."""
+                            compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
                             )
                         bw_module = lazy_backward_info.bw_module
                         # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph

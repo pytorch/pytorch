@@ -289,7 +289,7 @@ auto PyNode::name() const -> std::string {
 void PyNode::compiled_args(CompiledNodeArgs& args) {
   static PyObject* method_name =
       PyUnicode_InternFromString("_compiled_autograd_key");
-  THPObjectPtr pykey(PyObject_CallMethodNoArgs(obj, method_name));
+  THPObjectPtr pykey(PyObject_CallMethodObjArgs(obj, method_name, nullptr));
   if (!pykey)
     throw_python_error();
   TORCH_CHECK(
@@ -331,8 +331,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->input_info);
 
   Py_INCREF(obj);
-  _backward_idx =
-      args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
+  _backward_idx = args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
 
   PyObject* bw_state = f->compiled_autograd_backward_state;
   if (args.cond(bw_state != nullptr)) {
@@ -354,7 +353,8 @@ variable_list PyNode::apply_with_saved(
   saved.before(f->output_info);
   saved.before(f->input_info);
   f->compiled_autograd_tracing = true;
-  variable_list result = defer_to_dynamo(variable_list(inputs), saved.get_py_compiler());
+  variable_list result =
+      defer_to_dynamo(variable_list(inputs), saved.get_py_compiler());
   f->compiled_autograd_tracing = false;
   saved.after(f->compiled_autograd_symints);
   saved.after(f->saved_variables);
@@ -702,8 +702,18 @@ static void _wrap_outputs(
       PyTuple_SetItem(outputs, i, obj);
     } else {
       if (is_executable) {
+        // If one of the grad outputs is undefined, a correctly-shaped zeros
+        // should be used instead. To construct these for NJT, zeros_like() must
+        // be used until we have factory function support.
         // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-        self->output_info.emplace_back(*wrapped_outputs[i]);
+        bool is_differentiable =
+            (non_differentiable.count(
+                 wrapped_outputs[i]->unsafeGetTensorImpl()) == 0 &&
+             isDifferentiableType(wrapped_outputs[i]->scalar_type()));
+        bool use_zeros_like = is_differentiable && num_outputs > 1 &&
+            wrapped_outputs[i]->is_nested();
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        self->output_info.emplace_back(*wrapped_outputs[i], use_zeros_like);
       }
       // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
       PyTuple_SetItem(outputs, i, THPVariable_Wrap(*wrapped_outputs[i]));
@@ -1101,14 +1111,11 @@ PyObject* process_outputs(
     _save_variables(tensors_to_save, cdata, grad_fn);
   } else {
     // Remove unnecessary attributes
-    Py_XDECREF(grad_fn->to_save);
-    grad_fn->to_save = nullptr;
-    Py_XDECREF(grad_fn->non_differentiable);
-    grad_fn->non_differentiable = nullptr;
+    Py_CLEAR(grad_fn->to_save);
+    Py_CLEAR(grad_fn->non_differentiable);
   }
 
-  Py_XDECREF(grad_fn->saved_for_forward);
-  grad_fn->saved_for_forward = nullptr;
+  Py_CLEAR(grad_fn->saved_for_forward);
 
   // Unpack the output, unless .forward() returned a tuple
   if (unpack_output) {
@@ -1760,7 +1767,8 @@ static struct PyMethodDef THPFunction_methods[] = {
     {nullptr}};
 
 PyTypeObject THPFunctionType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._FunctionBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._FunctionBase", /* tp_name */
     sizeof(THPFunction), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)THPFunction_dealloc, /* tp_dealloc */
