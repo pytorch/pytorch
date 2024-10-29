@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import sympy
 
 import torch
-from torch.utils._triton import has_triton_tma
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from torch.utils._triton import has_triton_tma
 
@@ -472,7 +471,6 @@ def scaled_mm_options(  # type: ignore[no-untyped-def]
 
 
 add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
-
 
 
 def get_workspace_size(
