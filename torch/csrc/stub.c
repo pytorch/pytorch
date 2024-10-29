@@ -9,11 +9,7 @@ extern "C"
 __attribute__((visibility("default"))) PyObject* PyInit__C(void);
 #endif
 
-extern void global_kineto_init();
-
 PyMODINIT_FUNC PyInit__C(void)
 {
-  PyObject* object =  initModule();
-  global_kineto_init();
-  return object;
+  return initModule();
 }
