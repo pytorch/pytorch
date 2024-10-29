@@ -314,7 +314,7 @@ def tensorify_python_scalars(
                 # But it turns out that scan_combine_graph_0 doesn't have meta on it
                 # in the following test:
                 #
-                # python test/inductor/test_torchinductor_dynamic_shapes.py DynamicShapesGPUTests.test_custom_scan_op_compiled_dynamic_shapes_cuda
+                # python test/inductor/test_torchinductor_dynamic_shapes.py DynamicShapesGPUTests.test_custom_scan_op_compiled_dynamic_shapes_cuda # noqa: B950
                 #
                 # We should probably have some sort of test suite that ensures all
                 # fx graph nodes have val populated. But since that doesn't exist today,
