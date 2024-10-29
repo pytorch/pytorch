@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Union
+from typing import Any, Dict, List, Union
+
+from sympy import Integer, Number, Symbol
+from sympy.logic.boolalg import BooleanAtom
 
 import torch
 import torch.fx as fx
@@ -15,7 +18,9 @@ from torch.fx.graph_module import GraphModule  # noqa: TCH001
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
 from torch.fx.proxy import MetaProxy
+from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import TensorReferenceAnalysis
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 
 __all__: List[str] = []
@@ -107,6 +112,7 @@ def tensorify_python_scalars(
     placeholders = set()
     for node in graph.nodes:
         if node.op != "placeholder":
+            first_non_placeholder = node
             break
         else:
             placeholders.add(node)
@@ -116,10 +122,6 @@ def tensorify_python_scalars(
     def _sympy_interp(expr: sympy.Expr) -> MetaProxy:
         # sympy_interp() with hash consing, and special handling for
         # generating constants correctly
-        from sympy import Integer, Number, Symbol
-        from sympy.logic.boolalg import BooleanAtom
-
-        from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 
         # hash cons
         if isinstance(expr, Symbol) and expr not in expr_to_tensor_proxy:
@@ -176,25 +178,24 @@ def tensorify_python_scalars(
             nodes[i + 1] if node not in placeholders else first_non_placeholder
         ):
             # Look for tensor.item() calls on placeholders
-            if unbacked_bindings := node.meta.get("unbacked_bindings"):
-                for s in unbacked_bindings.keys():
-                    if (
-                        node is not None
-                        and node.op == "call_function"
-                        and node.target is torch.ops.aten._local_scalar_dense.default
-                    ):
-                        dtype = node.args[0].meta["val"].dtype
-                        if dtype != torch.float64:
-                            continue
+            if (
+                node is not None
+                and node.op == "call_function"
+                and node.target is torch.ops.aten._local_scalar_dense.default
+            ):
+                dtype = node.args[0].meta["val"].dtype
+                if dtype != torch.float64:
+                    continue
 
-                        assert isinstance(node.args[0], fx.Node), node.args[0]
+                assert isinstance(node.args[0], fx.Node), node.args[0]
 
-                        expr_to_tensor_proxy[s] = MetaProxy(
-                            node.args[0], tracer=tracer, fake_mode=fake_mode
-                        )
-                        expr_to_sym_proxy[s] = MetaProxy(
-                            node, tracer=tracer, fake_mode=fake_mode
-                        )
+                s = node.meta["val"].node.expr
+                expr_to_tensor_proxy[s] = MetaProxy(
+                    node.args[0], tracer=tracer, fake_mode=fake_mode
+                )
+                expr_to_sym_proxy[s] = MetaProxy(
+                    node, tracer=tracer, fake_mode=fake_mode
+                )
 
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
@@ -206,7 +207,7 @@ def tensorify_python_scalars(
 
             # Look for functions to convert
             if node.op == "call_function" and node.target in SUPPORTED_OPS:
-                args = []
+                args: List[Any] = []
                 transform = False
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
@@ -229,8 +230,10 @@ def tensorify_python_scalars(
                             )
 
                         args.append(proxy)
-                    else:
+                    elif isinstance(a, fx.Node):
                         args.append(MetaProxy(a, tracer=tracer, fake_mode=fake_mode))
+                    else:
+                        args.append(a)
 
                 if transform:
                     replacement_proxy = node.target(*args)
@@ -244,13 +247,84 @@ def tensorify_python_scalars(
                         )
 
                     node.replace_all_uses_with(replacement_proxy.node)
-
                     graph.erase_node(node)
 
-    # DCE symbols (which are guaranteed to be pure) only
-    for proxy in reversed(expr_to_sym_proxy.values()):
-        if len(proxy.node.users) == 0 and proxy.node.op != "placeholder":
-            graph.erase_node(proxy.node)
+    # Now do one more pass that specializes all symfloats we didn't manage
+    # to tensorify away.
+    nodes = list(graph.nodes)
+    for i, node in reversed(list(enumerate(nodes))):
+        if node.op == "output" or node.op == "placeholder":
+            continue
+
+        with graph.inserting_before(nodes[i]):
+            if len(node.users) == 0 and not node.is_impure():
+                graph.erase_node(node)
+                continue
+
+            args = []
+            kwargs: Dict[str, Any] = {}
+            transform = False
+            for a in node.args:
+                if (
+                    isinstance(a, fx.Node)
+                    and (zf := a.meta.get("val")) is not None
+                    and isinstance(zf, (torch.SymFloat, torch.SymInt))
+                    and (node_hint := zf.node.hint) is not None
+                    # The high level idea here is to specialize if we have
+                    # a node that has exclusively SymFloat free symbols.
+                    # This is because we don't want to specialize cases like
+                    # math.floor(math.sqrt(x.size(0))).
+                    and all(
+                        symbol_is_type(s, SymT.FLOAT) for s in zf.node.expr.free_symbols
+                    )
+                ):
+                    transform = True
+                    args.append(
+                        float(zf) if isinstance(zf, torch.SymFloat) else int(zf)
+                    )
+                else:
+                    args.append(a)
+
+            for k, v in node.kwargs.items():
+                if (
+                    isinstance(v, fx.Node)
+                    and (zf := v.meta.get("val")) is not None
+                    and isinstance(zf, (torch.SymFloat, torch.SymInt))
+                    and (node_hint := zf.node.hint) is not None
+                    and all(
+                        symbol_is_type(s, SymT.FLOAT) for s in zf.node.expr.free_symbols
+                    )
+                ):
+                    transform = True
+                    kwargs[k] = float(zf) if isinstance(zf, torch.SymFloat) else int(zf)
+                else:
+                    kwargs[k] = v
+
+            if transform:
+                # args may not be metaproxy (eg. float) so can't use metaproxy here
+                replacement_node = graph.call_function(node.target, tuple(args), kwargs)
+
+                # Originally I tried doing something like this for meta propagation:
+                #
+                # replacement_node.meta["val"] = node.target(
+                #     *[a.meta["val"] if isinstance(a, fx.Node) else a for a in args],
+                #     **kwargs,
+                # )
+                #
+                # But it turns out that scan_combine_graph_0 doesn't have meta on it
+                # in the following test:
+                #
+                # python test/inductor/test_torchinductor_dynamic_shapes.py DynamicShapesGPUTests.test_custom_scan_op_compiled_dynamic_shapes_cuda # noqa: B950
+                #
+                # We should probably have some sort of test suite that ensures all
+                # fx graph nodes have val populated. But since that doesn't exist today,
+                # I decided to just use the meta from the original node. Since we are
+                # only specializing and not changing the actual operation, this should
+                # still be an accurate meta val.
+                replacement_node.meta["val"] = node.meta["val"]
+
+                node.replace_all_uses_with(replacement_node)
+                graph.erase_node(node)
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
