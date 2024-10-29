@@ -8,6 +8,11 @@
 #include <string>
 #include <type_traits>
 
+#if !defined(FBCODE_CAFFE2) && !defined(C10_NODEPRECATED)
+#define C10_TYPENAME_SUPPORTS_CONSTEXPR 1
+#define C10_TYPENAME_CONSTEXPR constexpr
+#endif
+
 namespace c10::util {
 
 struct type_index final : IdWrapper<type_index, uint64_t> {
