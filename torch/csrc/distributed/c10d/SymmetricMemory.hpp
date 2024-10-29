@@ -60,12 +60,14 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
       c10::ScalarType dtype,
       int64_t storage_offset) = 0;
 
-  virtual void barrier(int channel) = 0;
-  virtual void put_signal(int dst_rank, int channel) = 0;
-  virtual void wait_signal(int src_rank, int channel) = 0;
+  virtual void barrier(int channel, size_t timeout_ms) = 0;
+  virtual void put_signal(int dst_rank, int channel, size_t timeout_ms) = 0;
+  virtual void wait_signal(int src_rank, int channel, size_t timeout_ms) = 0;
 
   virtual int get_rank() = 0;
   virtual int get_world_size() = 0;
+
+  virtual void stream_write_value32(uintptr_t addr, uint32_t val) = 0;
 };
 
 class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
@@ -81,7 +83,7 @@ class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
   virtual size_t get_alloc_size(void* ptr) = 0;
   virtual c10::intrusive_ptr<SymmetricMemory> rendezvous(void* ptr) = 0;
   virtual bool is_rendezvous_completed(void* ptr) = 0;
-  virtual bool has_multicast_support() = 0;
+  virtual bool has_multicast_support(int device_idx) = 0;
 };
 
 C10_EXPORT bool is_finalizing();
@@ -154,6 +156,8 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
 TORCH_API c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
     const at::Tensor& tensor);
 
-TORCH_API bool has_multicast_support(c10::DeviceType device_type);
+TORCH_API bool has_multicast_support(
+    c10::DeviceType device_type,
+    int device_idx);
 } // namespace symmetric_memory
 } // namespace c10d

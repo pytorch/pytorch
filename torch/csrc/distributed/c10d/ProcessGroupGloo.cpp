@@ -5,6 +5,7 @@
 
 #include <torch/csrc/distributed/c10d/GlooDeviceFactory.hpp>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <chrono>
 #include <exception>
 
@@ -574,6 +575,9 @@ bool ProcessGroupGloo::SendWork::wait(std::chrono::milliseconds timeout) {
 
   // Completes the Work object and throws the exception.
   finishAndThrow(exception);
+  c10d::unregister_work(
+      c10::intrusive_ptr<
+          ProcessGroupGloo::SendWork>::unsafe_reclaim_from_nonowning(this));
   return sendCompleted;
 }
 
@@ -621,6 +625,9 @@ bool ProcessGroupGloo::RecvWork::wait(std::chrono::milliseconds timeout) {
 
   // Completes the Work object and throws the exception.
   finishAndThrow(exception);
+  c10d::unregister_work(
+      c10::intrusive_ptr<
+          ProcessGroupGloo::RecvWork>::unsafe_reclaim_from_nonowning(this));
   return recvCompleted;
 }
 

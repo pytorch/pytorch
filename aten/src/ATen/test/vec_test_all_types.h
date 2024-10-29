@@ -943,22 +943,25 @@ void test_unary(
         UVT start = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
         UVT end = dmn_argc > 0 ? dmn.ArgsDomain[0].end : default_end;
         ValueGen<VT> generator(start, end, seed.add(changeSeedBy));
-        for (C10_UNUSED const auto trial : c10::irange(trialCount)) {
-            for (const auto k : c10::irange(el_count)) {
-                vals[k] = generator.get();
-                call_filter(filter, vals[k]);
-                //map operator
-                expected[k] = expectedFunction(vals[k]);
-            }
-            // test
-            auto input = vec_type::loadu(vals);
-            auto actual = actualFunction(input);
-            auto vec_expected = vec_type::loadu(expected);
-            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
-            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
+        for ([[maybe_unused]] const auto trial : c10::irange(trialCount)) {
+          for (const auto k : c10::irange(el_count)) {
+            vals[k] = generator.get();
+            call_filter(filter, vals[k]);
+            // map operator
+            expected[k] = expectedFunction(vals[k]);
+          }
+          // test
+          auto input = vec_type::loadu(vals);
+          auto actual = actualFunction(input);
+          auto vec_expected = vec_type::loadu(expected);
+          AssertVectorized<vec_type> vecAssert(
+              testNameInfo, seed, vec_expected, actual, input);
+          if (vecAssert.check(
+                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
+            return;
 
-        }// trial
-        //inrease Seed
+        } // trial
+        // inrease Seed
         changeSeedBy += 1;
     }
     for (auto& custom : testCase.getCustomChecks()) {
@@ -1002,22 +1005,25 @@ void test_binary(
         UVT end1 = dmn_argc > 1 ? dmn.ArgsDomain[1].end : default_end;
         ValueGen<VT> generator0(start0, end0, seed.add(changeSeedBy));
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
-        for (C10_UNUSED const auto trial : c10::irange(trialCount)) {
-            for (const auto k : c10::irange(el_count)) {
-                vals0[k] = generator0.get();
-                vals1[k] = generator1.get();
-                call_filter(filter, vals0[k], vals1[k]);
-                //map operator
-                expected[k] = expectedFunction(vals0[k], vals1[k]);
-            }
-            // test
-            auto input0 = vec_type::loadu(vals0);
-            auto input1 = vec_type::loadu(vals1);
-            auto actual = actualFunction(input0, input1);
-            auto vec_expected = vec_type::loadu(expected);
-            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1);
-            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))return;
-        }// trial
+        for ([[maybe_unused]] const auto trial : c10::irange(trialCount)) {
+          for (const auto k : c10::irange(el_count)) {
+            vals0[k] = generator0.get();
+            vals1[k] = generator1.get();
+            call_filter(filter, vals0[k], vals1[k]);
+            // map operator
+            expected[k] = expectedFunction(vals0[k], vals1[k]);
+          }
+          // test
+          auto input0 = vec_type::loadu(vals0);
+          auto input1 = vec_type::loadu(vals1);
+          auto actual = actualFunction(input0, input1);
+          auto vec_expected = vec_type::loadu(expected);
+          AssertVectorized<vec_type> vecAssert(
+              testNameInfo, seed, vec_expected, actual, input0, input1);
+          if (vecAssert.check(
+                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
+            return;
+        } // trial
         changeSeedBy += 1;
     }
     for (auto& custom : testCase.getCustomChecks()) {
@@ -1067,24 +1073,27 @@ void test_ternary(
         ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
         ValueGen<VT> generator2(start2, end2, seed.add(changeSeedBy + 2));
 
-        for (C10_UNUSED const auto trial : c10::irange(trialCount)) {
-            for (const auto k : c10::irange(el_count)) {
-                vals0[k] = generator0.get();
-                vals1[k] = generator1.get();
-                vals2[k] = generator2.get();
-                call_filter(filter, vals0[k], vals1[k], vals2[k]);
-                //map operator
-                expected[k] = expectedFunction(vals0[k], vals1[k], vals2[k]);
-            }
-            // test
-            auto input0 = vec_type::loadu(vals0);
-            auto input1 = vec_type::loadu(vals1);
-            auto input2 = vec_type::loadu(vals2);
-            auto actual = actualFunction(input0, input1, input2);
-            auto vec_expected = vec_type::loadu(expected);
-            AssertVectorized<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1, input2);
-            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
-        }// trial
+        for ([[maybe_unused]] const auto trial : c10::irange(trialCount)) {
+          for (const auto k : c10::irange(el_count)) {
+            vals0[k] = generator0.get();
+            vals1[k] = generator1.get();
+            vals2[k] = generator2.get();
+            call_filter(filter, vals0[k], vals1[k], vals2[k]);
+            // map operator
+            expected[k] = expectedFunction(vals0[k], vals1[k], vals2[k]);
+          }
+          // test
+          auto input0 = vec_type::loadu(vals0);
+          auto input1 = vec_type::loadu(vals1);
+          auto input2 = vec_type::loadu(vals2);
+          auto actual = actualFunction(input0, input1, input2);
+          auto vec_expected = vec_type::loadu(expected);
+          AssertVectorized<vec_type> vecAssert(
+              testNameInfo, seed, vec_expected, actual, input0, input1, input2);
+          if (vecAssert.check(
+                  bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))
+            return;
+        } // trial
         changeSeedBy += 1;
     }
 }

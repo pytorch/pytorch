@@ -101,7 +101,7 @@ static void RunDecompositions(Block* block) {
 
 void RunDecompositions(std::shared_ptr<Graph> g) {
   RunDecompositions(g->block());
-  for (C10_UNUSED const auto _ : c10::irange(2)) {
+  for ([[maybe_unused]] const auto _ : c10::irange(2)) {
     PeepholeOptimize(g, /*disable_shape_peephole*/ true);
     ConstantPropagation(g);
   }
@@ -189,7 +189,7 @@ void run_jit_decomposition(
   auto* trace_exec = torch::jit::GetDecompositionExecutor(schema);
   trace_exec->run((*stack));
   if (stack->back().isTuple()) {
-    at::IValue tup = stack->back();
+    at::IValue tup = std::move(stack->back());
     stack->pop_back();
     for (const auto& elem : tup.toTuple()->elements()) {
       stack->push_back(elem);

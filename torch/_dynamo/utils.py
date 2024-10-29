@@ -21,8 +21,10 @@ import operator
 import os
 import re
 import sys
+import textwrap
 import threading
 import time
+import traceback
 import types
 import typing
 import uuid
@@ -234,16 +236,6 @@ def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -
     _add_time_spent(key, "remote_cache_time_saved", time_saved)
 
 
-def get_cache_stats() -> Dict[str, Any]:
-    """Get a bunch of metadata about cache hits and misses to use in chromium events"""
-    cache_stats = {
-        "fxgraph_cache_hit": counters["inductor"]["fxgraph_cache_hit"],
-        "fxgraph_cache_miss": counters["inductor"]["fxgraph_cache_miss"],
-        "fxgraph_cache_bypass": counters["inductor"]["fxgraph_cache_bypass"],
-    }
-    return cache_stats
-
-
 # dynamo_timed is a context manager
 # By wrapping a function in dynamo_timed, we can store a record in compilation_time_metrics
 # where the key is the functions name.
@@ -288,9 +280,10 @@ def dynamo_timed(
     try:
         with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             t0 = time.time()
-            chromium_log.log_event_start(key, start, None)
             if phase_name:
-                chromium_log.log_event_start(phase_name, start)
+                chromium_log.log_event_start(phase_name, start, {"fn_name": key})
+            else:
+                chromium_log.log_event_start(key, start, {})
             yield
             time_spent = time.time() - t0
         compilation_time_metrics[key].append(time_spent)
@@ -304,16 +297,15 @@ def dynamo_timed(
             chromium_log.log_event_end(
                 phase_name,
                 time.time_ns(),
-                {"cache_stats": get_cache_stats()},
+                {},
                 start,
             )
-        chromium_log.log_event_end(
-            key, time.time_ns(), {"cache_stats": get_cache_stats()}, start
-        )
+        else:
+            chromium_log.log_event_end(key, time.time_ns(), {}, start)
         # Only record backward compilation metrics if phase_name is not None!
         if phase_name:
             frame_key = str(curr_frame)
-            # fwd only compilation stages: entire_frame_compile, backend_compile.
+            # fwd only compilation stages: entire_frame_compile, backend_compile, aotdispatch.
             # use frame_key as time aggregation key.
             if fwd_only and fail_type is None:
                 _add_time_spent(frame_key, phase_name, time_spent)
@@ -364,6 +356,7 @@ def dynamo_timed(
                                 fail_reason,
                                 remote_cache_time_saved,
                                 structured_logging_overhead_s,
+                                False,  # is_forward
                             )
                             record_compilation_metrics(metrics)
 
@@ -524,7 +517,7 @@ def count_calls(g: fx.Graph) -> int:
     return c
 
 
-def identity(x):
+def identity(x: T) -> T:
     return x
 
 
@@ -805,6 +798,10 @@ class CompilationMetrics:
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
     config_suppress_errors: Optional[bool]
+    config_inline_inbuilt_nn_modules: Optional[bool]
+    specialize_float: Optional[bool]
+    dynamo_config: Optional[str]
+    is_forward: Optional[bool]
 
 
 @dataclasses.dataclass
@@ -816,6 +813,7 @@ class BwdCompilationMetrics:
     fail_reason: Optional[str]
     remote_cache_time_saved_s: Optional[float]
     structured_logging_overhead_s: Optional[float]
+    is_forward: Optional[bool]
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -895,7 +893,7 @@ class ChromiumEventLogger:
         self,
         event_name: str,
         time_ns: int,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Dict[str, Any],
     ) -> None:
         """
         Logs the start of a single event.
@@ -903,13 +901,15 @@ class ChromiumEventLogger:
         :param time_ns Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
-        event = self._log_timed_event(
+
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
+        self._log_timed_event(
             event_name,
             time_ns,
             "B",
             metadata,
         )
-        log_chromium_event_internal(event, self.get_stack(), self.id_)
         self.get_stack().append(event_name)
 
     def reset(self) -> None:
@@ -923,8 +923,8 @@ class ChromiumEventLogger:
         self,
         event_name: str,
         time_ns: int,
-        metadata: Optional[Dict[str, Any]] = None,
-        start_time_ns: Optional[int] = None,
+        metadata: Dict[str, Any],
+        start_time_ns: int,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -933,6 +933,15 @@ class ChromiumEventLogger:
         :param time_ns: Timestamp in nanoseconds
         :param metadata: Any extra metadata associated with this event
         """
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
+        event = self._log_timed_event(
+            event_name,
+            time_ns,
+            "E",
+            metadata,
+        )
+
         # These stack health checks currently never happen,
         # but they're written this way to future proof any weird event
         # overlaps in the future.
@@ -943,13 +952,6 @@ class ChromiumEventLogger:
             log.warning("ChromiumEventLogger: Start event not in stack, ignoring")
             return
 
-        event = self._log_timed_event(
-            event_name,
-            time_ns,
-            "E",
-            metadata,
-        )
-
         while event_name != stack[-1]:
             # If the event isn't the most recent one to end, pop
             # off the stack until it is.
@@ -959,7 +961,7 @@ class ChromiumEventLogger:
             )
             stack.pop()
 
-        log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+        log_chromium_event_internal(event, stack, compile_id, self.id_, start_time_ns)
         # Finally pop the actual event off the stack
         stack.pop()
 
@@ -1004,6 +1006,10 @@ class ChromiumEventLogger:
         :param Optional[Dict[str, Any]] metadata: Any extra metadata associated with this event
         :param str cname optional color for the arrow in the trace
         """
+        if metadata is None:
+            metadata = {}
+        compile_id = str(torch._guards.CompileContext.current_compile_id())
+        metadata["compile_id"] = compile_id
         event = {
             "name": event_name,
             "ts": time_ns / 1000,
@@ -1022,7 +1028,9 @@ class ChromiumEventLogger:
             expect_trace_id=True,
         )
         # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), self.id_)
+        log_chromium_event_internal(
+            event, self.get_stack(), compile_id, self.id_, time_ns
+        )
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -2333,9 +2341,7 @@ def tensor_always_has_static_shape(
 
     if (
         tensor_source.guard_source().is_specialized_nn_module()
-        # Marking the tensor attributes of nn modules static to keep the behavior same as before
-        # inline_inbuilt_nn_module flag was introduced.
-        or tensor_source.guard_source().is_unspecialized_nn_module()
+        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -2476,7 +2482,7 @@ class numpy_to_tensor_wrapper:
         self.f = f
         self.__name__ = "wrapped_" + self.f.__name__
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped function <original {self.f.__name__}>>"
 
     def __call__(self, *args, **kwargs):
@@ -2500,7 +2506,7 @@ class numpy_method_wrapper:
         self.method = method
         self.__name__ = "wrapped_" + self.method
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped method <original {self.method}>>"
 
     def __call__(self, *args, **kwargs):
@@ -2519,7 +2525,7 @@ class numpy_operator_wrapper:
         self.op = op
         self.__name__ = f"wrapped_{op.__name__}"
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<Wrapped operator <original {self.__name__}>>"
 
     def __call__(self, *args, **kwargs):
@@ -2761,10 +2767,34 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         h(x)))
         ^^^^^
 
-    We need our own implementation since `format_frame_summary` in
+    We need our own implementation in < 3.13 since `format_frame_summary` in
     Python's `traceback` module doesn't handle multi-line expressions
     (and their anchor extraction code is not completely correct).
     """
+    if sys.version_info >= (3, 13):
+        # multiline traceback implemented in 3.13+
+        frame_summary = traceback.FrameSummary(
+            code.co_filename,
+            inst.positions.lineno,
+            code.co_name,
+            end_lineno=inst.positions.end_lineno,
+            colno=inst.positions.col_offset,
+            end_colno=inst.positions.end_col_offset,
+        )
+        result = traceback.format_list([frame_summary])[0]
+        # remove first line containing filename info
+        result = "\n".join(result.splitlines()[1:])
+        # indent lines with original indentation
+        orig_lines = [
+            linecache.getline(code.co_filename, lineno).rstrip()
+            for lineno in range(inst.positions.lineno, inst.positions.end_lineno + 1)
+        ]
+        orig_lines_dedent = textwrap.dedent("\n".join(orig_lines)).splitlines()
+        indent_len = len(orig_lines[0]) - len(orig_lines_dedent[0])
+        indent = orig_lines[0][:indent_len]
+        result = textwrap.indent(textwrap.dedent(result), indent)
+        return result
+
     assert inst.positions is not None
     if inst.positions.lineno is None:
         return ""
@@ -2895,18 +2925,28 @@ def is_torch_function_object(value):
 
 
 def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
-    from torch._dynamo.variables import LazyVariableTracker, UserDefinedObjectVariable
+    from torch._dynamo.variables import UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
-    if isinstance(vt, TensorWithTFOverrideVariable):
-        return True
+    # Note on lazy vars: The value will either be realized or not throughout the course of execution
+    # if the value has a torch function, it will eventually be realized so we can realize it here
+    # if the value does not have a torch function, it may or may not be realized
+    # if it is realized it will be used and guards will be installed properly
+    # if it is not used, guards won't be installed, and it doesn't matter
+    # if the value has a torch function or not, so we should *not* realize it.
+    # NB: We technically know that if is_realized is False, LazyVariableTracker has the peek_value method
+    # but mypy does not unfortunately
+    if vt.is_realized() or (
+        hasattr(vt, "peek_value") and hasattr(vt.peek_value(), "__torch_function__")
+    ):
+        if isinstance(vt, TensorWithTFOverrideVariable):
+            return True
 
-    if isinstance(vt, LazyVariableTracker):
-        LazyVariableTracker.realize(vt)
+        return isinstance(vt, UserDefinedObjectVariable) and hasattr(
+            vt.value, "__torch_function__"
+        )
 
-    return isinstance(vt, UserDefinedObjectVariable) and hasattr(
-        vt.value, "__torch_function__"
-    )
+    return False
 
 
 # see note [Tensor Fakification and Symbol Caching]
@@ -3011,7 +3051,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
         # fast path, avoid pytree overhead
         # compiled autograd inputs are always a list of tensors, maybe followed by symints
         assert inputs_idx_to_clear == [0]
@@ -3060,7 +3100,7 @@ class Lit:
     def __init__(self, s):
         self.s = s
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.s
 
 
@@ -3147,6 +3187,34 @@ def does_not_override_dict_iter_methods(user_cls):
         and user_cls.keys in (dict.keys, collections.OrderedDict.keys)
         and user_cls.__iter__ in (dict.__iter__, collections.OrderedDict.__iter__)
     )
+
+
+# Helper functions below are to prevent __torch_function__
+# calls from happening in the middle of __torch_function__
+# compiled bytecode
+# They will be skipped which is the desired result
+def call_size(x, i):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x, i):
+        return x.size(i)
+
+    return fn(x, i)
+
+
+def call_stride(x, i):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x, i):
+        return x.stride(i)
+
+    return fn(x, i)
+
+
+def call_storage_offset(x):
+    @torch._dynamo.disable(recursive=True)
+    def fn(x):
+        return x.storage_offset()
+
+    return fn(x)
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.

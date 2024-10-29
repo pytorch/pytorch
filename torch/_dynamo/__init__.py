@@ -17,6 +17,7 @@ from .decorators import (
     mark_static_address,
     maybe_mark_dynamic,
     run,
+    set_stance,
     substitute_in_graph,
 )
 from .eval_frame import (
@@ -57,6 +58,7 @@ __all__ = [
     "run",
     "replay",
     "disable",
+    "set_stance",
     "reset",
     "OptimizedModule",
     "is_compiling",

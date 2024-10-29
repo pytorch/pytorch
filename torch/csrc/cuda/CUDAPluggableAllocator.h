@@ -110,6 +110,10 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   bool initialized() override;
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override;
   void emptyCache() override;
+  void enable(bool) override {}
+  bool isEnabled() const override {
+    return true;
+  }
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override;
   void* getBaseAllocation(void* ptr, size_t* size) override;
 

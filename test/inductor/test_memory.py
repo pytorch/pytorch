@@ -7,7 +7,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class Foo(torch.nn.Module):
@@ -39,12 +39,17 @@ class Foo(torch.nn.Module):
         return t3.sum() + t4.sum()
 
 
+# The tests in this class uses very small tensors. The default
+# score_fusion_memory threshold will cause different fusion decisions and
+# generate a different wrapper. Override the threshold to make these tests
+# happy.
+@config.patch("score_fusion_memory_threshold", 1)
 class TestOperatorReorderForPeakMemory(TestCase):
     def setUp(self):
         super().setUp()
 
-        self.model = Foo().to("cuda")
-        self.inputs = torch.ones((2048, 1), device="cuda")
+        self.model = Foo().to(GPU_TYPE)
+        self.inputs = torch.ones((2048, 1), device=GPU_TYPE)
         self.orig_reorder_method = memory.reorder_for_peak_memory
 
     @mock.patch.object(config, "reorder_for_peak_memory", True)

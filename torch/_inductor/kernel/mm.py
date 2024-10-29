@@ -16,11 +16,11 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
 
-from .. import config as inductor_config
+from .. import config as inductor_config, ir
 from ..codegen.common import BackendFeature
 from ..codegen.cuda.gemm_template import CUTLASS2xGemmTemplate, CUTLASS3xGemmTemplate
 from ..codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
-from ..codegen.wrapper import WrapperCodeGen
+from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import FlexibleLayout, is_triton
 from ..lowering import register_lowering
 from ..select_algorithm import (
@@ -39,6 +39,7 @@ from ..utils import (
     use_triton_template,
 )
 from .mm_common import (
+    _is_static_problem,
     addmm_epilogue,
     extra_mm_configs,
     int8_mm_configs,
@@ -122,6 +123,13 @@ mm_template = TritonTemplate(
 """,
 )
 
+
+# prevent duplication registration of extern functions
+@functools.lru_cache(None)
+def lazy_register_extern_choice(fn):
+    return ExternKernelChoice(fn)
+
+
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 aten_addmm = ExternKernelChoice(
@@ -139,6 +147,20 @@ aten__sparse_semi_structured_mm = ExternKernelChoice(
 
 def _is_int8_mat(mat):
     return mat.get_dtype() in (torch.int8, torch.uint8)
+
+
+def _is_large_block_for_cpu(m, n, k):
+    # Thresholds are experimentally determined to reduce Triton CPU compile times
+    return m * n > 2**13
+
+
+def mm_config_kwargs(device):
+    if device == "cpu":
+        return {
+            "scale": 0.5,
+            "exclude": _is_large_block_for_cpu,
+        }
+    return {}
 
 
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
@@ -170,9 +192,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
     )
-    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(m, n, k):
+        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -203,7 +225,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
         if use_aten_gemm_kernels():
             always_included.append("extern_mm")
         num_choices_before_extra_configs = len(choices)
-        for config in extra_mm_configs(m, n, k):
+        for config in extra_mm_configs(
+            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -245,6 +269,9 @@ def tuned_mm(mat1, mat2, *, layout=None):
         log.warning("No choices for GEMM, using ATen backend as fallback")
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
+    for k in inductor_config.external_matmul:
+        choices.append(lazy_register_extern_choice(k).bind((mat1, mat2), layout))
+
     try:
         return autotune_select_algorithm(name, choices, [mat1, mat2], layout)
     except NoValidChoicesError:
@@ -254,33 +281,12 @@ def tuned_mm(mat1, mat2, *, layout=None):
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
 
-def _is_static_problem(inputs_tensors, layout):
-    # checks whether all input tensors and the output layout
-    # have a static shape by attempting to convert the dimensions
-    # to int
-    static_shape = True
-    static_size = WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size)
-    if static_size is None:
-        nonzero = True
-        for s in layout.size:
-            sz = WrapperCodeGen.statically_known_int_or_none(s)
-            if sz is not None and sz == 0:
-                nonzero = False
-                break
-        return False, nonzero
-    numel = 1
-    for dim in static_size:
-        numel *= dim
-    nonzero = numel > 0
-    return static_shape, nonzero
-
-
 @register_lowering(aten._int_mm, type_promotion_kind=None)
 def tuned_int_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=torch.int32
     )
-    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     use_cutlass = static_shape and is_nonzero and use_cutlass_template(layout, m, n, k)
 
     choices = (
@@ -296,7 +302,9 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
     if is_nonzero and use_triton_template(layout, enable_int32=True):
-        for config in int8_mm_configs(m, n, k):
+        for config in int8_mm_configs(
+            m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -323,7 +331,7 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
-    static_shape, is_nonzero = _is_static_problem([inp, mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
     if (not is_nonzero) or (not use_max_autotune()):
         # Use a FlexibleLayout if we are not autotuning.
         # This allows padding strides for the output.
@@ -375,7 +383,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         )
 
     if is_nonzero and use_triton_template(layout):
-        for config in mm_configs(m, n, k):
+        for config in mm_configs(m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(inp_expanded, mat1, mat2),
@@ -390,7 +398,9 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         # broadcasting on the last dim of the bias term seems not to be working
         # in the linear GEMM epilogue used by addmm.
         if (
-            WrapperCodeGen.statically_known_int_or_none(inp_expanded.layout.stride[-1])
+            PythonWrapperCodegen.statically_known_int_or_none(
+                inp_expanded.layout.stride[-1]
+            )
             != 0
         ):
             CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
@@ -668,7 +678,7 @@ def get_size_hints_strides(mat1, mat2):
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
-    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    static_shape, is_nonzero = _is_static_problem(layout)
 
     fallback = aten_fallback_mixed_mm.bind((mat1, mat2), layout)
 
@@ -707,7 +717,13 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
             choices.append(fallback)
 
         has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
-        for config in mixed_mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
+        for config in mixed_mm_configs(
+            m,
+            n,
+            k,
+            has_int8_tensor=has_int8_tensor,
+            **mm_config_kwargs(ir.get_device_type(mat1)),
+        ):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
@@ -764,7 +780,9 @@ def tuned_fused_int_mm_mul(mat1, mat2, mat3, out_dtype, *, layout=None):
         mat1, mat2, mat3, layout=layout, out_dtype=out_dtype
     )
     choices: List[Dict[Any, Any]] = []
-    for config in int8_mm_configs(m, n, k):
+    for config in int8_mm_configs(
+        m, n, k, **mm_config_kwargs(ir.get_device_type(mat1))
+    ):
         mm_template.maybe_append_choice(
             choices,
             input_nodes=(mat1, mat2, mat3),

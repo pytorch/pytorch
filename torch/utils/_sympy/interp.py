@@ -155,9 +155,14 @@ def _run_sympy_handler(analysis, args, expr, index_dtype=torch.int64):
             r = handler(*args)
             log.debug("%s(%s) -> %s", handler_name, args, r)
             return r
+    except NotImplementedError:
+        raise
     except Exception:
         log.warning("failed while executing %s(%s)", handler_name, args)
         raise
+
+
+_nil = object()
 
 
 def sympy_interp(
@@ -166,6 +171,7 @@ def sympy_interp(
     expr: Union[sympy.Expr, SympyBoolean],
     *,
     index_dtype=torch.int64,
+    missing_handler=None,
 ):
     # Handle base cases
     dtype = None
@@ -179,12 +185,26 @@ def sympy_interp(
     if dtype is not None:
         return analysis.constant(expr, dtype)
     elif isinstance(expr, sympy.Symbol):
-        return env[expr]
+        if (r := env.get(expr, _nil)) is not _nil:
+            return r
+        elif missing_handler:
+            return missing_handler(expr)
+        else:
+            raise KeyError(expr)
 
     # Recursive case
     return _run_sympy_handler(
         analysis,
-        [sympy_interp(analysis, env, arg) for arg in expr.args],  # type: ignore[arg-type]
+        [
+            sympy_interp(
+                analysis,
+                env,
+                arg,
+                index_dtype=index_dtype,
+                missing_handler=missing_handler,
+            )
+            for arg in expr.args
+        ],  # type: ignore[arg-type]
         expr,
         index_dtype=index_dtype,
     )  # type: ignore[arg-type]

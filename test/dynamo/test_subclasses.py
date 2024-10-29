@@ -373,9 +373,11 @@ class CtxSubclassTensor(torch.Tensor):
         )
         out_a = func(*args_a, **kwargs_a)
         out = pytree.tree_map(
-            lambda x: CtxSubclassTensor(x, biggest_constant)
-            if isinstance(x, torch.Tensor)
-            else x,
+            lambda x: (
+                CtxSubclassTensor(x, biggest_constant)
+                if isinstance(x, torch.Tensor)
+                else x
+            ),
             out_a,
         )
 
@@ -672,7 +674,7 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         wrapped2 = y.as_subclass(SigmoidToExpSubclass)
 
         def fn(w):
-            return w.sigmoid()
+            return w.exp()
 
         fn_opt = compile_full_eager(fn)
 
@@ -682,6 +684,38 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res_exp, res_act)
         self.assertEqual(res_exp, res_exp2)
+
+    def test_torch_function_call_on_method_arg(self):
+        class LocalSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func == torch._C.TensorBase.add_:
+                    func = torch._C.TensorBase.sub_
+
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_function__(func, types, args, kwargs)
+
+            def sigmoid(self):
+                return None
+
+        x = torch.ones(2, 2)
+        y = torch.ones(2, 2)
+        z = torch.ones(2, 2)
+        wrapped = y.as_subclass(LocalSubclass)
+        wrapped2 = z.as_subclass(LocalSubclass)
+
+        def fn(a, w):
+            a.add_(w)
+            return a
+
+        fn_opt = torch.compile(fn)
+
+        with torch._dynamo.config.patch("traceable_tensor_subclasses", {LocalSubclass}):
+            res_exp = fn(x, wrapped)
+            res_act = fn_opt(y, wrapped2)
+
+        self.assertEqual(res_exp, res_act)
 
     def test_user_overidden_method_unsupported(self):
         class LocalSubclass(torch.Tensor):
@@ -822,6 +856,31 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         res_exp = fn(wrapped)
         res_act = fn_opt(wrapped)
         self.assertEqual(res_exp, res_act)
+
+    def test_no_torch_function_on_size_bytecode(self):
+        class TestTensor(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                with torch._C.DisableTorchFunctionSubclass():
+                    out = func(*args, **kwargs)
+
+                    if func == torch.clone:
+                        return out * 2
+                    else:
+                        return out
+
+        def fn(x):
+            return torch.clone(x)
+
+        with torch._dynamo.config.patch(traceable_tensor_subclasses={TestTensor}):
+            inp = torch.ones(4, 4)
+            x = inp.as_subclass(TestTensor)
+            torch._dynamo.mark_dynamic(x, 0)
+            compiled_fn = torch.compile(fn, fullgraph=True)
+            out = compiled_fn(x)
+            self.assertEqual(out, torch.ones(4, 4) * 2)
 
     def test_torch_function_wrapper_class_with_kwargs(self):
         x = torch.ones(2, 2)
@@ -1490,11 +1549,11 @@ s1 > 3""",
                 )
                 out_a = func(*args_a, **kwargs_a)
                 out = pytree.tree_map(
-                    lambda x: SubclassTensor(
-                        x, SubclassTensorArgs2(x.shape, x.device, None)
-                    )
-                    if isinstance(x, torch.Tensor)
-                    else x,
+                    lambda x: (
+                        SubclassTensor(x, SubclassTensorArgs2(x.shape, x.device, None))
+                        if isinstance(x, torch.Tensor)
+                        else x
+                    ),
                     out_a,
                 )
                 return return_and_correct_aliasing(func, args, kwargs, out)

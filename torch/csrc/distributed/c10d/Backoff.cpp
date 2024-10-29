@@ -1,13 +1,12 @@
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 
-#include <exception>
 #include <stdexcept>
 
 namespace c10d {
 namespace {
 constexpr std::chrono::milliseconds kZeroInterval{0};
 
-int32_t randSeed() {
+std::random_device::result_type randSeed() {
   std::random_device rd;
   return rd();
 }

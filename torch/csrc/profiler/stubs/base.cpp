@@ -2,9 +2,7 @@
 
 #include <c10/util/Exception.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 ProfilerStubs::~ProfilerStubs() = default;
 
@@ -43,7 +41,7 @@ struct DefaultStubs : public ProfilerStubs {
 
  private:
   void fail() const {
-    AT_ERROR(name_, " used in profiler but not enabled.");
+    TORCH_CHECK(false, name_, " used in profiler but not enabled.");
   }
 
   const char* const name_;
@@ -78,6 +76,4 @@ REGISTER_DEFAULT(itt, ITT)
 REGISTER_DEFAULT(privateuse1, PrivateUse1)
 #undef REGISTER_DEFAULT
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

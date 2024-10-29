@@ -6,18 +6,18 @@ numpy
 psutil
 pyyaml
 requests
-setuptools
+# Setuptools>=74.0.0 stopped support for directly using private funcs(_msvccompiler)
+# and consolidated all compiler logic in distutils used in Pytorch build, so older
+# is required until pytorch build not refactored to work for latest setuptools.
+setuptools<=72.1.0
 types-dataclasses
 typing-extensions>=4.8.0
-sympy==1.12.1 ; python_version == "3.8"
 sympy==1.13.1 ; python_version >= "3.9"
 filelock
 networkx
 jinja2
 fsspec
-lintrunner
+lintrunner ; platform_system != "Windows"
 ninja
-# setuptools was removed from default python install
-setuptools ; python_version >= "3.12"
 packaging
-optree>=0.12.0 ; python_version <= "3.12"
+optree>=0.13.0

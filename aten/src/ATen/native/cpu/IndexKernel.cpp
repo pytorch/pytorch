@@ -78,7 +78,7 @@ void cpu_take_put_kernel(
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* iterated_data_bytes = data[0];
     auto* index_data_bytes = data[1];
-    for (const auto elem C10_UNUSED : c10::irange(n)) {
+    for ([[maybe_unused]] const auto elem : c10::irange(n)) {
       auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
       auto& iterated = *reinterpret_cast<scalar_t*>(iterated_data_bytes);
 
@@ -203,7 +203,7 @@ void index_fill_kernel(
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
-      for (const auto elem C10_UNUSED : c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         TORCH_CHECK_INDEX(idx >= -self_dim_size && idx < self_dim_size,
@@ -229,7 +229,7 @@ void index_fill_kernel(
       if (idx < 0) {
         idx += self_dim_size;
       }
-      for (const auto elem C10_UNUSED: c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
 
         self_data[idx * self_dim_stride] = fill_val;
@@ -262,7 +262,7 @@ void index_copy_kernel(
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
       auto* source_data_bytes = data[2];
-      for (const auto elem C10_UNUSED : c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
@@ -285,7 +285,7 @@ void index_copy_kernel(
       TORCH_CHECK_INDEX(idx >= 0 && idx < self_dim_size,
             "index_copy_(): index ", idx, " is out of bounds for dimension ",
             dim, " with size ", self_dim_size);
-      for (const auto elem C10_UNUSED : c10::irange(n)) {
+      for ([[maybe_unused]] const auto elem : c10::irange(n)) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto* source_data = reinterpret_cast<scalar_t*>(source_data_bytes);
 
@@ -474,8 +474,7 @@ void cpu_hflip_vec(at::TensorIterator& iter) {
     constexpr auto stride = sizeof(scalar_t);
     TORCH_INTERNAL_ASSERT(stride == -strides[0] && stride == strides[1]);
 
-    for (const auto j C10_UNUSED : c10::irange(size1)) {
-
+    for ([[maybe_unused]] const auto j : c10::irange(size1)) {
       // vectorized loop with negative stride for output
       char** C10_RESTRICT data_ = data_arr.data();
       int64_t n = size0;
@@ -543,8 +542,7 @@ void cpu_vflip_memcpy(at::TensorIterator& iter) {
     TORCH_INTERNAL_ASSERT(strides[0] == strides[1]);
     const int64_t stride = strides[0];
 
-    for (const auto j C10_UNUSED : c10::irange(size1)) {
-
+    for ([[maybe_unused]] const auto j : c10::irange(size1)) {
       char** C10_RESTRICT data_ = data_arr.data();
       int64_t n = size0;
 
