@@ -7,6 +7,7 @@ import logging
 import re
 import time
 import warnings
+from collections import OrderedDict
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -1938,18 +1939,39 @@ def _export(
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
 
-    export_artifact = export_func(  # type: ignore[operator]
-        mod,
-        args,
-        kwargs,
-        dynamic_shapes,
-        preserve_module_call_signature,
-        pre_dispatch,
-        original_state_dict,
-        original_in_spec,
-        allow_complex_guards_as_runtime_asserts,
-        _is_torch_jit_trace,
-    )
+    @contextmanager
+    def _deregister_hooks():
+        attrs = [
+            "_forward_hooks",
+            "_forward_pre_hooks",
+            "_state_dict_hooks",
+            "_state_dict_pre_hooks",
+            "_load_state_dict_pre_hooks",
+            "_load_state_dict_post_hooks",
+        ]
+        hooks = {}
+        for attr in attrs:
+            hooks[attr] = getattr(mod, attr)
+            setattr(mod, attr, OrderedDict())
+        try:
+            yield
+        finally:
+            for attr, hook in hooks.items():
+                setattr(mod, attr, hook)
+
+    with _deregister_hooks():
+        export_artifact = export_func(  # type: ignore[operator]
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            preserve_module_call_signature,
+            pre_dispatch,
+            original_state_dict,
+            original_in_spec,
+            allow_complex_guards_as_runtime_asserts,
+            _is_torch_jit_trace,
+        )
     export_graph_signature: ExportGraphSignature = export_artifact.aten.sig
 
     forward_arg_names = (
