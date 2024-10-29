@@ -443,6 +443,7 @@ def check_submodules():
         ["CMakeLists.txt"],
     )
 
+
 # Windows has very bad support for symbolic links.
 # Instead of using symlinks, we're going to copy files over
 def mirror_files_into_torchgen():
