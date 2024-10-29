@@ -2568,6 +2568,51 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             torch.compile(flex_attention)(query, key, value, block_mask=block_mask)
 
     @supported_platform
+    def test_free_symbol_dynamic(self):
+        def batch_flip_causal(b, h, q_idx, kv_idx):
+            return (q_idx >= kv_idx) & (b % 2 == 0)
+
+        class SimpleAttention(torch.nn.Module):
+            def __init__(self, dim=512, n_head=8):
+                super().__init__()
+                self.qkv = torch.nn.Linear(dim, 3 * dim)
+                self.n_head = n_head
+                self.head_dim = dim // n_head
+
+            def forward(self, x, block_mask=None):
+                B, T, C = x.size()
+                qkv = self.qkv(x).view(B, T, 3, self.n_head, self.head_dim)
+                qkv = qkv.permute(2, 0, 3, 1, 4)
+                q, k, v = qkv
+                y = flex_attention(q, k, v, block_mask=block_mask)
+                return y.transpose(1, 2).contiguous().view(B, T, C)
+
+        model = SimpleAttention().cuda()
+        model.compile(mode="default", dynamic=True)
+        sequence_len = 256
+
+        # Test different batch shapes with dense masks
+        torch._dynamo.reset()
+        for batch_shape in [4, 16, 32]:
+            # Create dense mask
+            rand_mask = torch.randint(0, 2, (batch_shape, sequence_len)).cuda().bool()
+            block_mask = torch.compile(create_block_mask, dynamic=True)(
+                B=batch_shape,
+                BLOCK_SIZE=128,
+                mask_mod=lambda b, h, q_idx, kv_idx: ~rand_mask[b, q_idx],
+                H=None,
+                Q_LEN=sequence_len,
+                KV_LEN=sequence_len,
+                device="cuda",
+            )
+
+            # Run forward pass
+            x = torch.randn(batch_shape, sequence_len, 512).cuda()
+            y = model(x, block_mask=block_mask)
+
+        self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+    @supported_platform
     def test_fw_bw_graph_correctness(self):
         cnt = CompileCounterWithBackend("aot_eager")
         make_tensor = functools.partial(
