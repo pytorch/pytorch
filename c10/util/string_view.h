@@ -591,6 +591,20 @@ constexpr inline void swap(
 
 using string_view = basic_string_view<char>;
 
+constexpr bool string_view_starts_with(
+    std::string_view str,
+    std::string_view prefix) noexcept {
+  return (prefix.size() > str.size()) ? false
+                                      : prefix == str.substr(0, prefix.size());
+}
+
+constexpr bool string_view_ends_with(
+    std::string_view str,
+    std::string_view suffix) noexcept {
+  return (suffix.size() > str.size())
+      ? false
+      : suffix == (str.substr(str.size() - suffix.size(), suffix.size()));
+}
 } // namespace c10
 
 namespace std {
