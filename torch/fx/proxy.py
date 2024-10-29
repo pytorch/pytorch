@@ -288,13 +288,10 @@ class TracerBase:
         """
         if isinstance(a, Proxy):
             return a.node  # most common arg type goes first
-        if hasattr(a, "__fx_create_arg__"):
+        elif hasattr(a, "__fx_create_arg__"):
             return a.__fx_create_arg__(self)
-        if a in (None, ...) or isinstance(a, (*base_types, enum.Enum)):
-            return a
-
         # aggregates
-        if isinstance(a, tuple):
+        elif isinstance(a, tuple):
             if hasattr(a, "_fields"):
                 # NamedTuple constructors don't seem to like getting a generator
                 # expression as an argument to their constructor, so build this
@@ -302,9 +299,9 @@ class TracerBase:
                 args = [self.create_arg(elem) for elem in a]
                 return type(a)(*args)  # type: ignore[arg-type]
             return type(a)([self.create_arg(elem) for elem in a])
-        if isinstance(a, list):
+        elif isinstance(a, list):
             return [self.create_arg(elem) for elem in a]
-        if isinstance(a, dict):
+        elif isinstance(a, dict):
 
             def no_node(arg):
                 if isinstance(arg, Node):
@@ -323,30 +320,32 @@ class TracerBase:
 
                 r[k] = self.create_arg(v)
             return r
-
-        if isinstance(a, slice):
+        elif isinstance(a, slice):
             return slice(
                 self.create_arg(a.start),
                 self.create_arg(a.stop),
                 self.create_arg(a.step),
             )
 
-        if isinstance(a, range):
+        elif isinstance(a, range):
             return range(
                 self.create_arg(a.start),
                 self.create_arg(a.stop),
                 self.create_arg(a.step),
             )
 
-        if isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
+        elif isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
             return a
 
-        if is_dataclass(a):
+        elif is_dataclass(a):
             kwargs = {
                 field.name: self.create_arg(getattr(a, field.name))
                 for field in fields(a)
             }
             return self.create_node("call_function", a.__class__, (), kwargs)
+
+        elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
+            return a
 
         raise NotImplementedError(f"argument of type: {type(a)}")
 
