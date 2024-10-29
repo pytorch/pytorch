@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import itertools
 import logging
@@ -15,6 +16,7 @@ from typing import (
     DefaultDict,
     Dict,
     Iterable,
+    Iterator,
     List,
     NoReturn,
     Optional,
@@ -191,9 +193,17 @@ def getattr_recursive(
     return attr_itr
 
 
-def mark_nodes_dislike_padding(
-    g: Graph, user_visible_outputs: Optional[Dict[str, None]]
-) -> None:
+def is_user_visible_output(node: torch.fx.Node) -> bool:
+    output_node = node.graph.find_nodes(op="output")[0]
+    return (
+        "user_visible_output_idxs" in output_node.meta
+        and node in output_node.args[0]
+        and output_node.args[0].index(node)
+        in output_node.meta["user_visible_output_idxs"]
+    )
+
+
+def mark_nodes_dislike_padding(g: Graph) -> None:
     """
     Nodes like convolution/convolution_backward want its input to be dense.
     If we pad their inputs, we result in extra calls to copy kernels!  On the other hand, padding usually helps reduction.
@@ -236,6 +246,8 @@ def mark_nodes_dislike_padding(
             else None
         )
 
+    output_node = g.find_nodes(op="output")[0]
+
     for cur in reversed(g.nodes):
         op = _get_overload_packet(cur)
         if not op:
@@ -252,11 +264,7 @@ def mark_nodes_dislike_padding(
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
-        if (
-            not config.pad_outputs
-            and user_visible_outputs
-            and cur.name in user_visible_outputs
-        ):
+        if not config.pad_outputs and is_user_visible_output(cur):
             cur.meta["dislike_padding"] = True
 
 
@@ -313,12 +321,11 @@ class GraphLowering(torch.fx.Interpreter):
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        example_inputs: Optional[List[torch.Tensor]] = None,
+        example_inputs: Optional[Sequence[object]] = None,
         shape_env: Optional[ShapeEnv] = None,
         graph_id: Optional[int] = None,
         cpp_wrapper: bool = False,
         aot_mode: bool = False,
-        user_visible_outputs: Optional[Dict[str, None]] = None,
         layout_opt: Optional[bool] = None,
         extern_node_serializer: Optional[
             Callable[[List[ir.ExternKernelNode]], Any]
@@ -429,14 +436,16 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_id = graph_id
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self.scheduler: torch._inductor.scheduler.Scheduler = None  # type: ignore[assignment]
+
+        # current_device is set only during codegen of a device-specific kernel
+        # a graph can have many devices
+        self.current_device: Optional[torch.device] = None
+
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
         self._warned_fallback = {"aten.convolution_backward"}
-        self.user_visible_outputs = (
-            user_visible_outputs if user_visible_outputs is not None else {}
-        )
-        mark_nodes_dislike_padding(gm.graph, user_visible_outputs)
+        mark_nodes_dislike_padding(gm.graph)
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
@@ -466,11 +475,29 @@ class GraphLowering(torch.fx.Interpreter):
         # Below field is related to printing debug intermediate tensor values info for debugging
         self.all_codegen_kernel_names: OrderedSet[str] = OrderedSet()
 
+        # state used by for Kernel.workspace
+        self.workspace_id = itertools.count()
+
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
     ) -> bool:
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
+
+    def get_current_device_or_throw(self) -> torch.device:
+        if device := self.current_device:
+            return device
+        else:
+            raise RuntimeError("No current device")
+
+    @contextlib.contextmanager
+    def set_current_device(self, device: torch.device) -> Iterator[None]:
+        prior = self.current_device
+        self.current_device = device
+        try:
+            yield
+        finally:
+            self.current_device = prior
 
     @staticmethod
     def decide_layout_opt(gm: GraphModule, *, is_inference: bool) -> bool:
@@ -1398,6 +1425,7 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.resize_as.default,
             ]
             is_output = any(user.op == "output" for user in n.users)
+            is_user_visible = is_user_visible_output(n)
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
@@ -1426,10 +1454,23 @@ class GraphLowering(torch.fx.Interpreter):
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
-                strides = n.meta["val"].stride()
-                if len(strides):
+                if is_user_visible:
+                    output_node = n.graph.find_nodes(op="output")[0]
+                    output_idx = output_node.args[0].index(n)
+                    original_output_strides = output_node.meta.get(
+                        "original_output_strides"
+                    )
+                    strides = (
+                        original_output_strides[output_idx]
+                        if original_output_strides is not None
+                        else None
+                    )
+                else:
+                    strides = n.meta["val"].stride()
+
+                if strides is not None and len(strides) > 0:
                     allow_padding = (
-                        config.pad_outputs or n.name not in self.user_visible_outputs
+                        config.pad_outputs or not is_user_visible
                     ) and not is_input_for_as_strided
                     dense = torch._prims_common.is_non_overlapping_and_dense(
                         n.meta["val"]
@@ -1442,7 +1483,7 @@ class GraphLowering(torch.fx.Interpreter):
                         and dense
                         and len(result.get_size()) == 4
                         and n in self.nodes_prefer_channels_last
-                        and n.name not in self.user_visible_outputs
+                        and not is_user_visible
                         and not is_input_for_as_strided
                     ):
                         strides = ir.FlexibleLayout.stride_ordered_for_memory_format(
@@ -1550,7 +1591,7 @@ class GraphLowering(torch.fx.Interpreter):
                 curr = result.data.data
                 if isinstance(curr, Pointwise):
                     # Use inner fn as a rough proxy. Good enough.
-                    if curr.has_large_inner_fn():
+                    if curr.has_large_inner_fn(threshold=100):
                         result.realize()
 
         # This is not complete, but it doesn't have to be: origin_node
@@ -2000,6 +2041,7 @@ class GraphLowering(torch.fx.Interpreter):
         return (
             name in self.graph_inputs.keys()
             and self.graph_inputs[name].get_numel() == 1
+            and len(self.graph_inputs[name].get_size()) == 0
             and self.graph_inputs[name].get_device().type == "cpu"
         ) or name in self.zero_dim_cpu_tensor_list
 
