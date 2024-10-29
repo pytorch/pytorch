@@ -158,9 +158,6 @@ nvtxMemHeapHandle_t registerNVTXMemoryBlock(void* ptr, size_t size, nvtxMemHeapH
         g_nvtxDomain = nvtxDomainCreateA("pytorch-allocator");
     }
 
-    printf("\n=== NVTX Registration Debug ===\n");
-    printf("Registering block: ptr=%p, size=%zu, parent_handle=%p\n", ptr, size, parent_handle);
-
     if (parent_handle == nullptr) {
         // This is a new allocation from CUDA, register it as a heap
         nvtxMemVirtualRangeDesc_t range_desc = {};
@@ -177,8 +174,6 @@ nvtxMemHeapHandle_t registerNVTXMemoryBlock(void* ptr, size_t size, nvtxMemHeapH
 
         auto handle = nvtxMemHeapRegister(g_nvtxDomain, &heap_desc);
 
-
-        printf("Registered new heap: handle=%p\n", handle);
         return handle;
     } else {
         // This is a suballocation from an existing block, register it as a region
@@ -196,7 +191,6 @@ nvtxMemHeapHandle_t registerNVTXMemoryBlock(void* ptr, size_t size, nvtxMemHeapH
         regions_desc.regionDescElements = &subrange;
         
         nvtxMemRegionsRegister(g_nvtxDomain, &regions_desc);
-        printf("Registered suballocation under parent handle=%p\n", parent_handle);
 
         return parent_handle;
     }
@@ -1437,15 +1431,12 @@ class DeviceCachingAllocator {
       bool inserted = pool->insert_into_blocks(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
-      // Add NVTX registration RIGHT HERE after the split is done
-
       if (remaining->nvtx_handle) {
         block->nvtx_handle = registerNVTXMemoryBlock(
             block->ptr, 
             block->size, 
             remaining->nvtx_handle);
       }
-
 
       if (already_split && !block->expandable_segment_) {
         // An already-split inactive block is being shrunk by size bytes.
@@ -1517,8 +1508,8 @@ class DeviceCachingAllocator {
 
     block->allocated = false;
 
-    // following logic might modifying underlaying Block, causing the size
-    // changed. We store ahead for reporting
+    // following logic might modify underlaying Block, causing the size
+    // to change. We store ahead for reporting
     auto orig_block_ptr = block->ptr;
     auto orig_block_size = block->size;
 
@@ -2393,7 +2384,6 @@ class DeviceCachingAllocator {
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
     if (block->nvtx_handle) {
-
         block->nvtx_handle = nullptr;
     }
     record_trace(
@@ -2774,7 +2764,6 @@ class DeviceCachingAllocator {
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
 
     if (p.err == cudaSuccess) {
-        // Register the newly allocated block
         p.block->nvtx_handle = registerNVTXMemoryBlock(p.block->ptr, p.block->size);
     }
 

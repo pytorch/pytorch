@@ -65,25 +65,6 @@ if(NOT BUILD_LIBTORCHLESS)
   endif()
 
   # ---[ Dependency of c10_cuda
-  if(TRUE)
-    message("This will never be printed.")
-    message("This will never be printed.")
-    message("This will never be printed.")
-    message("This will never be printed.")
-  endif()
-  message("CMAKE_SOURCE_DIR: ${CMAKE_SOURCE_DIR}")
-
-  # Try getting the target properties to see what include directories it knows about
-  get_target_property(NVTX_INCLUDES nvtx3-cpp INTERFACE_INCLUDE_DIRECTORIES)
-  message("NVTX include directories: ${NVTX_INCLUDES}")
-  target_include_directories(c10_cuda PRIVATE ${CMAKE_SOURCE_DIR}/third_party/NVTX/c/include)
-
-
-  if(USE_SYSTEM_NVTX)
-    message("=== USE_SYSTEM_NVTX is ON ===")
-  else()
-    message("=== USE_SYSTEM_NVTX is OFF ===")
-  endif()
 
   target_link_libraries(c10_cuda PUBLIC ${C10_LIB} torch::cudart torch::nvtx3)
 
