@@ -2,7 +2,6 @@
 # mypy: allow-untyped-defs
 
 
-import dataclasses
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -280,25 +279,3 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
-
-
-# Moved to invoke_quant in next PR
-
-
-@dataclasses.dataclass
-class InvokeQuant:
-    """
-    TODO - fill in next pr
-    """
-
-    def __call__(
-        self,
-        *args,
-        **kwargs,
-    ):
-        if not torch._utils.is_compiling():
-            return args[0](*args[1])
-
-        from torch._higher_order_ops import invoke_quant_tracer
-
-        return invoke_quant_tracer(*args, **kwargs, quant_options=self)  # type: ignore[call-arg]
