@@ -33,7 +33,7 @@ std::vector<size_t> get_mem_format_aware_shape(const at::Tensor& in) {
 template <typename PT>
 void q8_copy_int8_weight_and_add_offset(const at::Tensor& in, at::Tensor& out) {
   using T = typename PT::underlying;
-  static constexpr auto offset = std::is_same<T, uint8_t>::value ? 128 : 0;
+  static constexpr auto offset = std::is_same_v<T, uint8_t> ? 128 : 0;
   TORCH_CHECK(
       in.scalar_type() == c10::kQInt8,
       "q8_copy_int8_weight_and_add_offset: Expected input weight data type ",
