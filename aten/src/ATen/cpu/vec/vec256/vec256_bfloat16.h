@@ -1165,8 +1165,8 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   data += Vectorized<float>::size(); \
   load_fp32_from_##name(data, out2); \
 }
-LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
-LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16)
+LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16)
 
 #endif
 }} // namsepace at::vec::CPU_CAPABILITY
