@@ -54,6 +54,8 @@ def get_step_logger(logger: logging.Logger) -> Callable[..., None]:
     step = next(_step_counter)
 
     def log(level: int, msg: str, **kwargs: Any) -> None:
+        if "stacklevel" not in kwargs:
+            kwargs["stacklevel"] = 2
         logger.log(level, "Step %s: %s", step, msg, **kwargs)
 
     return log
