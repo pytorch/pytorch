@@ -1,5 +1,6 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/WaitCounter.h>
 
 #include <limits>
 
@@ -138,6 +139,7 @@ void device_synchronize() {
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
   }
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.cuda_device_synchronize);
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
