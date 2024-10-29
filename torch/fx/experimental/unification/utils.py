@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 __all__ = ["hashable", "transitive_get", "raises", "reverse_dict", "xfail", "freeze"]
+
+
 def hashable(x):
     try:
         hash(x)
@@ -9,7 +11,7 @@ def hashable(x):
 
 
 def transitive_get(key, d):
-    """ Transitive dict.get
+    """Transitive dict.get
     >>> d = {1: 2, 2: 3, 3: 4}
     >>> d.get(1)
     2
@@ -32,13 +34,13 @@ def raises(err, lamda):
 # Taken from theano/theano/gof/sched.py
 # Avoids licensing issues because this was written by Matthew Rocklin
 def _toposort(edges):
-    """ Topological sort algorithm by Kahn [1] - O(nodes + vertices)
+    """Topological sort algorithm by Kahn [1] - O(nodes + vertices)
     inputs:
         edges - a dict of the form {a: {b, c}} where b and c depend on a
     outputs:
         L - an ordered list of nodes that satisfy the dependencies of edges
     >>> # xdoctest: +SKIP
-    >>> _toposort({1: (2, 3), 2: (3, )})
+    >>> _toposort({1: (2, 3), 2: (3,)})
     [1, 2, 3]
     Closely follows the wikipedia page [2]
     [1] Kahn, Arthur B. (1962), "Topological sorting of large networks",
@@ -47,7 +49,7 @@ def _toposort(edges):
     """
     incoming_edges = reverse_dict(edges)
     incoming_edges = {k: set(val) for k, val in incoming_edges.items()}
-    S = ({v for v in edges if v not in incoming_edges})
+    S = {v for v in edges if v not in incoming_edges}
     L = []
 
     while S:
@@ -65,7 +67,7 @@ def _toposort(edges):
 
 def reverse_dict(d):
     """Reverses direction of dependence dict
-    >>> d = {'a': (1, 2), 'b': (2, 3), 'c':()}
+    >>> d = {"a": (1, 2), "b": (2, 3), "c": ()}
     >>> reverse_dict(d)  # doctest: +SKIP
     {1: ('a',), 2: ('a', 'b'), 3: ('b',)}
     :note: dict order are not deterministic. As we iterate on the
@@ -89,12 +91,12 @@ def xfail(func):
 
 
 def freeze(d):
-    """ Freeze container to hashable form
+    """Freeze container to hashable form
     >>> freeze(1)
     1
     >>> freeze([1, 2])
     (1, 2)
-    >>> freeze({1: 2}) # doctest: +SKIP
+    >>> freeze({1: 2})  # doctest: +SKIP
     frozenset([(1, 2)])
     """
     if isinstance(d, dict):

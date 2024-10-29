@@ -4020,15 +4020,24 @@ class TestSparseCompressedTritonKernels(TestCase):
     @suppress_warnings
     @parametrize("op", ['bsr_dense_addmm', 'bsr_dense_mm', 'bsr_dense_linear', '_int_bsr_dense_addmm'])
     @parametrize("blocksize", [16, '16x32', 32])
+    @parametrize("out_dtype", ['unspecified', 'int32'])
     @onlyCUDA
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float, torch.int8)
     @precisionOverride({torch.float16: 6e-1})
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
-    def test_triton_kernel(self, op, device, dtype, blocksize):
+    def test_triton_kernel(self, op, device, dtype, blocksize, out_dtype):
         from torch.sparse._triton_ops import bsr_dense_addmm, bsr_dense_mm, _int_bsr_dense_addmm
         from torch.sparse._triton_ops_meta import (create_blocked_tensor, get_meta,
                                                    optimize_bsr_dense_addmm, dump)
+        if out_dtype == "unspecified":
+            out_dtype = None
+        elif op == "bsr_dense_addmm":
+            out_dtype = getattr(torch, out_dtype)
+            if out_dtype.is_floating_point != dtype.is_floating_point:
+                self.skipTest("incompatible out dtype")
+        else:
+            self.skipTest("out dtype not implemented")
 
         def bsr_dense_linear(input, weights, bias=None):
             return torch.nn.functional.linear(input, weights, bias=bias).transpose(-1, -2)
@@ -4044,7 +4053,10 @@ class TestSparseCompressedTritonKernels(TestCase):
                     mat12 = torch._int_mm(mat1, mat2)
                 else:
                     # workaround RuntimeError: "addmm_cuda" not implemented for 'Char'
-                    mat12 = torch._int_mm(mat1, mat2).to(torch.int8)
+                    if out_dtype is not None:
+                        mat12 = torch._int_mm(mat1, mat2).to(out_dtype)
+                    else:
+                        mat12 = torch._int_mm(mat1, mat2).to(torch.int8)
             else:
                 mat12 = mat1 @ mat2
             if alpha != 1:
@@ -4140,7 +4152,12 @@ class TestSparseCompressedTritonKernels(TestCase):
                     dump()  # this will update torch/sparse/_triton_ops_meta.py
 
             expected = reference(input, mat1, mat2, beta=beta, alpha=alpha, left_alpha=left_alpha, right_alpha=right_alpha)
-            kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha,
+            if out_dtype is not None:
+                expected = expected.to(out_dtype)
+                out = expected.new_empty(input.shape, dtype=out_dtype)
+            else:
+                out = None
+            kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha, out=out,
                                                left_alpha=left_alpha, right_alpha=right_alpha), bsr_dense_mm={},
                           bsr_dense_linear=dict(bias=input.transpose(-1, -2)))[op]
 
@@ -4171,19 +4188,29 @@ class TestSparseCompressedTritonKernels(TestCase):
             if op in {'bsr_dense_addmm', 'bsr_dense_linear'}:
                 args = dict(bsr_dense_addmm=(nc_input, bsr, nc_mat2),
                             bsr_dense_linear=(nc_mat2.transpose(-1, -2), bsr))[op]
-                kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha, left_alpha=left_alpha, right_alpha=right_alpha),
+                kwargs = dict(bsr_dense_addmm=dict(beta=beta, alpha=alpha, left_alpha=left_alpha, right_alpha=right_alpha, out=out),
                               bsr_dense_linear=dict(bias=nc_input.transpose(-1, -2)))[op]
                 result = operation(*args, **kwargs)
                 self.assertEqual(result, expected)
 
     @parametrize("op", ['bsr_dense_addmm', '_int_bsr_dense_addmm'])
     @onlyCUDA
+    @parametrize("out_dtype", ['unspecified', 'int32'])
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.int8)
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float, torch.int8)
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
-    def test_triton_tune(self, op, device, dtype):
+    def test_triton_tune(self, op, device, dtype, out_dtype):
         from torch.sparse._triton_ops import bsr_dense_addmm, _int_bsr_dense_addmm
         from torch.sparse._triton_ops_meta import (create_blocked_tensor, tune_bsr_dense_addmm, tune__int_bsr_dense_addmm, get_meta)
+
+        if out_dtype == "unspecified":
+            out_dtype = None
+        elif op == "bsr_dense_addmm":
+            out_dtype = getattr(torch, out_dtype)
+            if out_dtype.is_floating_point != dtype.is_floating_point:
+                self.skipTest("incompatible out dtype")
+        else:
+            self.skipTest("out dtype not implemented")
 
         operation = dict(bsr_dense_addmm=bsr_dense_addmm, _int_bsr_dense_addmm=_int_bsr_dense_addmm)[op]
         tuner = dict(bsr_dense_addmm=tune_bsr_dense_addmm,
@@ -4200,12 +4227,19 @@ class TestSparseCompressedTritonKernels(TestCase):
         sparsity = 1 - bsr._nnz() * blocksize[0] * blocksize[1] / (M * K)
         input = make_tensor(K, N, dtype=dtype, device=device)
         dense = make_tensor(K, N, dtype=dtype, device=device)
+        version_dtype = dtype
+        if out_dtype is None:
+            out = None
+        else:
+            out = input.new_empty(input.shape, dtype=out_dtype)
+            if dtype is not out_dtype:
+                version_dtype = (dtype, out_dtype)
 
         if op in {'bsr_dense_addmm', '_int_bsr_dense_addmm'}:
             args = (input, bsr, dense)
 
             def get_current_meta():
-                version = (0, dtype, sparsity)
+                version = (0, version_dtype, sparsity)
                 meta_key = (M, K, N, *blocksize, False, True, True)
                 return get_meta(op, meta_key, version=version, exact=True)
         else:
@@ -4213,11 +4247,11 @@ class TestSparseCompressedTritonKernels(TestCase):
 
         self.assertEqual(get_current_meta(), None)
 
-        meta = tuner(*args, **dict(store=True, verbose=False))
+        meta = tuner(*args, **dict(store=True, verbose=False, out=out))
         self.assertEqual(get_current_meta(), meta)
 
-        expected = operation(*args)
-        result = operation(*args, **dict(meta=meta))
+        expected = operation(*args, **dict(out=None if out_dtype is None else out.clone()))
+        result = operation(*args, **dict(meta=meta, out=out))
         self.assertEqual(result, expected)
 
     @onlyCUDA

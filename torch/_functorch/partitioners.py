@@ -1506,9 +1506,12 @@ def dp_knapsack(
 
 
 def _optimize_runtime_with_given_memory(
+    joint_graph: fx.Graph,
     memory: List[float],
     runtimes: List[float],
     max_memory: float,
+    node_info: NodeInfo,
+    all_recomputable_banned_nodes: List[fx.Node],
 ) -> Tuple[float, List[int], List[int]]:
     SOLVER = config.activation_memory_budget_solver
     if SOLVER == "greedy":
@@ -1517,6 +1520,11 @@ def _optimize_runtime_with_given_memory(
         return ilp_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "dp":
         return dp_knapsack(memory, runtimes, max_memory)
+    elif callable(SOLVER):
+        saved_node_idx, recomp_node_idx = SOLVER(
+            memory, joint_graph, max_memory, node_info, all_recomputable_banned_nodes
+        )
+        return (0.0, saved_node_idx, recomp_node_idx)
     else:
         raise RuntimeError(f"Not aware of memory budget knapsack solver: {SOLVER}")
 
@@ -1572,7 +1580,9 @@ def estimate_runtime(node):
 
 
 def choose_saved_values_set(
-    joint_graph: fx.Graph, node_info: NodeInfo, memory_budget=1
+    joint_graph: fx.Graph,
+    node_info: NodeInfo,
+    memory_budget=1,
 ) -> List[fx.Node]:
     if memory_budget > 1 or memory_budget < 0:
         raise RuntimeError(
@@ -1680,18 +1690,28 @@ def choose_saved_values_set(
     ]
     from torch.utils._mode_utils import no_dispatch
 
-    def get_saved_values_knapsack(memory_budget):
+    def get_saved_values_knapsack(memory_budget, node_info, joint_graph):
         with no_dispatch():
             (
                 expected_runtime,
                 saved_node_idxs,
                 recomputable_node_idxs,
             ) = _optimize_runtime_with_given_memory(
-                memories_banned_nodes, runtimes_banned_nodes, max(memory_budget, 0)
+                joint_graph,
+                memories_banned_nodes,
+                runtimes_banned_nodes,
+                max(memory_budget, 0),
+                node_info,
+                all_recomputable_banned_nodes,
             )
         dont_ban = set()
         for idx in recomputable_node_idxs:
-            dont_ban.add(all_recomputable_banned_nodes[idx])
+            # if idx in all_recomputable_banned_nodes:
+            try:
+                dont_ban.add(all_recomputable_banned_nodes[idx])
+            except BaseException:
+                pass
+
         assert dont_ban.issubset(all_recomputable_banned_nodes)
 
         saved_values, _ = solve_min_cut(
@@ -1706,7 +1726,7 @@ def choose_saved_values_set(
         options = []
         for sweep_memory_budget in range(100, -1, -5):
             saved_values, expected_runtime = get_saved_values_knapsack(
-                sweep_memory_budget / 100
+                sweep_memory_budget / 100, node_info=node_info, joint_graph=joint_graph
             )
             options.append(
                 (
@@ -1751,7 +1771,9 @@ def choose_saved_values_set(
     # tensors we actually banned from recompute, but there may be other
     # tensors that we choose to save.
 
-    return get_saved_values_knapsack(memory_budget=memory_budget)[0]
+    return get_saved_values_knapsack(
+        memory_budget=memory_budget, node_info=node_info, joint_graph=joint_graph
+    )[0]
 
 
 def min_cut_rematerialization_partition(
@@ -1877,7 +1899,9 @@ def min_cut_rematerialization_partition(
             break
     # print("Memory Budget: ", memory_budget)
     saved_values = choose_saved_values_set(
-        joint_graph, node_info, memory_budget=memory_budget
+        joint_graph,
+        node_info,
+        memory_budget=memory_budget,
     )
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
@@ -1899,10 +1923,14 @@ def min_cut_rematerialization_partition(
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     if AOT_PARTITIONER_DEBUG:
+        from torch._inductor.fx_utils import get_node_storage
+
+        storages = {get_node_storage(node) for node in saved_values}
         print(
             "Theoretical Activations Stored: ",
             sum(_size_of(i) for i in saved_values) / 1e9,
         )
+        sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
         fw_module_nodes = {
             node.name for node in fw_module.graph.nodes if node.op == "call_function"
         }

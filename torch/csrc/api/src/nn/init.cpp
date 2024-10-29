@@ -1,6 +1,5 @@
 #include <torch/nn/init.h>
 
-#include <torch/linalg.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 
@@ -55,11 +54,11 @@ double calculate_kaiming_std(
 
 double calculate_gain(NonlinearityType nonlinearity, double param) {
   if (std::holds_alternative<enumtype::kTanh>(nonlinearity)) {
-    return 5.0 / 3.0; // NOLINT
+    return 5.0 / 3.0;
   } else if (std::holds_alternative<enumtype::kReLU>(nonlinearity)) {
-    return std::sqrt(2.0); // NOLINT
+    return std::sqrt(2.0);
   } else if (std::holds_alternative<enumtype::kLeakyReLU>(nonlinearity)) {
-    return std::sqrt(2.0 / (1 + pow(param, 2))); // NOLINT
+    return std::sqrt(2.0 / (1 + pow(param, 2)));
   }
 
   return 1.0;
@@ -135,7 +134,7 @@ Tensor orthogonal_(Tensor tensor, double gain) {
   }
 
   // Compute the qr factorization
-  auto [q, r] = torch::linalg::qr(flattened);
+  auto [q, r] = torch::linalg_qr(flattened);
   // Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
   auto d = torch::diag(r, 0);
   auto ph = d.sign();
@@ -208,16 +207,16 @@ Tensor xavier_normal_(Tensor tensor, double gain) {
   NoGradGuard guard;
 
   Fan fan(tensor);
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  const auto std = gain * std::sqrt(2.0 / (fan.in + fan.out));
+  const auto std =
+      gain * std::sqrt(2.0 / static_cast<double>(fan.in + fan.out));
   return tensor.normal_(0, std);
 }
 
 Tensor xavier_uniform_(Tensor tensor, double gain) {
   NoGradGuard guard;
   Fan fan(tensor);
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  const auto std = gain * std::sqrt(2.0 / (fan.in + fan.out));
+  const auto std =
+      gain * std::sqrt(2.0 / static_cast<double>(fan.in + fan.out));
   // Calculate uniform bounds from standard deviation with
   const auto a = std::sqrt(3.0) * std;
   return tensor.uniform_(-a, a);

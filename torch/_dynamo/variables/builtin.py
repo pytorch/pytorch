@@ -629,7 +629,7 @@ class BuiltinVariable(VariableTracker):
         super().__init__(**kwargs)
         self.fn = fn
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         if self.fn is None:
             name = "None"
         else:
