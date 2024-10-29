@@ -469,7 +469,7 @@ Tensor FunctionalInverses::view_as_inverse(const at::Tensor & base, const at::Te
     if (inverse_return_mode != InverseReturnMode::NeverView) {
       return mutated_view.view_as(base);
     } else {
-      return mutated_view.clone().view_as(base);
+      return mutated_view.view_as(base).clone();
     }
 }
 
