@@ -13,6 +13,7 @@ contain configuration options that affect only a specific part of the compiler:
 """
 
 import os
+import sys
 from typing import Optional
 
 
@@ -42,3 +43,9 @@ that two jobs are *related* (i.e., are the same workload) before we are willing
 to reuse this information.  So PGO is not enabled unless a valid job_id is
 available.
 """
+
+
+from torch.utils._config_module import install_config_module
+
+
+install_config_module(sys.modules[__name__])

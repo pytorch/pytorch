@@ -51,7 +51,6 @@ from .exc import (
 )
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
-from .pgo import put_code_state
 from .side_effects import AttributeMutationExisting, SideEffects
 from .source import (
     AttrSource,
@@ -1321,8 +1320,6 @@ class OutputGraph:
             # this information from the compiler collective
             tx.speculation_log.clear()
             raise exc.CompileCollectiveRestartAnalysis
-
-        put_code_state()  # TODO: maybe somewhere else better
 
     def compile_and_call_fx_graph(self, tx, rv, root):
         """

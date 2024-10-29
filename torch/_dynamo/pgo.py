@@ -3,7 +3,6 @@ from __future__ import annotations
 import copy
 import dataclasses
 import enum
-import functools
 import logging
 import os
 import pickle
@@ -381,15 +380,16 @@ def process_automatic_dynamic(
 
 
 # NB: This currently also controls if pgo is enabled at all
-@functools.lru_cache(None)
 def code_state_path() -> Optional[str]:
+    # TODO: info versions of these logs that log only once
+
     if not torch._dynamo.config.automatic_dynamic_local_pgo:
-        log.info("automatic_dynamic_local_pgo not enabled")
+        log.debug("automatic_dynamic_local_pgo not enabled")
         return None
 
     workflow_id = torch.compiler.config.workflow_id
     if workflow_id is None:
-        log.info("automatic_dynamic_local_pgo disabled because no workflow_id")
+        log.debug("automatic_dynamic_local_pgo disabled because no workflow_id")
         return None
 
     from torch._inductor.runtime.runtime_utils import cache_dir
@@ -411,7 +411,9 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
                 try:
                     _CODE_STATE = pickle.load(f)
                 except Exception:
-                    log.warning("get_code_state failed while reading %s", path)
+                    log.warning(
+                        "get_code_state failed while reading %s", path, exc_info=True
+                    )
                 else:
                     assert isinstance(_CODE_STATE, defaultdict)
                     log.info(

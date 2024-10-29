@@ -80,6 +80,11 @@ if torch.manual_seed is torch.random.manual_seed:
 
 def reset() -> None:
     """Clear all compile caches and restore initial state"""
+    # TODO: https://github.com/pytorch/pytorch/issues/139200
+    import logging
+
+    log = logging.getLogger(__name__)
+    log.info("torch._dynamo.reset")
     with convert_frame.compile_lock:
         reset_code_caches()
         convert_frame.input_codes.clear()
@@ -102,6 +107,11 @@ def reset() -> None:
 
 
 def reset_code_caches() -> None:
+    # TODO: https://github.com/pytorch/pytorch/issues/139200
+    import logging
+
+    log = logging.getLogger(__name__)
+    log.info("torch._dynamo.reset_code_caches")
     """Clear compile caches that are keyed by code objects"""
     with convert_frame.compile_lock:
         reset_code_state()
