@@ -2009,7 +2009,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
             norm_graph,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_nt_: "f64[3, s1, 5]", s1: "Sym(s1)"):
+    def forward(self, s1: "Sym(s1)", L_nt_: "f64[3, s1, 5]"):
         l_nt_ = L_nt_
 
         add: "f64[3, s1, 5]" = l_nt_ + 2;  l_nt_ = None
