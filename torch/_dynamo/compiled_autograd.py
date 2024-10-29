@@ -560,7 +560,7 @@ class AutogradCompilerInstance:
                 user.op == "call_function" and user.target == operator.getitem
                 for user in users
             )
-            registered_node = list(users[0].users.keys())[0]
+            registered_node = next(iter(users[0].users.keys()))
 
             if registered_node is not node.next:
                 registered_node.prepend(hook_getitem_node)
