@@ -719,8 +719,18 @@ def sym_constrain_range_for_size(size, min=None, max=None):
     # Avoid importing sympy at a module level
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
+    if min is None and max is None:
+        torch._check_is_size(size)
+        return
+
     if isinstance(size, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat or Symbool is nyi")
+    if type(size) is int:
+        if min is not None:
+            torch._check(size >= min)
+        if max is not None:
+            torch._check(size <= max)
+        return
     _constrain_range_for_size(size, min=min, max=max)
 
 
@@ -3390,10 +3400,6 @@ def meta_embedding_bag(
             lambda: "embedding_bag: per_sample_weights only supported with mode='sum'",
         )
         torch._check(
-            per_sample_weights.dtype == weight.dtype,
-            lambda: f"expected weight ({weight.dtype}) and per_sample_weights ({per_sample_weights.dtype}) to have same dtype",
-        )
-        torch._check(
             per_sample_weights.ndim == 1,
             lambda: f"expected per_sample_weights to be 1D tensor, got {per_sample_weights.ndim}D",
         )
@@ -4788,7 +4794,7 @@ def gather_shape_check(self, dim, index):
             torch._check(
                 ensure_nonempty_size(index, i) <= ensure_nonempty_size(self, i),
                 lambda: f"Size does not match at dimension {i} expected index {index.shape}"
-                + f" to be smaller than self {self.shape} apart from dimension {dim}",
+                + f" to be no larger than self {self.shape} apart from dimension {dim}",
             )
 
 
@@ -4893,13 +4899,13 @@ def scatter_shape_check(self, dim, index, src_opt=None):
         )
         torch._check(
             not is_wrong_shape,
-            lambda: f"Expected index {index.shape} to be smaller than self {self.shape}"
-            + f" apart from dimension {dim} and to be smaller than src {src_opt.shape}",
+            lambda: f"Expected index {index.shape} to be no larger than self {self.shape}"
+            + f" apart from dimension {dim} and to be no larger than src {src_opt.shape}",
         )
     else:
         torch._check(
             not is_wrong_shape,
-            lambda: f"Expected index {index.shape} to be smaller than self {self.shape}"
+            lambda: f"Expected index {index.shape} to be no larger than self {self.shape}"
             + f" apart from dimension {dim}",
         )
 
@@ -5979,6 +5985,24 @@ def topk_meta(self, k, dim=-1, largest=True, sorted=True):
     return self.new_empty(topKSize), self.new_empty(topKSize, dtype=torch.int64)
 
 
+@register_meta(aten._segment_reduce_backward)
+@out_wrapper()
+def meta__segment_reduce_backward(
+    grad, output, data, reduce, lengths=None, offsets=None, axis=0, initial=None
+):
+    assert (
+        lengths is not None or offsets is not None
+    ), "segment_reduce(): Either lengths or offsets must be defined"
+    data_contig = data.contiguous()
+    grad_contig = grad.contiguous()
+    return torch.empty_like(
+        data_contig,
+        dtype=grad_contig.dtype,
+        device=grad_contig.device,
+        layout=grad_contig.layout,
+    )
+
+
 @register_meta([aten.kthvalue.default, aten.kthvalue.values])
 @out_wrapper("values", "indices")
 def kthvalue_meta(self, k, dim=-1, keepdim=False):
@@ -6248,6 +6272,36 @@ def meta_searchsorted(
     side=None,
     sorter=None,
 ):
+    # If the sorted_sequence is not one-dimensional, its shape must match that of values
+    # in all but the last dimension.
+    torch._check(
+        len(sorted_sequence.shape) <= 1
+        or sorted_sequence.shape[:-1] == self.shape[:-1],
+        lambda: (
+            "torch.searchsorted(): boundaries tensor should be 1 dimension or the "
+            "first N-1 dimensions of boundaries tensor and input value tensor must "
+            f"match, but we got boundaries tensor {list(sorted_sequence.shape)} and "
+            f"input value tensor {list(self.shape)}"
+        ),
+    )
+
+    # If a sorter array is provided, its dimensions must exactly match sorted_sequence.
+    torch._check(
+        sorter is None or sorted_sequence.shape == sorter.shape,
+        lambda: (
+            "torch.searchsorted(): boundary and sorter must have the same size, but "
+            f"got boundary tensor {list(sorted_sequence.shape)} and got sorter tensor "
+            f"{list(sorter.shape) if sorter is not None else []}"
+        ),
+    )
+
+    # Per the docs, if side == "left" and right is True, we error.
+    torch._check(
+        side != "left" or not right,
+        "torch.searchsorted(): side and right can't be set to opposites, got side of "
+        "left while right was True",
+    )
+
     dtype = torch.int32 if out_int32 else torch.int64
     if isinstance(self, torch.Tensor):
         return torch.empty_like(self, dtype=dtype).contiguous()

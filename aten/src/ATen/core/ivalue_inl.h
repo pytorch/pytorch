@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <memory>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -500,7 +501,7 @@ struct TORCH_API TupleElements {
     return *this;
   }
 
-  C10_NODISCARD c10::ArrayRef<IValue> asArrayRef() const {
+  [[nodiscard]] c10::ArrayRef<IValue> asArrayRef() const {
     if (inlineSize_) {
       return c10::ArrayRef<IValue>(elementsInline_, inlineSize_);
     } else {
@@ -527,15 +528,15 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD bool empty() const {
+  [[nodiscard]] bool empty() const {
     return inlineSize_ ? false : elementsVector_.empty();
   }
 
-  C10_NODISCARD size_t size() const {
+  [[nodiscard]] size_t size() const {
     return inlineSize_ ? inlineSize_ : elementsVector_.size();
   }
 
-  C10_NODISCARD IValue& operator[](size_t idx) {
+  [[nodiscard]] IValue& operator[](size_t idx) {
     if (inlineSize_) {
       return elementsInline_[idx];
     } else {
@@ -543,7 +544,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD const IValue& operator[](size_t idx) const {
+  [[nodiscard]] const IValue& operator[](size_t idx) const {
     if (inlineSize_) {
       return elementsInline_[idx];
     } else {
@@ -551,7 +552,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD IValue& at(size_t idx) {
+  [[nodiscard]] IValue& at(size_t idx) {
     if (inlineSize_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
@@ -561,7 +562,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD const IValue& at(size_t idx) const {
+  [[nodiscard]] const IValue& at(size_t idx) const {
     if (inlineSize_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
@@ -572,7 +573,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD iterator begin() {
+  [[nodiscard]] iterator begin() {
     if (inlineSize_) {
       return elementsInline_;
     } else {
@@ -580,7 +581,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD iterator end() {
+  [[nodiscard]] iterator end() {
     if (inlineSize_) {
       return elementsInline_ + inlineSize_;
     } else {
@@ -588,7 +589,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD const_iterator begin() const {
+  [[nodiscard]] const_iterator begin() const {
     if (inlineSize_) {
       return elementsInline_;
     } else {
@@ -596,7 +597,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD const_iterator end() const {
+  [[nodiscard]] const_iterator end() const {
     if (inlineSize_) {
       return elementsInline_ + inlineSize_;
     } else {
@@ -604,27 +605,27 @@ struct TORCH_API TupleElements {
     }
   }
 
-  C10_NODISCARD const_iterator cbegin() const {
+  [[nodiscard]] const_iterator cbegin() const {
     return begin();
   }
 
-  C10_NODISCARD const_iterator cend() const {
+  [[nodiscard]] const_iterator cend() const {
     return end();
   }
 
-  C10_NODISCARD std::vector<IValue> vec() const & {
+  [[nodiscard]] std::vector<IValue> vec() const& {
     return asArrayRef().vec();
   }
 
-  C10_NODISCARD IValue& back() {
+  [[nodiscard]] IValue& back() {
     return *(end() - 1);
   }
 
-  C10_NODISCARD const IValue& back() const {
+  [[nodiscard]] const IValue& back() const {
     return *(end() - 1);
   }
 
-  C10_NODISCARD std::vector<IValue> vec() && {
+  [[nodiscard]] std::vector<IValue> vec() && {
     std::vector<IValue> result;
     result.reserve(size());
     for (auto&& iv : *this) {
@@ -1680,7 +1681,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 namespace detail {
 
 struct _guarded_unsigned_long_unique_dummy final {
-  _guarded_unsigned_long_unique_dummy(int64_t){};
+  _guarded_unsigned_long_unique_dummy(int64_t){}
 };
 using _guarded_unsigned_long = std::conditional_t<
     std::is_same_v<unsigned long, uint32_t> ||

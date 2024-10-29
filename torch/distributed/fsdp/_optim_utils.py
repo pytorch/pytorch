@@ -536,9 +536,7 @@ def _flatten_optim_state_dict(
                     else:
                         # Move the tensor in the original osd back to CPU to make the
                         # original osd unaffected.
-                        unflat_osd_state[fqn][state_name] = unflat_osd_state[fqn][
-                            state_name
-                        ].cpu()
+                        unflat_osd_state[fqn][state_name] = param_state.cpu()
 
     # Handle user-defined state, states that are not associated with parameters.
     for key in all_state_keys:
@@ -1457,7 +1455,7 @@ def _unflatten_orig_param_states(
             # gather the tensor on its TP dimension before chunking them into DTensor again.
             if placement != Replicate():
                 placement_dim = placement.dim  # type: ignore[attr-defined]
-                value_local = value.redistribute(placements=(Replicate(),))
+                value.redistribute(placements=(Replicate(),))
                 reshape_size = list(flat_param._shapes[param_idx])
                 reshape_size[placement_dim] *= value.device_mesh.size(0)
                 reshape_size = torch.Size(reshape_size)

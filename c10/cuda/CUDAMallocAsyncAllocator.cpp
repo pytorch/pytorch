@@ -38,6 +38,7 @@ struct UsageStream {
   UsageStream(UsageStream&& us) noexcept = default;
   UsageStream& operator=(const UsageStream& other) = default;
   UsageStream& operator=(UsageStream&& other) noexcept = default;
+  ~UsageStream() = default;
 };
 
 bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
@@ -494,6 +495,14 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         cudaMemPoolTrimTo(mempool, 0);
       }
     }
+  }
+
+  void enable(bool) override {
+    // cannot disable
+  }
+
+  bool isEnabled() const override {
+    return true;
   }
 
   void cacheInfo(c10::DeviceIndex device, size_t* maxWorkspaceGuess) override {

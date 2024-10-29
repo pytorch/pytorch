@@ -532,7 +532,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
 #ifdef USE_RPC
       return obj.cast<torch::distributed::rpc::PyRRef>().toIValue();
 #else
-      AT_ERROR("RRef is only supported with the distributed package");
+      TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
     } break;
     case TypeKind::PyObjectType: {
@@ -697,7 +697,7 @@ py::object toPyObject(IValue ivalue) {
             std::move(ivalue).toRRef());
     return py::cast(torch::distributed::rpc::PyRRef(RRefPtr));
 #else
-    AT_ERROR("RRef is only supported with the distributed package");
+    TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
   } else if (ivalue.isObject()) {
     const auto obj = std::move(ivalue).toObject();
@@ -751,7 +751,8 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isSymBool()) {
     return py::cast(std::move(ivalue).toSymBool());
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Missing cases in 'toPyObject'! Can't convert ",
         ivalue.tagKind(),
         " to a Python object");

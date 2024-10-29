@@ -14,6 +14,7 @@ from .optimizer import (
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -219,16 +220,15 @@ Adadelta.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
+        lr (float, Tensor, optional): coefficient that scale delta before it is applied
+            to the parameters (default: 1.0)
         rho (float, optional): coefficient used for computing a running average
             of squared gradients (default: 0.9). A higher value of `rho` will
             result in a slower average, which can be helpful for preventing
             oscillations in the learning process.
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-6).
-        lr (float, Tensor, optional): coefficient that scale delta before it is applied
-            to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
         {_foreach_doc}
         {_capturable_doc}
