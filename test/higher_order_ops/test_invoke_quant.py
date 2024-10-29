@@ -46,6 +46,22 @@ class TestInvokeQuant(TestCase):
         res = torch.compile(fn, backend=self.backend)(x_clone, y_clone)
         self.assertEqual(ref, res)
 
+    def test_inline(self):
+        def gn(x, y):
+            return (torch.mul(x, y) + y,)
+
+        def fn(x, y):
+            return InvokeQuant()(gn, (x, y), scheme="nf4")[0]
+
+        x = torch.randn(8, requires_grad=False)
+        y = torch.randn(8, requires_grad=False)
+        ref = gn(x, y)[0]
+
+        x_clone = x.clone().detach().requires_grad_(False)
+        y_clone = y.clone().detach().requires_grad_(False)
+        res = torch.compile(fn, backend=self.backend)(x_clone, y_clone)
+        self.assertEqual(ref, res)
+
     def test_multiple(self):
         torch._logging.set_logs(post_grad_graphs=True)
 
@@ -111,9 +127,9 @@ class TestInvokeQuantInductor(TestInvokeQuant):
         def fn_no_match(x, y, z):
             return invoke_quant_tracer(gn, (x, y)) @ z
 
-        x = torch.randn(64, 64, device="cuda", requires_grad=False)
-        y = torch.randn(64, 64, device="cuda", requires_grad=False)
-        z = torch.randn(64, 64, device="cuda", requires_grad=False)
+        x = torch.randn(64, 64, requires_grad=False)
+        y = torch.randn(64, 64, requires_grad=False)
+        z = torch.randn(64, 64, requires_grad=False)
 
         @register_graph_pattern(
             CallFunction(

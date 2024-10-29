@@ -52,7 +52,7 @@ def _(subgraph, *operands, schema=None):
         return subgraph(*operands)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class InvokeQuant:
     """
     Invoke a quantization function that will be preserved as a single operator. Preservation
