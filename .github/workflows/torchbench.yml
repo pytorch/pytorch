@@ -22,6 +22,7 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   get-a100-test-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-a100-test-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
