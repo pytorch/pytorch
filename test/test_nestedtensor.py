@@ -4,6 +4,7 @@ import ast
 import io
 import itertools
 import math
+import random
 import sys
 import tempfile
 import unittest
@@ -25,6 +26,7 @@ from torch.nested._internal.nested_tensor import (
     NestedTensor,
     ViewNestedFromBuffer,
 )
+from torch.nn.attention.flex_attention import create_nested_block_mask, flex_attention
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
@@ -33,6 +35,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    flex_attention_supported_platform,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -3892,6 +3895,21 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
 
+    def test_binary_pointwise_with_nested_int_second_arg(self, device):
+        # See https://github.com/pytorch/pytorch/issues/138496
+        nt = random_nt_from_dims(
+            [3, None, 5],
+            device=device,
+            dtype=torch.float32,
+            layout=torch.jagged,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "invalid argument"):
+            nt * nt.size(1)
+
+        with self.assertRaisesRegex(RuntimeError, "invalid argument"):
+            nt + nt.size(1)
+
     def test_split(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
         b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -4234,6 +4252,45 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         res_dense = torch.ops.aten.threshold_backward(buf1, buf2, 0.0)
 
         self.assertEqual(res_dense, res_nt.values())
+
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_record_stream(self, device, dtype):
+        def _create_nt():
+            values = torch.ones(1024, 4 * 1024, device="cuda")
+            offsets = torch.tensor([0, 500, 1024], device="cuda", dtype=torch.int64)
+            lengths = offsets.diff()
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets, lengths)
+            data_ptrs = {
+                nt._values.data_ptr(),
+                nt._offsets.data_ptr(),
+                nt._lengths.data_ptr(),
+            }
+            return nt, data_ptrs
+
+        def fn(record_stream):
+            nt, data_ptrs = _create_nt()
+            s = torch.cuda.Stream()
+
+            with torch.cuda.stream(s):
+                # emulate doing something long via sleep
+                per_ms = 2e7
+                torch.cuda._sleep(int(per_ms * 100))
+                if record_stream:
+                    nt.record_stream(s)
+            return data_ptrs
+
+        # expect memory reuse when record_stream() is not run
+        data_ptrs = fn(record_stream=False)
+        nt, nt_data_ptrs = _create_nt()
+        self.assertEqual(data_ptrs, nt_data_ptrs)
+        del nt
+        torch.cuda.synchronize()
+
+        # expect memory to be preserved (no reuse) when record_stream() is run
+        data_ptrs = fn(record_stream=True)
+        nt, nt_data_ptrs = _create_nt()
+        self.assertEqual(len(data_ptrs.intersection(nt_data_ptrs)), 0)
 
     @dtypes(torch.float32)
     @parametrize(
@@ -6973,6 +7030,121 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertTrue(torch.allclose(attn_output_eager, attn_output))
         self.assertTrue(torch.allclose(value_grad, value.grad))
 
+    # Helper function to generate random query, key, value NJTs in (B, n_heads, *, D) format.
+    # If noncontig_with_holes is True, the results will be non-contiguous with holes (i.e. have
+    # both offsets and lengths specified).
+    def _rand_qkv(self, device, dtype, noncontig_with_holes=False):
+        batch_size = 8
+        n_heads = 8
+        D = 16
+
+        sentence_lengths = [random.randint(2, 1023) for _ in range(batch_size - 1)]
+        total = sum(sentence_lengths)
+
+        # shape (B, *, D_total) where D_total = n_heads * D
+        query = torch.nested.nested_tensor(
+            [
+                torch.randn(l, n_heads * D, device=device, dtype=dtype)
+                for l in sentence_lengths
+            ],
+            layout=torch.jagged,
+        )
+        if noncontig_with_holes:
+            query = torch.nested.nested_tensor_from_jagged(
+                query._values,
+                query._offsets,
+                # -1 to introduce holes
+                lengths=query._offsets.diff() - 1,
+                jagged_dim=query._ragged_idx,
+                min_seqlen=query._min_seqlen,
+                max_seqlen=query._max_seqlen,
+            )
+        # NB: randn_like() doesn't propagate lengths so this doesn't preserve non-contiguity
+        key = torch.randn_like(query)
+        value = torch.randn_like(query)
+
+        # shape (B, *, D_total) -> (B, n_heads, *, D)
+        query = (
+            query.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        )
+        key = key.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        value = (
+            value.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        )
+
+        return query, key, value
+
+    @onlyCUDA
+    @flex_attention_supported_platform
+    @dtypes(torch.float32)
+    # non-contiguous with holes not supported yet
+    @decorateIf(unittest.skip, lambda params: params["noncontig_with_holes"])
+    @parametrize("noncontig_with_holes", [False, True])
+    def test_flex_attention(self, device, dtype, noncontig_with_holes):
+        query, key, value = self._rand_qkv(device, dtype, noncontig_with_holes)
+
+        # Run FlexAttention with a causal mask
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_nested_block_mask(causal_mask, 1, 1, query, _compile=True)
+        out_flex = flex_attention(query, key, value, block_mask=block_mask)
+        grad_out = torch.randn_like(out_flex)
+        grads_flex = torch.autograd.grad(
+            out_flex, inputs=(query, key, value), grad_outputs=(grad_out,)
+        )
+        flex_outs = [out_flex, *grads_flex]
+
+        # Run FlexAttention with a score_mod that represents causal attention
+        def causal_score_mod(score, b, h, q_idx, kv_idx):
+            return torch.where(q_idx >= kv_idx, score, float("-inf"))
+
+        out_flex2 = flex_attention(query, key, value, score_mod=causal_score_mod)
+        grads_flex2 = torch.autograd.grad(
+            out_flex2, inputs=(query, key, value), grad_outputs=(grad_out,)
+        )
+        flex_outs2 = [out_flex2, *grads_flex2]
+
+        # Run causal SDPA for comparison
+        out_sdpa = F.scaled_dot_product_attention(query, key, value, is_causal=True)
+        grads_sdpa = torch.autograd.grad(
+            out_sdpa, inputs=(query, key, value), grad_outputs=(grad_out,)
+        )
+        sdpa_outs = [out_sdpa, *grads_sdpa]
+
+        # Compare flex vs. SDPA output and grads
+        for flex, flex2, sdpa in zip(flex_outs, flex_outs2, sdpa_outs):
+            self.assertTrue(flex.is_nested and flex2.is_nested and sdpa.is_nested)
+            self.assertEqual(flex, sdpa, atol=1e-2, rtol=1e-2)
+            self.assertEqual(flex2, sdpa, atol=1e-2, rtol=1e-2)
+
+    @onlyCUDA
+    @flex_attention_supported_platform
+    @dtypes(torch.float32)
+    def test_flex_attention_converts_stacked_seq_indices(self, device, dtype):
+        # This test verifies that a score_mod function written to operate within
+        # NJT sequence index space, such as a lookup table, works correctly. This
+        # validates that FlexAttention properly converts indices within the
+        # "stacked sequence" space used for NJT -> sequence-relative indices.
+        query, key, value = self._rand_qkv(device, dtype)
+
+        # Test with score_mod
+        score_mod_table = torch.randn(query._max_seqlen, device=device, dtype=dtype)
+
+        def my_score_mod(score, b, h, q_idx, kv_idx):
+            return score_mod_table[q_idx]
+
+        flex_attention(query, key, value, score_mod=my_score_mod)
+
+        # Test with mask_mod
+        mask_mod_table = score_mod_table > 0.0
+
+        def my_mask_mod(b, h, q_idx, kv_idx):
+            return mask_mod_table[q_idx]
+
+        block_mask = create_nested_block_mask(my_mask_mod, 1, 1, query, _compile=True)
+        flex_attention(query, key, value, block_mask=block_mask)
+
     @dtypes(torch.float32)
     def test_apply_(self, device, dtype):
         nt = random_nt_from_dims(
@@ -7745,7 +7917,11 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     )
     def test_forward(self, device, dtype, op, dim_type, contiguity):
         for sample in op.sample_inputs(
-            device=device, dtype=dtype, requires_grad=False, dim_type=dim_type
+            device=device,
+            dtype=dtype,
+            requires_grad=False,
+            dim_type=dim_type,
+            contiguity=contiguity,
         ):
             # compare to reference, but expect different nested int
             out = op.op(sample.input, *sample.args, **sample.kwargs)
@@ -7762,7 +7938,11 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
     )
     def test_backward(self, device, dtype, op, dim_type, contiguity):
         for sample in op.sample_inputs(
-            device=device, dtype=dtype, requires_grad=True, dim_type=dim_type
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+            dim_type=dim_type,
+            contiguity=contiguity,
         ):
             # compare to reference, but expect different nested int
             out = op.op(sample.input, *sample.args, **sample.kwargs)
@@ -7790,9 +7970,20 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
 
     @withXFails(COMPILE_FORWARD_FAILURES)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
-    def test_compile_forward(self, device, dtype, op):
-        for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=False):
+    @reparametrize(
+        ops(
+            [op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,)
+        ),
+        include_dim_type_and_contiguity,
+    )
+    def test_compile_forward(self, device, dtype, op, dim_type, contiguity):
+        for sample in op.sample_inputs(
+            device=device,
+            dtype=dtype,
+            requires_grad=False,
+            dim_type=dim_type,
+            contiguity=contiguity,
+        ):
             torch.compiler.reset()
 
             op_fn = op.op
@@ -7813,13 +8004,22 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 self.assertEqual(out_compile, out_ref)
 
     @withXFails(COMPILE_BACKWARD_FAILURES)
-    @ops(
-        [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
-        allowed_dtypes=(torch.float32,),
+    @reparametrize(
+        ops(
+            [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
+            allowed_dtypes=(torch.float32,),
+        ),
+        include_dim_type_and_contiguity,
     )
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_compile_backward(self, device, dtype, op):
-        for sample in op.sample_inputs(device=device, dtype=dtype, requires_grad=True):
+    def test_compile_backward(self, device, dtype, op, dim_type, contiguity):
+        for sample in op.sample_inputs(
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+            dim_type=dim_type,
+            contiguity=contiguity,
+        ):
             torch.compiler.reset()
 
             op_fn = op.op
