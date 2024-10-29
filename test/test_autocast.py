@@ -349,7 +349,6 @@ class TestAutocastMPS(TestCase):
         self.assertEqual(weight_dtype_cast_counter, 2)
 
     def test_mps_autocast_error_message(self):
-        with self.assertWarnsRegex(UserWarning, "MPS Autocast only supports dtype of torch.float16 currently."):
         with self.assertWarnsRegex(
                 UserWarning, "MPS Autocast only supports dtype of torch.float16 currently."
         ):
