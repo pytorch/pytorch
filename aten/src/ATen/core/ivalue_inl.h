@@ -1,7 +1,19 @@
 #pragma once
 
-#ifdef Q_SLOT
+/*
+* //The slots was declared by QT,the "slots" macro would affect the compiling process seriously
+* //all of the slots declared in this file would be replaced by the Q_SLOTS.
+* //So,if you are using QT as your gui system,some compiling errors would orrur in this file.
+* //we must undef the qt macro to avoid this situation.
+*/
+
+/*
+If the slot macro originates from another system, we cannot simply define it as Q_stlots
+More macro definition processes can be completed here.
+*/
+#ifdef Q_SLOTS
 #undef slots
+#endif
 
 #include <condition_variable>
 #include <memory>
@@ -2555,5 +2567,8 @@ TypePtr IValue::type() const {
 
 } // namespace c10
 
-#ifdef Q_SLOT
+
+//if the "slots" macro came from QT,we can redefine it at the end of the header file.
+#ifdef Q_SLOTS
 #define slots Q_SLOTS
+#endif
