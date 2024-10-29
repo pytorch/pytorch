@@ -20,6 +20,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/cpu/Utils.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -3558,7 +3559,7 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   }
 
   bool dispatched = false;
-  if (at::globalContext().userEnabledMkldnn()) {
+  if (at::globalContext().userEnabledMkldnn() && at::cpu::is_avx512_vnni_supported()) {
     try {
       mkldnn_matmul_i8i8i32(self, mat2, result);
       dispatched = true;

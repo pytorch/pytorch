@@ -7,7 +7,7 @@ requires = [
     "ninja",
     "pyyaml",
     "cmake",
-    "typing-extensions",
+    "typing-extensions>=4.10.0",
     "requests",
 ]
 # Use legacy backend to import local packages in setup.py
