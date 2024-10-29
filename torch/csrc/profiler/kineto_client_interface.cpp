@@ -2,7 +2,7 @@
 #include <ATen/Context.h>
 #include <libkineto.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
-#include <torch/csrc/profiler/kineto_client_interface.h.h>
+#include <torch/csrc/profiler/kineto_client_interface.h>
 #include <chrono>
 #include <thread>
 
