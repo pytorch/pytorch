@@ -2512,18 +2512,14 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             "aot0_mm",
             "aot0_permute_3",
             "aot0_mm_1",
-            "aot0_permute_4",
             "aot0_sum_1",
             "aot0_view",
-            "aot0_permute_5",
             "aot0_le_1",
             "aot0_where_1",
             "aot0_permute_6",
             "aot0_mm_2",
-            "aot0_permute_7",
             "aot0_sum_2",
             "aot0_view_1",
-            "aot0_permute_8",
         ]
 
         found = 0
