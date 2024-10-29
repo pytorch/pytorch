@@ -802,7 +802,6 @@ Vectorized<c10::Half> inline fmsub(
       fmsub(a_float_high, b_float_high, c_float_high));
 #endif
 }
-
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)
 
 } // namespace CPU_CAPABILITY
