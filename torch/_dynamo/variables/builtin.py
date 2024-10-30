@@ -411,7 +411,7 @@ class BuiltinVariable(VariableTracker):
         op_handlers[operator.add].extend(list_like_addition_handlers)
 
         def list_iadd_handler(tx: "InstructionTranslator", a, b):
-            if not a.mutation_type or not b.has_unpack_var_sequence(tx):
+            if a.is_immutable() or not b.has_unpack_var_sequence(tx):
                 # Handler doesn't apply
                 return None
 

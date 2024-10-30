@@ -263,7 +263,7 @@ class CountIteratorVariable(IteratorVariable):
         self.step = step
 
     def next_variable(self, tx):
-        assert self.mutation_type
+        assert self.is_mutable()
         old_item = self.item
         tx.output.side_effects.mutation(self)
         self.item = self.item.call_method(tx, "__add__", [self.step], {})
@@ -301,7 +301,7 @@ class CycleIteratorVariable(IteratorVariable):
         self.item = item
 
     def next_variable(self, tx):
-        assert self.mutation_type
+        assert self.is_mutable()
 
         if self.iterator is not None:
             try:
@@ -374,7 +374,7 @@ class ZipVariable(IteratorVariable):
         return [variables.TupleVariable(list(var)) for var in zipped]
 
     def next_variable(self, tx):
-        assert self.mutation_type
+        assert self.is_mutable()
         old_index = self.index
         args = []
 

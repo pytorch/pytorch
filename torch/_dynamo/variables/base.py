@@ -452,6 +452,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def is_strict_mode(self, tx):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
 
+    def is_mutable(self):
+        """Whether Dynamo allows mutation on this variable."""
+        return self.mutation_type
+
+    def is_immutable(self):
+        """Whether Dynamo bans mutation on this variable."""
+        return not self.is_mutable()
+
     @staticmethod
     def build(
         tx: "InstructionTranslatorBase",

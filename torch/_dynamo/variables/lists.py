@@ -327,7 +327,7 @@ class CommonListMethodsVariable(BaseListVariable):
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
 
-        if name == "append" and self.mutation_type:
+        if name == "append" and self.is_mutable():
             assert not kwargs
             (arg,) = args
             tx.output.side_effects.mutation(self)
@@ -335,7 +335,7 @@ class CommonListMethodsVariable(BaseListVariable):
             return ConstantVariable.create(None)
         elif (
             name == "extend"
-            and self.mutation_type
+            and self.is_mutable()
             and args
             and args[0].has_force_unpack_var_sequence(tx)
         ):
@@ -345,7 +345,7 @@ class CommonListMethodsVariable(BaseListVariable):
             tx.output.side_effects.mutation(self)
             self.items.extend(seq)
             return ConstantVariable.create(None)
-        elif name == "insert" and self.mutation_type:
+        elif name == "insert" and self.is_mutable():
             assert not kwargs
             idx, value = args
             if isinstance(idx, SymNodeVariable):
@@ -355,18 +355,18 @@ class CommonListMethodsVariable(BaseListVariable):
             tx.output.side_effects.mutation(self)
             self.items.insert(const_idx, value)
             return ConstantVariable.create(None)
-        elif name == "pop" and self.mutation_type:
+        elif name == "pop" and self.is_mutable():
             assert not kwargs
             tx.output.side_effects.mutation(self)
             return self.items.pop(*[a.as_python_constant() for a in args])
-        elif name == "clear" and self.mutation_type:
+        elif name == "clear" and self.is_mutable():
             assert not kwargs and not args
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
         elif (
             name == "__setitem__"
-            and self.mutation_type
+            and self.is_mutable()
             and args
             and args[0].is_python_constant()
         ):
@@ -384,7 +384,7 @@ class CommonListMethodsVariable(BaseListVariable):
             assert not args
             items = list(self.items)
             return self.modified(items, mutation_type=ValueMutationNew())
-        elif name == "reverse" and self.mutation_type:
+        elif name == "reverse" and self.is_mutable():
             assert not kwargs
             assert not args
             self.items.reverse()
@@ -417,7 +417,7 @@ class ListVariable(CommonListMethodsVariable):
     ) -> "VariableTracker":
         if (
             name == "__setitem__"
-            and self.mutation_type
+            and self.is_mutable()
             and args
             and args[0].is_python_constant()
         ):
@@ -508,7 +508,7 @@ class DequeVariable(CommonListMethodsVariable):
     ) -> "VariableTracker":
         if (
             name == "__setitem__"
-            and self.mutation_type
+            and self.is_mutable()
             and args
             and args[0].is_python_constant()
         ):
@@ -523,7 +523,7 @@ class DequeVariable(CommonListMethodsVariable):
 
         if (
             name == "extendleft"
-            and self.mutation_type
+            and self.is_mutable()
             and args[0].has_force_unpack_var_sequence(tx)
         ):
             assert not kwargs
@@ -532,15 +532,15 @@ class DequeVariable(CommonListMethodsVariable):
             prefix.reverse()
             tx.output.side_effects.mutation(self)
             self.items = prefix + list(self.items)
-            result = ConstantVariable.create(None)
-        elif name == "popleft" and self.mutation_type:
+        elif name == "popleft" and self.is_mutable():
+            return ConstantVariable.create(None)
             assert not args
             assert not kwargs
             item = self.items[0]
             tx.output.side_effects.mutation(self)
             self.items = self.items[1:]
             result = item
-        elif name == "appendleft" and self.mutation_type:
+        elif name == "appendleft" and self.is_mutable():
             assert not kwargs
             tx.output.side_effects.mutation(self)
             self.items = [args[0]] + list(self.items)
@@ -888,7 +888,7 @@ class ListIteratorVariable(IteratorVariable):
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
     def next_variable(self, tx):
-        assert self.mutation_type
+        assert self.is_mutable()
         old_index = self.index
         if old_index >= len(self.items):
             raise_observed_exception(StopIteration, tx)
