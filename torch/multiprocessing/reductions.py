@@ -339,45 +339,14 @@ def reduce_tensor(tensor):
 
     storage = tensor._typed_storage()
 
-    current_device = torch._C._get_accelerator().type
-    if (
-        current_device != "cpu"
-        and storage._untyped_storage.device.type == current_device
-    ):
-        (
-            device,
-            handle,
-            storage_size_bytes,
-            storage_offset_bytes,
-            ref_counter_handle,
-            ref_counter_offset,
-            event_handle,
-            event_sync_required,
-        ) = storage._share_device_()
-        tensor_offset = tensor.storage_offset()
-        shared_cache[handle] = StorageWeakRef(storage)
-        # _backward_hooks purposely omitted here, see
-        # Note [Don't serialize hooks]
-        return (
-            rebuild_device_tensor,
-            (
-                type(tensor),
-                tensor.size(),
-                tensor.stride(),
-                tensor_offset,  # tensor offset in its storage
-                type(storage),
-                tensor.dtype,
-                device,
-                handle,  # identifier which CUDA allocation is the storage in.
-                storage_size_bytes,  # size(in bytes) of the storage
-                storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
-                tensor.requires_grad,
-                ref_counter_handle,
-                ref_counter_offset,
-                event_handle,
-                event_sync_required,
-            ),
+    if storage._untyped_storage.device.type == "cpu":
+        metadata = (
+            tensor.storage_offset(),
+            tensor.size(),
+            tensor.stride(),
+            tensor.requires_grad,
         )
+        return (rebuild_tensor, (type(tensor), storage, metadata))
     elif storage._untyped_storage.device.type == "meta":
         return (
             rebuild_meta_tensor,
@@ -391,15 +360,40 @@ def reduce_tensor(tensor):
                 tensor.requires_grad,
             ),
         )
-
-    # _backward_hooks purposely omitted here, see Note [Don't serialize hooks]
-    metadata = (
-        tensor.storage_offset(),
-        tensor.size(),
-        tensor.stride(),
-        tensor.requires_grad,
+    (
+        device,
+        handle,
+        storage_size_bytes,
+        storage_offset_bytes,
+        ref_counter_handle,
+        ref_counter_offset,
+        event_handle,
+        event_sync_required,
+    ) = storage._share_device_()
+    tensor_offset = tensor.storage_offset()
+    shared_cache[handle] = StorageWeakRef(storage)
+    # _backward_hooks purposely omitted here, see
+    # Note [Don't serialize hooks]
+    return (
+        rebuild_device_tensor,
+        (
+            type(tensor),
+            tensor.size(),
+            tensor.stride(),
+            tensor_offset,  # tensor offset in its storage
+            type(storage),
+            tensor.dtype,
+            device,
+            handle,  # identifier which CUDA allocation is the storage in.
+            storage_size_bytes,  # size(in bytes) of the storage
+            storage_offset_bytes,  # offset(in bytes) of the storage in the CUDA allocation
+            tensor.requires_grad,
+            ref_counter_handle,
+            ref_counter_offset,
+            event_handle,
+            event_sync_required,
+        ),
     )
-    return (rebuild_tensor, (type(tensor), storage, metadata))
 
 
 def rebuild_nested_tensor(
