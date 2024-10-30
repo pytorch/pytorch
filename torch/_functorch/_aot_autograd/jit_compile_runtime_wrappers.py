@@ -394,11 +394,14 @@ def run_joint_graph_passes_on_hops(
     def num_inputs(mod):
         return len(mod.graph.find_nodes(op="placeholder"))
 
-    def prepare_for_partitioner(mod, num_primals):
+    def prepare_for_partitioner(mod, num_primals, num_fw_outputs):
         # min-cut partitioner requires the placeholders to have primals and
-        # tangents string in the node.name.
-        # The signature of the joint graph is (*primals, *tangents)
+        # tangents string in the node.name. The signature of the joint graph is
+        # (*primals, *tangents)
 
+        # We also have to update the output signature which is right now
+        # (*grads, *fw_outs) and we have to change to (*fw_outs, *grads) for the
+        # partitioner to work.
         new_graph = torch.fx.Graph()
         env = {}
 
@@ -415,12 +418,24 @@ def run_joint_graph_passes_on_hops(
                     env[node] = new_graph.placeholder(
                         f"tangents_{next(tangents_counter)}"
                     )
+                env[node].meta = copy.copy(node.meta)
+            elif node.op == "output":
+                old_outputs = node.args[0]
+                new_outputs = (
+                    *old_outputs[-num_fw_outputs:],
+                    *old_outputs[:-num_fw_outputs],
+                )
+                new_outputs = [env[n] for n in new_outputs]
+                new_graph.output(tuple(new_outputs))
             else:
                 env[node] = new_graph.node_copy(node, lambda n: env[n])
-            env[node].meta = copy.copy(node.meta)
+                env[node].meta = copy.copy(node.meta)
 
         new_graph.lint()
-        return torch.fx.GraphModule(joint_gm, new_graph)
+
+        out = torch.fx.GraphModule(joint_gm, new_graph)
+        # breakpoint()
+        return out
 
     new_hop_graphs: Dict[str, InvokeSubgraphHopGraphs] = defaultdict(
         lambda: InvokeSubgraphHopGraphs()
@@ -465,7 +480,9 @@ def run_joint_graph_passes_on_hops(
                 joint_hop_gm = hop_gm
 
                 # Prepare the graph for the partitioner
-                joint_hop_gm = prepare_for_partitioner(joint_hop_gm, num_fw_inputs)
+                joint_hop_gm = prepare_for_partitioner(
+                    joint_hop_gm, num_fw_inputs, num_fw_outputs
+                )
 
                 # Step 2) and 3) - Run joint graph passes and partitioner
                 new_fw_hop_gm, new_bw_hop_gm = aot_config.partition_fn(
@@ -608,32 +625,32 @@ def run_joint_graph_passes_on_hops(
                     ),
                 )
                 propagate_meta_info(new_bw_hop_gm, env[node], node)
-        elif (
-            node.op == "call_function"
-            and node.target is operator.getitem
-            and node.args[0].op == "call_function"
-            and node.args[0].target is invoke_subgraph
-            and isinstance(node.args[0].args[1], str)
-            and node.args[0].args[1].startswith("___backward")
-        ):
-            identifier = (
-                node.args[0]
-                .args[1]
-                .replace("___forward", "")
-                .replace("___backward", "")
-            )
-            assert identifier in new_hop_graphs
+        # elif (
+        #     node.op == "call_function"
+        #     and node.target is operator.getitem
+        #     and node.args[0].op == "call_function"
+        #     and node.args[0].target is invoke_subgraph
+        #     and isinstance(node.args[0].args[1], str)
+        #     and node.args[0].args[1].startswith("___backward")
+        # ):
+        #     identifier = (
+        #         node.args[0]
+        #         .args[1]
+        #         .replace("___forward", "")
+        #         .replace("___backward", "")
+        #     )
+        #     assert identifier in new_hop_graphs
 
-            old_index = node.args[1]
-            num_fw_outputs = new_hop_graphs[identifier].old_num_fw_outputs
-            new_index = old_index - num_fw_outputs
+        #     old_index = node.args[1]
+        #     num_fw_outputs = new_hop_graphs[identifier].old_num_fw_outputs
+        #     new_index = old_index - num_fw_outputs
 
-            bw_gmod_node = env[node.args[0]]
-            env[node] = new_graph.call_function(
-                the_function=operator.getitem,
-                args=(bw_gmod_node, new_index),
-            )
-            env[node].meta = copy.copy(node.meta)
+        #     bw_gmod_node = env[node.args[0]]
+        #     env[node] = new_graph.call_function(
+        #         the_function=operator.getitem,
+        #         args=(bw_gmod_node, new_index),
+        #     )
+        #     env[node].meta = copy.copy(node.meta)
         else:
             env[node] = new_graph.node_copy(node, lambda x: env[x])
             env[node].meta = copy.copy(node.meta)
