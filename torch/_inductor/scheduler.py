@@ -2019,6 +2019,7 @@ class Scheduler:
                 for fs in val.free_symbols:
                     unbacked_symbol_to_origin_node[fs] = None
 
+        # 1. Fixed layout can have unbacked.
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
 

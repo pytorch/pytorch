@@ -16,7 +16,6 @@ from torch._C._functorch import (
 )
 from torch._dispatch.python import suspend_functionalization
 from torch._functorch.utils import exposed_in
-from torch._guards import detect_fake_mode
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
@@ -453,10 +452,10 @@ def _merge_tensors(a: torch.Tensor, b: torch.Tensor, mode: FakeTensorMode):
         ):
             merged_size.append(s0)
         else:
-            merged_size.append(mode.shape_env.create_unbacked_symint())
+            merged_size.append(mode.shape_env.create_unbacked_symint())  # type: ignore[union-attr]
             # TODO: setup value range
 
-    torch._check(a.stride() == b.stride())  # TODO: relax this
+    # torch._check(a.stride() == b.stride())  # TODO: relax this
 
     # NYI
     assert not a.is_quantized

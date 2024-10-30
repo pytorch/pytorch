@@ -4606,12 +4606,16 @@ class ExternKernel(InputsKernel):
         tensor_args = []
         non_tensor_args: List[Any] = []
         for arg in args_flat:
-            is_arg_tensor.append(isinstance(arg, IRNode))
+            is_arg_tensor.append(
+                isinstance(arg, IRNode) and not isinstance(arg, Subgraph)
+            )
             if is_arg_tensor[-1]:
                 tensor_args.append(arg)
             else:
                 if isinstance(arg, sympy.Expr):
                     arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
+                elif isinstance(arg, Subgraph):
+                    arg = arg.graph_module
                 non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
@@ -5145,6 +5149,66 @@ class ExternKernel(InputsKernel):
         for arg in self.kwargs.values():
             r |= maybe_free_unbacked_symbols(arg)
         return r
+
+    def codegen_unbacked_symbol_defs(self, wrapper):
+        if not hasattr(self, "unbacked_bindings"):
+            return
+
+        unbacked_bindings = resolve_unbacked_bindings(
+            V.graph.sizevars.shape_env, self.unbacked_bindings
+        )
+
+        if not unbacked_bindings:
+            return
+
+        for s, keypath in unbacked_bindings.items():
+
+            def go(expr, keypath):
+                if keypath == ():
+                    return expr
+
+                if (
+                    len(keypath) >= 2
+                    and isinstance(keypath[0], CallMethodKey)
+                    and isinstance(keypath[1], pytree.SequenceKey)
+                ):
+                    return go(
+                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
+                    )
+                elif isinstance(keypath[0], CallMethodKey):
+                    return go(f"{expr}.{keypath[0].name}()", keypath[1:])
+                elif isinstance(keypath[0], pytree.SequenceKey):
+                    return (
+                        go(f"std::get<{keypath[0].idx}>({expr})", keypath[1:])
+                        if V.graph.cpp_wrapper
+                        else go(f"{expr}[{keypath[0].idx}]", keypath[1:])
+                    )
+                elif isinstance(keypath[0], DivideByKey):
+                    # TODO: need to assert divisibility
+                    # TODO: this is invalid C++ codegen
+                    return go(f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:])
+                else:
+                    raise AssertionError(f"unrecognized keypath {keypath}")
+
+            def go_outer():
+                if V.graph.cpp_wrapper:
+                    # Special handling for the top level buffer access,
+                    # because self.get_name() is actually never bound; the
+                    # individual output arguments are bound by
+                    # generate_c_shim_fallback_kernel
+                    if len(self.get_outputs()) == 1:
+                        return go(self.get_outputs()[0].get_name(), keypath)
+                    else:
+                        assert isinstance(keypath[0], pytree.SequenceKey)
+                        return go(
+                            self.get_outputs()[keypath[0].idx].get_name(), keypath[1:]
+                        )
+                else:
+                    return go(self.get_name(), keypath)
+
+            wrapper.writeline(
+                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go_outer()}{wrapper.ending}"
+            )
 
     def __str__(self) -> str:
         kernel_name = getattr(self, "python_kernel_name", None)
@@ -6045,64 +6109,6 @@ class FallbackKernel(ExternKernelAlloc):
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
 
-    def codegen_unbacked_symbol_defs(self, wrapper):
-        if not hasattr(self, "unbacked_bindings"):
-            return
-
-        unbacked_bindings = resolve_unbacked_bindings(
-            V.graph.sizevars.shape_env, self.unbacked_bindings
-        )
-
-        if not unbacked_bindings:
-            return
-
-        for s, keypath in unbacked_bindings.items():
-
-            def go(expr, keypath):
-                if keypath == ():
-                    return expr
-
-                if (
-                    len(keypath) >= 2
-                    and isinstance(keypath[0], CallMethodKey)
-                    and isinstance(keypath[1], pytree.SequenceKey)
-                ):
-                    return go(
-                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
-                    )
-                elif isinstance(keypath[0], CallMethodKey):
-                    return go(f"{expr}.{keypath[0].name}()", keypath[1:])
-                elif isinstance(keypath[0], pytree.SequenceKey):
-                    return (
-                        go(f"std::get<{keypath[0].idx}>({expr})", keypath[1:])
-                        if V.graph.cpp_wrapper
-                        else go(f"{expr}[{keypath[0].idx}]", keypath[1:])
-                    )
-                elif isinstance(keypath[0], DivideByKey):
-                    # TODO: need to assert divisibility
-                    # TODO: this is invalid C++ codegen
-                    return go(f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:])
-                else:
-                    raise AssertionError(f"unrecognized keypath {keypath}")
-
-            def go_outer():
-                if V.graph.cpp_wrapper:
-                    # Special handling for the top level buffer access,
-                    # because self.get_name() is actually never bound; the
-                    # individual output arguments are bound by
-                    # generate_c_shim_fallback_kernel
-                    if len(self.outputs) == 1:
-                        return go(self.outputs[0].get_name(), keypath)
-                    else:
-                        assert isinstance(keypath[0], pytree.SequenceKey)
-                        return go(self.outputs[keypath[0].idx].get_name(), keypath[1:])
-                else:
-                    return go(self.get_name(), keypath)
-
-            wrapper.writeline(
-                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go_outer()}{wrapper.ending}"
-            )
-
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         if unbacked_bindings := getattr(self, "unbacked_bindings", None):
             resolved = resolve_unbacked_bindings(
@@ -6738,6 +6744,7 @@ class Conditional(ExternKernel):
         true_subgraph: Subgraph,
         false_subgraph: Subgraph,
         layout: MultiOutputLayout,
+        unbacked_bindings: Dict[sympy.Symbol, pytree.KeyPath],
     ):
         self.predicate = predicate
         self.operands = operands
@@ -6755,6 +6762,7 @@ class Conditional(ExternKernel):
             inputs=inputs,  # type: ignore[list-item]
         )
 
+        self.unbacked_bindings = unbacked_bindings
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
@@ -6766,8 +6774,18 @@ class Conditional(ExternKernel):
         false_fn: Subgraph,
         operands: List[TensorBox],
     ):
-        predicate = cls.realize_input(predicate)
-        operands = [cls.realize_input(x) for x in operands]
+        # TODO: Add logic of checking whehter there's fake_incorrect_kernels
+        # i.e. aten._fused_moving_avg_obs_fq_helper_functional in it
+        with V.graph.fake_mode:
+            (
+                example_output,
+                _,
+                _,
+                _,
+                unbacked_bindings,
+            ) = cls.process_kernel(
+                torch.ops.higher_order.cond, predicate, true_fn, false_fn, operands
+            )
 
         fx_operands = V.graph.current_node.args[-1]
         fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
@@ -6796,8 +6814,6 @@ class Conditional(ExternKernel):
         # make sure true and false outputs are structurally equivalent
         assert len(true_outputs) == len(false_outputs), (true_outputs, false_outputs)
         for i, (to, fo) in enumerate(zip(true_outputs, false_outputs)):
-            #assert to.get_size() == fo.get_size(), (i, to, fo)
-            #assert to.get_stride() == fo.get_stride(), (i, to, fo)
             assert to.get_device() == fo.get_device(), (i, to, fo)
             assert to.get_dtype() == fo.get_dtype(), (i, to, fo)
             assert to.get_layout().offset == fo.get_layout().offset, (i, to, fo)
@@ -6818,26 +6834,42 @@ class Conditional(ExternKernel):
             true_subgraph=true_fn,
             false_subgraph=false_fn,
             layout=MultiOutputLayout(device=device),
+            unbacked_bindings=unbacked_bindings,  # type: ignore[arg-type]
         )
+
+        def _symint_to_expr(s: Union[torch.SymInt, int]):
+            if not isinstance(s, torch.SymInt):
+                return s
+            return s.node.expr
 
         outputs = [
             MultiOutput(
                 FixedLayout(
                     device=output.get_device(),
                     dtype=output.get_dtype(),
-                    size=output.get_size(),
-                    stride=output.get_stride(),
+                    size=[_symint_to_expr(sz) for sz in fake_out.size()],
+                    stride=[_symint_to_expr(st) for st in fake_out.stride()],
                     offset=output.get_layout().offset,
                 ),
                 conditional,
                 [(list, i)],
             )
             # TODO: read this out of the fake tensor
-            for i, output in enumerate(true_outputs)
+            for i, (output, fake_out) in enumerate(zip(true_outputs, example_output))
         ]
 
-        conditional.outputs = outputs
+        conditional.outputs = outputs  # type: ignore[assignment]
         return outputs
+
+    def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
+        if unbacked_bindings := getattr(self, "unbacked_bindings", None):
+            resolved = resolve_unbacked_bindings(
+                V.graph.sizevars.shape_env, unbacked_bindings
+            )
+            assert resolved is not None
+            return resolved.keys()  # type: ignore[return-value]
+        else:
+            return OrderedSet()
 
     def codegen(self, wrapper):
         wrapper.codegen_conditional(self)

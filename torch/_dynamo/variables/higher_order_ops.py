@@ -837,11 +837,15 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from torch._higher_order_ops.cond import _merge_tensors
 
         flat_example_value = pytree.tree_map(
-            lambda a, b: _merge_tensors(
-                a.node.meta["example_value"], b.node.meta["example_value"], tx.fake_mode
-            )
-            if isinstance(a, torch.fx.Proxy) and isinstance(b, torch.fx.Proxy)
-            else a,
+            lambda a, b: (
+                _merge_tensors(
+                    a.node.meta["example_value"],
+                    b.node.meta["example_value"],
+                    tx.fake_mode,
+                )
+                if isinstance(a, torch.fx.Proxy) and isinstance(b, torch.fx.Proxy)
+                else a
+            ),
             true_r.as_proxy(),
             false_r.as_proxy(),
         )

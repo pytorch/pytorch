@@ -2193,6 +2193,7 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
         self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
         self.writeline(ExitSubgraphLine(self))
+        conditional.codegen_unbacked_symbol_defs(self)
 
     def codegen_while_loop(self, while_loop):
         name = while_loop.get_name()

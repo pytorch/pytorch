@@ -15,9 +15,8 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
 
 
-def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1):
+def _prepend_product_of_values(inputs, device, possible_values, num_to_prepend=1):
     result = []
-    device = inputs[0].device
     # iterate over the cartesian product of predicate values
     for values in itertools.product(*([possible_values] * num_to_prepend)):
         prepended = [torch.tensor(v, device=device) for v in values]
@@ -25,8 +24,8 @@ def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1):
     return result
 
 
-def prepend_predicates(inputs, num_predicates=1):
-    return _prepend_product_of_values(inputs, [False, True], num_predicates)
+def prepend_predicates(inputs, device, num_predicates=1):
+    return _prepend_product_of_values(inputs, device, [False, True], num_predicates)
 
 
 def prepend_counters(inputs, num_counters=1, counter_values=(0, 1, 5)):
@@ -183,6 +182,22 @@ class CondModels:
 
             return torch.cond(a.size(0) > b.size(0), true_fn, false_fn, [a, b])
 
+    class GenericCond(torch.nn.Module):
+        def __init__(self, true_fn, false_fn):
+            super().__init__()
+            self.true_fn = true_fn
+            self.false_fn = false_fn
+
+        def forward(
+            self,
+            p,
+        ):
+            return torch.cond(
+                p,
+                self.true_fn,
+                self.false_fn,
+            )
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -211,7 +226,9 @@ class CondTests(TestCase):
                     torch._dynamo.mark_dynamic(inp, 0)
 
         for inputs in input_sets:
-            for inputs_with_predicates in prepend_predicates(inputs, num_predicates):
+            for inputs_with_predicates in prepend_predicates(
+                inputs, device, num_predicates
+            ):
                 cloned_inputs = [inp.clone() for inp in inputs_with_predicates]
                 result = model(*inputs_with_predicates)
                 result_compiled = compiled_model(*inputs_with_predicates)
@@ -220,6 +237,31 @@ class CondTests(TestCase):
                 torch.testing.assert_close(result, result_compiled)
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    @parametrize("true_size", [(0, 1), (1, 2), (2, 3)])
+    @parametrize("false_size", [(2, 3), (3, 2)])
+    @parametrize("transpose", [True, False])
+    def test_cond_branch_with_different_output_size(
+        self, device, dynamic, true_size, false_size, transpose
+    ):
+        true_tensor = torch.randn(*true_size)
+        false_tensor = torch.randn(*false_size)
+        self._run_test(
+            model=CondModels.GenericCond(
+                true_fn=lambda: (
+                    true_tensor.sin() if not transpose else true_tensor.sin().t()
+                ),
+                false_fn=lambda: (
+                    false_tensor.cos() if not transpose else false_tensor.cos().t()
+                ),
+            ),
+            inputs=tuple(),
+            device=device,
+            dynamic=dynamic,
+        )
 
     @requires_gpu
     @parametrize("device", ["cpu", GPU_TYPE])
