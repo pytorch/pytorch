@@ -153,7 +153,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     // we can't do the normal wrapping here because IntArrayRef maps to both
     // torch.Size and tuple in python
     // TODO: consider factoring this out
-    THPObjectPtr tuple(PyTuple_New(strides.size()));
+    THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(strides.size())));
     if (!tuple) throw python_error();
     for (size_t i = 0; i != strides.size(); i++) {
       PyObject* s = torch::toPyObject(strides[i]);
