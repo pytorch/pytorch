@@ -1443,7 +1443,12 @@ class AutogradLazyBackwardCompileInfo:
 class AOTDispatchAutograd:
     @staticmethod
     def process_runtime_tangent(x, meta: Union[PlainTensorMeta, SubclassCreationMeta]):
-        if not isinstance(x, torch.Tensor) or isinstance(x, FakeTensor):
+        if not isinstance(x, torch.Tensor):
+            return x, [x]
+
+        if isinstance(x, FakeTensor):
+            if not x.is_contiguous(memory_format=meta.memory_format):
+                x = x.contiguous(memory_format=meta.memory_format)
             return x, [x]
 
         expected_type: Optional[type] = torch.Tensor
