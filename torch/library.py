@@ -567,27 +567,25 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> assert torch.allclose(y, x.sin())
         >>>
         >>> # Example 2: Register function with decorator.
-        >>> def sin_decorator(func):
+        >>> def custom_decorator(func):
         >>>     def wrapper(*args, **kwargs):
-        >>>         print("sin_decorator called.")
-        >>>         return func(*args, **kwargs)
+        >>>         return func(*args, **kwargs) + 1
         >>>     return wrapper
         >>>
         >>> # Define the operator
-        >>> torch.library.define("mylib::decorated_sin", "(Tensor x) -> Tensor")
+        >>> torch.library.define("mylib::sin_plus_one", "(Tensor x) -> Tensor")
         >>>
         >>> # Add implementations for the operator
-        >>> @torch.library.impl("mylib::decorated_sin", "cpu")
-        >>> @sin_decorator
+        >>> @torch.library.impl("mylib::sin_plus_one", "cpu")
+        >>> @custom_decorator
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
         >>> # Call the new operator from torch.ops.
         >>> x = torch.randn(3)
         >>>
-        >>> # This function call will print "sin_decorator called."
-        >>> y1 = torch.ops.mylib.sin(x)
-        >>> y2 = torch.sin(x)
+        >>> y1 = torch.ops.mylib.sin_plus_one(x)
+        >>> y2 = torch.sin(x) + 1
         >>> assert torch.allclose(y1, y2)
     """
     return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
