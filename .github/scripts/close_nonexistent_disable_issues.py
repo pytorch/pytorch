@@ -103,7 +103,6 @@ def printer(item: Tuple[str, Tuple[int, str, List[Any]]], extra: str) -> None:
 
 
 def close_issue(num: int) -> None:
-    return
     headers = {
         "Accept": "application/vnd.github.v3+json",
         "Authorization": f"token {os.environ['GITHUB_TOKEN']}",
