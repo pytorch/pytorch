@@ -344,13 +344,13 @@ def create_fw_bw_graph(fn, return_fwd_outs, fw_inputs, fw_outputs):
     fw_graph = _maybe_reenter_make_fx(fn)(*fw_inputs)
 
     def joint_fn(*joint_operands_grads):
-        # if use_output_and_grad_bw:
-        #     grads = joint_operands_grads[0]
-        #     inputs = joint_operands_grads[1]
-        # else:
         grads = joint_operands_grads[:num_grads]
         inputs = joint_operands_grads[num_grads:]
 
+        # This places the forward graph inside the joint_graph.
+        # The forward graph is not always used though and in order to
+        # save computations, it would be good if we can avoid it
+        # TODO: Realize this
         joint = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
         vals, grads = joint(
             list(inputs),
@@ -366,12 +366,6 @@ def create_fw_bw_graph(fn, return_fwd_outs, fw_inputs, fw_outputs):
         else:
             return pytree.tree_map(maybe_clone, grads)
 
-    # if use_output_and_grad_bw:
-    #     example_xs_out = list(fw_inputs) + list(fw_outputs)
-    #     joint_graph = _maybe_reenter_make_fx(joint_fn)(
-    #         *(list(example_grad), list(example_xs_out))
-    #     )
-    # else:
     example_xs_out = list(fw_inputs)
     joint_graph = _maybe_reenter_make_fx(joint_fn)(
         *(list(example_grad) + list(example_xs_out))
