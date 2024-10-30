@@ -88,7 +88,7 @@ if (SYCL_COMPILER_VERSION VERSION_LESS_EQUAL 20240703)
     set(sycl_lib_sufix "7")
   endif()
 endif()
- 
+
 # Find SYCL library fullname.
 find_library(
   SYCL_LIBRARY
