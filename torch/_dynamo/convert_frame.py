@@ -1178,7 +1178,7 @@ def _compile(
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
             chromium_event_log.log_event_end(
-                "dynamo", time.time_ns(), {}, chromium_start_time
+                "dynamo", time.time_ns(), {}, chromium_start_time, True
             )
 
 

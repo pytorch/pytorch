@@ -1945,7 +1945,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def compile_to_module(self) -> ModuleType:
         with dynamo_timed(
-            "GraphLowering.compile_to_module", phase_name="code_gen", fwd_only=False
+            "GraphLowering.compile_to_module",
+            phase_name="code_gen",
+            log_pt2_compile_event=True,
+            fwd_only=False,
         ):
             return self._compile_to_module()
 
