@@ -2308,7 +2308,7 @@ FALLBACK_ALLOW_LIST = {
 def sdpa_constraint(fx_node, *args, **kwargs):
     # sdpa requires dense last dimension]
 
-    def apply_constraint(arg, fx_arg):
+    def apply_constraint(idx, arg, fx_arg):
         if not isinstance(arg, ir.IRNode):
             return arg
 
@@ -2316,9 +2316,22 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         meta_stride = meta_val.stride()
 
         stride_order = ir.get_stride_order(meta_stride)
+
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
+
+        if (
+            fx_node.target
+            == aten._scaled_dot_product_efficient_attention_backward.default
+            and idx in (0, 5)
+        ):
+            assert len(stride_order) == 4
+            # The 0 and 5th arguments for aten._scaled_dot_product_efficient_attention_backward.default
+            # are for out and gradient_out. They have to be in
+            # (3, 1, 2, 0) stride order. Otherwise the kernel will crash.
+            # Check https://github.com/pytorch/pytorch/issues/138772
+            stride_order = (3, 1, 2, 0)
 
         if not meta_val.is_cuda:
             return ir.ExternKernel.require_stride_order(arg, stride_order)
@@ -2362,9 +2375,10 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
     args = tuple(
-        apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
+        apply_constraint(idx, arg, fx_arg)
+        for idx, (arg, fx_arg) in enumerate(zip(args, fx_node.args))
     )
-    kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
+    kwargs = {k: apply_constraint(-1, v, fx_node.kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
 
@@ -3162,6 +3176,7 @@ def index_output_size_and_inner_fn(
     indexed_size,
     x_loader,
     check,
+    wrap_neg=True,
 ):
     # Note that behavior of indexing differs when there are non consecutive
     # tensors. In this case, the tensor index is pulled to the beginning.
@@ -3213,6 +3228,7 @@ def index_output_size_and_inner_fn(
                         loader(idx[start_offset : start_offset + rank]),
                         size,
                         check=check,
+                        wrap_neg=wrap_neg,
                     )
                 )
         new_index = [
@@ -3235,7 +3251,7 @@ def index_impl(x, indices, check):
     )
 
 
-def index_impl_helper(x, indices, check):
+def index_impl_helper(x, indices, check, wrap_neg=True):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
     indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
@@ -3263,6 +3279,7 @@ def index_impl_helper(x, indices, check):
         indexed_size,
         None,
         check=check,
+        wrap_neg=wrap_neg,
     )
 
     def inner_fn(idx):
@@ -3442,7 +3459,9 @@ fallback__unsafe_masked_index_put_accumulate = fallback_handler(
 
 @register_lowering(aten._unsafe_masked_index, type_promotion_kind=None)
 def _unsafe_masked_index(self, mask, indices, fill):
-    ranges, _, _unsafe_index_fn = index_impl_helper(self, indices, check=False)
+    ranges, _, _unsafe_index_fn = index_impl_helper(
+        self, indices, check=False, wrap_neg=False
+    )
     mask_loader = mask.make_loader()
     self_loader = self.make_loader()
 
@@ -6394,6 +6413,12 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    return list(map(TensorBox.create, result))
+
+
+@register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
+def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
+    result = ir.InvokeSubgraph.create(subgraph_fn, operands)
     return list(map(TensorBox.create, result))
 
 
