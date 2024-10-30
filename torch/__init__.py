@@ -669,6 +669,9 @@ class SymFloat:
     def __hash__(self):
         return hash(builtins.float(self))
 
+    def conjugate(self) -> "SymFloat":
+        return self
+
 
 class SymBool:
     """
