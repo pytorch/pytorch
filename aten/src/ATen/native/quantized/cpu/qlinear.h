@@ -2,7 +2,8 @@
 #include <ATen/Tensor.h>
 #include <ATen/Config.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 class QLinearOnednn final {
  public:
@@ -42,4 +43,5 @@ C10_API static Tensor run_pointwise_binary_tensor(
       c10::string_view unary_post_op_algorithm);
 };
 
-} // namespace at::native
+} // namespace native
+} // namespace at

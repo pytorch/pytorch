@@ -13,7 +13,8 @@
 
 #include <algorithm>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 DEFINE_DISPATCH(qthreshold_stub);
 
@@ -44,4 +45,5 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::threshold"), TORCH_FN(threshold_quantized_cpu));
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

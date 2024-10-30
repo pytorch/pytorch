@@ -16,7 +16,8 @@
 
 #include <algorithm>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 DEFINE_DISPATCH(qbatch_norm_stub);
 DEFINE_DISPATCH(qbatch_norm_relu_stub);
@@ -411,4 +412,5 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::batch_norm3d_relu"), TORCH_FN(q_batch_norm3d_impl<true>));
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

@@ -18,7 +18,8 @@
 
 #include <cstring>
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 // pre calculate interpolation params on width
@@ -216,4 +217,5 @@ Tensor upsample_bilinear2d_quantized_cpu(
 }
 
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);
-} // namespace at::native
+} // namespace native
+} // namespace at

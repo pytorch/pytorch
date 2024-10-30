@@ -12,7 +12,8 @@
 #include <ATen/ops/int_repr_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 Tensor int_repr_quantized_cuda(const Tensor& self) {
   Tensor dst;
@@ -33,4 +34,5 @@ Tensor int_repr_quantized_cuda(const Tensor& self) {
   return dst;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

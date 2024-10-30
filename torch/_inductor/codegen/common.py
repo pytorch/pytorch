@@ -81,11 +81,6 @@ class WorkspaceArg:
 
     Not registered as a traditional buffer since there are no users,
     so it would be dead code eliminated.
-
-    Args:
-        nbytes: The size of the buffer in bytes.
-        zero_fill: Whether the buffer should be initialized to zero.
-
     """
 
     count: sympy.Expr
@@ -119,11 +114,15 @@ class WorkspaceArg:
     @staticmethod
     def maximum(a, b):
         assert (
-            a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
+            a.zero_mode == b.zero_mode
+            and a.dtype == b.dtype
+            and a.device == b.device
+            and a.inner_name == b.inner_name
+            and a.outer_name == b.outer_name
         )
         return WorkspaceArg(
             count=sympy.Max(a.count, b.count),
-            zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
+            zero_mode=a.zero_mode,
             dtype=a.dtype,
             device=a.device,
             inner_name=a.inner_name,
@@ -1416,26 +1415,15 @@ class KernelArgs:
 
     def workspace(self, nbytes: sympy.Expr, zero_fill: bool):
         """
-        Allocate or extend a workspace buffer of nbytes bytes.
-
-        This function manages the allocation of a workspace buffer. It either creates
-        a new WorkspaceArg or extends an existing one.
-
-        Note:
-        - Calling this function will in-place mutate the args by adding or updating
-        a WorkspaceArg.
-        - The codegen for generating the Python argdefs and call_defs will check
-        this field and allocate the buffer accordingly.
-        - A new argument "ws_ptr" will be present in the generated code.
+        Allocate a new uint32 scratch space for use within this kernel.  Multiple calls to this function will
+        extend the buffer returning a new region on each call.
 
         Args:
-            nbytes (sympy.Expr): The number of bytes to allocate.
-            zero_fill (bool): Whether to initialize the buffer to zero.
+            nbytes: size to add to the workspace.
+            zero_fill: True if the workspace should be zero-filled.
 
         Returns:
-            Tuple[str, int]: A tuple containing:
-                - "ws_ptr": A string identifier for the workspace pointer.
-                - offset: An integer representing the byte offset in the workspace.
+            (buffer_name: str, offset: sympy.Expr)
         """
         arg = WorkspaceArg(
             count=nbytes,

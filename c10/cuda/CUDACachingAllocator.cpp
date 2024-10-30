@@ -126,7 +126,7 @@ constexpr size_t kMinLargeAlloc =
     10485760; // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kRoundLarge = 2097152; // round up large allocations to 2 MiB
 
-static char SHAREABLE_HANDLE_VERSION = 1;
+char SHAREABLE_HANDLE_VERSION = 1;
 enum ShareableHandleType : char {
   SHAREABLE_CUDA_MALLOC = 'c',
   SHAREABLE_CUDA_EXPANDABLE_SEGMENT = 'e'
@@ -3222,7 +3222,7 @@ static void uncached_delete(void* ptr) {
   C10_CUDA_CHECK(cudaFree(ptr));
 }
 
-static void local_raw_delete(void* ptr);
+void local_raw_delete(void* ptr);
 
 class NativeCachingAllocator : public CUDAAllocator {
  private:
@@ -3828,7 +3828,7 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 };
 
-static NativeCachingAllocator allocator;
+NativeCachingAllocator allocator;
 
 void local_raw_delete(void* ptr) {
   if (TORCH_SDT_IS_ENABLED(free)) {
@@ -3887,7 +3887,7 @@ struct BackendStaticInitializer {
 };
 
 std::atomic<CUDAAllocator*> allocator;
-static BackendStaticInitializer backend_static_initializer;
+BackendStaticInitializer backend_static_initializer;
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10
 
