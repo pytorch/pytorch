@@ -71,7 +71,7 @@ using fft_fill_with_conjugate_symmetry_fn =
     void (*)(ScalarType dtype, IntArrayRef mirror_dims, IntArrayRef half_sizes,
              IntArrayRef in_strides, const void* in_data,
              IntArrayRef out_strides, void* out_data);
-DECLARE_DISPATCH(fft_fill_with_conjugate_symmetry_fn, fft_fill_with_conjugate_symmetry_stub);
+DECLARE_DISPATCH(fft_fill_with_conjugate_symmetry_fn, fft_fill_with_conjugate_symmetry_stub)
 
 // In real-to-complex transform, cuFFT and MKL only fill half of the values
 // due to conjugate symmetry. This function fills in the other half of the full
