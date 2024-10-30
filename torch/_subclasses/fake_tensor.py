@@ -36,6 +36,7 @@ from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
+import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject
@@ -153,22 +154,21 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 
 def get_plain_tensors(
-    subclass: Tensor, out_append_list: Optional[List[Tensor]] = None
-) -> List[Tensor]:
+    subclass: Tensor, *, out: List[Union[Tensor, int, SymInt]]
+) -> List[Union[Tensor, int, SymInt]]:
     # This function is used in Runtime, do not add redundant asserts
-    plain_tensors: List[Tensor] = [] if out_append_list is None else out_append_list
     todo = [subclass]
     while todo:
         curr = todo.pop()
         if not is_traceable_wrapper_subclass(curr):
-            plain_tensors.append(curr)
+            out.append(curr)
             continue
 
         inner_keys, _ = curr.__tensor_flatten__()
         for key in reversed(inner_keys):
             todo.append(getattr(curr, key))
 
-    return plain_tensors
+    return out
 
 
 def is_fake(x: object) -> TypeGuard[Tensor]:
@@ -1990,7 +1990,19 @@ class FakeTensorMode(TorchDispatchMode):
             log.debug("propagate_real_tensors %s", func)
             real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
             real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
+
+            is_builtin = library_utils.is_builtin(func)
+            if not is_builtin:
+                mutation_checker = library_utils.MutationChecker(
+                    func, real_flat_args, args_spec
+                )
+
             real_out = func(*real_args, **real_kwargs)
+
+            if not is_builtin:
+                mutation_checker.check()  # type: ignore[possibly-undefined]
+                library_utils.check_aliasing_constraint(func._name, flat_args, real_out)
+
         elif self.propagate_real_tensors:
             # This can happen occasionally legitimately, specifically when you
             # are inside the meta of a data dependent operation and you create
