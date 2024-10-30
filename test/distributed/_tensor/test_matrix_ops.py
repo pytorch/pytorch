@@ -340,7 +340,6 @@ class DistMatrixOpsTest(DTensorTestBase):
                     self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
                     self.assertEqual(dist_value.grad.full_tensor(), value.grad)
 
-    @skip_unless_torch_gpu
     @with_comms()
     def test_dtensor_mm(self):
         """
