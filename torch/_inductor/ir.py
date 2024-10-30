@@ -266,11 +266,13 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
 
 
 @overload
-def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None: ...
+def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None:
+    ...
 
 
 @overload
-def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor: ...
+def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor:
+    ...
 
 
 def ir_node_to_tensor(
@@ -1150,7 +1152,9 @@ class Reduction(Loops):
                 return (
                     bool(val)
                     if dst_dtype == torch.bool
-                    else float(val) if dst_dtype.is_floating_point else int(val)
+                    else float(val)
+                    if dst_dtype.is_floating_point
+                    else int(val)
                 )
 
             rtypes_to_inits = {
@@ -4587,7 +4591,9 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
-    def process_kernel(cls, kernel, *args, **kwargs) -> Tuple[
+    def process_kernel(
+        cls, kernel, *args, **kwargs
+    ) -> Tuple[
         Any,
         List[Any],
         List[Any],
