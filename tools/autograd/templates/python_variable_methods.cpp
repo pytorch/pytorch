@@ -1063,14 +1063,13 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else {
     throw TypeError("dtype must be a type, str, or dtype object");
   }
-  ScalarType scalar_type;
   Device device = self_.device();
   if (is_dtype) {
-    scalar_type = r.scalartype(0);
+    auto scalar_type = r.scalartype(0);
     return THPVariable_Wrap(dispatch_to(self_, scalar_type, /*non_blocking=*/ r.toBool(1), /*copy=*/ false, opt_memory_format));
   }
   at::TensorOptions options = torch::utils::options_from_string(type_name);
-  scalar_type = at::typeMetaToScalarType(options.dtype());
+  auto scalar_type = at::typeMetaToScalarType(options.dtype());
   auto device_type = options.device().type();
   if (device_type != device.type()) {
     device = at::Device(device_type);
