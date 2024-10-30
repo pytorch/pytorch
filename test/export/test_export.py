@@ -1175,6 +1175,10 @@ graph():
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
             ep = export(model, inputs)
 
+    # Bug: ep.run_decompositions() doesn't propagate real tensors
+    @testing.expectedFailureTrainingIRToRunDecomp
+    # Bug: ep.run_decompositions() doesn't propagate real tensors
+    @testing.expectedFailureTrainingIRToRunDecompNonStrict
     def test_draft_export_infers_fake_kernel(self):
         with torch.library._scoped_library("export", "FRAGMENT") as lib:
             lib.define("bar(Tensor x) -> Tensor")
@@ -1192,6 +1196,10 @@ graph():
             inputs = (torch.randn(1, 3), torch.randn(2, 1))
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 ep = export(model, inputs)
+
+        # expecttest only works for the base TestExport class.
+        if self.__class__ != TestExport:
+            return
 
         self.assertExpectedInline(
             str(ep.graph_module.code).strip(),
