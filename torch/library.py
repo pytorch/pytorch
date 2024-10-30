@@ -555,18 +555,16 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> import numpy as np
         >>> # Example 1: Register function.
         >>> # Define the operator
-        >>> torch.library.define("mylib::sin", "(Tensor x) -> Tensor")
+        >>> torch.library.define("mylib::mysin", "(Tensor x) -> Tensor")
         >>>
-        >>> # Add implementations for the operator
-        >>> @torch.library.impl("mylib::sin", "cpu")
+        >>> # Add implementations for the cpu device
+        >>> @torch.library.impl("mylib::mysin", "cpu")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
-        >>> # Call the new operator from torch.ops.
         >>> x = torch.randn(3)
-        >>> y1 = torch.ops.mylib.sin(x)
-        >>> y2 = torch.sin(x)
-        >>> assert torch.allclose(y1, y2)
+        >>> y = torch.ops.mylib.mysin(x)
+        >>> assert torch.allclose(y, x.sin())
         >>>
         >>> # Example 2: Register function with decorator.
         >>> def sin_decorator(func):
@@ -576,11 +574,8 @@ def impl(qualname, types, func=None, *, lib=None):
         >>>     return wrapper
         >>>
         >>> # Define the operator
-        >>> torch.library.define("mylibrary::sin", "(Tensor x) -> Tensor")
         >>> torch.library.define("mylib::decorated_sin", "(Tensor x) -> Tensor")
         >>>
-        >>> # Add implementations for the cpu device
-        >>> @torch.library.impl("mylibrary::sin", "cpu")
         >>> # Add implementations for the operator
         >>> @torch.library.impl("mylib::decorated_sin", "cpu")
         >>> @sin_decorator
@@ -589,8 +584,6 @@ def impl(qualname, types, func=None, *, lib=None):
         >>>
         >>> # Call the new operator from torch.ops.
         >>> x = torch.randn(3)
-        >>> y = torch.ops.mylibrary.sin(x)
-        >>> assert torch.allclose(y, x.sin())
         >>>
         >>> # This function call will print "sin_decorator called."
         >>> y1 = torch.ops.mylib.sin(x)
