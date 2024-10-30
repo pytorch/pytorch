@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import functools
 import itertools
 import logging
 import operator
@@ -17,7 +18,6 @@ from torch._inductor.virtualized import ops
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
-from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
 from ..codegen.common import BackendFeature, has_backend_feature
@@ -85,6 +85,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     The IR here has been normalized and functionalized.
     """
+    GraphTransformObserver = functools.partial(
+        torch.fx.passes.graph_transform_observer.GraphTransformObserver,
+        subsystem="post_grad_passes",
+    )
+
     if not torch._dynamo.config.skip_fsdp_hooks:
         remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
 
@@ -93,26 +98,30 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         gm.graph.eliminate_dead_code()
 
     if is_inference and config.reorder_for_locality:
-        apply_pass(lambda: reorder_for_locality(gm.graph), "reorder_for_locality")
+        GraphTransformObserver(gm, "reorder_for_locality").apply_graph_pass(
+            reorder_for_locality
+        )
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
-        with GraphTransformObserver(gm, "post_grad_custom_pre_pass"):
-            apply_pass(
-                lambda: post_grad_custom_pre_pass(gm.graph), "post_grad_custom_pre_pass"
-            )
+        GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
+            post_grad_custom_pre_pass
+        )
 
     if config.pattern_matcher:
         lazy_init()
         optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
-        apply_pass(
-            lambda: group_batch_fusion_passes(gm.graph, pre_grad=False),
-            "group_batch_fusion_passes",
+        GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
+            functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
-        apply_pass(lambda: remove_noop_ops(gm.graph), "remove_noop_ops")
+        GraphTransformObserver(gm, "remove_noop_ops").apply_graph_pass(
+            remove_noop_ops(gm.graph)
+        )
         for i, patterns in enumerate(pass_patterns):
-            apply_pass(lambda: patterns.apply(gm.graph), f"pass_pattern_{i}")  # type: ignore[arg-type]
+            GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
+                patterns.apply
+            )
         for pass_name in config.post_grad_fusion_options:
             # skip all patterns for group batch fusions
             if pass_name in POST_GRAD_FUSIONS:
@@ -121,7 +130,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             inductor_before_change = save_inductor_dict(
                 [pattern_matcher_pass.pass_name]
             )
-            apply_pass(lambda: pattern_matcher_pass.apply(gm.graph), pass_name)  # type: ignore[arg-type]
+            GraphTransformObserver(gm, pass_name).apply_graph_pass(
+                pattern_matcher_pass.apply
+            )
             if not is_same_dict(counters["inductor"], inductor_before_change):
                 optimus_scuba_log[
                     f"{pattern_matcher_pass.pass_name}_post_grad"
@@ -133,37 +144,37 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         micro_pipeline_tp_pass(gm.graph)
 
     if config._fuse_ddp_communication:
-        apply_pass(
+        GraphTransformObserver(gm, "fuse_ddp_communication").apply_graph_pass(
             lambda: fuse_ddp_communication(
                 gm.graph,
                 config._fuse_ddp_communication_passes,
                 config._fuse_ddp_bucket_size,
-            ),
-            "fuse_ddp_communication",
+            )
         )
 
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
-        with GraphTransformObserver(gm, "post_grad_custom_post_pass"):
-            apply_pass(
-                lambda: post_grad_custom_post_pass(gm.graph),
-                "post_grad_custom_post_pass",
-            )
+        GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
+            post_grad_custom_post_pass
+        )
 
-    apply_pass(lambda: stable_topological_sort(gm.graph), "stable_sort")
+    GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
 
-    apply_pass(lambda: move_constructors_to_gpu(gm.graph), "move_constructors_to_cuda")
+    GraphTransformObserver(gm, "move_constructors_to_cuda").apply_graph_pass(
+        move_constructors_to_gpu
+    )
 
     fake_tensor_updater.incremental_update()
 
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
-    apply_pass(lambda: reinplace_inplaceable_ops(gm.graph), "reinplace_inplaceable_ops")
-    apply_pass(
-        lambda: decompose_auto_functionalized(gm.graph), "decompose_auto_functionalized"
+    GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
+        reinplace_inplaceable_ops
     )
-
-    apply_pass(
-        lambda: comms.reinplace_fsdp_all_gather(gm.graph), "reinplace_fsdp_all_gather"
+    GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
+        decompose_auto_functionalized
+    )
+    GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
+        comms.reinplace_fsdp_all_gather
     )
 
     gm.recompile()

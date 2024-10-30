@@ -24,7 +24,7 @@ class GraphTransformObserver:
         self,
         gm: GraphModule,
         passname: str,
-        subsystem_name: Optional[str] = None,
+        subsystem: Optional[str] = None,
         log_url: Optional[str] = None,
     ):
         """
@@ -32,7 +32,7 @@ class GraphTransformObserver:
         """
 
         self.passname = passname
-        self.subsystem_name = subsystem_name
+        self.subsystem = subsystem
 
         # If log_url is None, we don't log anything
         if log_url is None:
@@ -72,14 +72,14 @@ class GraphTransformObserver:
         return None
 
     def _check_disable_pass(self):
-        if self.subsystem_name is None:
+        if self.subsystem is None:
             return False
 
         debug_info = lambda: self.passname  # noqa: E731
         from torch._inductor.bisect_helper import BisectionManager
 
         return BisectionManager.disable_subsystem(
-            "inductor", self.subsystem_name, debug_info
+            "inductor", self.subsystem, debug_info
         )
 
     def __enter__(self):
