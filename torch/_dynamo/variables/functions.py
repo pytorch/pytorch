@@ -166,7 +166,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def __init__(self, fn, is_constant=False, **kwargs) -> None:
         super().__init__(**kwargs)
-        print(f"Inside {self.__class__.__name__}({fn})", flush=True)
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
