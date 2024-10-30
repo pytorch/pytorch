@@ -4,7 +4,8 @@
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 DEFINE_DISPATCH(qdropout_stub);
 
@@ -17,4 +18,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::dropout"), quantized_dropout);
 }
 
-}  // namespace at::native
+}}  // namespace at::native
