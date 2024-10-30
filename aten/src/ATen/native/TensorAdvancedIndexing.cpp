@@ -1140,8 +1140,8 @@ static void index_reduce_func_impl(
     });
 
     if (op == ReductionType::MEAN) {
-      auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
-      counts.index_add_(dim, index, at::ones_like(source));
+      auto counts = include_self ? at::ones_like(result, ScalarType::Long) : at::zeros_like(result, ScalarType::Long);
+      counts.index_add_(dim, index, at::ones_like(source, ScalarType::Long));
       counts.masked_fill_(counts == 0, 1);
       if (result.is_floating_point() || result.is_complex()) {
         result.div_(counts);
@@ -1152,7 +1152,7 @@ static void index_reduce_func_impl(
   }
   else {
     TORCH_CHECK(source.dim() <= 1, "source.dim() (", source.dim(), ") must one or zero for given self.dim() (", self.dim(), ")");
-    auto counts = include_self ? at::ones_like(result) : at::zeros_like(result);
+    auto counts = include_self ? at::ones_like(result, ScalarType::Long) : at::zeros_like(result, ScalarType::Long);
     // explicitly capture all required variables to work around windows build
     // TODO: fix this when windows can correctly capture variables in nested lambda
     AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16,
@@ -1163,7 +1163,7 @@ static void index_reduce_func_impl(
       // TODO: Maybe TensorAccessor can be used here?
       auto* result_ptr = result.data_ptr<scalar_t>();
       auto* source_ptr = source.const_data_ptr<scalar_t>();
-      auto counts_ptr = counts.data_ptr<scalar_t>();
+      auto counts_ptr = counts.data_ptr<int64_t>();
       AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_func_cpu_",
         [&index_contig, &numel, &result, &result_ptr, &result_stride, &source_ptr, &source_stride, &op, &counts_ptr, &counts_stride] {
         auto index_data = index_contig.const_data_ptr<index_t>();
@@ -1171,7 +1171,7 @@ static void index_reduce_func_impl(
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result.numel()), "index out of range in self");
             scalar_t *self_ip = result_ptr + self_i * result_stride;
-            scalar_t *count_ip;
+            int64_t *count_ip;
             scalar_t val;
             switch (op) {
               case ReductionType::MEAN :
