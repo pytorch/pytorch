@@ -704,11 +704,11 @@ def generate_block_mask(attn_type: str, shape: Tuple[int]):
         new_mask_mod = mask_mod
 
     mask_shape = (1, 1, M, N) if attn_type != "document_mask" else (1, 1, M * B, N * B)
-
+    compiled_block_mask = torch.compile(create_block_mask)
     if new_mask_mod:
-        block_mask = create_block_mask(new_mask_mod, *mask_shape, "cuda")
+        block_mask = compiled_block_mask(new_mask_mod, *mask_shape, "cuda")
     else:
-        block_mask = create_block_mask(noop_mask, *mask_shape, "cuda")
+        block_mask = compiled_block_mask(noop_mask, *mask_shape, "cuda")
 
     return block_mask, mask_mod_kwargs
 
