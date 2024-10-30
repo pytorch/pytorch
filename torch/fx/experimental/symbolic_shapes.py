@@ -57,7 +57,7 @@ import torch.utils._pytree as pytree
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
-from torch._logging import LazyString, structured, trace_structured
+from torch._logging import dtrace_structured, LazyString, structured, trace_structured
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
@@ -2436,7 +2436,12 @@ class DimConstraints:
                 ):
                     if self._is_supported_congruence(congruence):
                         base, divisor = congruence.args
-                        tmp_name = f"_{self._dcp.source_name_to_debug_name[self._dcp.symbol_to_source[s][0].name()]}"
+                        tmp_name = "_" + str(
+                            self._dcp.source_name_to_debug_name.get(
+                                self._dcp.symbol_to_source[s][0].name(),
+                                self._dcp.symbol_to_source[s][0].name(),
+                            )
+                        )
                         tmp = sympy.Symbol(tmp_name, integer=True)
                         from torch._dynamo.source import ConstantSource
 
@@ -2918,7 +2923,7 @@ class ShapeEnv:
         )
 
         # This will make sure we only record the top-level function call.
-        self.is_recording = not self.should_record_events
+        self.is_recording = False
         # Keep track of the list of tracked fakes.
         self.tracked_fakes = tracked_fakes
         # List of events for reconstructing ShapeEnv at arbitrary points in time.
@@ -6004,6 +6009,20 @@ class ShapeEnv:
         return sloc
 
     def _log_guard(self, prefix: str, g: SympyBoolean, forcing_spec: bool) -> None:
+        dtrace_structured(
+            "guard_added",
+            metadata_fn=lambda: {
+                "expr": str(g),
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
+                "symbol_to_sources": {
+                    str(v): k
+                    for k, v in self.source_to_var.items()
+                    if v in g.free_symbols
+                },
+            },
+        )
         if self.log.isEnabledFor(logging.INFO):
             str_g = str(g)
             is_debug = (

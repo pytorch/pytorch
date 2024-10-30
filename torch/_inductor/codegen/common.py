@@ -119,15 +119,11 @@ class WorkspaceArg:
     @staticmethod
     def maximum(a, b):
         assert (
-            a.zero_mode == b.zero_mode
-            and a.dtype == b.dtype
-            and a.device == b.device
-            and a.inner_name == b.inner_name
-            and a.outer_name == b.outer_name
+            a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
         )
         return WorkspaceArg(
             count=sympy.Max(a.count, b.count),
-            zero_mode=a.zero_mode,
+            zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
             dtype=a.dtype,
             device=a.device,
             inner_name=a.inner_name,
@@ -251,6 +247,9 @@ class DeviceOpOverrides:
         raise NotImplementedError
 
     def cpp_device_ptr(self):
+        raise NotImplementedError
+
+    def tma_descriptor_helpers(self):
         raise NotImplementedError
 
 
@@ -1473,7 +1472,7 @@ class KernelArgs:
         arg = WorkspaceArg(
             count=min_size,
             zero_mode=WorkspaceZeroMode.ZERO_PER_GRAPH,
-            dtype=torch.int32,
+            dtype=torch.uint32,
             inner_name="sem_ptr",
             outer_name=f"semaphores_{current_device.type}_{current_device.index}",
             device=current_device,
