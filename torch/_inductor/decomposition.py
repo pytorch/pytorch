@@ -83,7 +83,6 @@ inductor_decompositions = get_decompositions(
         aten._to_copy,
         aten.tril_indices,
         aten.triu_indices,
-        aten.unbind_copy.int,
         aten.upsample_bilinear2d.vec,
         quantized.linear_dynamic_fp16_unpacked_weight,
         _quantized.wrapped_quantized_linear,
@@ -108,7 +107,6 @@ decomps_to_exclude = [
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
-    aten.baddbmm,  # upcasts to fp32, perf issue
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
