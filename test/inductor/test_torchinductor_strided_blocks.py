@@ -315,6 +315,11 @@ class TritonBlockPointerTest(InductorTestCase):
         full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
 
+        if num_triton_kernels == 2 and config.triton.cooperative_reductions:
+            # fewer kernels with cooperative reductions
+            num_triton_kernels = 1
+            num_block_pointers -= 2
+
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
         result, (code,) = self.run_and_compare(
