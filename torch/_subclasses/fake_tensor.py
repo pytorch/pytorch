@@ -2630,17 +2630,28 @@ def inferred_fake_kernel_from_real_out(
                 f"a return has a non-zero storage offset {real_out.storage_offset()}"
             )
 
-        # Assume rank specialized. That is, none of the inputs will affect the rank.
-        # This is emperically almost always true. An example of something that
-        # isn't is an `unsqueeze(x, n_times)` operator.
-        # A better thing to do is to *also* insert a runtime assertion for the rank of
-        # the output.
+        # Since PT2 is rank specialized, there's no such thing as a symbolic
+        # output rank. So we can assume the fake tensor has the same number of
+        # dimensions as the real tensor output.
+        #
+        # We shouldn't assume the Fake sizes/strides are exactly what we see on
+        # the real tensor output (perhaps we should give users a lever to toggle
+        # this). This is because there's a good amount of operators that return
+        # outputs with data-dependent output shape.
+        # So we infer the output sizes to all be unbacked symints
         fake_shape = [
             torch._library.fake_impl.allocate_size(mode.shape_env)
             for _ in range(real_out.dim())
         ]
-        fake_strides = [-1] * real_out.dim()
 
+        # We infer what the strides are. We had a couple of options for this:
+        # - assume the strides are computable from the sizes
+        # - use new fresh unbacked symints in the strides
+        #   This doesn't work that well (PT2 doesn't support unbacked symint strides well)
+        # - use the real strides
+        #   This can only be used if we assume the strides are static.
+        # We went with the first option.
+        fake_strides = [-1] * real_out.dim()
         strides = [(s, idx) for idx, s in enumerate(real_out.stride())]
         strides.sort()
         expected = 1
