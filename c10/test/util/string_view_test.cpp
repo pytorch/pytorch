@@ -81,12 +81,12 @@ TEST(StringViewTest, testStringConstructor) {
 } // namespace test_string_constructor
 
 namespace test_std_string_view_constructor {
-void test_std_string_view_conversion_is_implicit(c10::string_view_ext a) {}
+void test_std_string_view_conversion_is_implicit(c10::string_view a) {}
 TEST(StringViewTest, testStringViewConstructor) {
   std::string_view empty;
-  EXPECT_EQ(0, c10::string_view_ext(empty).size());
+  EXPECT_EQ(0, c10::string_view(empty).size());
   std::string_view hello_std_sv = "hello";
-  c10::string_view_ext hello_sv = hello_std_sv;
+  c10::string_view hello_sv = hello_std_sv;
   EXPECT_EQ(5, hello_sv.size());
   EXPECT_TRUE(string_equal("hello", hello_sv.data(), hello_sv.size()));
 
@@ -107,9 +107,9 @@ TEST(StringViewTest, testConversionToString) {
 
 namespace test_conversion_to_std_string_view {
 TEST(StringViewTest, testConversionToString) {
-  c10::string_view_ext empty;
+  c10::string_view empty;
   EXPECT_EQ(0, std::string_view(empty).size());
-  c10::string_view_ext hello_sv = "hello";
+  c10::string_view hello_sv = "hello";
   std::string_view hello_str(hello_sv);
   EXPECT_EQ(5, hello_str.size());
   EXPECT_EQ(std::string_view("hello"), hello_str);
