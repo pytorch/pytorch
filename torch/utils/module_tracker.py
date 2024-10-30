@@ -11,6 +11,10 @@ from torch.nn.modules.module import (
     register_module_forward_pre_hook,
 )
 from torch.utils._pytree import tree_flatten
+import gc
+
+logger = logging.getLogger(__name__)
+
 
 
 logger = logging.getLogger(__name__)
@@ -137,6 +141,7 @@ class ModuleTracker:
         tensors = [a for a in args if isinstance(a, torch.Tensor) and a.requires_grad]
         if tensors:
             register_multi_grad_hook(tensors, self._get_append_fn(name, True))
+            gc.collect()
 
     def __enter__(self):
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)
