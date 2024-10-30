@@ -155,7 +155,7 @@ c10::IValue pickle_load_obj(std::string_view data) {
       /*tensor_prefix=*/"",
       /*type_resolver=*/customClassResolver,
       /*obj_loader=*/torch::jit::ObjLoaderFunc,
-      /*device=*/c10::nullopt,
+      /*device=*/std::nullopt,
       reader);
 #else
   TORCH_CHECK(
