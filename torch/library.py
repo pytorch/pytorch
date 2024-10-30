@@ -543,7 +543,6 @@ def impl(qualname, types, func=None, *, lib=None):
     this API (see Example 2). Decorators placed outside this API will
     not be applied because this API does not return a function.
 
-
     Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
 
     Args:
