@@ -520,17 +520,17 @@ class CppMicroGemmAMX(CppMicroGemm):
     const auto num_elements_per_b_tile = 512;
     const auto buf_size_per_nr_block = ((K + {{block_k}} - 1) / {{block_k}}) * num_elements_per_b_tile * 2;
     const auto buf_size = buf_size_per_nr_block * (N / {{block_n}});
-{%- if is_msvc_compiler %}
+    {%- if is_msvc_compiler %}
     // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
     std::unique_ptr<{{input_t}}[]> heap_deq_b_buf_ptr(new {{input_t}}[buf_size]);
     {{input_t}}* dequantized_B_buf = heap_deq_b_buf_ptr.get();
-{%- else %}
+    {%- else %}
     // It's safe to use a stack-allocated array since the blocking strategy would
     // require us to allocate an array that's smaller than the size of L1D cache,
     // and the default per thread max stack size on Linux is quite higher,
     // so we need not worry about stack overflow.
     alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
-{%- endif %}
+    {%- endif %}
 
     // This may not be true for the tail, but wouldn't affect correctness.
     const auto num_b_rows = 16;
