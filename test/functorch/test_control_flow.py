@@ -2417,51 +2417,71 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
 
 
 class AssociativeScanModels:
-    
     @staticmethod
     def get_scan_fct(compile_mode, combine_mode):
         # Compile the associative_scan according to the provided compile_mode
-        if compile_mode != 'fake':
-            compile_mode = 'none'
+        if compile_mode != "fake":
+            compile_mode = "none"
             assoc_scan_comp = compile_mode_helper(associative_scan, compile_mode)
-            scan_fct = lambda combine_fn, xs, dim, reverse: assoc_scan_comp(combine_fn, xs, dim, reverse, combine_mode)
+
+            def scan_fct(combine_fn, xs, dim, reverse):
+                return assoc_scan_comp(combine_fn, xs, dim, reverse, combine_mode)
+
         else:
             scan_fct = _fake_associative_scan
         return scan_fct
-                
+
     class CombineFn(torch.nn.Module):
         def __init__(self, combine_fn, dim, reverse, combine_mode, compile_mode):
             super().__init__()
 
-            self.scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, combine_mode)
+            self.scan_fct = AssociativeScanModels.get_scan_fct(
+                compile_mode, combine_mode
+            )
             self.combine_fn = combine_fn
             self.dim = dim
             self.reverse = reverse
-            
+
         def forward(self, inputs):
             results = self.scan_fct(self.combine_fn, inputs, self.dim, self.reverse)
             return results
-        
+
     class Simple(torch.nn.Module):
         def __init__(self, dim, reverse, combine_mode, compile_mode):
             super().__init__()
-            
-            kwargs = {'dim': dim, 'reverse': reverse, 'combine_mode': combine_mode, 'compile_mode': compile_mode}
-            self.combine_fns = [AssociativeScanModels.CombineFn(get_scan_combine_fn("add", True), **kwargs),
-                                AssociativeScanModels.CombineFn(get_scan_combine_fn("mul", True), **kwargs)]
-        
+
+            kwargs = {
+                "dim": dim,
+                "reverse": reverse,
+                "combine_mode": combine_mode,
+                "compile_mode": compile_mode,
+            }
+            self.combine_fns = [
+                AssociativeScanModels.CombineFn(
+                    get_scan_combine_fn("add", True), **kwargs
+                ),
+                AssociativeScanModels.CombineFn(
+                    get_scan_combine_fn("mul", True), **kwargs
+                ),
+            ]
+
         def forward(self, inputs):
             results = []
             for combine_fn in self.combine_fns:
                 results.append(combine_fn(inputs))
-            return results    
+            return results
 
     class ChainFn(torch.nn.Module):
         def __init__(self, combine_fn, dim, reverse, combine_mode, compile_mode):
             super().__init__()
-            
+
             chain_len = len(combine_fn)
-            kwargs = {'combine_fn': combine_fn, 'dim': dim, 'reverse': reverse, 'combine_mode': combine_mode}
+            kwargs = {
+                "combine_fn": combine_fn,
+                "dim": dim,
+                "reverse": reverse,
+                "combine_mode": combine_mode,
+            }
 
             # Prepare the kwargs as a list.
             self.nested_tuple = []
@@ -2475,13 +2495,15 @@ class AssociativeScanModels:
                         kwargs_el[key] = val[ind]
                     else:
                         kwargs_el[key] = val
-                        
-                scan_fct = AssociativeScanModels.get_scan_fct(compile_mode, kwargs_el['combine_mode'])
-                combine_fn = kwargs_el['combine_fn']
-                del kwargs_el['combine_fn']
-                del kwargs_el['combine_mode']
+
+                scan_fct = AssociativeScanModels.get_scan_fct(
+                    compile_mode, kwargs_el["combine_mode"]
+                )
+                combine_fn = kwargs_el["combine_fn"]
+                del kwargs_el["combine_fn"]
+                del kwargs_el["combine_mode"]
                 self.nested_tuple.append((combine_fn, scan_fct, kwargs_el))
-            
+
         def forward(self, inputs):
             results = inputs
             for combine_fn, scan_fct, kwargs in self.nested_tuple:
@@ -2515,7 +2537,6 @@ class AssociativeScanTests(TestCase):
         # Return the result of the functions under test for further investigations
         return result
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2535,13 +2556,14 @@ class AssociativeScanTests(TestCase):
         self, combine_mode, reverse, compile_mode, device
     ):
         x = torch.randn(3, 10, 2, device=device)
-        kwargs = {'dim': 0,
-                  'reverse': reverse,
-                  'compile_mode': compile_mode,
-                  'combine_mode': combine_mode,
-                  }
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_mode": combine_mode,
+        }
         kwargs_fake = kwargs.copy()
-        kwargs_fake['compile_mode'] = 'fake'
+        kwargs_fake["compile_mode"] = "fake"
         results = self._run_test(
             model=AssociativeScanModels.Simple(**kwargs),
             model_fake=AssociativeScanModels.Simple(**kwargs_fake),
@@ -2556,15 +2578,16 @@ class AssociativeScanTests(TestCase):
 
         # Jax Examples
         x = torch.arange(0, 4, device=device)
-        kwargs = {'dim': 0,
-                  'reverse': reverse,
-                  'compile_mode': compile_mode,
-                  'combine_fn': get_scan_combine_fn("add", True),
-                  'combine_mode': combine_mode,
-                  }
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("add", True),
+            "combine_mode": combine_mode,
+        }
         kwargs_fake = kwargs.copy()
-        kwargs_fake['compile_mode'] = 'fake'
-        
+        kwargs_fake["compile_mode"] = "fake"
+
         result = self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -2578,7 +2601,6 @@ class AssociativeScanTests(TestCase):
 
         self.assertEqual(result, results_torch)
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2605,13 +2627,18 @@ class AssociativeScanTests(TestCase):
             rnd_scan_dim = random.randint(0, num_dim - 1)
             x = torch.randn(*shapes, device=device)
 
+            kwargs = {
+                "dim": rnd_scan_dim,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = kwargs.copy()
+            kwargs_fake["compile_mode"] = "fake"
             results = self._run_test(
-                model=AssociativeScanModels.Simple(),
+                model=AssociativeScanModels.Simple(**kwargs),
+                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
                 inputs=x,
-                combine_mode=combine_mode,
-                dim=rnd_scan_dim,
-                reverse=reverse,
-                compile_mode=compile_mode,
             )
 
             if not reverse:
@@ -2620,7 +2647,6 @@ class AssociativeScanTests(TestCase):
                     results_torch.append(op_pt(x, 0))
                 self.assertEqual(results, results_torch)
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     # This test is expected to fail, as there may be an issue with the underlying triton implementation
@@ -2633,13 +2659,18 @@ class AssociativeScanTests(TestCase):
             rnd_scan_dim = 0
             x = torch.randn(*shapes, device=torch.device("cuda"))
 
+            kwargs = {
+                "dim": rnd_scan_dim,
+                "reverse": True,
+                "compile_mode": "none",
+                "combine_mode": "generic",
+            }
+            kwargs_fake = kwargs.copy()
+            kwargs_fake["compile_mode"] = "fake"
             self._run_test(
-                model=AssociativeScanModels.Simple(),
+                model=AssociativeScanModels.Simple(**kwargs),
+                model_fake=AssociativeScanModels.Simple(**kwargs_fake),
                 inputs=x,
-                dim=rnd_scan_dim,
-                combine_mode="generic",
-                reverse=True,
-                compile_mode="none",
             )
 
     @skipIfRocm(msg="Unsupported on ROCM yet")
@@ -2663,39 +2694,50 @@ class AssociativeScanTests(TestCase):
         y = torch.randn(3, 2, 2, device=device)
         inp = (x, y)
 
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("tuple_fct", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.CombineFn(),
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=inp,
-            combine_mode=combine_mode,
-            dim=0,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=get_scan_combine_fn("tuple_fct", True),
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    def test_associative_scan_expand_in_combine_fn(self, compile_mode, reverse, device):
+    def test_associative_scan_expand_in_combine_fn(
+        self, compile_mode, combine_mode, reverse, device
+    ):
         x = torch.randn(3, 2, 2, device=device)
 
         def combine_fn(x, y):
             return x * torch.sum(y, -1).expand(x.shape)
 
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.CombineFn(),
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=x,
-            combine_mode="generic",
-            dim=0,
-            reverse=reverse,
-            compile_mode="none",
-            combine_fn=combine_fn,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -2707,17 +2749,21 @@ class AssociativeScanTests(TestCase):
         x = torch.arange(30, device=device).view(10, 3).t()
         assert not x.is_contiguous()
 
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("add", True),
+            "combine_mode": "generic",
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.CombineFn(),
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=x,
-            combine_mode="generic",
-            dim=0,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=get_scan_combine_fn("add", True),
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -2741,17 +2787,21 @@ class AssociativeScanTests(TestCase):
         z = torch.randn(3, 2, 2, device=device)
         inp = {"i": x, "j": ([y], [{"o": z}])}
 
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("complex_pointwise", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.CombineFn(),
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=inp,
-            combine_mode=combine_mode,
-            dim=0,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=get_scan_combine_fn("complex_pointwise", True),
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -2780,22 +2830,22 @@ class AssociativeScanTests(TestCase):
             return inp @ W
 
         inp = torch.randn(3, 10, 2, device=device)
-        kwargs = {'dim': 1,
-                  'reverse': reverse,
-                  'compile_mode': compile_mode,
-                  'combine_fn': [first_chain_fct, second_chain_fct],
-                  'combine_mode': combine_mode,
-                  }
+        kwargs = {
+            "dim": 1,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": [first_chain_fct, second_chain_fct],
+            "combine_mode": combine_mode,
+        }
         kwargs_fake = kwargs.copy()
-        kwargs_fake['compile_mode'] = 'fake'
+        kwargs_fake["compile_mode"] = "fake"
 
         self._run_test(
             model=AssociativeScanModels.ChainFn(**kwargs),
             model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
-            inputs=inp
+            inputs=inp,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -2825,17 +2875,21 @@ class AssociativeScanTests(TestCase):
 
         inp = torch.randn(3, 10, 2, device=device)
 
+        kwargs = {
+            "dim": 1,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": [first_chain_fct, second_chain_fct],
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.ChainFn(),
+            model=AssociativeScanModels.ChainFn(**kwargs),
+            model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
             inputs=inp,
-            combine_mode=combine_mode,
-            dim=1,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=[first_chain_fct, second_chain_fct],
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("combine_mode", ["pointwise", "generic"])
@@ -2868,35 +2922,25 @@ class AssociativeScanTests(TestCase):
 
         inp = torch.randn(3, 10, 2, device=device)
 
+        kwargs = {
+            "dim": [1, 0],
+            "reverse": [reverse_first, reverse_second],
+            "compile_mode": compile_mode,
+            "combine_fn": [first_chain_fct, second_chain_fct],
+            "combine_mode": [combine_mode, combine_mode],
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.ChainFn(),
+            model=AssociativeScanModels.ChainFn(**kwargs),
+            model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
             inputs=inp,
-            combine_mode=[combine_mode, combine_mode],
-            dim=[1, 0],
-            reverse=[reverse_first, reverse_second],
-            compile_mode=compile_mode,
-            combine_fn=[first_chain_fct, second_chain_fct],
         )
 
     # TODO: Does not work because of the usage of vmap witin associative_scan
-    # The parameterization is commented out for the moment and the test is skipped
-    @skipIfRocm(msg="Unsupported on ROCM yet")
+    # TODO: Re-enable additional parameters again once this issues has been resolved
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    # @parametrize("combine_mode", ["pointwise", "generic"])
-    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    # @parametrize("reverse_first", [False, True])
-    # @parametrize("same_direction", [False, True])
-    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # # Skipping the combination of combine_mode=pointwise and device=cpu
-    # # as the current implementation of pointwise does only support CUDA device
-    # @decorateIf(
-    #     unittest.skip,
-    #     lambda params: (
-    #         params["combine_mode"] == "pointwise"
-    #         and (params["device"] == torch.device("cpu") or torch.version.hip)
-    #     ),
-    # )
     @unittest.skip
     def test_associative_scan_nested(self):
         combine_mode = "pointwise"
@@ -2928,19 +2972,22 @@ class AssociativeScanTests(TestCase):
 
         inp = torch.randn(3, 10, 2, device=device)
 
-        # TODO: FIXME!
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse_first,
+            "compile_mode": compile_mode,
+            "combine_fn": first_nested_fct,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake["combine_fn"] = first_nested_fct_fake
         self._run_test(
-            model=AssociativeScanModels.NestedFn(),
+            model=AssociativeScanModels.NestedFn(**kwargs),
+            model_fake=AssociativeScanModels.NestedFn(**kwargs_fake),
             inputs=inp,
-            combine_mode=combine_mode,
-            dim=0,
-            reverse=reverse_first,
-            compile_mode=compile_mode,
-            combine_fn=first_nested_fct,
-            fake_combine_fn=first_nested_fct_fake,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -2975,25 +3022,25 @@ class AssociativeScanTests(TestCase):
 
         inp = torch.randn(3, 10, 1, device=device) * 2
 
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.CombineFn(),
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=inp,
-            combine_mode="generic",
-            dim=0,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=combine_fn,
         )
 
     # TODO: Does not work because of the usage of vmap witin associative_scan
-    # The parameterization is commented out for the moment and the test is marked with expected fail
-    @skipIfRocm(msg="Unsupported on ROCM yet")
+    # TODO: Re-enable additional parameters again once this issues has been resolved
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    # @parametrize("loop_type", ["while"])
-    # @parametrize("reverse", [False, True])
-    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @unittest.expectedFailure
     def test_associative_scan_loop_in_combine_fn_failure(self):
         compile_mode = "none"
@@ -3013,17 +3060,21 @@ class AssociativeScanTests(TestCase):
 
         inp = torch.randn(3, 10, 1, device=device) * 2
 
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.CombineFn(),
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=inp,
-            combine_mode="generic",
-            dim=0,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=combine_fn,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -3036,22 +3087,25 @@ class AssociativeScanTests(TestCase):
 
         inp = torch.randn(3, 10, 1, device=device)
 
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.CombineFn(),
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=inp,
-            combine_mode="generic",
-            dim=0,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=combine_fn,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
+    # TODO: Does not work because of the usage of vmap witin associative_scan
+    # TODO: Re-enable additional parameters again once this issues has been resolved
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    # @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
-    # @parametrize("reverse", [False, True])
-    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @unittest.expectedFailure
     def test_associative_scan_map_in_combine_fn(self):
         compile_mode = "none"
@@ -3068,17 +3122,21 @@ class AssociativeScanTests(TestCase):
 
         inp = torch.randn(3, 10, 1, device=device)
 
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.CombineFn(),
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=inp,
-            combine_mode="generic",
-            dim=0,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=combine_fn,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -3095,17 +3153,21 @@ class AssociativeScanTests(TestCase):
 
         inp = torch.randn(3, 10, 2, device=device)
 
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": combine_fn,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.CombineFn(),
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=inp,
-            combine_mode="generic",
-            dim=0,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=combine_fn,
         )
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -3122,17 +3184,63 @@ class AssociativeScanTests(TestCase):
     ):
         x = torch.randn(3, 10, 2, device=device)
 
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("non_pointwise", True),
+            "combine_mode": "generic",
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
         self._run_test(
-            model=AssociativeScanModels.CombineFn(),
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=x,
-            combine_mode="generic",
-            dim=0,
-            reverse=reverse,
-            compile_mode=compile_mode,
-            combine_fn=get_scan_combine_fn("non_pointwise", True),
         )
 
     @skipIfRocm(msg="Unsupported on ROCM yet")
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    def test_associative_scan_binary_operator(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        state_dim = 20
+        timesteps = 10
+        projected_inputs = torch.randn(
+            timesteps, state_dim, requires_grad=True, device=device
+        )
+        A = torch.randn(state_dim, requires_grad=True, device=device)
+        elements = (A.repeat((timesteps, 1)), projected_inputs)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": get_scan_combine_fn("s5_operator", True),
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=elements,
+        )
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_sparse_tensor(self):
@@ -3143,8 +3251,6 @@ class AssociativeScanTests(TestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             "torch.compile does not support sparse Tensors",
-            # torch._dynamo.exc.Unsupported,
-            # "Observed exception.*",
         ):
             result = associative_scan(
                 get_scan_combine_fn("add", True),
@@ -3203,7 +3309,6 @@ class AssociativeScanTests(TestCase):
         ):
             result = associative_scan(fct_wrong_pytree, inp, 0, combine_mode="generic")
 
-    @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_non_pointwise(self):
