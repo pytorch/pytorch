@@ -845,6 +845,17 @@ class ClassThatUsesBuildInstruction:
         # Third item, state here will cause pickle to push a BUILD instruction
         return ClassThatUsesBuildInstruction, (self.num,), {'foo': 'bar'}
 
+def _rebuild_class_that_uses_build_instruction(num):
+    return ClassThatUsesBuildInstructionFnRebuild(num)
+
+class ClassThatUsesBuildInstructionFnRebuild:
+    def __init__(self, num):
+        self.num = num
+
+    def __reduce_ex__(self, proto):
+        # Third item, state here will cause pickle to push a BUILD instruction
+        return _rebuild_class_that_uses_build_instruction, (self.num,), {'foo': 'bar'}
+
 @dataclass
 class ClassThatUsesBuildInstructionAllSlots:
     __slots__ = ["x", "y"]
@@ -1153,6 +1164,19 @@ class TestSerialization(TestCase, SerializationMixin):
             finally:
                 torch.serialization.clear_safe_globals()
                 ClassThatUsesBuildInstruction.__setstate__ = None
+
+    def test_weights_only_safe_globals_build_allowed_after_reduce(self):
+        c = ClassThatUsesBuildInstructionFnRebuild(2)
+        with BytesIOContext() as f:
+            torch.save(c, f)
+            f.seek(0)
+            with self.assertRaisesRegex(pickle.UnpicklingError,
+                                        ("GLOBAL __main__._rebuild_class_that_uses_build_instruction "
+                                         "was not an allowed global by default")):
+                torch.load(f, weights_only=True)
+            f.seek(0)
+            with torch.serialization.safe_globals([_rebuild_class_that_uses_build_instruction]):
+                torch.load(f, weights_only=True)
 
     @parametrize("slots", ['some', 'all'])
     def test_weights_only_safe_globals_build_with_slots(self, slots):
