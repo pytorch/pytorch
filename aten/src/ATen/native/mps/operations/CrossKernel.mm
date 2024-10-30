@@ -131,5 +131,5 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
 }
 } // anonymous namespace
 
-REGISTER_DISPATCH(cross_stub, &cross_mps_impl);
+REGISTER_DISPATCH(cross_stub, &cross_mps_impl)
 } // namespace at::native

@@ -140,5 +140,5 @@ static void i0_kernel_mps(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(i0_stub, &i0_kernel_mps);
+REGISTER_DISPATCH(i0_stub, &i0_kernel_mps)
 } // namespace at::native

@@ -190,7 +190,11 @@ inline int64_t max_iterate_size(Arg& iter, Args&... iter_tail) {
       max_iterate_size(iter_tail...));
 }
 
+<<<<<<< HEAD
 inline void iterate_overflow() {}
+=======
+inline void iterate_overflow(){}
+>>>>>>> 4de2f9c3bf0 (Fix Wextra-semi warnings)
 
 template <typename Arg, typename... Args>
 inline void iterate_overflow(Arg& iter, Args&... iter_tail) {
@@ -207,7 +211,11 @@ inline void iterate_overflow(Arg& iter, Args&... iter_tail) {
   iterate_overflow(iter_tail...);
 }
 
+<<<<<<< HEAD
 inline void forward(int64_t /*offset*/) {}
+=======
+inline void forward(int64_t /*offset*/){}
+>>>>>>> 4de2f9c3bf0 (Fix Wextra-semi warnings)
 
 template <typename Arg, typename... Args>
 inline void forward(int64_t offset, Arg& iter, Args&... iter_tail) {
@@ -230,7 +238,11 @@ inline int64_t max_dim(Arg& iter, Args&... iter_tail) {
   return std::max(iter.dim_, max_dim(iter_tail...));
 }
 
+<<<<<<< HEAD
 inline void apply_op() {}
+=======
+inline void apply_op(){}
+>>>>>>> 4de2f9c3bf0 (Fix Wextra-semi warnings)
 
 template <typename Op, typename... Args>
 inline void apply_op(

@@ -370,7 +370,7 @@ static void histogram_select_outer_bin_edges_kernel(const Tensor& input,
   }
 }
 
-REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel);
-REGISTER_DISPATCH(histogramdd_linear_stub, &histogramdd_linear_kernel);
-REGISTER_DISPATCH(histogram_select_outer_bin_edges_stub, &histogram_select_outer_bin_edges_kernel);
+REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel)
+REGISTER_DISPATCH(histogramdd_linear_stub, &histogramdd_linear_kernel)
+REGISTER_DISPATCH(histogram_select_outer_bin_edges_stub, &histogram_select_outer_bin_edges_kernel)
 } // namespace at::native
