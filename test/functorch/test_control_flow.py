@@ -1174,18 +1174,47 @@ def forward(self, pred_1, x_1):
     @parametrize("autograd", [True])
     def test_while_loop_tuple_mixed_gpu(self, autograd):
         def cond_fn(x, y):
-            return y.sum() < 5.
+            return x.sum() < 7.
         
         def body_fn(x, y):
-            return (torch.sin(x) * x + 5., y * x + 1)
+            return (x + 1, y * x)#, z + 2)
 
-        x = torch.randn(1, device="cuda", requires_grad=autograd)
-        y = torch.randn(2, 3, device="cuda", requires_grad=autograd)
+        # x = torch.randn(1, device="cuda", requires_grad=autograd)
+        # y = torch.randn(2, 3, device="cuda", requires_grad=autograd)
+        # x = torch.arange(3, dtype=torch.float32, device="cuda", requires_grad=autograd)
+        # y = torch.arange(3, dtype=torch.float32, device="cuda", requires_grad=autograd)
+        # z = torch.arange(4, dtype=torch.float32, device="cuda", requires_grad=autograd)
+        x = torch.ones(1, dtype=torch.float32, device="cuda", requires_grad=autograd)
+        y = torch.ones(1, dtype=torch.float32, device="cuda", requires_grad=autograd)
+        z = torch.ones(2, dtype=torch.float32, device="cuda", requires_grad=autograd)
+        # inp = (x, y, z)
         inp = (x, y)
+        # inp = (z,)
         
         res = while_loop(cond_fn, body_fn, inp)
         expected = _fake_while_loop(cond_fn, body_fn, inp)
         self.assertEqual(expected, res)
+        
+        # expected = (x + 1, x * y, z + 2)
+        # expected = (expected[0] + 1, expected[0] * expected[1], expected[2] + 2)
+        # expected = (expected[0] + 1, expected[0] * expected[1], expected[2] + 2)
+        # expected = (expected[0] + 1, expected[0] * expected[1], expected[2] + 2)
+        
+        # result_exp_flatten, _ = pytree.tree_flatten(expected[0])
+        # grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
+        # expected_grads = torch.autograd.grad(result_exp_flatten, inp[0], grad_exp_init)
+        # result_exp_flatten, _ = pytree.tree_flatten(expected[1])
+        # grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
+        # expected_grads2 = torch.autograd.grad(result_exp_flatten, inp[0], grad_exp_init)
+        
+        # result_exp_flatten, _ = pytree.tree_flatten(expected)
+        # grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
+        # expected_grads = torch.autograd.grad(result_exp_flatten, inp, grad_exp_init)
+        
+        # print('-'*80)
+        # # print(expected)
+        # # print((expected_grads, expected_grads2))
+        # print(expected_grads)
         
         if autograd:
             self.check_autograd(res, expected, inp)
