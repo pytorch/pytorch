@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import List, Union
 
 import torch
 import torch.fx as fx
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
-from torch._utils_internal import JustKnobsConfig
+from torch._utils_internal import justknobs_check
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.symbolic_shapes import ShapeEnv  # noqa: TCH001
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
@@ -90,11 +91,12 @@ def tensorify_python_scalars(
     """
     import sympy
 
-    knob = JustKnobsConfig(
-        name="pytorch/compiler:tensorify_python_scalars",
-        env_name="TENSORIFY_PYTHON_SCALARS",
-        default=True,
-    ).get()
+    knob = True
+    if ((env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None):
+        if env in ("0", "FALSE"):
+            knob = False
+    else:
+        knob = justknobs_check("pytorch/compiler:tensorify_python_scalars")
     if not knob:
         return None
 
