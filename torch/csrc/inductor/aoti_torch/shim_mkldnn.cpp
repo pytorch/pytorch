@@ -9,6 +9,7 @@
 #endif
 #include <ATen/native/mkldnn/Conv.h>
 #include <ATen/native/mkldnn/Linear.h>
+#include <ATen/native/quantized/cpu/qlinear.h>
 
 using namespace torch::aot_inductor;
 
@@ -265,6 +266,99 @@ AOTITorchError aoti_torch_cpu__linear_pointwise_binary(
         *tensor_handle_to_tensor_pointer(W),
         pointer_to_optional<at::Tensor>(B),
         attr);
+    *ret0 = new_tensor_handle(std::move(tmp_result));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu__qlinear_pointwise_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle act_scale,
+    AtenTensorHandle act_zero_point,
+    AtenTensorHandle onednn_weight,
+    AtenTensorHandle weight_scales,
+    AtenTensorHandle weight_zero_points,
+    AtenTensorHandle* B,
+    double output_scale,
+    int64_t output_zero_point,
+    const int32_t* output_dtype,
+    const char* post_op_name,
+    const double** post_op_args,
+    int64_t post_op_args_len_,
+    const char* post_op_algorithm,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::optional<c10::Scalar>> scalars_list;
+    scalars_list.reserve(post_op_args_len_);
+    for (int64_t i = 0; i < post_op_args_len_; i++) {
+      scalars_list.emplace_back(pointer_to_optional(post_op_args[i]));
+    }
+
+    auto tmp_result = at::native::QLinearOnednn::run_pointwise_tensor(
+        *tensor_handle_to_tensor_pointer(X),
+        *tensor_handle_to_tensor_pointer(act_scale),
+        *tensor_handle_to_tensor_pointer(act_zero_point),
+        *tensor_handle_to_tensor_pointer(onednn_weight),
+        *tensor_handle_to_tensor_pointer(weight_scales),
+        *tensor_handle_to_tensor_pointer(weight_zero_points),
+        pointer_to_optional<at::Tensor>(B),
+        output_scale,
+        output_zero_point,
+        pointer_to_optional<at::ScalarType>(output_dtype),
+        post_op_name,
+        scalars_list,
+        post_op_algorithm);
+    *ret0 = new_tensor_handle(std::move(tmp_result));
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cpu__qlinear_pointwise_binary_tensor(
+    AtenTensorHandle X,
+    AtenTensorHandle act_scale,
+    AtenTensorHandle act_zero_point,
+    AtenTensorHandle onednn_weight,
+    AtenTensorHandle weight_scales,
+    AtenTensorHandle weight_zero_points,
+    AtenTensorHandle* other,
+    AtenTensorHandle* B,
+    double output_scale,
+    int64_t output_zero_point,
+    const int32_t* output_dtype,
+    double other_scale,
+    int64_t other_zero_point,
+    const char* binary_post_op,
+    double binary_alpha,
+    const char* unary_post_op,
+    const double** unary_post_op_args,
+    int64_t unary_post_op_args_len_,
+    const char* unary_post_op_algorithm,
+    AtenTensorHandle* ret0) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    c10::List<std::optional<c10::Scalar>> scalars_list;
+    scalars_list.reserve(unary_post_op_args_len_);
+    for (int64_t i = 0; i < unary_post_op_args_len_; i++) {
+      scalars_list.emplace_back(pointer_to_optional(unary_post_op_args[i]));
+    }
+
+    auto tmp_result = at::native::QLinearOnednn::run_pointwise_binary_tensor(
+        *tensor_handle_to_tensor_pointer(X),
+        *tensor_handle_to_tensor_pointer(act_scale),
+        *tensor_handle_to_tensor_pointer(act_zero_point),
+        *tensor_handle_to_tensor_pointer(onednn_weight),
+        *tensor_handle_to_tensor_pointer(weight_scales),
+        *tensor_handle_to_tensor_pointer(weight_zero_points),
+        pointer_to_optional<at::Tensor>(other),
+        pointer_to_optional<at::Tensor>(B),
+        output_scale,
+        output_zero_point,
+        pointer_to_optional<at::ScalarType>(output_dtype),
+        other_scale,
+        other_zero_point,
+        binary_post_op,
+        binary_alpha,
+        unary_post_op,
+        scalars_list,
+        unary_post_op_algorithm);
     *ret0 = new_tensor_handle(std::move(tmp_result));
   });
 }
