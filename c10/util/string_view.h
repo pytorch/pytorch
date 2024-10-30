@@ -51,10 +51,12 @@ class basic_string_view final {
   /* implicit */ constexpr basic_string_view(const_pointer str)
       : basic_string_view(str, strlen_(str)) {}
 
-  /* implicit */ basic_string_view(const ::std::basic_string<CharT>& str)
+  /* implicit */ constexpr basic_string_view(
+      const ::std::basic_string<CharT>& str)
       : basic_string_view(str.data(), str.size()) {}
 
-  /* implicit */ basic_string_view(const ::std::basic_string_view<CharT>& str)
+  /* implicit */ constexpr basic_string_view(
+      const ::std::basic_string_view<CharT>& str)
       : basic_string_view(str.data(), str.size()) {}
 
   constexpr basic_string_view(const basic_string_view&) noexcept = default;
@@ -596,11 +598,7 @@ constexpr inline void swap(
   lhs.swap(rhs);
 }
 using string_view_ext = basic_string_view<char>;
-#ifdef FBCODE_CAFFE2
-using string_view = basic_string_view<char>;
-#else
 using std::string_view;
-#endif
 
 } // namespace c10
 

@@ -66,7 +66,6 @@ static_assert(4 == hell.size(), "");
 static_assert(string_equal("hell", hell.data(), hell.size()), "");
 } // namespace test_sized_constructor
 
-#ifndef FBCODE_CAFFE2
 namespace test_string_constructor {
 void test_conversion_is_implicit(string_view a) {}
 TEST(StringViewTest, testStringConstructor) {
@@ -94,7 +93,6 @@ TEST(StringViewTest, testStringViewConstructor) {
   test_std_string_view_conversion_is_implicit(hello_std_sv);
 }
 } // namespace test_std_string_view_constructor
-#endif
 
 namespace test_conversion_to_string {
 TEST(StringViewTest, testConversionToString) {
