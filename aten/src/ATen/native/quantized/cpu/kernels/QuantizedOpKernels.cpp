@@ -2540,25 +2540,46 @@ void _fake_quantize_tensor_helper(
     .add_input(input)
     .build();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_type_handling", [&] {
-    iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
-      for (const auto i : c10::irange(n)) {
-        scalar_t* output_val = (scalar_t*)(data[0] + i * strides[0]);
-        bool* mask_val = (bool*)(data[1] + i * strides[1]);
-        scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
+  if (at::isReducedFloatingType(input.scalar_type())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_type_handling", [&]() {
+      iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
+        for (const auto i : c10::irange(n)) {
+          scalar_t* output_val = (scalar_t*)(data[0] + i * strides[0]);
+          bool* mask_val = (bool*)(data[1] + i * strides[1]);
+          scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
 
-        const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
-        if (fake_quant_on) {
-        *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
-        *mask_val = ((quant_min <= qval) && (qval <= quant_max));
-        } else {
-          *output_val = *input_val;
-          *mask_val = 1;
+          const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
+          if (fake_quant_on) {
+          *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
+          *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+          } else {
+            *output_val = *input_val;
+            *mask_val = 1;
+          }
         }
-      }
+      });
     });
-  });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_type_handling", [&] {
+      iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
+        for (const auto i : c10::irange(n)) {
+          scalar_t* output_val = (scalar_t*)(data[0] + i * strides[0]);
+          bool* mask_val = (bool*)(data[1] + i * strides[1]);
+          scalar_t* input_val = (scalar_t*)(data[2] + i * strides[2]);
+
+          const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
+          if (fake_quant_on) {
+          *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
+          *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+          } else {
+            *output_val = *input_val;
+            *mask_val = 1;
+          }
+        }
+      });
+    });
   }
+}
 
 void fake_quantize_tensor_cachemask_kernel(
     Tensor& output,
@@ -2705,9 +2726,15 @@ void fake_quant_per_channel_cachemask_cpu(
   // TODO(future, optional): read once, write twice.  Not done at the moment
   //   for simplicity, as we do not expect this to be a bottleneck.
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
-    _fake_quant_per_channel_cachemask_cpu_helper<scalar_t>(iter, iter_mask, quant_min, quant_max);
-  });
+  if (at::isReducedFloatingType(iter.dtype())) {
+    AT_DISPATCH_REDUCED_FLOATING_TYPES(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&]() {
+      _fake_quant_per_channel_cachemask_cpu_helper<scalar_t>(iter, iter_mask, quant_min, quant_max);
+    });
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "fake_quantize_channel_cachemask_cpu_type_handling", [&] {
+      _fake_quant_per_channel_cachemask_cpu_helper<scalar_t>(iter, iter_mask, quant_min, quant_max);
+    });
+  }
 }
 
 
