@@ -11,7 +11,6 @@ import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import statically_known_true
-from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from ...utils._ordered_set import OrderedSet
@@ -436,32 +435,46 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     Run FX transformations on the joint forwards+backwards graph.
     """
+    GraphTransformObserver = functools.partial(
+        torch.fx.passes.graph_transform_observer.GraphTransformObserver,
+        subsystem="joint_graph_passes",
+    )
+
     lazy_init()
     count = 0
     if config.joint_custom_pre_pass is not None:
-        with GraphTransformObserver(graph, "joint_custom_pre_pass"):
-            config.joint_custom_pre_pass(graph.graph)
-            count += 1
+        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
+            config.joint_custom_pre_pass
+        )
+        count += 1
 
     from .post_grad import remove_noop_ops
 
-    remove_noop_ops(graph.graph)
+    GraphTransformObserver(graph, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
 
     if config.joint_graph_constant_folding:
-        with GraphTransformObserver(graph, "constant_fold_uniform_value"):
-            constant_fold_uniform_value(graph)
+        GraphTransformObserver(graph, "constant_fold_uniform_value").apply_gm_pass(
+            constant_fold_uniform_value
+        )
 
     if config.pattern_matcher:
-        for patterns in pass_patterns:
-            count += patterns.apply(graph.graph)  # type: ignore[arg-type]
+        for i, patterns in enumerate(pass_patterns):
+            maybe_count = GraphTransformObserver(
+                graph, f"pass_pattern_{i}"
+            ).apply_graph_pass(patterns.apply)
+            count += maybe_count if not maybe_count else 0
 
     if not config.fallback_random:
-        count += replace_random_passes(graph)
+        maybe_count = GraphTransformObserver(
+            graph, "replace_random_passes"
+        ).apply_gm_pass(graph)
+        count += maybe_count if maybe_count is not None else 0
 
     if config.joint_custom_post_pass is not None:
-        with GraphTransformObserver(graph, "joint_custom_post_pass"):
-            config.joint_custom_post_pass(graph.graph)
-            count += 1
+        GraphTransformObserver(graph, "joint_custom_post_pass").apply_graph_pass(
+            config.joint_custom_post_pass
+        )
+        count += 1
 
     if count:
         stable_topological_sort(graph.graph)

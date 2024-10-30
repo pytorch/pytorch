@@ -57,6 +57,9 @@ BACKENDS: Dict[str, List[Subsystem]] = {
     "aot_eager_decomp_partition_crossref": [],
     "inductor": [
         BisectSubsystem(
+            "joint_graph_passes"
+        ),  # passes applied individually on forward, and backward in inductor
+        BisectSubsystem(
             "post_grad_passes"
         ),  # passes applied individually on forward, and backward in inductor
         ConfigChange("inductor", "emulate_precision_casts", True),
