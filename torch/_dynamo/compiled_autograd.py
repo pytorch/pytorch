@@ -230,7 +230,10 @@ class AutogradCompilerInstance:
         self.stack.enter_context(disable_autocast_cache())
         # Needed to make sure we don't accidentally specialize any symbols
         assert self.fake_tensor_mode.shape_env is not None
-        self.fake_tensor_mode.shape_env._suppress_guards_enter()
+        env = self.fake_tensor_mode.shape_env
+        self.stack.enter_context(
+            torch.fx.experimental.symbolic_shapes._suppress_guards(env)
+        )
         return inputs, sizes, scalars
 
     def proxy_call_backward(
@@ -407,9 +410,6 @@ class AutogradCompilerInstance:
             {},
         )
         self.stack.close()
-        # Needed to make sure we don't accidentally specialize any symbols
-        assert self.fake_tensor_mode.shape_env is not None
-        self.fake_tensor_mode.shape_env._suppress_guards_exit()
         self.fx_tracer.create_node(
             "output",
             "output",
