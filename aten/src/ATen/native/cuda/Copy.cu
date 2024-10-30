@@ -285,7 +285,7 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   bool same_dtype = iter.dtype(0) == iter.dtype(1);
 
   // Check if the tensor is 1D or 2D and non-contiguous
-  if (iter.ndim() <= 2 && !iter.is_contiguous()) {  
+  if (iter.ndim() <= 2 && !iter.is_contiguous() && same_dtype) { 
     return false; 
   }
 
