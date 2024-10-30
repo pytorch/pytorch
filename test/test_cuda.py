@@ -1,6 +1,7 @@
 # Owner(s): ["module: cuda"]
 # ruff: noqa: F841
 
+import numpy as np
 import contextlib
 import ctypes
 import gc
@@ -3473,6 +3474,44 @@ print(ret)
             .strip()
         )
         self.assertEqual(r, "1.0")
+    def _test_copy(self, x, non_blocking):
+        # Perform the copy operation, either blocking or non-blocking
+        event = torch.cuda.Event()
+        x_gpu = x.to(device="cuda", non_blocking=non_blocking)
+        event.record()
+
+        if non_blocking:
+            event.synchronize()
+
+        self.assertEqual(x, x_gpu.cpu())
+    
+    def test_1d_copy(self):
+        # Contiguous 1D tensor
+        x = torch.ones(10000000, dtype=torch.uint8)
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
+
+        # Non-contiguous 1D tensor using a Fortran-ordered NumPy array
+        fortran_arr = np.asfortranarray(np.ones(10000000, dtype=np.uint8))
+        x = torch.from_numpy(fortran_arr[::2])  # Slice to make it non-contiguous
+        self.assertFalse(x.is_contiguous())
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
+   
+    def test_2d_copy(self):
+        rows, cols = 1000, 1000
+        # Contiguous 2D tensor
+        x = torch.ones((rows, cols), dtype=torch.float32)
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
+
+        # Non-contiguous 2D tensor using Fortran-ordered array
+        fortran_arr = np.asfortranarray(np.random.randn(rows, cols).astype(np.float32))
+        x = torch.from_numpy(fortran_arr)
+        
+        self.assertFalse(x.is_contiguous())
+        self._test_copy(x, non_blocking=True)
+        self._test_copy(x, non_blocking=False)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
