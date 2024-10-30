@@ -24,7 +24,7 @@ import sys
 import threading
 import traceback
 from collections import defaultdict
-from contextlib import contextmanager
+from contextlib import _GeneratorContextManager, contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -2881,6 +2881,15 @@ class ValueRangesSLoc:
     upper: SLoc
 
 
+@contextmanager
+def _suppress_guards(shape_env: ShapeEnv) -> Iterator[None]:
+    shape_env._suppress_guards_enter()
+    try:
+        yield
+    finally:
+        shape_env._suppress_guards_exit()
+
+
 class ShapeEnv:
     # This is a wrapper over the actual __init__ function.
     #
@@ -3546,20 +3555,24 @@ class ShapeEnv:
 
     @record_shapeenv_event()
     def _suppress_guards_enter(self) -> None:
+        if not hasattr(TLS, "suppress_guards_stack"):
+            TLS.suppress_guards_stack = []
+        old = self._suppress_guards_tls()
+        TLS.suppress_guards_stack.append(old)
         TLS.suppress_guards = True
 
     @record_shapeenv_event()
     def _suppress_guards_exit(self) -> None:
-        TLS.suppress_guards = False
+        old = (
+            TLS.suppress_guards_stack.pop()
+            if len(TLS.suppress_guards_stack) > 0
+            else False
+        )
+        TLS.suppress_guards = old
 
-    @contextmanager
-    def suppress_guards(self) -> Iterator[None]:
+    def suppress_guards(self) -> _GeneratorContextManager[None]:
         """Context manager to ignore all guards generated inside"""
-        self._suppress_guards_enter()
-        try:
-            yield
-        finally:
-            self._suppress_guards_exit()
+        return _suppress_guards(self)
 
     def _get_key(self) -> object:
         """
