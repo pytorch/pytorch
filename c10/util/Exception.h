@@ -689,28 +689,28 @@ namespace c10::detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-[[deprecated("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg)
-instead.")]]
+C10_DEPRECATED_MESSAGE("AT_ERROR(msg) is deprecated, use TORCH_CHECK(false, msg)
+instead.")
 */
 inline void deprecated_AT_ERROR() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-[[deprecated("AT_ASSERT is deprecated, if you mean to indicate an
+C10_DEPRECATED_MESSAGE("AT_ASSERT is deprecated, if you mean to indicate an
 internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user
 error checking, use " \ "TORCH_CHECK.  See
-https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
+https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERT() {}
 
 /*
 // Deprecation disabled until we fix sites in our codebase
-[[deprecated("AT_ASSERTM is deprecated, if you mean to indicate an
+C10_DEPRECATED_MESSAGE("AT_ASSERTM is deprecated, if you mean to indicate an
 internal invariant failure, use " \
                        "TORCH_INTERNAL_ASSERT instead; if you mean to do user
 error checking, use " \ "TORCH_CHECK.  See
-https://github.com/pytorch/pytorch/issues/20287 for more details.")]]
+https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERTM() {}
 
