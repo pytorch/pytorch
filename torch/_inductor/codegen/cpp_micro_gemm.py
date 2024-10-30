@@ -518,7 +518,7 @@ class CppMicroGemmAMX(CppMicroGemm):
     const auto num_elements_per_b_tile = 512;
     const auto last_k_offset = K / {{block_k}} * {{block_k}};
     const auto tail_k_size = K - last_k_offset;
-    const auto buf_size_per_nr_block = ((K / {{block_k}}) * num_elements_per_b_tile + tail_k_size) * 2;
+    const auto buf_size_per_nr_block = ((K / {{block_k}}) * num_elements_per_b_tile + tail_k_size * 32) * 2;
     const auto buf_size = buf_size_per_nr_block * (N / {{block_n}});
     {%- if is_msvc_compiler %}
     // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
