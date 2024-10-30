@@ -524,8 +524,17 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       torch::dispatch(c10::DispatchKey::CUDA, ::two_shot_all_reduce_),
       {at::Tag::pt2_compliant_tag});
 
+  // An mm that supports consuming asynchronous input. It guarantees the
+  // following rasterization order, and that the corresponding signal arrives
+  // before an input chunk is consumed.
+  //
+  // num_chunks = a_chunks_signals.numel()
+  // for chunk_idx in range(a_chunk_pivot, num_chunks + a_chunk_pivot):
+  //     chunk_idx = chunk_idx % num_chunks
+  //     wait_signal(a_chunk_signals, chunk_idx)
+  //     # Compute output tiles that consumes the input chunk
   m.def(
-      "async_input_mm(Tensor a, Tensor b, Tensor a_chunk_signals, int a_chunk_pivot) -> Tensor",
+      "_async_input_mm(Tensor a, Tensor b, Tensor a_chunk_signals, int a_chunk_pivot) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CUDA, c10d::symmetric_memory::cuda::async_input_mm),
       {at::Tag::pt2_compliant_tag});

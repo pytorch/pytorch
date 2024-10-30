@@ -28,27 +28,49 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  **************************************************************************************************/
+
+
+/**
+ * This file contains PersistentAsyncInputScheduler, a forked version of PersistentScheduler that
+ * supports consuming asynchronous input. This tile scheduler introduces the following arguments:
+ *
+ * - tiles_per_chunk_m – Specifies the size of an M chunk. Chunks are the granularity at which the
+ *   asynchronous input becomes ready. It must be an interger multiple of the size of an M tile.
+ *
+ * - chunk_signals – chunk_signals[i] == 1 indicates that chunk i is ready. Before returning a work
+ *   tile, get_current_work() waits for the signal to ensure that the corresponding chunk is ready.
+ *
+ * - tile_idx_pivot_m – After applying swizzling, apply `pivot(m) => (m + tile_idx_pivot_m) %
+ *   tiles_m` to `m`. In a distributed setting, this allows different ranks to process different m
+ *   indices at the same time, thus avoiding communication hotspots.
+ *
+ * Note that this scheduler currently only supports the KernelTmaWarpSpecializedCooperative kernel
+ * schedule. This is enforced via the template argument KernelSchedule.
+ *
+ * Usage:
+ *
+ * using GemmKernel = cutlass::gemm::kernel::GemmUniversal<
+ *    Shape<int, int, int, int>,
+ *    CollectiveMainloop,
+ *    CollectiveEpilogue,
+ *    cutlass::gemm::PersistentAsyncInputScheduler<KernelSchedule>>;
+ */
 #pragma once
 #include <cutlass/gemm/kernel/static_tile_scheduler.hpp>
 
 namespace {
 
-__device__ __forceinline__ uint32_t cas(uint32_t* addr, uint32_t compare, uint32_t val) {
-#if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
-  CUDA_KERNEL_ASSERT(false);
-#else
-  uint32_t old_val;
-  asm volatile("atom.global.relaxed.sys.cas.b32 %0, [%1], %2, %3;"
-               : "=r"(old_val)
-               : "l"(addr), "r"(compare), "r"(val)
-               : "memory");
-  return old_val;
-#endif
-}
-
 __device__ __forceinline__ void wait_signal(uint32_t* addr) {
-  while (cas(addr, 1, 1) != 1)
-    ;
+  int ready = *addr;
+  while (!ready) {
+    asm volatile("ld.volatile.global.b32 %0, [%1];"
+                 : "=r"(ready)
+                 : "l"(addr)
+                 : "memory");
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ > 700)
+    asm volatile("nanosleep.u32 20;");
+#endif
+  };
 }
 
 }
