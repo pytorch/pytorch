@@ -612,6 +612,17 @@ def reorder_for_peak_memory(
         nodes, name_to_fused_node, name_to_buf, name_to_freeable_input_buf
     )
 
+    # export graph for simulator if needed
+    export_graph = True
+    if export_graph:
+        export_graph_for_simulator(
+            nodes,
+            name_to_freeable_input_buf,
+            name_to_fused_node,
+            graph_inputs,
+            graph_outputs,
+        )
+
     # keep track of the peak memory estimates of different methods
     peak_memory_diff_methods: List[PeakMemoryResult] = []
 
@@ -656,3 +667,99 @@ def reorder_for_peak_memory(
     best_result = min(peak_memory_diff_methods, key=lambda x: x.peak_memory)
 
     return best_result.order
+
+
+def export_graph_for_simulator(
+    nodes: List[BaseSchedulerNode],
+    name_to_freeable_input_buf: Dict[str, FreeableInputBuffer],
+    name_to_fused_node: Dict[str, BaseSchedulerNode],
+    graph_inputs: Set[str],
+    graph_outputs: Set[str],
+) -> None:
+    """
+    Dump the graph for simulator.
+    """
+
+    class ORMBuffer(TypedDict):
+        name: str
+        size_alloc: int
+        size_free: int
+        size: int  # for backward compatibility
+        is_input: bool
+        is_output: bool
+        deps: List[str]
+        unmet_deps: List[str]
+
+    class ORMNode(TypedDict):
+        name: str
+        buffer_names: List[str]
+
+    class ORMGraph(TypedDict):
+        nodes: List[ORMNode]
+        buffers: List[ORMBuffer]
+
+    orm_buffers: List[ORMBuffer] = []
+    orm_nodes: List[ORMNode] = []
+
+    # get orm buffers for freeable input buffers
+    for buf_name, input_buf in name_to_freeable_input_buf.items():
+        orm_buf_input_buffer: ORMBuffer = {
+            "name": buf_name,
+            "size_alloc": input_buf.mpi_buffer.size_free,
+            "size_free": input_buf.mpi_buffer.size_free,
+            "size": input_buf.mpi_buffer.size_free,
+            "is_input": True,
+            "is_output": buf_name in graph_outputs,
+            "deps": [],
+            "unmet_deps": [],
+        }
+        orm_buffers.append(orm_buf_input_buffer)
+
+    # get orm buffers for scheduler buffers
+    name_to_buf: Dict[str, SchedulerBuffer] = {
+        buf.get_name(): buf for node in nodes for buf in node.get_outputs()
+    }  # need to reassign due to probably node pruning
+    for buf_name, sched_buf in name_to_buf.items():
+        deps = [
+            pred_buf.get_name()
+            for pred_buf in name_to_fused_node[
+                sched_buf.defining_op.get_name()
+            ].mpi_node.pred_buffers
+        ]
+        orm_buf_scheduler_buffer: ORMBuffer = {
+            "name": buf_name,
+            "size_alloc": sched_buf.mpi_buffer.size_alloc,
+            "size_free": sched_buf.mpi_buffer.size_free,
+            "size": sched_buf.mpi_buffer.size_free,
+            "is_input": False,
+            "is_output": buf_name in graph_outputs,
+            "deps": deps,
+            "unmet_deps": [
+                buf_name for buf_name in deps if buf_name not in graph_inputs
+            ],
+        }
+        orm_buffers.append(orm_buf_scheduler_buffer)
+
+    # get orm nodes
+    for node in nodes:
+        orm_node: ORMNode = {
+            "name": node.get_name(),
+            "buffer_names": list(node.get_buffer_names()),
+        }
+        orm_nodes.append(orm_node)
+
+    # create the graph object
+    g: ORMGraph = {
+        "nodes": orm_nodes,
+        "buffers": orm_buffers,
+    }
+
+    # dump the graph
+    import json
+    import os
+
+    from functorch.compile import get_graph_being_compiled
+
+    fname_graph = os.path.splitext(get_graph_being_compiled())[0] + "_fused.json"
+    with open(fname_graph, "w") as f:
+        json.dump(g, f, indent=2)
