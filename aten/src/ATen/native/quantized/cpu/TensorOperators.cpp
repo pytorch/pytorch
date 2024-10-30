@@ -24,8 +24,7 @@
 #include <ATen/ops/resize_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 /*
 All comparator operators will be named "<aten op name>_quantized_cpu".
@@ -100,4 +99,4 @@ const Tensor& quantized_resize_cpu_(
   return self;
 }
 
-}}  // at::native
+}  // namespace at::native
