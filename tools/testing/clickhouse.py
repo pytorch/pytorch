@@ -3,7 +3,7 @@ import os
 from functools import lru_cache
 from typing import Any, Dict, List
 
-import clickhouse_connect
+import clickhouse_connect  # type: ignore[import]
 
 
 @lru_cache(maxsize=1)
@@ -25,9 +25,7 @@ def get_clickhouse_client() -> Any:
     )
 
 
-def query_clickhouse(
-    query: str, params: Dict[str, Any]
-) -> Any:
+def query_clickhouse(query: str, params: Dict[str, Any]) -> Any:
     """
     Queries ClickHouse.  Returns datetime in YYYY-MM-DD HH:MM:SS format.
     """
