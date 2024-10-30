@@ -413,6 +413,7 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "native_batch_norm"),
     (None, None, "_upsample_bilinear2d_aa"),
     (None, None, "empty_strided"),  # aten.empty_strided was not decomposed
+    (None, None, "bernoulli"),  # bernoulli is a function of randomness, so couldn't do cross-reference.
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
