@@ -1992,15 +1992,21 @@ class TritonKernel(SIMDKernel):
         sizes = [":"] * (ndims - nreduce) + ["None"] * nreduce
         return f"{value}[{', '.join(sizes)}]"
 
-    def reduction_collapse_dims(self, buffer, value: str) -> CSEVariable:
+    def reduction_collapse_dims(self, buffer, value: str) -> str:
         """
         Reshape to RBLOCK, collapsing all reduction dims.
         """
+        # This is not needed for 1D reductions.
+        if self.num_reduction_dims == 1:
+            return value
+
         target_ndim = self.triton_tensor_ndim() - self.num_reduction_dims
         initial_shape = self.dense_size_list()
         target_shape = initial_shape[:target_ndim] + ["RBLOCK"]
-        return self.cse.generate(
-            buffer, triton_reshape(value, initial_shape, target_shape)
+        return str(
+            self.cse.generate(
+                buffer, triton_reshape(value, initial_shape, target_shape)
+            )
         )
 
     def reduction(
@@ -2045,7 +2051,7 @@ class TritonKernel(SIMDKernel):
             use_helper = reduction_type in {"any", "max", "min", "prod"}
             module = "triton_helpers" if use_helper else "tl"
 
-            value = str(self.reduction_collapse_dims(buffer, value))
+            value = self.reduction_collapse_dims(buffer, value)
             if reduction_type in {"max", "min"}:
                 value = self.reduction_resize(
                     f"{module}.{reduction_type}2({value}, {dim})"
