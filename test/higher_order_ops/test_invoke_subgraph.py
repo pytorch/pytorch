@@ -158,6 +158,23 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
+    def test_dropout(self):
+        @wrap_with_invoke_subgraph
+        def gn(x):
+            return torch.nn.functional.dropout(torch.sin(x), p=0.5)
+
+        @wrap_with_invoke_subgraph
+        def hn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x) + hn(x)
+
+        x = torch.randn(8, requires_grad=True)
+        # Difficult to check the results here because we random does not match
+        # between eager and Triton.
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+
     def test_dedupe(self):
         def gn(x, y):
             return (torch.mul(x, y),)
@@ -221,19 +238,26 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[8]", primals_2: "f32[8]"):
-        repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, '___forward_invoke_subgraph_0', (primals_1, primals_2));  repeated_subgraph0 = None
-        getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+        ___forward_invoke_subgraph_0_post_graph = self.___forward_invoke_subgraph_0_post_graph
 
-        repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, '___forward_invoke_subgraph_0', (getitem, primals_2));  repeated_subgraph0_1 = None
-        getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return (getitem_1, primals_1, primals_2, getitem)
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph, '___forward_invoke_subgraph_0_post_graph', (primals_1, primals_2));  ___forward_invoke_subgraph_0_post_graph = primals_1 = None
+        getitem: "f32[8]" = invoke_subgraph[0]
 
-    class repeated_subgraph0(torch.nn.Module):
-        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
-            mul: "f32[8]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-            return (mul,)
+        ___forward_invoke_subgraph_0_post_graph_1 = self.___forward_invoke_subgraph_0_post_graph
+
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph_1, '___forward_invoke_subgraph_0_post_graph', (getitem, primals_2));  ___forward_invoke_subgraph_0_post_graph_1 = getitem = primals_2 = None
+        getitem_1: "f32[8]" = invoke_subgraph_1[0]
+        getitem_2: "f32[8]" = invoke_subgraph_1[1]
+        getitem_3: "f32[8]" = invoke_subgraph_1[2];  invoke_subgraph_1 = None
+
+        getitem_6: "f32[8]" = invoke_subgraph[1]
+        getitem_7: "f32[8]" = invoke_subgraph[2];  invoke_subgraph = None
+        return (getitem_1, getitem_2, getitem_3, getitem_6, getitem_7)
+
+    class ___forward_invoke_subgraph_0_post_graph(torch.nn.Module):
+        def forward(self, primals_0: "f32[8]", primals_1: "f32[8]"):
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(primals_0, primals_1)
+            return (mul, primals_0, primals_1)
 """,
         )
 
