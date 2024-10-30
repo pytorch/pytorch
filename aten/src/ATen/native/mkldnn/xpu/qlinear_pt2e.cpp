@@ -1,14 +1,12 @@
 #include <torch/library.h>
 
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
-#include "c10/core/ScalarType.h"
+#include <c10/core/ScalarType.h>
 
 using namespace at::native::onednn;
 
-namespace at{
-namespace native{
-namespace xpu{
-    // Operators for pt2.0
+namespace at::native::xpu {
+
 Tensor q_linear_pointwise(
     Tensor act, // int8 cpu tensor
     double act_scale,
@@ -24,7 +22,6 @@ Tensor q_linear_pointwise(
     torch::List<std::optional<at::Scalar>> post_op_args,
     c10::string_view post_op_algorithm) {
 
-    
   Tensor b_raw = bias.has_value() ? bias.value() : at::Tensor();
 
   const int64_t dim = act.dim();
@@ -243,14 +240,12 @@ Tensor q_linear_pointwise_binary_tensor(
   return qout;
 }
 
-
 at::Tensor q_linear_prepack_onednn(
     at::Tensor weight,
     c10::optional<torch::List<int64_t>> input_shape) {
   at::Tensor weight_transposed = weight.transpose(0, 1);
   return weight_transposed;
 }
-
 
 TORCH_LIBRARY_IMPL(onednn, XPU, m) {
   m.impl(
@@ -270,7 +265,4 @@ TORCH_LIBRARY_IMPL(onednn, XPU, m) {
     TORCH_FN(q_linear_pointwise_binary_tensor));
 }
 
-
-}
-}
-}
+} // namespace at::native::xpu
