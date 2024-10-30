@@ -218,22 +218,6 @@ dot_with_fp32_arith_main_loop_no_bfdot(
   return reduce(sum);
 }
 
-template <typename T>
-struct half_to_float16 {
-  using type = T;
-};
-
-
-#ifdef __aarch64__
-template <>
-struct half_to_float16<Half> {
-  using type = float16_t;
-};
-#endif
-
-template <typename T>
-using half_to_float16_t = typename half_to_float16<T>::type;
-
 static_assert(
     (vec::Vectorized<Half>::size() & (vec::Vectorized<Half>::size() - 1)) == 0,
     "Below code expects power-of-2 vector register size!");
@@ -258,13 +242,10 @@ static_assert(
                                                                         \
   /* Second-tier tail fixup: handle all workloads. */                   \
   for (int j = len_aligned_vec; j < len; ++j) {                         \
-    /* We use half_to_float16_t here because changing to Half was */    \
-    /* causing arithmetic to at fp16 precision, but the necessary */    \
-    /* necessary behavior to pass python test/test_mps.py -k */         \
-    /* test_output_grad_match_nn_functional_linear_cpu_float16 is */    \
-    /* fp32. (I'm not sure exactly why this fixes it.) */               \
-    half_to_float16_t<std::decay_t<decltype(vec1[j])>> x1 = vec1[j];    \
-    half_to_float16_t<std::decay_t<decltype(vec2[j])>> x2 = vec2[j];    \
+    /* Attempting to use Half here caused multiple test failures; */    \
+    /* using float to unbreak. (Suspect we need a scalar FMA.) */       \
+    float x1 = vec1[j];                                                 \
+    float x2 = vec2[j];                                                 \
     reduced_sum += x1 * x2;                                             \
   }                                                                     \
   return reduced_sum
