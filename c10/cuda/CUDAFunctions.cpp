@@ -1,5 +1,6 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/WaitCounter.h>
 
 #include <limits>
 
@@ -138,6 +139,7 @@ void device_synchronize() {
   if (C10_UNLIKELY(interp)) {
     (*interp)->trace_gpu_device_synchronization(c10::kCUDA);
   }
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.cuda_device_synchronize);
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 }
 
@@ -173,7 +175,7 @@ namespace _internal {
 bool dummyHasPrimaryContext([[maybe_unused]] DeviceIndex device_index) {
   TORCH_CHECK(false, "Should never been called");
 }
-bool (*hasPrimaryContext)(DeviceIndex) = dummyHasPrimaryContext;
+static bool (*hasPrimaryContext)(DeviceIndex) = dummyHasPrimaryContext;
 
 // Private api to be called from CUDAHooks.cpp
 C10_CUDA_API void setHasPrimaryContext(bool (*func)(DeviceIndex)) {
@@ -208,7 +210,7 @@ cudaError_t GetDeviceCount(int* dev_count) {
 // call y = torch.empty(1, device=“cuda”) # CUDA context is created on cuda:0
 // ```
 #if CUDA_VERSION >= 12000
-thread_local DeviceIndex targetDeviceIndex = -1;
+thread_local static DeviceIndex targetDeviceIndex = -1;
 
 cudaError_t GetDevice(DeviceIndex* device) {
   if (targetDeviceIndex >= 0) {

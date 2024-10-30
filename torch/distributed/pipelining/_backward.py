@@ -169,7 +169,6 @@ def stage_backward_input(
     param_groups = get_param_groups(
         stage_input_grad_fns, weight_grad_fns, reverse_edges_dict
     )
-    print(f"got param_groups {param_groups=}")
 
     handles = []
     for param_group in param_groups:
@@ -230,7 +229,6 @@ def stage_backward_input(
 def stage_backward_weight(
     weights: Iterator[Parameter], param_groups: List[Dict[str, Any]], retain_graph=False
 ):
-    print("stage_backward_weight")
     # map weights to param_group_weights
     grad_acc_to_weight = {}
     weight_grads = []
@@ -272,7 +270,6 @@ def stage_backward_weight(
                 weight.grad = dw
             else:
                 weight.grad += dw
-            print("set {weight.shape=} grad to {grad_acc.shape}")
     # return grads in the original order weights were provided in
     return weight_grads
 
@@ -293,7 +290,6 @@ def stage_backward(
     in the autograd trace) as well as return a list of the gradients for the
     input values
     """
-    print("stage_backward")
     if outputs_with_grads_idxs is not None:
         # Deprecated, not used in runtime calls, only exists in compiler
         stage_output = [stage_output[i] for i in outputs_with_grads_idxs]
