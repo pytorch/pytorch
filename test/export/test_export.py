@@ -1074,6 +1074,107 @@ graph():
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
+    def test_draft_export_checks_mutation(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.randn(64), torch.randn(64))
+        with self.assertRaisesRegex(RuntimeError, "for argument 'y'"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={"y"})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        # No errors
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+    def test_draft_export_checks_mutation_list(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(xs: List[torch.Tensor]) -> torch.Tensor:
+            x, y = xs
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(xs):
+            x, y = xs
+            return x.clone()
+
+        class Foo(torch.nn.Module):
+            def forward(self, xs):
+                return foo(xs)
+
+        model = Foo()
+        inputs = ([torch.randn(64), torch.randn(64)],)
+        with self.assertRaisesRegex(RuntimeError, "for argument 'xs'"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={"xs"})
+        def foo(xs: List[torch.Tensor]) -> torch.Tensor:
+            x, y = xs
+            y.add_(1)
+            return x.clone()
+
+        @foo.register_fake
+        def _(xs):
+            x, y = xs
+            return x.clone()
+
+        # No errors
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
+    def test_draft_export_checks_aliasing(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.randn(64), torch.randn(64))
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                ep = export(model, inputs)
+
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @foo.register_fake
+        def _(x, y):
+            return x.clone()
+
+        # No errors
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
+
     @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
     @testing.expectedFailureSerDerNonStrict
     def test_real_tensor_bool_cast(self):
@@ -3127,6 +3228,21 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         args = (torch.rand(3, 700, 700), 150, 150)
         self.assertEqual(ecrop.module()(*args), ecrop(*args))
+
+    def test_dim_dynamic_divisibility(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                if x.size(0) % 2 == 0:
+                    return x.clone() * 2
+                else:
+                    return x.clone() * 0
+
+        input1 = (torch.randn(4),)
+        model = M()
+        dynamic_shapes = {
+            "x": {0: torch.export.Dim.DYNAMIC},
+        }
+        export(model, input1, dynamic_shapes=dynamic_shapes)
 
     def test_export_func_with_kwargs(self):
         class Module(torch.nn.Module):
