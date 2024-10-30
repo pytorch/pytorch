@@ -3128,6 +3128,21 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         args = (torch.rand(3, 700, 700), 150, 150)
         self.assertEqual(ecrop.module()(*args), ecrop(*args))
 
+    def test_dim_dynamic_divisibility(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                if x.size(0) % 2 == 0:
+                    return x.clone() * 2
+                else:
+                    return x.clone() * 0
+
+        input1 = (torch.randn(4),)
+        model = M()
+        dynamic_shapes = {
+            "x": {0: torch.export.Dim.DYNAMIC},
+        }
+        export(model, input1, dynamic_shapes=dynamic_shapes)
+
     def test_export_func_with_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, kw1, kw2):
