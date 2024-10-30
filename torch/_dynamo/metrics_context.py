@@ -14,9 +14,8 @@ class MetricsContext:
         """
         Use this class as a contextmanager to create a context under which to accumulate
         a set of metrics, e.g., metrics gathered during a compilation. On exit of the
-        contextmanager, we call the provided 'on_exit' function and pass a dictionary of
-        all metrics set during the lifetime of the contextmanager. Automatically adjusts
-        timing for any timed fields, i.e., those with a suffix of '_us', '_ms', or '_s'.
+        contextmanager, call the provided 'on_exit' function and pass a dictionary of
+        all metrics set during the lifetime of the contextmanager.
         """
         self._on_exit = on_exit
         self._metrics: Dict[str, Any] = {}
@@ -43,17 +42,6 @@ class MetricsContext:
         """
         Post-process metrics where appropriate and call the provided on_exit function.
         """
-        for name, value in self._metrics.items():
-            if not isinstance(value, (float, int)):
-                continue
-
-            if name.endswith("_us"):
-                self._metrics[name] = self._metrics[name] // 1000
-            elif name.endswith("_ms"):
-                self._metrics[name] = self._metrics[name] // 1000**2
-            elif name.endswith("_s"):
-                self._metrics[name] = float(self._metrics[name]) / 1000**3
-
         self._on_exit(self._metrics, exc_type, exc_value)
         self._recording = False
 
@@ -103,9 +91,9 @@ class MetricsContext:
     @contextmanager
     def timed(self, metric: str) -> Generator[Any, None, None]:
         """
-        Use this context manager to record execution time. Note that at exit, any
-        timing fields are updated automatically to represent us, ms, or s depending
-        on the suffix: "_us", "_ms", or "_s", respectively.
+        Use this context manager to record execution time. Automatically adjusts the
+        recorded time according to the suffix of the provided metric name: "_ns", "_us",
+        "_ms", or "_s" for nanoseconds, microseconds, etc.
         """
 
         # To properly record timing when there's recursion, start and stop the timer
@@ -119,5 +107,18 @@ class MetricsContext:
         finally:
             if outermost:
                 elapsed = time.time_ns() - self._start_time[metric]
+
+                # Adjust according to suffix. Assume seconds are floats and everything
+                # else is an integer.
+                if metric.endswith("_ns"):
+                    pass
+                elif metric.endswith("_us"):
+                    elapsed = elapsed // 1000
+                elif metric.endswith("_ms"):
+                    elapsed = elapsed // 1000**2
+                else:
+                    # Assume anything else is seconds.
+                    elapsed = float(elapsed) / 1000**3
+
                 self.increment(metric, elapsed)
                 del self._start_time[metric]
