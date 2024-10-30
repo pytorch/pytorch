@@ -459,8 +459,9 @@ class DequeVariable(CommonListMethodsVariable):
             maxlen.is_python_constant()
         ), f"maxlen must be a constant, got: {maxlen.debug_repr()}"
         self.maxlen = maxlen
+        items = list(items)
         if self.maxlen.as_python_constant() is not None:
-            items = list(items)[-maxlen.as_python_constant() :]
+            items = items[-maxlen.as_python_constant() :]
         super().__init__(items, **kwargs)
 
     def python_type(self):
@@ -534,7 +535,7 @@ class DequeVariable(CommonListMethodsVariable):
             prefix = arg.force_unpack_var_sequence(tx)
             prefix.reverse()
             tx.output.side_effects.mutation(self)
-            self.items = prefix + list(self.items)
+            self.items[:] = prefix + self.items
             slices = slice(None, maxlen)
             result = ConstantVariable.create(None)
         elif name == "popleft" and self.mutable_local:
@@ -542,19 +543,19 @@ class DequeVariable(CommonListMethodsVariable):
             assert not kwargs
             item = self.items[0]
             tx.output.side_effects.mutation(self)
-            self.items = self.items[1:]
+            self.items[:] = self.items[1:]
             result = item
         elif name == "appendleft" and self.mutable_local:
             assert not kwargs
             tx.output.side_effects.mutation(self)
-            self.items = [args[0]] + list(self.items)
+            self.items[:] = [args[0]] + self.items
             slices = slice(None, maxlen)
             result = ConstantVariable.create(None)
         else:
             result = super().call_method(tx, name, args, kwargs)
 
         if slices is not None and maxlen is not None and len(self.items) > maxlen:
-            self.items = list(self.items)[slices]
+            self.items[:] = self.items[slices]
         return result
 
 
