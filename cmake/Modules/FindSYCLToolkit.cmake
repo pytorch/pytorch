@@ -101,9 +101,6 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
     HINTS ${SYCL_LIBRARY_DIR}
     NO_DEFAULT_PATH
   )
-  if(SYCL_LIBRARY STREQUAL "SYCL_LIBRARY-NOTFOUND")
-    message(FATAL_ERROR "Cannot find a SYCL library on Windows")
-  endif()
 endif()
 
 find_library(
