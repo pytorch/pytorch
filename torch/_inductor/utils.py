@@ -858,7 +858,7 @@ def argsort(seq) -> List[int]:
 
 
 def argsort_sym(
-    shape_env, seq: List[Union[int, torch.SymInt, sympy.Expr]]
+    shape_env, seq: Sequence[Union[int, torch.SymInt, sympy.Expr]]
 ) -> List[int]:
     def cmp(a, b):
         a_idx, a_val = a
