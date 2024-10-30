@@ -6,8 +6,7 @@
 #include <ATen/native/Activation.h>
 #include <ATen/native/DispatchStub.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using qrelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qrelu_leaky_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
@@ -254,5 +253,4 @@ DECLARE_DISPATCH(qmean_inner_dim_fn, qmean_inner_dim_stub);
 DECLARE_DISPATCH(qstd_inner_dim_fn, qstd_inner_dim_stub);
 DECLARE_DISPATCH(qprelu_fn, qprelu_stub);
 
-} // namespace native
-} // namespace at
+} // namespace at::native
