@@ -331,7 +331,7 @@ static PyMethodDef THPStream_methods[] = {
     {"__eq__", (PyCFunction)THPStream_eq, METH_O, nullptr},
     {nullptr}};
 
-PyTypeObject THPStreamType = {
+static PyTypeObject THPStreamType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch.Stream", /* tp_name */
     sizeof(THPStream), /* tp_basicsize */
