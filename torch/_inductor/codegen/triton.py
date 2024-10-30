@@ -2250,17 +2250,10 @@ class TritonKernel(SIMDKernel):
 
                 welford_define(
                     self.suffix,
-                    [f"{result_mean}_tmp", f"{result_m2}_tmp", f"{result_weight}_tmp"],
+                    [str(x) for x in (result_mean, result_m2, result_weight)],
                     accumulator,
                     accumulator_m2,
                     accumulator_weight,
-                )
-                self.suffix.splice(
-                    f"""\
-                {result_mean} = {self.reduction_resize(f'{result_mean}_tmp')}
-                {result_m2} = {self.reduction_resize(f'{result_m2}_tmp')}
-                {result_weight} = {self.reduction_resize(f'{result_weight}_tmp')}
-                """
                 )
                 result_var = result_mean, result_m2, result_weight
             else:
