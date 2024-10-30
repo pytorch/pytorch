@@ -606,7 +606,7 @@ static PyObject* THPModule_fromDLPack(PyObject* _unused, PyObject* data) {
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
   auto tensor = torch::utils::tensor_fromDLPack(data);
-  return THPVariable_Wrap(tensor);
+  return THPVariable_Wrap(std::move(tensor));
   END_HANDLE_TH_ERRORS
 }
 

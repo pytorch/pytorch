@@ -64,12 +64,12 @@ PyObject* THPCppFunction_call(
   auto num_outputs = output.size();
   if (num_outputs == 1) {
     // assume we want to unpack one element tuples for now
-    return THPVariable_Wrap(output[0]);
+    return THPVariable_Wrap(std::move(output[0]));
   }
 
   THPObjectPtr tuple(PyTuple_New(static_cast<Py_ssize_t>(num_outputs)));
   for (size_t i = 0; i != num_outputs; ++i) {
-    PyTuple_SET_ITEM(tuple.get(), i, THPVariable_Wrap(output[i]));
+    PyTuple_SET_ITEM(tuple.get(), i, THPVariable_Wrap(std::move(output[i])));
   }
   return tuple.release();
 }

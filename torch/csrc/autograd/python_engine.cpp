@@ -387,7 +387,8 @@ PyObject* THPEngine_run_backward(
           "differentiated Tensors appears to not have been used "
           "in the graph. Set allow_unused=True if this is the "
           "desired behavior.");
-      PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));
+      PyTuple_SET_ITEM(
+          py_outputs.get(), i, THPVariable_Wrap(std::move(outputs[i])));
     }
     return py_outputs.release();
   } else {
