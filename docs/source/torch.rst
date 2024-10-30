@@ -306,12 +306,10 @@ Math operations
 Constants
 ~~~~~~~~~~~~~~~~~~~~~~
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    inf
-    nan
+======================================= ===========================================
+``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
+``nan``                                     A floating-point "not a number" value. This value is not a legal number.nan`. Alias for :attr:`math.nan`.
+======================================= ===========================================
 
 Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
