@@ -2204,7 +2204,7 @@ def gen_source_files(
     skip_dispatcher_op_registration: bool,
     update_aoti_c_shim: bool,
     aoti_backends: set[DispatchKey],
-    aoti_extend: bool,
+    extend_aoti_c_shim: bool,
 ) -> None:
     extra_cuda_headers = """\
 #include <c10/cuda/CUDAGuard.h>
@@ -2399,7 +2399,7 @@ def gen_source_files(
                 dispatch_key,
                 backend_indices,
                 header=True,
-                aoti_extend=aoti_extend,
+                extend_aoti_c_shim=extend_aoti_c_shim,
                 includes="",
             )
             if update_aoti_c_shim:
@@ -2444,7 +2444,7 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
                         structured_func_group_dict,
                         dispatch_key,
                         backend_indices,
-                        aoti_extend=aoti_extend,
+                        extend_aoti_c_shim=extend_aoti_c_shim,
                     )
                     if header is not None:
                         headers.append(header)
@@ -2462,7 +2462,7 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
                     dispatch_key,
                     backend_indices,
                     header=False,
-                    aoti_extend=aoti_extend,
+                    extend_aoti_c_shim=extend_aoti_c_shim,
                     includes=headers_for_aoti() + "\n" + extra_headers,
                 ),
             )
@@ -2859,9 +2859,13 @@ def main() -> None:
         "WARNING: Do not use this unless you are sure what you are doing!!!",
     )
     parser.add_argument(
-        "--aoti-extend",
+        "--extend-aoti-c-shim",
         action="store_true",
-        help="Update AOTInductor C shim after adding an entry to inductor_fallback_ops in torchgen/aoti/fallback_ops.py. "
+        help="This Flag indicates the generation of c shims for out-of-tree ATen ops,"
+        "which is an extension to the In-tree ATen op c shims. This flag needs to be combined with"
+        "---source-path=<out-of-tree native_functions.yaml>"
+        "--aoti-install-dir=<in-tree aoti_install_dir>/extend"
+        "   default is torch/csrc/inductor/aoti_torch/generated/extend"
         "WARNING: Do not use this unless you are sure what you are doing!!!",
     )
 
@@ -2885,10 +2889,7 @@ def main() -> None:
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
-    xpu_in_whitelist = (
-        options.backend_whitelist and str(DispatchKey.XPU) in options.backend_whitelist
-    )
-    if (not options.xpu) and (not xpu_in_whitelist):
+    if not options.xpu:
         ignore_keys.add(DispatchKey.XPU)
 
         if DispatchKey.XPU in dispatch_keys:
@@ -2929,6 +2930,7 @@ def main() -> None:
     Path(core_install_dir).mkdir(parents=True, exist_ok=True)
     ops_install_dir = f"{options.install_dir}/ops"
     Path(ops_install_dir).mkdir(parents=True, exist_ok=True)
+
     aoti_install_dir = f"{options.aoti_install_dir}"
     Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
 
@@ -3006,7 +3008,7 @@ def main() -> None:
             skip_dispatcher_op_registration=options.skip_dispatcher_op_registration,
             update_aoti_c_shim=options.update_aoti_c_shim,
             aoti_backends=aoti_backends,
-            aoti_extend=options.aoti_extend,
+            extend_aoti_c_shim=options.extend_aoti_c_shim,
         )
 
     if "headers" in options.generate:

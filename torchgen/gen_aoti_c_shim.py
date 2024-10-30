@@ -319,7 +319,7 @@ def get_backend_index_for_aoti(
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
-    aoti_extend: bool,
+    extend_aoti_c_shim: bool,
 ) -> BackendIndex | None:
     backend_index = None
     if backend_indices[dispatch_key].has_kernel(func) or (
@@ -333,7 +333,7 @@ def get_backend_index_for_aoti(
     else:
         # for the extend out-of-tree kernels, we don't need to
         # duplicatly create C shim wrappers for other dispatch keys
-        if aoti_extend:
+        if extend_aoti_c_shim:
             return backend_index
 
         elif backend_indices[DispatchKey.CompositeExplicitAutograd].has_kernel(func):
@@ -357,10 +357,10 @@ def get_header_for_aoti(
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
     dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
-    aoti_extend: bool,
+    extend_aoti_c_shim: bool,
 ) -> str | None:
     backend_index = get_backend_index_for_aoti(
-        func, func_group_mapping, dispatch_key, backend_indices, aoti_extend
+        func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
     )
     return (
         None
@@ -383,10 +383,10 @@ def gen_c_shim(
     dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
-    aoti_extend: bool,
+    extend_aoti_c_shim: bool,
 ) -> str | None:
     backend_index = get_backend_index_for_aoti(
-        func, func_group_mapping, dispatch_key, backend_indices, aoti_extend
+        func, func_group_mapping, dispatch_key, backend_indices, extend_aoti_c_shim
     )
     if backend_index is None:
         return None
@@ -418,7 +418,7 @@ class ShimGenerator:
     dispatch_key: DispatchKey
     backend_indices: dict[DispatchKey, BackendIndex]
     header: bool  # True to generate .h and False to generate .cpp
-    aoti_extend: bool
+    extend_aoti_c_shim: bool
 
     @method_with_native_function
     def __call__(
@@ -431,7 +431,7 @@ class ShimGenerator:
             self.dispatch_key,
             self.backend_indices,
             self.header,
-            self.aoti_extend,
+            self.extend_aoti_c_shim,
         )
         return result
 
@@ -442,7 +442,7 @@ def gen_aoti_c_shim(
     dispatch_key: DispatchKey,
     backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
-    aoti_extend: bool,
+    extend_aoti_c_shim: bool,
     includes: str = "",
 ) -> str:
     body = "\n".join(
@@ -453,7 +453,7 @@ def gen_aoti_c_shim(
                     dispatch_key,
                     backend_indices,
                     header,
-                    aoti_extend,
+                    extend_aoti_c_shim,
                 ),
                 native_functions,
             )
@@ -490,7 +490,7 @@ extern "C" {{
         return f"""
 {warning}
 
-#include <torch/csrc/inductor/aoti_torch/generated/{"extend/" if aoti_extend else ""}c_shim_{device}.h>
+#include <torch/csrc/inductor/aoti_torch/generated/{"extend/" if extend_aoti_c_shim else ""}c_shim_{device}.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
