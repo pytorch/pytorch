@@ -27,6 +27,7 @@ from ..exc import unimplemented, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import (
+    counters,
     check_constant_args,
     check_unspec_or_constant_args,
     identity,
@@ -37,6 +38,8 @@ from ..utils import (
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
+
+from unittest.mock import patch
 
 
 try:
@@ -156,10 +159,14 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     @classmethod
     def create_with_source(cls, value, source):
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
+        from torch._dynamo.bytecode_transformation import is_generator
+        if is_generator(value.__code__):
+            return ContextlibContextManagerFunctionVariable(cls(value, source=source))
         return cls(value, source=source)
 
     def __init__(self, fn, is_constant=False, **kwargs) -> None:
         super().__init__(**kwargs)
+        print(f"Inside {self.__class__.__name__}({fn})", flush=True)
         if getattr(fn, "_dynamo_marked_constant", False):
             # This method should be treated as a constant for the purposes of compilation
             self.is_constant = True
@@ -396,11 +403,13 @@ class ContextlibContextManagerFunctionVariable(BaseUserFunctionVariable):
         )
         # Flag to the tracer to change the behavior of YIELD_VALUE/RETURN_VALUE
         self.inline_tracer.consume_all_items = False
+        print(f'inside {self.__class__.__name__}::call_function()')
 
         return self
 
     def can_reconstruct(self, tx):
         # Any graph break should force the entire context manager to run on eager mode
+        print(f'inside {self.__class__.__name__}::can_reconstruct')
         return False
 
     def next_variable(self, tx):
@@ -408,10 +417,13 @@ class ContextlibContextManagerFunctionVariable(BaseUserFunctionVariable):
 
         tracer = self.inline_tracer
 
+        print(f'inside {self.__class__.__name__}::next_variable()')
+
         try:
             # inline_call_ has a try/except block that does the same thing
             # TODO: figure it out why it is not working for this usecase
-            return tracer.inline_call_().next_variable(tx)
+            with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
+                return tracer.inline_call_().next_variable(tx)
         except exc.ObservedUserStopIteration as e:
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
