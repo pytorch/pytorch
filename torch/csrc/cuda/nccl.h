@@ -32,7 +32,7 @@ typedef void* ncclComm_t;
  * nccl impp. */
 #define NCCL_UNIQUE_ID_BYTES 128
 typedef struct {
-  // NOLINTNEXTLINE(*array)
+  // NOLINTNEXTLINE(*array*)
   char internal[NCCL_UNIQUE_ID_BYTES];
 } ncclUniqueId;
 
