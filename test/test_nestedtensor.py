@@ -7647,12 +7647,6 @@ FORWARD_FAILURES = {
     "polar",
     "rsub",
     # reduction
-    "all",
-    "amax",
-    "amin",
-    "any",
-    "argmax",
-    "argmin",
     "count_nonzero",
     "linalg.vector_norm",
     "nansum",
@@ -7661,8 +7655,6 @@ FORWARD_FAILURES = {
     "var",
     "var.unbiased",
     # === BEGIN UNSUPPORTED SECTION ===
-    # RuntimeError: mean(): not supported for NestedTensor on dim=1
-    "mean",
     # ValueError: expects strided tensor (got torch.jagged tensor)
     "masked.amax",
     "masked.amin",
@@ -7689,8 +7681,6 @@ FORWARD_FAILURES = {
     "jiterator_binary",
     "jiterator_binary_return_by_ref",
     "jiterator_unary",
-    # RuntimeError: prod(): keepdim=True must be set for NestedTensor
-    "prod",
     # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
     "nanmean",
 }
@@ -7722,8 +7712,6 @@ BACKWARD_FAILURES = {
     "clone",
     # Calling into torch.ops.aten.size directly
     "masked_select",
-    # NotImplementedError: aten._nested_sum_backward.default. Need to fix the backward pass.
-    "sum",
 }
 
 COMPILE_FORWARD_FAILURES = {
