@@ -1647,7 +1647,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def backward(ctx, *flat_args):
-                return CompiledFunction._backward_prologue(*flat_args)
+                return CompiledFunction._backward_prologue(ctx, *flat_args)
 
             @staticmethod
             def _backward_prologue(ctx, *flat_args):
@@ -1945,8 +1945,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         _aot_id = aot_config.aot_id
 
                         @staticmethod
-                        def forward(ctx, *args):
-                            outs = CompiledFunction._backward_impl(*args)
+                        def forward(_, boxed_args):
+                            outs = CompiledFunction._backward_impl(ctx, boxed_args)
                             # TODO: figure out how to refactor the backward properly
                             # so I can use aot_dispatch_subclass_wrapper() here.
                             if CompiledFunction.maybe_subclass_metadata is not None:
@@ -1963,7 +1963,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             return outs
 
                         @staticmethod
-                        def backward(ctx, *args):
+                        def backward(_, *args):
                             raise RuntimeError(
                                 "torch.compile with aot_autograd does not currently support double backward"
                             )
@@ -1973,9 +1973,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
 
                     # Pass args even though they're unused, so that the graph is built
-                    out = CompiledFunctionBackward.apply(*all_args)
+                    out = CompiledFunctionBackward.apply(all_args)
                 else:
-                    out = CompiledFunction._backward_impl(*all_args)
+                    out = CompiledFunction._backward_impl(ctx, all_args)
 
                 # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
                 if CompiledFunction.maybe_subclass_metadata is not None:
