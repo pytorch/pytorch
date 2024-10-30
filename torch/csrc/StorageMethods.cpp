@@ -49,6 +49,9 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
 
 static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
+  // PyLong_FromVoidPtr should not need to mutate the pointer in order
+  // to extract a new long object from it.
+
   auto self_ = THPStorage_Unpack(self);
   // See Note [Invalid Python Storages]
   auto invalid = self_.data() == nullptr &&
@@ -56,7 +59,7 @@ static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   TORCH_CHECK(
       !invalid,
       "Attempted to access the data pointer on an invalid python storage.")
-  return torch::autograd::utils::wrap(self_.mutable_data());
+  return PyLong_FromVoidPtr(self_.mutable_data());
   END_HANDLE_TH_ERRORS
 }
 
@@ -389,7 +392,7 @@ static PyObject* THPStorage_fromFile(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
+static PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
@@ -425,7 +428,7 @@ PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
+static PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyTuple_Size(args) == 2, "_new_with_file takes exactly two arguments");
@@ -514,7 +517,7 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
+static PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
   TORCH_CHECK(
@@ -531,7 +534,7 @@ PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
+static PyObject* THPStorage_byteswap(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(PyTuple_GET_SIZE(args) == 1, "tuple of 1 item expected");
   PyObject* _elem_size = PyTuple_GET_ITEM(args, 0);

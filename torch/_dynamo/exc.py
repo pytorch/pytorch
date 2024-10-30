@@ -144,6 +144,7 @@ class UserErrorType(Enum):
     DYNAMIC_DIM = auto()
     INVALID_INPUT = auto()
     INVALID_OUTPUT = auto()
+    UNSUPPORTED_ALIASED_MUTATED_DYNAMIC_INPUTS = auto()
 
 
 class UserError(Unsupported):
@@ -172,7 +173,7 @@ class SkipCodeRecursiveException(TorchDynamoException):
     pass
 
 
-class CacheLimitExceeded(SkipCodeRecursiveException, Unsupported):
+class CacheLimitExceeded(Unsupported):
     pass
 
 
@@ -185,6 +186,13 @@ class UncapturedHigherOrderOpError(TorchDynamoException):
 
 
 class IncorrectUsage(Exception):
+    pass
+
+
+# TODO: I'm a little uncertain about what error classification we should have
+# for this.  This is potentially a user error, but regressions in
+# specialization in PyTorch proper could also trigger this problem
+class FailOnCacheLimitHit(Exception):
     pass
 
 
@@ -224,12 +232,12 @@ observed_exception_map = {
 }
 
 
-def raise_observed_exception(e, tx, vt):
+def raise_observed_exception(e, tx):
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(e).call_function(vt, [], {})
+    exception_vt = BuiltinVariable(e).call_function(tx, [], {})
     tx.exn_vt_stack.append(exception_vt)
     raise observed_exception_map[e]
 
@@ -280,6 +288,14 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
     # exception, its ok to fallback to eager but not silently. Here, we can use
     # this function to log the message and the stack trace.
     graph_break_msg = format_error_msg_verbose(e, code)
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "dynamo_graph_break_reason",
+            "encoding": "string",
+        },
+        payload_fn=lambda: graph_break_msg,
+    )
     graph_breaks_log.debug("%s", graph_break_msg)
     log.warning(msg)
     unimplemented(msg, from_exc=e)
