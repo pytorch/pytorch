@@ -87,7 +87,6 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
   else()
     set(sycl_runtime_version "")
   endif()
-  message(FATAL_ERROR "sycl${sycl_runtime_version}")
   find_library(
     SYCL_LIBRARY
     NAMES "sycl${sycl_runtime_version}"
