@@ -7,11 +7,11 @@ from importlib import import_module
 import torch
 import torch._prims_common as utils
 from torch._dynamo.test_case import TestCase
+from torch._dynamo.utils import preserve_rng_state
 from torch._inductor import config
 from torch._inductor.bisect_helper import BisectionManager
 from torch.library import _scoped_library, Library
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch._dynamo.utils import preserve_rng_state
 
 
 aten = torch.ops.aten
@@ -98,11 +98,12 @@ class TestCompilerBisector(TestCase):
         self.assertTrue("aten.exponential" in out.debug_info)
 
     def test_joint_graph(self):
-
         from torch._inductor import config
 
         def pass_fn(graph: torch.fx.Graph):
-            nodes = graph.find_nodes(op="call_function", target=torch.ops.aten.add.Tensor)
+            nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.add.Tensor
+            )
             assert len(nodes) == 1
             args = list(nodes[0].args)
             args[1] = 2
@@ -120,7 +121,7 @@ class TestCompilerBisector(TestCase):
 
             out = foo(inp)
             out_c = torch.compile(foo)(inp)
-            
+
             return torch.allclose(out, out_c)
 
         out = BisectionManager.do_bisect(test_fn)
@@ -130,7 +131,6 @@ class TestCompilerBisector(TestCase):
         self.assertTrue("joint_custom_post_pass" in out.debug_info)
 
     def test_rng(self):
-
         def foo():
             return torch.rand([10], device="cuda") + 1
 
@@ -141,14 +141,13 @@ class TestCompilerBisector(TestCase):
                 out = foo()
             with preserve_rng_state():
                 out_c = torch.compile(foo)()
-            
+
             return torch.allclose(out, out_c)
 
         out = BisectionManager.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "inductor_fallback_random")
         self.assertTrue("inductor_fallback_random" in out.debug_info)
-
 
     def test_crossref(self):
         test_ns = "bisect_ops"

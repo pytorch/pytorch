@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import itertools
 import logging
 import typing
@@ -12,8 +13,6 @@ from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.multiprocessing.reductions import StorageWeakRef
-import functools
-
 
 from ...utils._ordered_set import OrderedSet
 from .. import config
@@ -467,7 +466,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
             count += maybe_count if maybe_count is not None else 0
 
     if not config.fallback_random:
-        # not trying into the bisector because decomps may have already affected rng reproducibility 
+        # not trying into the bisector because decomps may have already affected rng reproducibility
         # we'll instead explicitly turn off the config
         count += replace_random_passes(graph)
 
