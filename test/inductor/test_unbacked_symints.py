@@ -11,14 +11,19 @@ from torch._inductor.utils import is_big_gpu
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipCUDAIf,
+    skipGPUIf,
 )
 from torch.testing._internal.common_utils import IS_LINUX, parametrize
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CUDA,
+    HAS_GPU,
+    requires_gpu,
+)
 
 
 class TestUnbackedSymints(InductorTestCase):
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand(self, device):
         def fn(x, y):
@@ -39,7 +44,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
         def fn(x):
@@ -50,7 +55,7 @@ class TestUnbackedSymints(InductorTestCase):
         x = make_tensor(32, 4, device=device, dtype=torch.float32, exclude_zero=True)
         actual = torch.compile(fn, fullgraph=True)(x)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_broadcast_tensors(self, device):
         def fn(x):
@@ -64,7 +69,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(x)
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_autotuning(self, device):
         def fn(x, y):
@@ -88,7 +93,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_split_with_sizes(self, device):
         def fn(x, y):
@@ -104,7 +109,7 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_view_of_slice(self, device):
         # Tests View.create(slice, size_with_unbacked_symint)
@@ -122,9 +127,8 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @requires_gpu()
     @dynamo_config.patch({"capture_scalar_outputs": True})
-    @inductor_config.patch({"abi_compatible": True})
     def test_triton_kernel_grid(self, device):
         if device == "cpu":
             raise unittest.SkipTest("Triton kernel requires GPU")
@@ -145,7 +149,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_nonzero_in_inference_mode(self, device):
         def fn(x):
@@ -191,14 +195,11 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
-    @skipCUDAIf(not HAS_CUDA, "requires cuda")
+    @requires_gpu()
     @dynamo_config.patch({"capture_scalar_outputs": True})
     def test_vertical_pointwise_reduction_fusion(self, device):
         # reset in case we run both cpu and cuda tests
         torch._inductor.metrics.reset()
-
-        if device == "cpu":
-            raise unittest.SkipTest("This test requires cuda")
 
         # Tests fusing a pointwise & reduction op with unbacked numel/rnumel.
         def fn(x, y, repeats):
@@ -213,9 +214,9 @@ class TestUnbackedSymints(InductorTestCase):
             return pointwise, reduction
 
         example_inputs = (
-            torch.randn(32, 16).cuda(),
-            torch.randn(1, 16).cuda(),
-            torch.tensor(32).cuda(),
+            torch.randn(32, 16).to(GPU_TYPE),
+            torch.randn(1, 16).to(GPU_TYPE),
+            torch.tensor(32).to(GPU_TYPE),
         )
 
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
@@ -279,12 +280,10 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
 
-instantiate_device_type_tests(
-    TestUnbackedSymints, globals(), only_for=(GPU_TYPE, "cpu")
-)
+instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if IS_LINUX and HAS_CUDA and is_big_gpu(0):
+    if IS_LINUX and HAS_GPU and (not HAS_CUDA or is_big_gpu(0)):
         run_tests()

@@ -52,7 +52,7 @@ class TORCH_API DistEngine {
 
   // Returns key-value pairs consisting of useful debugging information related
   // to distributed autograd.
-  std::unordered_map<std::string, int> getDebugInfo() const;
+  std::unordered_map<std::string, int64_t> getDebugInfo() const;
 
   DistEngine(const DistEngine&) = delete;
   DistEngine& operator=(const DistEngine&) = delete;

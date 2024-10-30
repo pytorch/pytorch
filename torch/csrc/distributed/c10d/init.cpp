@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
+#include <utility>
 #include <vector>
 #ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
@@ -96,17 +97,19 @@ class IntrusivePtrNoGilDestructor {
  public:
   IntrusivePtrNoGilDestructor() = default;
   IntrusivePtrNoGilDestructor(const IntrusivePtrNoGilDestructor&) = default;
-  IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) = default;
+  IntrusivePtrNoGilDestructor(IntrusivePtrNoGilDestructor&&) noexcept = default;
   IntrusivePtrNoGilDestructor& operator=(const IntrusivePtrNoGilDestructor&) =
       default;
-  IntrusivePtrNoGilDestructor& operator=(IntrusivePtrNoGilDestructor&&) =
-      default;
+  IntrusivePtrNoGilDestructor& operator=(
+      IntrusivePtrNoGilDestructor&&) noexcept = default;
   /* implicit */ IntrusivePtrNoGilDestructor(c10::intrusive_ptr<T> impl)
       : impl_(std::move(impl)) {}
   // This ctor is very important; see
   // https://github.com/pybind/pybind11/issues/2957
   explicit IntrusivePtrNoGilDestructor(T* impl)
+      // NOLINTNEXTLINE(bugprone-exception-escape)
       : impl_(c10::intrusive_ptr<T>::unsafe_steal_from_new(impl)) {}
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~IntrusivePtrNoGilDestructor() {
     if (impl_) {
       if (PyGILState_Check()) {
@@ -123,7 +126,7 @@ class IntrusivePtrNoGilDestructor {
   T* operator->() const noexcept {
     return impl_.get();
   }
-  C10_NODISCARD T* get() const noexcept {
+  [[nodiscard]] T* get() const noexcept {
     return impl_.get();
   }
   void reset() noexcept {
@@ -336,6 +339,7 @@ class PythonRequest : public ::c10d::control_plane::Request {
 };
 class PythonResponse : public ::c10d::control_plane::Response {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
   void setContent(std::string&& content, const std::string& content_type)
       override {
     PYBIND11_OVERRIDE_PURE_NAME(
@@ -908,8 +912,8 @@ This class does not support ``__members__`` property.)");
   module.def(
       "_register_process_group",
       [](const std::string& group_name,
-         c10::intrusive_ptr<::c10d::ProcessGroup> group) {
-        ::c10d::register_process_group(group_name, std::move(group));
+         const c10::intrusive_ptr<::c10d::ProcessGroup>& group) {
+        ::c10d::register_process_group(group_name, group);
       },
       py::arg("group_name"),
       py::arg("group"));
@@ -928,10 +932,25 @@ This class does not support ``__members__`` property.)");
          const c10::intrusive_ptr<::c10d::Work>& work) {
         dynamic_cast<::c10d::PyProcessGroup::PyWork*>(work.get())
             ->ref_py_object();
-        ::c10d::register_work(tensor, std::move(work));
+        ::c10d::register_work(tensor, work);
       },
       py::arg("tensor"),
       py::arg("work"));
+
+  module.def("_get_work_registry_size", []() {
+    return ::c10d::get_work_registry_size();
+  });
+
+  module.def(
+      "_set_allow_inflight_collective_as_graph_input",
+      [](bool value) {
+        return ::c10d::set_allow_inflight_collective_as_graph_input(value);
+      },
+      py::arg("value"));
+
+  module.def("_allow_inflight_collective_as_graph_input", []() {
+    return ::c10d::allow_inflight_collective_as_graph_input();
+  });
 
   // Remove a group from the native registry
   module.def(
@@ -1075,17 +1094,23 @@ This class does not support ``__members__`` property.)");
           py::arg("sizes"),
           py::arg("dtype"),
           py::arg("storage_offset") = 0)
-      .def("barrier", &SymmetricMemory::barrier, py::arg("channel") = 0)
+      .def(
+          "barrier",
+          &SymmetricMemory::barrier,
+          py::arg("channel") = 0,
+          py::arg("timeout_ms") = 0)
       .def(
           "put_signal",
           &SymmetricMemory::put_signal,
           py::arg("dst_rank"),
-          py::arg("channel") = 0)
+          py::arg("channel") = 0,
+          py::arg("timeout_ms") = 0)
       .def(
           "wait_signal",
           &SymmetricMemory::wait_signal,
           py::arg("src_rank"),
-          py::arg("channel") = 0)
+          py::arg("channel") = 0,
+          py::arg("timeout_ms") = 0)
       .def(
           "stream_write_value32",
           &SymmetricMemory::stream_write_value32,
@@ -1534,6 +1559,9 @@ Example::
                       bool useLibUV) {
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
+              if (worldSize.value() == 0) {
+                throw py::value_error("TCPStore world size cannot be 0");
+              }
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
@@ -1599,7 +1627,7 @@ Arguments:
             if (!store) {
               throw py::value_error("store argument cannot be None");
             }
-            return new ::c10d::PrefixStore(prefix, store);
+            return new ::c10d::PrefixStore(prefix, std::move(store));
           }),
           py::arg("prefix"),
           py::arg("store"))
@@ -2166,7 +2194,7 @@ communication mechanism.
                 // python-related libs.
                 self->registerOnCompletionHook(
                     [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
-                         hook))](std::shared_ptr<::c10d::WorkInfo> workInfo) {
+                         hook))](const std::shared_ptr<::c10d::WorkInfo>& workInfo) {
                       hookWrapper(workInfo);
                     });
               },
@@ -2744,7 +2772,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def(
               "_verify_work_timeout",
               [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
-                 const c10::intrusive_ptr<::c10d::Work> work,
+                 const c10::intrusive_ptr<::c10d::Work>& work,
                  const std::chrono::milliseconds& timeout) {
                 return self->verifyWorkTimeoutForTest(work, timeout);
               },
@@ -2759,32 +2787,19 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               &::c10d::ProcessGroupNCCL::setBoundDeviceId)
           .def(
               "perform_nocolor_split",
-              &::c10d::ProcessGroupNCCL::performNocolorSplit);
+              &::c10d::ProcessGroupNCCL::performNocolorSplit)
+          .def(
+              "abort",
+              &::c10d::ProcessGroupNCCL::abort,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_is_initialized",
+              &::c10d::ProcessGroupNCCL::isInitialized,
+              py::call_guard<py::gil_scoped_release>());
 
   module.def(
       "_get_intra_node_comm_usage_counter",
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
-
-  using IntraNodeComm = ::c10d::intra_node_comm::IntraNodeComm;
-  py::class_<IntraNodeComm, c10::intrusive_ptr<IntraNodeComm>>(
-      module, "_IntraNodeComm")
-      .def(
-          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
-                      size_t rank,
-                      size_t world_size,
-                      std::optional<size_t> buffer_size) {
-            auto comm = c10::make_intrusive<IntraNodeComm>(
-                store, rank, world_size, buffer_size);
-            if (!comm->rendezvous()) {
-              throw std::runtime_error("IntraNodeComm::rendezvous failed");
-            }
-            return comm;
-          }),
-          py::arg("store"),
-          py::arg("rank"),
-          py::arg("world_size"),
-          py::arg("buffer_size") = std::nullopt)
-      .def("barrier", &IntraNodeComm::barrier, py::arg("ranks") = py::none());
 
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
@@ -2922,6 +2937,12 @@ Example::
       .value("_ALLREDUCE_SPARSE", ::c10d::OpType::_ALLREDUCE_SPARSE)
       .value("UNKNOWN", ::c10d::OpType::UNKNOWN);
 
+  py::enum_<::c10d::WorkResult>(module, "WorkResult")
+      .value("SUCCESS", ::c10d::WorkResult::SUCCESS)
+      .value("TIMEOUT", ::c10d::WorkResult::TIMEOUT)
+      .value("COMM_ERROR", ::c10d::WorkResult::COMM_ERROR)
+      .value("UNKNOWN", ::c10d::WorkResult::UNKNOWN);
+
   py::class_<::c10d::WorkInfo, std::shared_ptr<::c10d::WorkInfo>>(
       module, "WorkInfo")
       .def_readonly("op_type", &::c10d::WorkInfo::opType)
@@ -3006,6 +3027,27 @@ such as `dist.all_reduce(tensor, async_op=True)`.
                   However, if timeout is set, it will block the CPU thread until the NCCL work is completed
                   or timed out. If timeout, exception will be thrown.
             )")
+      .def(
+          "get_future_result",
+          [](::c10d::Work& work) -> std::shared_ptr<jit::PythonFutureWrapper> {
+            return std::make_shared<jit::PythonFutureWrapper>(
+                work.getFutureResult());
+          },
+          R"(
+            Returns:
+                A ``torch.futures.Future`` object of int type which maps to the enum type of WorkResult
+                As an example, a future object can be retrieved
+                by ``fut = process_group.allreduce(tensor).get_future_result()``.
+
+            Example::
+                users can use ``fut.wait()`` to blocking wait for the completion of the work and
+                get the WorkResult by ``fut.value()``.
+                Also, users can use ``fut.then(call_back_func)`` to register a callback function to be called
+                when the work is completed, without blocking the current thread.
+
+            .. warning ::
+                ``get_future_result`` API supports NCCL
+           )")
       .def(
           "get_future",
           [](::c10d::Work& work) -> std::shared_ptr<jit::PythonFutureWrapper> {
@@ -3390,6 +3432,7 @@ static PyMethodDef methods[] = { // NOLINT
     {"_c10d_init", c10d_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 PyMethodDef* python_functions() {
   return methods;
 }

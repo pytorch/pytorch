@@ -40,7 +40,7 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, dataclass_transform, ParamSpec
 from unittest import mock
 
 import sympy
@@ -88,7 +88,7 @@ log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
-InputType = Union[torch.Tensor, int]
+InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
 
 GPU_ALIGN_BYTES = 16
@@ -477,7 +477,8 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
             try:
                 return self.{key}
             except AttributeError:
-                self.{key} = rv = fn(self)
+                rv = fn(self)
+                object.__setattr__(self, "{key}", rv)
                 return rv
         """.lstrip(),
         ctx,
@@ -1174,12 +1175,9 @@ def try_import_ck_lib():
     return package_dirname, gen_ops_library, gen_ops_preselected, CKGemmOperation
 
 
-def use_ck_template(layout, m, n, k):
+def use_ck_template(layout):
     # config knobs check 1
     if not use_max_autotune():
-        return False
-    # config knobs check 2
-    if not _use_autotune_backend("CK"):
         return False
     # platform check
     if not torch.version.hip:
@@ -1200,16 +1198,8 @@ def use_ck_template(layout, m, n, k):
     if not requested_supported_archs:
         return False
     # supported input dtypes
-    if layout.dtype not in [torch.float16, torch.bfloat16]:
+    if layout.dtype not in [torch.float16, torch.bfloat16, torch.float32]:
         return False
-    # TBD: investigate if we need to disable backend based on number of available CUs similar to `is_big_gpu`
-    # check if shape is static and gemm size is not 0
-    from .virtualized import V
-
-    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
-    if gemm_size <= 0:
-        return False
-    # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
 
     ck_package_dirname, _, _, _ = try_import_ck_lib()
 
@@ -1229,6 +1219,20 @@ def use_ck_template(layout, m, n, k):
         return False
 
     return True
+
+
+def use_ck_gemm_template(layout, m, n, k):
+    from .virtualized import V
+
+    return (
+        use_ck_template(layout)
+        and _use_autotune_backend("CK")
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    )
+
+
+def use_ck_conv_template(layout):
+    return use_ck_template(layout) and _use_conv_autotune_backend("CK")
 
 
 def _use_template_for_cpu(layout):
@@ -1823,7 +1827,7 @@ def get_cloned_parameter_buffer_name(name: str):
 
 def is_gpu(device: str):
     assert isinstance(device, str) or device is None, device
-    return device in ["cuda", "xpu"]
+    return device in GPU_TYPES
 
 
 def device_need_guard(device: str):
@@ -1969,7 +1973,7 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
     return result, s
 
 
-def shape_env_from_inputs(inputs: List[torch.Tensor]):
+def shape_env_from_inputs(inputs: Sequence[InputType]):
     shape_env = None
     fake_mode = detect_fake_mode(inputs)
 
@@ -2023,9 +2027,9 @@ def copy_misaligned_inputs(
 
 
 def remove_unaligned_input_idxs(
-    inputs: List[InputType],
+    inputs: Sequence[InputType],
     static_input_idxs: Sequence[int],
-):
+) -> Sequence[int]:
     """
     We require all inputs to be aligned, so introduce a copy for any
     that aren't.
@@ -2091,12 +2095,47 @@ def should_use_remote_fx_graph_cache():
     except ModuleNotFoundError:
         return False
 
-    jk_name = "pytorch/remote_cache:fx_graph_memcache_version"
-    if torch.version.hip is not None:
-        jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
-
-    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:fx_graph_memcache_version"
+    )
 
 
 def normalize_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
+
+def is_same_tensor(data: torch.Tensor, value: torch.Tensor):
+    return (
+        not data.is_mkldnn
+        and data.size() == value.size()
+        and data.stride() == value.stride()
+        and data.dtype == value.dtype
+        and data.device == value.device
+        and data.untyped_storage().data_ptr() == value.untyped_storage().data_ptr()
+        and data.storage_offset() == value.storage_offset()
+    )
+
+
+def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
+    return (
+        data.is_mkldnn
+        and data.size() == value.size()
+        and data.dtype == value.dtype
+        and data.device == value.device
+        and torch.ops.mkldnn.data_ptr(data) == torch.ops.mkldnn.data_ptr(value)
+    )
+
+
+@dataclass_transform(frozen_default=True)
+def ir_dataclass(cls=None, /, *, frozen: bool = True):
+    def wrap(cls: _T) -> _T:
+        if sys.version_info >= (3, 10):
+            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
+        else:
+            # Polyfill for python=3.9. kw_only simply introduces an extra check
+            # that only kwargs are used (and is not available on 3.9)
+            return dataclasses.dataclass(cls, frozen=frozen)
+
+    if cls is None:
+        return wrap
+    return wrap(cls)

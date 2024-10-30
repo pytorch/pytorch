@@ -17,11 +17,10 @@ from ..ir import (
     ExternKernel,
     FixedLayout,
     FlexibleLayout,
-    get_stride_order,
+    get_fill_order,
     InputBuffer,
     IRNode,
     StorageBox,
-    stride_order2fill_order,
     Subgraph,
     TensorBox,
 )
@@ -71,7 +70,7 @@ def create_placeholder(
     name: str, dtype: torch.dtype, device: torch.device
 ) -> TensorBox:
     """Creates a placeholder input buffers for producing subgraph_output."""
-    input_buffer = InputBuffer(name, FixedLayout(device, dtype, [], []))
+    input_buffer = InputBuffer(name=name, layout=FixedLayout(device, dtype, [], []))
     return TensorBox.create(input_buffer)
 
 
@@ -793,8 +792,7 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    stride_order = get_stride_order(query.get_stride())
-    fill_order = stride_order2fill_order(stride_order)
+    fill_order = get_fill_order(query.get_stride())
     out_strides = construct_strides(out_size, fill_order)
 
     layout = FixedLayout(
@@ -853,7 +851,7 @@ def flex_attention(
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
-
+    original_kernel_options = kernel_options.copy()
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
             continue
@@ -861,12 +859,13 @@ def flex_attention(
         if num_stages == 2:
             continue
 
+        cur_kernel_options = original_kernel_options.copy()
         # Performance tuning
-        kernel_options.setdefault("BLOCK_M", BLOCK_M)
-        kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
+        cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
-        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
-        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -891,7 +890,7 @@ def flex_attention(
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            **kernel_options,
+            **cur_kernel_options,
         )
     inputs_for_autotuning = (
         [
@@ -1784,7 +1783,7 @@ def flex_attention_backward(*args, **kwargs):
                 if BLOCK2 % BLOCK1 == 0
             ]
         )
-
+    original_kernel_options = kernel_options.copy()
     for BLOCK1, BLOCK2, num_warps, num_stages in configs:
         if (
             SPARSE_KV_BLOCK_SIZE % BLOCK1 != 0
@@ -1795,13 +1794,14 @@ def flex_attention_backward(*args, **kwargs):
             continue
 
         # Performance tuning
-        kernel_options.setdefault("BLOCK_M1", BLOCK1)
-        kernel_options.setdefault("BLOCK_N1", BLOCK2)
-        kernel_options.setdefault("BLOCK_M2", BLOCK2)
-        kernel_options.setdefault("BLOCK_N2", BLOCK1)
+        cur_kernel_options = original_kernel_options.copy()
+        cur_kernel_options.setdefault("BLOCK_M1", BLOCK1)
+        cur_kernel_options.setdefault("BLOCK_N1", BLOCK2)
+        cur_kernel_options.setdefault("BLOCK_M2", BLOCK2)
+        cur_kernel_options.setdefault("BLOCK_N2", BLOCK1)
         # Blocksparse options
-        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
-        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
@@ -1829,7 +1829,7 @@ def flex_attention_backward(*args, **kwargs):
             call_sizes=query.get_size() + key.get_size()[1:3],
             num_stages=num_stages,
             num_warps=num_warps,
-            **kernel_options,
+            **cur_kernel_options,
         )
     inputs_for_autotuning = (
         [

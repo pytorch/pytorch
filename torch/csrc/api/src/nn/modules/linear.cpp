@@ -25,8 +25,7 @@ Tensor IdentityImpl::forward(const Tensor& input) {
 // ============================================================================
 
 LinearImpl::LinearImpl(const LinearOptions& options_) : options(options_) {
-  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
-  reset();
+  LinearImpl::reset();
 }
 
 void LinearImpl::reset() {

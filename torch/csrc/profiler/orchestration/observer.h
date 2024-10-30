@@ -20,8 +20,10 @@ enum class C10_API_ENUM ActivityType {
 };
 
 inline std::string actToString(ActivityType t) {
-  const std::string ActivityTypeNames[] = {
-      "CPU", "XPU", "CUDA", "MTIA", "PrivateUse1"};
+  const std::array<
+      std::string,
+      static_cast<size_t>(ActivityType::NUM_KINETO_ACTIVITIES)>
+      ActivityTypeNames = {"CPU", "XPU", "CUDA", "MTIA", "PrivateUse1"};
   return ActivityTypeNames[static_cast<int>(t)];
 }
 
@@ -55,6 +57,7 @@ struct TORCH_API ExperimentalConfig {
       bool verbose = false,
       std::vector<std::string> performance_events = {},
       bool enable_cuda_sync_events = false,
+      bool adjust_profiler_step = false,
       bool adjust_timestamps = false);
   explicit operator bool() const;
 
@@ -73,6 +76,13 @@ struct TORCH_API ExperimentalConfig {
    */
   bool enable_cuda_sync_events;
   /*
+   * Controls whether or not timestamp adjustment for ProfilerStep and parent
+   * Python events occurs after profiling. This occurs at an O(n) cost and
+   * affects only the start of profiler step events.
+   */
+  bool adjust_profiler_step;
+
+  /*
    * Controls whether or not timestamp adjustment occurs after profiling.
    * The purpose of this is to adjust Vulkan event timelines to align with those
    * of their parent CPU events.
@@ -86,7 +96,7 @@ struct TORCH_API ExperimentalConfig {
 };
 
 struct TORCH_API ProfilerConfig {
-  ProfilerConfig(
+  explicit ProfilerConfig(
       ProfilerState state,
       bool report_input_shapes = false,
       bool profile_memory = false,
