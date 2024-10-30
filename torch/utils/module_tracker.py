@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import gc
 import logging
 import weakref
 from typing import Set
@@ -10,7 +11,7 @@ from torch.nn.modules.module import (
     register_module_forward_pre_hook,
 )
 from torch.utils._pytree import tree_flatten
-import gc
+
 
 logger = logging.getLogger(__name__)
 
