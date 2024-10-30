@@ -57,7 +57,7 @@ import torch.utils._pytree as pytree
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
-from torch._logging import LazyString, structured, trace_structured
+from torch._logging import dtrace_structured, LazyString, structured, trace_structured
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
@@ -457,11 +457,6 @@ def rebind_unbacked(
                     u1,
                 )
                 continue
-
-            # We only care about rebinding unbacked things
-            if u1.node.hint is not None:
-                continue
-
             raw_u1 = u1.node.expr
             # Simplify SymBool binding
             if (
@@ -4053,7 +4048,6 @@ class ShapeEnv:
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
-        symbolic_context: Optional[StatelessSymbolicContext] = None,
     ) -> sympy.Expr:
         """
         Create a symbol with an unspecified value
@@ -4073,7 +4067,7 @@ class ShapeEnv:
             constraint_dim,
             positive=None,
             do_not_specialize_zero_one=True,
-            symbolic_context=symbolic_context,
+            symbolic_context=None,
         )
 
     @record_shapeenv_event()
@@ -6012,6 +6006,20 @@ class ShapeEnv:
         return sloc
 
     def _log_guard(self, prefix: str, g: SympyBoolean, forcing_spec: bool) -> None:
+        dtrace_structured(
+            "guard_added",
+            metadata_fn=lambda: {
+                "expr": str(g),
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
+                "symbol_to_sources": {
+                    str(v): k
+                    for k, v in self.source_to_var.items()
+                    if v in g.free_symbols
+                },
+            },
+        )
         if self.log.isEnabledFor(logging.INFO):
             str_g = str(g)
             is_debug = (
@@ -6074,12 +6082,6 @@ class ShapeEnv:
         """
 
         # TODO: split conjunctions and evaluate them separately
-
-        if isinstance(
-            orig_expr,
-            (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse),
-        ):
-            return orig_expr
 
         # Don't track this one
         @functools.lru_cache(None)
