@@ -1109,6 +1109,7 @@ class GraphModuleSerializer(metaclass=Final):
             ],
             in_spec=treespec_dumps(module_call_signature.in_spec, TREESPEC_VERSION),
             out_spec=treespec_dumps(module_call_signature.out_spec, TREESPEC_VERSION),
+            forward_arg_names=names if (names := module_call_signature.forward_arg_names) else None
         )
 
     def serialize_module_call_graph(
@@ -1698,6 +1699,13 @@ class GraphModuleDeserializer(metaclass=Final):
 
         elif isinstance(target, torch._ops.HigherOrderOperator):
             args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
+            metadata = self.deserialize_metadata(serialized_node.metadata)
+            for x in (*args, *kwargs.values()):
+                if isinstance(x, torch.fx.Node) and x.op == "get_attr":
+                    # this means that we have deserialized a graph argument, but
+                    # unfortunately the schema for it does not include metadata;
+                    # so we reuse the metadata of the HOP call for such arguments
+                    x.meta.update(metadata)
             # If HOP returns a single tensor, name the
             # newly-created node after it. This ensures that these tensor values
             # have names that are consistent with serialized.
@@ -1713,7 +1721,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 "call_function", target, args, kwargs, name
             )
             self.deserialize_outputs(serialized_node, fx_node)
-            fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
+            fx_node.meta.update(metadata)
 
         elif isinstance(target, (torch._ops.OpOverload, *_registered_extension_types())):
             # For convenience: if this node returns a single tensor, name the
@@ -2257,6 +2265,7 @@ class GraphModuleDeserializer(metaclass=Final):
             ],
             in_spec=treespec_loads(module_call_signature.in_spec),
             out_spec=treespec_loads(module_call_signature.out_spec),
+            forward_arg_names=names if (names := module_call_signature.forward_arg_names) else None,
         )
 
     def deserialize_module_call_graph(

@@ -17,6 +17,8 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
 
+#include <torch/csrc/dynamo/debug_macros.h>
+
 #ifdef USE_CUDA
 #include <ATen/cuda/EmptyTensor.h>
 #endif
@@ -655,7 +657,7 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
 
 static std::unordered_map<PyObject*, uint64_t> dict_version_map;
 static int dict_version_watcher_id;
-static uint64_t global_dict_version_id = 0;
+static uint64_t global_dict_version_id = 1;
 static int dict_version_watch_callback(
     PyDict_WatchEvent event,
     PyObject* dict,
@@ -1466,8 +1468,8 @@ class DYNAMIC_INDICES : public LeafGuard {
     }
 
     static PyObject* issubset_str = PyUnicode_InternFromString("issubset");
-    PyObject* call_result = PyObject_CallMethodOneArg(
-        indices, issubset_str, _dynamic_indices.ptr()); // new ref
+    PyObject* call_result = PyObject_CallMethodObjArgs(
+        indices, issubset_str, _dynamic_indices.ptr(), nullptr); // new ref
     bool result = PyObject_IsTrue(call_result);
     Py_DECREF(call_result);
     Py_DECREF(indices);
@@ -1693,6 +1695,15 @@ class GuardManager {
   // guards and does not change the fail count. For simplicity, we duplicate
   // the code here.
   virtual bool check_nopybind(PyObject* value) { // borrowed ref
+
+    if (!this->check_leaf_guards_nopybind(value)) {
+      return false;
+    }
+
+    return this->check_accessors_nopybind(value);
+  }
+
+  bool check_leaf_guards_nopybind(PyObject* value) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       if (!guard->check_nopybind(value)) { // early exit
@@ -1702,6 +1713,10 @@ class GuardManager {
       }
     }
 
+    return true;
+  }
+
+  bool check_accessors_nopybind(PyObject* value) {
     bool matches_dict_tag = false;
     uint64_t new_tag = 0;
     if (_is_dict) {
@@ -1754,6 +1769,7 @@ class GuardManager {
       // swapping).
       _dict_tag = new_tag;
     }
+
     return result;
   }
 
@@ -1762,6 +1778,19 @@ class GuardManager {
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* value) { // borrowed ref
     int num_guards_executed = 0;
+
+    const GuardDebugInfo& debug_info =
+        check_leaf_guards_verbose_nopybind(value, num_guards_executed);
+    if (!debug_info.result) {
+      return debug_info;
+    }
+
+    return check_accessors_verbose_nopybind(value, num_guards_executed);
+  }
+
+  GuardDebugInfo check_leaf_guards_verbose_nopybind(
+      PyObject* value,
+      int& num_guards_executed) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       const GuardDebugInfo& debug_info = guard->check_verbose_nopybind(value);
@@ -1772,6 +1801,12 @@ class GuardManager {
       }
     }
 
+    return GuardDebugInfo(true, num_guards_executed);
+  }
+
+  GuardDebugInfo check_accessors_verbose_nopybind(
+      PyObject* value,
+      int& num_guards_executed) {
     // Iterate over accessors
     for (const auto& accessor : _accessors) {
       const GuardDebugInfo& debug_info =
@@ -1921,7 +1956,22 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    if (!GuardManager::check_nopybind(value)) {
+    if (!GuardManager::check_leaf_guards_nopybind(value)) {
+      _reset_relational_guard_state();
+      return false;
+    }
+
+    // Run accessor guards without TorchFunction enabled
+    // Dynamo should only be adding guards on values without
+    // torch function at this point, because if there
+    // was a torch function, we should've traced through it
+    const at::impl::TorchFunctionDisabledState old_state =
+        at::impl::PythonTorchFunctionTLS::get_disabled_state();
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+
+    if (!GuardManager::check_accessors_nopybind(value)) {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return false;
     }
@@ -1929,10 +1979,13 @@ class RootGuardManager : public GuardManager {
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return false;
       }
     }
+
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return true;
   }
@@ -1953,13 +2006,33 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
-    if (!debug_info.result) {
+    int num_guards_executed = 0;
+
+    // Run leaf guards
+    // This includes the GlobalStateGuard and the Torch Function Mode stack
+    // guard, which require Torch Function to be in its unmodified state
+    const GuardDebugInfo& debug_info_leaf =
+        GuardManager::check_leaf_guards_verbose_nopybind(
+            value, num_guards_executed);
+
+    if (!debug_info_leaf.result) {
       _reset_relational_guard_state();
-      return debug_info;
+      return debug_info_leaf;
     }
 
-    int num_guards_executed = debug_info.num_guards_executed;
+    const at::impl::TorchFunctionDisabledState old_state =
+        at::impl::PythonTorchFunctionTLS::get_disabled_state();
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    const GuardDebugInfo& debug_info_accessors =
+        GuardManager::check_accessors_verbose_nopybind(
+            value, num_guards_executed);
+
+    if (!debug_info_accessors.result) {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+      _reset_relational_guard_state();
+      return debug_info_accessors;
+    }
 
     // Iterate over epilogue leaf guards
     for (const auto& guard : _epilogue_lambda_guards) {
@@ -1967,11 +2040,13 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
             false, tmp_debug_info.verbose_code_parts, num_guards_executed);
       }
     }
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
@@ -2540,90 +2615,40 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
  public:
   TORCH_FUNCTION_MODE_STACK(
       const py::list& initial_stack,
-      const py::list& ignored_types,
       py::object verbose_code_parts)
-      : LeafGuard(std::move(verbose_code_parts)),
-        _ref_stack(),
-        _ignored_types() {
+      : LeafGuard(std::move(verbose_code_parts)), _ref_stack() {
     Py_ssize_t len = PyList_Size(initial_stack.ptr());
     for (Py_ssize_t idx = 0; idx < len; idx++) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
       auto type = Py_TYPE(mode);
       this->_ref_stack.push_back(type);
     }
-
-    len = PyList_Size(ignored_types.ptr());
-    for (Py_ssize_t idx = 0; idx < len; idx++) {
-      PyObject* type_obj =
-          PyList_GetItem(ignored_types.ptr(), idx); // borrowed ref
-      if (PyType_Check(type_obj) == 0) {
-        PyErr_SetString(
-            PyExc_TypeError, "ignored_types should contain a list of types");
-        return;
-      }
-      PyTypeObject* type = (PyTypeObject*)type_obj;
-      this->_ignored_types.insert(type);
-    }
   }
 
   bool check_nopybind(PyObject* value) override {
     // Ignore value arg, only used to satisfy the interface
-    size_t ref_ind = 0;
-    const int64_t len = at::impl::PythonTorchFunctionTLS::stack_len();
+    const size_t len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
     const size_t ref_stack_size = this->_ref_stack.size();
 
-    int64_t idx = 0;
-    while ((idx < len) && (ref_ind < ref_stack_size)) {
+    if (len != ref_stack_size) {
+      return false;
+    }
+
+    for (int64_t idx = 0; (size_t)idx < len; idx++) {
       std::shared_ptr<c10::SafePyObject> mode =
           at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
       PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
-      bool act_ignored = this->_ignored_types.count(mode_type) > 0;
-      bool ref_ignored =
-          this->_ignored_types.count(this->_ref_stack.at(ref_ind)) > 0;
-      // skip ignored types
-      if (act_ignored && ref_ignored) {
-        idx++;
-        ref_ind++;
-        continue;
-      } else if (ref_ignored) {
-        ref_ind++;
-        continue;
-      } else if (act_ignored) {
-        idx++;
-        continue;
-      }
-      // if we already have more non-ignored modes than the ref stack
-      // or if the mode doesn't match at the current index, return false
-      else if (mode_type != _ref_stack.at(ref_ind)) {
-        return false;
-      }
-      ref_ind++;
-      idx++;
-    }
-
-    for (; ref_ind < ref_stack_size; ref_ind++) {
-      if (!(this->_ignored_types.count(this->_ref_stack.at(ref_ind)) > 0)) {
+      if (mode_type != _ref_stack.at(idx)) {
         return false;
       }
     }
 
-    for (; idx < len; idx++) {
-      std::shared_ptr<c10::SafePyObject> mode =
-          at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
-
-      PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
-      if (!(this->_ignored_types.count(mode_type) > 0)) {
-        return false;
-      }
-    }
-
-    return ref_ind == ref_stack_size && idx == len;
+    return true;
   }
 
  private:
   std::vector<PyTypeObject*> _ref_stack;
-  std::set<PyTypeObject*> _ignored_types;
 };
 
 class TENSOR_MATCH : public LeafGuard {
@@ -3792,7 +3817,7 @@ PyObject* torch_c_dynamo_guards_init() {
       LeafGuard,
       std::shared_ptr<TORCH_FUNCTION_MODE_STACK>>(
       py_m, "TORCH_FUNCTION_MODE_STACK")
-      .def(py::init<py::list, py::list, py::list>())
+      .def(py::init<py::list, py::list>())
       .def("__call__", &TORCH_FUNCTION_MODE_STACK::check);
   py::class_<DATA_PTR_MATCH, LeafGuard, std::shared_ptr<DATA_PTR_MATCH>>(
       py_m, "DATA_PTR_MATCH")
@@ -4029,10 +4054,9 @@ PyObject* torch_c_dynamo_guards_init() {
           "add_torch_function_mode_stack_guard",
           [](GuardManager& self,
              const py::list& initial_stack,
-             const py::list& ignored_types,
              py::object verbose_code_parts) -> void {
             self.add_leaf_guard(std::make_shared<TORCH_FUNCTION_MODE_STACK>(
-                initial_stack, ignored_types, std::move(verbose_code_parts)));
+                initial_stack, std::move(verbose_code_parts)));
           })
       .def(
           "add_data_ptr_guard",

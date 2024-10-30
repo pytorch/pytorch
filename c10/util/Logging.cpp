@@ -128,7 +128,7 @@ bool IsAPIUsageDebugMode() {
 
 void APIUsageDebug(const string& event) {
   // use stderr to avoid messing with glog
-  std::cerr << "PYTORCH_API_USAGE " << event << std::endl;
+  std::cerr << "PYTORCH_API_USAGE " << event << '\n';
 }
 
 APIUsageLoggerType* GetAPIUsageLogger() {
@@ -209,10 +209,6 @@ void SetPyTorchDDPUsageLogger(
 
 static int64_t GLOBAL_RANK = -1;
 
-int64_t GetGlobalRank() {
-  return GLOBAL_RANK;
-}
-
 void SetGlobalRank(int64_t rank) {
   GLOBAL_RANK = rank;
 }
@@ -220,6 +216,7 @@ void SetGlobalRank(int64_t rank) {
 void LogAPIUsage(const std::string& event) try {
   if (auto logger = GetAPIUsageLogger())
     (*logger)(event);
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -229,6 +226,7 @@ void LogAPIUsageMetadata(
     const std::map<std::string, std::string>& metadata_map) try {
   if (auto logger = GetAPIUsageMetadataLogger())
     (*logger)(context, metadata_map);
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -236,6 +234,7 @@ void LogAPIUsageMetadata(
 void LogPyTorchDDPUsage(const DDPLoggingData& ddpData) try {
   if (auto logger = GetDDPUsageLogger())
     (*logger)(ddpData);
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
 }
@@ -245,6 +244,7 @@ bool LogAPIUsageFakeReturn(const std::string& event) try {
   if (auto logger = GetAPIUsageLogger())
     (*logger)(event);
   return true;
+  // NOLINTNEXTLINE(bugprone-empty-catch)
 } catch (std::bad_function_call&) {
   // static destructor race
   return true;
@@ -393,12 +393,12 @@ bool InitCaffeLogging(int* argc, char** argv) {
     std::cerr << "InitCaffeLogging() has to be called after "
                  "c10::ParseCommandLineFlags. Modify your program to make sure "
                  "of this."
-              << std::endl;
+              << '\n';
     return false;
   }
   if (FLAGS_caffe2_log_level > GLOG_FATAL) {
     std::cerr << "The log level of Caffe2 has to be no larger than GLOG_FATAL("
-              << GLOG_FATAL << "). Capping it to GLOG_FATAL." << std::endl;
+              << GLOG_FATAL << "). Capping it to GLOG_FATAL." << '\n';
     FLAGS_caffe2_log_level = GLOG_FATAL;
   }
   return true;
@@ -542,7 +542,7 @@ void setLogLevelFlagFromEnv() {
       << "`TORCH_CPP_LOG_LEVEL` environment variable cannot be parsed. Valid values are "
          "`INFO`, `WARNING`, `ERROR`, and `FATAL` or their numerical equivalents `0`, `1`, "
          "`2`, and `3`."
-      << std::endl;
+      << '\n';
 }
 
 } // namespace

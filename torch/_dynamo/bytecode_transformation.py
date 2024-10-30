@@ -1037,7 +1037,7 @@ def remove_fused_load_store(instructions: List[Instruction]) -> None:
                 create_instruction(inst0, argval=argval0),
                 create_instruction(inst1, argval=argval1),
             ]
-            new_insts.append(overwrite_instruction(inst, replace_insts))
+            new_insts.extend(overwrite_instruction(inst, replace_insts))
         else:
             new_insts.append(inst)
     instructions[:] = new_insts
