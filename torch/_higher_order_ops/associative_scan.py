@@ -213,9 +213,17 @@ def associative_scan(
         #            [torch.tensor([[1.0, 3.0],
         #                           [1.0, 3.0]])])
         # The arguments are of shape 2 x 2, but can be evaluated in parallel along the scan dimension.
+        # TODO: In case of the additional inputs, we the in_dims should be set to None
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
-            combine_fn=torch.vmap(combine_fn, dim, dim),
+            combine_fn=torch.vmap(
+                combine_fn,
+                in_dims=(
+                    pytree.tree_unflatten([dim] * len(leaves), spec),
+                    pytree.tree_unflatten([dim] * len(leaves), spec),
+                ),
+                out_dims=dim,
+            ),
             spec=spec,
             num_leaves=len(leaves),
         )
