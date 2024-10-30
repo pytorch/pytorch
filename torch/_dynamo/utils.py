@@ -71,6 +71,7 @@ from torch._C import (
     _push_on_torch_function_stack,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.metrics_context import MetricsContext
 from torch._guards import Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_chromium_event_internal, log_compilation_event
@@ -359,43 +360,43 @@ def dynamo_timed(
                             structured_logging_overhead_s = (
                                 torch._logging.get_structured_logging_overhead()
                             )
-                            metrics = CompilationMetrics(
-                                compile_id=compile_id,
-                                inductor_compile_time_s=inductor_compile_time,
-                                code_gen_time_s=code_gen_time,
-                                fail_type=fail_type,
-                                fail_reason=fail_reason,
-                                remote_cache_time_saved_s=remote_cache_time_saved,
-                                structured_logging_overhead_s=structured_logging_overhead_s,
-                                is_forward=False,  # is_forward
-                                remote_fx_graph_cache_get_time_ms=to_int_ms(
+                            metrics = {
+                                "compile_id": compile_id,
+                                "inductor_compile_time_s": inductor_compile_time,
+                                "code_gen_time_s": code_gen_time,
+                                "fail_type": fail_type,
+                                "fail_reason": fail_reason,
+                                "remote_cache_time_saved_s": remote_cache_time_saved,
+                                "structured_logging_overhead_s": structured_logging_overhead_s,
+                                "is_forward": False,
+                                "remote_fx_graph_cache_get_time_ms": to_int_ms(
                                     remote_fx_graph_cache_get_time
                                 ),
-                                remote_fx_graph_cache_put_time_ms=to_int_ms(
+                                "remote_fx_graph_cache_put_time_ms": to_int_ms(
                                     remote_fx_graph_cache_put_time
                                 ),
-                                start_time_us=start_ns // 1000,
-                                duration_us=(end_ns - start_ns) // 1000,
-                                inductor_cumulative_compile_time_us=to_int_us(
+                                "start_time_us": start_ns // 1000,
+                                "duration_us": (end_ns - start_ns) // 1000,
+                                "inductor_cumulative_compile_time_us": to_int_us(
                                     inductor_compile_time
                                 ),
-                                inductor_code_gen_cumulative_compile_time_us=to_int_us(
+                                "inductor_code_gen_cumulative_compile_time_us": to_int_us(
                                     code_gen_time
                                 ),
-                                distributed_ephemeral_timeout_us=to_int_us(
+                                "distributed_ephemeral_timeout_us": to_int_us(
                                     remote_cache_time_saved
                                 ),  # TODO: instrument more accurately
-                                structured_logging_overhead_us=to_int_us(
+                                "structured_logging_overhead_us": to_int_us(
                                     structured_logging_overhead_s
                                 ),
-                                remote_fx_graph_cache_get_time_us=to_int_us(
+                                "remote_fx_graph_cache_get_time_us": to_int_us(
                                     remote_fx_graph_cache_get_time
                                 ),
-                                remote_fx_graph_cache_put_time_us=to_int_us(
+                                "remote_fx_graph_cache_put_time_us": to_int_us(
                                     remote_fx_graph_cache_put_time
                                 ),
-                            )
-                            record_compilation_metrics(metrics)
+                            }
+                            metrics_context.update(metrics)
 
 
 @overload
@@ -810,6 +811,11 @@ def to_int_us(v: Optional[float]) -> Optional[int]:
     return None if v is None else int(v * 1_000_000)
 
 
+# Version field added to every log. Increment to make it easier to distinguish new
+# vs. old entries when you make a substantive change to how the logs are populated.
+LOG_FORMAT_VERSION = 1
+
+
 @dataclasses.dataclass
 class CompilationMetrics:
     compile_id: Optional[str] = None
@@ -866,6 +872,7 @@ class CompilationMetrics:
     structured_logging_overhead_us: Optional[int] = None
     remote_fx_graph_cache_get_time_us: Optional[int] = None
     remote_fx_graph_cache_put_time_us: Optional[int] = None
+    log_format_version: int = LOG_FORMAT_VERSION
 
 
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
@@ -913,8 +920,9 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics):
     )
 
 
-def record_compilation_metrics(compilation_metrics: CompilationMetrics):
+def record_compilation_metrics(metrics: Dict[str, Any], exc_type, exc_value):
     global _compilation_metrics
+    compilation_metrics = CompilationMetrics(**metrics)
     _compilation_metrics.append(compilation_metrics)
     if compilation_metrics.is_forward:
         name = "compilation_metrics"
@@ -923,10 +931,7 @@ def record_compilation_metrics(compilation_metrics: CompilationMetrics):
         name = "bwd_compilation_metrics"
     torch._logging.trace_structured(
         name,
-        lambda: {
-            k: list(v) if isinstance(v, set) else v
-            for k, v in dataclasses.asdict(compilation_metrics).items()
-        },
+        lambda: {k: list(v) if isinstance(v, set) else v for k, v in metrics.items()},
         # NB: Because compilation metrics *includes* the logging overhead time,
         # we can't both *measure* the logging overhead of compilation metrics
         # without making it inconsistent with compilation metrics itself, so
@@ -952,6 +957,33 @@ def clear_compilation_metrics() -> None:
 
 def get_compilation_metrics() -> List[CompilationMetrics]:
     return list(_compilation_metrics)
+
+
+# Use the following singleton to capture and log CompilationMetrics. Entering the context
+# manager allocates a new record to be logged when it exits. (You should not need to use
+# this directly unless you introduce a new code path where compilation metrics would be
+# gathered). While compiling, use the setters or timer in MetricsContext to update fields
+# in the current context. For example:
+#
+# To set a single field:
+#   metrics_context.set("metric_name", value)
+#
+# To set multiple fields:
+#   metrics_context.update({"name1": val1, "name2": val2})
+#
+# To increment a numeric field:
+#   metrics_context.increment("metric_name", value)
+#
+# To record execution time:
+#    def foo(...):
+#        # Record microseconds
+#        with metrics_context.timed("metric_us")
+#            ...
+#        # Record milliseconds
+#        with metrics_context.timed("metric_ms")
+#            ...
+#
+metrics_context = MetricsContext(on_exit=record_compilation_metrics)
 
 
 class ChromiumEventLogger:

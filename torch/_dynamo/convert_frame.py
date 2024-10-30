@@ -30,7 +30,7 @@ import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
-from torch._dynamo.utils import CompileTimeInstructionCounter
+from torch._dynamo.utils import CompileTimeInstructionCounter, metrics_context
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
@@ -104,7 +104,6 @@ from .symbolic_convert import (
 from .trace_rules import is_numpy
 from .utils import (
     CleanupManager,
-    CompilationMetrics,
     counters,
     dynamo_timed,
     format_bytecode,
@@ -116,7 +115,6 @@ from .utils import (
     istype,
     LazyString,
     orig_code_map,
-    record_compilation_metrics,
     reset_graph_break_dup_checker,
     setup_compile_debug,
     to_int_ms,
@@ -864,7 +862,7 @@ def _compile(
     chromium_event_log.log_event_start("dynamo", chromium_start_time, {})
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
         CompileContext(compile_id)
-    ):
+    ), metrics_context:
         restart_reasons: set[str] = set()
         # This is shared across restarts
         mutated_closure_cell_ids: Set[int] = set()
@@ -1114,72 +1112,81 @@ def _compile(
                 }
 
             config_dict = handle_sets(config.get_config_copy())
-            metrics = CompilationMetrics(
-                str(compile_id),
-                frame_key,
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                cache_size.num_cache_entries_with_same_id_matched_objs,
-                cache_size.num_cache_entries,
-                guard_count,
-                shape_env_guard_count,
-                graph_op_count,
-                graph_node_count,
-                graph_input_count,
-                start_time_ns / 1e9,
-                entire_frame_compile_time,
-                backend_compile_time,
-                inductor_compile_time,
-                code_gen_time,
-                fail_type,
-                fail_reason,
-                fail_user_frame_filename,
-                fail_user_frame_lineno,
-                non_compliant_ops,
-                compliant_custom_ops,
-                restart_reasons,
-                dynamo_time_before_restart,
-                guarded_code is not None,
-                possibly_missed_reinplacing_opportunities,
-                remote_cache_time_saved,
-                structured_logging_overhead_s,
-                config.suppress_errors,
-                config.inline_inbuilt_nn_modules,
-                config.specialize_float,
-                json.dumps(config_dict),
-                True,  # is_forward
-                to_int_ms(remote_fx_graph_cache_get_time),
-                to_int_ms(remote_fx_graph_cache_put_time),
-                start_time_us=start_time_ns // 1000,
-                duration_us=duration_ns // 1000,
-                dynamo_cumulative_compile_time_us=to_int_us(entire_frame_compile_time),
-                aot_autograd_cumulative_compile_time_us=to_int_us(backend_compile_time),
-                inductor_cumulative_compile_time_us=to_int_us(inductor_compile_time),
-                inductor_code_gen_cumulative_compile_time_us=to_int_us(code_gen_time),
-                triton_compile_time_us=None,  # TODO: instrument
-                runtime_cudagraphify_time_us=None,  # TODO: instrument in separate event
-                runtime_triton_autotune_time_us=None,  # TODO: instrument in separate event
-                dynamo_compile_time_before_restart_us=to_int_us(
-                    dynamo_time_before_restart
-                ),
-                cuda_synchronize_time_us=None,  # TODO: instrument
-                distributed_ephemeral_timeout_us=to_int_us(
-                    remote_cache_time_saved
-                ),  # TODO: instrument more accurately
-                structured_logging_overhead_us=to_int_us(structured_logging_overhead_s),
-                remote_fx_graph_cache_get_time_us=to_int_us(
+            metrics = {
+                "compile_id": str(compile_id),
+                "frame_key": frame_key,
+                "co_name": code.co_name,
+                "co_filename": code.co_filename,
+                "co_firstlineno": code.co_firstlineno,
+                "cache_size": cache_size.num_cache_entries_with_same_id_matched_objs,
+                "accumulated_cache_size": cache_size.num_cache_entries,
+                "guard_count": guard_count,
+                "shape_env_guard_count": shape_env_guard_count,
+                "graph_op_count": graph_op_count,
+                "graph_node_count": graph_node_count,
+                "graph_input_count": graph_input_count,
+                "start_time": start_time_ns / 1e9,
+                "entire_frame_compile_time_s": entire_frame_compile_time,
+                "backend_compile_time_s": backend_compile_time,
+                "inductor_compile_time_s": inductor_compile_time,
+                "code_gen_time_s": code_gen_time,
+                "fail_type": fail_type,
+                "fail_reason": fail_reason,
+                "fail_user_frame_filename": fail_user_frame_filename,
+                "fail_user_frame_lineno": fail_user_frame_lineno,
+                "non_compliant_ops": non_compliant_ops,
+                "compliant_custom_ops": compliant_custom_ops,
+                "restart_reasons": restart_reasons,
+                "dynamo_time_before_restart_s": dynamo_time_before_restart,
+                "has_guarded_code": guarded_code is not None,
+                "possibly_missed_reinplacing_opportunities": possibly_missed_reinplacing_opportunities,
+                "remote_cache_time_saved_s": remote_cache_time_saved,
+                "structured_logging_overhead_s": structured_logging_overhead_s,
+                "config_suppress_errors": config.suppress_errors,
+                "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
+                "specialize_float": config.specialize_float,
+                "dynamo_config": json.dumps(config_dict),
+                "is_forward": True,
+                "remote_fx_graph_cache_get_time_ms": to_int_ms(
                     remote_fx_graph_cache_get_time
                 ),
-                remote_fx_graph_cache_put_time_us=to_int_us(
+                "remote_fx_graph_cache_put_time_ms": to_int_ms(
                     remote_fx_graph_cache_put_time
                 ),
-            )
-            record_compilation_metrics(metrics)
+                "start_time_us": start_time_ns // 1000,
+                "duration_us": duration_ns // 1000,
+                "dynamo_cumulative_compile_time_us": to_int_us(
+                    entire_frame_compile_time
+                ),
+                "aot_autograd_cumulative_compile_time_us": to_int_us(
+                    backend_compile_time
+                ),
+                "inductor_cumulative_compile_time_us": to_int_us(inductor_compile_time),
+                "inductor_code_gen_cumulative_compile_time_us": to_int_us(
+                    code_gen_time
+                ),
+                "triton_compile_time_us": None,  # TODO: instrument
+                "runtime_cudagraphify_time_us": None,  # TODO: instrument in separate event
+                "runtime_triton_autotune_time_us": None,  # TODO: instrument in separate event
+                "dynamo_compile_time_before_restart_us": to_int_us(
+                    dynamo_time_before_restart
+                ),
+                "cuda_synchronize_time_us": None,  # TODO: instrument
+                "distributed_ephemeral_timeout_us": to_int_us(
+                    remote_cache_time_saved
+                ),  # TODO: instrument more accurately
+                "structured_logging_overhead_us": to_int_us(
+                    structured_logging_overhead_s
+                ),
+                "remote_fx_graph_cache_get_time_us": to_int_us(
+                    remote_fx_graph_cache_get_time
+                ),
+                "remote_fx_graph_cache_put_time_us": to_int_us(
+                    remote_fx_graph_cache_put_time
+                ),
+            }
+            metrics_context.update(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
-            chromium_event_log.log_event_end(
-                "dynamo", time.time_ns(), {}, chromium_start_time
-            )
 
 
 class ConvertFrame:

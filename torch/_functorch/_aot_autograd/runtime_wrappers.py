@@ -17,6 +17,7 @@ from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dynamo.utils import metrics_context
 from torch._guards import (
     compile_context,
     CompileContext,
@@ -1986,7 +1987,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         )
                         with tracing(saved_context), compile_context(
                             saved_compile_context
-                        ), context(), track_graph_compiling(aot_config, "backward"):
+                        ), context(), track_graph_compiling(
+                            aot_config, "backward"
+                        ), metrics_context:
                             CompiledFunction.compiled_bw = aot_config.bw_compiler(
                                 bw_module, placeholder_list
                             )
