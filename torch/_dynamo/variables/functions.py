@@ -157,11 +157,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def __init__(self, fn, is_constant=False, **kwargs) -> None:
         super().__init__(**kwargs)
-        if getattr(fn, "_dynamo_marked_constant", False):
-            # This method should be treated as a constant for the purposes of compilation
-            self.is_constant = True
-        else:
-            self.is_constant = False
+        # Check if this method should be treated as a constant for the purposes of compilation
+        self.is_constant = bool(
+            getattr(fn, "__torch_dynamo_can_constant_fold_through__", False)
+            or getattr(fn, "_dynamo_marked_constant", False)
+        )
 
         assert isinstance(
             fn, (types.FunctionType, torch.jit.ScriptFunction)
@@ -721,8 +721,8 @@ class SkipFunctionVariable(VariableTracker):
                 ):
                     msg = (
                         f"Graph break for an optree C/C++ function {self.value.__module__}.{self.value.__qualname__}."
-                        f" Consider using torch.utils._pytree - "
-                        f"https://github.com/pytorch/pytorch/blob/main/torch/utils/_pytree.py"
+                        f" Consider using torch.utils.pytree - "
+                        f"https://github.com/pytorch/pytorch/blob/main/torch/utils/pytree.py"
                     )
                     # also warn on it because most users won't see the graph break message
                     torch._dynamo.utils.warn_once(msg)

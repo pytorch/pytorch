@@ -31,6 +31,7 @@ from typing import (
     DefaultDict,
     Deque,
     Dict,
+    Final,
     FrozenSet,
     Generic,
     Hashable,
@@ -38,6 +39,7 @@ from typing import (
     List,
     Mapping,
     NamedTuple,
+    NoReturn,
     Optional,
     OrderedDict as GenericOrderedDict,
     overload,
@@ -48,7 +50,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated
+from typing_extensions import deprecated, Self
 
 
 __all__ = [
@@ -83,6 +85,12 @@ __all__ = [
     "treespec_dumps",
     "treespec_loads",
     "treespec_pprint",
+    "is_namedtuple",
+    "is_namedtuple_class",
+    "is_namedtuple_instance",
+    "is_structseq",
+    "is_structseq_class",
+    "is_structseq_instance",
 ]
 
 
@@ -408,6 +416,94 @@ class GetAttrKey:
         return getattr(obj, self.name)
 
 
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_namedtuple(obj: Union[object, type]) -> bool:
+    """Return whether the object is an instance of namedtuple or a subclass of namedtuple."""
+    cls = obj if isinstance(obj, type) else type(obj)
+    return is_namedtuple_class(cls)
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_namedtuple_class(cls: type) -> bool:
+    """Return whether the class is a subclass of namedtuple."""
+    return (
+        isinstance(cls, type)
+        and issubclass(cls, tuple)
+        and isinstance(getattr(cls, "_fields", None), tuple)
+        and all(type(field) is str for field in cls._fields)  # type: ignore[attr-defined]
+        and callable(getattr(cls, "_make", None))
+        and callable(getattr(cls, "_asdict", None))
+    )
+
+
+is_namedtuple_class.__torch_dynamo_can_constant_fold_through__ = True  # type: ignore[attr-defined]
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_namedtuple_instance(obj: object) -> bool:
+    """Return whether the object is an instance of namedtuple."""
+    return is_namedtuple_class(type(obj))
+
+
+_T_co = TypeVar("_T_co", covariant=True)
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+class structseq(Tuple[_T_co, ...]):
+    """A generic type stub for CPython's ``PyStructSequence`` type."""
+
+    n_fields: Final[int]  # type: ignore[misc]
+    n_sequence_fields: Final[int]  # type: ignore[misc]
+    n_unnamed_fields: Final[int]  # type: ignore[misc]
+
+    def __init_subclass__(cls) -> NoReturn:
+        """Prohibit subclassing."""
+        raise TypeError("type 'structseq' is not an acceptable base type")
+
+    def __new__(
+        cls: Type[Self],
+        sequence: Iterable[_T_co],
+        dict: Dict[str, Any] = ...,
+    ) -> Self:
+        raise NotImplementedError
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_structseq(obj: Union[object, type]) -> bool:
+    """Return whether the object is an instance of PyStructSequence or a class of PyStructSequence."""
+    cls = obj if isinstance(obj, type) else type(obj)
+    return is_structseq_class(cls)
+
+
+# Set if the type allows subclassing (see CPython's Include/object.h)
+Py_TPFLAGS_BASETYPE: int = 1 << 10
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_structseq_class(cls: type) -> bool:
+    """Return whether the class is a class of PyStructSequence."""
+    return (
+        isinstance(cls, type)
+        # Check direct inheritance from `tuple` rather than `issubclass(cls, tuple)`
+        and cls.__bases__ == (tuple,)
+        # Check PyStructSequence members
+        and isinstance(getattr(cls, "n_fields", None), int)
+        and isinstance(getattr(cls, "n_sequence_fields", None), int)
+        and isinstance(getattr(cls, "n_unnamed_fields", None), int)
+        # Check the type does not allow subclassing
+        and not bool(cls.__flags__ & Py_TPFLAGS_BASETYPE)  # only works for CPython
+    )
+
+
+is_structseq_class.__torch_dynamo_can_constant_fold_through__ = True  # type: ignore[attr-defined]
+
+
+# Reference: https://github.com/metaopt/optree/blob/main/optree/typing.py
+def is_structseq_instance(obj: object) -> bool:
+    """Return whether the object is an instance of PyStructSequence."""
+    return is_structseq_class(type(obj))
+
+
 def _tuple_flatten(d: Tuple[Any, ...]) -> Tuple[List[Any], Context]:
     return list(d), None
 
@@ -587,6 +683,39 @@ def _deque_unflatten(values: Iterable[Any], context: Context) -> Deque[Any]:
     return deque(values, maxlen=context)
 
 
+def _structseq_flatten(d: structseq[Any]) -> Tuple[List[Any], Context]:
+    return list(d), type(d)
+
+
+def _structseq_flatten_with_keys(
+    d: structseq[Any],
+) -> Tuple[List[Tuple[KeyEntry, Any]], Context]:
+    values, context = _structseq_flatten(d)
+    return [(SequenceKey(i), v) for i, v in enumerate(values)], context
+
+
+def _structseq_unflatten(values: Iterable[Any], context: Context) -> structseq[Any]:
+    return context(values)  # type: ignore[no-any-return]
+
+
+def _structseq_serialize(context: Context) -> DumpableContext:
+    json_structseq = {
+        "class_module": context.__module__,
+        "class_name": context.__qualname__,
+    }
+    return json_structseq
+
+
+def _structseq_deserialize(dumpable_context: DumpableContext) -> Context:
+    class_module = dumpable_context["class_module"]
+    class_name = dumpable_context["class_name"]
+    assert isinstance(class_module, str)
+    assert isinstance(class_name, str)
+    module = importlib.import_module(class_module)
+    context = getattr(module, class_name)
+    return context
+
+
 _private_register_pytree_node(
     tuple,
     _tuple_flatten,
@@ -640,32 +769,49 @@ _private_register_pytree_node(
     serialized_type_name="collections.deque",
     flatten_with_keys_fn=_deque_flatten_with_keys,
 )
-
-
-STANDARD_DICT_TYPES: FrozenSet[type] = frozenset(
-    {dict, OrderedDict, defaultdict},
+_private_register_pytree_node(
+    structseq,
+    _structseq_flatten,
+    _structseq_unflatten,
+    serialized_type_name="structseq",
+    to_dumpable_context=_structseq_serialize,
+    from_dumpable_context=_structseq_deserialize,
+    flatten_with_keys_fn=_structseq_flatten_with_keys,
 )
+
+
+STANDARD_DICT_TYPES: FrozenSet[type] = frozenset({dict, OrderedDict, defaultdict})
 BUILTIN_TYPES: FrozenSet[type] = frozenset(
-    {tuple, list, dict, namedtuple, OrderedDict, defaultdict, deque},  # type: ignore[arg-type]
+    {
+        tuple,
+        list,
+        dict,
+        namedtuple,  # type: ignore[arg-type]
+        OrderedDict,
+        defaultdict,
+        deque,
+        structseq,
+    },
 )
 
 
-# h/t https://stackoverflow.com/questions/2166818/how-to-check-if-an-object-is-an-instance-of-a-namedtuple
+@deprecated(
+    "torch.utils._pytree._is_namedtuple_instance is private and will be removed in a future release. "
+    "Please use torch.utils._pytree.is_namedtuple_instance instead.",
+    category=FutureWarning,
+)
 def _is_namedtuple_instance(tree: Any) -> bool:
-    typ = type(tree)
-    bases = typ.__bases__
-    if len(bases) != 1 or bases[0] != tuple:
-        return False
-    fields = getattr(typ, "_fields", None)
-    if not isinstance(fields, tuple):
-        return False
-    return all(type(entry) == str for entry in fields)
+    return is_namedtuple_instance(tree)
 
 
 def _get_node_type(tree: Any) -> Any:
-    if _is_namedtuple_instance(tree):
-        return namedtuple
-    return type(tree)
+    node_type = type(tree)
+    if node_type not in SUPPORTED_NODES:
+        if is_structseq_class(node_type):
+            return structseq
+        if is_namedtuple_class(node_type):
+            return namedtuple
+    return node_type
 
 
 # A leaf is defined as anything that is not a Node.
@@ -717,85 +863,87 @@ class TreeSpec:
     def is_leaf(self) -> bool:
         return self.num_nodes == 1 and self.num_leaves == 1
 
-    def _flatten_up_to_helper(self, tree: PyTree, subtrees: List[PyTree]) -> None:
-        if self.is_leaf():
-            subtrees.append(tree)
-            return
+    def flatten_up_to(self, tree: PyTree) -> List[PyTree]:
+        def helper(treespec: TreeSpec, tree: PyTree, subtrees: List[PyTree]) -> None:
+            if treespec.is_leaf():
+                subtrees.append(tree)
+                return
 
-        node_type = _get_node_type(tree)
-        if self.type not in BUILTIN_TYPES:
-            # Always require custom node types to match exactly
-            if node_type != self.type:
-                raise ValueError(
-                    f"Type mismatch; "
-                    f"expected {self.type!r}, but got {node_type!r}.",
-                )
-            flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-            child_pytrees, context = flatten_fn(tree)
-            if len(child_pytrees) != self.num_children:
-                raise ValueError(
-                    f"Node arity mismatch; "
-                    f"expected {self.num_children}, but got {len(child_pytrees)}.",
-                )
-            if context != self.context:
-                raise ValueError(
-                    f"Node context mismatch for custom node type {self.type!r}.",
-                )
-        else:
-            # For builtin dictionary types, we allow some flexibility
-            # Otherwise, we require exact matches
-            both_standard_dict = (
-                self.type in STANDARD_DICT_TYPES and node_type in STANDARD_DICT_TYPES
-            )
-            if node_type != self.type and not both_standard_dict:
-                raise ValueError(
-                    f"Node type mismatch; "
-                    f"expected {self.type!r}, but got {node_type!r}.",
-                )
-            if len(tree) != self.num_children:
-                raise ValueError(
-                    f"Node arity mismatch; "
-                    f"expected {self.num_children}, but got {len(tree)}.",
-                )
-
-            if both_standard_dict:  # dictionary types are compatible with each other
-                dict_context = (
-                    self.context
-                    if self.type is not defaultdict
-                    # ignore mismatch of `default_factory` for defaultdict
-                    else self.context[1]
-                )
-                expected_keys = dict_context
-                got_key_set = set(tree)
-                expected_key_set = set(expected_keys)
-                if got_key_set != expected_key_set:
-                    missing_keys = expected_key_set.difference(got_key_set)
-                    extra_keys = got_key_set.difference(expected_key_set)
-                    message = ""
-                    if missing_keys:
-                        message += f"; missing key(s): {missing_keys}"
-                    if extra_keys:
-                        message += f"; extra key(s): {extra_keys}"
-                    raise ValueError(f"Node keys mismatch{message}.")
-                child_pytrees = [tree[key] for key in expected_keys]
-            else:
-                flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-                child_pytrees, context = flatten_fn(tree)
-                if (
-                    context != self.context
-                    and self.type is not deque  # ignore mismatch of `maxlen` for deque
-                ):
+            node_type = _get_node_type(tree)
+            if treespec.type not in BUILTIN_TYPES:
+                # Always require custom node types to match exactly
+                if node_type != treespec.type:
                     raise ValueError(
-                        f"Node context mismatch for node type {self.type!r}; "
-                        f"expected {self.context!r}, but got {context!r}.",  # namedtuple type mismatch
+                        f"Type mismatch; "
+                        f"expected {treespec.type!r}, but got {node_type!r}.",
+                    )
+                flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+                children, context = flatten_fn(tree)
+                if len(children) != treespec.num_children:
+                    raise ValueError(
+                        f"Node arity mismatch; "
+                        f"expected {treespec.num_children}, but got {len(children)}.",
+                    )
+                if context != treespec.context:
+                    raise ValueError(
+                        f"Node context mismatch for custom node type {treespec.type!r}.",
+                    )
+            else:
+                # For builtin dictionary types, we allow some flexibility
+                # Otherwise, we require exact matches
+                both_standard_dict = (
+                    treespec.type in STANDARD_DICT_TYPES
+                    and node_type in STANDARD_DICT_TYPES
+                )
+                if not both_standard_dict and node_type != treespec.type:
+                    raise ValueError(
+                        f"Node type mismatch; "
+                        f"expected {treespec.type!r}, but got {node_type!r}.",
+                    )
+                if len(tree) != treespec.num_children:
+                    raise ValueError(
+                        f"Node arity mismatch; "
+                        f"expected {treespec.num_children}, but got {len(tree)}.",
                     )
 
-        for child_pytree, child_spec in zip(child_pytrees, self.children_specs):
-            child_spec._flatten_up_to_helper(child_pytree, subtrees)
+                if both_standard_dict:
+                    # dictionary types are compatible with each other
+                    dict_context = (
+                        treespec.context
+                        if treespec.type is not defaultdict
+                        # ignore mismatch of `default_factory` for defaultdict
+                        else treespec.context[1]
+                    )
+                    expected_keys = dict_context
+                    got_key_set = set(tree)
+                    expected_key_set = set(expected_keys)
+                    if got_key_set != expected_key_set:
+                        missing_keys = expected_key_set.difference(got_key_set)
+                        extra_keys = got_key_set.difference(expected_key_set)
+                        message = ""
+                        if missing_keys:
+                            message += f"; missing key(s): {missing_keys}"
+                        if extra_keys:
+                            message += f"; extra key(s): {extra_keys}"
+                        raise ValueError(f"Node keys mismatch{message}.")
+                    children = [tree[key] for key in expected_keys]
+                else:
+                    # node_type is treespec.type
+                    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+                    children, context = flatten_fn(tree)
+                    if (
+                        node_type is not deque  # ignore mismatch of `maxlen` for deque
+                    ) and context != treespec.context:
+                        raise ValueError(
+                            f"Node context mismatch for node type {treespec.type!r}; "
+                            f"expected {treespec.context!r}, but got {context!r}.",  # namedtuple type mismatch
+                        )
 
-    def flatten_up_to(self, tree: PyTree) -> List[PyTree]:
+            for subtree, subspec in zip(children, treespec.children_specs):
+                helper(subspec, subtree, subtrees)
+
         subtrees: List[PyTree] = []
-        self._flatten_up_to_helper(tree, subtrees)
+        helper(self, tree, subtrees)
         return subtrees
 
     def unflatten(self, leaves: Iterable[Any]) -> PyTree:
@@ -842,27 +990,6 @@ class LeafSpec(TreeSpec):
 _LEAF_SPEC = LeafSpec()
 
 
-def _tree_flatten_helper(
-    tree: PyTree,
-    leaves: List[Any],
-    is_leaf: Optional[Callable[[PyTree], bool]] = None,
-) -> TreeSpec:
-    if _is_leaf(tree, is_leaf=is_leaf):
-        leaves.append(tree)
-        return _LEAF_SPEC
-
-    node_type = _get_node_type(tree)
-    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, context = flatten_fn(tree)
-
-    # Recursively flatten the children
-    children_specs = [
-        _tree_flatten_helper(child, leaves, is_leaf=is_leaf) for child in child_pytrees
-    ]
-
-    return TreeSpec(node_type, context, children_specs)
-
-
 def tree_flatten(
     tree: PyTree,
     is_leaf: Optional[Callable[[PyTree], bool]] = None,
@@ -870,9 +997,23 @@ def tree_flatten(
     """Flattens a pytree into a list of values and a TreeSpec that can be used
     to reconstruct the pytree.
     """
+
+    def helper(node: PyTree, leaves: List[Any]) -> TreeSpec:
+        if _is_leaf(node, is_leaf=is_leaf):
+            leaves.append(node)
+            return _LEAF_SPEC
+
+        node_type = _get_node_type(node)
+        flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
+        children, context = flatten_fn(node)
+
+        # Recursively flatten the children
+        subspecs = [helper(child, leaves) for child in children]
+        return TreeSpec(node_type, context, subspecs)
+
     leaves: List[Any] = []
-    spec = _tree_flatten_helper(tree, leaves, is_leaf=is_leaf)
-    return leaves, spec
+    treespec = helper(tree, leaves)
+    return leaves, treespec
 
 
 def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
@@ -994,7 +1135,7 @@ def tree_map_(
     """
     leaves, treespec = tree_flatten(tree, is_leaf=is_leaf)
     flat_args = [leaves] + [treespec.flatten_up_to(r) for r in rests]
-    tuple(map(func, *flat_args))  # consume and exhaust the iterable
+    deque(map(func, *flat_args), maxlen=0)  # consume and exhaust the iterable
     return tree
 
 
@@ -1455,16 +1596,20 @@ def treespec_loads(serialized: str) -> TreeSpec:
     )
 
 
-class _DummyLeaf:
+class _Asterisk(str):
+    def __new__(cls) -> Self:
+        return super().__new__(cls, "*")
+
     def __repr__(self) -> str:
-        return "*"
+        return "*"  # no quotes
+
+
+_asterisk = _Asterisk()
+del _Asterisk
 
 
 def treespec_pprint(treespec: TreeSpec) -> str:
-    dummy_tree = tree_unflatten(
-        [_DummyLeaf() for _ in range(treespec.num_leaves)],
-        treespec,
-    )
+    dummy_tree = tree_unflatten([_asterisk] * treespec.num_leaves, treespec)
     return repr(dummy_tree)
 
 
