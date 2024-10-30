@@ -16,7 +16,7 @@ from ..select_algorithm import (
     realize_inputs,
     TritonTemplate,
 )
-from ..utils import use_aten_gemm_kernels, use_ck_template, use_triton_template
+from ..utils import use_aten_gemm_kernels, use_ck_gemm_template, use_triton_template
 from .mm_common import _is_static_problem, mm_args, mm_grid, scaled_mm_configs
 
 
@@ -189,7 +189,9 @@ scaled_mm_bias_template = TritonTemplate(
 )
 
 
-aten__fp8_mm = ExternKernelChoice(torch._scaled_mm, "at::_scaled_mm")
+aten__fp8_mm = ExternKernelChoice(
+    torch._scaled_mm, "at::_scaled_mm_out", op_overload=aten._scaled_mm.out
+)
 
 
 def are_compatible_scales(size_a: List[int], size_b: List[int]) -> bool:
@@ -292,7 +294,7 @@ def tuned_scaled_mm(
                 **kwargs,
             )
 
-    if is_nonzero and use_ck_template(layout, m, n, k):
+    if is_nonzero and use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, input_nodes)
 
     if (
