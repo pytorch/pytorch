@@ -3,6 +3,7 @@ name: Close nonexistent disable issues
 on:
   schedule:
     - cron: 5 22 * * 5  # this should be about 3PM PT on Friday
+  push:
 
 jobs:
   close-nonexistent-disable-issues:
@@ -21,5 +22,5 @@ jobs:
           CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_READONLY_PASSWORD }}
         run: |
           pip3 install requests==2.32.2
-          pip3 install rockset==1.0.3
+          pip3 install clickhouse-connect==0.7.16
           python3 .github/scripts/close_nonexistent_disable_issues.py
