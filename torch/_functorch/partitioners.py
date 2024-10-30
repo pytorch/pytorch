@@ -225,13 +225,16 @@ def _is_primal(node: fx.Node) -> bool:
     return (
         node.op == "placeholder"
         and "tangents" not in str(node.target)
+        and "is_tangent" not in node.meta
         and not _is_bwd_seed_offset(node)
         and not _is_fwd_seed_offset(node)
     )
 
 
 def _is_tangent(node: fx.Node) -> bool:
-    return node.op == "placeholder" and "tangents" in str(node.target)
+    return node.op == "placeholder" and (
+        "tangents" in str(node.target) or "is_tangent" in node.meta
+    )
 
 
 def _is_bwd_seed_offset(node: fx.Node) -> bool:
@@ -1829,7 +1832,7 @@ def min_cut_rematerialization_partition(
         name_to_node = get_name_to_node(joint_module.graph)
         required_bw_nodes = set()
         for node in joint_module.graph.nodes:
-            if node.op == "placeholder" and "tangents" in node.target:
+            if _is_tangent(node):
                 required_bw_nodes.add(node)
             elif _must_be_in_backward(node):
                 required_bw_nodes.add(node)
