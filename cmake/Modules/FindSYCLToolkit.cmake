@@ -3,6 +3,7 @@
 # SYCL_INCLUDE_DIR         : Include directories needed to use SYCL.
 # SYCL_LIBRARY_DIR         ：The path to the SYCL library.
 # SYCL_LIBRARY             : SYCL library fullname.
+# SYCL_COMPILER_VERSION    : SYCL compiler version.
 
 include(FindPackageHandleStandardArgs)
 
@@ -40,6 +41,24 @@ find_file(
 # Due to the unrecognized compilation option `-fsycl` in other compiler.
 list(APPEND SYCL_INCLUDE_DIR ${SYCL_INCLUDE_SYCL_DIR})
 
+# Find include/sycl/version.hpp to fetch sycl compiler version
+if(EXISTS ${SYCL_INCLUDE_SYCL_DIR}/version.hpp)
+  set(SYCL_VERSION_HEADER_FILE ${SYCL_INCLUDE_SYCL_DIR}/version.hpp)
+else()
+  message(FATAL_ERROR "Cannot find include/sycl/version.hpp to get SYCL_COMPILER_VERSION!")
+endif()
+
+# Read the sycl version header file into a variable
+file(READ ${SYCL_VERSION_HEADER_FILE} SYCL_VERSION_HEADER_CONTENT)
+
+# Extract the SYCL compiler version from the version header content.
+# 1. Match the regular expression to find the version string.
+# 2. Replace the "__SYCL_COMPILER_VERSION" part with an empty string.
+# 3. Strip leading and trailing spaces to get the version number.
+string(REGEX MATCH "__SYCL_COMPILER_VERSION[ ]+[0-9]+" TEMP1 ${SYCL_VERSION_HEADER_CONTENT})
+string(REPLACE "__SYCL_COMPILER_VERSION" "" TEMP2 ${TEMP1})
+string(STRIP ${TEMP2} SYCL_COMPILER_VERSION)
+
 # Find library directory from binary.
 find_file(
   SYCL_LIBRARY_DIR
@@ -60,13 +79,15 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux")
     NO_DEFAULT_PATH
   )
 endif()
-# On Windows, currently there's no sycl.lib. Only sycl7.lib with version suffix,
-# where the current version of the SYCL runtime is 7.
-# Until oneAPI adds support to sycl.lib without the version suffix,
-# sycl_runtime_version needs to be hardcoded and uplifted when SYCL runtime version uplifts.
-# TODO: remove this when sycl.lib is supported on Windows
-if(WIN32)
-  set(sycl_runtime_version 7)
+
+# On Windows, the SYCL library is named sycl7.lib until compiler version 20240703. sycl.lib is supported in the later version.
+if(CMAKE_SYSTEM_NAME MATCHES "Windows")
+  if (SYCL_COMPILER_VERSION VERSION_LESS_EQUAL 20240703)
+    set(sycl_runtime_version 7)
+  else()
+    set(sycl_runtime_version "")
+  endif()
+  message(FATAL_ERROR "sycl${sycl_runtime_version}")
   find_library(
     SYCL_LIBRARY
     NAMES "sycl${sycl_runtime_version}"
@@ -96,4 +117,6 @@ find_package_handle_standard_args(
   SYCL
   FOUND_VAR SYCL_FOUND
   REQUIRED_VARS SYCL_INCLUDE_DIR SYCL_LIBRARY_DIR SYCL_LIBRARY
-  REASON_FAILURE_MESSAGE "${SYCL_REASON_FAILURE}")
+  REASON_FAILURE_MESSAGE "${SYCL_REASON_FAILURE}"
+  VERSION_VAR SYCL_COMPILER_VERSION
+  )
