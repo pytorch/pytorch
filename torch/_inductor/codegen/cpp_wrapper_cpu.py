@@ -822,20 +822,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         if dtype == torch.float16 or dtype == torch.bfloat16:
             scalar_tmp = f"{scalar}_tmp"
             writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar_tmp};")
-
-            # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
-            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
-
             writer.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar_tmp}));"
             )
             writer.writeline(f"float {scalar} = float({scalar_tmp});")
         else:
             writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
-
-            # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
-            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
-
             writer.writeline(
                 f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
             )
@@ -939,6 +931,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             f"""
             '''
             )
+
             inductor_entry = CppWrapperCodeCache.load_pybinding(
                 ["std::vector<AtenTensorHandle>"], cpp_wrapper_src, "{self.device}", {len(V.graph.graph_outputs)})
             """
@@ -1014,29 +1007,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return shim_fn
 
     def generate_c_shim_extern_kernel_call(self, kernel, args):
-        wrapped_args = []
         debug_printer_manager = V.graph.wrapper_code.debug_printer
-
-        for x in args:
-            pieces = x.split(", ")
-            for piece in pieces:
-                # We only really *need* convert_arrayref_tensor_to_tensor for
-                # ArrayRefTensors. The code flowing into here uses `0` for nullptr,
-                # which convert_arrayref_tensor_to_tensor would blindly coerce to int,
-                # so just avoid wrapping integers.
-                # Name matching is to find tensor is hacky, but fixing all the
-                # ArrayRefTensor issues is not a priority for now.
-                if isinstance(piece, str) and piece.startswith(
-                    ("buf", "arg", "wrap_with_raii_handle_if_needed")
-                ):
-                    piece = f"convert_arrayref_tensor_to_tensor({piece})"
-                wrapped_args.append(piece)
-
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")
         with debug_printer_manager:
             shim_fn = self.get_c_shim_func_name(kernel)
             self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));"
             )
 
     def generate_c_shim_extern_kernel_alloc(self, extern_kernel, args):
@@ -1079,9 +1055,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 output_name = f"{output_name_base}_{idx}"
                 self.writeline(f"int64_t {output_name} = {output};")
                 output_args.append(f"&{output_name}")
-            elif isinstance(output, sympy.Symbol):
+            elif isinstance(output, sympy.Expr):
                 output_name = f"{output_name_base}_{idx}"
-                self.writeline(f"auto {output_name} = {output};")
+                self.writeline(f"auto {output_name} = {self.expr_printer(output)};")
                 output_args.append(f"&{output_name}")
             elif output is None:
                 output_args.append("nullptr")
@@ -1121,15 +1097,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
-        inputs_wrapped = [
-            (
-                f"convert_arrayref_tensor_to_tensor({x})"
-                if isinstance(x, str)
-                else str(x)
-            )
-            for x in inputs
-        ]
-        line = f"{cpp_kernel_name}(convert_arrayref_tensor_to_tensor({output}), {','.join(inputs_wrapped)}"
+        inputs_wrapped = [str(x) for x in inputs]
+        line = f"{cpp_kernel_name}({output}, {','.join(inputs_wrapped)}"
 
         if python_kernel_name.startswith("aten.scatter_reduce"):
             line += f", {','.join(kwargs)}"
@@ -1150,25 +1119,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
         # tensor prematurely deallocated, thus this std::vector().data() trick here.
         indices_str = (
-            "std::vector<AtenTensorHandle>{"
-            + (
-                ", ".join(
-                    [f"convert_arrayref_tensor_to_tensor({ind})" for ind in indices]
-                )
-            )
-            + "}.data()"
+            "std::vector<AtenTensorHandle>{" + (", ".join(indices)) + "}.data()"
         )
         args = [
-            f"convert_arrayref_tensor_to_tensor({x})",
+            x,
             indices_str,
             str(len(indices)),
-            f"convert_arrayref_tensor_to_tensor({values})",
+            values,
             accumulate,
         ]
-        args.insert(
-            0, f"convert_arrayref_tensor_to_tensor({x})"
-        )  # set x as the output tensor, this fallback mutates x.
-
+        args.insert(0, x)  # set x as the output tensor, this fallback mutates x.
         self.writeline(self.wrap_kernel_call(kernel, args))
 
     def add_benchmark_harness(self, output):
@@ -1214,6 +1174,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return (
             ""
             if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            or isinstance(buffer, ir.TMADescriptor)
             else f"{buffer.get_name()}.reset();"
         )
 
@@ -1362,12 +1323,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return f"RAIIAtenTensorHandle({tmp_name})"
 
     def codegen_reinterpret_view(
-        self, data, size_list, stride_list, offset, writer, dtype=None
+        self, data, size, stride, offset, writer, dtype=None
     ) -> str:
-        dim = str(len(size_list))
+        dim = str(len(size))
         original_offset = offset
-        size = self.codegen_shape_tuple(size_list)
-        stride = self.codegen_shape_tuple(stride_list)
         offset = self.codegen_sizevar(offset)
         call_strs = []
         final_tmp_name = None
@@ -1379,15 +1338,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 f"{data.get_name()}",
                 dim,
                 self.codegen_int_array_var(
-                    size,
+                    self.codegen_shape_tuple(size),
                     writer,
-                    known_statically=self.is_statically_known_list_of_ints(size_list),
+                    known_statically=self.is_statically_known_list_of_ints(size),
                     graph=self.get_codegened_graph(),
                 ),
                 self.codegen_int_array_var(
-                    stride,
+                    self.codegen_shape_tuple(stride),
                     writer,
-                    known_statically=self.is_statically_known_list_of_ints(stride_list),
+                    known_statically=self.is_statically_known_list_of_ints(stride),
                     graph=self.get_codegened_graph(),
                 ),
                 offset,
@@ -1417,8 +1376,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return tmp_RAIIAtenTensorHandle, call_strs
 
         if (
-            size_list == data.layout.size
-            and stride_list == data.layout.stride
+            size == data.layout.size
+            and stride == data.layout.stride
             and original_offset == data.layout.offset
         ):
             # pure dtypeview
@@ -1428,7 +1387,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 final_tmp_name = tmp_output_name
                 final_tmp_name_is_RAIIAtenTensorHandle = True
             else:
-                return f"{data.get_name()}"
+                return data.get_name()
         else:
             # firstly create reinterpretview
             final_tmp_name, reinterpret_call = create_reinterpret_call()
@@ -2230,12 +2189,7 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
         return self.val_to_arg_str_for_prim_type(val, type_)
 
     def create_tmp_raii_handle_var(self, base_handle):
-        if base_handle.startswith(
-            (
-                "convert_arrayref_tensor_to_tensor",
-                "wrap_with_raii_handle_if_needed",
-            )
-        ):
+        if base_handle.startswith(("wrap_with_raii_handle_if_needed",)):
             # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
             # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
             tmp_var_name = f"var_{next(self.arg_var_id)}"
