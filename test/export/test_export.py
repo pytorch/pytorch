@@ -5095,6 +5095,28 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
+        class Boo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = torch.tensor(True)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(False), torch.tensor(True)]
+                return x ^ self.a ^ list_tensor[0] ^ list_tensor[1]
+
+        ep = export(Boo(), (torch.tensor(False),))
+
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(ep.constants), 3)
+
+        inp = (torch.tensor(5),)
+        self.assertTrue(torch.allclose(ep.module()(*inp), Boo()(*inp)))
+
+        transform = ep.run_decompositions()
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
+
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):

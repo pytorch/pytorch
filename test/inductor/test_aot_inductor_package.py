@@ -1,8 +1,10 @@
 # Owner(s): ["module: inductor"]
 import copy
+import os
 import sys
 import tempfile
 import unittest
+import uuid
 
 from parameterized import parameterized_class
 
@@ -38,12 +40,18 @@ def compile(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-@unittest.skipIf(IS_FBCODE, "This is for OSS only")
 @parameterized_class(
     [
         {"device": "cpu", "package_cpp_only": False},
-        {"device": "cpu", "package_cpp_only": True},
     ]
+    + (
+        [
+            # FIXME: AssertionError: AOTInductor compiled library does not exist at
+            {"device": "cpu", "package_cpp_only": True}
+        ]
+        if not IS_FBCODE
+        else []
+    )
     + (
         [
             {"device": "cuda", "package_cpp_only": False},
@@ -205,6 +213,26 @@ class TestAOTInductorPackage(TestCase):
 
         self.assertEqual(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
         self.assertEqual(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
+
+    def test_directory_does_not_exist(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            unique_id = str(uuid.uuid4())
+            package_path = os.path.join(tmpdir, unique_id, "model.pt2")
+
+            model = Model()
+            aot_model = compile(Model(), example_inputs, package_path=package_path)
+            torch.testing.assert_close(
+                aot_model(*example_inputs), model(*example_inputs)
+            )
 
 
 if __name__ == "__main__":

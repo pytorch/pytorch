@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 
+import os
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch.fx
@@ -82,6 +83,10 @@ def aoti_compile_and_package(
     assert package_path is None or package_path.endswith(
         ".pt2"
     ), f"Expect package path to end with .pt2, got {package_path}"
+
+    if package_path is not None:
+        dir_path = os.path.dirname(package_path)
+        os.makedirs(dir_path, exist_ok=True)
 
     inductor_configs = inductor_configs or {}
 
