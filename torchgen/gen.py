@@ -2853,9 +2853,6 @@ def main() -> None:
 
     options = parser.parse_args()
 
-    if options.backend_whitelist and str(DispatchKey.XPU) in options.backend_whitelist:
-        options.xpu = True
-
     selector = get_custom_build_selector(
         options.op_registration_whitelist,
         options.op_selection_yaml_path,
@@ -2877,6 +2874,10 @@ def main() -> None:
     xpu_in_whitelist = (
         options.backend_whitelist and str(DispatchKey.XPU) in options.backend_whitelist
     )
+    # Only generate RegisterXPU.cpp when there is "--xpu" with torhgen/gen.py
+    # Before this change, torchgen always generates RegisterXPU.cpp for out-of-tree
+    # torch-xpu-ops native_functions.yaml which use --backend_whitelist=XPU and without "--xpu".
+    # After this change is landed, we will add --xpu in torch-xpu-ops and rmmove the check of "xpu_in_whitelist".
     if (not options.xpu) and (not xpu_in_whitelist):
         ignore_keys.add(DispatchKey.XPU)
 
