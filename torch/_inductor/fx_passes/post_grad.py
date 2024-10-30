@@ -65,19 +65,6 @@ pass_patterns = [
 ]
 
 
-def apply_pass(pass_fn: Callable[[], object], name: Optional[str] = None) -> None:
-    # TODO - we should just make this part of GraphTransformObserver
-    from torch._inductor.bisect_helper import BisectionManager
-
-    debug_info: Optional[Callable[[], str]] = None
-    if name is not None:
-        debug_info = lambda: name  # noqa: E731
-
-    if BisectionManager.disable_subsystem("inductor", "post_grad_passes", debug_info):
-        return
-    pass_fn()
-
-
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
