@@ -1000,6 +1000,7 @@ AOTITorchError aoti_torch_index_put_out(
     AtenTensorHandle self,
     const AtenTensorHandle* indices,
     const uint32_t num_indices,
+    // NOLINTNEXTLINE(misc-misplaced-const)
     const AtenTensorHandle values,
     bool accumulate) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
