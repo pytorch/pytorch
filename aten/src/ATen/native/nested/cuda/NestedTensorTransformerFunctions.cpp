@@ -1,5 +1,3 @@
-#include <numeric>
-#include <algorithm>
 #include <c10/util/Exception.h>
 
 #include <ATen/ATen.h>
@@ -77,8 +75,8 @@ Tensor nested_from_padded_cuda(
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded_contiguous.dim() - 2,
-            padded_contiguous.sizes()[0]);
+            static_cast<int>(padded_contiguous.dim() - 2),
+            static_cast<int>(padded_contiguous.sizes()[0]));
       } else {
         remove_padding_kernelLauncher(
             padded_contiguous.data_ptr<float>(),
@@ -86,8 +84,8 @@ Tensor nested_from_padded_cuda(
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded_contiguous.dim() - 1,
-            padded_contiguous.sizes()[0]);
+            static_cast<int>(padded_contiguous.dim() - 1),
+            static_cast<int>(padded_contiguous.sizes()[0]));
       }
     } else if (padded.dtype() == kHalf) {
       if (do_transform_0213) {
@@ -97,8 +95,8 @@ Tensor nested_from_padded_cuda(
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded_contiguous.dim() - 2,
-            padded_contiguous.sizes()[0]);
+            static_cast<int>(padded_contiguous.dim() - 2),
+            static_cast<int>(padded_contiguous.sizes()[0]));
       } else {
         remove_padding_kernelLauncher(
             padded_contiguous.data_ptr<c10::Half>(),
@@ -106,8 +104,8 @@ Tensor nested_from_padded_cuda(
             offsets_ptr,
             input_size_ptr,
             output_size_ptr,
-            padded_contiguous.dim() - 1,
-            padded_contiguous.sizes()[0]);
+            static_cast<int>(padded_contiguous.dim() - 1),
+            static_cast<int>(padded_contiguous.sizes()[0]));
       }
     } else {
       TORCH_CHECK(false, "Only support fp32/fp16 for padded input");

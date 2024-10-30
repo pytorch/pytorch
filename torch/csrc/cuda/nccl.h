@@ -100,14 +100,14 @@ TORCH_CUDA_CPP_API at::ArrayRef<ncclComm_t> get_communicators(
 TORCH_CUDA_CPP_API void check_inputs(
     at::TensorList inputs,
     at::TensorList outputs,
-    int input_multiplier,
-    int output_multiplier);
+    size_t input_multiplier,
+    size_t output_multiplier);
 TORCH_CUDA_CPP_API void check_inputs(
     at::TensorList inputs,
     const at::Tensor& output,
     int root,
-    int input_multiplier,
-    int output_multiplier);
+    size_t input_multiplier,
+    size_t output_multiplier);
 
 } // namespace detail
 

@@ -59,8 +59,11 @@ struct strided_tensor_iter_fixed {
   T* data_ = NULL;
   int64_t dim_ = 0;
 
+  // NOLINTNEXTLINE(*array*)
   int64_t counter_[N] = {0};
+  // NOLINTNEXTLINE(*array*)
   int64_t sizes_[N] = {0};
+  // NOLINTNEXTLINE(*array*)
   int64_t strides_[N] = {0};
 
   strided_tensor_iter_fixed(strided_tensor_iter_fixed const&) = delete;
