@@ -5,7 +5,7 @@ the chunking subgraph.
 
 import torch
 from torch.utils._pytree import tree_flatten
-from typing import Sequence
+from typing import Sequence, Set
 from torch.fx import Graph, Node
 from torch._inductor import config
 import itertools
@@ -15,6 +15,38 @@ prims = torch.ops.prims
 
 class CantChunk(RuntimeError):
     pass
+
+def get_fake_tensor_from_node(node: torch.fx.Node) -> torch.Tensor:
+    if (
+        not hasattr(node, "meta")
+        or ("val" not in node.meta)
+        or not isinstance(node.meta["val"], torch.Tensor)
+    ):
+        return None
+    return node.meta["val"]
+
+
+def print_non_selected_nodes(graph: Graph, filter_set: Set):
+    print("Remaining nodes:")
+    for idx, node in enumerate(graph.nodes):
+        if node not in filter_set:
+            fake_tensor = get_fake_tensor_from_node(node)
+            shape = list(fake_tensor.shape) if fake_tensor is not None else "?"
+            print(f"  {idx:3}: {shape} {node.format_node()}")
+
+def get_tangent_node(graph: Graph) -> Node:
+    """
+    Return the single tangent node. Raise CantChunk if the graph has
+    more than one tangents.
+    """
+    tangents = []
+    for node in graph.nodes:
+        if node.op == "placeholder" and "tangent" in node.name:
+            tangents.append(node)
+
+    if len(tangents) != 1:
+        raise CantChunk("Can chunk only if there is a single tangent")
+    return tangents[0]
 
 # Right now only allow matmul/addmm as the source nodes for chunking.
 # May extend it to more ops.
@@ -56,23 +88,14 @@ def use_tangent(node: torch.fx.Node) -> bool:
         for arg in get_args_of_node_type(node)
     )
 
-def get_fake_tensor_from_node(node: torch.fx.Node) -> torch.Tensor:
-    if (
-        not hasattr(node, "meta")
-        or ("val" not in node.meta)
-        or not isinstance(node.meta["val"], torch.Tensor)
-    ):
-        return None
-    return node.meta["val"]
 
-
-def compute_tensor_size(*args, **kwargs):
+def compute_tensor_size(*args, count_bytes=True, **kwargs):
     flat_args, _ = tree_flatten((args, kwargs))
     tot = 0
     for arg in flat_args:
         if (fake_tensor := get_fake_tensor_from_node(arg)) is None:
             continue
-        tot += fake_tensor.numel() * fake_tensor.dtype.itemsize
+        tot += fake_tensor.numel() * (fake_tensor.dtype.itemsize if count_bytes else 1)
     return tot
 
 class Collector:
@@ -168,7 +191,25 @@ class Collector:
         return list(reversed(reachable_nodes))
 
     @classmethod
-    def collect_chunking_subgraph_nodes(cls, graph: torch.fx.Graph) -> Sequence[Node]:
+    def find_reachable_nodes_backward(cls, candidate_list, source_user):
+        """
+        Discover node as large as `source_user` from the `candidate_list`.
+        """
+        reachable_nodes = set()
+        source_user_size = compute_tensor_size(source_user, count_bytes=False)
+        while candidate_list:
+            curr_node = candidate_list.pop()
+            curr_node_size = compute_tensor_size(curr_node, count_bytes=False)
+
+            if curr_node_size != source_user_size:
+                continue
+
+            reachable_nodes.add(curr_node)
+            candidate_list += get_args_of_node_type(curr_node)
+        return reachable_nodes
+
+    @classmethod
+    def collect_chunking_subgraph_nodes(cls, graph: torch.fx.Graph) -> Set[Node]:
         source_user = cls.collect_source_user(graph)
         argidx = eligible_source_node_op_to_idx[source_user.target]
         source_node = source_user.args[argidx]
@@ -196,4 +237,33 @@ class Collector:
                     return False
             return True
 
-        return cls._find_reachable_nodes(source_node, _can_expand)
+        # The chunking subgraph should contains nodes reachable from
+        # the source_ndoe
+        chunking_subgraph_nodes = set(cls._find_reachable_nodes(source_node, _can_expand))
+
+        # The chunking subgraph should also contains nodes reachable from
+        # tangents.
+        # TODO: this is specific for training now. Need revise if we have
+        # inference usecase.
+        tangent = get_tangent_node(graph)
+        chunking_subgraph_nodes |= set(cls._find_reachable_nodes(tangent,
+            _can_expand))
+
+        # The last part of nodes for the chunking subgraph are a bit hard
+        # to find.
+        #
+        # The gather op for CrossEntropyLoss in the forward will cause an
+        # scatter op in the backward. The scatter op runs on the output of
+        # aten.full. This `aten.full` is also the tensor we need to chunk. Otherwise,
+        # this tensor need to be passed into the chunking subgraph as inputs
+        # which costs memory.
+        #
+        # We discover such nodes by check all nodes used as args in
+        # `chunking_subgraph_nodes` but itself is not in `chunking_subgraph_nodes`.
+        # We check if such node can go backward in the graph and reach a node which is as large as the
+        # `chunk_user` node. Add those nodes to `chunking_subgraph_nodes`
+        external_args = set(itertools.chain.from_iterable(get_args_of_node_type(node) for node in chunking_subgraph_nodes)) - chunking_subgraph_nodes
+        chunking_subgraph_nodes |= cls.find_reachable_nodes_backward(list(external_args), source_user)
+
+        # print_non_selected_nodes(graph, chunking_subgraph_nodes)
+        return chunking_subgraph_nodes

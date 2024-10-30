@@ -755,11 +755,7 @@ class AutoChunker:
             """
             We want to dedup the nodes and order then as the orignal graph
             """
-            out = set()
-            for nd in itertools.chain(lhs, rhs):
-                assert isinstance(nd, torch.fx.Node)
-                if nd not in out:
-                    out.add(nd)
+            out = set(lhs) | set(rhs)
 
             return sorted(out, key=lambda nd: self.node_to_idx[nd])
 
