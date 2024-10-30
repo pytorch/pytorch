@@ -41,9 +41,18 @@ def create_fw_bw_graph_combinefn(cond_fn, body_fn, carried_inputs, additional_in
             num_additional_inputs = len(additional_inputs)
 
             fw_xs = [pytree.tree_map(_from_fun, x) for x in carried_inputs]
-            fw_xs_list = [torch.unsqueeze(pytree.tree_map(_from_fun, x), 0) for x in carried_inputs]
-            roll_cnt = pytree.tree_map(_from_fun, torch.zeros(1, dtype=torch.int64, device=carried_inputs[0].device))
-            max_cnt = pytree.tree_map(_from_fun, torch.zeros(1, dtype=torch.int64, device=carried_inputs[0].device))
+            fw_xs_list = [
+                torch.unsqueeze(pytree.tree_map(_from_fun, x), 0)
+                for x in carried_inputs
+            ]
+            roll_cnt = pytree.tree_map(
+                _from_fun,
+                torch.zeros(1, dtype=torch.int64, device=carried_inputs[0].device),
+            )
+            max_cnt = pytree.tree_map(
+                _from_fun,
+                torch.zeros(1, dtype=torch.int64, device=carried_inputs[0].device),
+            )
             fw_additional_inputs = [
                 pytree.tree_map(_from_fun, a) for a in additional_inputs
             ]
@@ -51,9 +60,11 @@ def create_fw_bw_graph_combinefn(cond_fn, body_fn, carried_inputs, additional_in
                 pytree.tree_map(_from_fun, a) for a in additional_inputs
             ]
             outs = body_fn(*fw_xs, *fw_additional_inputs)
-            
+
             fw_outputs = [pytree.tree_map(_from_fun, o) for o in outs]
-            fw_outputs_bwd = [pytree.tree_map(_from_fun, o) for o in outs] + [pytree.tree_map(_from_fun, a) for a in additional_inputs]
+            fw_outputs_bwd = [pytree.tree_map(_from_fun, o) for o in outs] + [
+                pytree.tree_map(_from_fun, a) for a in additional_inputs
+            ]
             if any(not isinstance(out, torch.Tensor) for out in fw_outputs):
                 raise RuntimeError(
                     "Expect outputs produced by combine_fn to only contains tensors. "
@@ -66,23 +77,28 @@ def create_fw_bw_graph_combinefn(cond_fn, body_fn, carried_inputs, additional_in
                 (*fw_xs, *fw_additional_inputs),
                 (*fw_outputs,),
             )
-            
+
             def wrapper_fwd(*args):
                 # The first num_xs elements are the concatenations of all previous outputs
                 # The remainder are the inputs for the current iteration and the additional inputs
                 outs = args[:num_xs]
                 inp = args[num_xs:]
-                
+
                 # Run the forward body
                 fw_outs = fw_graph(*inp)
-                
+
                 # Append the outputs to the front of the previous outputs
                 # outs = [torch.concat([o, torch.unsqueeze(fwo, 0)], 0) for o, fwo in zip(outs, fw_outs)]
-                outs = [torch.concat([torch.unsqueeze(fwo, 0), o], 0) for o, fwo in zip(outs, fw_outs)]
+                outs = [
+                    torch.concat([torch.unsqueeze(fwo, 0), o], 0)
+                    for o, fwo in zip(outs, fw_outs)
+                ]
                 return *outs, *fw_outs
-            
-            fw_graph_new = _maybe_reenter_make_fx(wrapper_fwd)(*fw_xs_list, *fw_xs, *fw_additional_inputs)
-            
+
+            fw_graph_new = _maybe_reenter_make_fx(wrapper_fwd)(
+                *fw_xs_list, *fw_xs, *fw_additional_inputs
+            )
+
             def wrapper_bwd(*args):
                 # The first num_xs of elements represent the current gradients
                 # The next two elements are the current loop counter and the maximum loop counter
@@ -90,21 +106,29 @@ def create_fw_bw_graph_combinefn(cond_fn, body_fn, carried_inputs, additional_in
                 # the ouput T-1 as the 0-th element
                 # The next last set of elements are the additional arguments
                 grad = args[:num_xs]
-                grad_additional_inputs = args[num_xs:num_xs + num_additional_inputs]
+                grad_additional_inputs = args[num_xs : num_xs + num_additional_inputs]
                 rcnt = args[num_xs + num_additional_inputs]
                 mcnt = args[num_xs + num_additional_inputs + 1]
-                outs = args[num_xs + num_additional_inputs + 2:2*num_xs + num_additional_inputs + 2]
-                bw_add_args = args[2*num_xs + num_additional_inputs + 2:]
-                
+                outs = args[
+                    num_xs
+                    + num_additional_inputs
+                    + 2 : 2 * num_xs
+                    + num_additional_inputs
+                    + 2
+                ]
+                bw_add_args = args[2 * num_xs + num_additional_inputs + 2 :]
+
                 last_out = [torch.squeeze(o[rcnt], 0) for o in outs]
-                
+
                 new_grad = joint_graph(*grad, *last_out, *bw_add_args)
-                grad_additional_inputs = [ng * g for ng, g in zip(new_grad[num_xs:], grad_additional_inputs)]
-                
+                grad_additional_inputs = [
+                    ng * g for ng, g in zip(new_grad[num_xs:], grad_additional_inputs)
+                ]
+
                 new_grad = new_grad[:num_xs] + grad_additional_inputs
-                
+
                 return *new_grad, rcnt + 1, mcnt, *outs
-            
+
             new_joint_graph = _maybe_reenter_make_fx(wrapper_bwd)(
                 *fw_outputs_bwd,
                 roll_cnt,
@@ -112,34 +136,39 @@ def create_fw_bw_graph_combinefn(cond_fn, body_fn, carried_inputs, additional_in
                 *fw_xs_list,
                 *bw_additional_inputs,
             )
-            
+
             def wrapper_cond_fw(*args):
                 # The first num_xs elements are the concatenations of all previous outputs
                 # The second num_xs elements are the inputs for the current iteration
                 inp = args[num_xs:]
-                
+
                 fw_outs = cond_fn(*inp)
-                
+
                 return fw_outs
-            
-            cond_fn_graph_new = _maybe_reenter_make_fx(wrapper_cond_fw)(*fw_xs_list, *fw_xs, *fw_additional_inputs)
-            
+
+            cond_fn_graph_new = _maybe_reenter_make_fx(wrapper_cond_fw)(
+                *fw_xs_list, *fw_xs, *fw_additional_inputs
+            )
+
             def bwd_cond_fn(*args):
                 # The two elements are the current loop counter and the maximum loop counter
                 rcnt = args[num_xs + num_additional_inputs]
                 mcnt = args[num_xs + num_additional_inputs + 1]
-                
+
                 # Check whether the maximum of the loop counter is reached
                 return (rcnt < mcnt - 1)[0]
-            
-            bwd_cond_fn_graph_new = _maybe_reenter_make_fx(bwd_cond_fn)(*fw_outputs_bwd,
-                                                                        roll_cnt,
-                                                                        max_cnt,
-                                                                        *fw_xs_list,
-                                                                        *bw_additional_inputs,)
+
+            bwd_cond_fn_graph_new = _maybe_reenter_make_fx(bwd_cond_fn)(
+                *fw_outputs_bwd,
+                roll_cnt,
+                max_cnt,
+                *fw_xs_list,
+                *bw_additional_inputs,
+            )
 
         return cond_fn_graph_new, fw_graph_new, bwd_cond_fn_graph_new, new_joint_graph
-    
+
+
 class WhileLoopAutogradOp(torch.autograd.Function):
     @staticmethod
     def extract_init_xs_additional_inputs(flat_args, num_leaves_init, num_leaves_xs):
@@ -161,39 +190,56 @@ class WhileLoopAutogradOp(torch.autograd.Function):
         ctx._joint_graph = joint_graph
         ctx._bwd_cond_fn_graph = bwd_cond_fn_graph
         flat_args_list = list(flat_args)
-        xs, additional_inputs = flat_args_list[:num_leaves_xs], flat_args_list[num_leaves_xs:]
+        xs, additional_inputs = (
+            flat_args_list[:num_leaves_xs],
+            flat_args_list[num_leaves_xs:],
+        )
         ctx._num_leaves_xs = num_leaves_xs
         ctx._num_additional_inputs = len(additional_inputs)
 
         with torch._C._AutoDispatchBelowAutograd():
             ones = [torch.unsqueeze(x, 0) for x in xs]
-            inp = tuple([*ones, *xs])
+            inp = *ones, *xs
             outs = while_loop_op(cond_fn_graph, fw_graph, inp, tuple(additional_inputs))
             out_list, outs = outs[:num_leaves_xs], outs[num_leaves_xs:]
             ctx.save_for_backward(*(list(out_list) + xs + additional_inputs))
-            
+
             return (*outs,)
 
     @staticmethod
     def backward(ctx, *flat_grads):
         num_leaves_xs = ctx._num_leaves_xs
         num_additional_inputs = ctx._num_additional_inputs
-        
+
         joint_graph = ctx._joint_graph
         bwd_cond_fn_graph = ctx._bwd_cond_fn_graph
 
         # Collect the variables from the FWD path
         fwd_vals = ctx.saved_tensors
-        out_list, xs, additional_inputs = fwd_vals[:num_leaves_xs], fwd_vals[num_leaves_xs:2*num_leaves_xs], fwd_vals[2*num_leaves_xs:]
-        
+        out_list, xs, additional_inputs = (
+            fwd_vals[:num_leaves_xs],
+            fwd_vals[num_leaves_xs : 2 * num_leaves_xs],
+            fwd_vals[2 * num_leaves_xs :],
+        )
+
         with torch._C._AutoDispatchBelowAutograd():
-            out_list = [torch.concat([o[1:], torch.zeros_like(o[0:1, :])], 0) for o in out_list]
+            out_list = [
+                torch.concat([o[1:], torch.zeros_like(o[0:1, :])], 0) for o in out_list
+            ]
             roll_cnt = torch.zeros(1, dtype=torch.int64, device=xs[0].device)
-            max_cnt = torch.ones(1, dtype=torch.int64, device=xs[0].device) * out_list[0].shape[0]
-            flat_grads_plus_additional_inputs = list(flat_grads) + [torch.ones_like(a) for a in additional_inputs]
-            inp = tuple([*flat_grads_plus_additional_inputs, roll_cnt, max_cnt, *out_list])
-            grads = while_loop_op(bwd_cond_fn_graph, joint_graph, inp, tuple(additional_inputs))[:num_leaves_xs + num_additional_inputs]
+            max_cnt = (
+                torch.ones(1, dtype=torch.int64, device=xs[0].device)
+                * out_list[0].shape[0]
+            )
+            flat_grads_plus_additional_inputs = list(flat_grads) + [
+                torch.ones_like(a) for a in additional_inputs
+            ]
+            inp = *flat_grads_plus_additional_inputs, roll_cnt, max_cnt, *out_list
+            grads = while_loop_op(
+                bwd_cond_fn_graph, joint_graph, inp, tuple(additional_inputs)
+            )[: num_leaves_xs + num_additional_inputs]
             return *[None] * 5, *grads
+
 
 class WhileLoopOp(HigherOrderOperator):
     def __init__(self) -> None:
@@ -326,7 +372,6 @@ def while_loop(cond_fn, body_fn, carried_inputs):
                     backend = make_eager_backend_with_torch_function_mode(metadata_mode)
                 else:
                     backend = "eager"
-                backend = "eager"
                 return torch.compile(
                     _while_loop_op_wrapper, backend=backend, fullgraph=True
                 )(cond_fn, body_fn, carried_inputs, additional_inputs)
@@ -355,7 +400,7 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
                 f"cond_fn must return a boolean scalar tensor but got {pred}"
             )
         out = body_fn(*carried_vals, *additional_inputs)
-        
+
         # TODO: move those checks to another place?
         assert isinstance(
             out, tuple
@@ -380,7 +425,7 @@ def while_loop_autograd(cond_fn, body_fn, carried_inputs, additional_inputs):
         with torch._C._AutoDispatchBelowAutograd():
             return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
 
-    # TODO: Support this in the future
+    # TODO: Support partial gradients of inputs in the future
     if pytree.tree_any(
         lambda t: not t.requires_grad,  # type: ignore[union-attr]
         (carried_inputs, additional_inputs),
@@ -407,8 +452,10 @@ def while_loop_autograd(cond_fn, body_fn, carried_inputs, additional_inputs):
         cond_fn_graph,
         fw_graph,
         bwd_cond_fn_graph,
-        joint_graph
-    ) = create_fw_bw_graph_combinefn(cond_fn, body_fn, carried_inputs, additional_inputs)
+        joint_graph,
+    ) = create_fw_bw_graph_combinefn(
+        cond_fn, body_fn, carried_inputs, additional_inputs
+    )
 
     flat_out = WhileLoopAutogradOp.apply(
         cond_fn_graph,
@@ -418,7 +465,7 @@ def while_loop_autograd(cond_fn, body_fn, carried_inputs, additional_inputs):
         num_leaves_xs,
         *(carried_inputs + additional_inputs),
     )
-    return *flat_out,
+    return (*flat_out,)
 
 
 @while_loop_op.py_impl(ProxyTorchDispatchMode)
@@ -505,6 +552,7 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
             unwrapped_additional_inputs,
         )
         return ctx.wrap_tensors(ret)
+
 
 def _fake_while_loop(cond_fn, body_fn, operands):
     while cond_fn(*operands):
