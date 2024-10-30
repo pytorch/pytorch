@@ -261,11 +261,13 @@ def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[in
     return fill_order
 
 
-def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[int]:
+def get_stride_order(
+    seq: Sequence[Union[int, torch.SymInt, Expr]], shape_env=None
+) -> Sequence[int]:
     """
     Convert strides to stride order
     """
-    sorted_idx: Sequence[int] = get_fill_order(seq, V.graph.sizevars.shape_env)
+    sorted_idx: Sequence[int] = get_fill_order(seq, shape_env)
     out = [0 for _ in range(len(seq))]
     for i, elem in enumerate(sorted_idx):
         out[elem] = i
