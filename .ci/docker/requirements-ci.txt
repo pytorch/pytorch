@@ -257,7 +257,7 @@ tb-nightly==2.13.0a20230426
 #test that import:
 
 # needed by torchgen utils
-typing-extensions
+typing-extensions>=4.10.0
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -331,7 +331,7 @@ sympy==1.13.1 ; python_version >= "3.9"
 #Pinned versions:
 #test that import:
 
-onnx==1.16.1
+onnx==1.17.0
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
