@@ -201,3 +201,18 @@ def fork_rng(
         torch.set_rng_state(cpu_rng_state)
         for device, device_rng_state in zip(devices, device_rng_states):
             device_mod.set_rng_state(device_rng_state, device)
+
+def default_generator_func() -> torch.Generator:
+    r"""Returns the default random number generator.
+
+    The default generator is used by all random number generating functions unless a
+    specific generator is explicitly provided.
+
+    Returns:
+        torch.Generator: The default generator for CPU.
+    
+    Example:
+        >>> gen = torch.random.default_generator_func()
+        >>> torch.manual_seed(42, generator=gen)
+    """
+    return default_generator

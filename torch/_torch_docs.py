@@ -1353,42 +1353,6 @@ Example::
 )
 
 add_docstr(
-    torch.default_generator,
-    r"""
-
-default_generator
-
-The default random number generator (RNG) used for generating random numbers in various operations.
-
-This generator is used in functions that rely on randomness, such as initializing tensors with random values, and can be modified or seeded for reproducibility.
-
-You can control randomness globally in PyTorch by manipulating `torch.default_generator`. For example, you can set a seed using `torch.manual_seed()` to ensure consistent results across runs.
-
-Example::
-
-    >>> # Setting a random seed for reproducibility using torch.default_generator
-    >>> torch.manual_seed(42)
-    >>> torch.rand(2, 2)
-    tensor([[0.3745, 0.9507],
-            [0.7319, 0.5987]])
-
-    >>> # Using torch.default_generator directly for generating random numbers
-    >>> generator = torch.default_generator
-    >>> generator.initial_seed()  # Get the seed used by the default generator
-    42
-    >>> torch.rand(2, 2, generator=generator)
-    tensor([[0.1560, 0.1559],
-            [0.0581, 0.8661]])
-
-    >>> # Manually creating and using a separate generator
-    >>> my_generator = torch.Generator().manual_seed(1234)
-    >>> torch.rand(2, 2, generator=my_generator)
-    tensor([[0.8274, 0.7944],
-            [0.2046, 0.4760]])
-""".format(**common_args),
-)
-
-add_docstr(
     torch.bernoulli,
     r"""
 bernoulli(input: Tensor, *, generator: Optional[Generator], out: Optional[Tensor]) -> Tensor
