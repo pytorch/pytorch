@@ -799,7 +799,7 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    fill_order = get_fill_order([V.graph.sizevars.evaluate_expr(sympy.sympify(i)) for i in query.get_stride()])
+    fill_order = V.graph.sizevars.guarded_order([sympy.sympify(i) for i in query.get_stride()])
     out_strides = construct_strides(out_size, fill_order)
 
     layout = FixedLayout(
