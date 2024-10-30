@@ -166,7 +166,7 @@ class SuperVariable(VariableTracker):
 
             if (
                 isinstance(objvar, variables.UserDefinedObjectVariable)
-                and isinstance(objvar.mutable_local, AttributeMutationNew)
+                and isinstance(objvar.mutation_type, AttributeMutationNew)
                 and not (args or kwargs)
             ):
                 with do_not_convert_to_tracable_parameter():
@@ -371,7 +371,7 @@ class InspectSignatureVariable(VariableTracker):
         if kwargs:
             unimplemented(f"inspect.signature with {kwargs}")
         return InspectSignatureVariable(
-            callable, mutable_local=variables.base.MutableLocal()
+            callable, mutation_type=variables.base.ValueMutationNew()
         )
 
     def __init__(self, inspected: VariableTracker, **kwargs) -> None:
@@ -520,7 +520,7 @@ class InspectBoundArgumentsVariable(VariableTracker):
         self.bound_arguments_var = variables.ConstDictVariable(
             arguments_dict,
             type(bound_arguments.arguments),
-            mutable_local=variables.base.MutableLocal(),
+            mutation_type=variables.base.ValueMutationNew(),
         )
         self.signature = signature
 
@@ -1573,7 +1573,9 @@ class RandomClassVariable(VariableTracker):
         elif kwargs:
             unimplemented("random.Random() with kwargs")
         seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
-        return RandomVariable(seed=seed, mutable_local=variables.base.MutableLocal())
+        return RandomVariable(
+            seed=seed, mutation_type=variables.base.ValueMutationNew()
+        )
 
 
 class RandomVariable(VariableTracker):
