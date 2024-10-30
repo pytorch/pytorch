@@ -115,7 +115,7 @@ static std::unique_ptr<sycl::kernel> getKernel(
   return std::make_unique<sycl::kernel>(fun);
 }
 
-static std::unique_ptr<sycl::kernel> loadKernel(
+[[maybe_unused]] static std::unique_ptr<sycl::kernel> loadKernel(
     std::string filePath,
     const std::string& funcName,
     uint32_t sharedMemBytes,
@@ -129,7 +129,7 @@ static std::unique_ptr<sycl::kernel> loadKernel(
   return getKernel(mod, funcName.c_str());
 }
 
-static void launchKernel(
+[[maybe_unused]] static void launchKernel(
     std::unique_ptr<sycl::kernel>& kernel_ptr,
     uint32_t grid_x,
     uint32_t grid_y,
