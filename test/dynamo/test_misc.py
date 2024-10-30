@@ -9956,7 +9956,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            collections.deque([0.0, -x]),
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -9990,7 +9990,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            [0.0, -x],
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -10006,6 +10006,7 @@ def ___make_guard_fn():
                         x * y,
                         3.0,
                         y - 2,
+                        1,
                         torch.zeros(2, 2),
                         2 * y,
                         -y,
@@ -10040,7 +10041,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            [0.0, -x],
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -10051,7 +10052,7 @@ def ___make_guard_fn():
                     }
                     tree2 = collections.OrderedDict(
                         [
-                            ("c", (y, 3.0, [-y, 10.0])),
+                            ("c", (y, 3.0, collections.deque([1, -y, 10.0]))),
                             ("a", [y, y + 1]),
                             ("b", y + 2),
                             (
