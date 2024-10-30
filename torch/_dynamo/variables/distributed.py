@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 import functools
 import inspect
-from typing import Dict, List, TYPE_CHECKING
+from typing import Any, Dict, List, TYPE_CHECKING
 
 import torch
 from torch.fx.experimental._backward_state import BackwardState
@@ -214,6 +214,9 @@ class DeviceMeshVariable(DistributedVariable):
     def as_python_constant(self):
         return self.value
 
+    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
+        raise NotImplementedError
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
@@ -313,7 +316,7 @@ class BackwardHookVariable(VariableTracker):
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
     ):
-        if not compiled_autograd.enabled():
+        if not compiled_autograd.compiled_autograd_enabled:
             unimplemented("module-level backwards hooks require compiled autograd")
 
         def _in_graph_bw_hooks(bw_state: BackwardState):

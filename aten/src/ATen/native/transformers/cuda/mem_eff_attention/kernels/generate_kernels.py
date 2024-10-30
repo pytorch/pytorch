@@ -352,7 +352,7 @@ def write_decl_impl(
             declarations += f"    {_call}"
         declarations += "}\n\n"
         dispatch_all += f"""
-    if (std::is_same<DT, {DTYPES[cat_dt]}>::value && {cat_sm} <= cc && cc < {cat_sm_max}) {{
+    if (std::is_same_v<DT, {DTYPES[cat_dt]}> && {cat_sm} <= cc && cc < {cat_sm_max}) {{
         {dispatch_category_fn}(cb, cc);
     }}"""
 
