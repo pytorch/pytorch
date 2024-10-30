@@ -2587,28 +2587,45 @@ class TestSDPACudaOnly(NNTestCase):
                 self.n_embd = config.n_embd
                 self.test = test
 
-            def forward(self, x):
+            def forward(self, x, permute_order):
                 B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
                 q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
-                k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
-                q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
-                v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)  # (B, nh, T, hs)
+                k = k.view(B, T, self.n_head, C // self.n_head).permute(permute_order)
+                q = q.view(B, T, self.n_head, C // self.n_head).permute(permute_order)
+                v = v.view(B, T, self.n_head, C // self.n_head).permute(permute_order)
 
                 y = F.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
-                self.test.assertTrue(y.transpose(1, 2).is_contiguous())
-                y = y.transpose(1, 2).view(B, T, C)
+                reverse_order = [permute_order.index(i) for i in range(4)]
+                self.test.assertTrue(y.permute(reverse_order).is_contiguous())
+                y = y.permute(reverse_order).view(B, T, C)
                 y = self.c_proj(y)
                 return y
 
-        def test_attention(backend: SDPBackend):
+        def test_attention(backend: SDPBackend, permute_order: List[List[int]]):
             config = Config()
             Attention = CausalSelfAttention(config, self).to("cuda", dtype=torch.float16)
             sample_input = torch.randn(1, 2048, config.n_embd, device="cuda", dtype=torch.float16)
             with sdpa_kernel(backend):
-                out = Attention(sample_input)
+                out = Attention(sample_input, permute_order)
+
+        permute_orders = list()
+        permutable = (0, 1, 2)
+        for first_dim in permutable:
+            curr = [first_dim]
+            remaining = list(permutable)
+            remaining.remove(first_dim)
+            for second_dim in remaining:
+                curr2 = list(curr)
+                curr2.append(second_dim)
+                remaining2 = list(remaining)
+                remaining2.remove(second_dim)
+                curr2 += remaining2
+                curr2 += [3]
+                permute_orders.append(curr2)
 
         width = 100
-        test_attention(SDPBackend.CUDNN_ATTENTION)
+        for permute_order in permute_orders:
+            test_attention(SDPBackend.CUDNN_ATTENTION, permute_order)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])

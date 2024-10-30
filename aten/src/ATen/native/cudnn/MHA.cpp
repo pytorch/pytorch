@@ -300,6 +300,11 @@ void alloc_with_matching_layout(
   TORCH_CHECK(
       shape.size() == q.sizes().size(),
       "cuDNN SDPA alloc_with_matching_layout got requested shape ndim != q ndim");
+
+  if (std::equal(q.sizes().begin(), q.sizes().end(), shape.begin())) {
+    output = at::empty_like(q);
+  }
+
   // get the "fill order," which is just an argsort on the strides
   std::vector<int> fill_order(shape.size());
   std::iota(fill_order.begin(), fill_order.end(), 0);
