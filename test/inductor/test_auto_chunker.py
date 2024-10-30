@@ -67,6 +67,7 @@ class AutoChunkerTest(TestCase):
             expected_bound = M * N * dtype.itemsize
             self.assertTrue(peak_memory < expected_bound, f"Actual peak_memory {peak_memory}, expected bound {expected_bound}")
 
+
     def test_matmul_trivial(self):
         self.common_matmul_test(has_softmax=False)
 
