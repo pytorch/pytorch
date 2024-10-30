@@ -11,7 +11,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import (
-    guard_sizes_oblivious,
+    _guard_sizes_oblivious,
     statically_known_true,
 )
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
@@ -578,7 +578,7 @@ def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
-    if guard_sizes_oblivious(size, arg_size):
+    if _guard_sizes_oblivious(size, arg_size):
         node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
         match.erase_nodes()
 
@@ -597,7 +597,7 @@ def pointless_view_pair(match: Match, arg, size1, size2):
     """
     node = match.output_node()
     arg_size = list(arg.meta["val"].shape)
-    if guard_sizes_oblivious(arg_size, size2):
+    if _guard_sizes_oblivious(arg_size, size2):
         node.replace_all_uses_with(arg)
         match.erase_nodes()
 
