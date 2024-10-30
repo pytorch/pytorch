@@ -17,7 +17,8 @@ Args:
 Returns:
   Fake quantized tensor (float dtype).
 */
-namespace at::native {
+namespace at {
+namespace native {
 void fake_quantize_tensor_cachemask_kernel_cuda(
     Tensor& output,
     Tensor& mask,
@@ -212,4 +213,5 @@ void _fake_quantize_grad_learnable_channel_kernel_cuda(TensorIterator &iter, int
 REGISTER_DISPATCH(fake_quant_per_channel_cachemask_stub, &fake_quant_per_channel_cachemask_cuda);
 REGISTER_DISPATCH(fake_quant_grad_learnable_channel_stub, &_fake_quantize_grad_learnable_channel_kernel_cuda);
 
-} // namespace at::native
+} // namespace native
+} // namespace at

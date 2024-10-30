@@ -15,7 +15,8 @@
 #include <ATen/ops/lt.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 template <typename T>
@@ -266,4 +267,5 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(
     dequantize_tensor_per_channel_float_qparams_stub,
     &dequantize_tensor_per_channel_float_qparams_cuda);
-} // namespace at::native
+} // namespace native
+} // namespace at

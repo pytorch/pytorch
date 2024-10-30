@@ -15,7 +15,8 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 void assign_quantized_tensor_cuda(
   const Tensor& self, Tensor& dst) {
@@ -60,4 +61,5 @@ Tensor make_per_channel_quantized_tensor_cuda(
   return dst;
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

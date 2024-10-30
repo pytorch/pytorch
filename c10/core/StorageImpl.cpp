@@ -4,11 +4,11 @@
 namespace c10 {
 
 // The array to save function pointer for custom storageImpl create.
-static std::array<StorageImplCreateHelper, at::COMPILE_TIME_MAX_DEVICE_TYPES>
+C10_API std::array<StorageImplCreateHelper, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     StorageImplCreate;
 
 // A allowlist of device type, currently available is PrivateUse1
-static ska::flat_hash_set<c10::DeviceType>& GetBackendMetaAllowlist() {
+inline ska::flat_hash_set<c10::DeviceType>& GetBackendMetaAllowlist() {
   static ska::flat_hash_set<c10::DeviceType> DeviceTypeAllowList{
       DeviceType::PrivateUse1};
   return DeviceTypeAllowList;

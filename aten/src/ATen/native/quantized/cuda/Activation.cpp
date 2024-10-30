@@ -2,7 +2,8 @@
 #include <ATen/ATen.h>
 #include <ATen/Functions.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // this kernel is currently implemented with dequantize -> fp32 gelu -> quantize, which is not equivalent to int8 gelu
 // It might be possible to write a variant of the int8 gelu that's equivalent to dequantize -> fp32 cuda gelu kernel -> quantize,
@@ -26,3 +27,4 @@ Tensor relu_quantized_cuda(const Tensor& self) {
 }
 
 }  // namespace at::native
+}  // namespace at
