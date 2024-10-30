@@ -68,7 +68,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Dict, List, Set, Type
+from typing import Any, Dict, List
 
 import torch
 from torch._utils import IMPORT_MAPPING, NAME_MAPPING
@@ -214,7 +214,6 @@ class Unpickler:
         self.read = file.read
         self.memo: Dict[int, Any] = {}
         self.proto: int = -1
-        self.types_created_via_reduce: Set[Type] = set()
 
     def load(self):
         """Read a pickled object representation from the open file.
@@ -279,9 +278,7 @@ class Unpickler:
                     raise UnpicklingError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )
-                res = func(*args)
-                self.stack[-1] = res
-                self.types_created_via_reduce.add(type(res))
+                self.stack[-1] = func(*args)
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()
                 inst = self.stack[-1]
@@ -292,10 +289,7 @@ class Unpickler:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
-                elif (
-                    type(inst) in _get_user_allowed_globals().values()
-                    or type(inst) in self.types_created_via_reduce
-                ):
+                elif type(inst) in _get_user_allowed_globals().values():
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
                     else:
