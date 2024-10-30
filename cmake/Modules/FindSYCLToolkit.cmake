@@ -42,10 +42,18 @@ find_file(
 list(APPEND SYCL_INCLUDE_DIR ${SYCL_INCLUDE_SYCL_DIR})
 
 # Find include/sycl/version.hpp to fetch sycl compiler version
-if(EXISTS ${SYCL_INCLUDE_SYCL_DIR}/version.hpp)
-  set(SYCL_VERSION_HEADER_FILE ${SYCL_INCLUDE_SYCL_DIR}/version.hpp)
-else()
-  message(FATAL_ERROR "Cannot find include/sycl/version.hpp to get SYCL_COMPILER_VERSION!")
+find_file(
+  SYCL_VERSION_HEADER_FILE
+  NAMES version.hpp
+  HINTS ${SYCL_INCLUDE_SYCL_DIR}
+  NO_DEFAULT_PATH
+  )
+
+if(NOT SYCL_VERSION_HEADER_FILE)
+  set(SYCL_FOUND False)
+  set(SYCL_REASON_FAILURE "Cannot find include/sycl/version.hpp to get SYCL_COMPILER_VERSION!")
+  set(SYCL_NOT_FOUND_MESSAGE "${SYCL_REASON_FAILURE}")
+  return()
 endif()
 
 # Read the sycl version header file into a variable
@@ -55,9 +63,9 @@ file(READ ${SYCL_VERSION_HEADER_FILE} SYCL_VERSION_HEADER_CONTENT)
 # 1. Match the regular expression to find the version string.
 # 2. Replace the "__SYCL_COMPILER_VERSION" part with an empty string.
 # 3. Strip leading and trailing spaces to get the version number.
-string(REGEX MATCH "__SYCL_COMPILER_VERSION[ ]+[0-9]+" TEMP1 ${SYCL_VERSION_HEADER_CONTENT})
-string(REPLACE "__SYCL_COMPILER_VERSION" "" TEMP2 ${TEMP1})
-string(STRIP ${TEMP2} SYCL_COMPILER_VERSION)
+string(REGEX MATCH "__SYCL_COMPILER_VERSION[ ]+[0-9]+" _SYCL_COMPILER_VERSION_MATCH ${SYCL_VERSION_HEADER_CONTENT})
+string(REPLACE "__SYCL_COMPILER_VERSION" "" _SYCL_COMPILER_VERSION_NUMBER ${_SYCL_COMPILER_VERSION_MATCH})
+string(STRIP ${_SYCL_COMPILER_VERSION_NUMBER} SYCL_COMPILER_VERSION)
 
 # Find library directory from binary.
 find_file(
