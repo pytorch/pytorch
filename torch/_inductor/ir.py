@@ -279,12 +279,14 @@ def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[
     return out
 
 
-@overload  # type: ignore[no-redef]
-def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None: ...
+@overload
+def ir_node_to_tensor(x: Literal[None], guard_shape: bool = True) -> None:
+    ...
 
 
 @overload
-def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor: ...
+def ir_node_to_tensor(x: IRNode, guard_shape: bool = True) -> torch.Tensor:
+    ...
 
 
 def ir_node_to_tensor(
@@ -360,7 +362,7 @@ class IRNode:
         finally:
             IRNode._current_origins = old
 
-    def _post_init_setattr(self, attr, value):  # type: ignore[no-untyped-def]
+    def _post_init_setattr(self, attr, value) -> None:  # type: ignore[no-untyped-def]
         # Intended for use in __post_init__ for enforcing an invariant on a dataclass
         # If you must, can also be used for setting provenance info
         # We would like to try and minimize these usages though
@@ -486,10 +488,10 @@ class Operation:
         assert self.operation_name is not None
         return self.operation_name
 
-    def is_extern(self):  # type: ignore[no-untyped-def]
+    def is_extern(self) -> bool:
         return False
 
-    def is_no_op(self):  # type: ignore[no-untyped-def]
+    def is_no_op(self) -> bool:
         return False
 
     def get_read_writes(self):  # type: ignore[no-untyped-def]
@@ -527,7 +529,7 @@ class Operation:
         """
         return OrderedSet()
 
-    def get_workspace_size(self):  # type: ignore[no-untyped-def]
+    def get_workspace_size(self) -> int:
         """
         Gets extra global memory size needed by this buffer.
         Some algorithms (e.g. group gemm) may require extra global memory in the generated code.
@@ -548,7 +550,7 @@ class Loops(IRNode):
             self.inner_fn_free_unbacked_symbols(),
         )
 
-    def __str__(self, names: Tuple[str] = ("ranges",)) -> str:  # type: ignore[no-untyped-def]
+    def __str__(self, names: Tuple[str] = ("ranges",)) -> str:
         return self.str_helper(
             [
                 f"'{self.device.type}'",
@@ -2535,7 +2537,7 @@ class SqueezeView(BaseView):
 
         return new_size, reindex
 
-    def __init__(self, data):  # type: ignore[no-untyped-def]
+    def __init__(self, data) -> None:  # type: ignore[no-untyped-def]
         raise AssertionError("use SqueezeView.create()")
 
 
@@ -2547,7 +2549,7 @@ class GenericView(BaseView):
     def make_reindexer(self):  # type: ignore[no-untyped-def]
         return self.reindex
 
-    def reindex_str(self):  # type: ignore[no-untyped-def]
+    def reindex_str(self) -> str:
         index_old = [
             sympy_index_symbol_with_prefix(SymT.INDEX, n) for n in range(len(self.size))
         ]
@@ -2797,7 +2799,7 @@ class ReinterpretView(BaseView):
             dtype=self.layout.dtype,
         )
 
-    def num_reads(self):  # type: ignore[no-untyped-def]
+    def num_reads(self) -> int:
         return 1
 
 
@@ -2931,16 +2933,16 @@ class BaseConstant(IRNode):
     def get_origin_node(self):  # type: ignore[no-untyped-def]
         return None
 
-    def mark_reuse(self, users):  # type: ignore[no-untyped-def]
+    def mark_reuse(self, users) -> None:  # type: ignore[no-untyped-def]
         pass
 
-    def has_exceeded_max_reads(self):  # type: ignore[no-untyped-def]
+    def has_exceeded_max_reads(self) -> bool:
         return False
 
     def get_reads(self):  # type: ignore[no-untyped-def]
         return ()
 
-    def is_extern(self):  # type: ignore[no-untyped-def]
+    def is_extern(self) -> bool:
         return False
 
 
@@ -3003,7 +3005,7 @@ class Layout(IRNode):
         size: List[Expr],
         stride: Optional[Sequence[Union[Expr, int]]],
         offset: Expr = Integer(0),
-    ):
+    ) -> None:
         assert stride is None or len(size) == len(
             stride
         ), f"size={size}, stride={stride}"
@@ -3033,7 +3035,7 @@ class Layout(IRNode):
         return is_contiguous_strides_for_shape(self.stride, self.size)
 
     @staticmethod
-    def is_channels_last_contiguous(shape, strides):  # type: ignore[no-untyped-def]
+    def is_channels_last_contiguous(shape, strides) -> bool:  # type: ignore[no-untyped-def]
         ndim = len(shape)
         if ndim not in [4, 5] or shape[1] == 1:
             return False
@@ -3044,7 +3046,7 @@ class Layout(IRNode):
                 return False
         return True
 
-    def is_transposed(self):  # type: ignore[no-untyped-def]
+    def is_transposed(self) -> bool:
         for left, right, size in zip(
             self.stride,
             reversed(FlexibleLayout.contiguous_strides(list(reversed(self.size)))),
@@ -3054,7 +3056,7 @@ class Layout(IRNode):
                 return False
         return True
 
-    def is_stride_ordered(self, order):  # type: ignore[no-untyped-def]
+    def is_stride_ordered(self, order) -> bool:  # type: ignore[no-untyped-def]
         assert len(self.stride) == len(order)
 
         # ignore dimensions of size 1, they dont affect layout
@@ -3200,7 +3202,7 @@ class FixedLayout(Layout):
         size: Union[List[Expr], List[int]],
         stride: Optional[Sequence[Union[Expr, int]]] = None,
         offset: Union[Expr, int] = Integer(0),
-    ):
+    ) -> None:
         if stride is None:
             stride = FlexibleLayout.contiguous_strides(size)
         super().__init__(
@@ -3358,7 +3360,7 @@ class FlexibleLayout(Layout):
             self.offset,
         )
 
-    def __init__(self, device, dtype, size, stride_order=None):  # type: ignore[no-untyped-def]
+    def __init__(self, device, dtype, size, stride_order=None) -> None:  # type: ignore[no-untyped-def]
         if stride_order:
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
@@ -3369,7 +3371,7 @@ class FlexibleLayout(Layout):
 class NonOwningLayout(Layout):
     """Is a view into the storage of another tensor"""
 
-    def __init__(self, view: Union[BaseView, TensorBox]):
+    def __init__(self, view: Union[BaseView, TensorBox]) -> None:
         layout = view.get_layout()
         super().__init__(
             layout.device,
@@ -3405,7 +3407,7 @@ class NoneLayout(IRNode):
     size: List[int] = dataclasses.field(default_factory=lambda: [0])
     stride: List[int] = dataclasses.field(default_factory=lambda: [0])
 
-    def storage_size(self):  # type: ignore[no-untyped-def]
+    def storage_size(self) -> int:
         return 0
 
     def as_fixed(self):  # type: ignore[no-untyped-def]
@@ -3413,7 +3415,7 @@ class NoneLayout(IRNode):
 
 
 class MutationLayoutSHOULDREMOVE(Layout):
-    def __init__(self, target: IRNode):
+    def __init__(self, target: IRNode) -> None:
         super().__init__(
             target.get_device(),
             target.get_dtype(),
@@ -3538,7 +3540,7 @@ class Buffer(IRNode):
     def get_storage_numel(self):  # type: ignore[no-untyped-def]
         return self.get_numel()
 
-    def is_extern(self):  # type: ignore[no-untyped-def]
+    def is_extern(self) -> bool:
         return False
 
     def freeze_layout(self):  # type: ignore[no-untyped-def]
@@ -3605,7 +3607,7 @@ class Buffer(IRNode):
     def realize(self):  # type: ignore[no-untyped-def]
         pass
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         # Returns False by default.
         return False
 
@@ -3625,7 +3627,7 @@ class OperationBuffer(Buffer, Operation):
 
 
 class InputBuffer(Buffer):
-    def num_reads(self):  # type: ignore[no-untyped-def]
+    def num_reads(self) -> int:
         return 1
 
 
@@ -3983,7 +3985,7 @@ class ComputedBuffer(OperationBuffer):
     def is_no_op(self):  # type: ignore[no-untyped-def]
         return self.data.is_zero_elements()
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return True
 
     def constant_to_device(self, device):  # type: ignore[no-untyped-def]
@@ -3997,7 +3999,7 @@ class TemplateBuffer(OperationBuffer):
     that we can fuse an epilogue onto.
     """
 
-    def __init__(self, layout, inputs, make_kernel_render):  # type: ignore[no-untyped-def]
+    def __init__(self, layout, inputs, make_kernel_render) -> None:  # type: ignore[no-untyped-def]
         super().__init__(name=None, layout=layout)
         self.inputs = InputsKernel.unwrap_storage(inputs)
         self.make_kernel_render = make_kernel_render
@@ -4027,10 +4029,10 @@ class TemplateBuffer(OperationBuffer):
     def get_reduction_type(self):  # type: ignore[no-untyped-def]
         return None
 
-    def is_no_op(self):  # type: ignore[no-untyped-def]
+    def is_no_op(self) -> bool:
         return False
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return True
 
     def simplify_and_reorder(  # type: ignore[no-untyped-def]
@@ -4054,7 +4056,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         mutated_inputs: Optional[Iterable[IRNode]] = None,
-    ):
+    ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
         We want the ability for TritonTemplates to output multiple tensors. Triton
@@ -4109,7 +4111,7 @@ class ChoiceCaller:
         input_nodes: List[Buffer],
         layout: Layout,
         description: str,
-    ):
+    ) -> None:
         super().__init__()
         self.name = name
         self.layout = layout
@@ -4162,7 +4164,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         inputs: List[IRNode],
         choice_timings: Callable[[], Dict[ChoiceCaller, float]],
         unfiltered_choices: List[ChoiceCaller],
-    ):
+    ) -> None:
         super().__init__(layout=layout, inputs=inputs, make_kernel_render=None)
         self._choice_timings_fn = choice_timings
         self._choice_timings: Optional[Dict[ChoiceCaller, float]] = None
@@ -4201,7 +4203,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         finally:
             self.make_kernel_render = render
 
-    def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase):  # type: ignore[no-untyped-def]
+    def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase) -> None:
         assert isinstance(caller, torch._inductor.select_algorithm.TritonTemplateCaller)
         assert self.layout.size == caller.layout.size
         assert self.layout.stride == caller.layout.stride
@@ -4220,7 +4222,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         make_kernel_render,
         workspace_size: int,
         template: CUDATemplate,
-    ):
+    ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
         self.workspace_size = workspace_size
@@ -4231,7 +4233,7 @@ class CUDATemplateBuffer(TemplateBuffer):
 
 
 class CppTemplateBuffer(TemplateBuffer):
-    def __init__(self, layout, inputs, make_kernel_render, template, choice):  # type: ignore[no-untyped-def]
+    def __init__(self, layout, inputs, make_kernel_render, template, choice) -> None:  # type: ignore[no-untyped-def]
         super().__init__(layout, inputs, make_kernel_render)
         self.template = template
         self.choice = choice
@@ -4293,15 +4295,15 @@ class InputsKernel(OperationBuffer):
             inputs_new.append(x)
         return inputs_new
 
-    def is_extern(self):  # type: ignore[no-untyped-def]
+    def is_extern(self) -> bool:
         return True
 
-    def num_reads(self):  # type: ignore[no-untyped-def]
+    def num_reads(self) -> int:
         return 1
 
 
 class NopKernel(InputsKernel):
-    def is_no_op(self):  # type: ignore[no-untyped-def]
+    def is_no_op(self) -> bool:
         return True
 
 
@@ -4466,7 +4468,7 @@ class ConcatKernel(NopKernel):
         )
         return cls.realize_into(pw, dst)
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return True
 
 
@@ -4504,7 +4506,7 @@ class ExternKernel(InputsKernel):
         cpp_kernel_name=None,
         ordered_kwargs_for_cpp_kernel=(),
         op_overload=None,
-    ):
+    ) -> None:
         super().__init__(
             name=name,
             layout=layout,
@@ -4568,7 +4570,7 @@ class ExternKernel(InputsKernel):
             self.apply_constraint()
             self.freeze_layout()
 
-    def codegen_comment(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen_comment(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         origin_str, detailed_origin_str = get_kernel_metadata(self, wrapper)
         if origin_str:
             wrapper.writeline(origin_str)
@@ -4576,7 +4578,7 @@ class ExternKernel(InputsKernel):
     def codegen(self, wrapper):  # type: ignore[no-untyped-def]
         raise NotImplementedError
 
-    def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None):  # type: ignore[no-untyped-def]
+    def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None) -> None:
         self.cpp_kernel_name = cpp_kernel_name
         self.cpp_kernel_overload_name = None
         self.cpp_kernel_key = None
@@ -4616,7 +4618,7 @@ class ExternKernel(InputsKernel):
         except Exception:
             self.cpp_op_schema = ""
 
-    def set_python_kernel_name(self, python_kernel_name: Optional[str]):  # type: ignore[no-untyped-def]
+    def set_python_kernel_name(self, python_kernel_name: Optional[str]) -> None:
         self.python_kernel_name = python_kernel_name
         if python_kernel_name is not None:
             return
@@ -4652,7 +4654,9 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
-    def process_kernel(cls, kernel, *args, **kwargs) -> Tuple[  # type: ignore[no-untyped-def]
+    def process_kernel(  # type: ignore[no-untyped-def]
+        cls, kernel, *args, **kwargs
+    ) -> Tuple[
         Any,
         List[Any],
         List[Any],
@@ -5004,7 +5008,7 @@ class ExternKernel(InputsKernel):
     def require_contiguous(cls, x):  # type: ignore[no-untyped-def]
         return cls.require_stride_order(x, list(reversed(range(len(x.get_size())))))
 
-    def apply_constraint(self):  # type: ignore[no-untyped-def]
+    def apply_constraint(self) -> None:
         pass
 
     def fill_non_provided_args(self, args, kwargs):  # type: ignore[no-untyped-def]
@@ -5136,7 +5140,7 @@ class ExternKernel(InputsKernel):
             ]
         return kwargs
 
-    def codegen_size_asserts(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen_size_asserts(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if config.size_asserts and not V.graph.cpp_wrapper:
             # comparing strides for 0 size tensor is tricky. Ignore them for now.
             if sympy_product(self.get_size()) == 0:
@@ -5214,7 +5218,7 @@ class ExternKernel(InputsKernel):
 
 @ir_dataclass(frozen=False)
 class ExternKernelOut(ExternKernel):
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
         kernel_name = self.get_kernel_name()
@@ -5244,7 +5248,7 @@ class ExternKernelOut(ExternKernel):
         cpp_kernel_name=None,
         ordered_kwargs_for_cpp_kernel=(),
         op_overload=None,
-    ):
+    ) -> None:
         super().__init__(
             None,
             layout,
@@ -5260,12 +5264,12 @@ class ExternKernelOut(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return True
 
 
 class RandomSeeds(ExternKernelOut):
-    def __init__(self, count: int, device: torch.device):
+    def __init__(self, count: int, device: torch.device) -> None:
         limits = torch.iinfo(torch.int64)
         super().__init__(
             layout=FixedLayout(
@@ -5285,7 +5289,7 @@ class RandomSeeds(ExternKernelOut):
 
 
 class ExternKernelAlloc(ExternKernel):
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs()]
         V.graph.wrapper_code.generate_extern_kernel_alloc(self, args)
@@ -5302,7 +5306,7 @@ class ExternKernelAlloc(ExternKernel):
         cpp_kernel_name=None,
         ordered_kwargs_for_cpp_kernel=(),
         op_overload=None,
-    ):
+    ) -> None:
         super().__init__(
             None,
             layout,
@@ -5322,7 +5326,7 @@ class ExternKernelAlloc(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
     def apply_constraint(self):  # type: ignore[no-untyped-def]
@@ -5334,7 +5338,7 @@ class MutationOutput(Buffer):
     An output buffer that represents the mutation of a pre-existing buffer
     """
 
-    def __init__(self, layout, mutated_node, mutating_node: Operation):  # type: ignore[no-untyped-def]
+    def __init__(self, layout, mutated_node, mutating_node: Operation) -> None:  # type: ignore[no-untyped-def]
         super().__init__(name=None, layout=layout)
         mutated_node_name = mutated_node.get_name()
         V.graph.mark_buffer_mutated(mutated_node_name)
@@ -5348,7 +5352,7 @@ class MutationOutput(Buffer):
     def get_mutation_names(self):  # type: ignore[no-untyped-def]
         return self.mutation_names
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
 
@@ -5383,7 +5387,7 @@ class TMADescriptor(ExternKernel):
         dims: List[Union[int, torch.SymInt]],
         block_dims: List[Union[int, torch.SymInt]],
         element_size: Optional[int] = None,
-    ):
+    ) -> None:
         assert len(dims) in (1, 2)
         assert len(dims) == len(block_dims)
 
@@ -5422,7 +5426,7 @@ class TMADescriptor(ExternKernel):
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.generate_tma_descriptor(self)
 
 
@@ -5439,7 +5443,7 @@ class UserDefinedTritonKernel(ExternKernel):
             kernel = kernel.fn
         return kernel, configs
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         kernel, configs = self.get_kernel_and_configs()
 
         # Definition of kernel
@@ -5523,7 +5527,7 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
-    def __init__(self, *, kernel_idx, grid, tma_descriptor_metadata, kernel_args):  # type: ignore[no-untyped-def]
+    def __init__(self, *, kernel_idx, grid, tma_descriptor_metadata, kernel_args) -> None:  # type: ignore[no-untyped-def]
         inputs = []
         kwargs = {}
         constant_args = []
@@ -5586,7 +5590,7 @@ class InplaceBernoulliFallback(ExternKernel):
     This needs to be a custom class to handle mutation properly
     """
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         (x,) = (t.codegen_reference() for t in self.inputs)
 
         if V.graph.cpp_wrapper:
@@ -5600,7 +5604,7 @@ class InplaceBernoulliFallback(ExternKernel):
                 f"{self.get_kernel_name()}({x}, {', '.join(map(repr, self.constant_args))}){wrapper.ending}"
             )
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
     def get_mutation_names(self):  # type: ignore[no-untyped-def]
@@ -5609,7 +5613,7 @@ class InplaceBernoulliFallback(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
-    def __init__(self, op_overload, x, *constant_args):  # type: ignore[no-untyped-def]
+    def __init__(self, op_overload, x, *constant_args) -> None:  # type: ignore[no-untyped-def]
         super().__init__(
             None,
             NoneLayout(device=x.get_device()),
@@ -5628,11 +5632,11 @@ class InplaceCopyFallback(ExternKernel):
     This needs to be a custom class to handle mutation properly
     """
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         (dst, src, non_blocking) = self.codegen_args()
         wrapper.codegen_device_copy(src, dst, non_blocking)
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
     def get_mutation_names(self):  # type: ignore[no-untyped-def]
@@ -5646,7 +5650,7 @@ class InplaceCopyFallback(ExternKernel):
         layout,
         inputs,
         constant_args,
-    ):
+    ) -> None:
         super().__init__(
             None,
             layout,
@@ -5676,7 +5680,7 @@ class MutatingFirstArgExternKernel(ExternKernel):
     This needs to be a custom class to handle mutation properly
     """
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         argrefs = [
             *(t.codegen_reference() for t in self.inputs),
             *map(repr, self.constant_args),
@@ -5685,7 +5689,7 @@ class MutatingFirstArgExternKernel(ExternKernel):
             f"{self.get_kernel_name()}({', '.join(argrefs)}){wrapper.ending}"
         )
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
     def get_mutation_names(self):  # type: ignore[no-untyped-def]
@@ -5694,12 +5698,12 @@ class MutatingFirstArgExternKernel(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
-    def has_side_effects(self):  # type: ignore[no-untyped-def]
+    def has_side_effects(self) -> bool:
         return True
 
 
 class ResizeStorageBytes(MutatingFirstArgExternKernel):
-    def __init__(self, variable, new_size):  # type: ignore[no-untyped-def]
+    def __init__(self, variable, new_size) -> None:  # type: ignore[no-untyped-def]
         assert isinstance(new_size, int), "TODO: dynamic shapes"
         super().__init__(
             None,
@@ -5716,7 +5720,7 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
 
 
 class SetSourceTensorKernel(ExternKernelAlloc):
-    def __init__(self, self_tensor, storage_tensor):  # type: ignore[no-untyped-def]
+    def __init__(self, self_tensor, storage_tensor) -> None:  # type: ignore[no-untyped-def]
         self_tensor.freeze_layout()
         super().__init__(
             self_tensor.get_layout(),
@@ -5744,7 +5748,7 @@ class ScatterFallback(ExternKernel):
     It also handle the case `src` being a scalar properly.
     """
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         reduce = self.kwargs["reduce"]
         if V.graph.cpp_wrapper:
             # Follow aten/src/ATen/native/ReductionType.h:get_operator_enum
@@ -5767,7 +5771,7 @@ class ScatterFallback(ExternKernel):
             self.codegen_kwargs(),
         )
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
     def get_mutation_names(self):  # type: ignore[no-untyped-def]
@@ -5786,7 +5790,7 @@ class ScatterFallback(ExternKernel):
         *,
         reduce: Optional[str] = None,
         include_self: bool = True,
-    ):
+    ) -> None:
         self.src_is_tensor = isinstance(src, TensorBox)
 
         constant_args: Tuple[Any, ...]
@@ -5817,7 +5821,7 @@ class IndexPutFallback(ExternKernel):
     This needs to be a custom class to handle mutation and indices properly
     """
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         (x, values, *valid_indices) = (t.codegen_reference() for t in self.inputs)
         indices = []
         iter_valid_indices = iter(valid_indices)
@@ -5831,7 +5835,7 @@ class IndexPutFallback(ExternKernel):
             self.get_kernel_name(), x, indices, values, *self.codegen_const_args()
         )
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
     def get_mutation_names(self):  # type: ignore[no-untyped-def]
@@ -5840,7 +5844,7 @@ class IndexPutFallback(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
-    def __init__(self, op_overload, x, indices, values, accumulate):  # type: ignore[no-untyped-def]
+    def __init__(self, op_overload, x, indices, values, accumulate) -> None:  # type: ignore[no-untyped-def]
         self.indices = indices
         valid_indices = [i for i in indices if i is not None]
         tensors = [self.realize_input(x) for x in [x, values, *valid_indices]]
@@ -5884,7 +5888,7 @@ class DeviceCopy(ExternKernelOut):
             constant_args,
         )
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         args = self.codegen_args()
         assert len(args) == 2
         if self.output_view:
@@ -5903,10 +5907,10 @@ class DynamicScalar(ExternKernel):
     def get_reads(self):  # type: ignore[no-untyped-def]
         return ()
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
-    def __init__(self, sym, keypath, data):  # type: ignore[no-untyped-def]
+    def __init__(self, sym, keypath, data) -> None:  # type: ignore[no-untyped-def]
         data.realize()
         super().__init__(
             None, NoneLayout(device=torch.device("cpu")), self.unwrap_storage([data])
@@ -5917,7 +5921,7 @@ class DynamicScalar(ExternKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet([self.sym])
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_dynamic_scalar(self)
 
 
@@ -5929,10 +5933,10 @@ class AssertScalar(ExternKernel):
     def get_reads(self):  # type: ignore[no-untyped-def]
         return ()
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
-    def __init__(self, scalar, msg):  # type: ignore[no-untyped-def]
+    def __init__(self, scalar, msg) -> None:  # type: ignore[no-untyped-def]
         super().__init__(
             # Buffer(name, layotu)
             None,
@@ -5943,13 +5947,13 @@ class AssertScalar(ExternKernel):
         self.scalar = scalar
         self.msg = msg
 
-    def has_side_effects(self):  # type: ignore[no-untyped-def]
+    def has_side_effects(self) -> bool:
         return True
 
     def get_unbacked_symbol_uses(self):  # type: ignore[no-untyped-def]
         return free_unbacked_symbols(self.scalar)
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if V.graph.cpp_wrapper:
             pass
         else:
@@ -5986,7 +5990,7 @@ class FallbackKernel(ExternKernelAlloc):
         kwargs=None,
         *,
         unbacked_bindings=None,
-    ):
+    ) -> None:
         if (
             kernel == aten.mul.Tensor
             and len(tensor_args) == 1
@@ -6063,7 +6067,7 @@ class FallbackKernel(ExternKernelAlloc):
         schema_args = schema.arguments
         args, kwargs = self.unflatten_args(self.inputs, self.constant_args)
 
-        def handle_aliasing_and_mutation(info, arg):  # type: ignore[no-untyped-def]
+        def handle_aliasing_and_mutation(info, arg) -> None:  # type: ignore[no-untyped-def]
             # Assertions to make sure we didn't mismatch args
             if isinstance(info.type, torch.ListType):
                 assert isinstance(arg, (list, tuple))
@@ -6083,7 +6087,7 @@ class FallbackKernel(ExternKernelAlloc):
             if info.alias_info is None:
                 return
 
-            def add_alias(t):  # type: ignore[no-untyped-def]
+            def add_alias(t) -> None:  # type: ignore[no-untyped-def]
                 self.alias_names.append(t.get_name())
                 if info.alias_info.is_write:
                     self.mutation_outputs.append(
@@ -6100,7 +6104,7 @@ class FallbackKernel(ExternKernelAlloc):
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
 
-    def codegen_unbacked_symbol_defs(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen_unbacked_symbol_defs(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         if not hasattr(self, "unbacked_bindings"):
             return
 
@@ -6304,7 +6308,7 @@ class FallbackKernel(ExternKernelAlloc):
 
         return [*args, *ordered_kwargs]
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         kernel = self.op_overload
         if kernel.namespace == "aten":  # type: ignore[union-attr]
             # Aten Fallback Ops
@@ -6444,7 +6448,7 @@ class FallbackKernel(ExternKernelAlloc):
 class ComplexView(FallbackKernel):
     """View a complex number as two dtyped numbers or vice versa"""
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
     def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
@@ -6460,7 +6464,7 @@ class ComplexView(FallbackKernel):
         unflatten_args,
         *,
         unbacked_bindings=None,
-    ):
+    ) -> None:
         super().__init__(
             layout,
             kernel,
@@ -6498,13 +6502,13 @@ class MultiOutput(ExternKernel):
         else:
             return basename
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_multi_output(
             self.get_name(),
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
 
-    def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):  # type: ignore[no-untyped-def]
+    def __init__(self, layout, input, indices: List[Tuple[Any, ...]]) -> None:  # type: ignore[no-untyped-def]
         super().__init__(None, layout, [input], ())
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
@@ -6513,7 +6517,7 @@ class MultiOutput(ExternKernel):
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
         return self.inputs[0].get_unbacked_symbol_uses()
 
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
     def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
@@ -6641,7 +6645,7 @@ class StorageBox(MutableBox):
         self.data.traceback = traceback
         return self.data.name
 
-    def realize_hint(self):  # type: ignore[no-untyped-def]
+    def realize_hint(self) -> None:
         """
         Called on buffers we expect to be forced to realize later.
         """
@@ -6675,7 +6679,7 @@ class StorageBox(MutableBox):
             )
         return False
 
-    def mark_reuse(self, users):  # type: ignore[no-untyped-def]
+    def mark_reuse(self, users) -> None:  # type: ignore[no-untyped-def]
         if self.should_realize_on_reuse(users):
             self.realize()
 
@@ -6707,7 +6711,7 @@ class InvokeSubgraph(ExternKernel):
 
     def __init__(
         self, subgraph: Subgraph, operands: List[TensorBox], layout: MultiOutputLayout
-    ):
+    ) -> None:
         super().__init__(
             name=None,
             layout=layout,
@@ -6774,7 +6778,7 @@ class InvokeSubgraph(ExternKernel):
         invoke_subgraph.outputs = outputs
         return outputs
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_invoke_subgraph(self)
 
 
@@ -6793,7 +6797,7 @@ class Conditional(ExternKernel):
         true_subgraph: Subgraph,
         false_subgraph: Subgraph,
         layout: MultiOutputLayout,
-    ):
+    ) -> None:
         self.predicate = predicate
         self.operands = operands
         self.true_subgraph = true_subgraph
@@ -6895,7 +6899,7 @@ class Conditional(ExternKernel):
         conditional.outputs = outputs
         return outputs
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_conditional(self)
 
 
@@ -6914,7 +6918,7 @@ class WhileLoop(ExternKernel):
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
-    ):
+    ) -> None:
         self.carried_inputs = carried_inputs
         self.additional_inputs = additional_inputs
         self.cond_subgraph = cond_subgraph
@@ -7022,7 +7026,7 @@ class WhileLoop(ExternKernel):
         while_loop.outputs = outputs
         return outputs
 
-    def codegen(self, wrapper):  # type: ignore[no-untyped-def]
+    def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
         wrapper.codegen_while_loop(self)
 
 
@@ -7037,7 +7041,7 @@ class EffectfulKernel(FallbackKernel):
         kwargs=None,
         *,
         unbacked_bindings=None,
-    ):
+    ) -> None:
         super().__init__(
             layout,
             kernel,
@@ -7066,7 +7070,7 @@ class EffectfulKernel(FallbackKernel):
 
         return read_writes
 
-    def has_side_effects(self):  # type: ignore[no-untyped-def]
+    def has_side_effects(self) -> bool:
         return True
 
 
@@ -7086,15 +7090,15 @@ class TorchBindObject(IRNode):
 
 
 class _CollectiveKernel(FallbackKernel):
-    def should_allocate(self):  # type: ignore[no-untyped-def]
+    def should_allocate(self) -> bool:
         return False
 
-    def has_side_effects(self):  # type: ignore[no-untyped-def]
+    def has_side_effects(self) -> bool:
         return True
 
     # This is identical to FallbackKernel.set_cpp_kernel(), minus the
     # part that checks against input aliasing and mutation.
-    def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None):  # type: ignore[no-untyped-def]
+    def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None) -> None:
         from .codegen.wrapper import get_cpp_op_schema
 
         assert (
