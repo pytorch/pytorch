@@ -802,7 +802,7 @@ class CachingAutotuner(KernelInterface):
         contaminating them. Avoid cloning the other buffers because it
         leads to increased memory usage.
         """
-        from torch._prims_common import clone_preserve_strides
+        from ..compile_fx import clone_preserve_strides
 
         def prepare_arg(name, arg):
             if name in self.mutated_arg_names and name not in exclude:

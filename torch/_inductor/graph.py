@@ -36,7 +36,7 @@ from torch import device, Tensor
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._logging import LazyString, trace_structured
-from torch._prims_common import clone_preserve_strides, make_channels_last_strides_for
+from torch._prims_common import make_channels_last_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
@@ -1845,6 +1845,8 @@ class GraphLowering(torch.fx.Interpreter):
                     ]
 
                 if self.mutated_inputs:
+                    from .compile_fx import clone_preserve_strides
+
                     mutated_input_idxs = [
                         idx
                         for idx, name in enumerate(self.graph_inputs)
