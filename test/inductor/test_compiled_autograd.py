@@ -3066,7 +3066,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 self.a = a
                 self.c = c
                 self.b = b
-                self.lin1 = torch.nn.Linear(b * a, b * c, device="cuda")
+                self.lin1 = torch.nn.Linear(b * a, b * c, device="cpu")
 
             def forward(self, x):
                 x = x.view(-1, self.a * self.b)
@@ -3102,8 +3102,8 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         def gen_tensor_dict(sizes):
             tensor_dict = {
-                "a": [torch.randn(sizes[0], 48, device="cuda") for _ in range(4)],
-                "b": [torch.randn(sizes[1], 48, device="cuda") for _ in range(7)],
+                "a": [torch.randn(sizes[0], 48, device="cpu") for _ in range(4)],
+                "b": [torch.randn(sizes[1], 48, device="cpu") for _ in range(7)],
             }
             return tensor_dict
 
@@ -3128,14 +3128,14 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
                 gm, backend=inner_compiler, fullgraph=True, dynamic=True
             )
 
-        x = torch.zeros(100, 48, device="cuda")
+        x = torch.zeros(100, 48, device="cpu")
         tensor_dict = gen_tensor_dict([101, 102])
         out = m(strs, tensor_dict, x)
 
         with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
             out.sum().backward()
 
-        x = torch.zeros(103, 48, device="cuda")
+        x = torch.zeros(103, 48, device="cpu")
         tensor_dict = gen_tensor_dict([104, 105])
         out = m(strs, tensor_dict, x)
 

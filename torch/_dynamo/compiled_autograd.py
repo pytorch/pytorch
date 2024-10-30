@@ -310,7 +310,7 @@ class AutogradCompilerInstance:
             if (
                 node.op == "call_function"
                 and node.target == operator.eq
-                and self.is_sym_node(node.args[1])
+                and (self.is_sym_node(node.args[0]) or self.is_sym_node(node.args[1]))
             ):
                 if len(node.users) == 0:
                     self.fx_tracer.graph.erase_node(node)
