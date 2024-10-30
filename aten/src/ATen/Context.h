@@ -52,6 +52,8 @@ class TORCH_API Context {
       return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
     } else if (device_type == at::kIPU) {
       return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
+    } else if (device_type == at::kHPU) {
+      return at::detail::getHPUHooks().getDefaultHPUGenerator(device.index());
     } else if (device_type == at::kPrivateUse1) {
       return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
           device.index());
