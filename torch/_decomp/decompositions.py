@@ -10,6 +10,8 @@ from functools import partial, reduce
 from itertools import chain, product
 from typing import Any, Callable, cast, Iterable, List, Optional, Tuple, Union
 
+import sympy
+
 import torch
 import torch._meta_registrations
 import torch._prims as prims
@@ -4413,9 +4415,14 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
     # Check the contiguous, we can skip the dim with size of 1
     # as aten: https://github.com/pytorch/pytorch/blob/
     # e201460f8aa1510b4c4686627d57b69756c4b916/aten/src/ATen/TensorGeometry.cpp#L17
+    expected_stride = [sympy.Integer(1)]
+    for size in reversed(t1_shape[1:]):
+        expected_stride.append(size * expected_stride[-1])
     return all(
-        st1 == st2 * s2 if s2 != 1 else True
-        for (st1, st2, s2) in zip(t1_stride[:-2], t1_stride[1:-1], t1_shape[1:-1])
+        size == 1 or left == right
+        for left, right, size in zip(
+            t1_stride, list(reversed(expected_stride)), t1_shape
+        )
     )
 
 
