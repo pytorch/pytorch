@@ -102,9 +102,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
-        GraphTransformObserver(gm, "remove_noop_ops").apply_graph_pass(
-            remove_noop_ops(gm.graph)
-        )
+        GraphTransformObserver(gm, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
         for i, patterns in enumerate(pass_patterns):
             GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
                 patterns.apply
@@ -132,8 +130,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config._fuse_ddp_communication:
         GraphTransformObserver(gm, "fuse_ddp_communication").apply_graph_pass(
-            lambda: fuse_ddp_communication(
-                gm.graph,
+            lambda graph: fuse_ddp_communication(
+                graph,
                 config._fuse_ddp_communication_passes,
                 config._fuse_ddp_bucket_size,
             )

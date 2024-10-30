@@ -62,6 +62,7 @@ BACKENDS: Dict[str, List[Subsystem]] = {
         BisectSubsystem(
             "post_grad_passes"
         ),  # passes applied individually on forward, and backward in inductor
+        ConfigChange("inductor", "fallback_random", True),
         ConfigChange("inductor", "emulate_precision_casts", True),
         BisectSubsystem("lowerings"),  # lowering aten operators to inductor
     ],  # TODO - add more - fusions, amp numeric mode ?
@@ -404,7 +405,7 @@ class BisectionManager:
                 else:
                     if isinstance(curr_subsystem, ConfigChange):
                         print(
-                            f"Setting config {curr_subsystem.config_name} field {curr_subsystem.config_field}"
+                            f"Setting config {curr_subsystem.config_name} field {curr_subsystem.config_field} "
                             f"to {curr_subsystem.config_value} fixed the issue"
                         )
                     else:

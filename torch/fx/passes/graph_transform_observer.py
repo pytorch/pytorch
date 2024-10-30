@@ -31,6 +31,7 @@ class GraphTransformObserver:
         log_url is inferred to be torch._inductor.config.trace.log_url_for_graph_xform unless otherwise specified
         """
 
+        self.gm = gm
         self.passname = passname
         self.subsystem = subsystem
 
@@ -44,7 +45,6 @@ class GraphTransformObserver:
         if self.log_url is None:
             return
         GraphTransformObserver.__pass_count += 1
-        self.gm = gm
 
         self.input_dot_graph = FxGraphDrawer(
             self.gm,

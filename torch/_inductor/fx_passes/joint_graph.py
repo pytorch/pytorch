@@ -12,6 +12,8 @@ from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.multiprocessing.reductions import StorageWeakRef
+import functools
+
 
 from ...utils._ordered_set import OrderedSet
 from .. import config
@@ -462,13 +464,12 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
             maybe_count = GraphTransformObserver(
                 graph, f"pass_pattern_{i}"
             ).apply_graph_pass(patterns.apply)
-            count += maybe_count if not maybe_count else 0
+            count += maybe_count if maybe_count is not None else 0
 
     if not config.fallback_random:
-        maybe_count = GraphTransformObserver(
-            graph, "replace_random_passes"
-        ).apply_gm_pass(graph)
-        count += maybe_count if maybe_count is not None else 0
+        # not trying into the bisector because decomps may have already affected rng reproducibility 
+        # we'll instead explicitly turn off the config
+        count += replace_random_passes(graph)
 
     if config.joint_custom_post_pass is not None:
         GraphTransformObserver(graph, "joint_custom_post_pass").apply_graph_pass(
