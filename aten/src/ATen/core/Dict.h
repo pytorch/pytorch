@@ -80,9 +80,10 @@ public:
 
   template<class Value_>
   void setValue(Value_&& value) const {
-    static_assert(std::is_constructible<Value, Value_>::value, "Wrong type for the value argument of setValue()");
+    static_assert(std::is_constructible_v<Value, Value_>, "Wrong type for the value argument of setValue()");
     iterator_->second = Value(std::forward<Value_>(value));
   }
+  ~DictEntryRef() = default;
 
 private:
   // allow copying and moving, but only our friends (i.e. the Dict class) can do
