@@ -61,6 +61,8 @@ BINARY_OPS = [
     "minimum",
     "maximum",
     "mod",
+    "bitwise_and",
+    "bitwise_or",
 ]
 BITWISE_OPS = [
     "bitwise_and",
@@ -238,6 +240,10 @@ class TestValueRanges(TestCase):
     @parametrize("dtype", ("int", "float"))
     def test_binary_ref(self, fn, dtype):
         to_dtype = {"int": sympy.Integer, "float": sympy.Float}
+        # Don't test bitwise methods since value range analysis on a singleton
+        # range may not return a singleton result.
+        if fn in BITWISE_OPS:
+            return
         # Don't test float on int only methods
         if dtype == "float" and fn in ["pow_by_natural", "mod"]:
             return
@@ -323,7 +329,7 @@ class TestValueRanges(TestCase):
                         self.assertIn(r, ref_r)
 
     # This takes about 4s for all the variants
-    @parametrize("fn", BINARY_OPS + BITWISE_OPS + COMPARE_OPS)
+    @parametrize("fn", BINARY_OPS + COMPARE_OPS)
     def test_binary_ref_range(self, fn):
         # TODO: bring back sympy.oo testing for float unary fns
         vals = LESS_CONSTANTS
@@ -349,7 +355,7 @@ class TestValueRanges(TestCase):
     @parametrize("fn", BITWISE_OPS)
     def test_bitwise_ref_range(self, fn):
         # N^4 complexity
-        vals = range(-4, 4)
+        vals = range(-4, 5)
         for a, b in itertools.product(generate_range(vals), repeat=2):
             with self.subTest(a=a, b=b):
                 for a0, b0 in itertools.product(vals, repeat=2):
@@ -359,6 +365,23 @@ class TestValueRanges(TestCase):
                         ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
                         r = getattr(ReferenceAnalysis, fn)(a0, b0)
                         self.assertIn(r, ref_r)
+
+        # test that bitwise ops can take bool arguments
+        bool_vals = [
+            (3, sympy.true),
+            (3, sympy.false),
+            (sympy.true, 3),
+            (sympy.false, 3),
+            (sympy.true, sympy.true),
+            (sympy.true, sympy.false),
+            (sympy.false, sympy.true),
+            (sympy.false, sympy.false),
+        ]
+        for a, b in bool_vals:
+            with self.subTest(a=a, b=b):
+                ref_r = getattr(ValueRangeAnalysis, fn)(a, b)
+                r = getattr(ReferenceAnalysis, fn)(a, b)
+                self.assertIn(r, ref_r)
 
 
 class TestSympyInterp(TestCase):
@@ -380,6 +403,8 @@ class TestSympyInterp(TestCase):
         vals = CONSTANTS
         if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
             vals = [True, False]
+        elif fn in BITWISE_OPS:
+            vals = vals + [True, False]
         arity = 1
         if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
             arity = 2
@@ -417,6 +442,8 @@ class TestSympyInterp(TestCase):
         vals = CONSTANTS
         if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
             vals = [True, False]
+        elif fn in BITWISE_OPS:
+            vals = vals + [True, False]
 
         arity = 1
         if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
@@ -494,6 +521,8 @@ class TestSympyInterp(TestCase):
         vals = CONSTANTS
         if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
             vals = [True, False]
+        elif fn in BITWISE_OPS:
+            vals = vals + [True, False]
 
         arity = 1
         if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:

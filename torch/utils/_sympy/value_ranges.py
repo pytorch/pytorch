@@ -501,25 +501,40 @@ class SymPyValueRangeAnalysis:
         return ValueRanges.coordinatewise_increasing_map(a, b, sympy.And)
 
     @staticmethod
+    def _bool_to_int(x):
+        if x.is_singleton():
+            return ValueRanges.wrap(sympy.Integer(1 if x.lower else 0))
+        else:
+            return ValueRanges(sympy.Integer(0), sympy.Integer(1))
+
+    @staticmethod
     def _bit_length(n):
         return len(bin(n).lstrip("-0b"))
 
-    @staticmethod
-    def bitwise_and(a, b):
+    @classmethod
+    def bitwise_and(cls, a, b):
         a, b = ValueRanges.wrap(a), ValueRanges.wrap(b)
+        if a.is_bool:
+            a = cls._bool_to_int(a)
+        if b.is_bool:
+            b = cls._bool_to_int(b)
         lower = min(a.lower, b.lower)
         if lower < 0 and lower != -int_oo:
             # If both lower bounds are negative, then bits start like
             # 1...10..., so the smallest possible value is 1...101...1.
             # Thus, we need to find the next smallest power of 2 (inclusive).
-            lower = -(1 << SymPyValueRangeAnalysis._bit_length(-lower - 1))
+            lower = -(1 << cls._bit_length(-lower - 1))
         else:
             lower = 0
         return ValueRanges(lower, max(a.upper, b.upper))
 
-    @staticmethod
-    def bitwise_or(a, b):
+    @classmethod
+    def bitwise_or(cls, a, b):
         a, b = ValueRanges.wrap(a), ValueRanges.wrap(b)
+        if a.is_bool:
+            a = cls._bool_to_int(a)
+        if b.is_bool:
+            b = cls._bool_to_int(b)
         upper = max(a.upper, b.upper)
         if upper == 0:
             upper = 0
@@ -527,7 +542,7 @@ class SymPyValueRangeAnalysis:
             # If both upper bounds are positive, then the largest
             # possible value is 01...1, so we need to find
             # next largest power of 2 (exclusive), minus 1
-            upper = (1 << SymPyValueRangeAnalysis._bit_length(upper)) - 1
+            upper = (1 << cls._bit_length(upper)) - 1
         elif upper < 0:
             upper = -1
         return ValueRanges(min(a.lower, b.lower), upper)

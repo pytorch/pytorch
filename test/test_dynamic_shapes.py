@@ -389,6 +389,10 @@ class TestPySymInt(TestCase):
         a2 = create_symint(shape_env, 0b1100)
         self.assertEqual(a2 & 0b1010, 0b1000)
 
+        a3 = create_symbool(shape_env, True)
+        b3 = create_symbool(shape_env, True)
+        self.assertEqual(a3 & b3, True)
+
     def test_symint_bitwise_or(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 0b1100)

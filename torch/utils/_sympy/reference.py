@@ -378,11 +378,11 @@ class TensorReferenceAnalysis:
 
     @staticmethod
     def bitwise_and(a, b):
-        return torch.ops.aten.bitwise_and.default(a, b)
+        return torch.ops.aten.bitwise_and(a, b)
 
     @staticmethod
     def bitwise_or(a, b):
-        return torch.ops.aten.bitwise_or.default(a, b)
+        return torch.ops.aten.bitwise_or(a, b)
 
     @staticmethod
     def eq(a, b):

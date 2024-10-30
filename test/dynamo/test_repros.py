@@ -6201,6 +6201,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             z |= z >> 1
             z |= z << 1
             z &= z
+            # test composition with non-bitwise ops
             z = (z | z) % 6
             return z
 
