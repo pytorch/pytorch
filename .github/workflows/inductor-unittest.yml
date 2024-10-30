@@ -1,11 +1,12 @@
 
-# This workflow is designed to run unit tests for inductor tests.
-
+# Workflow: Inductor Unit Test
+# This workflow runs both unit tests for inductor.
+# It also runs for rerun-disabled-tests work nightly.
 name: inductor-unittest
 on:
   workflow_call:
   schedule:
-    - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests, `schedule 29 8 * * *` is reserved for rerun disabled tests.
+    - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests. `schedule 29 8 * * *` is reserved for rerun disabled tests.
   workflow_dispatch:
 
 concurrency:

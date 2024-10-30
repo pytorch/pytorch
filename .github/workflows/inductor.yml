@@ -1,9 +1,3 @@
-# Workflow: Inductor
-# This workflow runs both benchmark tests and unit tests for inductor.
-# To include new test:
-#  1. Unit Tests: add to workflow inductor-unittest.yml
-#  2. Benchmark Tests: this workflow
-#  3. Mixed: add to workflow inductor-unittest.yml, and skip benchmark tests using rerun-disabled-tests in bash script.
 name: inductor
 
 on:
