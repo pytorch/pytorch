@@ -53,6 +53,7 @@ from .exc import (
     unimplemented,
     unimplemented_with_warning,
 )
+from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import AttributeMutationExisting, SideEffects
@@ -277,6 +278,8 @@ class OutputGraph:
             "co_filename": f_code.co_filename,
             "co_firstlineno": f_code.co_firstlineno,
         }
+
+        self.region_tracker = GraphRegionTracker()
 
         # tracked_fakes says where any tensor that was wrapped to fake came
         # from.  It is similar to GraphArg, in that all GraphArgs will get
@@ -1390,6 +1393,9 @@ class OutputGraph:
         return [node.meta["grapharg"] for node in self.placeholders]
 
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
+        print(self.region_tracker)
+        print(self.region_tracker.get_identical_regions())
+
         with dynamo_timed(
             "OutputGraph.call_user_compiler",
             phase_name="backend_compile",

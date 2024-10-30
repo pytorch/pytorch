@@ -2275,6 +2275,9 @@ def _wrap_fx_proxy(
         # with preserve_rng_state():
         # only allow_non_graph_fake in this instance because we handle the non-fake
         # cases properly below.
+        tx.output.region_tracker.track_node(
+            tx.f_code.co_filename, tx.lineno, proxy.node
+        )
         example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
 
     return handle_traced_output(
