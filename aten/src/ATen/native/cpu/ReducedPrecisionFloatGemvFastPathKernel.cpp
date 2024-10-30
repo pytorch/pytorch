@@ -73,7 +73,7 @@ float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
     }
   });
   const auto [t0, t1] = vec::convert_half_float(x[0]);
-#if defined(__aarch64__)
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
   return vaddvq_f32(t0 + t1);
 #else
   return vec::vec_reduce_all<float>(
@@ -115,7 +115,7 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
 #endif // !defined(__aarch64__) || defined( __ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
 
 float reduce(vec::Vectorized<float> x) {
-#if defined(__aarch64__)
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
   return vaddvq_f32(x);
 #else
   return vec::vec_reduce_all<float>(
@@ -146,7 +146,7 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
     const vec::Vectorized<c10::Half>& b,
     const vec::Vectorized<float>& acc_low,
     const vec::Vectorized<float>& acc_high) {
-#ifdef __ARM_FEATURE_FP16_FML
+#if defined(__ARM_FEATURE_FP16_FML) && !defined(CPU_CAPABILITY_SVE)
   return std::make_pair(vfmlalq_low_f16(acc_low, a, b), vfmlalq_high_f16(acc_high, a, b));
 #else
   const auto [a_float_low, a_float_high] = convert_half_float(a);
