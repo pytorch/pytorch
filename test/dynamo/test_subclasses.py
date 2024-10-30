@@ -1771,11 +1771,11 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
                 return (torch.ones_like(out_val),)
 
         with self.branch_nested_state():
-            from torch.nested._internal.nested_tensor import _tensor_symint_registry
+            from torch.nested._internal.nested_tensor import _cache_id_registry
 
             # Validate that compilation does not modify eager state
-            registry_before = list(_tensor_symint_registry.items())
-            count_before = torch.nested._internal.nested_tensor._tensor_id_counter
+            registry_before = list(_cache_id_registry.items())
+            count_before = torch.nested._internal.nested_tensor._cache_id_counter
 
             guards_exported = []
             guards_failed = []
@@ -1794,8 +1794,8 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
                 guard_export_fn=append_guard_export,
                 guard_fail_fn=append_guard_fail,
             )(fn)
-            registry_after = list(_tensor_symint_registry.items())
-            count_after = torch.nested._internal.nested_tensor._tensor_id_counter
+            registry_after = list(_cache_id_registry.items())
+            count_after = torch.nested._internal.nested_tensor._cache_id_counter
             self.assertEqual(registry_before, registry_after)
             self.assertEqual(count_before, count_after)
 

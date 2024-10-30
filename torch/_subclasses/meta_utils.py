@@ -337,23 +337,16 @@ class MetaTensorDescriber:
         from torch.nested._internal.nested_tensor import _cache_id_registry
 
         njt_cache = None
-        # For t to have a njt_cache, it must be in the
         njt_cache_ref = torch._njt_offsets_to_weak_cache.get(t, None)
         if njt_cache_ref is not None and njt_cache_ref() is not None and recurse:
             njt_cache = self.describe_njt_cache(njt_cache_ref(), root=t)
 
         cache_id = None
-        if njt_cache_ref is not None:
+        if njt_cache_ref is not None and njt_cache_ref() is not None:
             cache_id = _cache_id_registry.get(njt_cache_ref(), None)
 
         if njt_cache is not None:
             assert cache_id is not None, f"{cache_id=} {njt_cache=}"
-
-        print(list(_cache_id_registry.keys()), list(_cache_id_registry.values()))
-        print("t in offsets -> cache (weak)", t in torch._njt_offsets_to_weak_cache)
-        if t in torch._njt_offsets_to_weak_cache:
-            print("t's cache in cache -> id", torch._njt_offsets_to_weak_cache[t] in _cache_id_registry)
-
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
@@ -808,13 +801,10 @@ class MetaConverter:
                 shape_env,
                 callback,
                 source=src,
-                symbolic_context=None,
-                # (
-                #     None  # What is the default?
-                #     if symbolic_context is None
-                #     # Would be cool not to hard code this!
-                #     else symbolic_context.inner_contexts["_offsets"]
-                # )
+                # We could also look up the inner symbolic context, but that is more work
+                symbolic_context=all_dynamic_symbolic_context(
+                    t, src, shape_env, callback
+                )
             )
 
         if shape_env is not None:
@@ -1718,7 +1708,7 @@ class MetaConverter:
                 assert t.njt_cache is not None
                 # Nested int is associated with the cache now rather than any particular offset.
                 # many to one.
-                r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
+                r.fake_mode.create_symbolic_nested_int(
                     cache=t.njt_cache,
                     cache_id=t.cache_id,
                 )

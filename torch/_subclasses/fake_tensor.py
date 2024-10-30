@@ -903,7 +903,8 @@ class FakeTensor(Tensor):
 
     # TODO(soulitzer): handle other metadata as well if provided
     def get_nested_cache(self, *, lengths=None):
-        if self.cache_id is None:
+        # Do we have more guarantees about what is true and false together.
+        if self.cache_id is None or self.cache_id not in self.fake_mode.cache_id_to_fake_cache:
             from torch.nested._internal.nested_tensor import NestedCache
 
             cache = NestedCache({
@@ -912,9 +913,8 @@ class FakeTensor(Tensor):
             }, self.fake_mode)
 
             self.get_nested_int(cache=cache)
-
-            self.fake_mode.cache_id_to_fake_cache[self.cache_id] = cache
             cache.id = self.cache_id
+            self.fake_mode.cache_id_to_fake_cache[self.cache_id] = cache
 
         return self.fake_mode.cache_id_to_fake_cache[self.cache_id]
 
@@ -939,6 +939,15 @@ class FakeTensor(Tensor):
             torch._check_is_size(s)
             torch._check(s >= 2)
             out.append(s)
+        return out
+
+    # Invariant: A fake tensor post-creation is guaranteed to
+    # have any associated symbolic nested int set
+    def detach(self) -> torch.Tensor:  # type: ignore[override]
+        # move the cache id over, for aot we reuse the same fake mode
+        # we need to worry about export.
+        out = torch.ops.aten.detach.default(self)
+        out.cache_id = self.cache_id
         return out
 
 

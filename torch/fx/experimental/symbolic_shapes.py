@@ -3287,6 +3287,7 @@ class ShapeEnv:
 
             # Check if the fake mode already has the cache for the id
             cache_src = SymNodePropertySource(source, "nested_int_cache")
+            coeff = hint.node.nested_int_coeff()
 
             cache_data = {}  # just a dictionary
             fake_mode = None
@@ -3301,15 +3302,15 @@ class ShapeEnv:
                 cache_data[cache_key] = fake_cache_value
                 # TODO(soulitzer): we can probably simplify this.
                 # Or we can assume that the cache is always non-empty?
-                fake_mode = fake_cache_value.fake_mode
-                if hint.node.t_id in fake_mode.cache_id_to_symint:
-                    # TODO(soulitzer): Coeff can be symbolic!
-                    return fake_mode.cache_id_to_symint[hint.node.t_id] * hint.node.nested_int_coeff()
+                if fake_cache_value is not None:
+                    fake_mode = fake_cache_value.fake_mode
+                if hint.node.t_id in fake_mode.cache_id_to_symint and coeff == 1:
+                    # only check cache if coeff is 1, otherwise, we'd need to
+                    # create a symbol for the coeff
+                    return fake_mode.cache_id_to_symint[hint.node.t_id]
 
             cache = NestedCache(cache_data, fake_mode=fake_mode)
             cache.id = hint.node.t_id
-
-            coeff = hint.node.nested_int_coeff()
 
             nested_int = SymInt(
                 SymNode(
@@ -3318,6 +3319,10 @@ class ShapeEnv:
                     fx_node=fx_node,
                 )
             )
+            if coeff == 1:
+                # cache only if coeff is 1
+                fake_mode.cache_id_to_symint[hint.node.t_id] = nested_int
+
             return nested_int
         else:
             # How can this occur? When we mark_unbacked, we end up with a real
