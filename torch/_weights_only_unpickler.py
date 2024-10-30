@@ -68,7 +68,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Type
 
 import torch
 from torch._utils import IMPORT_MAPPING, NAME_MAPPING
@@ -281,7 +281,6 @@ def get_globals_in_pkl(file) -> Set[str]:
             raise UnpicklingError(f"Unsupported operand {key[0]}")
 
 
-
 class Unpickler:
     def __init__(self, file, *, encoding: str = "bytes"):
         self.encoding = encoding
@@ -289,6 +288,7 @@ class Unpickler:
         self.read = file.read
         self.memo: Dict[int, Any] = {}
         self.proto: int = -1
+        self.types_created_via_reduce: Set[Type] = set()
 
     def load(self):
         """Read a pickled object representation from the open file.
@@ -353,7 +353,9 @@ class Unpickler:
                     raise UnpicklingError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )
-                self.stack[-1] = func(*args)
+                res = func(*args)
+                self.stack[-1] = res
+                self.types_created_via_reduce.add(type(res))
             elif key[0] == BUILD[0]:
                 state = self.stack.pop()
                 inst = self.stack[-1]
@@ -364,7 +366,10 @@ class Unpickler:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
-                elif type(inst) in _get_user_allowed_globals().values():
+                elif (
+                    type(inst) in _get_user_allowed_globals().values()
+                    or type(inst) in self.types_created_via_reduce
+                ):
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
                     else:
