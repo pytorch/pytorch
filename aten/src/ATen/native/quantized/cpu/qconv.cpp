@@ -1434,16 +1434,17 @@ static at::Tensor _quantized_convolution_onednn(
   bool has_unary_post_op = unary_attr.has_value() && unary_attr.value() != "none";
   // has_accum_postop_sum: extra input besides the conv to do conv post op sum fusion.
   bool has_accum_postop_sum = has_binary_post_op && binary_attr.value() == "sum";
+  bool has_binary_postop_add = has_binary_post_op && binary_attr.value() == "add";
 
-  if (has_accum_postop_sum) {
-    TORCH_CHECK(accum.has_value(), "For post op sum, accum tensor should not be empty.");
+  if (has_accum_postop_sum || has_binary_postop_add) {
+    TORCH_CHECK(accum.has_value(), "For post op sum or post op binary_add, accum tensor should not be empty.");
     TORCH_CHECK(
       accum.value().is_contiguous(
         kSpatialDim == 2
         ? c10::MemoryFormat::ChannelsLast
         : c10::MemoryFormat::ChannelsLast3d
       ),
-      "For post op sum, accum tensor must be contiguous."
+      "For post op sum or post op binary_add, accum tensor must be contiguous."
     );
     if (fp32_output || bfloat16_output) {
       TORCH_CHECK(accum_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, accum_scale must be 1.0.");
@@ -1603,13 +1604,16 @@ static at::Tensor _quantized_convolution_onednn(
     return output;
   }
   ideep::tensor dst = at::native::itensor_view_from_dense(output);
-  static ideep::tensor::desc dummy_accum_desc;
+  static ideep::tensor empty_tensor;
+  static ideep::tensor::desc empty_tensor_desc;
+  ideep::tensor src1 = has_binary_postop_add ? at::native::itensor_view_from_dense(accum.value()) : empty_tensor;
+  auto accum_desc = has_binary_postop_add ? src1.get_desc() : empty_tensor_desc;
   ideep::attr_t op_attr = onednn_utils::create_attr_by_post_op(
     binary_attr.has_value() ? binary_attr.value() : "none",
     binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
     accum_scale,
     accum_zero_point,
-    dummy_accum_desc,
+    accum_desc,
     unary_attr.has_value() ? unary_attr.value() : "none",
     unary_scalars,
     unary_algorithm.has_value() ? unary_algorithm.value() : ""
@@ -1690,6 +1694,9 @@ static at::Tensor _quantized_convolution_onednn(
   }
   if (output_zero_point != 0) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_t});
+  }
+  if (has_binary_postop_add) {
+    args.insert({DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src1});
   }
   primitive.execute(ideep::stream::default_stream(), args);
 #else
@@ -1941,7 +1948,7 @@ class QConvoneDNN final {
 #if AT_MKLDNN_ENABLED()
     // Conv2D post op check
     TORCH_CHECK(
-      act.dim() == 4 && binary_attr == "sum" && (
+      act.dim() == 4 && (binary_attr == "sum" || binary_attr == "add") && (
         !unary_attr.has_value() ||
         (unary_attr.has_value() &&
           (
@@ -1949,7 +1956,7 @@ class QConvoneDNN final {
           )
         )
       ),
-      "post_op sum or post_op sum_relu is supported for quantized pointwise conv2d. Got binary_post_op: ",
+      "post_op sum, binary_add, sum_relu and binary_add_relu are supported for quantized pointwise conv2d. Got binary_post_op: ",
       binary_attr,
       " unary_post_op: ",
       unary_attr.has_value() ? unary_attr.value() : "none",
