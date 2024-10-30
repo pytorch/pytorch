@@ -77,7 +77,7 @@ inline __m512i pack_saturate_and_clamp<int32_t>(
     int32_t min_val [[maybe_unused]],
     int32_t max_val [[maybe_unused]]) {
   // This function is for linkage only, will not be used
-  AT_ERROR("pack_saturate_and_clamp<int32_t> is not supported");
+  TORCH_CHECK(false, "pack_saturate_and_clamp<int32_t> is not supported");
   return __m512i{};
 }
 
