@@ -1,4 +1,3 @@
-
 #include <ATen/Tensor.h>
 #include <ATen/core/Tensor.h>
 
@@ -31,9 +30,7 @@ void quantized_matmul_pt2(
   c10::string_view unary_post_op_algorithm){
 
   bool m2_trans = true;
-
   auto attr = Attr(output_scale, output_zero_point);
-
   construct_attr_by_post_op(
     binary_post_op,
     binary_alpha,
@@ -45,7 +42,6 @@ void quantized_matmul_pt2(
     unary_post_op_algorithm,
     attr
   );
-
 
   size_t dims = result.dim();
   at::Device curDevice = at::Device(at::kXPU, c10::xpu::current_device());
@@ -129,8 +125,6 @@ void quantized_matmul_pt2(
   // bias is fused in post-op for quantized path
   b = b.contiguous(); // avoid reorder 2 times
 
-  // ipex matmul support both ab/ba shape for m2 at::Tensor, we don't check any more
-
   auto m1_usr_dt = get_onednn_dtype(m1);
   auto m2_usr_dt = get_onednn_dtype(m2);
   auto dst_usr_dt = get_onednn_dtype(dst);
@@ -184,21 +178,16 @@ void quantized_matmul_pt2(
   dnnl::post_ops po;
   attr.extract_post_ops(dst, true);
   bool m1_need_zp = (input_zero_point != 0);
-  // wgh should never have zero point
   bool wgh_is_per_channel = weight_scales.numel() > 1;
 
-  // STEP3: create primitive
   dnnl::matmul matmul_p;
   dnnl::matmul::primitive_desc matmul_pd;
-
 
   m1_md = dnnl::memory::desc(m1_dims, m1_dt, m1_strides);
   m2_md = dnnl::memory::desc(m2_dims, m2_dt, m2_strides);
   dst_md = dnnl::memory::desc(dst_dims, dst_dt, dst_strides);
-  // STEP2: creat attribute
   dnnl::primitive_attr pattr;
   pattr.set_post_ops(po);
-
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
   at::Tensor m2_sc;
@@ -230,7 +219,7 @@ void quantized_matmul_pt2(
   m1_usr_md = dnnl::memory::desc(m1_dims, m1_usr_dt, m1_strides);
   m2_usr_md = dnnl::memory::desc(m2_dims, m2_usr_dt, m2_strides);
   dst_usr_md = dnnl::memory::desc(dst_dims, dst_usr_dt, dst_strides);
-  // STEP4: create memory
+
   auto m1_usr_m = make_onednn_memory(m1_usr_md, engine, m1.data_ptr());
   auto m2_usr_m = make_onednn_memory(m2_usr_md, engine, m2.data_ptr());
   auto dst_usr_m = make_onednn_memory(dst_usr_md, engine, dst.data_ptr());
@@ -249,7 +238,6 @@ void quantized_matmul_pt2(
       matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
 
-  // bias add for gen12hp platform
   if (attr.with_binary())
     attr.construct_post_binary(matmul_pd, args);
 
@@ -272,7 +260,7 @@ void quantized_matmul_pt2(
   Tensor m1_sc_tensor, m1_zp_tensor;
   m1_sc_m = dnnl_memory_from_host_scalar(static_cast<float>(input_scale), m1_sc_tensor, engine);
   m1_zp_m = dnnl_memory_from_host_scalar(static_cast<int32_t>(input_zero_point), m1_zp_tensor, engine);
-  
+
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, m1_sc_m});
   if (m1_need_zp) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, m1_zp_m});
@@ -284,5 +272,4 @@ void quantized_matmul_pt2(
     result.copy_(dst);
 }
 
-
-}
+} // namespace at::native::onednn
