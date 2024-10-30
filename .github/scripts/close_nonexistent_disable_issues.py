@@ -2,17 +2,21 @@ import argparse
 import json
 import multiprocessing as mp
 import os
-from pathlib import Path
 import re
 import sys
 import tempfile
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import requests
 from gitutils import retries_decorator
+
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 from tools.testing.clickhouse import query_clickhouse
+
+
 sys.path.pop(0)
 
 
@@ -70,9 +74,11 @@ DISABLED_TESTS_JSON = (
     "https://ossci-metrics.s3.amazonaws.com/disabled-tests-condensed.json"
 )
 
+
 @retries_decorator()
 def query_db(query: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     return query_clickhouse(query, params)
+
 
 def parse_args() -> Any:
     parser = argparse.ArgumentParser()
@@ -82,7 +88,6 @@ def parse_args() -> Any:
         help="Only list the tests.",
     )
     return parser.parse_args()
-
 
 
 def download_log_worker(temp_dir: str, id: int, name: str) -> None:

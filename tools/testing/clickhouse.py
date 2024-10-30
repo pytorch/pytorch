@@ -25,12 +25,12 @@ def get_clickhouse_client() -> Any:
     )
 
 
-def query_clickhouse(query: str, params: Dict[str, Any]) -> Any:
+def query_clickhouse(query: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Queries ClickHouse.  Returns datetime in YYYY-MM-DD HH:MM:SS format.
     """
 
-    def convert_to_json_list(res: str) -> List[Dict[str, Any]]:
+    def convert_to_json_list(res: bytes) -> List[Dict[str, Any]]:
         rows = []
         for row in res.decode().split("\n"):
             if row:
