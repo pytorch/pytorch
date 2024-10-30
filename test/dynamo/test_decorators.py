@@ -802,6 +802,24 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             def d(x):
                 pass
 
+    def test_set_stance_force_backend_with_disable(self):
+        @torch.compiler.disable
+        def inner(x):
+            return x
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return inner(x)
+
+        f(torch.randn(3, 3))
+
+        def fail_backend(gm, ex):
+            raise RuntimeError("fail!")
+
+        # should not raise error
+        with torch.compiler.set_stance("default", force_backend=fail_backend):
+            f(torch.randn(3, 3))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
