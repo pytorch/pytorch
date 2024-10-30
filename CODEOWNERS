@@ -102,6 +102,10 @@ test/functorch/test_vmap.py @zou3519 @chillee @kshitij12345
 torch/_higher_order_ops/*.py @zou3519
 torch/_dynamo/variables/higher_order_ops.py @zou3519
 
+# AOTAutograd
+torch/_functorch/_aot_autograd/*.py @bdhirsh
+torch/_functorch/aot_autograd.py @bdhirsh
+
 # torch MPS
 test/test_mps.py @kulinseth @malfet
 aten/src/ATen/mps/ @kulinseth @malfet
@@ -112,10 +116,10 @@ aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
 torch/csrc/mtia/ @egienvalue
 
 # Profiler
-torch/csrc/autograd/profiler* @aaronenyeshi @sraikund16
-torch/autograd/profiler* @aaronenyeshi @sraikund16
-torch/csrc/profiler/ @aaronenyeshi @sraikund16
-torch/profiler/ @aaronenyeshi @sraikund16
+torch/csrc/autograd/profiler* @sraikund16
+torch/autograd/profiler* @sraikund16
+torch/csrc/profiler/ @sraikund16
+torch/profiler/ @sraikund16
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee
