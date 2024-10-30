@@ -698,7 +698,13 @@ def _add_spec(gm: torch.nn.Module, spec) -> str:
     return name
 
 
-def _generate_flatten(gm: torch.nn.Module, node, spec) -> torch.fx.Node:
+def _generate_flatten(gm: torch.nn.Module, node) -> torch.fx.Node:
+    flatten = gm.graph.call_function(pytree.tree_flatten, (node,))
+    getitem_0 = gm.graph.call_function(operator.getitem, (flatten, 0))
+    return getitem_0
+
+
+def _generate_flatten_spec(gm: torch.nn.Module, node, spec) -> torch.fx.Node:
     name = _add_spec(gm, spec)
     spec_node = gm.graph.get_attr(name)
     return gm.graph.call_function(fx_pytree.tree_flatten_spec, (node, spec_node))
@@ -830,7 +836,7 @@ class _ModuleFrame:
                 kwarg_nodes = {}
                 for name in kwargs_spec.context:
                     kwarg_nodes[name] = self.graph.placeholder(name)
-                flat_args = _generate_flatten(
+                flat_args = _generate_flatten_spec(
                     self.module,
                     (tuple(arg_nodes), kwarg_nodes),
                     signature.in_spec,
@@ -998,7 +1004,7 @@ class _ModuleFrame:
                 tuple(get_actual_output_node(output) for output in orig_outputs),
                 signature.out_spec,
             )
-            parent_out: Optional[torch.fx.Node] = _generate_flatten(
+            parent_out: Optional[torch.fx.Node] = _generate_flatten_spec(
                 self.parent.module, self.parent_call_module, signature.out_spec
             )
             graph_outputs: Union[torch.fx.Node, List[torch.fx.Node]] = tree_out_node
