@@ -210,6 +210,34 @@ class AttrSource(ChainedSource):
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
 
+@dataclasses.dataclass(frozen=True)
+class SymNodePropertySource(ChainedSource):
+    prop: str
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.node.{self.prop}()"
+
+
+@dataclasses.dataclass(frozen=True)
+class NestedTensorCacheSource(ChainedSource):
+    def name(self) -> str:
+        return f"torch._njt_offsets_to_weak_cache[{self.base.name()}]"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+
+@dataclasses.dataclass(frozen=True)
+class NestedTensorCacheListSource(ChainedSource):
+    def name(self) -> str:
+        return f"torch._njt_offsets_to_weak_cache[{self.base.name()}]().state()"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
 
 # Represents tensor.grad source. It could be represented by AttrSource as well.
 # But, we could access grad field on tensor directly in C++ without going

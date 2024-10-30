@@ -945,6 +945,10 @@ void initDispatchBindings(PyObject* module) {
     return c10::SymNode(
         c10::make_intrusive<c10::ConstantSymNodeImpl<bool>>(data));
   });
+   m.def("_get_constant_int_symnode", [](int64_t data) {
+    return c10::SymNode(
+        c10::make_intrusive<c10::ConstantSymNodeImpl<int64_t>>(data));
+  });
 
   m.def("_non_sym_sizes", [](const at::Tensor& a) {
     return a.sizes(); // NB: NOT sym_size

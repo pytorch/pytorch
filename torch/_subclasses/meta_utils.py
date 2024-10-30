@@ -192,6 +192,35 @@ class MetaTensorDescriber:
             self.next_storage_id += 1
         return self.lookup_storage[s]
 
+    def describe_custom_size_strides(self, t: torch.Tensor):
+        def process(x):
+            from torch.nested._internal.nested_int import NestedIntNode
+
+            if isinstance(x, torch.SymInt):
+                assert isinstance(x.node, NestedIntNode)
+                return MetaNestedIntDesc(
+                    cache=self.describe_njt_cache(x.node.nested_int_cache()),
+                )
+            return None
+        return MetaCustomSizeStridesDesc(
+            size=tuple(process(x) for x in t.size()),
+            stride=tuple(process(x) for x in t.stride()),
+        )
+
+    def describe_njt_cache(self, njt_cache, *, root=None):
+        def process(x):
+            if x is None:
+                return None
+            if x is root:
+                return self.describe_tensor(x, recurse=False)
+            return self.describe_tensor(x)
+
+        return MetaNJTCacheDesc(
+            keys=tuple(njt_cache.data.keys()),
+            values=tuple(process(x) for x in njt_cache.data.values())
+        )
+
+
     def describe_storage(self, s: torch.UntypedStorage, *, trace: bool = False):
         r = MetaStorageDesc(
             id=self.get_storage_id(s),
@@ -305,7 +334,26 @@ class MetaTensorDescriber:
             }
             type_v = type(t)
 
-        from torch.nested._internal.nested_tensor import _tensor_symint_registry
+        from torch.nested._internal.nested_tensor import _cache_id_registry
+
+        njt_cache = None
+        # For t to have a njt_cache, it must be in the
+        njt_cache_ref = torch._njt_offsets_to_weak_cache.get(t, None)
+        if njt_cache_ref is not None and njt_cache_ref() is not None and recurse:
+            njt_cache = self.describe_njt_cache(njt_cache_ref(), root=t)
+
+        cache_id = None
+        if njt_cache_ref is not None:
+            cache_id = _cache_id_registry.get(njt_cache_ref(), None)
+
+        if njt_cache is not None:
+            assert cache_id is not None, f"{cache_id=} {njt_cache=}"
+
+        print(list(_cache_id_registry.keys()), list(_cache_id_registry.values()))
+        print("t in offsets -> cache (weak)", t in torch._njt_offsets_to_weak_cache)
+        if t in torch._njt_offsets_to_weak_cache:
+            print("t's cache in cache -> id", torch._njt_offsets_to_weak_cache[t] in _cache_id_registry)
+
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
@@ -335,11 +383,10 @@ class MetaTensorDescriber:
             is_parameter=isinstance(t, torch.nn.Parameter),
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
-            nested_int=(
-                _tensor_symint_registry[t].node.nested_int()
-                if t in _tensor_symint_registry
-                else None
-            ),
+            cache_id=cache_id,
+            njt_cache=njt_cache,
+            # We may be able to remove nested_int in favor of this.
+            custom_size_strides = self.describe_custom_size_strides(t),
             is_functional=is_functional,
             layout=layout,
             device=t.device,
@@ -423,6 +470,23 @@ class MetaTensorDescriber:
 
 
 @dataclass(frozen=True)
+class MetaNestedIntDesc:
+    cache: MetaNJTCacheDesc
+
+
+@dataclass(frozen=True)
+class MetaCustomSizeStridesDesc:
+    size: Tuple[Optional[MetaNestedIntDesc], ...]
+    stride: Tuple[Optional[MetaNestedIntDesc], ...]
+    # storage_offset can never be NestedInt
+
+
+@dataclass(frozen=True)
+class MetaNJTCacheDesc:
+    keys: Tuple[Optional[str], ...]
+    values: Tuple[Optional[MetaTensorDesc], ...]
+
+@dataclass(frozen=True)
 class MetaStorageDesc:
     id: MetaStorageId
     size: int
@@ -475,7 +539,9 @@ class MetaTensorDesc:
     # We eagerly symbolicize the associated nested int for e.g. offsets / lengths
     # metadata if that offsets is already associated with a nested int.
     # See test_construct_from_jagged_with_input_offsets_mixed_case.
-    nested_int: Optional[int] = None
+    cache_id: Optional[int] = None
+    njt_cache: Optional[MetaNJTCacheDesc] = None
+    custom_size_strides: MetaCustomSizeStridesDesc = None
     is_traceable_wrapper_subclass: bool = False
     is_functional: bool = False
     is_conj: bool = False
@@ -734,7 +800,23 @@ class MetaConverter:
         # This is too aggressive: we do duck sizing and 0/1 simplification
         # as we allocate variables, and we do need to register guards for
         # these cases.
-        maybe_suppress: Callable[[], Any] = contextlib.nullcontext
+
+        # Capture everything needed to recursively call meta_tensor where we need it
+        def metafy_fn(t: MetaTensorDesc, src) -> torch.Tensor:
+            return self.meta_tensor(
+                t,
+                shape_env,
+                callback,
+                source=src,
+                symbolic_context=None,
+                # (
+                #     None  # What is the default?
+                #     if symbolic_context is None
+                #     # Would be cool not to hard code this!
+                #     else symbolic_context.inner_contexts["_offsets"]
+                # )
+            )
+
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
@@ -768,6 +850,8 @@ class MetaConverter:
                         [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
                         src,
                         symbolic_context=symbolic_context,
+                        metafy_fn=metafy_fn,
+                        custom_size_strides=t.custom_size_strides
                     )
             else:
                 return (t.size, t.stride, t.storage_offset)
@@ -1575,13 +1659,70 @@ class MetaConverter:
             if t.is_parameter:
                 r._is_param = True
 
-            # See Note: [Creating symbolic nested int]
-            if t.nested_int is not None:
-                r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
-                    nt_tensor_id=t.nested_int
-                )
-
+            from torch._dynamo.source import (
+                NestedTensorCacheSource,
+                GetItemSource,
+            )
+            from torch.nested._internal.nested_tensor import NestedCache
+            # TODO(soulitzer):
+            # - This is always the host cache, why is that?
+            #   (?) the user can reference the device cache from the host cache.
+            # - How to handle the weak ref on the subclass
+            #   e.g., if I have a MultiDeviceTensor that
+            #
+            # The cache can live independently of nested int in eager -
+            # nested int is meant to be a thin dispoable wrapper over this cache.
+            # Note that passing around the raw cache shoudl not be exposed to the
+            # user to keep things changeable.
+            # This means that despite eagerly creating the nested int whenever
+            # we have a cache we must fakify the cache using the
+            # NestedTensorCacheSource directly here instead of doing
+            # chaining a NestedIntSource.
             self.set_tensor_memo(t, r)
+
+            # Recurse AFTER memoization
+            if t.njt_cache is not None:
+                # this being None is the opposite of what I would've expected
+                assert t.cache_id is not None
+
+                # TODO(soulitzer): maybe check if the cache already exists?
+                # TODO(soulitzer): test this case where two fake things point to the same cache.
+                cache_data = {}  # just a dictionary
+                for cache_key, cache_value in zip(t.njt_cache.keys, t.njt_cache.values):
+                    if cache_value is None:
+                        cache_data[cache_key] = None
+                        continue
+                    fake_cache_value = self.meta_tensor(
+                        cache_value,
+                        shape_env,
+                        callback,
+                        source=GetItemSource(NestedTensorCacheSource(source), cache_key),
+                        symbolic_context=None,
+                    )
+                    cache_data[cache_key] = fake_cache_value
+
+                # NB: keep a mapping on FakeMode here because if we create
+                # A NJT later with the a different offsets, and the same cach
+                # we want their cache to be aliased based on the nested int.
+
+                # Not going to put the cache directly on the fake tensor since
+                # you can already reference via the cache id
+                # Offset should just remember its nested id.
+                # Anything wrong with keeping it alive for the duration of the fake mode?
+                cache = NestedCache(cache_data, fake_mode=r.fake_mode)
+                cache.id = t.cache_id
+                r.fake_mode.cache_id_to_fake_cache[t.cache_id] = cache
+
+              # See Note: [Creating symbolic nested int]
+            if t.cache_id is not None:
+                assert t.njt_cache is not None
+                # Nested int is associated with the cache now rather than any particular offset.
+                # many to one.
+                r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
+                    cache=t.njt_cache,
+                    cache_id=t.cache_id,
+                )
+                r.cache_id = t.cache_id
 
         return self.get_tensor_memo(t)
 

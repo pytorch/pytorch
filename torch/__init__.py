@@ -2667,3 +2667,6 @@ def _is_device_backend_autoload_enabled() -> builtins.bool:
 
 if _is_device_backend_autoload_enabled():
     _import_device_backends()
+
+from torch.utils.weak import WeakTensorKeyDictionary
+_njt_offsets_to_weak_cache = WeakTensorKeyDictionary()

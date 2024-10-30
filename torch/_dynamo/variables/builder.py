@@ -1573,6 +1573,22 @@ class VariableBuilder:
                     VariableBuilder(self.tx, inner_source)(inner_value)
                 )
 
+        from torch._dynamo.source import (
+            NestedTensorCacheSource,
+            NestedTensorCacheListSource,
+        )
+        njt_cache_ref = torch._njt_offsets_to_weak_cache.get(value, None)
+        if njt_cache_ref is not None and njt_cache_ref() is not None:
+            install_guard(
+                NestedTensorCacheListSource(source).make_guard(GuardBuilder.EQUALS_MATCH)
+            )
+            # TODO(soulitzer): we may need to recurse here
+            # for cache_key, cache_value in njt_cache:
+            #     inner_source = NestedTensorCacheSource(self.source, cache_key)
+            #     LazyVariableTracker.realize_all(
+            #         VariableBuilder(self.tx, inner_source)(cache_value)
+            #     )
+
         self.tx.output.input_source_to_var[source] = tensor_variable
         assert "tensor_dict" not in tensor_proxy.node.meta
         tensor_proxy.node.meta["tensor_dict"] = _extract_tensor_dict(value)
