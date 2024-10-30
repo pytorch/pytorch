@@ -1109,7 +1109,7 @@ void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size, cons
     auto* perm_ptr = data[0];
     const auto* pivots_ptr = data[1];
 
-    for (C10_UNUSED const auto elem : c10::irange(nelems)) {
+    for ([[maybe_unused]] const auto elem : c10::irange(nelems)) {
       // WARNING: linalg.lu_factor returns int32 pivots,
       // this behavior could change in the future.
       const auto perm_data = reinterpret_cast<int64_t*>(perm_ptr);
