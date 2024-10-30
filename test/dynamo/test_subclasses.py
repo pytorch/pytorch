@@ -2323,27 +2323,36 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase, NestedTensorTestCase):
             # varies based on the type of view
             guard_str = "\n".join(guards)
             if nt_view_name == "subclass_dense":
-                self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
+                self.assertExpectedInline(guard_str, """\
+Eq(s2 - 1, s0)
+Eq(s0*s3, s0*s1)""")
             elif nt_view_name == "dense_subclass_dense_subclass":
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s5 - 1, s2)
-Eq(s12 - 1, s7)
-Eq(s11, s9)""",
+Eq(s4 - 1, s2)
+Eq(s1*s5, s1*s3)
+Eq(s10 - 1, s7)
+Eq(s13, s9)
+Eq(s11*s13, s13*s8)""",
                 )
             elif nt_view_name.startswith("base_is_nt_True"):
                 self.assertExpectedInline(
                     guard_str,
-                    """Eq(s3 - 1, s0)""",
+                    """\
+Eq(s2 - 1, s0)
+Eq(s0*s3, s0*s1)
+Eq(s0*s1, s0*s7)""",
                 )
             else:
                 self.assertExpectedInline(
                     guard_str,
                     """\
-Eq(s4 - 1, s1)
-Eq(s13 - 1, s8)
-Eq(s12, s10)""",
+Eq(s3 - 1, s1)
+Eq(s1*s4, s1*s2)
+Eq(s11 - 1, s8)
+Eq(s14, s10)
+Eq(s10*s12, s10*s9)""",
                 )
             return gm
 
