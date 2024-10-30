@@ -2,9 +2,7 @@
 #include <c10/core/ScalarType.h>
 #include <memory>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 template <typename Node>
 using NodePtr = std::shared_ptr<Node>;
@@ -124,6 +122,4 @@ using SyncThreadsPtr = NodePtr<SyncThreads>;
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_DECLARE);
 #undef IMM_DECLARE
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
