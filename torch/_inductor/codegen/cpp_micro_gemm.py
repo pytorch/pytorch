@@ -513,12 +513,12 @@ class CppMicroGemmAMX(CppMicroGemm):
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
 {%- if use_cached_dequantized_B %}
     // Create a stack-allocated buffer for tiles of B.
-    // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements,
-    // but to make things simple, we'll allocate space for a 16x32 tile even for the tail.
-    // It's possible that N may not be equal to Nr, but might be a multiple of it.
-    // So, we'll allocate the buffer accordingly.
+    // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
+    // Also, it's possible that N may not be equal to Nr, but might be a multiple of it.
     const auto num_elements_per_b_tile = 512;
-    const auto buf_size_per_nr_block = ((K + {{block_k}} - 1) / {{block_k}}) * num_elements_per_b_tile * 2;
+    const auto last_k_offset = K / {{block_k}} * {{block_k}};
+    const auto tail_k_size = K - last_k_offset;
+    const auto buf_size_per_nr_block = ((K / {{block_k}}) * num_elements_per_b_tile + tail_k_size) * 2;
     const auto buf_size = buf_size_per_nr_block * (N / {{block_n}});
     {%- if is_msvc_compiler %}
     // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
@@ -532,8 +532,6 @@ class CppMicroGemmAMX(CppMicroGemm):
     alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
     {%- endif %}
 
-    // This may not be true for the tail, but wouldn't affect correctness.
-    const auto num_b_rows = 16;
     const auto b_tile_ptr_stride = ldb * {{vnni_size}};
 
     auto load_B_row = [&]({{input2_t}}* {{restrict_keyword}} src, {{input_t}}* {{restrict_keyword}} dst) {
@@ -542,7 +540,7 @@ class CppMicroGemmAMX(CppMicroGemm):
         b_bf16.store(dst);
     };
 
-    auto load_B_tile = [&]({{input2_t}}* B_ptr, int idx) {
+    auto load_B_tile = [&]({{input2_t}}* B_ptr, int idx, int num_b_rows) {
         {{input_t}}* base_addr = dequantized_B_buf + idx;
         {{kernel.unroll_pragma(8)}}
         for (int i = 0; i < num_b_rows; i++) {
@@ -555,19 +553,15 @@ class CppMicroGemmAMX(CppMicroGemm):
     auto load_dequantized_B = [&](int n) {
         // Load a tile of B & cache it in L1D.
         const int64_t init_idx =  n * buf_size_per_nr_block;
-        // For simplicity, even if the tail would not be a multiple of block_k,
-        // each B tile's dequantized data in the buffer would have 16x32 elements,
-        // so while loading such a tail into the buffer, we would incur unnecessary loads of some garbage data,
-        // but it won't be loaded into AMX tiles, and thus won't affect computation.
-        const auto last_k_offset = K / {{block_k}} * {{block_k}};
-        const auto tail_k_size = K - last_k_offset;
         const auto max_k_idx = tail_k_size ? last_k_offset + {{block_k}} : last_k_offset;
         {{kernel.unroll_pragma(4)}}
         for (int k = 0; k < max_k_idx; k += {{block_k}}) {
             {{kernel.unroll_pragma(2)}}
             for (int tile_col = 0; tile_col <= 1; tile_col++) {
+                int num_b_rows = (k < K) ? 16 : (max_k_idx - K);
                 load_B_tile(const_cast<{{input2_t}}*>(B) + k * ldb + tile_col * {{16 * vnni_size}},
-                              (k / {{block_k // 2}} + tile_col) * num_elements_per_b_tile + init_idx);
+                            (k / {{block_k // 2}} + tile_col) * num_elements_per_b_tile + init_idx,
+                            num_b_rows);
             }
         }
     };
