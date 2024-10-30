@@ -18,7 +18,7 @@ runs:
           # Pulled from instance metadata endpoint for EC2
           # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
           category=$1
-          curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          curl -H "X-aws-ec2-metadata-token: $(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 30")" -fsSL "http://169.254.169.254/latest/meta-data/${category}"
         }
         echo "ami-id: $(get_ec2_metadata ami-id)"
         echo "instance-id: $(get_ec2_metadata instance-id)"

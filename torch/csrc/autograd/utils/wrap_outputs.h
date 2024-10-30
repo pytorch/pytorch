@@ -47,7 +47,7 @@ inline PyObject* wrap(c10::complex<double> value) {
 }
 
 inline PyObject* wrap(void* value) {
-  return PyLong_FromVoidPtr(value);
+  return THPUtils_packInt64(reinterpret_cast<intptr_t>(value));
 }
 
 inline PyObject* wrap(THPDtype* dtype) {
@@ -66,8 +66,8 @@ inline PyObject* wrap(at::Layout layout) {
   return Py_NewRef(getTHPLayout(layout));
 }
 
-inline PyObject* wrap(at::Tensor tensor) {
-  return THPVariable_Wrap(Variable(std::move(tensor)));
+inline PyObject* wrap(const at::Tensor& tensor) {
+  return THPVariable_Wrap(tensor);
 }
 
 inline PyObject* wrap(const at::Scalar& scalar) {

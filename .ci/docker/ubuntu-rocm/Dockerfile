@@ -68,6 +68,8 @@ RUN rm install_rocm.sh
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh
 RUN rm install_rocm_magma.sh
+ADD ./common/install_miopen.sh install_miopen.sh
+RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 ENV ROCM_PATH /opt/rocm
 ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
@@ -120,6 +122,9 @@ RUN bash ./install_cache.sh && rm install_cache.sh
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
+
+# Install LLVM dev version (Defined in the pytorch/builder github repository)
+COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 USER jenkins
 CMD ["bash"]
