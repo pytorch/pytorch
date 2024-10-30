@@ -2436,7 +2436,12 @@ class DimConstraints:
                 ):
                     if self._is_supported_congruence(congruence):
                         base, divisor = congruence.args
-                        tmp_name = f"_{self._dcp.source_name_to_debug_name[self._dcp.symbol_to_source[s][0].name()]}"
+                        tmp_name = "_" + str(
+                            self._dcp.source_name_to_debug_name.get(
+                                self._dcp.symbol_to_source[s][0].name(),
+                                self._dcp.symbol_to_source[s][0].name(),
+                            )
+                        )
                         tmp = sympy.Symbol(tmp_name, integer=True)
                         from torch._dynamo.source import ConstantSource
 
