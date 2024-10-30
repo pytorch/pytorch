@@ -540,8 +540,7 @@ def impl(qualname, types, func=None, *, lib=None):
 
     This API may be used as a decorator. You can use nested decorators
     with this API provided they return a function and are placed inside
-    this API (see Example 2). Decorators placed outside this API will
-    not be applied because this API does not return a function.
+    this API (see Example 2).
 
     Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
 
