@@ -26,7 +26,7 @@ from ..utils import (
     odict_values,
     set_example_value,
 )
-from .base import MutableLocal, VariableTracker
+from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable, UserMethodVariable
 from .iter import IteratorVariable
@@ -104,7 +104,7 @@ class BaseListVariable(VariableTracker):
             return self.clone(
                 items=self.items[index],
                 source=None,
-                mutable_local=MutableLocal() if self.mutable_local else None,
+                mutation_type=ValueMutationNew() if self.mutation_type else None,
             )
         else:
             assert isinstance(index, (int, torch.SymInt))
@@ -276,7 +276,7 @@ class RangeVariable(BaseListVariable):
                 variables.ConstantVariable.create(x)
                 for x in [sub_start, sub_stop, sub_step]
             ],
-            mutable_local=MutableLocal() if self.mutable_local else None,
+            mutation_type=ValueMutationNew() if self.mutation_type else None,
         )
         return result
 
@@ -327,7 +327,7 @@ class CommonListMethodsVariable(BaseListVariable):
     ) -> "VariableTracker":
         from .tensor import SymNodeVariable
 
-        if name == "append" and self.mutable_local:
+        if name == "append" and self.mutation_type:
             assert not kwargs
             (arg,) = args
             tx.output.side_effects.mutation(self)
@@ -335,7 +335,7 @@ class CommonListMethodsVariable(BaseListVariable):
             return ConstantVariable.create(None)
         elif (
             name == "extend"
-            and self.mutable_local
+            and self.mutation_type
             and args
             and args[0].has_force_unpack_var_sequence(tx)
         ):
@@ -345,7 +345,7 @@ class CommonListMethodsVariable(BaseListVariable):
             tx.output.side_effects.mutation(self)
             self.items.extend(seq)
             return ConstantVariable.create(None)
-        elif name == "insert" and self.mutable_local:
+        elif name == "insert" and self.mutation_type:
             assert not kwargs
             idx, value = args
             if isinstance(idx, SymNodeVariable):
@@ -355,18 +355,18 @@ class CommonListMethodsVariable(BaseListVariable):
             tx.output.side_effects.mutation(self)
             self.items.insert(const_idx, value)
             return ConstantVariable.create(None)
-        elif name == "pop" and self.mutable_local:
+        elif name == "pop" and self.mutation_type:
             assert not kwargs
             tx.output.side_effects.mutation(self)
             return self.items.pop(*[a.as_python_constant() for a in args])
-        elif name == "clear" and self.mutable_local:
+        elif name == "clear" and self.mutation_type:
             assert not kwargs and not args
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
         elif (
             name == "__setitem__"
-            and self.mutable_local
+            and self.mutation_type
             and args
             and args[0].is_python_constant()
         ):
@@ -383,8 +383,8 @@ class CommonListMethodsVariable(BaseListVariable):
             assert not kwargs
             assert not args
             items = list(self.items)
-            return self.modified(items, mutable_local=MutableLocal())
-        elif name == "reverse" and self.mutable_local:
+            return self.modified(items, mutation_type=ValueMutationNew())
+        elif name == "reverse" and self.mutation_type:
             assert not kwargs
             assert not args
             self.items.reverse()
@@ -417,7 +417,7 @@ class ListVariable(CommonListMethodsVariable):
     ) -> "VariableTracker":
         if (
             name == "__setitem__"
-            and self.mutable_local
+            and self.mutation_type
             and args
             and args[0].is_python_constant()
         ):
@@ -508,7 +508,7 @@ class DequeVariable(CommonListMethodsVariable):
     ) -> "VariableTracker":
         if (
             name == "__setitem__"
-            and self.mutable_local
+            and self.mutation_type
             and args
             and args[0].is_python_constant()
         ):
@@ -523,7 +523,7 @@ class DequeVariable(CommonListMethodsVariable):
 
         if (
             name == "extendleft"
-            and self.mutable_local
+            and self.mutation_type
             and args[0].has_force_unpack_var_sequence(tx)
         ):
             assert not kwargs
@@ -533,14 +533,14 @@ class DequeVariable(CommonListMethodsVariable):
             tx.output.side_effects.mutation(self)
             self.items = prefix + list(self.items)
             result = ConstantVariable.create(None)
-        elif name == "popleft" and self.mutable_local:
+        elif name == "popleft" and self.mutation_type:
             assert not args
             assert not kwargs
             item = self.items[0]
             tx.output.side_effects.mutation(self)
             self.items = self.items[1:]
             result = item
-        elif name == "appendleft" and self.mutable_local:
+        elif name == "appendleft" and self.mutation_type:
             assert not kwargs
             tx.output.side_effects.mutation(self)
             self.items = [args[0]] + list(self.items)
@@ -888,7 +888,7 @@ class ListIteratorVariable(IteratorVariable):
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
     def next_variable(self, tx):
-        assert self.mutable_local
+        assert self.mutation_type
         old_index = self.index
         if old_index >= len(self.items):
             raise_observed_exception(StopIteration, tx)
