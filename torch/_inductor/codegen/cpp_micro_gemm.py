@@ -573,9 +573,11 @@ class CppMicroGemmAMX(CppMicroGemm):
             {{kernel.unroll_pragma(2)}}
             for (int tile_col = 0; tile_col <= 1; tile_col++) {
                 int num_b_rows = (k < last_k_offset) ? 16 : tail_k_size;
-                load_B_tile(const_cast<{{input2_t}}*>(B + n) + k * ldb + tile_col * {{16 * vnni_size}},
-                            (k / {{block_k // 2}} + tile_col) * num_elements_per_b_tile + init_idx,
-                            num_b_rows);
+                load_B_tile(
+                    const_cast<{{input2_t}}*>(B) + n + k * ldb + tile_col * {{16 * vnni_size}},
+                    (k / {{block_k // 2}} + tile_col) * num_elements_per_b_tile + init_idx,
+                    num_b_rows
+                );
             }
         }
     };
