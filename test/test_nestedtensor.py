@@ -6195,6 +6195,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             a.copy_(b)
 
     # This can't happen in the opinfo tests due to subprocess creation
+    @unittest.skipIf(
+        TEST_WITH_ROCM,
+        "In ROCm, kernel asserts are disabled due to performance overhead",
+    )
     def test_index_put_error(self, device):
         import subprocess
 
