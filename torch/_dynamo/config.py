@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Unio
 
 import torch
 from torch._environment import is_fbcode
+from torch.utils._config_module import get_tristate_env, install_config_module
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -509,6 +510,11 @@ automatic_dynamic_local_pgo: bool = (
     os.environ.get("TORCH_DYNAMO_AUTOMATIC_DYNAMIC_LOCAL_PGO", "0") == "1"
 )
 
+# Like above, but using remote cache
+automatic_dynamic_remote_pgo: Optional[bool] = get_tristate_env(
+    "TORCH_DYNAMO_AUTOMATIC_DYNAMIC_REMOTE_PGO"
+)
+
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
@@ -517,9 +523,6 @@ if TYPE_CHECKING:
 
     def _make_closure_patcher(**changes):
         ...
-
-
-from torch.utils._config_module import install_config_module
 
 
 install_config_module(sys.modules[__name__])

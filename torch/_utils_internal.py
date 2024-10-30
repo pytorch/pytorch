@@ -344,6 +344,10 @@ def max_clock_rate():
             return 1100
 
 
+def get_workflow_id() -> Optional[str]:
+    return None
+
+
 TEST_MASTER_ADDR = "127.0.0.1"
 TEST_MASTER_PORT = 29500
 # USE_GLOBAL_DEPS controls whether __init__.py tries to load

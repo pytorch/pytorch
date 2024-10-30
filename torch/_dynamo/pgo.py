@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import copy
 import dataclasses
 import enum
@@ -12,8 +13,11 @@ from typing import DefaultDict, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
 
 import torch._dynamo.config
+import torch._utils_internal
 import torch.compiler.config
 from torch._dynamo.utils import get_chromium_event_logger
+from torch._environment import is_fbcode
+from torch._inductor.remote_cache import create_cache
 from torch._logging._internal import trace_structured_artifact
 
 
@@ -21,6 +25,7 @@ if TYPE_CHECKING:
     import types
 
     from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._inductor.remote_cache import JsonDataTy, RemoteCache
 
 
 log = logging.getLogger(__name__)
@@ -379,17 +384,27 @@ def process_automatic_dynamic(
         return res
 
 
-# NB: This currently also controls if pgo is enabled at all
-def code_state_path() -> Optional[str]:
+def get_workflow_id() -> Optional[str]:
     # TODO: info versions of these logs that log only once
-
-    if not torch._dynamo.config.automatic_dynamic_local_pgo:
-        log.debug("automatic_dynamic_local_pgo not enabled")
+    if torch._inductor.config.force_disable_caches:
+        log.debug(
+            "automatic_dynamic_local_pgo force disabled by torch._inductor.config.force_disable_caches"
+        )
         return None
 
-    workflow_id = torch.compiler.config.workflow_id
-    if workflow_id is None:
-        log.debug("automatic_dynamic_local_pgo disabled because no workflow_id")
+    if (r := torch.compiler.config.workflow_id) is not None:
+        return "user_" + r
+
+    if (r := torch._utils_internal.get_workflow_id()) is not None:
+        return "mast_" + r
+
+    return None
+
+
+# NB: This currently also controls if pgo is enabled at all
+def code_state_path(workflow_id: str) -> Optional[str]:
+    if not torch._dynamo.config.automatic_dynamic_local_pgo:
+        log.debug("automatic_dynamic_local_pgo not enabled")
         return None
 
     from torch._inductor.runtime.runtime_utils import cache_dir
@@ -397,48 +412,105 @@ def code_state_path() -> Optional[str]:
     return os.path.join(cache_dir(), "dynamo", f"code_state_{workflow_id}.pkl")
 
 
+def should_use_remote_dynamo_pgo_cache() -> bool:
+    if torch._inductor.config.force_disable_caches:
+        return False
+
+    if (r := torch._dynamo.config.automatic_dynamic_remote_pgo) is not None:
+        return r
+
+    if not is_fbcode():
+        return False
+
+    if torch._utils_internal.is_fb_unit_test():
+        return False
+
+    try:
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
+    except ModuleNotFoundError:
+        return False
+
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:dynamo_pgo_version"
+    )
+
+
+def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
+    if not should_use_remote_dynamo_pgo_cache():
+        return None
+
+    return create_cache(
+        "dynamo-pgo",
+        is_fbcode(),
+        "FbRemoteDynamoPGOCache",
+        "RemoteDynamoPGOCache",
+    )
+
+
 def get_code_state() -> DefaultDict[CodeId, CodeState]:
     global _CODE_STATE, _INIT_CODE_STATE
-    if _CODE_STATE is None:
-        path = code_state_path()
+    if _CODE_STATE is not None:
+        return _CODE_STATE
 
-        _CODE_STATE = defaultdict(CodeState)
+    # Initialize it (even if we don't look up profile)
+    _CODE_STATE = defaultdict(CodeState)
 
-        if path is not None and os.path.exists(path):
-            # Read lock not necessary as we always write atomically write to
-            # the actual location
-            with open(path, "rb") as f:
-                try:
-                    _CODE_STATE = pickle.load(f)
-                except Exception:
-                    log.warning(
-                        "get_code_state failed while reading %s", path, exc_info=True
-                    )
-                else:
-                    assert isinstance(_CODE_STATE, defaultdict)
-                    log.info(
-                        "get_code_state %s hit, %d entries", path, len(_CODE_STATE)
-                    )
-                    trace_structured_artifact(
-                        "get_code_state",
-                        "string",
-                        lambda: repr(_CODE_STATE),
-                    )
-                    _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
+    workflow_id = get_workflow_id()
+    if workflow_id is None:
+        return _CODE_STATE
+
+    def hit(ty: str) -> DefaultDict[CodeId, CodeState]:
+        global _INIT_CODE_STATE
+        assert isinstance(_CODE_STATE, defaultdict)
+        log.info("get_code_state %s hit %s, %d entries", path, ty, len(_CODE_STATE))
+        trace_structured_artifact(
+            "get_code_state",
+            "string",
+            lambda: repr(_CODE_STATE),
+        )
+        _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
+        return _CODE_STATE
+
+    # Attempt local
+    path = code_state_path(workflow_id)
+    if path is not None and os.path.exists(path):
+        # Read lock not necessary as we always write atomically write to
+        # the actual location
+        with open(path, "rb") as f:
+            try:
+                _CODE_STATE = pickle.load(f)
+            except Exception:
+                log.warning(
+                    "get_code_state failed while reading %s", path, exc_info=True
+                )
+            else:
+                return hit("local")
+
+    # Attempt remote
+    remote_cache = get_remote_cache()
+    if remote_cache is not None:
+        # TODO: I don't really understand why there's a JSON container format
+        try:
+            cache_data = remote_cache.get(workflow_id)
+            assert isinstance(cache_data, dict)
+            data = cache_data["data"]
+            assert isinstance(data, str)
+            payload = base64.b64decode(data)
+            _CODE_STATE = pickle.loads(payload)
+        except Exception:
+            log.warning(
+                "get_code_state failed remote read on %s", workflow_id, exc_info=True
+            )
         else:
-            log.info("get_code_state %s not found", path)
+            return hit("remote")
+
+    log.info("get_code_state using default")
 
     assert _CODE_STATE is not None
-
     return _CODE_STATE
 
 
 def put_code_state() -> None:
-    path = code_state_path()
-    if path is None:
-        log.info("put_code_state: no workflow_id, disabled")
-        return
-
     if _CODE_STATE is None:
         log.info("put_code_state: never initialized, will not write")
         return
@@ -447,22 +519,67 @@ def put_code_state() -> None:
         log.info("put_code_state: no change, skipping")
         return
 
+    workflow_id = get_workflow_id()
+    if workflow_id is None:
+        log.info("put_code_state: no workflow id, skipping")
+        return
+
+    put_local_code_state(workflow_id)
+    put_remote_code_state(workflow_id)
+
+
+def put_local_code_state(workflow_id: str) -> None:
+    assert _CODE_STATE is not None
+
+    path = code_state_path(workflow_id)
+
+    if path is None:
+        log.info("put_code_state: local cache disabled")
+        return
+
     tmp_path = path + ".tmp"
     lock_path = path + ".lock"
     # We /mostly/ don't need the lock but the tmp file could be clobbered
     # TODO: use a safe tempfile create to eliminate lock
     from filelock import FileLock
 
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
         with open(tmp_path, "wb") as f:
             pickle.dump(_CODE_STATE, f)
         os.rename(tmp_path, path)
-        log.info("put_code_state: wrote %s, %d entries", path, len(_CODE_STATE))
+        log.info("put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE))
         trace_structured_artifact(
             "put_code_state",
             "string",
             lambda: repr(_CODE_STATE),
         )
+
+
+def put_remote_code_state(workflow_id: str) -> None:
+    assert _CODE_STATE is not None
+
+    remote_cache = get_remote_cache()
+
+    if remote_cache is None:
+        log.info("put_code_state: remote cache disabled")
+        return
+
+    content = pickle.dumps(_CODE_STATE)
+    cache_data: JsonDataTy = {
+        "data": base64.b64encode(content).decode("ascii"),
+    }
+    remote_cache.put(workflow_id, cache_data)
+    log.info(
+        "put_code_state: wrote remote %s, %d entries", workflow_id, len(_CODE_STATE)
+    )
+    # TODO: don't log this multiple times
+    trace_structured_artifact(
+        "put_code_state",
+        "string",
+        lambda: repr(_CODE_STATE),
+    )
 
 
 # NB: this does NOT reset the cached code state on disk
