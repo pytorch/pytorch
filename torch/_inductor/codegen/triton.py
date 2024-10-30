@@ -2114,12 +2114,15 @@ class TritonKernel(SIMDKernel):
             values = _welford(buffer, mean, m2, weight)
             return tuple(self.cse.generate(buffer, value) for value in values)
 
-        def welford_define(buffer, result_expr: str, mean, m2, weight) -> None:
+        def welford_define(
+            buffer, result_exprs: Sequence[str], mean, m2, weight
+        ) -> None:
             """
             Calls triton_helpers.welford, assigning the results to the given expression.
             """
             values = _welford(buffer, mean, m2, weight)
-            buffer.splice(f"{result_expr} = {', '.join(values)}")
+            for result_expr, value in zip(result_exprs, values):
+                buffer.splice(f"{result_expr} = {value}")
 
         cache_key = (src_dtype, reduction_type, value)
         if cache_key in self.cse.reduction_cache:
@@ -2247,7 +2250,7 @@ class TritonKernel(SIMDKernel):
 
                 welford_define(
                     self.suffix,
-                    f"{result_mean}_tmp, {result_m2}_tmp, {result_weight}_tmp",
+                    [f"{result_mean}_tmp", f"{result_m2}_tmp", f"{result_weight}_tmp"],
                     accumulator,
                     accumulator_m2,
                     accumulator_weight,
