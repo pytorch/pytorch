@@ -196,8 +196,8 @@ Tensor group_norm(
   const Tensor kEmpty;
   auto memory_format = input.suggest_memory_format();
 
-  const auto& X = (!input.device().is_cpu() && !input.is_privateuseone() && memory_format == at::MemoryFormat::ChannelsLast) ?
-                input.contiguous(memory_format) : input.contiguous();  const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
+  const auto& X = input.contiguous(memory_format);
+  const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
   TORCH_CHECK(!gamma.defined() || gamma.sym_numel() == C);
   TORCH_CHECK(!beta.defined() || beta.sym_numel() == C);
