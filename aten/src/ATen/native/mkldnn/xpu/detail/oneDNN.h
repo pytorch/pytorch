@@ -154,5 +154,4 @@ void quantized_matmul_pt2(
   torch::List<std::optional<at::Scalar>>& unary_post_op_args,
   c10::string_view unary_post_op_algorithm);
 
-
 } // namespace at::native::onednn
