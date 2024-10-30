@@ -57,7 +57,7 @@ import torch.utils._pytree as pytree
 # NB: The sym_* functions are used via getattr() and must be imported here.
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
-from torch._logging import LazyString, structured, trace_structured
+from torch._logging import dtrace_structured, LazyString, structured, trace_structured
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
 from torch.fx.experimental import _config as config
@@ -233,6 +233,16 @@ class SymIntEqByExpr:
         return hash(self._extract())
 
 
+def _nested_int_aware_sort(tup: Tuple[Union[SymInt, int], int]) -> Tuple[int, int, int]:
+    return (
+        # Order nested ints by their coefficients.
+        # 1 here to order nested ints after non-nested-ints.
+        (1, tup[0].node.nested_int_coeff(), tup[1])
+        if is_nested_int(tup[0])
+        else (0, *tup)
+    )
+
+
 # Wrapper on lru_cache that reports statistics at process end
 def lru_cache(
     maxsize: Optional[int],
@@ -295,13 +305,6 @@ def uninteresting_files() -> Set[str]:
     return {inspect.getfile(m) for m in mods}
 
 
-# We don't bother with the metaclass as all of the dispatching logic happens
-# entirely from Python
-#
-# Didn't bother with ancestors for now, unlikely to have multiple modes for
-# symints right now
-
-
 class ConstraintViolationError(RuntimeError):
     pass
 
@@ -342,7 +345,8 @@ def has_hint(a: Scalar) -> bool:
 
 
 def is_concrete_int(a: Union[int, SymInt]) -> bool:
-    r"""Utility to check if underlying object
+    """
+    Utility to check if underlying object
     in SymInt is concrete value. Also returns
     true if integer is passed in.
 
@@ -515,7 +519,8 @@ def is_accessor_node(node: torch.fx.Node) -> bool:
 
 
 def canonicalize_bool_expr(expr: _T) -> _T:
-    r"""Canonicalize a boolean expression by transforming it into a lt / le
+    """
+    Canonicalize a boolean expression by transforming it into a lt / le
     inequality and moving all the non-constant terms to the rhs.
     We canonicalize And / Ors / Not via cnf and then canonicalize their subexpr
     recursively
@@ -667,9 +672,11 @@ def _reduce_to_lowest_terms(expr: sympy.Expr) -> sympy.Expr:
 
 
 def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
-    r"""Utility to check if underlying object
+    """
+    Utility to check if underlying object
     in SymBool is concrete value. Also returns
     true if integer is passed in.
+
     Args:
         a (SymBool or bool): Object to test if it bool
     """
@@ -1049,7 +1056,8 @@ def definitely_false(a: BoolLikeType) -> bool:
 
 
 def statically_known_true(x: Union[bool, SymBool]) -> bool:
-    """Returns True if x can be simplified to a constant and is true.
+    """
+    Returns True if x can be simplified to a constant and is true.
 
     .. note::
         This function doesn't introduce new guards, so the expression may end
@@ -1057,7 +1065,6 @@ def statically_known_true(x: Union[bool, SymBool]) -> bool:
 
     Args:
         x (bool, SymBool): The expression to try statically evaluating
-
     """
     if isinstance(x, SymBool):
         expr = x.node.expr
@@ -1471,7 +1478,8 @@ class EqualityConstraint(Constraint):
     _defs: Dict[Source, sympy.Expr] = field(init=False)
 
     def __post_init__(self) -> None:
-        """Pre-processing to answer queries `is_equal` and `is_derived` below.
+        """
+        Pre-processing to answer queries `is_equal` and `is_derived` below.
 
         Example: Suppose we are given:
           source_pairs [a = b, b = c]
@@ -2910,7 +2918,7 @@ class ShapeEnv:
         )
 
         # This will make sure we only record the top-level function call.
-        self.is_recording = not self.should_record_events
+        self.is_recording = False
         # Keep track of the list of tracked fakes.
         self.tracked_fakes = tracked_fakes
         # List of events for reconstructing ShapeEnv at arbitrary points in time.
@@ -3079,9 +3087,9 @@ class ShapeEnv:
 
         # Whenever we allocate a fresh unbacked Symbol, we add it to this
         # pending list.  Unbacked symbol allocation can occur at unpredictable
-        # points during meta tensor propagation, but at some point, the we
+        # points during meta tensor propagation, but at some point, we
         # have to know what the binding site for an unbacked symbol is, and
-        # this is computed when we actually place the node in the graph.  The
+        # this is computed when we actually place the node in the graph. The
         # important thing is that we always actually handle every unaccounted
         # for unbacked symbol, so this list helps us keep track of them and
         # then make sure they are all accounted for.
@@ -3767,21 +3775,10 @@ class ShapeEnv:
             candidates = {
                 ex_size[i] * ex_stride[i]: size[i] * stride[i]
                 for i in range(len(size))
-                if stride[i] is not None and ex_stride[i] >= 0
+                if stride[i] is not None
             }
 
             # iterate over unbound strides in sorted order
-            def _nested_int_aware_sort(
-                tup: Tuple[Union[SymInt, int], int]
-            ) -> Tuple[int, int, int]:
-                return (
-                    # Order nested ints by their coefficients.
-                    # 1 here to order nested ints after non-nested-ints.
-                    (1, tup[0].node.nested_int_coeff(), tup[1])
-                    if is_nested_int(tup[0])
-                    else (0, *tup)
-                )
-
             val_list = sorted(
                 [(ex_stride[i], i) for i in range(len(stride)) if stride[i] is None],
                 key=_nested_int_aware_sort,
@@ -4052,7 +4049,8 @@ class ShapeEnv:
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
     ) -> sympy.Expr:
-        """Create a symbol with an unspecified value
+        """
+        Create a symbol with an unspecified value
 
         Compared to standard symbols we do not assume the value is positive,
         nor do we specialze on zero or one values.
@@ -4472,7 +4470,7 @@ class ShapeEnv:
         #
         # So, it is perhaps easier to flip things on their head: the guard
         # expressions we generate here say what simplifications are valid,
-        # and what are not.  Below, we explain each of the guard expressions
+        # and what are not. Below, we explain each of the guard expressions
         # we generate
 
         # TODO: Make this more efficient by binding all the size/stride/offsets
@@ -6006,6 +6004,20 @@ class ShapeEnv:
         return sloc
 
     def _log_guard(self, prefix: str, g: SympyBoolean, forcing_spec: bool) -> None:
+        dtrace_structured(
+            "guard_added",
+            metadata_fn=lambda: {
+                "expr": str(g),
+                "stack": structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                ),
+                "symbol_to_sources": {
+                    str(v): k
+                    for k, v in self.source_to_var.items()
+                    if v in g.free_symbols
+                },
+            },
+        )
         if self.log.isEnabledFor(logging.INFO):
             str_g = str(g)
             is_debug = (
@@ -6290,6 +6302,7 @@ class ShapeEnv:
             for ra in ras:
                 ra.stack.cleanup()
 
+    @lru_cache(256)
     @record_shapeenv_event(save_tracked_fakes=True)
     def defer_runtime_assert(
         self, orig_expr: SympyBoolean, msg: str, fx_node: Optional[torch.fx.Node] = None
@@ -6327,7 +6340,6 @@ class ShapeEnv:
         # NB: Don't use new_expr as expr; it could contain gunk like shape0
         # which we don't want to guard on
 
-        # OK, we're definitely doing a runtime assert now
         if (
             self._translation_validation_enabled
             and fx_node is not None
@@ -6341,10 +6353,9 @@ class ShapeEnv:
         if not self._suppress_guards_tls():
             # If you're here because of this assert, read Note [Backwards runtime asserts]
             # in torch/_inductor/graph.py
-            assert not self.runtime_asserts_frozen, expr
-
+            if self.runtime_asserts_frozen:
+                log.warning("runtime_asserts_frozen but then got %s", expr)
             self._check_frozen(expr, sympy.true)
-
             # eliminate symbols on equality tests / refine ranges
             if isinstance(expr, sympy.Rel):
                 self._maybe_guard_rel(expr)

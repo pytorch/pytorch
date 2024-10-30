@@ -224,29 +224,11 @@ struct LiftedIValueArgs {
   const std::optional<size_t>& active_node_call_idx;
 };
 
-// Hold GIL while using
-struct PyTLSWrapper {
-  PyTLSWrapper(PyObject* state) : state(state) {}
-  PyTLSWrapper(const PyTLSWrapper&) = delete;
-  PyTLSWrapper& operator=(const PyTLSWrapper&) = delete;
-  PyTLSWrapper(PyTLSWrapper&&) = default;
-  PyTLSWrapper& operator=(PyTLSWrapper&&) = default;
-
-  static PyTLSWrapper create();
-
-  PyObject* get(std::string_view key) const;
-
- private:
-  PyObject* state;
-};
-
 struct AutogradCompilerCall {
-  AutogradCompilerCall() = delete;
-  AutogradCompilerCall(PyTLSWrapper&& state)
+  AutogradCompilerCall()
       : active_node_call_idx(std::nullopt),
         tensor_args(active_node_call_idx),
-        lifted_ivalue_args(active_node_call_idx),
-        state(std::move(state)) {}
+        lifted_ivalue_args(active_node_call_idx) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
@@ -272,11 +254,8 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
-
   // NodeCall id of each size, only when verbose logging is enabled
   std::vector<uint32_t> size_input_origins;
-
-  const PyTLSWrapper state;
 };
 
 class CompiledNodeArgs {
@@ -491,21 +470,21 @@ class CompiledNodeArgs {
   void collect(T t) {       \
     specialize_on_bytes(t); \
   }
-  COLLECT_AS_BYTES(c10::ScalarType);
-  COLLECT_AS_BYTES(c10::DeviceType);
-  COLLECT_AS_BYTES(c10::Layout);
-  COLLECT_AS_BYTES(c10::MemoryFormat);
-  COLLECT_AS_BYTES(int8_t);
-  COLLECT_AS_BYTES(int16_t);
-  COLLECT_AS_BYTES(int32_t);
-  COLLECT_AS_BYTES(int64_t);
-  COLLECT_AS_BYTES(uint8_t);
-  COLLECT_AS_BYTES(uint16_t);
-  COLLECT_AS_BYTES(uint32_t);
-  COLLECT_AS_BYTES(uint64_t);
-  COLLECT_AS_BYTES(bool);
-  COLLECT_AS_BYTES(float);
-  COLLECT_AS_BYTES(double);
+  COLLECT_AS_BYTES(c10::ScalarType)
+  COLLECT_AS_BYTES(c10::DeviceType)
+  COLLECT_AS_BYTES(c10::Layout)
+  COLLECT_AS_BYTES(c10::MemoryFormat)
+  COLLECT_AS_BYTES(int8_t)
+  COLLECT_AS_BYTES(int16_t)
+  COLLECT_AS_BYTES(int32_t)
+  COLLECT_AS_BYTES(int64_t)
+  COLLECT_AS_BYTES(uint8_t)
+  COLLECT_AS_BYTES(uint16_t)
+  COLLECT_AS_BYTES(uint32_t)
+  COLLECT_AS_BYTES(uint64_t)
+  COLLECT_AS_BYTES(bool)
+  COLLECT_AS_BYTES(float)
+  COLLECT_AS_BYTES(double)
 #undef COLLECT_AS_BYTES
 
   void collect_hooks_from(Node* fn) {
