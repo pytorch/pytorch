@@ -337,7 +337,7 @@ class MetaTensorDescriber:
         from torch.nested._internal.nested_tensor import _cache_id_registry
 
         njt_cache = None
-        njt_cache_ref = torch._njt_offsets_to_weak_cache.get(t, None)
+        njt_cache_ref = torch._get_njt_cache_from_offsets(t)
         if njt_cache_ref is not None and njt_cache_ref() is not None and recurse:
             njt_cache = self.describe_njt_cache(njt_cache_ref(), root=t)
 
@@ -1649,70 +1649,27 @@ class MetaConverter:
             if t.is_parameter:
                 r._is_param = True
 
-            from torch._dynamo.source import (
-                NestedTensorCacheSource,
-                GetItemSource,
-            )
-            from torch.nested._internal.nested_tensor import NestedCache
-            # TODO(soulitzer):
-            # - This is always the host cache, why is that?
-            #   (?) the user can reference the device cache from the host cache.
-            # - How to handle the weak ref on the subclass
-            #   e.g., if I have a MultiDeviceTensor that
-            #
-            # The cache can live independently of nested int in eager -
-            # nested int is meant to be a thin dispoable wrapper over this cache.
-            # Note that passing around the raw cache shoudl not be exposed to the
-            # user to keep things changeable.
-            # This means that despite eagerly creating the nested int whenever
-            # we have a cache we must fakify the cache using the
-            # NestedTensorCacheSource directly here instead of doing
-            # chaining a NestedIntSource.
             self.set_tensor_memo(t, r)
 
-            # Recurse AFTER memoization
-            if t.njt_cache is not None:
-                # this being None is the opposite of what I would've expected
-                assert t.cache_id is not None
+            nested_cache = None
 
-                # TODO(soulitzer): maybe check if the cache already exists?
-                # TODO(soulitzer): test this case where two fake things point to the same cache.
-                cache_data = {}  # just a dictionary
+            if t.njt_cache is not None:
+                from torch._dynamo.source import NestedTensorCacheSource, GetItemSource
+
+                assert t.cache_id is not None
+                cache_data = {}
+                # It's important that we recurse AFTER memoization.
                 for cache_key, cache_value in zip(t.njt_cache.keys, t.njt_cache.values):
-                    if cache_value is None:
-                        cache_data[cache_key] = None
-                        continue
-                    fake_cache_value = self.meta_tensor(
+                    fake_cache_value = metafy_fn(
                         cache_value,
-                        shape_env,
-                        callback,
+                        # Make sure to use the NestedTensorCacheSource directly
                         source=GetItemSource(NestedTensorCacheSource(source), cache_key),
-                        symbolic_context=None,
-                    )
+                    ) if cache_value is not None else None
                     cache_data[cache_key] = fake_cache_value
 
-                # NB: keep a mapping on FakeMode here because if we create
-                # A NJT later with the a different offsets, and the same cach
-                # we want their cache to be aliased based on the nested int.
-
-                # Not going to put the cache directly on the fake tensor since
-                # you can already reference via the cache id
-                # Offset should just remember its nested id.
-                # Anything wrong with keeping it alive for the duration of the fake mode?
-                cache = NestedCache(cache_data, fake_mode=r.fake_mode)
-                cache.id = t.cache_id
-                r.fake_mode.cache_id_to_fake_cache[t.cache_id] = cache
-
-              # See Note: [Creating symbolic nested int]
-            if t.cache_id is not None:
-                assert t.njt_cache is not None
-                # Nested int is associated with the cache now rather than any particular offset.
-                # many to one.
-                r.fake_mode.create_symbolic_nested_int(
-                    cache=t.njt_cache,
-                    cache_id=t.cache_id,
-                )
-                r.cache_id = t.cache_id
+                nested_cache = r.fake_mode.get_nested_cache(cache_data)
+                # See Note: [Creating symbolic nested int]
+                r.fake_mode.get_nested_symint(nested_cache)
 
         return self.get_tensor_memo(t)
 

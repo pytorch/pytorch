@@ -41,8 +41,8 @@ def _ge(lhs, rhs) -> bool:
 
 
 class NestedIntNode:
-    def __init__(self, t_id, cache, coeff):
-        self.t_id = t_id
+    def __init__(self, cache, coeff):
+        self.t_id = cache.id
         self.cache = cache
         self.coeff = coeff
 
@@ -88,7 +88,7 @@ class NestedIntNode:
             other = other.constant_int()
         else:
             raise ValueError(f"unsupported: {type(other)}")
-        return NestedIntNode(self.t_id, self.cache, self.coeff * other)
+        return NestedIntNode(self.cache, self.coeff * other)
 
     def eq(self, other) -> "SymNode":
         return torch._C._get_constant_bool_symnode(_eq(self, other))

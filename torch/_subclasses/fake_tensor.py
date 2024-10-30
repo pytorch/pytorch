@@ -610,12 +610,6 @@ class FakeTensor(Tensor):
     item_memo = SymIntMemoDescriptor()
     unique_memo = SymIntMemoDescriptor()
 
-    # We expect nested_int_memo to be None when an offsets is a graph
-    # intermediate, or an input that has never been associated with a
-    # nested int.
-    # TODO(soulitzer): Undo nested-specific SymIntMemo changes?
-    cache_id: int = 0
-
     # Indicates to our torch_dispatch dispatching infra that
     # this is an "infra" mode with lower dispatching precedence.
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
@@ -883,41 +877,6 @@ class FakeTensor(Tensor):
 
         return common_device, has_scalar_only_inputs
 
-    def get_nested_int(
-        self,
-        *,
-        cache = None,
-        coeff: Union[int, torch.SymInt] = 1,
-    ) -> torch.SymInt:
-        assert cache is not None
-
-        if self.cache_id is None or self.cache_id not in self.fake_mode.cache_id_to_symint:
-            # TODO(soulitzer): When does it go into the latter case?
-            cache_id = self.fake_mode.create_symbolic_nested_int(
-                cache=cache,
-                cache_id=None
-            )
-            self.cache_id = cache_id
-        return self.fake_mode.cache_id_to_symint[self.cache_id] * coeff
-
-
-    # TODO(soulitzer): handle other metadata as well if provided
-    def get_nested_cache(self, *, lengths=None):
-        # Do we have more guarantees about what is true and false together.
-        if self.cache_id is None or self.cache_id not in self.fake_mode.cache_id_to_fake_cache:
-            from torch.nested._internal.nested_tensor import NestedCache
-
-            cache = NestedCache({
-                "offsets": self,
-                "lengths": lengths,
-            }, self.fake_mode)
-
-            self.get_nested_int(cache=cache)
-            cache.id = self.cache_id
-            self.fake_mode.cache_id_to_fake_cache[self.cache_id] = cache
-
-        return self.fake_mode.cache_id_to_fake_cache[self.cache_id]
-
     # We must handle tolist in a special way for FakeTensors here in the case
     # where tolist is called from torch dispatch for tensor subclasses.
     # Ordinarily, if a program calls .tolist compiling still works because there is
@@ -944,10 +903,9 @@ class FakeTensor(Tensor):
     # Invariant: A fake tensor post-creation is guaranteed to
     # have any associated symbolic nested int set
     def detach(self) -> torch.Tensor:  # type: ignore[override]
-        # move the cache id over, for aot we reuse the same fake mode
-        # we need to worry about export.
         out = torch.ops.aten.detach.default(self)
-        out.cache_id = self.cache_id
+        fake_mode = self.fake_mode
+        fake_mode.nested_meta_to_cache_id[out] = fake_mode.nested_meta_to_cache_id[self]
         return out
 
 
@@ -1140,6 +1098,7 @@ class FakeTensorMode(TorchDispatchMode):
     # TODO(soulitzer): Should this be reset if the id is also reset?
     cache_id_to_fake_cache = {}
     cache_id_to_symint = {}
+    nested_meta_to_cache_id = {}
 
     def __init__(
         self,
@@ -2192,31 +2151,15 @@ class FakeTensorMode(TorchDispatchMode):
 
         return tree_map(wrap, r)
 
-    # what are the cases:
-    # - in graph creation: both are none
-    # - fakification (see offsets): both are provided
-    # - fakificaiton (see njt): both are provided (but don't come here)
-
-    def create_symbolic_nested_int(
-        self, *, cache=None, cache_id: Optional[int] = None
-    ) -> torch.SymInt:
-        # See Note: [Creating symbolic nested int]
-        # Returned nested int always has coeff=1; multiply the result by coeff if needed
+    def create_nested_symint(self, cache) -> torch.SymInt:
         import torch.nested._internal.nested_tensor
         from torch.nested._internal.nested_int import NestedIntNode
 
-        assert cache is not None
-
-        if cache_id is None:
-            cache_id = self.cache_id_counter
-            assert self.enter_stack, "should only called while FakeTensorMode is active"
-            self.cache_id_counter += 1
-
-        hint = SymInt(NestedIntNode(t_id=cache_id, cache=cache, coeff=1))
+        hint = SymInt(NestedIntNode(cache=cache, coeff=1))
 
         src = torch._dynamo.source.EphemeralSource("intermediate_offsets_or_lengths")
         assert self.shape_env is not None
-        ret = self.shape_env.create_symintnode(
+        nested_symint = self.shape_env.create_symintnode(
             sym=self.shape_env.create_symbol(
                 val=hint,
                 source=src,
@@ -2224,8 +2167,39 @@ class FakeTensorMode(TorchDispatchMode):
             hint=hint,
             source=src,
         )
-        self.cache_id_to_symint[cache_id] = ret
-        return cache_id
+        self.cache_id_to_symint[cache.id] = nested_symint
+
+    def get_nested_symint(
+        self, cache, coeff
+    ) -> torch.SymInt:
+        # Assume that the cache exists and is registered.
+        # See Note: [Creating symbolic nested int]
+        if cache.id not in self.cache_id_to_symint:
+            self.create_nested_symint(cache)
+        return self.cache_id_to_symint[cache.id] * coeff
+
+    def get_nested_cache_id(self, data) -> None:
+        mb_cache_id = None
+        for v in data.values():
+            if v in self.nested_meta_to_cache_id:
+                mb_cache_id = self.nested_meta_to_cache_id.get(v)
+                # Could the same metadata belong in multiple caches?
+                break
+        return mb_cache_id
+
+    def get_nested_cache(self, data) -> None:
+        # Try to figure out what the cache_id from the metadata
+        cache_id = self.get_nested_cache_id(data)
+        if cache_id is None:
+            from torch.nested._internal.nested_tensor import NestedCache
+            cache_id = self.cache_id_counter
+            assert self.enter_stack, "should only called while FakeTensorMode is active"
+            self.cache_id_counter += 1
+            cache = NestedCache(data, id=cache_id, fake_mode=self)
+            self.cache_id_to_fake_cache[cache_id] = cache
+            for v in data.values():
+                self.nested_meta_to_cache_id[v] = cache_id
+        return self.cache_id_to_fake_cache[cache_id]
 
     _cpp_meta_supports_symint = ordered_set(
         aten.empty.memory_format,

@@ -6,84 +6,111 @@ import weakref
 import torch
 from torch._C import DispatchKey, DispatchKeySet
 from torch._prims_common import is_expandable_to
-from torch.utils.weak import WeakIdKeyDictionary
+from torch.utils.weak import WeakIdKeyDictionary, WeakTensorKeyDictionary
 from torch.nested._internal.nested_int import NestedIntNode
 
 
-_cache_id_registry = WeakIdKeyDictionary()
-_cache_id_counter = 0
+# _cache_id_registry = WeakIdKeyDictionary()
+# _cache_id_counter = 0
 
-class NestedCache():
-    def __init__(self, data, fake_mode=None):
-        self.data = data
-        self.fake_mode_ref = weakref.ref(fake_mode) if fake_mode is not None else None
-        # Booo this cannot be immediately populated in all casees.
-        self.id = None
-
-    def state(self):
-        # This is the state we would like to guard on.
-        return tuple(k is not None for k in self.data.values())
-
+# In eager, whenever we register cache
+# - update the cache_id <-> cache mappings
+# - update the offsets -> cache_id mapping
 
 # Maintain cache -> id: int mapping
-def get_nested_symint(cache: NestedCache, *, coeff=1):
-    # Cache created in compile have fake mode reference
-    if cache.fake_mode_ref is not None:
-        fake_mode = cache.fake_mode_ref()
-        assert fake_mode is not None
-        # FakeMode needs to remember from cache to cache_id
-        return fake_mode.cache_id_to_symint[cache.id] * coeff
-
-    # In eager.
-    global _cache_id_counter
-
-    cache_id = _cache_id_registry.get(cache)
-    if cache_id is None:
-        cache_id = _cache_id_counter
-        _cache_id_counter += 1
-        _cache_id_registry[cache] = cache_id
-
-    ragged_size = torch.SymInt(NestedIntNode(
-        cache_id,
-        cache,
-        coeff=coeff
-    ))
-
-    return ragged_size
 
 # Get the cache from the offsets, lengths, all the metadata
 # If any one of them already associated with a cache, return that one.
+# ignore lengths for now.
+# ignore devices for now, assume everything on cpu.
+
+# Given the metadata, get to the cache.
+
+
+class NestedCache():
+    # Do not construct/update this directly! Use the cache registry methods.
+    def __init__(self, data, id=None, fake_mode=None):
+        self.data = data
+        self.fake_mode_ref = weakref.ref(fake_mode) if fake_mode is not None else None
+        # Booo this cannot be immediately populated in all casees.
+        self.id = id if id is not None else None
+
+    def state(self):
+        # This specifies what to specialize on.
+        # Specialize on whether the cache is None or not.
+        # TODO; also specialize on the
+        return tuple(k is not None for k in self.data.values())
+
+# The cache registry encapsulates the logic of creating and managing caches
+class CacheRegistry:
+    def __init__(self):
+        self._cache_id_to_cache_ref = {}
+        self._metadata_to_id = weakref.WeakKeyDictionary()
+        self._cache_id_counter = 0
+
+    def new_cache(self, data):
+        cache_id = self._cache_id_counter
+        cache = NestedCache(data, id=cache_id)
+        for v in data.values():
+            if v is not None:
+                self._metadata_to_id[v] = cache_id
+        self._cache_id_counter += 1
+        self._cache_id_to_cache_ref[cache_id] = weakref.ref(cache)
+        return cache
+
+    def set_metadata(self, cache, key, value):
+        self._metadata_to_id[value] = cache.id
+        cache.data[key] = value
+
+    def get_cache_from_meta(self, metadata):
+        cache_id = self._metadata_to_id.get(metadata)
+        return self.get_cache_from_id(cache_id) if cache_id is not None else None
+
+    def get_cache_from_id(self, cache_id):
+        cache_ref = self._cache_id_to_cache_ref.get(cache_id)
+        if cache_ref is not None:
+            cache = cache_ref()
+            if cache is not None:
+                return cache
+            else:
+                # The cache has been garbage collected
+                del self._cache_id_to_cache_ref[cache_id]
+        return None
+
+_cache_registry = CacheRegistry()
+
+def get_nested_symint(cache: NestedCache, *, coeff=1):
+    # Assume that I have a cache that is registered somewhere.
+    # Assume that anything in the cache has been registered.
+    if cache.fake_mode_ref is not None:
+        # In compile, keep the same instance of nested int around
+        fake_mode = cache.fake_mode_ref()
+        assert fake_mode is not None
+        return fake_mode.cache_id_to_symint[cache.id] * coeff
+    else:
+        # In eager, always create a fresh nested int.
+        return torch.SymInt(NestedIntNode(
+            cache,
+            coeff=coeff
+        ))
+
 def get_nested_cache(*, offsets=None, lengths=None, coeff=1):
-    # ignore lengths for now.
-    # ignore devices for now, assume everything on cpu.
     from torch._subclasses.fake_tensor import FakeTensor
     from torch._subclasses.functional_tensor import mb_unwrap_functional_tensor
 
-    # NB: Only FakeTensor is associated with a cache
-    tensor = mb_unwrap_functional_tensor(offsets)
-    if isinstance(tensor, FakeTensor):
-        out = tensor.get_nested_cache()
-        return out
-
-    # Maintain offsets -> cache mapping (weak)
-    cache_ref = torch._njt_offsets_to_weak_cache.get(offsets, None)
-    if cache_ref is None or cache_ref() is None:
-        cache = NestedCache({
-            "offsets": offsets,
-            "lengths": lengths,
-        })
-
-        cache_ref = weakref.ref(cache)
-        # update the cache registry automatically, so we always have a cache_id
-        get_nested_symint(cache)
-
-        cache.id = _cache_id_registry[cache]
-
-        torch._njt_offsets_to_weak_cache[offsets] = cache_ref
-        if lengths is not None:
-            torch._njt_offsets_to_weak_cache[lengths] = cache_ref
-
-    return cache_ref()
+    t = mb_unwrap_functional_tensor(offsets)
+    if isinstance(t, FakeTensor):
+        # In compile, handle everything through the fake tensor
+        return t.get_nested_cache()
+    else:
+        # Check if a cache already exists for the given offsets
+        cache = _cache_registry.get_cache_from_meta(offsets)
+        if cache is None:
+            cache = _cache_registry.new_cache({
+                "offsets": offsets,
+                "lengths": lengths,
+            })
+        return cache
 
 
 # SDPA metadata; max / min seqlens are needed for e.g. flash

@@ -3270,60 +3270,42 @@ class ShapeEnv:
                 assert int(sym) == hint
             out = int(sym)
         elif is_nested_int(hint) and mb_nested_int_desc is not None:
-            # Thread the fake_mode through?
-            # Also store the cache_id on the mb_nested_int_desc?
-            # Hack around for now.
-            # it sucks that we had to fakify another tensor before realizing
-            # that we've already cached, but fine because if we already
-            # cached, we would've hit the fake tensor cache, it just looks funny.
-
-            # See Note [Recursive fakification]
             from torch._dynamo.source import (
                 SymNodePropertySource,
                 GetItemSource
             )
             from torch.nested._internal.nested_int import NestedIntNode
-            from torch.nested._internal.nested_tensor import NestedCache
-
-            # Check if the fake mode already has the cache for the id
             cache_src = SymNodePropertySource(source, "nested_int_cache")
-            coeff = hint.node.nested_int_coeff()
 
-            cache_data = {}  # just a dictionary
+            # See Note [Recursive fakification]
+            cache_data = {}
             fake_mode = None
             for cache_key, cache_value in zip(mb_nested_int_desc.cache.keys, mb_nested_int_desc.cache.values):
-                if cache_value is None:
-                    fake_cache_value = None
-                else:
-                    fake_cache_value = metafy_fn(
-                        cache_value,
-                        GetItemSource(cache_src, cache_key),
-                    )
+                fake_cache_value = metafy_fn(
+                    cache_value,
+                    GetItemSource(cache_src, cache_key),
+                ) if cache_value is not None else None
                 cache_data[cache_key] = fake_cache_value
-                # TODO(soulitzer): we can probably simplify this.
-                # Or we can assume that the cache is always non-empty?
-                if fake_cache_value is not None:
-                    fake_mode = fake_cache_value.fake_mode
-                if hint.node.t_id in fake_mode.cache_id_to_symint and coeff == 1:
-                    # only check cache if coeff is 1, otherwise, we'd need to
-                    # create a symbol for the coeff
-                    return fake_mode.cache_id_to_symint[hint.node.t_id]
+                fake_mode = fake_mode if fake_cache_value is None else fake_cache_value.fake_mode
 
-            cache = NestedCache(cache_data, fake_mode=fake_mode)
-            cache.id = hint.node.t_id
+            cache = fake_mode.get_nested_cache(cache_data)
+            coeff = hint.node.nested_int_coeff()
 
-            nested_int = SymInt(
-                SymNode(
-                    sym, self, int,
-                    SymInt(NestedIntNode(hint.node.t_id, cache, coeff=coeff)),
-                    fx_node=fx_node,
+            def construct():
+                return SymInt(
+                    SymNode(
+                        sym, self, int,
+                        SymInt(NestedIntNode(cache, coeff=coeff)),
+                        fx_node=fx_node,
+                    )
                 )
-            )
             if coeff == 1:
-                # cache only if coeff is 1
-                fake_mode.cache_id_to_symint[hint.node.t_id] = nested_int
-
-            return nested_int
+                # Participate in caching only if coeff is 1
+                if cache.id not in fake_mode.cache_id_to_symint:
+                    fake_mode.cache_id_to_symint[cache.id] = construct()
+                return fake_mode.cache_id_to_symint[cache.id]
+            else:
+                return construct()
         else:
             # How can this occur? When we mark_unbacked, we end up with a real
             # tensor that has hints for all sizes, but we MUST NOT create a

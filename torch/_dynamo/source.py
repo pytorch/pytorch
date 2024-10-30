@@ -224,7 +224,7 @@ class SymNodePropertySource(ChainedSource):
 @dataclasses.dataclass(frozen=True)
 class NestedTensorCacheSource(ChainedSource):
     def name(self) -> str:
-        return f"torch._njt_offsets_to_weak_cache[{self.base.name()}]"
+        return f"torch._get_njt_cache_from_offsets({self.base.name()})"
 
     def guard_source(self):
         return self.base.guard_source()
@@ -233,7 +233,7 @@ class NestedTensorCacheSource(ChainedSource):
 @dataclasses.dataclass(frozen=True)
 class NestedTensorCacheListSource(ChainedSource):
     def name(self) -> str:
-        return f"torch._njt_offsets_to_weak_cache[{self.base.name()}]().state()"
+        return f"torch._get_njt_cache_from_offsets({self.base.name()}).state()"
 
     def guard_source(self):
         return self.base.guard_source()

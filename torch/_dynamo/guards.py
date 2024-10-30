@@ -1052,7 +1052,7 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, NestedTensorCacheListSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
-                python_lambda=lambda x: torch._njt_offsets_to_weak_cache[x]().state(),
+                python_lambda=lambda x: torch._get_njt_cache_from_offsets(x).state(),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
