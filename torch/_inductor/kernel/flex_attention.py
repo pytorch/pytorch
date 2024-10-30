@@ -600,7 +600,7 @@ _a100_default_config = {
 
 def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
-    head_dim = V.graph.sizevars.evaluate_expr(sympy.sympify(query.get_size()[-1]))
+    head_dim = V.graph.sizevars.evaluate_static_shape(sympy.sympify(query.get_size()[-1]))
     default_config = None
 
     if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
@@ -625,7 +625,7 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
 
 
 def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
-    head_dim = V.graph.sizevars.evaluate_expr(query.get_size()[-1])
+    head_dim = V.graph.sizevars.evaluate_static_shape(query.get_size()[-1])
     dtype = query.get_dtype()
 
     if dtype == torch.float32:
@@ -830,8 +830,8 @@ def flex_attention(
         full_kv_num_blocks, full_kv_indices = (
             empty(0, device=query.get_device()) for _ in range(2)
         )
-    kernel_options.setdefault("QK_HEAD_DIM", V.graph.sizevars.evaluate_expr(sympy.sympify(qk_head_dim)))
-    kernel_options.setdefault("V_HEAD_DIM", V.graph.sizevars.evaluate_expr(sympy.sympify(v_head_dim)))
+    kernel_options.setdefault("QK_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(sympy.sympify(qk_head_dim)))
+    kernel_options.setdefault("V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(sympy.sympify(v_head_dim)))
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
@@ -1780,8 +1780,8 @@ def flex_attention_backward(*args, **kwargs):
         full_kv_num_blocks, full_kv_indices, full_q_num_blocks, full_q_indices = (
             empty(0, device=query.get_device()) for _ in range(4)
         )
-    kernel_options.setdefault("QK_HEAD_DIM", V.graph.sizevars.evaluate_expr(sympy.sympify(qk_head_dim)))
-    kernel_options.setdefault("V_HEAD_DIM", V.graph.sizevars.evaluate_expr(sympy.sympify(v_head_dim)))
+    kernel_options.setdefault("QK_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(sympy.sympify(qk_head_dim)))
+    kernel_options.setdefault("V_HEAD_DIM", V.graph.sizevars.evaluate_static_shape(sympy.sympify(v_head_dim)))
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
