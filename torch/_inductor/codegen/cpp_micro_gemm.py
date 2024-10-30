@@ -514,11 +514,26 @@ class CppMicroGemmAMX(CppMicroGemm):
 {%- if use_cached_dequantized_B %}
     // Create a stack-allocated buffer for tiles of B.
     // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
-    // Also, it's possible that N may not be equal to Nr, but might be a multiple of it.
     const auto num_elements_per_b_tile = 512;
     const auto last_k_offset = K / {{block_k}} * {{block_k}};
     const auto tail_k_size = K - last_k_offset;
     const auto buf_size_per_nr_block = ((K / {{block_k}}) * num_elements_per_b_tile + tail_k_size * 32) * 2;
+    // Although the outer loop in the micro-kernel iterates on n, we could only cache K * Nr elements of
+    // dequantized B, pertaining to each value of n.
+    // But we allow for caching of multiple K * Nr sets in the code to support N != Nr for two reasons:
+    // 1. If N would not be equal to Nr in the future, outer loop in the micro-kernel that iterates over n
+    //    could potentially be unrolled. If the cache could only store K * Nr elements, loop-unrolling would be
+    //    impossible due to memory aliasing.
+    // 2. In the future, if the loops that iterate over m & n would need to be inverted,
+    //    such that m would be iterated over in the outer-loop instead, then for correctness,
+    //    we would need multiple dequantized B caches of K * Nr elements, if N would not be equal to Nr,
+    //    but would instead be a multiple of it.
+    // However, if performance would be better with iterating over n in the outer-loop,
+    // then we may revisit this decision because in that case, we could choose K & N such that
+    // K * Nr elements would fit in L1D but K * N elements need not (Other aspects of blocking
+    // would also be considered while determining the values of K & N).
+    // Then we could only cache one set of K * Nr elements instead of multiple sets of K * Nr elements.
+    // Of course, loop unrolling for the outer loop (iterating over n) would not be possible in that case.
     const auto buf_size = buf_size_per_nr_block * (N / {{block_n}});
     {%- if is_msvc_compiler %}
     // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
@@ -552,14 +567,13 @@ class CppMicroGemmAMX(CppMicroGemm):
     };
     auto load_dequantized_B = [&](int n) {
         // Load a tile of B & cache it in L1D.
-        const int64_t init_idx =  n * buf_size_per_nr_block;
-        const auto max_k_idx = tail_k_size ? last_k_offset + {{block_k}} : last_k_offset;
+        const int64_t init_idx = (n / {{block_n}}) * buf_size_per_nr_block;
         {{kernel.unroll_pragma(4)}}
-        for (int k = 0; k < max_k_idx; k += {{block_k}}) {
+        for (int k = 0; k < K; k += {{block_k}}) {
             {{kernel.unroll_pragma(2)}}
             for (int tile_col = 0; tile_col <= 1; tile_col++) {
-                int num_b_rows = (k < K) ? 16 : (max_k_idx - K);
-                load_B_tile(const_cast<{{input2_t}}*>(B) + k * ldb + tile_col * {{16 * vnni_size}},
+                int num_b_rows = (k < last_k_offset) ? 16 : tail_k_size;
+                load_B_tile(const_cast<{{input2_t}}*>(B + n) + k * ldb + tile_col * {{16 * vnni_size}},
                             (k / {{block_k // 2}} + tile_col) * num_elements_per_b_tile + init_idx,
                             num_b_rows);
             }
@@ -567,10 +581,13 @@ class CppMicroGemmAMX(CppMicroGemm):
     };
 {%- endif %}
     // TODO(jgong5): loop unroll for M and N
+    // TODO(sanchitintel): the loops may need to be inverted if N would cease to always be equal to Nr.
+    // In that case, looping over m in the outer loop may help with cache-locality of A tiles.
+    // Benchmark when N would cease to be equal to Nr, and choose the best course of action at that time.
     for (int64_t n = 0; n < N; n += {{block_n}}) {
 {%- if use_cached_dequantized_B %}
         // Dequantize K * 32 int8 B elements into BF16
-        load_dequantized_B(n / {{block_n}});
+        load_dequantized_B(n);
 {%- endif %}
         for (int64_t m = 0; m < M; m += {{block_m}}) {
             int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
@@ -584,7 +601,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     amx_state,
                     A + m * lda,
 {%- if use_cached_dequantized_B %}
-                    dequantized_B_buf +  n * buf_size_per_nr_block,
+                    dequantized_B_buf + (n / {{block_n}}) * buf_size_per_nr_block,
 {%- else %}
                     B + n,
 {%- endif %}
@@ -604,7 +621,7 @@ class CppMicroGemmAMX(CppMicroGemm):
                     amx_state,
                     A + m_tail * lda,
 {%- if use_cached_dequantized_B %}
-                    dequantized_B_buf +  n * buf_size_per_nr_block,
+                    dequantized_B_buf + (n / {{block_n}}) * buf_size_per_nr_block,
 {%- else %}
                     B + n,
 {%- endif %}
