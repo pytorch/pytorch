@@ -274,9 +274,11 @@ bool ProcessGroupUCC::WorkUCC::wait(std::chrono::milliseconds /* unused */) {
     Work::recordFunctionEndCallback_();
     Work::recordFunctionEndCallback_ = nullptr;
   }
-  c10d::unregister_work(
-      c10::intrusive_ptr<
-          ProcessGroupUCC::WorkUCC>::unsafe_reclaim_from_nonowning(this));
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<
+            ProcessGroupUCC::WorkUCC>::unsafe_reclaim_from_nonowning(this));
+  }
   return true;
 }
 
