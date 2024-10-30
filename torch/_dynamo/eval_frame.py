@@ -882,9 +882,11 @@ def _optimize(
         hooks,
         backend_ctx_ctor,
         dynamic=dynamic,
-        compiler_config=backend.get_compiler_config()
-        if hasattr(backend, "get_compiler_config")
-        else None,
+        compiler_config=(
+            backend.get_compiler_config()
+            if hasattr(backend, "get_compiler_config")
+            else None
+        ),
         rebuild_ctx=rebuild_ctx,
     )
 
@@ -998,9 +1000,11 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                         flat_args[i],
                         symbolic_context=StatelessSymbolicContext(
                             dynamic_sizes=[
-                                DimDynamic.DYNAMIC
-                                if d in flat_args_dynamic_dims[i]
-                                else DimDynamic.STATIC
+                                (
+                                    DimDynamic.DYNAMIC
+                                    if d in flat_args_dynamic_dims[i]
+                                    else DimDynamic.STATIC
+                                )
                                 for d in range(len(flat_args[i].shape))
                             ],
                             constraint_sizes=[None] * len(flat_args[i].shape),
@@ -1067,6 +1071,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
                 "dynamo_flat_name_to_original_fqn"
             ]
+        if "dynamo_compile_id" in self.module.meta:
+            result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]
         return result_gm
 
 
