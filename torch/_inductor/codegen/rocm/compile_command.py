@@ -25,14 +25,19 @@ def _rocm_include_paths() -> List[str]:
         from libfb.py import parutil
 
         ck_path = parutil.get_dir_path("composable-kernel-headers")
-        ck_include = os.path.join(ck_path, "include")
     else:
-        ck_include = os.path.join(
-            config.rocm.ck_dir or cpp_extension._join_rocm_home("composable_kernel"),
-            "include",
+        ck_path = config.rocm.ck_dir or cpp_extension._join_rocm_home(
+            "composable_kernel"
         )
 
-    paths = [os.path.realpath(rocm_include), os.path.realpath(ck_include)]
+    ck_include = os.path.join(ck_path, "include")
+    ck_library_include = os.path.join(ck_path, "library", "include")
+
+    # CK has to take priority over ROCm include paths
+    # Since CK is potentially more up-to-date
+    paths = [
+        os.path.realpath(p) for p in (ck_include, ck_library_include, rocm_include)
+    ]
     return paths
 
 

@@ -36,8 +36,10 @@ from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
+import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
@@ -151,22 +153,22 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
             torch._C._set_dispatch_mode(old)
 
 
-def get_plain_tensors(subclass: Tensor) -> List[Tensor]:
-    assert is_traceable_wrapper_subclass(subclass)
-    plain_tensors: List[Tensor] = []
+def get_plain_tensors(
+    subclass: Tensor, *, out: List[Union[Tensor, int, SymInt]]
+) -> List[Union[Tensor, int, SymInt]]:
+    # This function is used in Runtime, do not add redundant asserts
     todo = [subclass]
     while todo:
         curr = todo.pop()
         if not is_traceable_wrapper_subclass(curr):
-            assert isinstance(curr, Tensor)
-            plain_tensors.append(curr)
+            out.append(curr)
             continue
 
         inner_keys, _ = curr.__tensor_flatten__()
         for key in reversed(inner_keys):
             todo.append(getattr(curr, key))
 
-    return plain_tensors
+    return out
 
 
 def is_fake(x: object) -> TypeGuard[Tensor]:
@@ -1946,7 +1948,9 @@ class FakeTensorMode(TorchDispatchMode):
         args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        def maybe_to_real_tensor(t: T) -> Optional[Union[T, Tensor]]:
+        def maybe_to_real_tensor(
+            t: T,
+        ) -> Optional[Union[T, Tensor, torch._C.ScriptObject]]:
             if isinstance(t, FakeTensor):
                 return t.real_tensor
             elif isinstance(t, py_sym_types):
@@ -1956,6 +1960,8 @@ class FakeTensorMode(TorchDispatchMode):
                         self.shape_env.unbacked_var_to_val
                     )
                 )
+            elif isinstance(t, FakeScriptObject):
+                return t.real_obj
             else:
                 return t
 
@@ -1984,7 +1990,19 @@ class FakeTensorMode(TorchDispatchMode):
             log.debug("propagate_real_tensors %s", func)
             real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
             real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
+
+            is_builtin = library_utils.is_builtin(func)
+            if not is_builtin:
+                mutation_checker = library_utils.MutationChecker(
+                    func, real_flat_args, args_spec
+                )
+
             real_out = func(*real_args, **real_kwargs)
+
+            if not is_builtin:
+                mutation_checker.check()  # type: ignore[possibly-undefined]
+                library_utils.check_aliasing_constraint(func._name, flat_args, real_out)
+
         elif self.propagate_real_tensors:
             # This can happen occasionally legitimately, specifically when you
             # are inside the meta of a data dependent operation and you create

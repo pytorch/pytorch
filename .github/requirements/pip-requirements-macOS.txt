@@ -1,4 +1,4 @@
-boto3==1.19.12
+boto3==1.35.42
 hypothesis==6.56.4
 expecttest==0.2.1
 fbscribelogger==0.1.6
