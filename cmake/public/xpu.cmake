@@ -33,3 +33,9 @@ set_property(
 torch_xpu_get_arch_list(XPU_ARCH_FLAGS)
 # propagate to torch-xpu-ops
 set(TORCH_XPU_ARCH_LIST ${XPU_ARCH_FLAGS})
+
+if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND SYCL_COMPILER_VERSION VERSION_LESS_EQUAL 20240703)
+  # for ABI compatibility on Linux
+  string(APPEND XPU_EXTRA_FLAGS " -D__INTEL_PREVIEW_BREAKING_CHANGES")
+  set(DNNL_CXX_FLAGS "-DCMAKE_CXX_FLAGS=-fpreview-breaking-changes")
+endif()

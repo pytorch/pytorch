@@ -75,34 +75,28 @@ find_file(
   NO_DEFAULT_PATH
   )
 
-# Find SYCL library fullname.
-# Don't use if(LINUX) here since this requires cmake>=3.25 and file is installed
-# and used by other projects.
-# See: https://cmake.org/cmake/help/v3.25/variable/LINUX.html
-if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-  find_library(
-    SYCL_LIBRARY
-    NAMES sycl-preview
-    HINTS ${SYCL_LIBRARY_DIR}
-    NO_DEFAULT_PATH
-  )
-endif()
-
-# On Windows, the SYCL library is named sycl7.lib until compiler version 20240703. sycl.lib is supported in the later version.
-if(CMAKE_SYSTEM_NAME MATCHES "Windows")
-  if (SYCL_COMPILER_VERSION VERSION_LESS_EQUAL 20240703)
-    set(sycl_runtime_version 7)
-  else()
-    set(sycl_runtime_version "")
+if (SYCL_COMPILER_VERSION VERSION_LESS_EQUAL 20240703)
+  # Don't use if(LINUX) here since this requires cmake>=3.25 and file is installed
+  # and used by other projects.
+  # See: https://cmake.org/cmake/help/v3.25/variable/LINUX.html
+  if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+    set(sycl_lib_suffix "-preview")
+  else (CMAKE_SYSTEM_NAME MATCHES "Windows")
+    # On Windows, the SYCL library is named sycl7.lib until compiler version 20240703.
+    # sycl.lib is supported in the later version.
+    set(sycl_lib_sufix "7")
   endif()
-  find_library(
-    SYCL_LIBRARY
-    NAMES "sycl${sycl_runtime_version}"
-    HINTS ${SYCL_LIBRARY_DIR}
-    NO_DEFAULT_PATH
-  )
 endif()
+ 
+# Find SYCL library fullname.
+find_library(
+  SYCL_LIBRARY
+  NAMES "sycl${sycl_lib_suffix}"
+  HINTS ${SYCL_LIBRARY_DIR}
+  NO_DEFAULT_PATH
+)
 
+# Find OpenCL library fullname, which is a dependency of oneDNN.
 find_library(
   OCL_LIBRARY
   NAMES OpenCL

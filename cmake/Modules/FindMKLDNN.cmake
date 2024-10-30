@@ -42,11 +42,6 @@ IF(NOT MKLDNN_FOUND)
         list(APPEND DNNL_MAKE_COMMAND "--" "-l" "$ENV{MAX_JOBS}")
       endif()
     endif()
-    if(LINUX)
-      set(DNNL_CXX_FLAGS "-DCMAKE_CXX_FLAGS=-fpreview-breaking-changes")
-    else()
-      set(DNNL_CXX_FLAGS "")
-    endif()
     ExternalProject_Add(xpu_mkldnn_proj
       SOURCE_DIR ${MKLDNN_ROOT}
       PREFIX ${XPU_MKLDNN_DIR_PREFIX}
