@@ -12,7 +12,7 @@ from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._utils_internal import JustKnobsConfig
 from torch.fx._utils import lazy_format_graph_code
-from torch.fx.experimental.symbolic_shapes import ShapeEnv  # noqa: TCH001
+from torch.fx.experimental.symbolic_shapes import guard_scalar, ShapeEnv  # noqa: TCH001
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
 # TODO: refactor
@@ -275,13 +275,8 @@ def tensorify_python_scalars(
                     # op(.. zf2 ..)
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
-                    if isinstance(val, torch.SymFloat):
-                        node.replace_all_uses_with(float(val))
-                    elif isinstance(val, torch.SymInt):
-                        node.replace_all_uses_with(int(val))
-                    elif isinstance(val, torch.SymBool):
-                        node.replace_all_uses_with(bool(val))
 
+                    node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
     graph_code_log.debug(
