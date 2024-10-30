@@ -5592,8 +5592,10 @@ class ShapeEnv:
         Adds or updates a replacement for a symbol.
         Use this instead of `self.replacements[a] = tgt`.
         """
-
         if tgt == self.replacements.get(a, None):
+            return
+
+        if a in tgt.free_symbols:
             return
 
         # Precondition: a == tgt
