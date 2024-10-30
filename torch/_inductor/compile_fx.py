@@ -1515,9 +1515,7 @@ def compile_fx(
             example_inputs: List[InputType],
             is_inference: bool,
         ) -> CompiledFxGraph:
-            with dynamo_utils.dynamo_timed(
-                "compile_fx.<locals>.fw_compiler_base",
-            ):
+            with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
                 return _fw_compiler_base(model, example_inputs, is_inference)
 
         def _fw_compiler_base(

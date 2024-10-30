@@ -7,9 +7,11 @@ import logging
 import time
 from collections import defaultdict
 from typing import DefaultDict, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self
+
+from caffe2.fb._utils_internal import log_pt2_compile_event
 
 from torch._dynamo.utils import get_chromium_event_logger
+from typing_extensions import Self
 
 
 if TYPE_CHECKING:
@@ -220,6 +222,7 @@ def update_automatic_dynamic(
                 "cached": str(old_entry.scalar),
                 "new": str(entry.scalar),
             },
+            log_pt2_compile_event=True
         )
         if is_unspecialized_nn_module:
             log.info(
@@ -259,6 +262,7 @@ def update_automatic_dynamic(
                 "cached": str(old_entry_tup),
                 "new": str(entry_tup),
             },
+            log_pt2_compile_event=True
         )
 
     if is_update and old_entry.size != mut_entry.size:
