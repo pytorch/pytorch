@@ -627,13 +627,13 @@ DEFINE_DISPATCH(mkldnn_convolution_transpose_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated2d_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated3d_backward_stub);
 DEFINE_DISPATCH(slow_conv_transpose2d_backward_stub);
-REGISTER_NO_CPU_DISPATCH(conv_depthwise2d_backward_stub);
-REGISTER_NO_CPU_DISPATCH(conv_depthwise3d_backward_stub);
-REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub);
-REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub);
-REGISTER_NO_CPU_DISPATCH(miopen_convolution_backward_stub);
-REGISTER_NO_CPU_DISPATCH(miopen_convolution_transpose_backward_stub);
-REGISTER_NO_CPU_DISPATCH(miopen_depthwise_convolution_backward_stub);
+REGISTER_NO_CPU_DISPATCH(conv_depthwise2d_backward_stub)
+REGISTER_NO_CPU_DISPATCH(conv_depthwise3d_backward_stub)
+REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub)
+REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub)
+REGISTER_NO_CPU_DISPATCH(miopen_convolution_backward_stub)
+REGISTER_NO_CPU_DISPATCH(miopen_convolution_transpose_backward_stub)
+REGISTER_NO_CPU_DISPATCH(miopen_depthwise_convolution_backward_stub)
 
 template <typename T>
 std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params) {
@@ -1732,8 +1732,8 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> ggI_maybe_owned = at::borrow_from_optional_tensor(ggI_opt);
   const Tensor& ggI = *ggI_maybe_owned;
-  const Tensor& ggW_r = c10::value_or_else(ggW_r_opt, [] {return Tensor();});
-  const Tensor& ggb = c10::value_or_else(ggb_opt, [] {return Tensor();});
+  const Tensor& ggW_r = ggW_r_opt.value_or(Tensor());
+  const Tensor& ggb = ggb_opt.value_or(Tensor());
 
 
   auto ggW = ggW_r;

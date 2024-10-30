@@ -279,16 +279,21 @@ class ProcessGroupNCCLOpTest(MultiProcContinousTest):
 
             # single warmup
             pg.allreduce(xs).wait()
-            self.assertEqual(xs[0].item(), 2)
+            # 1 + 1 + ...  = world_size
+            expected_val = self.world_size
+            self.assertEqual(xs[0].item(), expected_val)
 
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):
                 pg.allreduce(xs).wait()
-            self.assertEqual(xs[0].item(), 2)
+            # Graph capture should not change the tensor value
+            self.assertEqual(xs[0].item(), expected_val)
 
             graph.replay()
+            expected_val *= self.world_size
             graph.replay()
-            self.assertEqual(xs[0].item(), 8)
+            expected_val *= self.world_size
+            self.assertEqual(xs[0].item(), expected_val)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
