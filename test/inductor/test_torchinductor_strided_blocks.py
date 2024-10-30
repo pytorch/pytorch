@@ -500,7 +500,7 @@ class TritonBlockPointerTest(InductorTestCase):
             ((129, 129), 1, 1, torch.argmax),
         ],
     )
-    def test_nd_tiling_odd_shapes_reduce(
+    def test_2d_reduction_odd_shapes(
         self,
         view_size: Tuple[int],
         num_block_pointers: int,
@@ -508,7 +508,8 @@ class TritonBlockPointerTest(InductorTestCase):
         reduction_op: Callable,
     ):
         """
-        Tests a reduction kernel.
+        Tests 2D reduction kernels. These arise from "odd" shapes which are not
+        expressible with a 1D block pointer.
         """
         view = self._discontiguous_tensor(view_size)
 
@@ -523,11 +524,10 @@ class TritonBlockPointerTest(InductorTestCase):
         )
 
         # Check the code for multiple Rn_BLOCK's
-        expected_blocks = ["R0_BLOCK", "R1_BLOCK"]
-        for block in expected_blocks:
+        for block in ["R0_BLOCK", "R1_BLOCK"]:
             self.assertIn(block, code)
 
-    def test_2d_reduce_no_x_dim(self):
+    def test_2d_reduction_no_x_dim(self):
         """
         Tests a 2D reduction without an "x" dimension.
         """
@@ -550,8 +550,7 @@ class TritonBlockPointerTest(InductorTestCase):
         self.assertNotIn("BLOCK", signature_line)
 
         # Check for 2 reduction dimensions in the body.
-        expected_blocks = ["R0_BLOCK", "R1_BLOCK"]
-        for block in expected_blocks:
+        for block in ["R0_BLOCK", "R1_BLOCK"]:
             self.assertIn(block, code)
 
     @parametrize(
@@ -573,7 +572,8 @@ class TritonBlockPointerTest(InductorTestCase):
 
         NB: the input size should be "nice" in the sense that it's a multiple of the
         number of processors. Otherwise, we will get more complex indexing that
-        doesn't generate a 2D block pointer.
+        doesn't generate a block pointer. Since tiling welford reductions depends on
+        the block pointer analysis, those cases would fall back to 1D.
         """
         view = self._discontiguous_tensor(size)
 
@@ -590,8 +590,54 @@ class TritonBlockPointerTest(InductorTestCase):
         self.assertEqual("welford" in code, not expect_fallback)
 
         # Check for 2 reduction dimensions.
-        expected_blocks = ["R0_BLOCK", "R1_BLOCK"]
-        for block in expected_blocks:
+        for block in ["R0_BLOCK", "R1_BLOCK"]:
+            self.assertIn(block, code)
+
+    def test_welford_non_block_pointer(
+        self,
+    ):
+        """
+        Tests a welford reduction where block pointer analysis fails.
+        The main loop will be a 1D reduction, instead of 2D.
+        """
+        # Use a "bad" size that's not evenly divisible by the launch grid.
+        # This won't decompose into a block pointer.
+        view = self._discontiguous_tensor((259, 311))
+
+        # We expect many block pointers for this one.
+        result, (code,) = self.run_and_compare(
+            torch.var_mean,
+            view,
+            expected_num_block_pointers=6,
+            expected_num_triton_kernels=3,
+            config_patches={"triton.prefer_nd_tiling": True},
+        )
+
+        # Check for a Welford reduction.
+        self.assertIn("welford", code)
+
+        # Check for a single reduction dimension.
+        self.assertIn("R0_BLOCK", code)
+        self.assertNotIn("R1_BLOCK", code)
+
+    def test_reduction_multiple_discontiguous_dims(self):
+        """
+        Test reducing a tensor with more than one discontiguous dimension. This case
+        won't generate a block pointer, since we don'allow enough tiling dimensions.
+        """
+        # Use odd shapes to frustrate block pointer analysis.
+        view = self._discontiguous_tensor((3, 7, 11))
+
+        result, (code,) = self.run_and_compare(
+            torch.sum,
+            view,
+            expected_num_block_pointers=0,
+            expected_num_triton_kernels=1,
+            config_patches={"triton.prefer_nd_tiling": True},
+        )
+
+        # Check for 2 reduction dimensions.
+        for block in ["R0_BLOCK", "R1_BLOCK"]:
             self.assertIn(block, code)
 
     def test_complex_reshape_block_ptr(self):
