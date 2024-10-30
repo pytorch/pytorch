@@ -27,7 +27,8 @@ THPUtils_PySequence_to_CUDAStreamList(PyObject* obj) {
       // Spicy hot reinterpret cast!!
       streams.emplace_back(at::cuda::CUDAStream::unpack3(
           (reinterpret_cast<THCPStream*>(stream))->stream_id,
-          (reinterpret_cast<THCPStream*>(stream))->device_index,
+          static_cast<c10::DeviceIndex>(
+              reinterpret_cast<THCPStream*>(stream)->device_index),
           static_cast<c10::DeviceType>(
               (reinterpret_cast<THCPStream*>(stream))->device_type)));
     } else if (stream == Py_None) {
