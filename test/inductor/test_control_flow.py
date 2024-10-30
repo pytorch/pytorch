@@ -182,6 +182,37 @@ class CondModels:
 
             return torch.cond(a.size(0) > b.size(0), true_fn, false_fn, [a, b])
 
+    class CondWithDiffOutputSize(torch.nn.Module):
+        def forward(self, flag, x):
+            def true_fn(x):
+                import math
+
+                from torch.nn import functional as F
+
+                ori_size, new_size = (
+                    (
+                        math.trunc(x.shape[-2] / 1),
+                        math.trunc(x.shape[-1] / 1),
+                    ),
+                    (
+                        math.trunc(x.shape[-2] + 0.5),
+                        math.trunc(x.shape[-1] + 0.5),
+                    ),
+                )
+                x = F.interpolate(x, size=new_size, mode="bilinear")
+                x = F.interpolate(x, size=ori_size, mode="bilinear")
+                return x
+
+            def false_fn(x):
+                return x.clone()
+
+            return torch.cond(
+                flag,
+                true_fn,
+                false_fn,
+                [x],
+            )
+
     class GenericCond(torch.nn.Module):
         def __init__(self, true_fn, false_fn):
             super().__init__()
@@ -259,6 +290,18 @@ class CondTests(TestCase):
                 ),
             ),
             inputs=tuple(),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_gpu
+    @parametrize("device", ["cpu", GPU_TYPE])
+    @parametrize("dynamic", [False, True])
+    def test_cond_branch_with_different_output_size2(self, device, dynamic):
+        inp = torch.rand(3, 3, 28, 28)
+        self._run_test(
+            model=CondModels.CondWithDiffOutputSize(),
+            inputs=(inp,),
             device=device,
             dynamic=dynamic,
         )
