@@ -349,9 +349,7 @@ def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
                     )
                 data_file = io.BytesIO(zip_file.get_record("data.pkl"))
                 all_globals = _weights_only_unpickler.get_globals_in_pkl(data_file)
-                return list(
-                    all_globals.difference(safe_global_strings)
-                )
+                return list(all_globals.difference(safe_global_strings))
         else:
             raise ValueError("Expected input to be a checkpoint returned by torch.save")
 
