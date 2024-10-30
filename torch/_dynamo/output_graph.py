@@ -88,6 +88,7 @@ from .utils import (
     increment_op_count,
     lazy_format_graph_code,
     LazyString,
+    metrics_context,
     nn_module_proxy,
     same,
     set_example_value,
@@ -1454,7 +1455,7 @@ class OutputGraph:
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         with dynamo_timed(
             "OutputGraph.call_user_compiler", phase_name="backend_compile"
-        ):
+        ), metrics_context.timed("aot_autograd_cumulative_compile_time_us"):
             return self._call_user_compiler(gm)
 
     def _call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:

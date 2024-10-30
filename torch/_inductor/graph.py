@@ -34,7 +34,7 @@ import torch._logging
 import torch.fx
 from torch import device, Tensor
 from torch._decomp import get_decompositions
-from torch._dynamo.utils import defake, dynamo_timed
+from torch._dynamo.utils import defake, dynamo_timed, metrics_context
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import make_channels_last_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
@@ -1946,7 +1946,7 @@ class GraphLowering(torch.fx.Interpreter):
     def compile_to_module(self) -> ModuleType:
         with dynamo_timed(
             "GraphLowering.compile_to_module", phase_name="code_gen", fwd_only=False
-        ):
+        ), metrics_context.timed("inductor_code_gen_cumulative_compile_time_us"):
             return self._compile_to_module()
 
     def _compile_to_module(self) -> ModuleType:

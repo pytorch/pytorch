@@ -336,12 +336,6 @@ def dynamo_timed(
                         # one record for one bwd graph.
                         if phase_name == "inductor_compile":
                             if fail_type is None:
-                                inductor_compile_time = frame_phase_timing[
-                                    compile_id
-                                ].get("inductor_compile", None)
-                                code_gen_time = frame_phase_timing[compile_id].get(
-                                    "code_gen", None
-                                )
                                 remote_cache_time_saved = frame_phase_timing[
                                     compile_id
                                 ].get("remote_cache_time_saved", None)
@@ -352,8 +346,6 @@ def dynamo_timed(
                                     compile_id
                                 ].get("remote_fx_graph_cache_put", None)
                             else:
-                                inductor_compile_time = None
-                                code_gen_time = None
                                 remote_cache_time_saved = None
                                 remote_fx_graph_cache_get_time = None
                                 remote_fx_graph_cache_put_time = None
@@ -362,8 +354,6 @@ def dynamo_timed(
                             )
                             metrics = {
                                 "compile_id": compile_id,
-                                "inductor_compile_time_s": inductor_compile_time,
-                                "code_gen_time_s": code_gen_time,
                                 "fail_type": fail_type,
                                 "fail_reason": fail_reason,
                                 "remote_cache_time_saved_s": remote_cache_time_saved,
@@ -377,12 +367,6 @@ def dynamo_timed(
                                 ),
                                 "start_time_us": start_ns // 1000,
                                 "duration_us": (end_ns - start_ns) // 1000,
-                                "inductor_cumulative_compile_time_us": to_int_us(
-                                    inductor_compile_time
-                                ),
-                                "inductor_code_gen_cumulative_compile_time_us": to_int_us(
-                                    code_gen_time
-                                ),
                                 "distributed_ephemeral_timeout_us": to_int_us(
                                     remote_cache_time_saved
                                 ),  # TODO: instrument more accurately
@@ -813,7 +797,7 @@ def to_int_us(v: Optional[float]) -> Optional[int]:
 
 # Version field added to every log. Increment to make it easier to distinguish new
 # vs. old entries when you make a substantive change to how the logs are populated.
-LOG_FORMAT_VERSION = 1
+LOG_FORMAT_VERSION = 2
 
 
 @dataclasses.dataclass
@@ -831,10 +815,6 @@ class CompilationMetrics:
     graph_node_count: Optional[int] = None
     graph_input_count: Optional[int] = None
     start_time: Optional[float] = None
-    entire_frame_compile_time_s: Optional[float] = None
-    backend_compile_time_s: Optional[float] = None
-    inductor_compile_time_s: Optional[float] = None
-    code_gen_time_s: Optional[float] = None
     fail_type: Optional[str] = None
     fail_reason: Optional[str] = None
     fail_user_frame_filename: Optional[str] = None

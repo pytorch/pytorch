@@ -47,6 +47,7 @@ from torch._dynamo.utils import (
     dynamo_timed,
     flatten_graph_inputs,
     lazy_format_graph_code,
+    metrics_context,
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
@@ -574,6 +575,7 @@ def compile_fx_inner(
         stack.enter_context(_WaitCounter("pytorch.wait_counter.dynamo_compile").guard())
         stack.enter_context(with_fresh_cache_if_config())
         stack.enter_context(DebugContext())
+        stack.enter_context(metrics_context.timed("inductor_cumulative_compile_time_us"))
 
         return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
             gm,

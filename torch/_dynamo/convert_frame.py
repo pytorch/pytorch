@@ -702,6 +702,7 @@ def _compile(
                 _WaitCounter("pytorch.wait_counter.dynamo_compile").guard()
             )
             stack.enter_context(CompileTimeInstructionCounter.record())
+            stack.enter_context(metrics_context.timed("dynamo_cumulative_compile_time_us"))
             return _compile_inner(code, one_graph, hooks, transform)
 
         return None  # dead, but see https://github.com/python/mypy/issues/7577
@@ -1035,16 +1036,6 @@ def _compile(
                 graph_op_count = output.count_calls()
                 graph_node_count = len(output.graph.nodes)
                 graph_input_count = len(output.placeholders)
-                entire_frame_compile_time = frame_phase_timing[frame_key].get(
-                    "entire_frame_compile", None
-                )
-                backend_compile_time = frame_phase_timing[frame_key].get(
-                    "backend_compile", None
-                )
-                inductor_compile_time = frame_phase_timing[frame_key].get(
-                    "inductor_compile", None
-                )
-                code_gen_time = frame_phase_timing[frame_key].get("code_gen", None)
                 non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
                 compliant_custom_ops = {
                     op.__qualname__ for op in output.compliant_custom_ops
@@ -1082,10 +1073,6 @@ def _compile(
                 graph_op_count = None
                 graph_node_count = None
                 graph_input_count = None
-                entire_frame_compile_time = None
-                backend_compile_time = None
-                inductor_compile_time = None
-                code_gen_time = None
                 non_compliant_ops = set({})
                 compliant_custom_ops = set({})
                 restart_reasons = set()
@@ -1126,10 +1113,6 @@ def _compile(
                 "graph_node_count": graph_node_count,
                 "graph_input_count": graph_input_count,
                 "start_time": start_time_ns / 1e9,
-                "entire_frame_compile_time_s": entire_frame_compile_time,
-                "backend_compile_time_s": backend_compile_time,
-                "inductor_compile_time_s": inductor_compile_time,
-                "code_gen_time_s": code_gen_time,
                 "fail_type": fail_type,
                 "fail_reason": fail_reason,
                 "fail_user_frame_filename": fail_user_frame_filename,
@@ -1155,16 +1138,6 @@ def _compile(
                 ),
                 "start_time_us": start_time_ns // 1000,
                 "duration_us": duration_ns // 1000,
-                "dynamo_cumulative_compile_time_us": to_int_us(
-                    entire_frame_compile_time
-                ),
-                "aot_autograd_cumulative_compile_time_us": to_int_us(
-                    backend_compile_time
-                ),
-                "inductor_cumulative_compile_time_us": to_int_us(inductor_compile_time),
-                "inductor_code_gen_cumulative_compile_time_us": to_int_us(
-                    code_gen_time
-                ),
                 "triton_compile_time_us": None,  # TODO: instrument
                 "runtime_cudagraphify_time_us": None,  # TODO: instrument in separate event
                 "runtime_triton_autotune_time_us": None,  # TODO: instrument in separate event
