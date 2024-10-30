@@ -380,7 +380,7 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
         return expr
 
 
-def guard_sizes_oblivious(
+def _guard_sizes_oblivious(
     lhs_sizes: Sequence[Union[torch.SymInt, bool]],
     rhs_sizes: Sequence[Union[torch.SymInt, bool]],
 ) -> bool:
