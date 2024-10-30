@@ -86,15 +86,15 @@ struct GemmParams : OpParams {
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * m * k;
+    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * k * n;
+    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * m * n;
+    return sizeof(T) * ldc * n;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -136,7 +136,7 @@ struct GemmParams : OpParams {
 
   TuningStatus NumericalCheck(GemmParams<T> *other) {
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, m*n) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, ldc*n) ? OK : FAIL;
   }
 
   char transa;
@@ -162,23 +162,11 @@ struct GemmAndBiasParams : OpParams {
     return fmt::sprintf("%c%c_%ld_%ld_%ld", transa, transb, m, n, k);
   }
 
-  size_t GetSizeA() const {
-    return sizeof(T) * m * k;
-  }
-
-  size_t GetSizeB() const {
-    return sizeof(T) * k * n;
-  }
-
-  size_t GetSizeC() const {
-    return sizeof(T) * m * n;
-  }
-
   size_t GetSize(bool duplicate_inputs) const {
-    size_t size = GetSizeC();
+    size_t size = sizeof(T) * ldc * n;
     if (duplicate_inputs) {
-      size += GetSizeA();
-      size += GetSizeB();
+      size += sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+      size += sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
     }
     return size;
   }
@@ -188,13 +176,13 @@ struct GemmAndBiasParams : OpParams {
     *copy = *this;
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
-    size_t c_size = GetSizeC();
+    size_t c_size = ldc * n * sizeof(T);
     copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
     AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
         copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
     if (duplicate_inputs) {
-      size_t a_size = GetSizeA();
-      size_t b_size = GetSizeB();
+      size_t a_size = sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+      size_t b_size = sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
       copy->a = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(a_size));
       copy->b = static_cast<const T*>(c10::cuda::CUDACachingAllocator::raw_alloc(b_size));
       copy->duplicate_inputs_ = true;
@@ -213,7 +201,7 @@ struct GemmAndBiasParams : OpParams {
 
   TuningStatus NumericalCheck(GemmAndBiasParams<T> *other) {
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, m*n) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, ldc*n) ? OK : FAIL;
   }
 
   char transa;
@@ -245,15 +233,15 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * m * k * batch;
+    return sizeof(T) * std::min(lda, stride_a) * ((transa == 'n' || transa == 'N') ? k : m) * batch;
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * k * n * batch;
+    return sizeof(T) * std::min(ldb, stride_b) * ((transb == 'n' || transb == 'N') ? n : k) * batch;
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * m * n * batch;
+    return sizeof(T) * std::min(ldc, stride_c) * n * batch;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -330,15 +318,15 @@ struct ScaledGemmParams : OpParams {
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * m * k;
+    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * k * n;
+    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * m * n;
+    return sizeof(T) * ldc * n;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -379,7 +367,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(ScaledGemmParams<T> *other) {
-    return detail::NumericalCheck(c_dtype, c, other->c, m*n) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, ldc*n) ? OK : FAIL;
   }
 
   char transa;
