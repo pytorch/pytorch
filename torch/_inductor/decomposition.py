@@ -75,6 +75,7 @@ inductor_decompositions = get_decompositions(
         aten.native_group_norm,
         aten.native_layer_norm,
         aten.nll_loss2d_backward,
+        aten.permute_copy,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -996,3 +997,23 @@ def adaptive_max_pool2d(
         return aten.max_pool2d_with_indices(x, kernel_size)
 
     return NotImplemented
+
+
+@register_decomposition(aten.searchsorted.Scalar)
+def searchsorted_scalar(
+    sorted_sequence: torch.Tensor,
+    self: torch.types.Number,
+    *,
+    out_int32: bool = False,
+    right: bool = False,
+    side: Optional[str] = None,
+    sorter: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    return aten.searchsorted(
+        sorted_sequence,
+        torch.tensor([self], device=sorted_sequence.device),
+        out_int32=out_int32,
+        right=right,
+        side=side,
+        sorter=sorter,
+    )[0]

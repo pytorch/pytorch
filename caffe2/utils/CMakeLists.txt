@@ -1,9 +1,8 @@
 list(APPEND Caffe2_CPU_SRCS
-  utils/string_utils.cc
   utils/threadpool/ThreadPool.cc
 )
 
-if(USE_PTHREADPOOL AND NOT USE_INTERNAL_PTHREADPOOL_IMPL)
+if(USE_PTHREADPOOL)
   list(APPEND Caffe2_CPU_SRCS
     utils/threadpool/pthreadpool-cpp.cc
     utils/threadpool/thread_pool_guard.cpp

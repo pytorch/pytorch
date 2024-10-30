@@ -150,6 +150,9 @@ def _tensor_rebuild_functions():
         # Reasoning is that we don't have control over the numpy functions, but
         # this utility is provided by pytorch
         torch._utils._rebuild_device_tensor_from_numpy,
+        # In 2.6, we should no longer have a dependency on numpy and the above
+        # _rebuild_device_tensor_from_numpy function.
+        torch._utils._rebuild_device_tensor_from_cpu_tensor,
     }
 
 
@@ -166,6 +169,7 @@ def _get_allowed_globals():
         "torch.device": torch.device,
         "_codecs.encode": encode,  # for bytes
         "builtins.bytearray": bytearray,  # for bytearray
+        "builtins.set": set,  # for set
     }
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():

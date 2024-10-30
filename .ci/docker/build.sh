@@ -355,6 +355,12 @@ case "$image" in
     CONDA_CMAKE=yes
     VISION=yes
     ;;
+  pytorch-linux-jammy-py3-clang18-asan)
+    ANACONDA_PYTHON_VERSION=3.10
+    CLANG_VERSION=18
+    CONDA_CMAKE=yes
+    VISION=yes
+    ;;
   pytorch-linux-jammy-py3.9-gcc11)
     ANACONDA_PYTHON_VERSION=3.9
     GCC_VERSION=11
@@ -408,9 +414,6 @@ case "$image" in
     DB=yes
     VISION=yes
     CONDA_CMAKE=yes
-    # snadampal: skipping sccache due to the following issue
-    # https://github.com/pytorch/pytorch/issues/121559
-    SKIP_SCCACHE_INSTALL=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
@@ -423,9 +426,6 @@ case "$image" in
     DB=yes
     VISION=yes
     CONDA_CMAKE=yes
-    # snadampal: skipping sccache due to the following issue
-    # https://github.com/pytorch/pytorch/issues/121559
-    SKIP_SCCACHE_INSTALL=yes
     # snadampal: skipping llvm src build install because the current version
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes

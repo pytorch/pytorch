@@ -3,6 +3,7 @@ import socket
 import uuid
 from contextlib import contextmanager
 from datetime import timedelta
+from enum import Enum
 from functools import partial
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 
@@ -133,6 +134,150 @@ def _get_backend_stream() -> torch.cuda.Stream:
     return _backend_stream
 
 
+def _pipelined_multi_all_gather_and_consume(
+    shard: List[torch.Tensor],
+    shard_consumer: Callable[[List[torch.Tensor], int], None],
+    ag_out: List[torch.Tensor],
+    group_name: str,
+) -> None:
+    """
+    Perform the following logic with micro-pipelined computation and
+    communication:
+
+        gathered = [
+            all_gather_tensor(x, gather_dim=0, group=group)
+            for x in shard
+        ]
+
+        shards = [[] for _ in range(group_size)]
+        for x in ag_out:
+            for i, y in enumerate(x.chunk(group_size)):
+                shards[i].append(y)
+
+        for src_rank, shard in enumerate(shards):
+            shard_consumer(shard, src_rank)
+    """
+    p2p_workspace_size_req = 0
+    for x in shard:
+        p2p_workspace_size_req += x.numel() * x.element_size()
+    symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
+    group_size = symm_mem.world_size
+    rank = symm_mem.rank
+
+    symm_mem.barrier(channel=0)
+    backend_stream = _get_backend_stream()
+    backend_stream.wait_stream(torch.cuda.current_stream())
+
+    for x, y in zip(shard, ag_out):
+        assert x.is_contiguous(), (
+            "_pipelined_all_gather_and_consume: all tensors "
+            "in `shard` must be contiguous"
+        )
+        assert y.is_contiguous(), (
+            "_pipelined_all_gather_and_consume: all tensors "
+            "in `ag_out` must be contiguous"
+        )
+        assert x.shape[0] * group_size == y.shape[0]
+        assert x.shape[1:] == y.shape[1:]
+
+    def copy_shard(dst: List[torch.Tensor], src: List[torch.Tensor]) -> None:
+        for d, s in zip(dst, src):
+            d.copy_(s)
+
+    def get_p2p_bufs(remote_rank: int) -> List[torch.Tensor]:
+        offset_bytes = 0
+        bufs = []
+        for x in shard:
+            buf = symm_mem.get_buffer(
+                remote_rank,
+                x.shape,
+                x.dtype,
+                storage_offset=offset_bytes // x.element_size(),
+            )
+            bufs.append(buf)
+            offset_bytes += buf.numel() * buf.element_size()
+        return bufs
+
+    local_p2p_bufs = get_p2p_bufs(rank)
+
+    # shards[i] => shard from rank i
+    shards: List[List[torch.Tensor]] = [[] for _ in range(group_size)]
+    for x in ag_out:
+        for i, y in enumerate(x.chunk(group_size)):
+            shards[i].append(y)
+
+    # Parallelization strategy: after each rank copies its shard into its local
+    # p2p buffer, every rank issues independent p2p copy -> shard_consumer
+    # sequences to two streams. In addition to computation/communication
+    # overlapping, the strategy allows for computation/computation overlapping,
+    # greatly reducing quantization inefficiency.
+    #
+    # Notation:
+    # - "mv" for the copy to local buffer
+    # - "cp" for p2p copies
+    # - "b" for barriers
+    #
+    # Constraints:
+    # - The GPU scheduler may or may not overlap "mv" with the first shard_consumer.
+    # - "cp" from different streams cannot overlap.
+    #
+    # Ideal scenario 0 - "mv" overlaps with the first shard_consumer:
+    #
+    # stream 0: [ shard_consumer ][ cp ][ shard_consumer ]
+    # stream 1: [ mv ][b][ cp ][ shard_consumer ]
+    #
+    # Ideal scenario 1 - "mv" is scheduled before the first shard_consumer:
+    #
+    # stream 0:       [ shard_consumer ][ cp ][ shard_consumer ]
+    # stream 1: [ mv ][b][ cp ][ shard_consumer ]
+    #
+    # Suboptimal scenario 0 - "mv" is scheduled after the first shard_consumer:
+    #
+    # stream 0: [ shard_consumer ]               [ cp ][ shard_consumer ]
+    # stream 1:                   [ mv ][b][ cp ][ shard_consumer ]
+    #
+    # Suboptimal scenario 0 - "b" is scheduled after the first shard_consumer:
+    #
+    # stream 0:       [ shard_consumer ]         [ cp ][ shard_consumer ]
+    # stream 1: [ mv ]                  [b][ cp ][ shard_consumer ]
+    #
+    # We haven't yet figured out a way to ensure "mv" and "b" are either
+    # overlapped with or scheduled before the first shard_consumer. Thus, to
+    # prevent suboptimal scenarios, we are giving up the chance to overlap "mv"
+    # and "b" with the first shard_consumer for now.
+    copy_shard(dst=local_p2p_bufs, src=shard)
+    symm_mem.barrier(channel=1)
+    backend_stream.wait_stream(torch.cuda.current_stream())
+
+    # At this point, all ranks have copied their local shard to
+    # their local p2p buffer. Each rank can now copy and consume
+    # remote shards.
+    shard_consumer(shard, rank)
+
+    for step in range(1, group_size):
+        if step % 2 == 0:
+            stream = torch.cuda.current_stream()
+        else:
+            stream = backend_stream
+        remote_rank = (step + rank) % group_size
+        remote_p2p_bufs = get_p2p_bufs(remote_rank)
+        with torch.cuda.stream(stream):
+            copy_shard(dst=shards[remote_rank], src=remote_p2p_bufs)
+            shard_consumer(shards[remote_rank], remote_rank)
+
+    # Copy from input to the all-gather output. Opportunistically overlap it
+    # with the last shard_consumer.
+    if group_size % 2 == 0:
+        stream = torch.cuda.current_stream()
+    else:
+        stream = backend_stream
+    with torch.cuda.stream(stream):
+        copy_shard(dst=shards[rank], src=shard)
+
+    torch.cuda.current_stream().wait_stream(backend_stream)
+    symm_mem.barrier(channel=0)
+
+
 def _pipelined_all_gather_and_consume(
     shard: torch.Tensor,
     shard_consumer: Callable[[torch.Tensor, int], None],
@@ -143,52 +288,21 @@ def _pipelined_all_gather_and_consume(
     Perform the following logic with micro-pipelined computation and
     communication:
 
-        tensor = all_gather_tensor(shard, gather_dim=1, group=group)
-        chunks = tensor.chunk(group.size())
-        for src_rank, chunk in enumerate(chunks):
-            shard_consumer(chunk, src_rank)
-
-    NOTE:
-    - The shard passed to shard consumer will always be contiguous.
+        ag_out = all_gather_tensor(shard, gather_dim=0, group=group)
+        shards = ag_out.chunk(group.size())
+        for src_rank, shard in enumerate(shards):
+            shard_consumer(shard, src_rank)
     """
-    p2p_workspace_size_req = shard.numel() * shard.element_size()
-    symm_mem = get_symm_mem_workspace(group_name, min_size=p2p_workspace_size_req)
-    group_size = symm_mem.world_size
-    rank = symm_mem.rank
 
-    symm_mem.barrier(channel=0)
-    backend_stream = _get_backend_stream()
-    backend_stream.wait_stream(torch.cuda.current_stream())
-    local_p2p_buf = symm_mem.get_buffer(rank, shard.shape, shard.dtype)
+    def adapter(shard: List[torch.Tensor], rank: int) -> None:
+        shard_consumer(shard[0], rank)
 
-    chunks = ag_out.chunk(group_size)
-
-    # While consuming local shard, copy it to the local p2p buffer
-    # in another stream.
-    shard_consumer(shard, rank)
-    chunks[rank].copy_(shard)
-
-    with torch.cuda.stream(backend_stream):
-        local_p2p_buf.copy_(shard)
-        symm_mem.barrier(channel=1)
-    torch.cuda.current_stream().wait_stream(backend_stream)
-
-    # At this point, all ranks have copied their local shard to
-    # their local p2p buffer. Each rank can now copy and consume
-    # remote shards.
-    for step in range(1, group_size):
-        if step % 2 == 0:
-            stream = torch.cuda.current_stream()
-        else:
-            stream = backend_stream
-        remote_rank = (step + rank) % group_size
-        remote_p2p_buf = symm_mem.get_buffer(remote_rank, shard.shape, shard.dtype)
-        with torch.cuda.stream(stream):
-            chunks[remote_rank].copy_(remote_p2p_buf)
-            shard_consumer(chunks[remote_rank], remote_rank)
-
-    torch.cuda.current_stream().wait_stream(backend_stream)
-    symm_mem.barrier(channel=0)
+    _pipelined_multi_all_gather_and_consume(
+        [shard],
+        adapter,
+        [ag_out],
+        group_name,
+    )
 
 
 def _pipelined_produce_and_all2all(
@@ -233,22 +347,68 @@ def _pipelined_produce_and_all2all(
         remote_rank = (rank - step) % group_size
         if step % 2 == 0:
             stream = torch.cuda.current_stream()
-            other_stream = backend_stream
             p2p_buf = local_p2p_buf_1
             remote_p2p_buf = get_p2p_buf(remote_rank, 1)
         else:
             stream = backend_stream
-            other_stream = torch.cuda.current_stream()
             p2p_buf = local_p2p_buf_0
             remote_p2p_buf = get_p2p_buf(remote_rank, 0)
         with torch.cuda.stream(stream):
+            # Parallelization strategy: every rank issues independent compute
+            # -> barrier -> p2p copy sequences on two streams. In addition to
+            # computation/communication overlapping, the strategy allows for
+            # computation/computation overlapping, greatly reducing
+            # quantization inefficiency.
+            #
+            # Ideally, stream activities would look like this ("b" for
+            # barriers, "cp" for p2p copies):
+            #
+            # [rank 0]
+            # stream 0:         [  chunk_producer  ][b][ cp ][  chunk_producer ][b][ cp ]
+            # stream 1: [  chunk_producer  ][b][ cp ][  chunk_producer  ][b][ cp ]
+            #
+            # [rank 1]
+            # stream 0:         [  chunk_producer  ][b][ cp ][  chunk_producer ][b][ cp ]
+            # stream 1: [  chunk_producer  ][b][ cp ][  chunk_producer  ][b][ cp ]
+            #
+            # Note that the barriers synchronize streams with the same ID
+            # across ranks. They don't synchronize streams on the same rank.
+            #
+            # Since the work on both streams is independent, there's no
+            # guarantee that the chunk_producer from stream 0 or stream 1 will
+            # be scheduled first. If there is a scheduling mismatch across
+            # ranks, the barrier forces all ranks to wait for the slowest.
+            #
+            # When scheduling mismatches occur among ranks, the stream
+            # activities might look like this (note that p2p copies from
+            # different streams cannot overlap with each other):
+            #
+            # [rank 0]
+            # stream 0: [  chunk_producer  ][b        ][ cp ][  chunk_producer ][b       ][ cp ]
+            # stream 1:         [  chunk_producer  ][b]      [ cp ][  chunk_producer  ][b]      [ cp ]
+            #
+            # [rank 1]
+            # stream 0:         [  chunk_producer  ][b]      [ cp ][  chunk_producer  ][b]      [ cp ]
+            # stream 1: [  chunk_producer  ][b        ][ cp ][  chunk_producer  ][b      ][ cp ]
+            #
+            # To prevent this, we need to ensure that the chunk_producer on
+            # stream 1 gets scheduled first on every rank. Without access to
+            # the underlying kernels, CUDA offers no API to control the
+            # scheduling order of two independent, overlapping kernels. Our
+            # solution is to issue a small sleep kernel in stream 0. The sleep
+            # duration is insignificant, but having an extra task in stream 0
+            # will almost guarantee that the chunk_producer on stream 1 gets
+            # scheduled first. Once the first chunk_producer is scheduled in
+            # the correct order, there's very little room for the scheduling
+            # order of subsequent kernels to be inconsistent across ranks.
+            if step == 2:
+                torch.cuda._sleep(100)
             chunk_producer((rank + step) % group_size, p2p_buf)
             symm_mem.barrier(channel=step % 2)
-            # Make the other stream to wait for the barrier on the current
-            # stream to finish before chunk_producer to avoid the compute
-            # delaying the barrier.
-            other_stream.wait_stream(stream)
             out_chunks[remote_rank].copy_(remote_p2p_buf)
+            # The local P2P buffer can only be overwritten by the next
+            # chunk_producer after all peers have finished reading from it.
+            symm_mem.barrier(channel=step % 2)
 
     chunk_producer(rank, out_chunks[rank])
     torch.cuda.current_stream().wait_stream(backend_stream)
@@ -286,10 +446,44 @@ lib.define(
 )
 
 
+class _ScaleMode(Enum):
+    UNSCALED = "unscaled"
+    TENSOR_WISE = "tensor-wise"
+    ROW_WISE_SHARDED = "row-wise-sharded"
+    ROW_WISE_REPLICATED = "row-wise-replicated"
+
+
+def _check_and_verify_fp8_all_gather_scale_mode(
+    shard: torch.Tensor, scale: Optional[torch.Tensor], gather_dim: int, group_size: int
+) -> _ScaleMode:
+    full_shape = list(shard.shape)
+    full_shape[gather_dim] *= group_size
+
+    if scale is None:
+        return _ScaleMode.UNSCALED
+    elif scale.shape[:-1] == shard.shape[:-1] and scale.shape[-1] == 1:
+        # Row-wise scaling
+        #
+        # NOTE: when the last dim of both A_shard and A_scale is one, we can't
+        # tell if A_scale is replicated tensor-wise scale or sharded row-wise
+        # scale. Treating it as row-wise scaling for safety.
+        return _ScaleMode.ROW_WISE_SHARDED
+    elif scale.numel() == 1:
+        return _ScaleMode.TENSOR_WISE
+    elif list(scale.shape[:-1]) == full_shape[:-1]:
+        return _ScaleMode.ROW_WISE_REPLICATED
+    else:
+        raise ValueError(
+            "Invalid scale shape for fp8 all-gather "
+            f"(shard shape: {shard.shape}, scale shape: {scale.shape})"
+        )
+
+
 def _fused_all_gather_matmul_impl(
     mm_out_op: torch._ops.OpOverload,
     A_shard: torch.Tensor,
     Bs: List[torch.Tensor],
+    A_scale: Optional[torch.Tensor],
     kwargs_list: List[Dict[str, Any]],
     out_dtypes: List[Optional[torch.dtype]],
     gather_dim: int,
@@ -313,36 +507,96 @@ def _fused_all_gather_matmul_impl(
     # The flattened tensor doesn't need to be contiguous (for computation
     # efficiency), as _pipelined_all_gather_and_consume guarantees that shards
     # passed to shard_consumer are contiguous.
-    x = A_shard.movedim(gather_dim, 0)
-    leading_dims = [group.size()] + list(x.shape[:-1])
-    x = x.flatten(0, -2)
+    A_shard_flat = A_shard.movedim(gather_dim, 0)
+    leading_dims = [group.size()] + list(A_shard_flat.shape[:-1])
+    A_shard_flat = A_shard_flat.flatten(0, -2)
 
     # Helper function for reverting the above transformation
     def unflatten(t: torch.Tensor) -> torch.Tensor:
         return t.view(*leading_dims, -1).flatten(0, 1).movedim(0, gather_dim)
 
-    ag_out = x.new_empty(
-        x.shape[0] * group.size(),
-        x.shape[1],
+    A_flat = A_shard_flat.new_empty(
+        A_shard_flat.shape[0] * group.size(),
+        A_shard_flat.shape[1],
     )
+
     outputs = [
-        x.new_empty(x.shape[0] * group.size(), B.shape[1], dtype=out_dtype or B.dtype)
+        A_flat.new_empty(A_flat.shape[0], B.shape[1], dtype=out_dtype or B.dtype)
         for B, out_dtype in zip(Bs, out_dtypes)
     ]
     output_shards = [output.chunk(group.size()) for output in outputs]
 
-    # Computing block-wise matmul along the first dim of A
-    def shard_consumer(shard: torch.Tensor, rank: int) -> None:
-        for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
-            mm_out_op(shard, B, **kwargs, out=output_shards[idx][rank])
-
-    _pipelined_all_gather_and_consume(
-        x,
-        shard_consumer,
-        ag_out,
-        group_name,
+    scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
+        shard=A_shard, scale=A_scale, gather_dim=gather_dim, group_size=group.size()
     )
-    return unflatten(ag_out), [unflatten(output) for output in outputs]
+
+    # Computing block-wise matmul along the first dim of A
+    if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
+        assert A_scale is not None
+        A_scale_shard = A_scale.movedim(gather_dim, 0).flatten(0, -2)
+        A_scale_flat = A_scale_shard.new_empty(
+            A_scale_shard.shape[0] * group.size(),
+            A_scale_shard.shape[1],
+        )
+
+        def row_wise_sharded_consumer(shard: List[torch.Tensor], rank: int) -> None:
+            for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
+                mm_out_op(
+                    shard[0],
+                    B,
+                    scale_a=shard[1],
+                    **kwargs,
+                    out=output_shards[idx][rank],
+                )
+
+        _pipelined_multi_all_gather_and_consume(
+            [A_shard_flat, A_scale_shard],
+            row_wise_sharded_consumer,
+            [A_flat, A_scale_flat],
+            group_name,
+        )
+    elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
+        assert A_scale is not None
+        A_scale_shards = (
+            A_scale.movedim(gather_dim, 0).flatten(0, -2).chunk(group.size())
+        )
+
+        def row_wise_replicated_consumer(shard: torch.Tensor, rank: int) -> None:
+            for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
+                mm_out_op(
+                    shard,
+                    B,
+                    scale_a=A_scale_shards[rank],
+                    **kwargs,
+                    out=output_shards[idx][rank],
+                )
+
+        _pipelined_all_gather_and_consume(
+            A_shard_flat,
+            row_wise_replicated_consumer,
+            A_flat,
+            group_name,
+        )
+    else:
+        if scale_mode == _ScaleMode.TENSOR_WISE:
+            assert A_scale is not None
+            for kwargs in kwargs_list:
+                kwargs["scale_a"] = A_scale
+        else:
+            assert scale_mode == _ScaleMode.UNSCALED
+
+        def default_consumer(shard: torch.Tensor, rank: int) -> None:
+            for idx, (B, kwargs) in enumerate(zip(Bs, kwargs_list)):
+                mm_out_op(shard, B, **kwargs, out=output_shards[idx][rank])
+
+        _pipelined_all_gather_and_consume(
+            A_shard_flat,
+            default_consumer,
+            A_flat,
+            group_name,
+        )
+
+    return unflatten(A_flat), [unflatten(output) for output in outputs]
 
 
 @torch.library.impl(lib, "fused_all_gather_matmul", "Meta")
@@ -388,6 +642,7 @@ def _fused_all_gather_matmul(
             torch.ops.aten.mm.out,
             A_shard,
             Bs,
+            None,
             [{} for B in Bs],
             [B.dtype for B in Bs],
             gather_dim,
@@ -417,6 +672,25 @@ def _fused_all_gather_scaled_matmul_fallback(
     A = torch.ops._c10d_functional.wait_tensor(A)
     A = A.view(group_size, *A_shard.shape).movedim(gather_dim + 1, 1).flatten(0, 1)
 
+    scale_mode = _check_and_verify_fp8_all_gather_scale_mode(
+        shard=A_shard, scale=A_scale, gather_dim=gather_dim, group_size=group_size
+    )
+    if scale_mode == _ScaleMode.ROW_WISE_SHARDED:
+        A_scale_shard = A_scale
+        A_scale = torch.ops._c10d_functional.all_gather_into_tensor(
+            A_scale.contiguous(), group_size, group_name
+        )
+        A_scale = torch.ops._c10d_functional.wait_tensor(A_scale)
+        A_scale = (
+            A_scale.view(group_size, *A_scale_shard.shape)
+            .movedim(gather_dim + 1, 1)
+            .flatten(0, -2)
+        )
+    elif scale_mode == _ScaleMode.ROW_WISE_REPLICATED:
+        A_scale = A_scale.movedim(gather_dim, 0).flatten(0, -2)
+    else:
+        assert scale_mode == _ScaleMode.TENSOR_WISE
+
     def scaled_matmul(
         A: torch.Tensor,
         B: torch.Tensor,
@@ -429,7 +703,14 @@ def _fused_all_gather_scaled_matmul_fallback(
     ) -> torch.Tensor:
         leading_dims = A.shape[:-1]
         res = torch.ops.aten._scaled_mm(
-            A.flatten(0, -2), B, A_scale, B_scale, out_dtype=out_dtype
+            A.flatten(0, -2),
+            B,
+            A_scale,
+            B_scale,
+            bias,
+            result_scale,
+            out_dtype=out_dtype,
+            use_fast_accum=use_fast_accum,
         )
         return res.unflatten(0, leading_dims)
 
@@ -465,7 +746,10 @@ def _fused_all_gather_scaled_matmul(
         res = torch.ops.aten._scaled_mm(A.flatten(0, -2), B, A_scale, B_scale)
         res = res.unflatten(0, leading_dims)
 
-    Optimal stride order for A_shard - if A_shard.movedim(gather_dim, 0) is
+    The input `A_scale` can be tensor-wise, row-wise-sharded or
+    row-wise-replicated.
+
+    Optimal stride order for `A_shard` - if `A_shard.movedim(gather_dim, 0)` is
     contiguous, no extra copy is required for input layout transformation.
     Otherwise A_shard needs to be copied once.
     """
@@ -499,9 +783,9 @@ def _fused_all_gather_scaled_matmul(
             torch.ops.aten._scaled_mm.out,
             A_shard,
             Bs,
+            A_scale,
             [
                 {
-                    "scale_a": A_scale,
                     "scale_b": B_scale,
                     "bias": bias,
                     "scale_result": result_scale,
@@ -548,6 +832,7 @@ def _fused_matmul_reduce_scatter_impl(
     mm_out_op: torch._ops.OpOverload,
     A: torch.Tensor,
     B: torch.Tensor,
+    A_scale: Optional[torch.Tensor],
     kwargs: Dict[str, Any],
     out_dtype: Optional[torch.dtype],
     reduce_op: str,
@@ -571,16 +856,36 @@ def _fused_matmul_reduce_scatter_impl(
     out_shape = [*A.shape[:-1], B.shape[1]]
     out_shape[scatter_dim] //= group.size()
 
-    # Move the gather_dim to the front and flatten the tensor into a 2D matrix
+    # Move the scatter_dim to the front and flatten the tensor into a 2D matrix
     x = A.movedim(scatter_dim, 0)
     leading_dims = [group.size()] + list(x.shape[:-1])
     leading_dims[1] //= group.size()
     x = x.flatten(0, -2)
-    shards = x.chunk(group.size())
+    A_shards = x.chunk(group.size())
+
+    A_scale_shards = None
+    if A_scale is None:
+        pass
+    elif A_scale.numel() == 1:
+        A_scale_shards = [A_scale] * group.size()
+    else:
+        if A_scale.shape[:-1] != A.shape[:-1]:
+            raise ValueError(
+                "For row-wise scaling, the leading dims of A_scale "
+                "must match the leading dims of A "
+                f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
+            )
+        A_scale = A_scale.movedim(scatter_dim, 0).contiguous().flatten(0, -2)
+        A_scale_shards = list(A_scale.chunk(group.size()))
 
     # Computing block-wise matmul along the first dim of A
     def chunk_producer(rank: int, out: torch.Tensor) -> None:
-        mm_out_op(shards[rank], B, **kwargs, out=out)
+        if A_scale_shards is not None:
+            mm_out_op(
+                A_shards[rank], B, scale_a=A_scale_shards[rank], **kwargs, out=out
+            )
+        else:
+            mm_out_op(A_shards[rank], B, **kwargs, out=out)
 
     stacked_partials = x.new_empty(x.shape[0], B.shape[1], dtype=out_dtype or A.dtype)
 
@@ -640,6 +945,7 @@ def _fused_matmul_reduce_scatter(
             mm_out_op=torch.ops.aten.mm.out,
             A=A,
             B=B,
+            A_scale=None,
             kwargs={},
             out_dtype=A.dtype,
             reduce_op=reduce_op,
@@ -662,6 +968,20 @@ def _fused_scaled_matmul_reduce_scatter_fallback(
     out_dtype: Optional[torch.dtype] = None,
     use_fast_accum: bool = False,
 ) -> torch.Tensor:
+    if A_scale.numel() > 1:
+        if A_scale.shape[:-1] != A.shape[:-1]:
+            raise ValueError(
+                "For row-wise scaling, the leading dims of A_scale "
+                "must match the leading dims of A "
+                f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
+            )
+        A_scale = A_scale.flatten(0, -2).contiguous()
+    elif A_scale.numel() != 1:
+        raise ValueError(
+            "Invalid A_scale shape "
+            f"(A shape: {A.shape}, A_scale shape: {A_scale.shape})"
+        )
+
     C = torch._scaled_mm(
         A.flatten(0, -2).contiguous(),
         B,
@@ -716,8 +1036,8 @@ def _fused_scaled_matmul_reduce_scatter(
             mm_out_op=torch.ops.aten._scaled_mm.out,
             A=A,
             B=B,
+            A_scale=A_scale,
             kwargs={
-                "scale_a": A_scale,
                 "scale_b": B_scale,
                 "bias": bias,
                 "scale_result": result_scale,
@@ -733,14 +1053,14 @@ def _fused_scaled_matmul_reduce_scatter(
 
 def restride_A_for_fused_matmul_reduce_scatter(
     t: torch.Tensor,
-    gather_dim: int,
+    scatter_dim: int,
 ) -> torch.Tensor:
     """
     Restride the `A_shard` arg of `fused_matmul_reduce_scatter` for optimal
     perf. See the doc for `fused_matmul_reduce_scatter` for detail.
     """
     perm = list(range(len(t.shape)))
-    perm.insert(0, perm.pop(gather_dim))
+    perm.insert(0, perm.pop(scatter_dim))
     return make_contiguous_for_perm(t, perm)
 
 

@@ -103,6 +103,9 @@ inline void drop(Stack* stack, size_t n) {
   drop(*stack, n);
 }
 inline IValue pop(Stack& stack) {
+  if (stack.empty()) {
+    throw std::runtime_error("pop() called on empty stack");
+  }
   auto r = std::move(stack.back());
   stack.pop_back();
   return r;
@@ -193,7 +196,7 @@ struct TuplePacker {
 template <typename... Args>
 struct TuplePacker<0, Args...> {
   // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
-  static void execute(Stack& /*stack*/, std::tuple<Args...>&& /*t*/){};
+  static void execute(Stack& /*stack*/, std::tuple<Args...>&& /*t*/){}
 };
 
 template <typename... Args>
