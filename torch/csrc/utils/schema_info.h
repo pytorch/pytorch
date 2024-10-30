@@ -106,6 +106,7 @@ struct TORCH_API SchemaInfo {
   // Alias map of outputs to inputs
   std::vector<std::unordered_set<size_t>> output_alias_map_;
 
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const c10::FunctionSchema schema_;
 
   bool alias_maps_current_;

@@ -12,6 +12,7 @@ permissions: read-all
 
 jobs:
   update-commit-hash:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
@@ -41,6 +42,7 @@ jobs:
           pytorchbot-token: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
   update-slow-tests:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     environment: update-commit-hash
     steps:
