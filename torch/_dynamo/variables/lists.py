@@ -518,6 +518,12 @@ class DequeVariable(CommonListMethodsVariable):
             self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
 
+        maxlen = self.maxlen.as_python_constant()
+        if maxlen is not None:
+            slices = slice(-maxlen, None)
+        else:
+            slices = None
+
         if (
             name == "extendleft"
             and self.mutable_local
@@ -529,6 +535,7 @@ class DequeVariable(CommonListMethodsVariable):
             prefix.reverse()
             tx.output.side_effects.mutation(self)
             self.items = prefix + list(self.items)
+            slices = slice(None, maxlen)
             result = ConstantVariable.create(None)
         elif name == "popleft" and self.mutable_local:
             assert not args
@@ -541,12 +548,13 @@ class DequeVariable(CommonListMethodsVariable):
             assert not kwargs
             tx.output.side_effects.mutation(self)
             self.items = [args[0]] + list(self.items)
+            slices = slice(None, maxlen)
             result = ConstantVariable.create(None)
         else:
             result = super().call_method(tx, name, args, kwargs)
 
-        if self.maxlen.as_python_constant() is not None:
-            self.items = list(self.items)[-self.maxlen.as_python_constant() :]
+        if slices is not None and maxlen is not None and len(self.items) > maxlen:
+            self.items = list(self.items)[slices]
         return result
 
 
