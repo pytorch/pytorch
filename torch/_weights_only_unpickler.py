@@ -68,7 +68,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
 import torch
 from torch._utils import IMPORT_MAPPING, NAME_MAPPING
