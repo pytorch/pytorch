@@ -1717,7 +1717,7 @@ class PatternMatcherPass:
     def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
-    def apply(self, gm: torch.fx.GraphModule) -> int:
+    def apply(self, gm: Union[torch.fx.GraphModule, torch.fx.Graph]) -> int:
         if not self.patterns:
             return 0
         if isinstance(gm, torch.fx.GraphModule):
