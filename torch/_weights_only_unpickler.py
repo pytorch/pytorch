@@ -90,6 +90,7 @@ def _add_safe_globals(safe_globals: List[Any]):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
 
+
 def _get_safe_globals() -> List[Any]:
     global _marked_safe_globals_set
     return list(_marked_safe_globals_set)
