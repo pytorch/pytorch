@@ -150,8 +150,8 @@ PyObject* THCPModule_canDeviceAccessPeer_wrap(PyObject* self, PyObject* args) {
       THPUtils_checkLong(arg1), "invalid argument to canDeviceAccessPeer");
   TORCH_CHECK(
       THPUtils_checkLong(arg2), "invalid argument to canDeviceAccessPeer");
-  int64_t device = THPUtils_unpackLong(arg1);
-  int64_t peer_device = THPUtils_unpackLong(arg2);
+  auto device = THPUtils_unpackDeviceIndex(arg1);
+  auto peer_device = THPUtils_unpackDeviceIndex(arg2);
 
   torch::utils::device_lazy_init(at::kCUDA);
   auto can_access = at::cuda::canDeviceAccessPeer(device, peer_device);
@@ -1719,7 +1719,7 @@ PyObject* THCPModule_cuda_tunableop_get_results(
   for (const auto& [op_sig, kernelmap] : results) {
     result_size += kernelmap.size();
   }
-  THPObjectPtr outer_tuple(PyTuple_New(result_size));
+  THPObjectPtr outer_tuple(PyTuple_New(static_cast<Py_ssize_t>(result_size)));
   if (!outer_tuple)
     throw python_error();
   size_t result_index = 0;
@@ -1759,7 +1759,8 @@ PyObject* THCPModule_cuda_tunableop_get_validators(
   auto validators = at::cuda::tunable::getTuningContext()
                         ->GetTuningResultsValidator()
                         .GetAllValidators();
-  THPObjectPtr outer_tuple(PyTuple_New(validators.size()));
+  THPObjectPtr outer_tuple(
+      PyTuple_New(static_cast<Py_ssize_t>(validators.size())));
   if (!outer_tuple)
     throw python_error();
   size_t validator_index = 0;
