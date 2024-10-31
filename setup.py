@@ -442,10 +442,6 @@ def check_submodules():
         os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
         ["CMakeLists.txt"],
     )
-    check_for_files(
-        os.path.join(third_party_path, "onnx", "third_party", "benchmark"),
-        ["CMakeLists.txt"],
-    )
 
 
 # Windows has very bad support for symbolic links.
