@@ -2509,10 +2509,6 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """
-        Note that V.graph.scheduler can be None when codegening triton template
-        kernels.
-        """
         self.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
@@ -2520,6 +2516,9 @@ class Kernel(CodeGen):
         """
         Any buffers that are both created and have a last use in the
         same kernel can be removed.
+
+        Note that V.graph.scheduler can be None when codegening triton template
+        kernels.
         """
         scheduler = V.graph.scheduler
         if not scheduler:
