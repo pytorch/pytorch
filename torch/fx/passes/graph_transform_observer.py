@@ -15,8 +15,19 @@ __all__ = ["GraphTransformObserver"]
 class GraphTransformObserver:
     __pass_count = 0
 
-    def __init__(self, gm: GraphModule, passname: str, log_url: Optional[str] = None):
+    def __init__(
+        self, gm: GraphModule, passname: str, *, log_url: Optional[str] = None
+    ):
+        """
+        log_url is inferred to be torch._inductor.config.trace.log_url_for_graph_xform unless otherwise specified
+        """
+
         # If log_url is None, we don't log anything
+        if log_url is None:
+            from torch._inductor.config import trace
+
+            log_url = trace.log_url_for_graph_xform
+
         self.log_url = log_url
         if self.log_url is None:
             return
