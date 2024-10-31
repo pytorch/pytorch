@@ -45,7 +45,7 @@ class Config:
         justknob: the name of the feature / JK. In OSS this is unused.
         default: is the value to default this knob to in OSS.
         env_name_force: The environment variable to read that is a FORCE
-            enviornment variable. I.e. it overrides everything
+            environment variable. I.e. it overrides everything
         env_name_default: The environment variable to read that changes the
             default behaviour. I.e. user overrides take preference.
     """
@@ -60,20 +60,13 @@ class Config:
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
 
-
 def _read_env_variable(name: str) -> Optional[bool]:
-    if (env := os.getenv(name)) is not None:
-        env = env.upper()
-        if env in ("1", "TRUE"):
-            return True
-        if env in ("0", "FALSE"):
-            return False
-        warnings.warn(
-            f"Difficulty parsing env variable {name}={env} - Assuming env variable means true and returning True",
-        )
+    value = os.environ.get(name)
+    if value == "1":
         return True
+    if value == "0":
+        return False
     return None
-
 
 def install_config_module(module: ModuleType) -> None:
     """
