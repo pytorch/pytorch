@@ -224,9 +224,6 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             # Sometimes inductor configs are unpickleable and can fail
             raise BypassAOTAutogradCache from e
 
-    def debug_lines(self) -> List[str]:
-        return AOTAutogradCachePickler.debug_lines(self)
-
 
 def _reduce_aot_config(aot_config: AOTConfig):
     """
@@ -256,9 +253,15 @@ def _reduce_tensor(tensor):
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
-    dispatch_table = FxGraphCachePickler.dispatch_table.copy()
-    dispatch_table[AOTConfig] = _reduce_aot_config
-    dispatch_table[torch.Tensor] = _reduce_tensor
+    def __init__(self):
+        super().__init__()
+        self.dispatch_table: Dict
+        self.dispatch_table.update(
+            {
+                AOTConfig: _reduce_aot_config,
+                torch.Tensor: _reduce_tensor,
+            }
+        )
 
 
 def autograd_cache_key(
@@ -273,9 +276,10 @@ def autograd_cache_key(
     """
     check_cacheable(gm)
     details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
+    pickler = AOTAutogradCachePickler()
     # The prefix distinguishes among the other kinds of objects we cache
-    key = "a" + AOTAutogradCachePickler.get_hash(details)
-    debug_lines = details.debug_lines()
+    key = "a" + pickler.get_hash(details)
+    debug_lines = pickler.debug_lines(details)
     log.debug(
         "Autograd graph cache hash details for key %s:\n%s",
         key,
