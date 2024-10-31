@@ -2575,9 +2575,9 @@ class TestSDPACudaOnly(NNTestCase):
             shape_q = [BHSqD[idx] for idx in permute_order]
             shape_kv = [BHSkvD[idx] for idx in permute_order]
             reverse = [permute_order.index(idx) for idx in range(4)]
-            q = torch.randn(*shape_q, dtype=torch.bfloat16, device='cuda').permute(reverse)
-            k = torch.randn(*shape_kv, dtype=torch.bfloat16, device='cuda').permute(reverse)
-            v = torch.randn(*shape_kv, dtype=torch.bfloat16, device='cuda').permute(reverse)
+            q = torch.randn(*shape_q, dtype=torch.bfloat16, device='cuda', requires_grad=True).permute(reverse)
+            k = torch.randn(*shape_kv, dtype=torch.bfloat16, device='cuda', requires_grad=True).permute(reverse)
+            v = torch.randn(*shape_kv, dtype=torch.bfloat16, device='cuda', requires_grad=True).permute(reverse)
             self.assertEqual(q.shape, BHSqD)
             self.assertEqual(k.shape, BHSkvD)
             self.assertEqual(v.shape, BHSkvD)
@@ -2585,6 +2585,7 @@ class TestSDPACudaOnly(NNTestCase):
             with sdpa_kernel(backend):
                 out = F.scaled_dot_product_attention(q, k, v)
                 self.assertTrue(out.permute(permute_order).is_contiguous())
+                out.sum().backward()
 
         permute_orders = list()
         permutable = [0, 1, 2]

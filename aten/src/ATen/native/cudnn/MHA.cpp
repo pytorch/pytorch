@@ -324,6 +324,37 @@ void alloc_with_matching_layout(
                .as_strided(
                    at::IntArrayRef(shape), at::IntArrayRef(ordered_strides), 0);
 }
+
+void permute_to_matching_layout(const Tensor& output, Tensor& grad_output)
+{
+  const int dims = output.sizes().size();
+  std::vector<int64_t> outer_to_inner(dims);
+  std::iota(outer_to_inner.begin(), outer_to_inner.end(), 0);
+  const auto o_strides = output.strides();
+  std::stable_sort(
+      outer_to_inner.begin(), outer_to_inner.end(), [&o_strides](int idx1, int idx2) {
+        return o_strides[idx1] > o_strides[idx2];
+      });
+  std::vector<int64_t> inverse(dims);
+  for (int d = 0; d < dims; d++) {
+    inverse[d] = std::find(outer_to_inner.begin(), outer_to_inner.end(), d) - outer_to_inner.begin();
+  }
+  grad_output = grad_output.permute(at::IntArrayRef(outer_to_inner)).contiguous().permute(at::IntArrayRef(inverse));
+}
+
+bool same_strides(const Tensor& t1, const Tensor& t2) {
+  std::vector<int> t1_strides_no_ones;
+  std::vector<int> t2_strides_no_ones;
+  std::copy_if(t1.strides().begin(), t1.strides().end(),
+               std::back_inserter(t1_strides_no_ones), [](int i) {
+                 return i > 1;
+               });
+  std::copy_if(t2.strides().begin(), t2.strides().end(),
+               std::back_inserter(t2_strides_no_ones), [](int i) {
+                 return i > 1;
+               });
+  return std::equal(t1_strides_no_ones.begin(), t1_strides_no_ones.end(), t2_strides_no_ones.begin(), t2_strides_no_ones.end());
+}
 } // namespace
 
 auto build_graph_and_tensors(
@@ -693,30 +724,16 @@ void run_cudnn_SDP_bprop(
   }
 
   Tensor dO_ = dO;
-  if (!dO.strides()[dO.strides().size() - 1]) {
-    TORCH_WARN(
-        "cuDNN SDPA backward got an innermost stride of 0 in grad_out, which is unsupported."
-        " Materializing a contiguous tensor which will increase memory usage...");
-    dO_ = dO.contiguous();
-  }
-  if ( // handle trivial transposed case with a transposed dim of size 1
-       // see also:  https://github.com/pytorch/pytorch/issues/134001
-      !(dO_.is_contiguous() && o.is_contiguous()) &&
-      !std::equal(
-          o.strides().begin(), o.strides().end(), dO.strides().begin())) {
-    TORCH_WARN(
+  if (!same_strides(o, dO)) {
+    TORCH_WARN_ONCE(
         "cuDNN SDPA backward got grad_output.strides() != output.strides(), "
         "attempting to materialize a grad_output with matching strides...");
-    if (o.is_contiguous()) {
-      dO_ = dO.contiguous();
-    } else {
-      dO_ = dO.transpose(1, 2).contiguous().transpose(1, 2);
-    }
+    TORCH_WARN_ONCE("output: ", o.strides(), " grad_output: ", dO_.strides());
+    permute_to_matching_layout(o, dO_);
   }
+  TORCH_WARN("output: ", o.strides(), " grad_output: ", dO_.strides());
   TORCH_INTERNAL_ASSERT(
-      (dO_.is_contiguous() && o.is_contiguous()) ||
-          std::equal(
-              dO_.strides().begin(), dO_.strides().end(), o.strides().begin()),
+      same_strides(o, dO_),
       "cuDNN SDPA expected grad_output.strides() == output.strides(), "
       "the previous step probably failed to materialize a grad_output "
       "with matching strides...");
