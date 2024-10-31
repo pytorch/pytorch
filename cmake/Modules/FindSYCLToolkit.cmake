@@ -22,6 +22,70 @@ if(nosyclfound)
   return()
 endif()
 
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+  set(SYCL_EXECUTABLE_NAME icpx)
+elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
+  set(SYCL_EXECUTABLE_NAME icx)
+endif()
+
+# Find SYCL compiler executable.
+find_program(
+  SYCL_COMPILER
+  NAMES ${SYCL_EXECUTABLE_NAME}
+  PATHS "${SYCL_ROOT}"
+  PATH_SUFFIXES bin bin64
+  NO_DEFAULT_PATH
+  )
+
+function(parse_sycl_compiler_version version_number)
+  # Generate a small C++ source code file to determine the SYCL compiler version.
+  set(SOURCE_CODE
+  "
+    #include <iostream>
+    int main() {
+    #if defined(__INTEL_LLVM_COMPILER)
+      std::cout << \"__INTEL_LLVM_COMPILER=\" << __INTEL_LLVM_COMPILER << std::endl;
+    #endif
+      return 0;
+    }
+  ")
+  set(SOURCE_CODE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+  set(SOURCE_CODE_FILE "${SOURCE_CODE_DIR}/sycl_compiler_version.cpp")
+  set(SOURCE_CODE_EXCUTABLE_NAME "${SOURCE_CODE_FILE}.exe")
+  file(WRITE ${SOURCE_CODE_FILE} "${SOURCE_CODE}")
+  # Compile the source code file.
+  execute_process(
+    COMMAND "${SYCL_COMPILER}"
+    "-fsycl"
+    ${SOURCE_CODE_FILE}
+    "-o"
+    ${SOURCE_CODE_EXCUTABLE_NAME}
+    WORKING_DIRECTORY ${SOURCE_CODE_DIR}
+    RESULT_VARIABLE result
+    TIMEOUT 60
+    )
+  if(result)
+    return()
+  endif()
+  # Run the generated executable to output et the SYCL compiler version.
+  execute_process(
+    COMMAND ${SOURCE_CODE_EXCUTABLE_NAME}
+    WORKING_DIRECTORY ${SOURCE_CODE_DIR}
+    OUTPUT_VARIABLE output
+    RESULT_VARIABLE result
+    TIMEOUT 60
+    )
+  if(result)
+    return()
+  endif()
+  # Parse the version number from the output.
+  string(REGEX REPLACE "^__INTEL_LLVM_COMPILER=" "" VERSION_NUMBER_MATCH "${output}")
+  set(${version_number} "${VERSION_NUMBER_MATCH}" PARENT_SCOPE)
+endfunction()
+
+parse_sycl_compiler_version(SYCL_COMPILER_VERSION)
+message(FATAL_ERROR ${SYCL_COMPILER_VERSION})
+
 # Find include path from binary.
 find_file(
   SYCL_INCLUDE_DIR
