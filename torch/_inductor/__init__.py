@@ -85,6 +85,8 @@ def aoti_compile_and_package(
 
     assert package_path is None or package_path.endswith(".pt2")
 
+    inductor_configs = inductor_configs or {}
+
     if inductor_configs.get("aot_inductor.output_path"):
         raise RuntimeError(
             "Please pass in a package path to aot_inductor_compile() instead "
