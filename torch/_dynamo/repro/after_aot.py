@@ -323,9 +323,7 @@ def save_graph_repro(
     )
 
 
-def dump_compiler_graph_state(
-    gm, args, compiler_name, *, accuracy=None, save_graph_repro_func=save_graph_repro
-):
+def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -334,7 +332,7 @@ def dump_compiler_graph_state(
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
     with open(file_name, "w") as fd:
-        save_graph_repro_func(
+        save_graph_repro(
             fd, gm, args, compiler_name, save_dir=subdir, accuracy=accuracy
         )
     curdir = os.getcwd()

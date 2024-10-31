@@ -1180,10 +1180,6 @@ def compile_fx_aot(
     config_patches: Optional[Dict[str, str]] = None,
 ) -> str:
 
-    for node in model_.graph.nodes:
-        if node.target == torch.ops.aten.relu.default:
-            raise Exception("dummy error: relu is not supported in AOTInductor")
-
     config_patches: Dict[str, Any] = (
         {"cpp_wrapper": True}
         if config_patches is None

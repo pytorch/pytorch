@@ -3,10 +3,7 @@
 A demo of minifier for AOTI. Code mostly copied from `_dynamo/repro/after_aot.py`.
 
 
-Run the code snippet below:
-
-[TODO]: Still need to set up this part of the demo with a better example. Currently I just error on relu.
-
+Run the code snippet below, which inject an error on relu.
 
 ```python
 class Model(torch.nn.Module):
@@ -22,7 +19,8 @@ class Model(torch.nn.Module):
         x = self.sigmoid(x)
         return x
 
-
+# inject error on relu
+torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY = "compile_error"
 torch._inductor.config.dump_aoti_minifier = True
 
 package_path = os.path.join(os.getcwd(), "my_package.pt2")
