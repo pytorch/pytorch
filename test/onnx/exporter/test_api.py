@@ -288,7 +288,6 @@ class TestExportAPIDynamo(common_utils.TestCase):
             dynamo=True,
         )
         all_nodes = [n.op_type for n in onnx_program.model.graph]
-        # The dispatcher should pick the correct overload based on the input types
         self.assertIn("Sub", all_nodes)
         self.assertNotIn("Add", all_nodes)
 
