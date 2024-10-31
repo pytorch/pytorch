@@ -2188,11 +2188,6 @@ def _simulate_comms_compute(
     def _prev_ops(stage_idx):
         rank = stage_to_rank(stage_idx)
         ops = copy.deepcopy(schedule[rank])
-        if len(pipeline_order[rank]):
-            # batched comm ops may need to be jointly scheduled (e.g. send_f_recv_b depends on and is a dep of send_b_recv_f)
-            # assuming we iterate in sorted rank order, peeking at the next unscheduled action for later ranks should unblock us
-            ops.append(pipeline_order[rank][0])
-
         return ops
 
     def _ready_to_schedule(action: Optional[_Action]) -> bool:
