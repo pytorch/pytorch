@@ -280,7 +280,7 @@ def justknobs_feature(
     return justknobs_check(name)
 
 
-def justknobs_check(name: str, default=True) -> bool:
+def justknobs_check(name: str, default: bool = True) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
     where you can toggle this value to False in JK without having to
