@@ -36,6 +36,7 @@ void quantized_matmul_pt2(
     binary_alpha,
     input_scale,
     input_zero_point,
+    other,
     unary_post_op,
     unary_post_op_args,
     unary_post_op_algorithm,
@@ -45,8 +46,6 @@ void quantized_matmul_pt2(
   size_t dims = result.dim();
   at::Device curDevice = at::Device(at::kXPU, c10::xpu::current_device());
   auto engine = GpuEngineManager::Instance().get_engine(curDevice);
-  // engine index means the engine created on which device
-  auto engine_index = curDevice.index();
   auto strm = GpuStreamManager::Instance().get_stream();
 
   at::Tensor m1 = is_onednn_matmul_strides(mat1)
