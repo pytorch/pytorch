@@ -211,8 +211,8 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     def _gen_test_code(self, run_code, repro_after, repro_level):
         repro_after_line = (
             f"""\
-            torch._dynamo.config.repro_after = "{repro_after}"
-        """
+torch._dynamo.config.repro_after = "{repro_after}"
+"""
             if repro_after
             else ""
         )
