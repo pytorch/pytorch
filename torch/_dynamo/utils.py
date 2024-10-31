@@ -1023,6 +1023,8 @@ class ChromiumEventLogger:
             metadata,
         )
         self.get_stack().append(event_name)
+        # Add metadata from start event
+        self.add_event_data(event_name, **metadata)
 
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
