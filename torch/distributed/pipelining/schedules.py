@@ -1025,9 +1025,13 @@ def _add_send_recv(
 
     def _has_comms(action: _Action) -> bool:
         if action.computation_type == F:
-            return action.stage_index != num_stages - 1
+            return action.stage_index != num_stages - 1 and stage_to_rank(
+                action.stage_index + 1
+            ) != stage_to_rank(action.stage_index)
         elif action.computation_type in (BACKWARD_INPUT, FULL_BACKWARD):
-            return action.stage_index != 0
+            return action.stage_index != 0 and stage_to_rank(
+                action.stage_index - 1
+            ) != stage_to_rank(action.stage_index)
         return False
 
     def _get_comms(action: _Action) -> Tuple[_Action, _Action]:
@@ -1050,22 +1054,38 @@ def _add_send_recv(
         if action is None:
             return True
         elif action.computation_type == F and not action.stage_index == 0:
-            expected_recv = _Action(
-                action.stage_index,
-                RECV_F if action.computation_type == F else RECV_B,
-                action.microbatch_index,
-            )
-            return expected_recv in prev_actions
+            for p in prev_actions:
+                if (
+                    p.computation_type == RECV_F
+                    and p.stage_index == action.stage_index
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
+                elif (
+                    p.computation_type == FORWARD
+                    and p.stage_index == action.stage_index - 1
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
+            return False
         elif (
             action.computation_type in (BACKWARD_INPUT, FULL_BACKWARD)
             and not action.stage_index == num_stages - 1
         ):
-            expected_recv = _Action(
-                action.stage_index,
-                RECV_F if action.computation_type == F else RECV_B,
-                action.microbatch_index,
-            )
-            return expected_recv in prev_actions
+            for p in prev_actions:
+                if (
+                    p.computation_type == RECV_B
+                    and p.stage_index == action.stage_index
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
+                elif (
+                    p.computation_type in (BACKWARD_INPUT, FULL_BACKWARD)
+                    and p.stage_index == action.stage_index + 1
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
+            return False
         else:
             return True
 
@@ -1586,6 +1606,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 stage_idx = action.stage_index
                 stage = stage_index_to_stage[stage_idx]
                 stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
+                # see [Note: V-schedule special case]
+                is_next_stage_on_this_rank = stage_idx + 1 in stage_index_to_stage
+                is_prev_stage_on_this_rank = stage_idx - 1 in stage_index_to_stage
 
                 logger.debug(
                     "_PipelineScheduleRuntime running time_step %d, action %s",
@@ -1638,21 +1661,38 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
 
-                    if not stage.is_first:
+                    if (
+                        not stage.is_first
+                        # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                        and not is_prev_stage_on_this_rank
+                    ):
                         assert (
                             stage_idx,
                             mb_index,
                         ) in fwd_recv_ops, f"Computing {action=} before receiving input"
                         fwd_recv_ops.pop((stage_idx, mb_index)).wait()
+
                     output = stage.forward_one_chunk(
                         mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
                     )
                     self._maybe_compute_loss(stage, output, target_mbs, mb_index)
+
+                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                    # see [Note: V-schedule special case]
+                    if is_next_stage_on_this_rank:
+                        stage_index_to_stage[stage_idx + 1].set_local_fwd_input(
+                            output, mb_index
+                        )
+
                 elif comp_type == FULL_BACKWARD:
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
 
-                    if not stage.is_last:
+                    if (
+                        not stage.is_last
+                        # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
+                        and not is_next_stage_on_this_rank
+                    ):
                         assert (
                             stage_idx,
                             mb_index,
@@ -1666,6 +1706,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         loss=loss,
                         full_backward=True,
                     )
+                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                    # see [Note: V-schedule special case]
+                    if is_prev_stage_on_this_rank:
+                        stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
+                            stage.get_local_bwd_output(mb_index), mb_index
+                        )
                 elif comp_type == BACKWARD_INPUT:
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
@@ -1690,6 +1736,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         loss=loss,
                         full_backward=False,
                     )
+                    # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
+                    # see [Note: V-schedule special case]
+                    if is_prev_stage_on_this_rank:
+                        stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
+                            stage.get_local_bwd_output(mb_index), mb_index
+                        )
                 elif comp_type == BACKWARD_WEIGHT:
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
@@ -2270,11 +2322,6 @@ def _simulate_comms_compute(
     def _prev_ops(stage_idx):
         rank = stage_to_rank(stage_idx)
         ops = copy.deepcopy(schedule[rank])
-        if len(pipeline_order[rank]):
-            # batched comm ops may need to be jointly scheduled (e.g. send_f_recv_b depends on and is a dep of send_b_recv_f)
-            # assuming we iterate in sorted rank order, peeking at the next unscheduled action for later ranks should unblock us
-            ops.append(pipeline_order[rank][0])
-
         return ops
 
     def _ready_to_schedule(action: Optional[_Action]) -> bool:
@@ -2294,6 +2341,12 @@ def _simulate_comms_compute(
                     and p.microbatch_index == action.microbatch_index
                 ):
                     return True
+                elif (
+                    p.computation_type == F
+                    and p.stage_index == action.stage_index - 1
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
             return False
         elif action.computation_type in (BACKWARD_INPUT, FULL_BACKWARD):
             if action.stage_index == num_stages - 1:
@@ -2304,6 +2357,12 @@ def _simulate_comms_compute(
                 elif (
                     p.computation_type == RECV_B
                     and p.stage_index == action.stage_index
+                    and p.microbatch_index == action.microbatch_index
+                ):
+                    return True
+                elif (
+                    p.computation_type in (BACKWARD_INPUT, FULL_BACKWARD)
+                    and p.stage_index == action.stage_index + 1
                     and p.microbatch_index == action.microbatch_index
                 ):
                     return True
