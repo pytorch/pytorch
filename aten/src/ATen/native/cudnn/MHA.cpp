@@ -297,12 +297,13 @@ void alloc_with_matching_layout(
     const Tensor& q,
     Tensor& output,
     const std::vector<int64_t>& shape) {
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       shape.size() == q.sizes().size(),
       "cuDNN SDPA alloc_with_matching_layout got requested shape ndim != q ndim");
 
   if (std::equal(q.sizes().begin(), q.sizes().end(), shape.begin())) {
     output = at::empty_like(q);
+    return;
   }
 
   // get the "fill order," which is just an argsort on the strides
