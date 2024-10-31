@@ -386,6 +386,7 @@ class TestScheduleLowering(TestCase):
                 },
                 "stage_to_rank": lambda stage_idx: stage_idx,
                 "num_stages": 2,
+                "simulated_steps": 11,
             },
         ],
     )
@@ -426,7 +427,7 @@ class TestScheduleLowering(TestCase):
         # _dump_chrometrace(simulated_schedule, "lowered_comms.json")
         # print(_format_pipeline_order(simulated_schedule))
         num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
-        self.assertEqual(num_steps, 9)
+        self.assertEqual(num_steps, 11)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)
