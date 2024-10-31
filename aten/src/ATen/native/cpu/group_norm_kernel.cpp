@@ -1584,7 +1584,7 @@ void GroupNormBackwardKernelImpl(
 
 } // namespace
 
-REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl);
-REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl);
+REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl)
+REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl)
 
 } // namespace at::native
