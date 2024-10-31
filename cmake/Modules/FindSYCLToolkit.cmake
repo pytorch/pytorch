@@ -83,8 +83,15 @@ function(parse_sycl_compiler_version version_number)
   set(${version_number} "${VERSION_NUMBER_MATCH}" PARENT_SCOPE)
 endfunction()
 
+# target 20240104
 parse_sycl_compiler_version(SYCL_COMPILER_VERSION)
-message(FATAL_ERROR ${SYCL_COMPILER_VERSION})
+
+if(NOT SYCL_COMPILER_VERSION)
+  set(SYCL_FOUND False)
+  set(SYCL_REASON_FAILURE "Cannot parse sycl compiler version to get SYCL_COMPILER_VERSION!")
+  set(SYCL_NOT_FOUND_MESSAGE "${SYCL_REASON_FAILURE}")
+  return()
+endif()
 
 # Find include path from binary.
 find_file(
