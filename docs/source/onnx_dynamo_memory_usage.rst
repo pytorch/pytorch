@@ -11,7 +11,7 @@ compared to the TorchScript-based ONNX exporter.
 Below is an example demonstrating the memory usage difference between TorchScript-based and TorchDynamo-based ONNX exporters.
 In this example, we use the HighResNet model from MONAI. Before proceeding, please install it from PyPI:
 
-.. code-block:: bat
+.. code-block:: bash
 
    pip install monai
 
