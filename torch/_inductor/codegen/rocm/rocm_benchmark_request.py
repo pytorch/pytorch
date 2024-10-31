@@ -29,6 +29,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         output_tensor_meta: Union[TensorMeta, List[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
+        generate_runner: bool = True,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
@@ -39,12 +40,15 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self.hash_key: str = ""
         self.source_file: str = ""
         self.hash_key, self.source_file = ROCmCodeCache.write(self.source_code, "so")
+        self.generate_runner = generate_runner
 
     def precompile(self):
         # Prepopulate code cache
         # may happen in separate Threadpool
         log.debug("Precompiling %s", self)
         ROCmCodeCache.compile(self.source_code, "so")
+        if self.generate_runner:
+            ROCmCodeCache.compile(self.source_code, "exe")
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
