@@ -454,22 +454,22 @@ def run_joint_graph_passes_on_hops(
             and node.target is invoke_subgraph
             and isinstance(node.args[1], str)
         ):
-            hop_gm = getattr(joint_gm, node.args[0].target)
             identifier = (
                 node.args[1].replace("___forward", "").replace("___backward", "")
             )
+
+            # If partitioning already done for this identifier, skip.
+            if new_hop_graphs[identifier].partitioning_done:
+                continue
+
+            hop_gm = getattr(joint_gm, node.args[0].target)
             assert isinstance(hop_gm, torch.fx.GraphModule)
-            if (
-                node.args[1].startswith("___forward")
-                and not new_hop_graphs[identifier].partitioning_done
-            ):
+
+            if node.args[1].startswith("___forward"):
                 # Collect some information from the forward hop graph
                 new_hop_graphs[identifier].old_num_fw_inputs = num_inputs(hop_gm)
                 new_hop_graphs[identifier].old_num_fw_outputs = num_outputs(hop_gm)
-            elif (
-                node.args[1].startswith("___backward")
-                and not new_hop_graphs[identifier].partitioning_done
-            ):
+            elif node.args[1].startswith("___backward"):
                 num_fw_inputs = new_hop_graphs[identifier].old_num_fw_inputs
                 assert num_fw_inputs is not None
                 num_fw_outputs = new_hop_graphs[identifier].old_num_fw_outputs
@@ -517,40 +517,52 @@ def run_joint_graph_passes_on_hops(
     #
     # Now, lets look at the backward hop graph. Old signature
     #   inputs - (*primals, *tangents)
-    #   outputs - (*fw_outs, *grad_outs)
+    #   outputs - (*grad_outs, *fw_outs)
     # New signature
     #   inputs - (*saved_tensors, *tangents) -- Different
     #   outputs - (*grad_outs)  -- Different
-    # Here both input and output signature change. Replacing the old bw graph
-    # with the new graph requires a lot of careful management here.
+    # Here both input and output signature change. The output signature handling
+    # is quite easy because the grads_out are sitting at the right place, so we
+    # dont have to do anything.
     #
-    # For saved tensors (inputs of the new_bw_hop_gm), we collect the inputs
-    # from the corresponding fw_node (we save this mapping of fw_node in
-    # bw_to_fw_hop_node_mapping).
-    # For outputs, we have to intercept getitem on the backward nodes and then
-    # manually change the index.
+    # For the input signature, we have to collect the saved tensors from the
+    # corresponding forward graph output. We collect all saved_tensors when we
+    # see the forward graph, and save it into a map and then later use it during
+    # the backward.
 
     env = {}  # type: ignore[var-annotated]
     new_graph = torch.fx.Graph()
 
-    seen_submods = set()
+    already_added_new_hop_mods = set()
 
-    bw_to_fw_hop_node_mapping = {}
+    # The stack of fw_nodes for invoke_subgraph HOP. There is an implicit
+    # assumption about the graph structure, i.e., if we have hop1, hop2, hop3,
+    # ... in the forward part of the joint graph, we will have .., hop3, hop2,
+    # hop1 order for the backward. This structure allows us to just use a stack
+    # to collect all the information that we need to pass from the forward hop
+    # node to the corresponding backward node.
+    old_fw_hop_nodes_stack = []
+    # Collect the saved tensor nodes that we need to pass as inputs to the
+    # backward hop.
+    fw_node_to_saved_tensors_map = {}
 
-    def add_submod(new_subgraph_mod, name):
+    def add_new_hop_gm(new_subgraph_mod, name):
         new_subgraph_attr_name = f"{name}_post_graph"
-        if new_subgraph_attr_name in seen_submods:
+        if new_subgraph_attr_name in already_added_new_hop_mods:
             return new_subgraph_attr_name
 
         joint_gm.register_module(new_subgraph_attr_name, new_subgraph_mod)
-        seen_submods.add(new_subgraph_attr_name)
+        already_added_new_hop_mods.add(new_subgraph_attr_name)
         return new_subgraph_attr_name
 
-    def propagate_meta_info(new_submod, new_node, old_node):
-        output = new_submod.graph.find_nodes(op="output")[0]
+    def propagate_meta_info(new_hop_gm, new_call_function_node, old_call_function_node):
+        # Copy all the fields from the old call_function node. And then override
+        # the `val` meta field with the outputs of new_hop_gm.
+        new_call_function_node.meta = copy.copy(old_call_function_node.meta)
+
+        output = new_hop_gm.graph.find_nodes(op="output")[0]
         out_example_vals = [n.meta["val"] for n in output.args[0]]
-        new_node.meta = copy.copy(old_node.meta)
-        new_node.meta["val"] = tuple(out_example_vals)
+        new_call_function_node.meta["val"] = tuple(out_example_vals)
 
     for node in joint_gm.graph.nodes:
         if (
@@ -562,9 +574,14 @@ def run_joint_graph_passes_on_hops(
                 node.args[1].replace("___forward", "").replace("___backward", "")
             )
             if node.args[1].startswith("___forward"):
+                # Insert the new_fw_hop_gm. This is straightforward. Get the
+                # new_fw_hop_gm, insert the hop_gm as a get_attr node, and then
+                # add a call_function node. Additionally, also use getitem
+                # call_functions to collect the saved_tensor nodes
+
                 new_fw_hop_gm = new_hop_graphs[identifier].new_fw_hop_gm
                 assert new_fw_hop_gm is not None
-                new_fw_mod_attr_name = add_submod(new_fw_hop_gm, node.args[1])
+                new_fw_mod_attr_name = add_new_hop_gm(new_fw_hop_gm, node.args[1])
                 new_fw_mod_attr = new_graph.get_attr(new_fw_mod_attr_name)
 
                 old_operands = node.args[2]
@@ -578,43 +595,55 @@ def run_joint_graph_passes_on_hops(
                     ),
                 )
                 propagate_meta_info(new_fw_hop_gm, env[node], node)
-                bw_to_fw_hop_node_mapping[(identifier, *node.args[2])] = env[node]
+
+                old_num_fw_outputs = new_hop_graphs[identifier].old_num_fw_outputs
+                new_num_fw_outputs = new_hop_graphs[identifier].new_num_fw_outputs
+                assert old_num_fw_outputs
+                assert new_num_fw_outputs
+
+                saved_tensor_nodes = []
+                # new_hop_fw_gm output signature is (*fw_outs, *saved_tensors)
+                # old_num_fw_outputs = len(fw_outs)
+                # new_num_fw_outputs = len(*fw_outs, *saved_tensors)
+                for fw_out_idx in range(old_num_fw_outputs, new_num_fw_outputs):
+                    saved_tensor_node = new_graph.call_function(
+                        the_function=operator.getitem, args=(env[node], fw_out_idx)
+                    )
+                    saved_tensor_node.meta = copy.copy(env[node].meta)
+                    saved_tensor_node.meta["val"] = env[node].meta["val"][fw_out_idx]
+                    saved_tensor_nodes.append(saved_tensor_node)
+
+                # Save the saved_tensors info for the fw_node. This will be used
+                # to form the inputs for the backward hop.
+                old_fw_hop_nodes_stack.append(node)
+                fw_node_to_saved_tensors_map[node] = (identifier, saved_tensor_nodes)
             elif node.args[1].startswith("___backward"):
+                # Get the saved_tensors from the forward graph and find the new
+                # tangents, and replace the old bw hop with the new bw hop.
                 new_bw_hop_gm = new_hop_graphs[identifier].new_bw_hop_gm
                 assert new_bw_hop_gm is not None
-                new_bw_mod_attr_name = add_submod(new_bw_hop_gm, node.args[1])
+                new_bw_mod_attr_name = add_new_hop_gm(new_bw_hop_gm, node.args[1])
                 new_bw_mod_attr = new_graph.get_attr(new_bw_mod_attr_name)
 
                 # Prepare the operands for the bwd graph
                 # Old bw graph signature : (*primals, *tangents)
                 # New signature will be : (*saved_tensors, *tangents)
-                # To fetch saved_tensor, we do getitem on the fw_node
+                # We have already collected the saved_tensors in the forward hop processing.
 
-                start_idx_of_saved_tensors = new_hop_graphs[
-                    identifier
-                ].old_num_fw_outputs
-                assert start_idx_of_saved_tensors is not None
-                num_fw_inputs = new_hop_graphs[identifier].old_num_fw_inputs
-                total_fw_outputs = new_hop_graphs[identifier].new_num_fw_outputs
-                assert total_fw_outputs is not None
+                assert len(old_fw_hop_nodes_stack)
+                fw_hop_node = old_fw_hop_nodes_stack.pop()
+                (
+                    fw_hop_node_identifier,
+                    saved_tensor_nodes,
+                ) = fw_node_to_saved_tensors_map[fw_hop_node]
 
-                fw_node = bw_to_fw_hop_node_mapping[
-                    (identifier, *node.args[2][:num_fw_inputs])
-                ]
-                assert fw_node is not None
+                assert fw_hop_node_identifier == identifier
 
-                new_operands = []
-                for fw_out_idx in range(start_idx_of_saved_tensors, total_fw_outputs):
-                    new_operand = new_graph.call_function(
-                        the_function=operator.getitem, args=(fw_node, fw_out_idx)
-                    )
-                    new_operand.meta = copy.copy(fw_node.meta)
-                    new_operand.meta["val"] = fw_node.meta["val"][fw_out_idx]
-                    new_operands.append(new_operand)
-
-                old_tangents = node.args[2][num_fw_inputs:]
+                num_primals = new_hop_graphs[identifier].old_num_fw_inputs
+                assert num_primals
+                old_tangents = node.args[2][num_primals:]
                 new_tangents = [env[n] for n in old_tangents]
-                new_operands.extend(new_tangents)
+                new_operands = saved_tensor_nodes + new_tangents
 
                 env[node] = new_graph.call_function(
                     the_function=invoke_subgraph,
@@ -625,32 +654,6 @@ def run_joint_graph_passes_on_hops(
                     ),
                 )
                 propagate_meta_info(new_bw_hop_gm, env[node], node)
-        # elif (
-        #     node.op == "call_function"
-        #     and node.target is operator.getitem
-        #     and node.args[0].op == "call_function"
-        #     and node.args[0].target is invoke_subgraph
-        #     and isinstance(node.args[0].args[1], str)
-        #     and node.args[0].args[1].startswith("___backward")
-        # ):
-        #     identifier = (
-        #         node.args[0]
-        #         .args[1]
-        #         .replace("___forward", "")
-        #         .replace("___backward", "")
-        #     )
-        #     assert identifier in new_hop_graphs
-
-        #     old_index = node.args[1]
-        #     num_fw_outputs = new_hop_graphs[identifier].old_num_fw_outputs
-        #     new_index = old_index - num_fw_outputs
-
-        #     bw_gmod_node = env[node.args[0]]
-        #     env[node] = new_graph.call_function(
-        #         the_function=operator.getitem,
-        #         args=(bw_gmod_node, new_index),
-        #     )
-        #     env[node].meta = copy.copy(node.meta)
         else:
             env[node] = new_graph.node_copy(node, lambda x: env[x])
             env[node].meta = copy.copy(node.meta)

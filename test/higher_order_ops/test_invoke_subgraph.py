@@ -158,6 +158,29 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
+    def test_diamond(self):
+        @wrap_with_invoke_subgraph
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            a = gn(x)
+            b = gn(x)
+            return torch.sin(a) + torch.cos(b)
+
+        x = torch.randn(8, requires_grad=True)
+        ref = fn(x)
+
+        x_clone = x.clone().detach().requires_grad_(True)
+        res = torch.compile(fn, fullgraph=True)(x_clone)
+
+        # Run backward
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
     def test_dropout(self):
         @wrap_with_invoke_subgraph
         def gn(x):
@@ -241,18 +264,17 @@ class GraphModule(torch.nn.Module):
         ___forward_invoke_subgraph_0_post_graph = self.___forward_invoke_subgraph_0_post_graph
 
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph, '___forward_invoke_subgraph_0_post_graph', (primals_1, primals_2));  ___forward_invoke_subgraph_0_post_graph = primals_1 = None
-        getitem: "f32[8]" = invoke_subgraph[0]
+        getitem: "f32[8]" = invoke_subgraph[1]
+        getitem_1: "f32[8]" = invoke_subgraph[2]
+        getitem_2: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
 
         ___forward_invoke_subgraph_0_post_graph_1 = self.___forward_invoke_subgraph_0_post_graph
 
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph_1, '___forward_invoke_subgraph_0_post_graph', (getitem, primals_2));  ___forward_invoke_subgraph_0_post_graph_1 = getitem = primals_2 = None
-        getitem_1: "f32[8]" = invoke_subgraph_1[0]
-        getitem_2: "f32[8]" = invoke_subgraph_1[1]
-        getitem_3: "f32[8]" = invoke_subgraph_1[2];  invoke_subgraph_1 = None
-
-        getitem_6: "f32[8]" = invoke_subgraph[1]
-        getitem_7: "f32[8]" = invoke_subgraph[2];  invoke_subgraph = None
-        return (getitem_1, getitem_2, getitem_3, getitem_6, getitem_7)
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph_1, '___forward_invoke_subgraph_0_post_graph', (getitem_2, primals_2));  ___forward_invoke_subgraph_0_post_graph_1 = getitem_2 = primals_2 = None
+        getitem_3: "f32[8]" = invoke_subgraph_1[1]
+        getitem_4: "f32[8]" = invoke_subgraph_1[2]
+        getitem_5: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return (getitem_5, getitem, getitem_1, getitem_3, getitem_4)
 
     class ___forward_invoke_subgraph_0_post_graph(torch.nn.Module):
         def forward(self, primals_0: "f32[8]", primals_1: "f32[8]"):
