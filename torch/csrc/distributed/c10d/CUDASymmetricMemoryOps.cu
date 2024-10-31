@@ -387,6 +387,13 @@ at::Tensor one_shot_all_reduce_out(
   return out;
 }
 
+at::Tensor one_shot_all_reduce_meta(
+    const at::Tensor& input,
+    std::string reduce_op,
+    std::string group_name) {
+  return at::empty_like(input);
+}
+
 at::Tensor one_shot_all_reduce(
     const at::Tensor& input,
     std::string reduce_op,
@@ -564,8 +571,10 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 
   m.def(
       "one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
-      torch::dispatch(c10::DispatchKey::CUDA, ::one_shot_all_reduce),
       {at::Tag::pt2_compliant_tag});
+
+  m.impl("one_shot_all_reduce", torch::dispatch(c10::DispatchKey::Meta, ::one_shot_all_reduce_meta));
+  m.impl("one_shot_all_reduce", torch::dispatch(c10::DispatchKey::CUDA, ::one_shot_all_reduce));
 
   m.def(
       "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)",
