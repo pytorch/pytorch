@@ -25,12 +25,12 @@ concurrency:
 permissions: read-all
 
 jobs:
-  inductor-unittest:
+  unit-test:
     if: github.repository_owner == 'pytorch'
     name: inductor-unittest
     uses: ./.github/workflows/inductor-unittest.yml
     with:
-      job_name: inductor-unittest
+      job_name: unit-test
 
   get-label-type:
     name: get-label-type
