@@ -26,6 +26,7 @@ permissions: read-all
 
 jobs:
   inductor-unittest:
+    if: github.repository_owner == 'pytorch'
     name: inductor-unittest
     uses: ./.github/workflows/inductor-unittest.yml
 
