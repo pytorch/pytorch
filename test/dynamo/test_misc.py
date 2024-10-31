@@ -101,6 +101,12 @@ T = typing.TypeVar("T")
 TPFLAGS_MAPPING = 1 << 6
 
 
+# A class defined in the global scope, used in MiscTests.test_const_getattr
+class _B:
+    def __init__(self):
+        pass
+
+
 # Specializes a test to run only if translation validation is set.
 def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
     @functools.wraps(fn)
@@ -1411,6 +1417,28 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(opt_fn(v, [10, 20])[0, 0], -10)
         # One recompile per differing input type
         self.assertEqual(cnts.frame_count, 3)
+
+    def test_const_getattr(self):
+        # See https://github.com/pytorch/pytorch/issues/118675
+        def fn(x):
+            y = x[f"{_B.__module__}.{_B.__name__}"]
+            z = x[f"{_B.__class__.__module__}.{_B.__name__}"]
+            u = x[f"{_B.__class__.__module__}.{_B.__class__.__qualname__}"]
+            return y + z + u
+
+        args = (
+            {
+                f"{_B.__module__}._B": torch.randn(10),
+                "builtins._B": torch.randn(10),
+                "builtins.type": torch.randn(10),
+            },
+        )
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        self.assertEqual(fn(*args), opt_fn(*args))
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_cell_output1(self):
         out = None

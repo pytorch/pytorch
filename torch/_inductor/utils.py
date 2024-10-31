@@ -1638,7 +1638,7 @@ def pass_execution_and_save(func, gm, inp, msg):
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
-        with GraphTransformObserver(gm, msg, config.trace.log_url_for_graph_xform):
+        with GraphTransformObserver(gm, msg):
             func(gm.graph)
         time_elapsed = datetime.now() - start_time
         # recompile graph

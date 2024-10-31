@@ -98,6 +98,8 @@ def fuse_as_graphmodule(
     nodes: NodeList,
     module_name: str,
     partition_lookup_table: _Optional[Dict[Node, None]] = None,
+    *,
+    always_return_tuple: bool = False,
 ) -> Tuple[GraphModule, Tuple[Node, ...], Tuple[Node, ...]]:
     """
     Fuse nodes in graph_module into a GraphModule.
@@ -110,6 +112,8 @@ def fuse_as_graphmodule(
         module_name: class name for the fused GraphModule
 
         partition_lookup_table (Optional[Dict[Node, None]]): optional dict of nodes to speed up lookup
+
+        always_return_tuple (bool): whether to always return a tuple, even if there is only one output
 
     Returns:
         fused_gm (GraphModule): fused graph module, where its node is a copy of `nodes` in `gm`
@@ -183,11 +187,12 @@ def fuse_as_graphmodule(
     # outs contain nodes in the new subgraph
     outs = tuple(output_mapping.values())
 
-    # Take care of the args of FX output node. If there's a single
-    # output then the output node args is like (output_single), else
-    # if there're multiple outputs then the output node args is like
-    # ((output_0, output_1, ...)).
-    subgraph.output(outs[0] if len(outs) == 1 else outs)
+    if always_return_tuple:
+        # always return a tuple, even if there is only one output
+        subgraph.output(outs)
+    else:
+        # If there's a single output then return it directly, otherwise return a tuple.
+        subgraph.output(outs[0] if len(outs) == 1 else outs)
 
     # lint to ensure correctness
     subgraph.lint()
