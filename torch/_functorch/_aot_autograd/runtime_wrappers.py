@@ -1512,7 +1512,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
             maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
-            _compiled_autograd_should_lift = False
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
 
@@ -1669,7 +1668,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
                 class CompiledFunctionBackward(torch.autograd.Function):
                     # CompiledFunctionBackward is not yet supported in dynamo skipfiles
-                    _compiled_autograd_should_lift = False
                     _aot_id = aot_config.aot_id
 
                     @staticmethod
@@ -1688,6 +1686,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 return CompiledFunctionBackward.apply(*all_args)
 
+            @torch._dynamo.allow_in_graph
             @staticmethod
             def _backward_prologue(ctx, *flat_args):
                 # Calling convention: we expect a grad_out passed to the backward:
@@ -1974,9 +1973,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 return all_args
 
+            @torch._dynamo.allow_in_graph
             @staticmethod
             def _backward_impl(ctx, all_args):
-                if ctx._is_compiled_autograd_tracing():
+                if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                     if lazy_backward_info is None:
                         raise RuntimeError(
                             """This compiled backward function was saved by AOTAutogradCache, which does not support
@@ -2066,6 +2066,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 )
                 return out
 
+            @torch._dynamo.allow_in_graph
             @staticmethod
             def _backward_epilogue(ctx, out):
                 # Toss out the backward output tokens

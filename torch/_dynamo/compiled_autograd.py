@@ -6,8 +6,11 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.external_utils import (
-    call_backward,
+    call_backward_epilogue,
+    call_backward_impl,
+    call_backward_prologue,
     call_hook,
+    create_fake_ctx,
     FakeCompiledAutogradEngine,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
@@ -151,20 +154,49 @@ class AutogradCompilerInstance:
         inputs,
         output_metadatas,
         saved_tensors,
-        backward_idx: int,
+        bwd_idx: int,
     ):
         assert self.hooks_proxy is not None
-        backward_c_function = self.hooks_proxy[backward_idx]  # type: ignore[index]
-        proxies = self.fx_tracer.create_proxy(
+        pctx = self.hooks_proxy[bwd_idx]  # type: ignore[index]
+
+        # symbolic trace start
+        pfakectx = self.fx_tracer.create_proxy(
             kind="call_function",
-            target=call_backward,
+            target=create_fake_ctx,
             args=(
-                backward_c_function,
+                pctx,
                 self.to_proxy(saved_tensors),
+            ),
+            kwargs={},
+        )
+        pall_args = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_backward_prologue,
+            args=(
+                pfakectx,
                 *self.to_proxy(inputs),
             ),
             kwargs={},
         )
+        pout = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_backward_impl,
+            args=(
+                pfakectx,
+                pall_args,
+            ),
+            kwargs={},
+        )
+        proxies = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_backward_epilogue,
+            args=(
+                pfakectx,
+                pout,
+            ),
+            kwargs={},
+        )
+        # symbolic trace end
 
         with disable_proxy_modes_tracing():
             # create fake Tensors
