@@ -390,8 +390,7 @@ def with_comms(eager_init: bool = False) -> TestFunc:
 
         return wrapper
 
-    return decorator
-
+    return decorator(eager_init) if callable(eager_init) else decorator
 
 
 class DTensorOpTestBase(MultiThreadedTestCase):
