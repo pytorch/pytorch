@@ -796,30 +796,40 @@ class HooksTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnts.frame_count, 1)
 
-    def test_state_dict_hooks(self):
-        model = torch.nn.Linear(2, 4)
-        compiled_model = torch.compile(model)
+    @torch._dynamo.config.patch(skip_nnmodule_hook_guards=False)
+    def test_nnmodule_hook_guards(self):
+        # Compile a model and then apply a hook
 
-        original_state_dict = model.state_dict()
-        compiled_state_dict = compiled_model.state_dict()
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16)
 
-        assert original_state_dict.keys() == compiled_state_dict.keys()
-        for key, tensor in original_state_dict.items():
-            assert tensor.equal(compiled_state_dict[key])
+            def forward(self, x):
+                return self.linear(x)
 
-        # check if original model can load both state dicts
-        model.load_state_dict(original_state_dict)
-        model.load_state_dict(compiled_state_dict)
+        cnts = torch._dynamo.testing.CompileCounter()
 
-        # check if compile model can load both state dicts
-        compiled_model.load_state_dict(original_state_dict)
-        compiled_model.load_state_dict(compiled_state_dict)
+        mod = Mod()
 
-        # check backwards compatibility
-        backwards_state_dict = {
-            f"_orig_mod.{key}": tensor for key, tensor in original_state_dict.items()
-        }
-        compiled_model.load_state_dict(backwards_state_dict)
+        def fn(x):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend=cnts)
+
+        x = torch.ones(16, 16)
+        opt_fn(x)
+
+        # Register a hook
+        def forward_hook(self, inputs, out):
+            return out * 2
+
+        mod.register_forward_hook(forward_hook)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
 
 
 if __name__ == "__main__":

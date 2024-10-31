@@ -7,6 +7,7 @@ from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from ..pattern_matcher import (
     Arg,
@@ -65,6 +66,7 @@ post_grad_pass_names = [
     "decompose_mm_pass",
     "unbind_stack_aten_pass",
     "shape_padding_multiplier",
+    "pad_aten_mm_pass",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -193,7 +195,7 @@ def normalize_split_base(
         new_split_node = graph.call_function(
             torch.split,
             args=new_args,
-            kwargs=new_kwargs,
+            kwargs=new_kwargs,  # type: ignore[arg-type]
         )
     split_node.replace_all_uses_with(new_split_node)
     new_split_node.meta.update(split_node.meta)
@@ -238,7 +240,9 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
         # TODO dynamic_shapes with assume_static_by_default=False fails while AOT Autograd tracing.
         return
     # remove the dummy split whose split sections size is one
-    if len(split_sections) == 1:
+    # theoretically nodes with no users should be removed, but we have seen the corner case
+    # thus we add its uers check to walk around the StopIteration error.
+    if len(split_sections) == 1 and len(split_node.users.keys()) > 0:
         # find the grand children of the split_node
         next_users = find_next_users(split_node)
         user = next(iter(split_node.users.keys()))
@@ -378,7 +382,7 @@ def normalize_stack_default(match: Match, *args, **kwargs):
 
     with graph.inserting_after(node):
         new_node = graph.call_function(
-            node.target,
+            node.target,  # type: ignore[arg-type]
             args=(tensors,),
             kwargs={"dim": dim},
         )
@@ -447,6 +451,10 @@ def normalize_reshape_default(match: Match, *args, **kwargs):
         return
     reshape_input = get_arg_value(reshape_node, 0)
 
+    if free_symbols(reshape_node.meta["example_value"].shape):
+        log.debug("dynamic shape not supported: %s", reshape_node)
+        return
+
     with match.graph.inserting_after(reshape_node):
         new_reshape_node = match.graph.call_function(
             torch.reshape,
@@ -455,6 +463,67 @@ def normalize_reshape_default(match: Match, *args, **kwargs):
     reshape_node.replace_all_uses_with(new_reshape_node)
     new_reshape_node.meta.update(reshape_node.meta)
     match.graph.erase_node(reshape_node)
+
+
+@register_graph_pattern(
+    CallMethodVarArgs("clamp", users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_pass"),
+)
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.clamp, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_pass"),
+)
+def normalize_clamp_default(match: Match, *args, **kwargs):
+    clamp_node = match.nodes[0]
+    if not is_node_meta_valid(clamp_node):
+        log.debug("example value absent for node: %s", clamp_node)
+        return
+
+    if free_symbols(clamp_node.meta["example_value"].shape):
+        log.debug("dynamic shape not supported: %s", clamp_node)
+        return
+    if len(clamp_node.args) > 1:
+        args = (get_arg_value(clamp_node, 0),)
+        kwargs = {
+            "min": get_arg_value(clamp_node, 1, kwarg_name="min"),
+            "max": get_arg_value(clamp_node, 2, kwarg_name="max"),
+        }
+    else:
+        args = clamp_node.args
+        kwargs = clamp_node.kwargs
+    with match.graph.inserting_after(clamp_node):
+        new_clamp_node = match.graph.call_function(
+            torch.clamp,
+            args=args,
+            kwargs=kwargs,
+        )
+    clamp_node.replace_all_uses_with(new_clamp_node)
+    new_clamp_node.meta.update(clamp_node.meta)
+    match.graph.erase_node(clamp_node)
+
+
+@register_graph_pattern(
+    CallMethodVarArgs("detach", users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_pass"),
+)
+def normalize_detach_default(match: Match, *args, **kwargs):
+    detach_node = match.nodes[0]
+    if not is_node_meta_valid(detach_node):
+        log.debug("example value absent for node: %s", detach_node)
+        return
+
+    if free_symbols(detach_node.meta["example_value"].shape):
+        log.debug("dynamic shape not supported: %s", detach_node)
+        return
+
+    with match.graph.inserting_after(detach_node):
+        new_detach_node = match.graph.call_function(
+            torch.detach,
+            args=detach_node.args,
+        )
+    detach_node.replace_all_uses_with(new_detach_node)
+    new_detach_node.meta.update(detach_node.meta)
+    match.graph.erase_node(detach_node)
 
 
 class TorchSplit(CallFunction):
@@ -529,7 +598,7 @@ def merge_splits(
 
     to_remove = []
 
-    with graph.inserting_before(first_split):
+    with graph.inserting_before(first_split):  # type: ignore[arg-type]
         # Add the new split node
         new_split = graph.call_function(
             torch.split,
@@ -1535,7 +1604,7 @@ def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
             # case 1: the cat uses all getitems from the split
             if len(split_sections) == len(cat_user.args[0]):  # type: ignore[arg-type]
                 # replace the users of the cat node to be the input of the split node
-                cat_user.replace_all_uses_with(split_node.args[0])
+                cat_user.replace_all_uses_with(split_node.args[0])  # type: ignore[arg-type]
                 # remove the cat node
                 graph.erase_node(cat_user)
                 counters["inductor"]["mutate_cat_pass"] += 1
@@ -1947,7 +2016,7 @@ def remove_split_unbind_children(graph: torch.fx.Graph, inputs: List[torch.fx.No
     # check the split node to remove if it has no users
     for node in nodes:
         if len(node.users.keys()) == 0:  # type: ignore[union-attr]
-            graph.erase_node(node)
+            graph.erase_node(node)  # type: ignore[arg-type]
 
 
 # ############pattern to be optimized is#########

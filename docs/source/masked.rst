@@ -277,30 +277,26 @@ The following ops are currently supported:
     chunk
     column_stack
     dsplit
-    empty_like
     flatten
-    full_like
     hsplit
     hstack
     kron
     meshgrid
     narrow
-    ones_like
-    rand_like
-    randint_like
-    randn_like
+    nn.functional.unfold
     ravel
     select
     split
+    stack
     t
     transpose
     vsplit
     vstack
-    zeros_like
     Tensor.expand
     Tensor.expand_as
     Tensor.reshape
     Tensor.reshape_as
+    Tensor.unfold
     Tensor.view
 
 .. This module needs to be documented. Adding here in the meantime
@@ -308,7 +304,6 @@ The following ops are currently supported:
 .. py:module:: torch.masked.maskedtensor.binary
 .. py:module:: torch.masked.maskedtensor.core
 .. py:module:: torch.masked.maskedtensor.creation
-.. py:module:: torch.masked.maskedtensor.like
 .. py:module:: torch.masked.maskedtensor.passthrough
 .. py:module:: torch.masked.maskedtensor.reductions
 .. py:module:: torch.masked.maskedtensor.unary

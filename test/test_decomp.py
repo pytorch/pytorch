@@ -12,6 +12,7 @@ import torch.autograd
 from torch import Tensor
 from torch._decomp import core_aten_decompositions, decomposition_table
 from torch._dispatch.python import enable_python_dispatcher
+from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import tf32_off
@@ -62,7 +63,7 @@ decomposition_names = {
 core_decomposition_names = {
     overload_to_aten_name(k)
     for k in core_aten_decompositions()
-    if isinstance(k, torch._ops.OpOverload)
+    if isinstance(k, torch._ops.OpOverload) and not _is_cia_op(k)
 }
 _decomp_test_ops = [
     op
@@ -1037,7 +1038,6 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 
 class DecompOneOffTests(TestCase):
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_softmax(self, device):
@@ -1052,7 +1052,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions._softmax(x, -1, False)
         self.assertEqual(ref.stride(), res.stride())
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_contiguous_log_softmax(self, device):
@@ -1118,7 +1117,6 @@ class DecompOneOffTests(TestCase):
             self.assertEqual(a.stride(), b.stride())
             self.assertEqual(a.dtype, b.dtype)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_elu_backward(self, device):
@@ -1131,7 +1129,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.elu_backward(grad_out, 1.0, 1, 1, True, out)
         self.assertEqual(ref, res)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_threshold_backward_dtype(self, device):
@@ -1142,7 +1139,6 @@ class DecompOneOffTests(TestCase):
         res = torch._decomp.decompositions.threshold_backward(grad, input_tensor, 1)
         self.assertEqual(ref.dtype, res.dtype)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_weight_norm_interface(self, device):
@@ -1162,7 +1158,6 @@ class DecompOneOffTests(TestCase):
             torch._decomp.decompositions._weight_norm_interface(inp, inp2),
         )
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCPU
     @skipIfCrossRef
     @skipOps(
@@ -1179,24 +1174,6 @@ class DecompOneOffTests(TestCase):
     def test_sdpa(self, device, dtype, op):
         # SDPA doesn't support float16, this is aligned with aten/src/ATen/native/transformers/attention.cpp. If we
         # add support for float16 over there we should update this test as well.
-
-        class ScaledDotProductAttention(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(
-                self, query_layer, key_layer, value_layer, mask=None, is_causal=True
-            ):
-                attn_output = op(
-                    query_layer,
-                    key_layer,
-                    value_layer,
-                    attn_mask=mask,
-                    dropout_p=0.0,
-                    is_causal=is_causal,
-                )
-                return attn_output
-
         query_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
         key_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
         value_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
@@ -1206,12 +1183,17 @@ class DecompOneOffTests(TestCase):
 
         for mask in masks:
             is_causal = mask is None
-            attention = ScaledDotProductAttention()
             decomposed_res = (
                 torch._decomp.decompositions.scaled_dot_product_flash_attention_for_cpu(
                     query_layer, key_layer, value_layer, 0.0, is_causal, attn_mask=mask
                 )
             )
+            actual_res = decomposed_res[0]
+            # Output has form (N, H, L, E), but should be continuous on (L, N, H, E)
+            # in order for subsequent view(L * N, H * E) to be valid.
+            # So permute(2, 0, 1, 3) before checking that tensor is contiguous
+            self.assertTrue(actual_res.permute(2, 0, 1, 3).is_contiguous())
+
             eager_res = op(
                 query_layer,
                 key_layer,
@@ -1221,9 +1203,7 @@ class DecompOneOffTests(TestCase):
                 is_causal=is_causal,
             )
 
-            self.assertTrue(
-                torch.allclose(decomposed_res[0], eager_res, atol=atol, rtol=rtol)
-            )
+            self.assertTrue(torch.allclose(actual_res, eager_res, atol=atol, rtol=rtol))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
@@ -1245,9 +1225,7 @@ class HasDecompTest(TestCase):
 
         try:
             # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-            return not op.has_kernel_for_dispatch_key(
-                DispatchKey.CompositeImplicitAutograd
-            )
+            return not _is_cia_op(op)
         except RuntimeError as e:
             # has_key fails for some jit-registered ops, which shouldn't be
             # relevant here anyway

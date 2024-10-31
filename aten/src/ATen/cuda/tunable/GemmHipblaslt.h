@@ -9,6 +9,7 @@
 #include <ATen/cuda/tunable/GemmCommon.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/StringUtil.h>
+#include <fmt/printf.h>
 
 #include <hipblaslt/hipblaslt.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -25,40 +26,45 @@
 namespace at::cuda::tunable {
 
 template <typename T>
-constexpr hipblasDatatype_t HipBlasDataTypeFor();
+constexpr hipblasDatatype_t HipDataTypeFor();
 
 template <>
-constexpr hipblasDatatype_t HipBlasDataTypeFor<float>() {
-  return HIPBLAS_R_32F;
+constexpr hipblasDatatype_t HipDataTypeFor<float>() {
+  return HIP_R_32F;
 }
 
 template <>
-constexpr hipblasDatatype_t HipBlasDataTypeFor<Half>() {
-  return HIPBLAS_R_16F;
+constexpr hipblasDatatype_t HipDataTypeFor<Half>() {
+  return HIP_R_16F;
 }
 
 template <>
-constexpr hipblasDatatype_t HipBlasDataTypeFor<BFloat16>() {
-  return HIPBLAS_R_16B;
+constexpr hipblasDatatype_t HipDataTypeFor<BFloat16>() {
+  return HIP_R_16BF;
 }
 
 template <>
-constexpr hipblasDatatype_t HipBlasDataTypeFor<double>() {
-  return HIPBLAS_R_64F;
+constexpr hipblasDatatype_t HipDataTypeFor<double>() {
+  return HIP_R_64F;
 }
 
 template <>
-constexpr hipblasDatatype_t HipBlasDataTypeFor<c10::Float8_e4m3fnuz>() {
+constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e4m3fnuz>() {
   return HIP_R_8F_E4M3_FNUZ;
 }
 
 template <>
-constexpr hipblasDatatype_t HipBlasDataTypeFor<c10::Float8_e5m2fnuz>() {
+constexpr hipblasDatatype_t HipDataTypeFor<c10::Float8_e5m2fnuz>() {
   return HIP_R_8F_E5M2_FNUZ;
 }
 
 template <typename T>
 int GetBatchFromParams(const GemmParams<T>* params) {
+  return 1;
+}
+
+template <typename T>
+int GetBatchFromParams(const GemmAndBiasParams<T>* params) {
   return 1;
 }
 
@@ -78,6 +84,11 @@ int GetStrideAFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+int GetStrideAFromParams(const GemmAndBiasParams<T>* params) {
+  return 1;
+}
+
+template <typename T>
 int GetStrideAFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->stride_a;
 }
@@ -89,6 +100,11 @@ int GetStrideAFromParams(const ScaledGemmParams<T>* params) {
 
 template <typename T>
 int GetStrideBFromParams(const GemmParams<T>* params) {
+  return 1;
+}
+
+template <typename T>
+int GetStrideBFromParams(const GemmAndBiasParams<T>* params) {
   return 1;
 }
 
@@ -108,6 +124,11 @@ int GetStrideCFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+int GetStrideCFromParams(const GemmAndBiasParams<T>* params) {
+  return 1;
+}
+
+template <typename T>
 int GetStrideCFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->stride_c;
 }
@@ -119,6 +140,11 @@ int GetStrideCFromParams(const ScaledGemmParams<T>* params) {
 
 template <typename T>
 float GetAlphaFromParams(const GemmParams<T>* params) {
+  return params->alpha;
+}
+
+template <typename T>
+float GetAlphaFromParams(const GemmAndBiasParams<T>* params) {
   return params->alpha;
 }
 
@@ -138,6 +164,11 @@ float GetBetaFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+float GetBetaFromParams(const GemmAndBiasParams<T>* params) {
+  return 0.0;
+}
+
+template <typename T>
 float GetBetaFromParams(const GemmStridedBatchedParams<T>* params) {
   return params->beta;
 }
@@ -149,6 +180,11 @@ float GetBetaFromParams(const ScaledGemmParams<T>* params) {
 
 template <typename T>
 const void* GetAScalePointerFromParams(const GemmParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
+const void* GetAScalePointerFromParams(const GemmAndBiasParams<T>* params) {
   return nullptr;
 }
 
@@ -168,6 +204,11 @@ const void* GetBScalePointerFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+const void* GetBScalePointerFromParams(const GemmAndBiasParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
 const void* GetBScalePointerFromParams(const GemmStridedBatchedParams<T>* params) {
   return nullptr;
 }
@@ -179,6 +220,11 @@ const void* GetBScalePointerFromParams(const ScaledGemmParams<T>* params) {
 
 template <typename T>
 const void* GetDScalePointerFromParams(const GemmParams<T>* params) {
+  return nullptr;
+}
+
+template <typename T>
+const void* GetDScalePointerFromParams(const GemmAndBiasParams<T>* params) {
   return nullptr;
 }
 
@@ -198,6 +244,11 @@ const void* GetBiasPointerFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+const void* GetBiasPointerFromParams(const GemmAndBiasParams<T>* params) {
+  return params->bias;
+}
+
+template <typename T>
 const void* GetBiasPointerFromParams(const GemmStridedBatchedParams<T>* params) {
   return nullptr;
 }
@@ -213,6 +264,11 @@ hipDataType GetBiasTypeFromParams(const GemmParams<T>* params) {
 }
 
 template <typename T>
+hipDataType GetBiasTypeFromParams(const GemmAndBiasParams<T>* params) {
+  return HipDataTypeFor<T>();
+}
+
+template <typename T>
 hipDataType GetBiasTypeFromParams(const GemmStridedBatchedParams<T>* params) {
   return HIP_R_32F;
 }
@@ -220,6 +276,26 @@ hipDataType GetBiasTypeFromParams(const GemmStridedBatchedParams<T>* params) {
 template <typename T>
 hipDataType GetBiasTypeFromParams(const ScaledGemmParams<T>* params) {
   return at::cuda::ScalarTypeToCudaDataType(params->bias_dtype);
+}
+
+template <typename T>
+at::cuda::blas::GEMMAndBiasActivationEpilogue GetActivationFromParams(const GemmParams<T>* params) {
+  return at::cuda::blas::GEMMAndBiasActivationEpilogue::None;
+}
+
+template <typename T>
+at::cuda::blas::GEMMAndBiasActivationEpilogue GetActivationFromParams(const GemmAndBiasParams<T>* params) {
+  return params->activation;
+}
+
+template <typename T>
+at::cuda::blas::GEMMAndBiasActivationEpilogue GetActivationFromParams(const GemmStridedBatchedParams<T>* params) {
+  return at::cuda::blas::GEMMAndBiasActivationEpilogue::None;
+}
+
+template <typename T>
+at::cuda::blas::GEMMAndBiasActivationEpilogue GetActivationFromParams(const ScaledGemmParams<T>* params) {
+  return at::cuda::blas::GEMMAndBiasActivationEpilogue::None;
 }
 
 static hipblasOperation_t _hipblasOpFromChar(char op) {
@@ -234,7 +310,7 @@ static hipblasOperation_t _hipblasOpFromChar(char op) {
     case 'C':
       return HIPBLAS_OP_C;
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_hipblasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
@@ -247,7 +323,7 @@ static char _charFromhipblasOp(hipblasOperation_t op) {
     case HIPBLAS_OP_C:
       return 'C';
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_charFromhipblasOp input should be HIPBLAS_OP_N/T/C but got `", op, "`");
 }
 
@@ -263,7 +339,9 @@ static size_t GetHipblasltWorkspaceSize() {
   // 256MB is max workspace size allowed for hipblaslt
   // hipblaslt-bench uses 32MB
   // recommendation from hipblaslt author was 76MB
-  size_t workspace_size = 32*1024;  // going with 32MB
+  // TunableOp hipBLASLt workspace size is aligned with
+  // PyTorch's default in CUDABlas.cpp (_parseChosenWorkspaceSize)
+  size_t workspace_size = 76*1024;
   if (env) {
     try {
       workspace_size = std::stoi(env);
@@ -327,9 +405,9 @@ class HipblasltGemmOp : public Callable<ParamsT> {
     TuningStatus Call(const ParamsT* params) override {
       hipblasOperation_t transa_outer = MapLayoutToHipBlasLt(ALayout);
       hipblasOperation_t transb_outer = MapLayoutToHipBlasLt(BLayout);
-      auto a_datatype = HipBlasDataTypeFor<AT>();
-      auto b_datatype = HipBlasDataTypeFor<BT>();
-      auto in_out_datatype = HipBlasDataTypeFor<CT>();
+      auto a_datatype = HipDataTypeFor<AT>();
+      auto b_datatype = HipDataTypeFor<BT>();
+      auto in_out_datatype = HipDataTypeFor<CT>();
       auto opa = _hipblasOpFromChar(params->transa);
       auto opb = _hipblasOpFromChar(params->transb);
 
@@ -381,17 +459,28 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       const void* mat1_scale_ptr = GetAScalePointerFromParams<CT>(params);
       const void* mat2_scale_ptr = GetBScalePointerFromParams<CT>(params);
       const void* result_scale_ptr = GetDScalePointerFromParams<CT>(params);
-      if (mat1_scale_ptr && mat2_scale_ptr && result_scale_ptr) {
+      if (mat1_scale_ptr && mat2_scale_ptr) {
         matmul.setAttribute(HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, mat1_scale_ptr);
         matmul.setAttribute(HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
+      }
+      if (result_scale_ptr) {
         matmul.setAttribute(HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
+      }
 
-        const void* bias_ptr = GetBiasPointerFromParams<CT>(params);
-        auto bias_datatype = GetBiasTypeFromParams<CT>(params);
-        if (bias_ptr) {
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
+      const void* bias_ptr = GetBiasPointerFromParams<CT>(params);
+      auto bias_datatype = GetBiasTypeFromParams<CT>(params);
+      if (bias_ptr) {
+        matmul.setAttribute(HIPBLASLT_MATMUL_DESC_BIAS_POINTER, bias_ptr);
+        matmul.setAttribute(HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, bias_datatype);
+        auto activation = GetActivationFromParams<CT>(params);
+        if (activation == at::cuda::blas::GEMMAndBiasActivationEpilogue::RELU) {
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_EPILOGUE, HIPBLASLT_EPILOGUE_RELU_BIAS);
+        }
+        else if (activation == at::cuda::blas::GEMMAndBiasActivationEpilogue::GELU) {
+          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_EPILOGUE, HIPBLASLT_EPILOGUE_GELU_BIAS);
+        }
+        else {
           matmul.setAttribute(HIPBLASLT_MATMUL_DESC_EPILOGUE, HIPBLASLT_EPILOGUE_BIAS);
-          matmul.setAttribute(HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE, bias_datatype);
         }
       }
 
@@ -460,9 +549,9 @@ template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout,
 auto GetHipBlasLtTypeStringAndOps() {
   hipblasOperation_t transa_outer = MapLayoutToHipBlasLt(ALayout);
   hipblasOperation_t transb_outer = MapLayoutToHipBlasLt(BLayout);
-  auto a_datatype = HipBlasDataTypeFor<AT>();
-  auto b_datatype = HipBlasDataTypeFor<BT>();
-  auto in_out_datatype = HipBlasDataTypeFor<CT>();
+  auto a_datatype = HipDataTypeFor<AT>();
+  auto b_datatype = HipDataTypeFor<BT>();
+  auto in_out_datatype = HipDataTypeFor<CT>();
   std::vector<hipblasLtMatmulHeuristicResult_t> heuristic_result;
 
   hipblasLtHandle_t handle;
@@ -492,8 +581,7 @@ auto GetHipBlasLtTypeStringAndOps() {
     auto algo = heuristic_result[i].algo;
     int algo_index = hipblaslt_ext::getIndexFromAlgo(algo);
     auto callable = std::make_unique<HipblasltGemmOp<AT, BT, CT, ALayout, BLayout, ParamsT>>(algo);
-    std::string type_string = c10::str(
-        "Gemm_Hipblaslt_", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), "_", algo_index);
+    std::string type_string = fmt::sprintf("Gemm_Hipblaslt_%c%c_%d", _charFromhipblasOp(transa_outer), _charFromhipblasOp(transb_outer), algo_index);
     ret.emplace_back(type_string, std::move(callable));
   }
 
@@ -503,6 +591,11 @@ auto GetHipBlasLtTypeStringAndOps() {
 template <typename T, BlasOp ALayout, BlasOp BLayout>
 auto GetHipBlasLtGemmTypeStringAndOps() {
   return GetHipBlasLtTypeStringAndOps<T, T, T, ALayout, BLayout, GemmParams<T>>();
+}
+
+template <typename T, BlasOp ALayout, BlasOp BLayout>
+auto GetHipBlasLtGemmAndBiasTypeStringAndOps() {
+  return GetHipBlasLtTypeStringAndOps<T, T, T, ALayout, BLayout, GemmAndBiasParams<T>>();
 }
 
 template <typename T, BlasOp ALayout, BlasOp BLayout>

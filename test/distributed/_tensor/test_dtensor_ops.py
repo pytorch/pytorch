@@ -14,11 +14,7 @@ from torch.testing._internal.common_device_type import (
     ops,
 )
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
-from torch.testing._internal.common_utils import (
-    run_tests,
-    suppress_warnings,
-    TEST_WITH_ASAN,
-)
+from torch.testing._internal.common_utils import run_tests, suppress_warnings
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorConverter,
     DTensorOpTestBase,
@@ -191,9 +187,6 @@ dtensor_fails = {
     xfail("index_reduce", "amin"),
     xfail("index_select"),
     xfail("isin"),
-    xfail("isinf"),
-    xfail("isneginf"),
-    xfail("isposinf"),
     xfail("kthvalue"),
     xfail("linalg.cholesky"),
     xfail("linalg.cholesky_ex"),
@@ -201,9 +194,7 @@ dtensor_fails = {
     xfail("linalg.det"),
     xfail("linalg.det", "singular"),
     xfail("linalg.eig"),
-    xfail("linalg.eigh"),
     xfail("linalg.eigvals"),
-    xfail("linalg.eigvalsh"),
     xfail("linalg.householder_product"),
     xfail("linalg.inv"),
     xfail("linalg.inv_ex"),
@@ -309,7 +300,6 @@ dtensor_fails = {
     xfail("nn.functional.elu"),
     xfail("nn.functional.fractional_max_pool2d"),
     xfail("nn.functional.fractional_max_pool3d"),
-    xfail("nn.functional.gaussian_nll_loss"),
     xfail("nn.functional.glu"),
     xfail("nn.functional.grid_sample"),
     xfail("nn.functional.group_norm"),
@@ -320,12 +310,8 @@ dtensor_fails = {
     xfail("nn.functional.huber_loss"),
     xfail("nn.functional.instance_norm"),
     xfail("nn.functional.interpolate", "area"),
-    xfail("nn.functional.interpolate", "bicubic"),
-    xfail("nn.functional.interpolate", "bilinear"),
-    xfail("nn.functional.interpolate", "linear"),
     xfail("nn.functional.interpolate", "nearest"),
     xfail("nn.functional.interpolate", "nearest-exact"),
-    xfail("nn.functional.interpolate", "trilinear"),
     xfail("nn.functional.leaky_relu"),
     xfail("nn.functional.linear"),
     xfail("nn.functional.local_response_norm"),
@@ -355,7 +341,6 @@ dtensor_fails = {
     xfail("nn.functional.pdist"),
     xfail("nn.functional.pixel_shuffle"),
     xfail("nn.functional.pixel_unshuffle"),
-    xfail("nn.functional.poisson_nll_loss"),
     xfail("nn.functional.prelu"),
     xfail("nn.functional.relu6"),
     xfail("nn.functional.rrelu"),
@@ -368,7 +353,6 @@ dtensor_fails = {
     xfail("nn.functional.triplet_margin_loss"),
     xfail("nn.functional.triplet_margin_with_distance_loss"),
     xfail("nn.functional.unfold"),
-    xfail("nn.functional.upsample_bilinear"),
     xfail("nn.functional.upsample_nearest"),
     xfail("nonzero"),
     xfail("normal"),
@@ -377,6 +361,7 @@ dtensor_fails = {
     xfail("ormqr"),
     xfail("ones"),
     xfail("pca_lowrank"),
+    xfail("permute_copy"),
     xfail("pinverse"),
     xfail("polar"),
     xfail("put"),
@@ -433,6 +418,7 @@ dtensor_fails = {
     xfail("special.xlog1py"),
     xfail("special.zeta"),
     xfail("squeeze", "multiple"),
+    xfail("squeeze_copy"),
     xfail("signal.windows.bartlett"),
     xfail("signal.windows.blackman"),
     xfail("signal.windows.cosine"),
@@ -539,7 +525,6 @@ class TestDTensorOps(DTensorOpTestBase):
 
     # only allow float dytpe for now, we can relax this constraint
     # when feel necessary later (i.e when adding quantization support).
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps("TestDTensorOps", "test_dtensor_op_db", dtensor_fails)

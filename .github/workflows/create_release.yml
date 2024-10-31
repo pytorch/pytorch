@@ -16,6 +16,16 @@ on:
     paths: [.github/workflows/create_release.yml]
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   release:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     name: Create Release
@@ -63,7 +73,7 @@ jobs:
           files: ${{env.PT_RELEASE_FILE}}
       - name: Upload source distribution to GHA artifacts for release tags
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4.4.0
         with:
           name: ${{ env.PT_RELEASE_FILE }}
           path: ${{ env.PT_RELEASE_FILE }}
@@ -73,14 +83,16 @@ jobs:
 
   upload_source_code_to_s3:
     if: ${{ github.repository == 'pytorch/pytorch' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && contains(github.ref, 'rc') }}
-    runs-on: linux.2xlarge
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
     environment: sourcecode-upload
     name: Upload source code to S3 for release tags
     permissions:
       id-token: write
-    needs: release
+    needs:
+      - get-label-type
+      - release
     steps:
-      - uses: actions/download-artifact@v2
+      - uses: actions/download-artifact@v4.1.7
         with:
           name: ${{ needs.release.outputs.pt_release_name }}
       - name: Configure AWS credentials(PyTorch account)

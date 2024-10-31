@@ -81,7 +81,7 @@ static void im2col_out_cuda_template(
 
   if (input.dim() == 3) {
     batched_input = false;
-    input = input.view({1, input.size(0), input.size(1), input.size(2)});
+    input = input.unsqueeze(0);
   }
 
   int64_t batch_size = input.size(0);
@@ -103,7 +103,7 @@ static void im2col_out_cuda_template(
   output.resize_({batch_size, n_output_plane, output_length});
 
   // Launch kernel
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kHalf, kBFloat16, kBool,
       input.scalar_type(), "im2col_out_cuda", [&] {
     Tensor input_n;
     Tensor output_n;
@@ -131,10 +131,10 @@ static void im2col_out_cuda_template(
           output_n.mutable_data_ptr<scalar_t>());
     }
 
-    if (!batched_input) {
-      output.resize_({n_output_plane, output_length});
-    }
   });
+  if (!batched_input) {
+    output = output.squeeze(0);
+  }
 }
 
 } // namespace

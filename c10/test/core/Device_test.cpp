@@ -54,3 +54,12 @@ TEST(DeviceTypeTest, PrivateUseOneDeviceType) {
   ASSERT_EQ(c10::get_privateuse1_backend(true), "my_privateuse1_backend");
   ASSERT_EQ(c10::get_privateuse1_backend(false), "MY_PRIVATEUSE1_BACKEND");
 }
+
+TEST(DeviceTypeTest, PrivateUseOneRegister) {
+  ASSERT_THROW(c10::register_privateuse1_backend("cpu"), c10::Error);
+  ASSERT_THROW(c10::register_privateuse1_backend("cuda"), c10::Error);
+  ASSERT_THROW(c10::register_privateuse1_backend("hip"), c10::Error);
+  ASSERT_THROW(c10::register_privateuse1_backend("mps"), c10::Error);
+  ASSERT_THROW(c10::register_privateuse1_backend("xpu"), c10::Error);
+  ASSERT_THROW(c10::register_privateuse1_backend("mtia"), c10::Error);
+}

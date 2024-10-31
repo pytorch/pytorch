@@ -22,9 +22,9 @@ class ArtifactContent(object):
     properties: Optional[_property_bag.PropertyBag] = dataclasses.field(
         default=None, metadata={"schema_property_name": "properties"}
     )
-    rendered: Optional[
-        _multiformat_message_string.MultiformatMessageString
-    ] = dataclasses.field(default=None, metadata={"schema_property_name": "rendered"})
+    rendered: Optional[_multiformat_message_string.MultiformatMessageString] = (
+        dataclasses.field(default=None, metadata={"schema_property_name": "rendered"})
+    )
     text: Optional[str] = dataclasses.field(
         default=None, metadata={"schema_property_name": "text"}
     )

@@ -5,7 +5,6 @@ import inspect
 import logging
 import operator
 import re
-import types
 from typing import Callable, Sequence
 
 import onnxscript  # type: ignore[import]
@@ -20,7 +19,6 @@ from torch.onnx._internal.fx import (
     _pass,
     diagnostics,
     onnxfunction_dispatcher,
-    op_validation,
     type_utils as fx_type_utils,
 )
 from torch.utils import _pytree
@@ -396,7 +394,6 @@ class FxOnnxInterpreter:
         node,
         fx_graph_module: torch.fx.GraphModule,
         onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
-        op_level_debug: bool,
         onnxscript_graph: onnxscript_graph_building.TorchScriptGraph,
         onnxscript_tracer: onnxscript_graph_building.TorchScriptTracingEvaluator,
         fx_name_to_onnxscript_value: dict[
@@ -411,7 +408,6 @@ class FxOnnxInterpreter:
             node: The FX node to be translated.
             fx_graph_module: The FX graph module containing the node.
             onnxfunction_dispatcher: The dispatcher to find the best matched ONNX op.
-            op_level_debug (bool): Whether to enable op level debug.
             onnxscript_graph: The ONNX graph to be populated.
             onnxscript_tracer: The tracer to trace the ONNX graph.
             fx_name_to_onnxscript_value: The mapping from FX node name to ONNX Script value.
@@ -446,7 +442,6 @@ class FxOnnxInterpreter:
                 onnxscript_tracer,
                 fx_name_to_onnxscript_value,
                 onnxfunction_dispatcher,
-                op_level_debug,
                 fx_graph_module,
             )
         elif node.op == "call_method":
@@ -459,7 +454,6 @@ class FxOnnxInterpreter:
                 onnxscript_tracer,
                 fx_graph_module,
                 onnxfunction_dispatcher,
-                op_level_debug,
             )
         elif node.op == "output":
             self.output(node, onnxscript_graph, fx_name_to_onnxscript_value)
@@ -474,7 +468,6 @@ class FxOnnxInterpreter:
         self,
         fx_graph_module: torch.fx.GraphModule,
         onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
-        op_level_debug: bool,
         parent_onnxscript_graph: onnxscript_graph_building.TorchScriptGraph
         | None = None,
     ) -> onnxscript_graph_building.TorchScriptGraph:
@@ -483,7 +476,6 @@ class FxOnnxInterpreter:
         Args:
             fx_graph_module: FX graph module to be translated.
             onnxfunction_dispatcher: ONNX function dispatcher.
-            op_level_debug: Whether to enable op-level debug.
             parent_onnxscript_graph: The parent TorchScript graph. Must be provided if
                 `fx_graph_module` is a submodule. If not provided,
                 `fx_graph_module` is assumed to be the root module.
@@ -541,13 +533,11 @@ class FxOnnxInterpreter:
         # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
         # with FakeTensorMode.
         with torch.utils._mode_utils.no_dispatch():
-            # node_fixed_shape is only used on op_level_debug purpose.
             for node in fx_graph_module.graph.nodes:
                 self.run_node(
                     node,
                     fx_graph_module,
                     onnxfunction_dispatcher,
-                    op_level_debug,
                     onnxscript_graph,
                     onnxscript_tracer,
                     fx_name_to_onnxscript_value,
@@ -621,12 +611,12 @@ class FxOnnxInterpreter:
             | tuple[onnxscript_graph_building.TorchScriptTensor, ...],
         ],
         onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
-        op_level_debug: bool,
         fx_graph_module: torch.fx.GraphModule,
     ):
         # aten ops and other stateless functions.
         if node.target == operator.getitem and isinstance(
-            fx_name_to_onnxscript_value[node.args[0].name], tuple  # type: ignore[union-attr,index]
+            fx_name_to_onnxscript_value[node.args[0].name],  # type: ignore[union-attr,index]
+            tuple,
         ):
             onnx_tensor_tuple = fx_name_to_onnxscript_value[node.args[0].name]  # type: ignore[union-attr,index]
             index = node.args[1]
@@ -660,9 +650,10 @@ class FxOnnxInterpreter:
             diagnostic_context=self.diagnostic_context,
         )
         with onnxscript.evaluator.default_as(onnxscript_tracer):
-            output: onnxscript_graph_building.TorchScriptTensor | tuple[
-                onnxscript_graph_building.TorchScriptTensor, ...
-            ] = symbolic_fn(*onnx_args, **onnx_kwargs)
+            output: (
+                onnxscript_graph_building.TorchScriptTensor
+                | tuple[onnxscript_graph_building.TorchScriptTensor, ...]
+            ) = symbolic_fn(*onnx_args, **onnx_kwargs)
         assert (
             output is not None
         ), f"Node creates None with target={node.target}, name={node.name}, args={onnx_args}, kwargs={onnx_kwargs}"
@@ -673,23 +664,6 @@ class FxOnnxInterpreter:
         assert isinstance(
             output, (onnxscript_graph_building.TorchScriptTensor, tuple)
         ), type(output)
-        # NOTE(titaiwang): We bypass two kinds of ops as it's not meaningful to
-        # validate them with op level debug.
-        # 1. aten::sym_size: The op is simply get item from a list of tensors.
-        # 2. BuiltinFunction: It doesn't supported tensor
-        if (
-            op_level_debug
-            and node.target != torch.ops.aten.sym_size
-            and not isinstance(node.target, types.BuiltinFunctionType)
-        ):
-            op_validation.validate_op_between_ort_torch(
-                self.diagnostic_context,
-                node,
-                symbolic_fn,
-                fx_args,
-                fx_kwargs,
-                fx_graph_module,
-            )
         fx_name_to_onnxscript_value[node.name] = output
 
     def output(
@@ -732,7 +706,6 @@ class FxOnnxInterpreter:
         tracer: onnxscript_graph_building.TorchScriptTracingEvaluator,
         root_fx_graph_module: torch.fx.GraphModule,
         onnxfunction_dispatcher: onnxfunction_dispatcher.OnnxFunctionDispatcher,
-        op_level_debug: bool,
     ) -> None:
         """Export a fx.GraphModule submodule to ONNXScript graph.
 
@@ -751,7 +724,6 @@ class FxOnnxInterpreter:
             tracer: The tracer used to trace the ONNXScript graph.
             root_fx_graph_module: The root FX module.
             onnxfunction_dispatcher: The dispatcher.
-            op_level_debug: Whether to enable op-level debug.
         """
         assert isinstance(
             node.target, str
@@ -764,7 +736,7 @@ class FxOnnxInterpreter:
         ), f"sub_module must be a torch.fx.GraphModule, not {type(sub_module)} for node {node}."
 
         sub_onnxscript_graph = self.run(
-            sub_module, onnxfunction_dispatcher, op_level_debug, parent_onnxscript_graph
+            sub_module, onnxfunction_dispatcher, parent_onnxscript_graph
         )
 
         onnx_args, _ = _wrap_fx_args_as_onnxscript_args(
@@ -779,9 +751,10 @@ class FxOnnxInterpreter:
         # be considered.
         unique_module_name = f"{sub_module._get_name()}_{node.target}"
 
-        outputs: onnxscript_graph_building.TorchScriptTensor | tuple[
-            onnxscript_graph_building.TorchScriptTensor, ...
-        ] = parent_onnxscript_graph.add_module_call(  # type: ignore[assignment]
+        outputs: (
+            onnxscript_graph_building.TorchScriptTensor
+            | tuple[onnxscript_graph_building.TorchScriptTensor, ...]
+        ) = parent_onnxscript_graph.add_module_call(  # type: ignore[assignment]
             unique_module_name, sub_onnxscript_graph, onnx_args
         )
 
