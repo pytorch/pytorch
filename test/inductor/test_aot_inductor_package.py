@@ -38,12 +38,18 @@ def compile(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-@unittest.skipIf(IS_FBCODE, "This is for OSS only")
 @parameterized_class(
     [
         {"device": "cpu", "package_cpp_only": False},
-        {"device": "cpu", "package_cpp_only": True},
     ]
+    + (
+        [
+            # FIXME: AssertionError: AOTInductor compiled library does not exist at
+            {"device": "cpu", "package_cpp_only": True}
+        ]
+        if not IS_FBCODE
+        else []
+    )
     + (
         [
             {"device": "cuda", "package_cpp_only": False},
