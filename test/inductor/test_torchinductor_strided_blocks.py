@@ -52,6 +52,13 @@ class TritonBlockPointerTest(InductorTestCase):
         view = torch.as_strided(full, view_size, full.stride())
         return view
 
+    def _assert_reduction_ndims(self, code, num_dims: int) -> None:
+        reduction_blocks = ["R0_BLOCK", "R1_BLOCK"]
+        for expected_block in reduction_blocks[:num_dims]:
+            self.assertIn(expected_block, code)
+        for unexpected_block in reduction_blocks[num_dims:]:
+            self.assertNotIn(unexpected_block, code)
+
     def run_and_compare(
         self,
         func: Callable[..., Any],
@@ -530,8 +537,7 @@ class TritonBlockPointerTest(InductorTestCase):
         )
 
         # Check the code for multiple Rn_BLOCK's
-        for block in ["R0_BLOCK", "R1_BLOCK"]:
-            self.assertIn(block, code)
+        self._assert_reduction_ndims(code, 2)
 
     def test_2d_reduction_no_x_dim(self):
         """
@@ -556,8 +562,7 @@ class TritonBlockPointerTest(InductorTestCase):
         self.assertNotIn("BLOCK", signature_line)
 
         # Check for 2 reduction dimensions in the body.
-        for block in ["R0_BLOCK", "R1_BLOCK"]:
-            self.assertIn(block, code)
+        self._assert_reduction_ndims(code, 2)
 
     @parametrize(
         "size,expected_num_block_pointers,expected_num_triton_kernels,expect_fallback",
@@ -596,8 +601,7 @@ class TritonBlockPointerTest(InductorTestCase):
         self.assertEqual("welford" in code, not expect_fallback)
 
         # Check for 2 reduction dimensions.
-        for block in ["R0_BLOCK", "R1_BLOCK"]:
-            self.assertIn(block, code)
+        self._assert_reduction_ndims(code, 2)
 
     def test_welford_non_block_pointer(
         self,
@@ -623,8 +627,7 @@ class TritonBlockPointerTest(InductorTestCase):
         self.assertIn("welford", code)
 
         # Check for a single reduction dimension.
-        self.assertIn("R0_BLOCK", code)
-        self.assertNotIn("R1_BLOCK", code)
+        self._assert_reduction_ndims(code, 1)
 
     def test_reduction_multiple_discontiguous_dims(self):
         """
@@ -643,8 +646,7 @@ class TritonBlockPointerTest(InductorTestCase):
         )
 
         # Check for 2 reduction dimensions.
-        for block in ["R0_BLOCK", "R1_BLOCK"]:
-            self.assertIn(block, code)
+        self._assert_reduction_ndims(code, 2)
 
     @parametrize(
         "tile_reductions",
@@ -669,8 +671,7 @@ class TritonBlockPointerTest(InductorTestCase):
         )
 
         # Check the code for multiple Rn_BLOCK's
-        num_rblocks = sum(int(block in code) for block in ["R0_BLOCK", "R1_BLOCK"])
-        self.assertEqual(num_rblocks, 2 if tile_reductions else 1)
+        self._assert_reduction_ndims(code, 2 if tile_reductions else 1)
 
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
