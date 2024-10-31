@@ -210,7 +210,6 @@ def default_generator_func() -> torch.Generator:
 
     Returns:
         torch.Generator: The default generator for CPU.
-    
     Example:
         >>> gen = torch.random.default_generator_func()
         >>> torch.manual_seed(42, generator=gen)

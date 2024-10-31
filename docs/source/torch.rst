@@ -184,7 +184,7 @@ Random sampling
     initial_seed
     get_rng_state
     set_rng_state
-    default_generator
+    default_generator_func
     bernoulli
     multinomial
     normal
