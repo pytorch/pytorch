@@ -680,17 +680,12 @@ class TestScheduleLowering(TestCase):
         ]
         # Create a pipeline stage to wrap that submodule
         num_microbatches = 2
-        input_args = x.chunk(num_microbatches)[0]
         stages = [
             PipelineStage(
                 stage_module,
                 stage_idx,
                 n_stages,
                 device,
-                # TODO(whc) shape inference shouldn't have needed to run communications in this 1-rank, 2-stage scenario,
-                # but it was failing on fakePG recv data unpiclking error, so something is wrong. Work around for now.
-                input_args=input_args,
-                output_args=input_args,
             )
             for stage_module, stage_idx in zip(stage_modules, stage_indices)
         ]
@@ -701,8 +696,6 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=[0, 0],
-            # TODO should we test both T/F?
-            use_full_backward=True,
         )
         schedule._load_actions(
             {
@@ -815,7 +808,6 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=[0],
-            use_full_backward=False,
         )
         schedule._load_actions(
             {
