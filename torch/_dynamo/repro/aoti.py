@@ -276,19 +276,33 @@ def repro_minify(options, exported_program, config_patches):
     mod, args, kwargs = repro_common(options, exported_program)
     compiler_name = "aot_inductor"
 
+    from torch.cuda import synchronize
+
+    need_sync = False
+
+    for arg in args:
+        if isinstance(arg, torch.Tensor) and arg.is_cuda:
+            need_sync = True
+            break
     # device = options.device
     # if device != "cpu" and not device.startswith("cuda"):
     #     raise RuntimeError("Unsupported device " + device)
 
     def module_fails(gm, flat_example_inputs, check_str=None):
+        # we have to export first so the in_spec and out_spec are populated
+        tuple_inputs = tuple(flat_example_inputs)
+        ep = torch.export.export(gm, tuple_inputs)
+        gm = ep.module()
         try:
             _aoti_compile_and_package_inner(
                 gm,
-                flat_example_inputs,
+                tuple_inputs,
                 kwargs,
                 load_and_run=True,
                 inductor_configs=config_patches,
             )
+            if need_sync:
+                synchronize()  # ensure segfaults are surfaced
             return False
         except Exception as e:
             if check_str is not None and check_str not in repr(e):

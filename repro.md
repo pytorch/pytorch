@@ -191,20 +191,14 @@ if __name__ == "__main__":
 
 ```
 
-Mod:
+print(exported_program.graph)
 ```python
-GraphModule()
-
-
-
-def forward(self, linear):
-    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
-    relu = torch.ops.aten.relu.default(linear);  linear = None
-    return pytree.tree_unflatten((relu,), self._out_spec)
+graph():
+    %linear : [num_users=1] = placeholder[target=linear]
+    %relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
+    return (relu,)
 ```
 
-
-[Question]: What should the device in aot_load be? Currently it's an arg to re_repro.
 
 [TODO]: write some test cases
 
