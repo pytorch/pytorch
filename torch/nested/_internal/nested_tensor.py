@@ -214,6 +214,18 @@ class NestedTensor(torch.Tensor):
     def _min_seqlen(self):
         return self._get_min_seqlen()
 
+    # Convenience accessors that return a min / max seqlen if one is present and do NOT
+    # compute / cache them if they're not.
+    @property
+    def _maybe_max_seqlen(self) -> Optional[int]:
+        mt = self._max_seqlen_tensor
+        return None if mt is None else _load_val_from_tensor(mt)
+
+    @property
+    def _maybe_min_seqlen(self) -> Optional[int]:
+        mt = self._min_seqlen_tensor
+        return None if mt is None else _load_val_from_tensor(mt)
+
     def __repr__(self):  # type: ignore[override]
         # We should implement this in torch/_tensor_str.py instead
         grad_fn_str = (
@@ -300,6 +312,8 @@ class NestedTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        # If you're wondering why there's a nested tensor with one of its
+        # size = -1, see note: [NJT outer_size in AOTDispatcher]
         kwargs = {} if kwargs is None else kwargs
 
         # Lazy import to avoid circular dependency

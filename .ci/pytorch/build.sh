@@ -203,9 +203,12 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
-  export USE_CUDA=0
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    export USE_CUDA=1
+  fi
   export USE_ASAN=1
-  export UBSAN_FLAGS="-fno-sanitize-recover=all;-fno-sanitize=float-divide-by-zero;-fno-sanitize=float-cast-overflow"
+  export REL_WITH_DEB_INFO=1
+  export UBSAN_FLAGS="-fno-sanitize-recover=all"
   unset USE_LLVM
 fi
 
@@ -273,7 +276,6 @@ else
     # set only when building other architectures
     # or building non-XLA tests.
     if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
-          "$BUILD_ENVIRONMENT" != *s390x*   &&
           "$BUILD_ENVIRONMENT" != *xla* ]]; then
       if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
         # Install numpy-2.0.2 for builds which are backward compatible with 1.X
@@ -396,8 +398,6 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   python tools/stats/export_test_times.py
 fi
 
-# snadampal: skipping it till sccache support added for aarch64
-# https://github.com/pytorch/pytorch/issues/121559
-if [[ "$BUILD_ENVIRONMENT" != *aarch64* &&  "$BUILD_ENVIRONMENT" != *s390x* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *s390x* ]]; then
   print_sccache_stats
 fi

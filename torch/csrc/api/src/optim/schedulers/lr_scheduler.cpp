@@ -1,8 +1,7 @@
 #include <c10/util/irange.h>
 #include <torch/optim/schedulers/lr_scheduler.h>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 LRScheduler::LRScheduler(torch::optim::Optimizer& optimizer)
     : optimizer_(optimizer) {}
@@ -39,5 +38,4 @@ std::vector<double> LRScheduler::get_current_lrs() const {
   return learnings_rates;
 }
 
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

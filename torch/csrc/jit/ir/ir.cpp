@@ -292,7 +292,7 @@ SourceRange Node::sourceRange() const {
 }
 
 static std::ostream& indent(std::ostream& out, size_t level) {
-  for (C10_UNUSED const auto i : c10::irange(level)) {
+  for ([[maybe_unused]] const auto i : c10::irange(level)) {
     out << "  ";
   }
   return out;
@@ -746,9 +746,10 @@ void Block::destroy() {
 
 void Graph::cloneFrom(Graph& src) {
   auto env = [](Value* v) -> Value* {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Graph::copy() encountered a use of a value " + v->debugName() +
-        " not in scope. Run lint!");
+            " not in scope. Run lint!");
   };
   block()->cloneFrom(src.block(), env);
 }
@@ -1767,7 +1768,7 @@ Node* Graph::createTupleSlice(
   new_vals.reserve(num_values);
 
   int64_t i = beg;
-  for (C10_UNUSED const auto j : c10::irange(num_values)) {
+  for ([[maybe_unused]] const auto j : c10::irange(num_values)) {
     auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
     auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
 
@@ -1815,7 +1816,7 @@ Node* Graph::createListUnpack(Value* v, size_t size) {
   ListTypePtr list_type = v->type()->expect<ListType>();
   TypePtr elem_type = list_type->getElementType();
   auto n = create(prim::ListUnpack, {v}, 0);
-  for (C10_UNUSED const auto i : c10::irange(size)) {
+  for ([[maybe_unused]] const auto i : c10::irange(size)) {
     n->addOutput()->setType(elem_type);
   }
   return n;
