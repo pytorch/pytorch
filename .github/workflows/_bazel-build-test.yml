@@ -91,14 +91,14 @@ jobs:
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
-      - name: Check if in a ARC runner
+      - name: Check if in a container runner
         shell: bash
-        id: check_arc_runner
-        run: echo "IN_ARC_RUNNER=$([ -f /.inarc ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+        id: check_container_runner
+        run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-        if: ${{ inputs.cuda-version != 'cpu' && steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
+        if: ${{ inputs.cuda-version != 'cpu' && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
 
       - name: Output disk space left
         run: |
@@ -137,11 +137,15 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_REGION: us-east-1
           TORCH_CUDA_ARCH_LIST: 5.2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           CUDA_VERSION: ${{ inputs.cuda-version }}
         run: |
+          python3 -m pip install boto3==1.19.12
+          # Fetch aws credential from IMDs
+          eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
           export SHARD_NUMBER=0
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
@@ -163,6 +167,7 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_REGION \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e REENABLED_ISSUES \
             -e TORCH_CUDA_ARCH_LIST \

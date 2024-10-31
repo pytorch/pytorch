@@ -189,6 +189,7 @@ manual_torch_name_rule_map = {
     "torch.sym_min": TorchInGraphFunctionVariable,
     "torch.sym_sqrt": TorchInGraphFunctionVariable,
     "torch.sym_ite": TorchInGraphFunctionVariable,
+    "torch.sym_sum": TorchInGraphFunctionVariable,
     "torch.Tensor#_make_wrapper_subclass": SkipFunctionVariable,
     "torch.Tensor#__init__": SkipFunctionVariable,
     "torch.cuda.set_device": SkipFunctionVariable,
@@ -421,6 +422,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_avx512_bf16_supported",
         "torch._C._cpu._is_amx_tile_supported",
         "torch._C._cpu._init_amx",
+        "torch._C._cpu._is_arm_sve_supported",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
         "torch._C._crash_if_csrc_ubsan",
@@ -2338,6 +2340,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._register_device_module",
         "torch._running_with_deploy",
         "torch._utils._dummy_type",
+        "torch._utils._flatten_dense_tensors",
+        "torch._utils._unflatten_dense_tensors",
         "torch._weights_only_unpickler._get_allowed_globals",
         "torch._weights_only_unpickler.load",
         "torch.align_tensors",
@@ -2445,6 +2449,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cpu._is_avx512_bf16_supported",
         "torch._C._cpu._is_amx_tile_supported",
         "torch.cpu._init_amx",
+        "torch._C._cpu._is_arm_sve_supported",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
         "torch.cpu.device_count",
@@ -2541,6 +2546,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda.memory._snapshot",
         "torch.cuda.memory.caching_allocator_alloc",
         "torch.cuda.memory.caching_allocator_delete",
+        "torch.cuda.memory.caching_allocator_enable",
         "torch.cuda.memory.change_current_allocator",
         "torch.cuda.memory.empty_cache",
         "torch.cuda.memory.get_allocator_backend",
@@ -2911,6 +2917,9 @@ def get_tensor_method():
             method, (types.MethodDescriptorType, types.WrapperDescriptorType)
         ):
             s.add(method)
+
+    # mlazos: this is a function which we handle specially in TensorVariable
+    s.add(torch.Tensor.__contains__)  # type: ignore[arg-type]
     return frozenset(s)
 
 
@@ -3153,7 +3162,6 @@ THIRDPARTY_SKIPLIST = (
     "hypothesis",
     "networkx",
     "numpy",
-    "omegaconf",
     "onnx",
     "onnxruntime",
     "onnx_tf",
@@ -3245,6 +3253,7 @@ MOD_INLINELIST = [
     "torch._functorch.functional_call",
     "torch._functorch.vmap",
     "torch._higher_order_ops.associative_scan",
+    "torch._higher_order_ops.invoke_subgraph",
     "torch._higher_order_ops.scan",
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
@@ -3268,6 +3277,7 @@ MOD_INLINELIST = [
     "torch.nn",
     "torch.overrides",
     "torch.random",
+    "torch.return_types",
     "torch.sparse",
     "torch.testing",
     "torch.utils._content_store",

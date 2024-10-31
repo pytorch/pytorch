@@ -10,7 +10,7 @@ import copy
 import itertools
 import unittest
 import warnings
-from contextlib import nullcontext
+from contextlib import ContextDecorator, nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
@@ -5747,6 +5747,62 @@ def forward(self, tangents_1, tangents_2):
             self.assertEqual(ref_out2.requires_grad, out2.requires_grad)
 
 
+class GradsNoForceContiguousContextManager(ContextDecorator):
+    def __enter__(self):
+        # flake8: noqa: TOR901
+        self.lib = torch.library.Library("_mylib", "FRAGMENT")
+        self.d = {
+            torch.channels_last: 0,
+            torch.contiguous_format: 0,
+        }
+
+        self.lib.define("foo(Tensor x) -> Tensor")
+        self.lib.define("foo2(Tensor x) -> Tensor")
+
+        def foo_impl(a):
+            return a.clone()
+
+        def foo_meta(a):
+            return a.clone()
+
+        def foo2_impl(x):
+            self.d[torch._prims_common.suggest_memory_format(x)] += 1
+            return x.clone()
+
+        def foo2_meta(a):
+            return a.clone()
+
+        for backend in ["CPU", "CUDA"]:
+            self.lib.impl("foo", foo_impl, backend)
+            self.lib.impl("foo2", foo2_impl, backend)
+
+        self.lib.impl("foo", foo_meta, "Meta")
+        self.lib.impl("foo2", foo2_meta, "Meta")
+
+        def foo_bwd(ctx, grad):
+            torch.ops._mylib.foo2(grad)
+            return grad.clone()
+
+        torch.library.register_autograd("_mylib::foo", foo_bwd, lib=self.lib)
+
+        from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
+
+        _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
+        _register_effectful_op(torch.ops._mylib.foo2.default, _EffectType.ORDERED)
+
+        return self
+
+    def __exit__(self, type, value, tb):
+        self.lib._destroy()
+        return False
+
+    def reset_counters(self):
+        self.d = {
+            torch.channels_last: 0,
+            torch.contiguous_format: 0,
+        }
+
+
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):
@@ -5970,12 +6026,172 @@ class TestAOTModuleSimplified(AOTTestCase):
         out = torch.compile(fn, backend="aot_eager", fullgraph=True)(inp)
         self.assertEqual(ref_out, out)
 
+    # Next several tests are related to issue:
+    # https://github.com/pytorch/pytorch/issues/134644
+    # AOTD tries to predict tangents for tracing ahead of time.
+    # The first strategy was to coerce traced_tangents and runtime_tangents to be contiguous().
+    # But for models working in channels_last memory format this will add additional contiguous() calls.
+    # The fix is predicting tangents memory format to be similar to outputs memory format.
+    # And coerce runtime tangents to that traced memory format.
+    def test_grads_no_force_contiguous_dense(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
+
+                def forward(self, x, y, cont_inp):
+                    z = y + 3
+                    y.mul_(2)
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return (
+                        r,
+                        r.transpose(0, 1),
+                        z.view(-1),
+                        z.transpose(0, 1),
+                        cont_inp * 2,
+                    )
+
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
+
+            def dense_inps():
+                return (
+                    torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                        memory_format=torch.channels_last
+                    ),
+                    torch.randn(3, 2, 1, 1, requires_grad=True).to(
+                        memory_format=torch.channels_last
+                    ),
+                    torch.randn(3, 2, 1, 1, requires_grad=True),
+                )
+
+            ref_inps = dense_inps()
+            ref_outs = m(*ref_inps)
+            ref_outs[0].sum().backward()
+
+            ctx.reset_counters()
+            inps = dense_inps()
+            outs = torch.compile(m, backend="inductor", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+
+            self.assertEqual(ctx.d[torch.channels_last], 1)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
+
+    def test_grads_no_force_contiguous_subclass(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
+
+                def forward(self, x, y):
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return r, y + 1
+
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
+
+            def inps_fn():
+                return (
+                    TwoTensor(
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                        torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                            memory_format=torch.channels_last
+                        ),
+                    ),
+                    torch.randn(3, 2, requires_grad=True).clone(),
+                )
+
+            ref_outs = m(*inps_fn())
+            ref_outs[0].sum().backward()
+
+            ctx.reset_counters()
+            mc = M()
+            mc.to(memory_format=torch.channels_last)
+            mc.train()
+            outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps_fn())
+            outs[0].sum().backward()
+
+            self.assertEqual(ctx.d[torch.channels_last], 2)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
+
+    def test_grads_no_force_contiguous_nested_subclass(self):
+        with GradsNoForceContiguousContextManager() as ctx:
+
+            class M(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.conv = torch.nn.Conv2d(3, 3, 3)
+
+                def forward(self, x):
+                    r = self.conv(x)
+                    r = torch.ops._mylib.foo(r)
+                    return r
+
+            m = M()
+            m.to(memory_format=torch.channels_last)
+            m.train()
+
+            def inps_fn(x):
+                return (
+                    TwoTensor(
+                        TwoTensor(x.clone(), x.clone()), TwoTensor(x.clone(), x.clone())
+                    ),
+                )
+
+            x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                memory_format=torch.channels_last
+            )
+            ref_inps = inps_fn(x)
+            ref_outs = m(*ref_inps)
+            ref_outs[0].sum().backward()
+
+            ctx.reset_counters()
+
+            mc = M()
+            mc.to(memory_format=torch.channels_last)
+            mc.train()
+
+            x = torch.randn(2, 3, 5, 5, requires_grad=True).to(
+                memory_format=torch.channels_last
+            )
+            inps = inps_fn(x)
+            outs = torch.compile(mc, backend="aot_eager", fullgraph=True)(*inps)
+            outs[0].sum().backward()
+            self.assertEqual(ctx.d[torch.channels_last], 4)
+            self.assertEqual(ctx.d[torch.contiguous_format], 0)
+
+    def test_grads_no_force_contiguous_nested_tensor_tangent(self):
+        # NestedTensor setattr could fails with AttributeError for attr "_min_seqlen_tensor"
+        # Adding test to verify that it is handled.
+        def fn(x):
+            return x.clone()
+
+        a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(3, 3, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(4, 3, requires_grad=True, dtype=torch.float64)
+        nt = torch.nested.as_nested_tensor([a, b, c], layout=torch.jagged)
+
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(nt)
+        out_buffer = out.values()
+        ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
+
     @torch._inductor.config.patch({"freezing": True})
     def test_inductor_freezing_with_subclasses(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.w = TwoTensor(torch.randn(3, 4), torch.randn(3, 4))
+                self.wt = torch.randn(3, 4)
 
             def forward(self, x):
                 return (
@@ -5983,12 +6199,25 @@ class TestAOTModuleSimplified(AOTTestCase):
                         dim=0, index=torch.tensor([0, 2, 1], dtype=torch.int64)
                     )
                     + self.w
+                    + self.wt
                 )
 
         m = M()
         inp = torch.randn(3, 4)
         with torch.no_grad():
             torch.compile(m, fullgraph=True)(inp)
+
+    def test_rrelu(self):
+        def fn(x):
+            return torch.rrelu(x, training=True)
+
+        def fn_(x):
+            torch.rrelu_(x, training=True)
+            return x
+
+        x = torch.randn(4, 4)
+        torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        torch.compile(fn_, backend="inductor", fullgraph=True)(x)
 
     @torch._functorch.config.patch("aotd_debug_profile", True)
     def test_aotd_debug_profile_overhead_logging(self):
@@ -6001,6 +6230,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         last_bwd_start_time = None
         last_bwd_compiled_module_start_time = None
         last_bwd_compiled_module_duration = None
+        last_bwd_tgs_start_time = None
 
         fwd_overheads_ns = []
         fwd_compiled_module_durations_ns = []
@@ -6010,21 +6240,20 @@ class TestAOTModuleSimplified(AOTTestCase):
         bwd_overheads_ns = []
         bwd_compiled_module_durations_ns = []
         bwd_total_durations_ns = []
+        bwd_tgs_durations_ns = []
 
         EVENT_NAME_PREFIX = "torch._functorch._aot_autograd.runtime_wrappers"
 
-        def on_event(event):
-            event_name = event["name"]
-            event_ph = event["ph"]
+        def on_event(event_name, time_ns, metadata, event_type):
             if event_name == f"{EVENT_NAME_PREFIX}.runtime_wrapper":
-                if event_ph == "B":
+                if event_type == "B":
                     nonlocal last_fwd_runtime_wrapper_start_time
                     assert last_fwd_runtime_wrapper_start_time is None
-                    last_fwd_runtime_wrapper_start_time = event["ts"]
-                elif event_ph == "E":
+                    last_fwd_runtime_wrapper_start_time = time_ns
+                elif event_type == "E":
                     assert last_fwd_runtime_wrapper_start_time is not None
                     last_fwd_runtime_wrapper_duration = (
-                        event["ts"] - last_fwd_runtime_wrapper_start_time
+                        time_ns - last_fwd_runtime_wrapper_start_time
                     )
                     fwd_runtime_wrapper_durations_ns.append(
                         last_fwd_runtime_wrapper_duration
@@ -6039,13 +6268,13 @@ class TestAOTModuleSimplified(AOTTestCase):
                 event_name
                 == f"{EVENT_NAME_PREFIX}.CompiledFunction.forward.compiled_module"
             ):
-                if event_ph == "B":
+                if event_type == "B":
                     nonlocal last_fwd_compiled_module_start_time
-                    last_fwd_compiled_module_start_time = event["ts"]
-                elif event_ph == "E":
+                    last_fwd_compiled_module_start_time = time_ns
+                elif event_type == "E":
                     assert last_fwd_compiled_module_start_time != -1
                     last_fwd_compiled_module_duration = (
-                        event["ts"] - last_fwd_compiled_module_start_time
+                        time_ns - last_fwd_compiled_module_start_time
                     )
                     last_fwd_compiled_module_start_time = -1
                     fwd_compiled_module_durations_ns.append(
@@ -6055,34 +6284,44 @@ class TestAOTModuleSimplified(AOTTestCase):
                 event_name
                 == f"{EVENT_NAME_PREFIX}.CompiledFunction.backward.compiled_module"
             ):
-                if event_ph == "B":
+                if event_type == "B":
                     nonlocal last_bwd_compiled_module_start_time
-                    last_bwd_compiled_module_start_time = event["ts"]
-                elif event_ph == "E":
+                    last_bwd_compiled_module_start_time = time_ns
+                elif event_type == "E":
                     nonlocal last_bwd_compiled_module_duration
                     last_bwd_compiled_module_duration = (
-                        event["ts"] - last_bwd_compiled_module_start_time
+                        time_ns - last_bwd_compiled_module_start_time
                     )
                     bwd_compiled_module_durations_ns.append(
                         last_bwd_compiled_module_duration
                     )
             elif event_name == f"{EVENT_NAME_PREFIX}.CompiledFunction.forward":
-                if event_ph == "B":
+                if event_type == "B":
                     nonlocal last_fwd_start_time
-                    last_fwd_start_time = event["ts"]
-                elif event_ph == "E":
-                    last_forward_duration = event["ts"] - last_fwd_start_time
+                    last_fwd_start_time = time_ns
+                elif event_type == "E":
+                    last_forward_duration = time_ns - last_fwd_start_time
                     fwd_total_durations_ns.append(last_forward_duration)
             elif event_name == f"{EVENT_NAME_PREFIX}.CompiledFunction.backward":
-                if event_ph == "B":
+                if event_type == "B":
                     nonlocal last_bwd_start_time
-                    last_bwd_start_time = event["ts"]
-                elif event_ph == "E":
-                    last_backward_duration = event["ts"] - last_bwd_start_time
+                    last_bwd_start_time = time_ns
+                elif event_type == "E":
+                    last_backward_duration = time_ns - last_bwd_start_time
                     bwd_overheads_ns.append(
                         last_backward_duration - last_bwd_compiled_module_duration
                     )
                     bwd_total_durations_ns.append(last_backward_duration)
+            elif (
+                event_name
+                == f"{EVENT_NAME_PREFIX}.CompiledFunction.backward_process_tangents"
+            ):
+                if event_type == "B":
+                    nonlocal last_bwd_tgs_start_time
+                    last_bwd_tgs_start_time = time_ns
+                elif event_type == "E":
+                    last_bwd_tgs_duration = time_ns - last_bwd_tgs_start_time
+                    bwd_tgs_durations_ns.append(last_bwd_tgs_duration)
 
         chromium_logger = torch._dynamo.utils.get_chromium_event_logger()
         chromium_logger.add_listener(on_event)
@@ -6111,19 +6350,17 @@ class TestAOTModuleSimplified(AOTTestCase):
             )
 
         def inps_fn(x):
-            return inp_recursive_two_tensor(x, input_two_tensor_depth),
+            return (inp_recursive_two_tensor(x, input_two_tensor_depth),)
 
         benchmark_inps = [
-            inps_fn(torch.randn(shape, requires_grad=True))
-            for _ in range(num_iters)
+            inps_fn(torch.randn(shape, requires_grad=True)) for _ in range(num_iters)
         ]
         m(*benchmark_inps[0])
-        import os
 
         for i, inps in enumerate(benchmark_inps):
-            if (i == 5):
-                print(f"XXX PID:{os.getpid()}")
-                breakpoint()
+            # if (i == 5):
+            #    print(f"XXX PID:{os.getpid()}")
+            #    breakpoint()
 
             outs = torch.compile(m, backend="inductor", fullgraph=True)(*inps)
             outs[0].sum().backward()
@@ -6135,7 +6372,19 @@ class TestAOTModuleSimplified(AOTTestCase):
             assert len(bwd_compiled_module_durations_ns) == num_iters
             assert len(bwd_overheads_ns) == num_iters
             assert len(bwd_total_durations_ns) == num_iters
+            assert len(bwd_tgs_durations_ns) == num_iters
             assert len(fwd_runtime_wrapper_durations_ns) == num_iters
+
+        def _reset_stats():
+            fwd_compiled_module_durations_ns.clear()
+            fwd_overheads_ns.clear()
+            fwd_total_durations_ns.clear()
+            fwd_runtime_wrapper_durations_ns.clear()
+
+            bwd_compiled_module_durations_ns.clear()
+            bwd_overheads_ns.clear()
+            bwd_total_durations_ns.clear()
+            bwd_tgs_durations_ns.clear()
 
         _assert_len()
 
@@ -6154,7 +6403,7 @@ class TestAOTModuleSimplified(AOTTestCase):
                 f"{s} FW_aotd_overhead_avg:{fwd_aotd_overhead_avg_ns:.3f}ns "
                 f"{100 * fwd_aotd_overhead_avg_ns / fwd_compiled_module_duration_avg_ns:.3f}% "
                 f"of fwd_compiled_module_duration_avg_ns:{fwd_compiled_module_duration_avg_ns:.3f}ns "
-                f"fwd_runtime_wrapper_duration_avg_ns:{fwd_runtime_wrapper_duration_avg_ns:.3f}ns"
+                f"\n    fwd_runtime_wrapper_duration_avg_ns:{fwd_runtime_wrapper_duration_avg_ns:.3f}ns"
             )
 
             bwd_compiled_module_duration_avg_ns = (
@@ -6162,24 +6411,19 @@ class TestAOTModuleSimplified(AOTTestCase):
             )
             bwd_aotd_overhead_avg_ns = sum(bwd_overheads_ns) / num_iters
             bwd_total_duration_avg_ns = sum(bwd_total_durations_ns) / num_iters
+            bwd_tgs_duration_avg_ns = sum(bwd_tgs_durations_ns) / num_iters
             print(
                 f"{s} BW_aotd_overhead_avg:{bwd_aotd_overhead_avg_ns:.3f}ns "
                 f"{100 * bwd_aotd_overhead_avg_ns / bwd_compiled_module_duration_avg_ns:.3f}% "
                 f"of bwd_compiled_module_duration_avg:{bwd_compiled_module_duration_avg_ns:.3f}ns "
-                f"bwd_total_duration_avg:{bwd_total_duration_avg_ns:.3f}ns"
+                f"\n    bwd_total_duration_avg:{bwd_total_duration_avg_ns:.3f}ns "
+                f"\n    bwd_tgs_duration_avg:{bwd_tgs_duration_avg_ns:.3f}ns"
             )
 
         # Uncomment for adhoc aotd overhead perf experimentation
         _print_stat("   SUBCLASS")
 
-        fwd_compiled_module_durations_ns.clear()
-        fwd_overheads_ns.clear()
-        fwd_total_durations_ns.clear()
-        fwd_runtime_wrapper_durations_ns.clear()
-
-        bwd_compiled_module_durations_ns.clear()
-        bwd_overheads_ns.clear()
-        bwd_total_durations_ns.clear()
+        _reset_stats()
 
         class M2(torch.nn.Module):
             def __init__(self, p) -> None:
@@ -6187,19 +6431,16 @@ class TestAOTModuleSimplified(AOTTestCase):
                 self.p = p
 
             def forward(self, *plain_tensors):
-                return (self.p + x + x for x in plain_tensors)
+                return tuple(self.p + x + x for x in plain_tensors)
 
         m2 = M2(torch.randn(shape, requires_grad=True))
         m2.train()
 
         def inps_fn2(x):
-            return (x.clone() for i in range(2 ** input_two_tensor_depth))
+            return (x.clone() for i in range(2**input_two_tensor_depth))
 
         benchmark_inps2 = [
-            inps_fn2(
-                torch.randn(shape, requires_grad=True)
-            )
-            for _ in range(num_iters)
+            inps_fn2(torch.randn(shape, requires_grad=True)) for _ in range(num_iters)
         ]
 
         m(*benchmark_inps[0])
@@ -6301,12 +6542,6 @@ symbolic_aot_autograd_failures = {
     xfail(
         "nn.functional.nll_loss", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "_segment_reduce", "lengths"
-    ),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail(
-        "_segment_reduce", "offsets"
-    ),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "_upsample_bilinear2d_aa"
@@ -6364,6 +6599,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
                 self.assertEqual,
                 check_gradients=True,
                 try_check_data_specialization=try_check_data_specialization,
+                skip_correctness_check=op.skip_correctness_check_compile_vs_eager,
             )
         except DynamicOutputShapeException:
             self.skipTest("Dynamic output shape operation in trace")

@@ -449,8 +449,8 @@ class AHTrainDecisionTree(AHTrain):
             for row in group.itertuples():
                 choice2time[row.choice] = row.median_execution_time
 
-            assert len(unique_choices) == len(
-                group
+            assert (
+                len(unique_choices) == len(group)
             ), f"len(unique_choices) != len(group): {len(unique_choices)} != {len(group)}"
 
             return pd.Series(
