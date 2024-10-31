@@ -247,7 +247,7 @@ void pixel_unshuffle_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(pixel_shuffle_kernel, &pixel_shuffle_kernel_impl);
-REGISTER_DISPATCH(pixel_unshuffle_kernel, &pixel_unshuffle_kernel_impl);
+REGISTER_DISPATCH(pixel_shuffle_kernel, &pixel_shuffle_kernel_impl)
+REGISTER_DISPATCH(pixel_unshuffle_kernel, &pixel_unshuffle_kernel_impl)
 
 } // at::native

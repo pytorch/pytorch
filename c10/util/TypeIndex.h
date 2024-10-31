@@ -100,9 +100,8 @@ inline constexpr type_index get_type_index() {
       uint64_t,
       detail::type_index_impl<std::decay_t<T>>()>::value};
 #else
-  // There's nothing in theory preventing us from running this on device code
-  // except for nvcc throwing a compiler error if we enable it.
-  return (abort(), type_index(0));
+  static_assert(false && sizeof(T));
+  return {};
 #endif
 }
 
@@ -128,4 +127,4 @@ inline constexpr string_view get_fully_qualified_type_name() noexcept {
 }
 } // namespace c10::util
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::type_index);
+C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::type_index)
