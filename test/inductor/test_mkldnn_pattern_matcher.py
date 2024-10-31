@@ -1106,8 +1106,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_add_mkldnn(self, device="cpu"):
-        self._qconv2d_add_cpu_test_helper(device=device)
+    def test_qconv2d_add_cpu(self):
+        self._qconv2d_add_cpu_test_helper()
+        self._qconv2d_add_cpu_test_helper2()
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfNoXPU
+    def test_qconv2d_add_xpu(self):
+        self._qconv2d_add_cpu_test_helper(device="xpu")
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -1117,8 +1124,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_qconv2d_add_relu_mkldnn(self, device="cpu"):
-        self._qconv2d_add_cpu_test_helper(device=device, use_relu=True)
+    def test_qconv2d_add_relu_cpu(self):
+        self._qconv2d_add_cpu_test_helper(use_relu=True)
+        self._qconv2d_add_cpu_test_helper2(use_relu=True)
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfNoXPU
+    def test_qconv2d_add_relu_xpu(self):
+        self._qconv2d_add_cpu_test_helper(device="xpu", use_relu=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
