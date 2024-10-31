@@ -1329,7 +1329,6 @@ def _copy_graph_attrs(
 
 
 def _deduplicate_modules(partitions):
-    duplicate_entries = []
     for shared_submodules in partitions:
         for i, entry in enumerate(shared_submodules):
             child_fqn = _call_name(entry.fqn, entry.call_idx)
@@ -1338,7 +1337,6 @@ def _deduplicate_modules(partitions):
             # Iterate over all previously seen modules, and deduplicate if possible
             for seen in shared_submodules[:i]:
                 if _check_graph_equivalence(seen.module, entry.module):
-                    duplicate_entries.append(entry)
                     # Since graphs are equivalent, we can deduplicate.
                     # There are two cases.
                     if seen.fqn == entry.fqn:
