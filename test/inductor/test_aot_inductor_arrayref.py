@@ -172,6 +172,7 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
+    "test_masked_select_dynamic": fail_stack_allocation(is_skip=True),
     "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
 }
 
