@@ -124,6 +124,7 @@ class AOTInductorModelBase {
 #endif // USE_CUDA
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AOTInductorModelBase() {
 #ifdef USE_CUDA
     if (run_finished_) {
