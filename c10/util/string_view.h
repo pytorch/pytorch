@@ -609,9 +609,8 @@ constexpr bool string_view_starts_with(
 constexpr bool string_view_ends_with(
     std::string_view str,
     std::string_view suffix) noexcept {
-  return (suffix.size() > str.size())
-      ? false
-      : suffix == (str.substr(str.size() - suffix.size(), suffix.size()));
+  return str.size() >= suffix.size() &&
+      str.substr(str.size() - suffix.size()) == suffix;
 }
 } // namespace c10
 
