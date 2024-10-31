@@ -294,7 +294,7 @@ auto fixSizeOneDimStrideSDPA(
 }
 
 void alloc_with_matching_layout(
-    const Tensor& q, 
+    const Tensor& q,
     Tensor& output,
     const std::vector<int64_t>& shape) {
   TORCH_CHECK(
@@ -311,8 +311,8 @@ void alloc_with_matching_layout(
   const auto q_strides = q.strides();
   std::stable_sort(
       fill_order.begin(), fill_order.end(), [&q_strides](int idx1, int idx2) {
-        return q_strides[idx1] < q_strides[idx2]
-      ;});
+        return q_strides[idx1] < q_strides[idx2];
+      });
   std::vector<int64_t> ordered_strides(shape.size());
   int64_t current_stride = 1;
   for (const int dim_idx : fill_order) {
