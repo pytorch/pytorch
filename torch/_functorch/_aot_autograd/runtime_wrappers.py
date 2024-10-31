@@ -1992,8 +1992,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         all_args.append(ctx._compiled_autograd_backward_state)
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     with context():
-                        out = normalize_as_list(bw_module(*all_args))
-                    return CompiledFunction._backward_epilogue(ctx, out)
+                        return normalize_as_list(bw_module(*all_args))
 
                 assert (
                     not backward_state_indices
