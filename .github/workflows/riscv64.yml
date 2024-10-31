@@ -1,0 +1,27 @@
+name: riscv64
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - ciflow/riscv64/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  # noble use python3.12
+  # See: https://packages.ubuntu.com/noble/python/python3
+  linux-noble-cpu-riscv64-py3_12-gcc14-build:
+    if: github.repository_owner == 'pytorch'
+    name: linux-noble-cpu-riscv64-py3_12-gcc14
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-cpu-riscv64-py3_12-pyvenv-gcc14
+      docker-image-name: pytorch/manylinuxriscv64-builder:cpu-riscv64
+      runner: linux.riscv64

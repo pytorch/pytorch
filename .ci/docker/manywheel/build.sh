@@ -58,6 +58,13 @@ case ${GPU_ARCH_TYPE} in
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=9"
         MANY_LINUX_VERSION="cxx11-abi"
         ;;
+    cpu-riscv64)
+        TARGET=final
+        DOCKER_TAG=cpu-riscv64
+        GPU_IMAGE=""
+        DOCKER_GPU_BUILD_ARG=""
+        MANY_LINUX_VERSION="riscv64"
+        ;;
     cpu-s390x)
         TARGET=final
         DOCKER_TAG=cpu-s390x
