@@ -1476,6 +1476,13 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 stage_idx = action.stage_index
                 stage = stage_index_to_stage[stage_idx]
                 stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
+                # see [Note: V-schedule special case]
+                is_next_stage_on_this_rank = stage_idx + 1 in stage_index_to_stage
+<<<<<<< HEAD
+                is_prev_stage_on_this_rank = stage_idx - 1 in stage_index_to_stage
+=======
+                is_prev_stage_on_this_rank = stage_idx + 1 in stage_index_to_stage
+>>>>>>> 9eb54a4094e ([Pipelining] Support V-schedules in IR and Runtime)
 
                 logger.debug(
                     "_PipelineScheduleRuntime running time_step %d, action %s",
@@ -1531,7 +1538,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     if (
                         not stage.is_first
                         # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
-                        and stage_idx - 1 not in stage_index_to_stage
+                        and not is_prev_stage_on_this_rank
                     ):
                         assert (
                             stage_idx,
@@ -1546,7 +1553,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
 
                     # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                     # see [Note: V-schedule special case]
-                    if stage_idx + 1 in stage_index_to_stage:
+                    if is_next_stage_on_this_rank:
                         stage_index_to_stage[stage_idx + 1].set_local_fwd_input(
                             output, mb_index
                         )
@@ -1558,7 +1565,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     if (
                         not stage.is_last
                         # no recv op expected for V-schedule special case (see [Note: V-schedule special case])
-                        and stage_idx + 1 not in stage_index_to_stage
+                        and not is_next_stage_on_this_rank
                     ):
                         assert (
                             stage_idx,
@@ -1575,7 +1582,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     )
                     # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                     # see [Note: V-schedule special case]
-                    if stage_idx - 1 in stage_index_to_stage:
+                    if is_prev_stage_on_this_rank:
                         stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
                             stage.get_local_bwd_output(mb_index), mb_index
                         )
@@ -1599,7 +1606,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     )
                     # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                     # see [Note: V-schedule special case]
-                    if stage_idx - 1 in stage_index_to_stage:
+                    if is_prev_stage_on_this_rank:
                         stage_index_to_stage[stage_idx - 1].set_local_bwd_input(
                             stage.get_local_bwd_output(mb_index), mb_index
                         )
