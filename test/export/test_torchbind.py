@@ -10,7 +10,6 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._higher_order_ops.wrap import wrap
 from torch._library.fake_class_registry import FakeScriptObject
-from torch.export import export
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (

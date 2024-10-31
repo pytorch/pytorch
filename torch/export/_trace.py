@@ -1496,8 +1496,6 @@ def _export_to_aten_ir_make_fx(
 
                 hook.remove()  # type: ignore[possibly-undefined]
 
-            gm.graph.eliminate_dead_code()
-
         # create graph signature
         input_names = _graph_input_names(gm)
         output_names = _graph_output_names(gm)
