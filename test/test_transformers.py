@@ -2529,9 +2529,9 @@ class TestSDPACudaOnly(NNTestCase):
     def test_cudnn_attention_nonmodulo64seqlen(self, device):
         # see also: https://github.com/pytorch/pytorch/issues/137347
         mask = torch.randint(0, 2, (2, 1, 157, 6404)).to(device="cuda", dtype=torch.bool)
-        q = torch.randn(2, 32, 157, 128, device='cuda', dtype=torch.bfloat16, requires_grad=True)
-        k = torch.randn(2, 32, 6404, 128, device='cuda', dtype=torch.bfloat16, requires_grad=True)
-        v = torch.randn(2, 32, 6404, 128, device='cuda', dtype=torch.bfloat16, requires_grad=True)
+        q = torch.randn(2, 32, 157, 128, device='cuda', dtype=torch.float16, requires_grad=True)
+        k = torch.randn(2, 32, 6404, 128, device='cuda', dtype=torch.float16, requires_grad=True)
+        v = torch.randn(2, 32, 6404, 128, device='cuda', dtype=torch.float16, requires_grad=True)
         q_cpu = q.detach().clone().cpu()
         k_cpu = k.detach().clone().cpu()
         v_cpu = v.detach().clone().cpu()
@@ -2587,22 +2587,11 @@ class TestSDPACudaOnly(NNTestCase):
                 self.assertTrue(out.permute(permute_order).is_contiguous())
 
         permute_orders = list()
-        permutable = (0, 1, 2)
-        for first_dim in permutable:
-            curr = [first_dim]
-            remaining = list(permutable)
-            remaining.remove(first_dim)
-            for second_dim in remaining:
-                curr2 = list(curr)
-                curr2.append(second_dim)
-                remaining2 = list(remaining)
-                remaining2.remove(second_dim)
-                curr2 += remaining2
-                curr2 += [3]
-                permute_orders.append(curr2)
+        permutable = [0, 1, 2]
+        permute_orders = itertools.permutations(permutable)
 
         for permute_order in permute_orders:
-            test_attention(SDPBackend.CUDNN_ATTENTION, permute_order)
+            test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3])
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
