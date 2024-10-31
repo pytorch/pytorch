@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <type_traits>
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
@@ -54,6 +55,20 @@ struct bitset final {
     return 0 == bitset_;
   }
 
+  constexpr bitset operator~() const noexcept {
+    using unsigned_bitset = std::make_unsigned_t<bitset_type>;
+    return bitset(
+        static_cast<bitset_type>(~static_cast<unsigned_bitset>(bitset_)));
+  }
+
+  // Tests if all bits are set in the bitset (typically to be used as a
+  // sentinel)
+  constexpr bool all() const noexcept {
+    using unsigned_bitset = std::make_unsigned_t<bitset_type>;
+    return ~static_cast<unsigned_bitset>(0) ==
+        static_cast<unsigned_bitset>(bitset_);
+  }
+
   // Call the given functor with the index of each bit that is set
   template <class Func>
   void for_each_set_bit(Func&& func) const {
@@ -105,6 +120,8 @@ struct bitset final {
   friend bool operator==(bitset lhs, bitset rhs) noexcept {
     return lhs.bitset_ == rhs.bitset_;
   }
+
+  constexpr bitset(bitset_type b) noexcept : bitset_{b} {}
 
   bitset_type bitset_{0};
 };

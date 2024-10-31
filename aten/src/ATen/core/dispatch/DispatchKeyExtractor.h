@@ -137,33 +137,58 @@ public:
   void registerSchema(const FunctionSchema& schema) {
     TORCH_INTERNAL_ASSERT(dispatch_arg_indices_reverse_.is_entirely_unset());
     dispatch_arg_indices_reverse_ = makeBitsetForDispatchArgs(schema);
+    num_args_ = schema.arguments().size();
   }
   void deregisterSchema() {
     dispatch_arg_indices_reverse_ = c10::utils::bitset();
+    num_args_ = 0;
   }
 
   DispatchKeySet getDispatchKeySetBoxed(const torch::jit::Stack* stack) const {
     DispatchKeySet ks;
-    dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
-      const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
-      if (C10_LIKELY(ivalue.isTensor())) {
-        // NB: Take care not to introduce a refcount bump (there's
-        // no safe toTensorRef method, alas)
-        ks = ks | ivalue.unsafeToTensorImpl()->key_set();
-      } else if (C10_UNLIKELY(ivalue.isTensorList())) {
-        for (const at::Tensor& tensor : ivalue.toTensorList()) {
-          ks = ks | tensor.key_set();
+    if (C10_UNLIKELY(dispatch_arg_indices_reverse_.all())) {
+      for (int64_t i = 0; i < num_args_; i++) {
+        const auto& ivalue = torch::jit::peek(*stack, i, num_args_);
+        if (C10_LIKELY(ivalue.isTensor())) {
+          // NB: Take care not to introduce a refcount bump (there's
+          // no safe toTensorRef method, alas)
+          ks = ks | ivalue.unsafeToTensorImpl()->key_set();
+        } else if (C10_UNLIKELY(ivalue.isTensorList())) {
+          for (const at::Tensor& tensor : ivalue.toTensorList()) {
+            ks = ks | tensor.key_set();
+          }
         }
-      }
-      // Tensor?[] translates to a c10::List<IValue> so we need to peek inside
-      else if (C10_UNLIKELY(ivalue.isList())) {
-        for (const auto& elt : ivalue.toListRef()) {
-          if (elt.isTensor()) {
-            ks = ks | elt.toTensor().key_set();
+        // Tensor?[] translates to a c10::List<IValue> so we need to peek inside
+        else if (C10_UNLIKELY(ivalue.isList())) {
+          for (const auto& elt : ivalue.toListRef()) {
+            if (elt.isTensor()) {
+              ks = ks | elt.toTensor().key_set();
+            }
           }
         }
       }
-    });
+    } else {
+      dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
+        const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
+        if (C10_LIKELY(ivalue.isTensor())) {
+          // NB: Take care not to introduce a refcount bump (there's
+          // no safe toTensorRef method, alas)
+          ks = ks | ivalue.unsafeToTensorImpl()->key_set();
+        } else if (C10_UNLIKELY(ivalue.isTensorList())) {
+          for (const at::Tensor& tensor : ivalue.toTensorList()) {
+            ks = ks | tensor.key_set();
+          }
+        }
+        // Tensor?[] translates to a c10::List<IValue> so we need to peek inside
+        else if (C10_UNLIKELY(ivalue.isList())) {
+          for (const auto& elt : ivalue.toListRef()) {
+            if (elt.isTensor()) {
+              ks = ks | elt.toTensor().key_set();
+            }
+          }
+        }
+      });
+    }
     // Keys that are fallthrough should be skipped
     if (requiresBitsetPerBackend_) {
       auto backend_idx = ks.getBackendIndex();
@@ -192,22 +217,23 @@ public:
 
 private:
   static c10::utils::bitset makeBitsetForDispatchArgs(const FunctionSchema& schema) {
-    TORCH_CHECK(schema.arguments().size() <= c10::utils::bitset::NUM_BITS(),
-        "The function schema has ", schema.arguments().size(),
-        " arguments but this PyTorch build only supports ", c10::utils::bitset::NUM_BITS());
-    c10::utils::bitset dispatch_arg_indices_reverse;
-    for (const auto index : c10::irange(schema.arguments().size())) {
-      if (schema.arguments()[index].type()->isSubtypeOf(*TensorType::get()) ||
-          schema.arguments()[index].type()->isSubtypeOf(
-              *ListType::ofTensors()) ||
-          schema.arguments()[index].type()->isSubtypeOf(
-              *ListType::ofOptionalTensors()) ||
-          schema.arguments()[index].type()->isSubtypeOf(
-              *OptionalType::ofTensor())) {
-        dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
+    if (schema.arguments().size() <= c10::utils::bitset::NUM_BITS()) {
+      c10::utils::bitset dispatch_arg_indices_reverse;
+      for (const auto index : c10::irange(schema.arguments().size())) {
+        if (schema.arguments()[index].type()->isSubtypeOf(*TensorType::get()) ||
+            schema.arguments()[index].type()->isSubtypeOf(
+                *ListType::ofTensors()) ||
+            schema.arguments()[index].type()->isSubtypeOf(
+                *ListType::ofOptionalTensors()) ||
+            schema.arguments()[index].type()->isSubtypeOf(
+                *OptionalType::ofTensor())) {
+          dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
+        }
       }
+      return dispatch_arg_indices_reverse;
+    } else {
+      return ~c10::utils::bitset();
     }
-    return dispatch_arg_indices_reverse;
   }
 
   explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
@@ -228,6 +254,7 @@ private:
   // dispatch_arg_indices_reverse_ is allowed to have zero bits set; that just means you must do the
   // fallthrough
   c10::utils::bitset dispatch_arg_indices_reverse_;
+  int64_t num_args_;
 
   // Set of functionality keys for which the operator does NOT have fallthrough kernel.
   DispatchKeySet nonFallthroughKeys_;
