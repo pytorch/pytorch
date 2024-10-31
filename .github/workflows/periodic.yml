@@ -255,16 +255,6 @@ jobs:
           }
         ]}
 
-  buck-build-test:
-    if: github.repository_owner == 'pytorch'
-    name: buck-build-test
-    uses: ./.github/workflows/_buck-build-test.yml
-    with:
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-latest" },
-        ]}
-
   android-emulator-build-test:
     if: github.repository_owner == 'pytorch'
     name: android-emulator-build-test

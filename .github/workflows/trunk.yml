@@ -293,3 +293,14 @@ jobs:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build.outputs.test-matrix }}
+
+  # No need to run following jobs on PR, just need to gather their signals on main
+  buck-build-test:
+    if: github.repository_owner == 'pytorch' && github.ref == 'refs/heads/main'
+    name: buck-build-test
+    uses: ./.github/workflows/_buck-build-test.yml
+    with:
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-latest" },
+        ]}
