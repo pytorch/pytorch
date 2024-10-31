@@ -82,11 +82,21 @@ template_rule(
     substitutions = _DNNL_RUNTIME_OMP,
 )
 
+template_rule(
+    name = "include_dnnl_version_hash",
+    src = "include/oneapi/dnnl/dnnl_version_hash.h.in",
+    out = "include/oneapi/dnnl/dnnl_version_hash.h",
+    substitutions = {
+        "@DNNL_VERSION_HASH@": "1794c3452f1bf814339fcffe521d5984e6e64b94",
+    },
+)
+
 cc_library(
     name = "mkl-dnn",
     srcs = glob([
         "src/common/*.cpp",
         "src/cpu/**/*.cpp",
+        "src/cpu/**/**/*.cpp",
     ], exclude=[
         "src/cpu/aarch64/**/*.cpp",
         "src/cpu/rv64/**/*.cpp",
@@ -98,7 +108,9 @@ cc_library(
         "include/*.hpp",
         "src/cpu/**/*.hpp",
         "src/cpu/**/*.h",
+        "src/cpu/**/**/*.h",
         "src/common/*.hpp",
+        "src/common/**/**/*.h",
         "src/common/ittnotify/jitprofiling.h",
     ], exclude=[
         "src/cpu/aarch64/**/*.hpp",
