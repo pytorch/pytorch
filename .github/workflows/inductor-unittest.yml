@@ -1,13 +1,12 @@
-
 # Workflow: Inductor Unit Test
-# This workflow runs both unit tests for inductor. It also runs for rerun-disabled-tests work nightly.
+# runs unit tests for inductor.
+# Perfoms daily memory leak checks and reruns of disabled tests, scheduled at `29 8 * * *`.
+
 name: inductor-unittest
 on:
   workflow_call:
   schedule:
-    - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests. `schedule 29 8 * * *` is reserved for rerun disabled tests.
-  workflow_dispatch:
-
+    - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
