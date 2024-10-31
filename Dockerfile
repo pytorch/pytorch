@@ -65,7 +65,7 @@ RUN --mount=type=cache,target=/opt/ccache \
     CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" \
     python setup.py install
 
-# Stage 5: Torch Packages Installation (Main Packages Only)
+# Stage 5: Torch dependencies Installation
 FROM conda as torch-packages
 ARG INSTALL_CHANNEL=whl/nightly
 ARG CUDA_PATH=cu121
@@ -79,33 +79,50 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 # Define packages to install
 ENV PACKAGES="torch torchvision torchaudio"
 
-# Step 1: Preinstall Dependencies (Cached Separately)
+# Step 1: Preinstall Torch Dependencies (Cached Separately)
 RUN set -eux; \
+    # Determine PIP_PRE_FLAG based on INSTALL_CHANNEL
     if echo "${INSTALL_CHANNEL}" | grep -q "nightly"; then \
     PIP_PRE_FLAG="--pre"; \
     else \
     PIP_PRE_FLAG=""; \
     fi; \
+    # Determine EXTRA_INDEX_URL based on TARGETPLATFORM
     if [ "$TARGETPLATFORM" = "linux/arm64" ]; then \
     EXTRA_INDEX_URL="https://download.pytorch.org/whl/cpu/"; \
     else \
     EXTRA_INDEX_URL="https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH%.}/"; \
     fi; \
     echo "Using EXTRA_INDEX_URL=${EXTRA_INDEX_URL} with PIP_PRE_FLAG=${PIP_PRE_FLAG}"; \
+    # Create a temporary directory to store dependencies
+    TEMP_DIR=$(mktemp -d); \
+    trap 'rm -rf "$TEMP_DIR"' EXIT; \
+    # Initialize an empty requirements file for dependencies
+    DEP_REQUIREMENTS="${TEMP_DIR}/dependencies.txt"; \
+    touch "$DEP_REQUIREMENTS"; \
+    # Iterate over each package to collect dependencies
     for PACKAGE in $PACKAGES; do \
     echo "Fetching dependencies for $PACKAGE"; \
-    curl -s https://pypi.org/pypi/${PACKAGE}/json -o ${PACKAGE}.json; \
-    DEPS=$(jq -r '.info.requires_dist[]? | split(";")[0]' ${PACKAGE}.json | tr '\n' ' '); \
-    if [ -n "$DEPS" ]; then \
-    echo "Installing dependencies for $PACKAGE: $DEPS"; \
-    pip install --no-cache-dir $DEPS --extra-index-url $EXTRA_INDEX_URL; \
+    # Fetch package metadata from PyPI
+    curl -s https://pypi.org/pypi/${PACKAGE}/json -o "${TEMP_DIR}/${PACKAGE}.json"; \
+    \
+    # Extract requires_dist entries, preserving environment markers
+    jq -r '.info.requires_dist[]?' "${TEMP_DIR}/${PACKAGE}.json" >> "$DEP_REQUIREMENTS"; \
+    \
+    rm -f "${TEMP_DIR}/${PACKAGE}.json"; \
+    done; \
+    \
+    # Remove duplicate dependencies while preserving environment markers
+    sort -u "$DEP_REQUIREMENTS" -o "$DEP_REQUIREMENTS"; \
+    \
+    # Install dependencies using pip with the requirements file
+    if [ -s "$DEP_REQUIREMENTS" ]; then \
+    echo "Installing dependencies from $DEP_REQUIREMENTS"; \
+    pip install --no-cache-dir $PIP_PRE_FLAG --extra-index-url "$EXTRA_INDEX_URL" -r "$DEP_REQUIREMENTS"; \
     else \
-    echo "No dependencies found for $PACKAGE"; \
-    fi; \
-    rm -f ${PACKAGE}.json; \
-    done
-
-# Step 2: Install Main Torch Packages Without Dependencies
+    echo "No dependencies to install."; \
+    fi;
+# Step 2: Install Torch packages without dependencies
 RUN set -eux; \
     if echo "${INSTALL_CHANNEL}" | grep -q "nightly"; then \
     PIP_PRE_FLAG="--pre"; \
