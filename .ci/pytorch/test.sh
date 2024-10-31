@@ -390,7 +390,7 @@ test_inductor_cpp_wrapper() {
   if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
     echo "skip dynamo benchmark tests for rerun-disabled-test"
   else
-    echo "run dynamo benchmark tests for rerun-disabled-test"
+    echo "run dynamo benchmark tests with cpp wrapper"
     python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
     --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
