@@ -194,6 +194,44 @@ class InterpreterModule(torch.nn.Module):
         )
 
 
+class InterpreterModuleDispatcher(torch.nn.Module):
+    def __init__(self, call_modules: List[InterpreterModule]):
+        super().__init__()
+        assert call_modules
+        self._call_modules = call_modules
+        self._num_calls = 0
+
+    def forward(self, *args, **kwargs):
+        call_module = self._call_modules[self._num_calls]
+        self._num_calls = (self._num_calls + 1) % len(self._call_modules)
+        try:
+            return call_module(*args, **kwargs)
+        except Exception:
+            self._num_calls = 0
+            raise
+
+    def call_modules(self):
+        return self._call_modules
+
+    def print_readable(
+        self,
+        print_output=True,
+        include_stride=False,
+        include_device=False,
+        colored=False,
+    ):
+        outputs = [
+            mod.print_readable(
+                print_output,
+                include_stride,
+                include_device,
+                colored,
+            )
+            for mod in self._call_modules
+        ]
+        return "\n".join(outputs)
+
+
 class FlatArgsAdapter(abc.ABC):
     """
     Adapts input arguments with ``input_spec`` to align ``target_spec``.
@@ -414,7 +452,7 @@ class UnflattenedModule(torch.nn.Module):
                 inputs_to_state[n] = targets
 
         _sink_params(self, inputs_to_state, [])
-        _deduplicate_modules(seen_modules.values())
+        redirected_call_indices = _deduplicate_modules(seen_modules.values())
 
         # Helper function to check input nodes of `module` has been processed.
         def check_module_inputs(module, scope):
@@ -444,6 +482,7 @@ class UnflattenedModule(torch.nn.Module):
 
         # Recurively check all input nodes have been processed.
         check_module_inputs(self, [])
+        self._dispatch_modules(redirected_call_indices)
 
         # Cache so we don't have to compute this every time.
         # NOTE: this needs to be kept in sync with the placeholders in
@@ -539,6 +578,42 @@ class UnflattenedModule(torch.nn.Module):
                 *flat_args, enable_io_processing=False
             )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
+
+    def _dispatch_modules(self, redirected_call_indices):
+        all_modules = {}
+        for fqn, mod in self.named_modules(remove_duplicate=False):
+            all_modules[fqn] = mod
+        for fqn, fqn_ in redirected_call_indices.items():
+            all_modules[fqn] = all_modules[fqn_]
+
+        # map each fqn to a list of called_modules
+        module_call_graph = {
+            entry.fqn
+            for entry in self.module_call_graph
+            if entry.fqn and entry.signature
+        }
+        called_modules = defaultdict(list)
+        for fqn, mod in sorted(all_modules.items()):
+            if fqn in module_call_graph:
+                called_modules[fqn.split("@")[0]].append(mod)
+
+        # replace multiple call modules with a single dispatcher module
+        for orig_fqn, call_modules in called_modules.items():
+            if len(call_modules) > 1:
+                for i, call_module in enumerate(call_modules):
+                    fqn = _call_name(orig_fqn, i+1)
+                    if fqn not in redirected_call_indices:
+                        self._modules.pop(fqn)
+                self.set_submodule(
+                    orig_fqn, InterpreterModuleDispatcher(call_modules)
+                )
+
+        for node in self.graph.nodes:
+            if node.op == "call_module":
+                fqn = node.target.split("@")[0]
+                if fqn in called_modules:
+                    node.target = fqn
+
 
     def print_readable(
         self,
@@ -1329,7 +1404,7 @@ def _copy_graph_attrs(
 
 
 def _deduplicate_modules(partitions):
-    duplicate_entries = []
+    redirected_call_indices = {}
     for shared_submodules in partitions:
         for i, entry in enumerate(shared_submodules):
             child_fqn = _call_name(entry.fqn, entry.call_idx)
@@ -1338,7 +1413,6 @@ def _deduplicate_modules(partitions):
             # Iterate over all previously seen modules, and deduplicate if possible
             for seen in shared_submodules[:i]:
                 if _check_graph_equivalence(seen.module, entry.module):
-                    duplicate_entries.append(entry)
                     # Since graphs are equivalent, we can deduplicate.
                     # There are two cases.
                     if seen.fqn == entry.fqn:
@@ -1355,6 +1429,7 @@ def _deduplicate_modules(partitions):
                             entry.parent_fqn, seen_child_fqn
                         )
                         entry.parent_call_module.target = seen_target  # type: ignore[union-attr]
+                        redirected_call_indices[child_fqn] = seen_child_fqn
                         break
                     elif not deduplicated:
                         # Case 2: The current module has a different fqn than the seen module.
@@ -1368,6 +1443,8 @@ def _deduplicate_modules(partitions):
                         # so we do not break out of the loop yet.
                         entry.parent_module.set_submodule(target, seen.module)
                         deduplicated = True
+
+    return redirected_call_indices
 
 
 def _sink_params(
