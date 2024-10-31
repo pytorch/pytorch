@@ -19,6 +19,13 @@ concurrency:
 permissions: read-all
 
 jobs:
+  unit-test:
+    if: github.repository_owner == 'pytorch'
+    name: inductor-unittest
+    uses: ./.github/workflows/inductor-cu124-unittest.yml
+    with:
+      job_name: unittest
+
   get-default-label-prefix:
     name: get-default-label-prefix
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
