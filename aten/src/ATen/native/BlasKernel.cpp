@@ -286,15 +286,15 @@ void gemv_fast_path<float>(const char *trans, const int *m, const int *n, const 
   sgemv_(remove_const(trans), remove_const(m), remove_const(n), remove_const(alpha), remove_const(a), remove_const(lda), remove_const(x), remove_const(incx), remove_const(beta), y, remove_const(incy));
 }
 #else
-INSTANTIATE(float);
-INSTANTIATE(double);
+INSTANTIATE(float)
+INSTANTIATE(double)
 #endif // AT_BUILD_WITH_BLAS
 
-INSTANTIATE(uint8_t);
-INSTANTIATE(int8_t);
-INSTANTIATE(int16_t);
-INSTANTIATE(int);
-INSTANTIATE(int64_t);
+INSTANTIATE(uint8_t)
+INSTANTIATE(int8_t)
+INSTANTIATE(int16_t)
+INSTANTIATE(int)
+INSTANTIATE(int64_t)
 #if !defined(C10_MOBILE)
 #if !defined(__aarch64__)
 // Currently, only fp16_gemv_trans is built for non-aarch64.
@@ -537,8 +537,8 @@ void gemv_fast_path<at::BFloat16>(
 // Note that the above block was an else, so it's active if __aarch64__ *is* defined.
 #endif // !defined(__aarch64__)
 #else // !defined(C10_MOBILE))
-INSTANTIATE(c10::Half);
-INSTANTIATE(c10::BFloat16);
+INSTANTIATE(c10::Half)
+INSTANTIATE(c10::BFloat16)
 #endif // !defined(C10_MOBILE)
 #undef INSTANTIATE
 
