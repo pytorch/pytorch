@@ -8,6 +8,7 @@
 #  2. inductor.yml(this workflow):
 #      - non-flaky benchmakr tests
 name: inductor
+
 on:
   push:
     branches:
