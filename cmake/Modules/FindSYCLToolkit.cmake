@@ -56,16 +56,19 @@ if(NOT SYCL_VERSION_HEADER_FILE)
   return()
 endif()
 
-# Read the sycl version header file into a variable
-file(READ ${SYCL_VERSION_HEADER_FILE} SYCL_VERSION_HEADER_CONTENT)
+macro(parse_version_number_from_header_file header_file version_name version_number)
+  # Read the version header file into a variable
+  file(READ ${header_file} header_content)
+  # Parse the version number from the version header content.
+  # 1. Match the regular expression to find the version string by version name.
+  # 2. Replace the version name part with an empty string.
+  # 3. Strip leading and trailing spaces to get the version number.
+  string(REGEX MATCH "${version_name}[ ]+[0-9]+" _VERSION_MATCH ${header_content})
+  string(REPLACE "${version_name}" "" _VERSION_NUMBER ${_VERSION_MATCH})
+  string(STRIP ${_VERSION_NUMBER} ${version_number})
+endmacro()
 
-# Extract the SYCL compiler version from the version header content.
-# 1. Match the regular expression to find the version string.
-# 2. Replace the "__SYCL_COMPILER_VERSION" part with an empty string.
-# 3. Strip leading and trailing spaces to get the version number.
-string(REGEX MATCH "__SYCL_COMPILER_VERSION[ ]+[0-9]+" _SYCL_COMPILER_VERSION_MATCH ${SYCL_VERSION_HEADER_CONTENT})
-string(REPLACE "__SYCL_COMPILER_VERSION" "" _SYCL_COMPILER_VERSION_NUMBER ${_SYCL_COMPILER_VERSION_MATCH})
-string(STRIP ${_SYCL_COMPILER_VERSION_NUMBER} SYCL_COMPILER_VERSION)
+parse_version_number_from_header_file(${SYCL_VERSION_HEADER_FILE} "__SYCL_COMPILER_VERSION" SYCL_COMPILER_VERSION)
 
 # Find library directory from binary.
 find_file(
