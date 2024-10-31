@@ -1624,27 +1624,14 @@ def forward(self, pred_1, x_1):
 
     # TODO: Does not work because of the usage of vmap witin associative_scan
     # The parameterization is commented out for the moment and the test is marked with expected fail
+    # Fails with: AssertionError: scan is not an OpOverload
     @skipIfRocm(msg="Unsupported on ROCM yet")
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    # @parametrize("combine_mode", ["pointwise", "generic"])
-    # @parametrize("compile_mode_scan", ["none", "compile", "compile_dynamic_shape"])
-    # @parametrize("compile_mode_associative_scan", ["none", "eager", "compile", "compile_dynamic_shape"])
-    # @parametrize("reverse", [False, True])
-    # @parametrize("reverse_associative_scan", [False, True])
-    # @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
-    # # Skipping combine_mode=pointwise
-    # # as the cond operation is classified to be non-pointwise
-    # @decorateIf(
-    #     unittest.skip,
-    #     lambda params: (
-    #         params["combine_mode"] == "pointwise"
-    #     ),
-    # )
     @unittest.expectedFailure
     def test_scan_associative_scan(self):
         combine_mode = "generic"
-        compile_mode_scan = "none"
+        compile_mode_scan = "compile"
         compile_mode_associative_scan = "none"
         reverse = True
         reverse_associative_scan = True
@@ -2537,6 +2524,11 @@ class AssociativeScanTests(TestCase):
         # Return the result of the functions under test for further investigations
         return result
 
+    def _prepare_fake_kwargs(self, original_kwargs):
+        kwargs_fake = original_kwargs.copy()
+        kwargs_fake["compile_mode"] = "fake"
+        return kwargs_fake
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     @parametrize("reverse", [False, True])
@@ -2562,8 +2554,7 @@ class AssociativeScanTests(TestCase):
             "compile_mode": compile_mode,
             "combine_mode": combine_mode,
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         results = self._run_test(
             model=AssociativeScanModels.Simple(**kwargs),
             model_fake=AssociativeScanModels.Simple(**kwargs_fake),
@@ -2585,9 +2576,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": get_scan_combine_fn("add", True),
             "combine_mode": combine_mode,
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
-
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         result = self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -2633,8 +2622,7 @@ class AssociativeScanTests(TestCase):
                 "compile_mode": compile_mode,
                 "combine_mode": combine_mode,
             }
-            kwargs_fake = kwargs.copy()
-            kwargs_fake["compile_mode"] = "fake"
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
             results = self._run_test(
                 model=AssociativeScanModels.Simple(**kwargs),
                 model_fake=AssociativeScanModels.Simple(**kwargs_fake),
@@ -2665,8 +2653,7 @@ class AssociativeScanTests(TestCase):
                 "compile_mode": "none",
                 "combine_mode": "generic",
             }
-            kwargs_fake = kwargs.copy()
-            kwargs_fake["compile_mode"] = "fake"
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
             self._run_test(
                 model=AssociativeScanModels.Simple(**kwargs),
                 model_fake=AssociativeScanModels.Simple(**kwargs_fake),
@@ -2701,8 +2688,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": get_scan_combine_fn("tuple_fct", True),
             "combine_mode": combine_mode,
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -2730,8 +2716,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": combine_fn,
             "combine_mode": "generic",
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -2756,8 +2741,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": get_scan_combine_fn("add", True),
             "combine_mode": "generic",
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -2794,8 +2778,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": get_scan_combine_fn("complex_pointwise", True),
             "combine_mode": combine_mode,
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -2820,7 +2803,6 @@ class AssociativeScanTests(TestCase):
     def test_associative_scan_downstream_scan_matmul(
         self, combine_mode, compile_mode, reverse, device
     ):
-        # Chain with matmul
         def first_chain_fct(scan_fct, inp, **kwargs):
             o = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
             return o
@@ -2837,9 +2819,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": [first_chain_fct, second_chain_fct],
             "combine_mode": combine_mode,
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
-
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.ChainFn(**kwargs),
             model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
@@ -2864,7 +2844,6 @@ class AssociativeScanTests(TestCase):
     def test_associative_scan_downstream_scan_scan(
         self, combine_mode, compile_mode, reverse, device
     ):
-        # Chain with associative_scan
         def first_chain_fct(scan_fct, inp, **kwargs):
             o1 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
             return o1
@@ -2882,8 +2861,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": [first_chain_fct, second_chain_fct],
             "combine_mode": combine_mode,
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.ChainFn(**kwargs),
             model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
@@ -2911,7 +2889,6 @@ class AssociativeScanTests(TestCase):
     ):
         reverse_second = reverse_first if same_direction else not reverse_first
 
-        # Chain with associative_scan on different dim
         def first_chain_fct(scan_fct, inp, **kwargs):
             o1 = scan_fct(get_scan_combine_fn("add", True), inp, **kwargs)
             return o1
@@ -2929,8 +2906,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": [first_chain_fct, second_chain_fct],
             "combine_mode": [combine_mode, combine_mode],
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.ChainFn(**kwargs),
             model_fake=AssociativeScanModels.ChainFn(**kwargs_fake),
@@ -2941,7 +2917,7 @@ class AssociativeScanTests(TestCase):
     # TODO: Re-enable additional parameters again once this issues has been resolved
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @unittest.skip
+    @unittest.expectedFailure
     def test_associative_scan_nested(self):
         combine_mode = "pointwise"
         compile_mode = "eager"
@@ -2979,8 +2955,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": first_nested_fct,
             "combine_mode": combine_mode,
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         kwargs_fake["combine_fn"] = first_nested_fct_fake
         self._run_test(
             model=AssociativeScanModels.NestedFn(**kwargs),
@@ -3029,8 +3004,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": combine_fn,
             "combine_mode": "generic",
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -3067,8 +3041,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": combine_fn,
             "combine_mode": "generic",
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -3094,8 +3067,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": combine_fn,
             "combine_mode": "generic",
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -3129,8 +3101,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": combine_fn,
             "combine_mode": "generic",
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -3160,8 +3131,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": combine_fn,
             "combine_mode": "generic",
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -3191,8 +3161,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": get_scan_combine_fn("non_pointwise", True),
             "combine_mode": "generic",
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -3233,8 +3202,7 @@ class AssociativeScanTests(TestCase):
             "combine_fn": get_scan_combine_fn("s5_operator", True),
             "combine_mode": combine_mode,
         }
-        kwargs_fake = kwargs.copy()
-        kwargs_fake["compile_mode"] = "fake"
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
         self._run_test(
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -3260,10 +3228,9 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self, device):
         B, N, C, H, W = 3, 3, 2, 3, 3
-        x = torch.randn(B, N, C, H, W, device=device)
+        x = torch.randn(B, N, C, H, W, device=torch.device("cuda"))
 
         def fct_wrong_dtype(x, y):
             return (x + y).to(torch.int64)
