@@ -71,6 +71,7 @@ from torch._utils_internal import log_cache_bypass
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
+from .triton_bundler import TritonBundler, TritonKernelArtifacts
 from .utils import _align
 
 
@@ -1030,7 +1031,7 @@ class FxGraphCache:
         example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
-    ) -> Optional[CompiledFxGraph]:
+    ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
@@ -1071,6 +1072,7 @@ class FxGraphCache:
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
         graph = None
+        cache_info: Dict[str, Any] = dict()
 
         for candidate in iterate_over_candidates():
             if not candidate.guards_expr:
@@ -1097,7 +1099,7 @@ class FxGraphCache:
                 break
 
         if graph is None:
-            return None
+            return None, cache_info
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
@@ -1118,6 +1120,14 @@ class FxGraphCache:
 
             write_atomic(artifact_path, code, make_dirs=True)
 
+        if bundle := graph._triton_bundle:
+            triton_bundler_meta = TritonBundler.read_and_emit(bundle)
+            if (meta := triton_bundler_meta) is not None:
+                cache_info["triton_bundler_meta"] = str(meta)
+                get_chromium_event_logger().add_event_data(
+                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                )
+
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
@@ -1132,7 +1142,7 @@ class FxGraphCache:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
             log.error("Failed to load cached artifact: %s", artifact_path)
-            return None
+            return None, cache_info
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
@@ -1161,7 +1171,7 @@ class FxGraphCache:
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
         )
-        return graph
+        return graph, cache_info
 
     @staticmethod
     def post_compile(
@@ -1383,10 +1393,11 @@ class FxGraphCache:
         Doesn't do any logging on its own, because AOTAutograd handles a cache miss
         differently from FXGraphCache.
         """
-        compiled_graph = FxGraphCache._lookup_graph(
+        compiled_graph, cache_info = FxGraphCache._lookup_graph(
             key, example_inputs, local, remote_cache
         )
         cache_info = {
+            **cache_info,
             "key": key,
             "components": debug_lines,
             "cache_event_time": time_ns(),
@@ -1463,6 +1474,9 @@ class FxGraphCache:
             compiled_graph._time_taken_ns = time_ns() - start_time
             cache_key = key_info[0]
             compiled_graph._fx_graph_cache_key = cache_key
+            compiled_graph._triton_bundle, triton_bundler_meta = TritonBundler.collect()
+            if triton_bundler_meta is not None:
+                cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
             cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
             FxGraphCache._save_graph(
                 cache_key,
@@ -1569,6 +1583,7 @@ class CompiledFxGraph:
     _time_taken_ns: Optional[int] = None
     _boxed_call: Optional[bool] = None
     _fx_graph_cache_key: Optional[str] = None
+    _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
 
     def __init__(
         self,
