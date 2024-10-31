@@ -1289,11 +1289,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
                                 # however that is not necessarily true of get_fwd_recv_ops
                                 stage = stage_index_to_stage[stage_index + 1]
                                 ops.extend(stage.get_fwd_recv_ops(mb_index))
-                        elif (
-                            computation_type == _ComputationType.FULL_BACKWARD
-                            or computation_type == _ComputationType.BACKWARD_WEIGHT
+                        elif computation_type in (
+                            FULL_BACKWARD,
+                            BACKWARD_INPUT,
+                            BACKWARD_WEIGHT,
                         ):
-                            # Previous rank doing backward or weight update has no influence for the current rank forward recv
+                            # Previous rank doing backward has no influence for the current rank forward recv
                             pass
                         else:
                             raise ValueError(
@@ -1312,13 +1313,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
                             mb_index is not None
                         ), "All currently supported action types require valid microbatch_index"
                         # Only handle receives for the backwards from a next rank
-                        if (
-                            computation_type == _ComputationType.FORWARD
-                            or computation_type == _ComputationType.BACKWARD_WEIGHT
-                        ):
+                        if computation_type in (FORWARD, BACKWARD_WEIGHT):
                             # Next rank doing forward or weight update has no influence for the current rank backward recv
                             pass
-                        elif computation_type == _ComputationType.FULL_BACKWARD:
+                        elif computation_type in (BACKWARD_INPUT, FULL_BACKWARD):
                             # If not the first stage, then receive bwd gradients
                             if stage_index - 1 in stage_index_to_stage:
                                 # TODO: We are assuming that stage will always receive from stage+1
