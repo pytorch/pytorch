@@ -3505,8 +3505,7 @@ x=torch.ones(1000000, dtype=torch.uint8)[::2]
         self._test_copy(x, non_blocking=False)
 
         # Non-contiguous 2D tensor using Fortran-ordered array
-        fortran_arr = np.asfortranarray(np.random.randn(rows, cols).astype(np.float32))
-        x = torch.from_numpy(fortran_arr)
+        x = torch.rand(rows, cols).t()
         
         self.assertFalse(x.is_contiguous())
         self._test_copy(x, non_blocking=True)
