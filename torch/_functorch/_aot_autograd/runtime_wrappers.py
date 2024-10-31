@@ -1459,9 +1459,10 @@ class AOTDispatchAutograd:
 
         runtime_type = type(x)
         runtime_meta = None
+        runtime_subclass_keys: List[str] = []
 
         if is_traceable_wrapper_subclass(x):
-            runtime_meta = x.__tensor_flatten__()[1]
+            runtime_subclass_keys, runtime_meta = x.__tensor_flatten__()
 
         def maybe_coerce(x):
             same_type: bool = expected_type == runtime_type
@@ -1505,9 +1506,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             return x, [x]
 
         assert isinstance(meta, SubclassCreationMeta)
-        inner_keys = x.__tensor_flatten__()[0]
-
-        assert len(meta.attrs) == len(inner_keys)
+        assert len(meta.attrs) == len(runtime_subclass_keys)
         leaves = []
         for i, (attr, attr_meta) in enumerate(meta.attrs.items()):
             elem = getattr(x, attr)
