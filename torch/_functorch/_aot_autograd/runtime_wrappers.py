@@ -1945,11 +1945,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         _aot_id = aot_config.aot_id
 
                         @staticmethod
-                        def forward(_, boxed_args):
-                            return CompiledFunction._backward_impl(ctx, boxed_args)
+                        def forward(ctx, *unused_args):
+                            return CompiledFunction._backward_impl(ctx, all_args)
 
                         @staticmethod
-                        def backward(_, *args):
+                        def backward(ctx, *args):
                             raise RuntimeError(
                                 "torch.compile with aot_autograd does not currently support double backward"
                             )
@@ -1959,7 +1959,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
 
                     # Pass args even though they're unused, so that the graph is built
-                    out = CompiledFunctionBackward.apply(all_args)
+                    out = CompiledFunctionBackward.apply(*all_args)
                 else:
                     out = CompiledFunction._backward_impl(ctx, all_args)
 
