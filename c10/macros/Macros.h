@@ -217,7 +217,8 @@ using namespace c10::xpu;
 // Unlike C10_ALWAYS_INLINE, C10_ALWAYS_INLINE_ATTRIBUTE can be used
 // on a lambda.
 #if defined(_MSC_VER)
-// VS2022 doesn't accept [[msvc::forceinline]] on a lambda..
+// Several recent versions of VS2022 (at least VS17.7 through VS17.10)
+// don't accept [[msvc::forceinline]] on a lambda.
 #define C10_ALWAYS_INLINE_ATTRIBUTE
 #elif __has_attribute(always_inline) || defined(__GNUC__)
 #define C10_ALWAYS_INLINE_ATTRIBUTE __attribute__((__always_inline__))
