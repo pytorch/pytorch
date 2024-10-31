@@ -171,7 +171,7 @@ def capture_pre_autograd_graph_using_training_ir() -> bool:
     return False
 
 
-def justknobs_check(name: str, default=True) -> bool:
+def justknobs_check(name: str, default: bool = True) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
     where you can toggle this value to False in JK without having to
