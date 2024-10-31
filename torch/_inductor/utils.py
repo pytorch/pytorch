@@ -2009,7 +2009,8 @@ def align_inputs_from_check_idxs(
 
 
 def clone_preserve_strides(x: torch.Tensor):
-    if any(s == 0 for s in x.size()):
+    if 0 in x.size():
+        # Short-circuits if the shape has no elements
         needed_size = 0
     else:
         needed_size = (

@@ -260,7 +260,7 @@ class TORCH_API TimedSection {
 
   ~TimedSection() {
     int64_t now = NowNs();
-    metric_->AddSample(now, now - start_);
+    metric_->AddSample(now, static_cast<double>(now - start_));
   }
 
   double Elapsed() const {
