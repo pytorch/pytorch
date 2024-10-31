@@ -218,15 +218,15 @@ def run_functionalized_fw_and_collect_metadata(
             # tensors. This is a problem as the inner tensor stride change may not be reflected
             # correctly in the outer tensor, so disallow this for now.
             mutates_data = has_data_mutation(f_arg)
-            if (
-                mutates_data
-                and not arg.is_contiguous()
-                and is_traceable_wrapper_subclass(arg)
-            ):
-                raise RuntimeError(
-                    "Mutations on non-contiguous inputs are currently not allowed on "
-                    "tensor subclasses"
-                )
+            #if (
+            #    mutates_data
+            #    and not arg.is_contiguous()
+            #    and is_traceable_wrapper_subclass(arg)
+            #):
+            #    raise RuntimeError(
+            #        "Mutations on non-contiguous inputs are currently not allowed on "
+            #        "tensor subclasses"
+            #    )
 
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False

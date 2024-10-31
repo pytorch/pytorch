@@ -8020,19 +8020,19 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     in_f, fullgraph=True, backend="aot_eager_decomp_partition"
                 )
 
-                if sample.input.is_contiguous():
-                    compiled_in_f(sample.input, *sample.args, **sample.kwargs)
-                    if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
-                        self.assertEqualIgnoringNestedInts(sample.input, out_ref)
-                    else:
-                        self.assertEqual(sample.input, out_ref)
+                # if sample.input.is_contiguous():
+                compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                    self.assertEqualIgnoringNestedInts(sample.input, out_ref)
                 else:
-                    # see https://github.com/pytorch/pytorch/issues/106456
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
-                    ):
-                        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                    self.assertEqual(sample.input, out_ref)
+                #else:
+                #    # see https://github.com/pytorch/pytorch/issues/106456
+                #    with self.assertRaisesRegex(
+                #        RuntimeError,
+                #        "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
+                #    ):
+                #        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
 
     @withXFails(COMPILE_BACKWARD_FAILURES)
     @ops(
