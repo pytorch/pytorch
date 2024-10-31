@@ -334,19 +334,11 @@ class MetaTensorDescriber:
             }
             type_v = type(t)
 
-        from torch.nested._internal.nested_tensor import _cache_id_registry
-
-        njt_cache = None
-        njt_cache_ref = torch._get_njt_cache_from_offsets(t)
-        if njt_cache_ref is not None and njt_cache_ref() is not None and recurse:
-            njt_cache = self.describe_njt_cache(njt_cache_ref(), root=t)
-
-        cache_id = None
-        if njt_cache_ref is not None and njt_cache_ref() is not None:
-            cache_id = _cache_id_registry.get(njt_cache_ref(), None)
-
-        if njt_cache is not None:
-            assert cache_id is not None, f"{cache_id=} {njt_cache=}"
+        njt_cache_desc, cache_id = None, None
+        njt_cache = torch._get_njt_cache_from_offsets(t)
+        if njt_cache is not None and recurse:
+            njt_cache_desc = self.describe_njt_cache(njt_cache, root=t)
+            cache_id = njt_cache.id
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
@@ -377,7 +369,7 @@ class MetaTensorDescriber:
             is_traceable_wrapper_subclass=is_traceable_wrapper_subclass_v,
             is_nested=is_nested,
             cache_id=cache_id,
-            njt_cache=njt_cache,
+            njt_cache=njt_cache_desc,
             # We may be able to remove nested_int in favor of this.
             custom_size_strides = self.describe_custom_size_strides(t),
             is_functional=is_functional,
@@ -1663,13 +1655,13 @@ class MetaConverter:
                     fake_cache_value = metafy_fn(
                         cache_value,
                         # Make sure to use the NestedTensorCacheSource directly
-                        source=GetItemSource(NestedTensorCacheSource(source), cache_key),
+                        src=GetItemSource(NestedTensorCacheSource(source), cache_key),
                     ) if cache_value is not None else None
                     cache_data[cache_key] = fake_cache_value
 
-                nested_cache = r.fake_mode.get_nested_cache(cache_data)
+                nested_cache = r.fake_mode.get_nested_cache(cache_data, cache_id=t.cache_id)
                 # See Note: [Creating symbolic nested int]
-                r.fake_mode.get_nested_symint(nested_cache)
+                r.fake_mode.get_nested_symint(nested_cache, coeff=1)
 
         return self.get_tensor_memo(t)
 
