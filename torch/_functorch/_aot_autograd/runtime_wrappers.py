@@ -14,7 +14,7 @@ import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils.dlpack
@@ -1476,7 +1476,7 @@ class AOTDispatchAutograd:
 
         runtime_type = type(x)
         runtime_meta = None
-        runtime_subclass_keys: List[str] = []
+        runtime_subclass_keys: Sequence[str] = []
 
         if is_traceable_wrapper_subclass(x):
             runtime_subclass_keys, runtime_meta = x.__tensor_flatten__()
@@ -1523,6 +1523,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             return x, [x]
 
         assert isinstance(meta, SubclassCreationMeta)
+        if orig_x is not x:
+            runtime_subclass_keys = x.__tensor_flatten__()[0]
+
         assert len(meta.attrs) == len(runtime_subclass_keys)
         leaves = []
         for i, (attr, attr_meta) in enumerate(meta.attrs.items()):
