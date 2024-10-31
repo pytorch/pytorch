@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import torch.fx
 import torch.utils._pytree as pytree
 
+
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
 
