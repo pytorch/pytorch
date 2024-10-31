@@ -16,22 +16,30 @@ from unittest import mock
 from torch._utils_internal import justknobs_check
 
 
-@dataclass
+@dataclass(kw_only=True)
 class Config:
     """Represents a config with richer behaviour than just a default value.
-
+::
     i.e.
     foo = Config(justknob="//foo:bar", default=False)
     install_config_module(...)
 
     This configs must be installed with install_config_module to be used
 
+    Precedence Order:
+        user_override: If a user sets a value (i.e. foo.bar=True), that
+            has the highest precendance and is always respected
+        justknob: If this pytorch installation supports justknobs, that will
+            override defaults, but will not override the user_override precendence.
+        default: This value is the lowest precendance, and will be used if nothing is
+            set.
+
     Arguments:
         justknob: the name of the feature / JK. In OSS this is unused.
         default: is the value to default this knob to in OSS.
     """
 
-    default: bool = True
+    default: Any = None
     justknob: Optional[str] = None
 
 
@@ -67,7 +75,7 @@ def install_config_module(module: ModuleType) -> None:
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
-                config[name] = _ConfigEntry(value)
+                config[name] = _ConfigEntry(Config(default=value))
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, Config):
@@ -153,10 +161,7 @@ class _ConfigEntry:
     # The justknob to check for this config
     justknob: Optional[str] = None
 
-    def __init__(self, config: Any):
-        if not isinstance(config, Config):
-            self.default = config
-            return
+    def __init__(self, config: Config):
         self.default = config.default
         self.justknob = config.justknob
 
@@ -245,7 +250,7 @@ class ConfigModule(ModuleType):
             if ignored_keys and key in ignored_keys:
                 if skip_default and not self._is_default(key):
                     warnings.warn(
-                        f"Skipping serialization of {key} value {self.__getattr__(key)}"
+                        f"Skipping serialization of {key} value {getattr(self, key)}"
                     )
                 continue
             if ignored_prefixes:
