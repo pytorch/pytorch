@@ -6,7 +6,7 @@ name: inductor-cu124-unittest
 on:
   workflow_call:
       inputs:
-        job_name:
+        additional_name:
           required: false
           type: string
           default: "inductor-cu124-unittest"
@@ -16,7 +16,7 @@ on:
     - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ inputs.job_name || 'default' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ inputs.additional_name || 'default' }}
   cancel-in-progress: true
 
 permissions: read-all
