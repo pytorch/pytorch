@@ -145,9 +145,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+          SCCACHE_REGION: us-east-1
           ID_X86_32: ${{ steps.build-x86_32.outputs.container_id }}
         run: |
           set -eux
+
+          # Fetch aws credential from IMDs
+          eval "$(python3 .github/scripts/get_aws_session_tokens.py)"
 
           # Putting everything together
           # ID_X86_32 container were created during build-x86_32 step
@@ -165,6 +169,7 @@ jobs:
             -e SHA1 \
             -e BRANCH \
             -e SCCACHE_BUCKET \
+            -e SCCACHE_REGION \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --user jenkins \
