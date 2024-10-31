@@ -1140,8 +1140,8 @@ static void index_reduce_func_impl(
     });
 
     if (op == ReductionType::MEAN) {
-      auto counts = include_self ? at::ones_like(result, ScalarType::Long) : at::zeros_like(result, ScalarType::Long);
-      counts.index_add_(dim, index, at::ones_like(source, ScalarType::Long));
+      auto counts = include_self ? at::ones_like(result, index.dtype()) : at::zeros_like(result, index.dtype());
+      counts.index_add_(dim, index, at::ones_like(source, index.dtype()));
       counts.masked_fill_(counts == 0, 1);
       if (result.is_floating_point() || result.is_complex()) {
         result.div_(counts);

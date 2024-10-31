@@ -1313,8 +1313,8 @@ TORCH_IMPL_FUNC(index_reduce_cuda_out)
     index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::PROD, reduce_multiply, result);
   } else if (reduce == "mean") {
     index_reduce_func_cuda_impl(self, dim, index, source, include_self, ReductionType::MEAN, reduce_add, result);
-    auto counts = include_self ? at::ones_like(result, ScalarType::Long) : at::zeros_like(result, ScalarType::Long);
-    counts.index_add_(dim, index, at::ones_like(source, ScalarType::Long));
+    auto counts = include_self ? at::ones_like(result, index.dtype()) : at::zeros_like(result, index.dtype());
+    counts.index_add_(dim, index, at::ones_like(source, index.dtype()));
     counts.masked_fill_(counts == 0, 1);
     if (result.is_floating_point() || result.is_complex()) {
       result.div_(counts);
