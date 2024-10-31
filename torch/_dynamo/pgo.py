@@ -7,9 +7,6 @@ import logging
 import time
 from collections import defaultdict
 from typing import DefaultDict, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
-
-from caffe2.fb._utils_internal import log_pt2_compile_event
-
 from torch._dynamo.utils import get_chromium_event_logger
 from typing_extensions import Self
 
