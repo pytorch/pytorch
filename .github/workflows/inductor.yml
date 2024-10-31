@@ -1,10 +1,6 @@
 name: inductor
 
 on:
-  # for testing
-  pull_request:
-    branches:
-      - main
   push:
     branches:
       - main

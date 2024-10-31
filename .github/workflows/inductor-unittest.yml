@@ -4,6 +4,10 @@
 # It also runs for rerun-disabled-tests work nightly.
 name: inductor-unittest
 on:
+  # for testing
+  pull_request:
+    branches:
+      - main
   workflow_call:
   schedule:
     - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests. `schedule 29 8 * * *` is reserved for rerun disabled tests.
