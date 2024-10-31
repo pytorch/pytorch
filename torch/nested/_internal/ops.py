@@ -1967,7 +1967,11 @@ def to_padded_tensor_default(func, *args, **kwargs):
     if output_size is not None:
         max_seq_len = output_size[inp._ragged_idx]
     else:
-        max_seq_len = inp._max_seqlen
+        max_seq_len = (
+            inp._max_seqlen
+            if inp._max_seqlen_tensor is not None
+            else inp._values.size(0)
+        )
 
     # only 2D values with ragged packed dim=0 is supported by the underlying FBGEMM
     # kernel so do shape gymnastics if needed
