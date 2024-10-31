@@ -78,15 +78,18 @@ find_file(
   NO_DEFAULT_PATH
   )
 
+# Define the old version of SYCL toolkit that is compatible with the current version of PyTorch.
+set(PYTORCH_2_5_SYCL_TOOLKIT_VERSION 20240703)
+
 # By default, we use libsycl.so on Linux and sycl.lib on Windows as the SYCL library name.
-if (SYCL_COMPILER_VERSION VERSION_LESS_EQUAL 20240703)
+if (SYCL_COMPILER_VERSION VERSION_LESS_EQUAL PYTORCH_2_5_SYCL_TOOLKIT_VERSION)
   # Don't use if(LINUX) here since this requires cmake>=3.25 and file is installed
   # and used by other projects.
   # See: https://cmake.org/cmake/help/v3.25/variable/LINUX.html
   if(CMAKE_SYSTEM_NAME MATCHES "Linux")
     set(sycl_lib_suffix "-preview")
   elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
-    # On Windows, the SYCL library is named sycl7.lib until compiler version 20240703.
+    # On Windows, the SYCL library is named sycl7.lib until PYTORCH_2_5_SYCL_TOOLKIT_VERSION.
     # sycl.lib is supported in the later version.
     set(sycl_lib_sufix "7")
   endif()
