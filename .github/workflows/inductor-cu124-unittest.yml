@@ -7,10 +7,10 @@ on:
   workflow_call:
     inputs:
       job_name:
-      required: false
-      type: string
-      default: "inductor-cu124-unittest"
-      description: 'A job name passed for concurrency group'
+        required: false
+        type: string
+        default: "inductor-cu124-unittest"
+        description: 'A job name passed for concurrency group'
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
