@@ -82,7 +82,7 @@ _T = TypeVar("_T", bound="AutotuneArgs")
 
 @dataclasses.dataclass
 class BenchmarkTensors:
-    """Represents a set of inputs and outputs for autotuining with a template"""
+    """Represents a set of inputs and outputs for autotuning with a template"""
 
     input_tensors: List[torch.Tensor]
     output_tensor: Optional[torch.Tensor]
@@ -96,7 +96,9 @@ class AutotuneArgs:
     """During autotuning, we need to pass the same inputs to all choices.
     Note:
         Since we typically have a mix of external choices and triton choices, we create
-        two lists of inputs, one for external inputs and one for triton inputs.
+        two lists of inputs for the same underlying buffers:
+        - External inputs (for aten kernels): Include offset for sliced tensors
+        - Triton inputs: Use base pointer for sliced tensors, without offset
     """
 
     triton: BenchmarkTensors
