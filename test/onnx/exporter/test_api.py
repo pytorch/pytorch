@@ -205,6 +205,30 @@ class TestExportAPIDynamo(common_utils.TestCase):
         input = torch.randn(2)
         self.assert_export(Model(), (input))
 
+    def test_custom_translation_table_overrides_ops(self):
+        from onnxscript import opset18 as op
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        def custom_add(x, y):
+            # Replace add with sub
+            return op.Sub(x, y)
+
+        custom_translation_table = {torch.ops.aten.add.Tensor: custom_add}
+
+        onnx_program = torch.onnx.export(
+            Model(),
+            (torch.randn(2, 2), torch.randn(2, 2)),
+            custom_translation_table=custom_translation_table,
+            dynamo=True,
+        )
+        all_nodes = [n.op_type for n in onnx_program.model.graph]
+        print(all_nodes)
+        self.assertIn("Sub", all_nodes)
+        self.assertNotIn("Add", all_nodes)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
