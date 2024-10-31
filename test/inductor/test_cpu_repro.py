@@ -868,7 +868,6 @@ class CPUReproTests(TestCase):
         def fn(x, y):
             x = x + 10
             y[x] += y[x]
-            return y
 
         x = torch.randint(-10, -9, (1, 2), dtype=torch.int64)
         y = torch.randn((2, 32), dtype=torch.float32)
@@ -878,6 +877,41 @@ class CPUReproTests(TestCase):
             fn(x, y)
             torch.compile(fn)(x_clone, y_clone)
             self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
+
+    def test_index_add(self):
+        # https://github.com/pytorch/pytorch/issues/138908
+        def fn(x, y, scale_y, index):
+            values = x[index] + y * scale_y
+            out = x.index_add_(dim=0, source=values, index=index)
+            return out
+
+        inp = (
+            torch.randn(10, 10),
+            torch.randn(5, 10),
+            torch.randn(10),
+            torch.randperm(10, device="cpu")[:5].to(torch.int32),
+        )
+        inp_clones = []
+        for i in range(3):
+            inp_clones.append(
+                [
+                    inp[0].clone(),
+                    inp[1].clone(),
+                    inp[2].clone(),
+                    inp[3].clone()
+                    if i == 0
+                    else torch.zeros(10, device="cpu")[:5].to(torch.int32),
+                ]
+            )
+        inp_clone, inp_clone2, inp_clone3 = inp_clones
+        with torch.no_grad():
+            cfn = torch.compile(fn)
+            ref = fn(*inp)
+            res = cfn(*inp_clone)
+            self.assertEqual(ref, res, atol=1e-3, rtol=1e-3)
+            ref = fn(*inp_clone2)
+            res = cfn(*inp_clone3)
+            self.assertEqual(ref, res, atol=1e-3, rtol=1e-3)
 
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):

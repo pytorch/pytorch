@@ -1241,7 +1241,7 @@ class InplacingTests(TestCase):
             return out
 
         inp = (T(10, 10), T(5, 10), T(10))
-        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """250""")
+        self.assertExpectedInline(count_numel(scaled_index_add, *inp), """470""")
 
 
 # Test cases where we don't do the right thing yet.
