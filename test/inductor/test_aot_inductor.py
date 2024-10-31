@@ -1104,6 +1104,56 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
+    def test_fallback_kernel_with_symexpr_output(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Module(torch.nn.Module):
+            def forward(self, q, k, v):
+                q = q.reshape(
+                    q.shape[0],
+                    2,
+                    q.shape[2] * q.shape[3],
+                    q.shape[1] // 2,
+                )
+                k = k.reshape(
+                    k.shape[0],
+                    2,
+                    k.shape[2] * k.shape[3],
+                    k.shape[1] // 2,
+                )
+                v = v.reshape(
+                    v.shape[0],
+                    2,
+                    v.shape[2] * v.shape[3],
+                    v.shape[1] // 2,
+                )
+
+                res = torch.ops.aten._scaled_dot_product_flash_attention.default(
+                    q,
+                    k,
+                    v,
+                )
+                return res[0]
+
+        m = Module().to(device=self.device)
+        tensor_shape = (4, 32, 4, 4)
+        inputs = (
+            torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
+        )
+
+        dynamic_shapes = {
+            "q": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
+            "k": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
+            "v": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
+        }
+        ep = torch.export.export(m, inputs, dynamic_shapes=dynamic_shapes, strict=False)
+        path = torch._inductor.aot_compile(ep.module(), inputs)
+        aot_model = torch._export.aot_load(path, device=self.device)
+        torch.testing.assert_close(m(*inputs), aot_model(*inputs))
+
     def test_large_grid(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
