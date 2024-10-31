@@ -73,7 +73,7 @@ float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
     }
   });
   const auto [t0, t1] = vec::convert_half_float(x[0]);
-#if defined(__aarch64__)
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
   return vaddvq_f32(t0 + t1);
 #else
   return vec::vec_reduce_all<float>(
@@ -129,7 +129,7 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
 #endif // !defined(__aarch64__) || defined( __ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
 
 float reduce(vec::Vectorized<float> x) {
-#if defined(__aarch64__)
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
   return vaddvq_f32(x);
 #else
   return vec::vec_reduce_all<float>(
@@ -214,7 +214,7 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
     const vec::Vectorized<c10::Half>& b,
     const vec::Vectorized<float>& acc_low,
     const vec::Vectorized<float>& acc_high) {
-#ifdef __ARM_FEATURE_FP16_FML
+#if defined(__ARM_FEATURE_FP16_FML) && !defined(CPU_CAPABILITY_SVE)
   return std::make_pair(vfmlalq_low_f16(acc_low, a, b), vfmlalq_high_f16(acc_high, a, b));
 #else
   const auto [a_float_low, a_float_high] = convert_half_float(a);
@@ -332,21 +332,6 @@ dot_with_fp32_arith_main_loop_bfdot(
 }
 #endif // COMPILER_SUPPORTS_BF16_TARGET
 
-template <typename T>
-struct half_to_float16 {
-  using type = T;
-};
-
-#ifdef __aarch64__
-template <>
-struct half_to_float16<Half> {
-  using type = float16_t;
-};
-#endif
-
-template <typename T>
-using half_to_float16_t = typename half_to_float16<T>::type;
-
 static_assert(
     (vec::Vectorized<Half>::size() & (vec::Vectorized<Half>::size() - 1)) == 0,
     "Below code expects power-of-2 vector register size!");
@@ -371,13 +356,10 @@ static_assert(
                                                                         \
   /* Second-tier tail fixup: handle all workloads. */                   \
   for (int j = len_aligned_vec; j < len; ++j) {                         \
-    /* We use half_to_float16_t here because changing to Half was */    \
-    /* causing arithmetic to at fp16 precision, but the necessary */    \
-    /* necessary behavior to pass python test/test_mps.py -k */         \
-    /* test_output_grad_match_nn_functional_linear_cpu_float16 is */    \
-    /* fp32. (I'm not sure exactly why this fixes it.) */               \
-    half_to_float16_t<std::decay_t<decltype(vec1[j])>> x1 = vec1[j];    \
-    half_to_float16_t<std::decay_t<decltype(vec2[j])>> x2 = vec2[j];    \
+    /* Attempting to use Half here caused multiple test failures; */    \
+    /* using float to unbreak. (Suspect we need a scalar FMA.) */       \
+    float x1 = vec1[j];                                                 \
+    float x2 = vec2[j];                                                 \
     reduced_sum += x1 * x2;                                             \
   }                                                                     \
   return reduced_sum

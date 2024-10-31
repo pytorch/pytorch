@@ -333,10 +333,17 @@ void gemm(
    }
 #endif
 #if AT_MKLDNN_ENABLED()
-   const bool bf16_gemv_trans_fast_path_would_be_beneficial = cpuinfo_initialize() && !cpuinfo_has_x86_avx512bf16();
-   const bool use_bf16_gemv_trans =
-     bf16_gemv_trans_fast_path_would_be_beneficial && transa == TransposeType::Transpose &&
+#ifdef __aarch64__
+   // MKLDNN also supports ARM for bf16, and the bypass is only
+   // currently intended for x86/x86_64.
+   const bool use_bf16_gemv_trans = false;
+#else
+   const bool bf16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
+     !cpuinfo_has_x86_avx512bf16();
+   const bool use_bf16_gemv_trans = bf16_gemv_trans_would_be_faster &&
+     transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
+#endif
    if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
@@ -359,12 +366,13 @@ void gemm(
    // The documented MKL behavior when FP16 support is not available
    // is to upconvert to fp32 and call sgemm. We can do better by
    // fusing the conversion.
-   const bool fp16_gemv_trans_fast_path_would_be_beneficial =
-     cpuinfo_initialize() && cpuinfo_has_x86_f16c() && !cpuinfo_has_x86_avx512fp16();
-   const bool use_fp16_gemv_trans =
-     fp16_gemv_trans_fast_path_would_be_beneficial && transa == TransposeType::Transpose &&
+   const bool fp16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
+     cpuinfo_has_x86_f16c() && !cpuinfo_has_x86_avx512fp16();
+   const bool use_fp16_gemv_trans = fp16_gemv_trans_would_be_faster &&
+     transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
-   if (!use_fp16_gemv_trans && mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (!use_fp16_gemv_trans &&
+       mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
