@@ -70,7 +70,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self, TypeGuard
+from typing_extensions import Self, TypeIs
 
 import torch
 import torch._guards
@@ -78,7 +78,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
-from torch._inductor.config import trace as trace_config
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -305,10 +304,10 @@ class FailedMatch(RuntimeError):
 MatchResult = Union[Match, FailedMatch]
 
 
-def is_match(m: MatchResult) -> TypeGuard[Match]:
+def is_match(m: MatchResult) -> TypeIs[Match]:
     """
-    TypeGuards cannot act on `self`. Thus this function exists to let mypy
-    recognize FailedMatch.__bool__ as a TypeGuard.
+    TypeIs cannot act on `self`. Thus this function exists to let mypy
+    recognize FailedMatch.__bool__ as a TypeIs.
     """
     return bool(m)
 
@@ -1746,9 +1745,7 @@ class PatternMatcherPass:
         if has_call_module:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
         pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
-        with GraphTransformObserver(
-            gm, pass_name, trace_config.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, pass_name):
             for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
                 target = extract_target(node)
                 if node.op == "call_module":
