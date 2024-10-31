@@ -423,7 +423,8 @@ class ContextlibContextManagerFunctionVariable(BaseUserFunctionVariable):
             # TODO: figure it out why it is not working for this usecase
             with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
                 return tracer.inline_call_().next_variable(tx)
-        except exc.ObservedUserStopIteration as e:
+        # except exc.ObservedUserStopIteration as e:
+        except exc.ObservedException as e:
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
 
