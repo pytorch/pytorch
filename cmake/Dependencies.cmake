@@ -96,8 +96,9 @@ if(USE_XPU)
     "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
   endif()
-  # XPU_HOST_CXX_FLAGS will be empty if XPU is disabled.
-  string(APPEND CMAKE_CXX_FLAGS ${XPU_HOST_CXX_FLAGS})
+  foreach(flag ${XPU_HOST_CXX_FLAGS})
+    add_definitions(${flag})
+  endforeach()
 endif()
 
 # ---[ Custom Protobuf
