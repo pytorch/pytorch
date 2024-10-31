@@ -8,7 +8,7 @@ on:
     inputs:
       job_name:
         required: false
-        default: "default"
+        default: "inductor-unittest"
         type: string
         description: 'A job name passed for concurrency group'
   schedule:
