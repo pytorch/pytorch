@@ -173,6 +173,10 @@ CPU_TEST_FAILURES = {
     ),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
     "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
+    # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
+    "test_symint_item": fail_minimal_arrayref_interface(is_skip=True),
+    # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
+    "test_symbool_item": fail_minimal_arrayref_interface(is_skip=True),
 }
 
 
