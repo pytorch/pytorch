@@ -224,7 +224,7 @@ class Vectorized<c10::Half> {
     Vectorized<c10::Half> vec(
         vreinterpretq_f16_u16(
             vbslq_u16(
-                vreinterpretq_u16_f16(mask),
+                mask,
                 vreinterpretq_u16_f16(b.values),
                 vreinterpretq_u16_f16(a.values))));
 
