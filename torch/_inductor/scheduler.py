@@ -929,6 +929,7 @@ class SchedulerNode(BaseSchedulerNode):
         # entry by using a customized cache implemetation rather than
         # lru_cache.
         SIMDScheduling.candidate_tilings.cache_clear()
+        self.pointwise_read_writes.clear_cache(self)
 
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep

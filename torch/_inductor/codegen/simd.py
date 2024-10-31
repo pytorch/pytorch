@@ -1630,7 +1630,7 @@ class SIMDScheduling(BaseScheduling):
             return ()
 
         rw = node.pointwise_read_writes()
-        assert len(rw.range_vars) == len(ranges)
+        assert len(rw.range_vars) == len(ranges), f"{rw.range_vars=} {ranges=}"
 
         # isinstance(dep, MemoryDep): this filters out StarDeps. StarDeps refer to reads
         # that need to access the entire tensor; they don't contribute read indexing
