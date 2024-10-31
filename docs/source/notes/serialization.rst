@@ -249,7 +249,7 @@ by default within the pickle file, you should see an actionable error like such
            `torch.serialization.safe_globals([MyDataClass])` context manager to allowlist this global
            if you trust this class/function.
 
-Please follow the steps in the error message.
+Please follow the steps in the error message and allowlist the functions or classes only if you trust them.
 
 To get all GLOBALs (functions/classes) in the checkpoint that are not yet allowlisted you can use
 :func:`torch.serialization.get_unsafe_globals_in_checkpoint` which will return a list of strings of the form
@@ -269,7 +269,8 @@ Getting unsafe globals
 A caveat is that :func:`torch.serialization.get_unsafe_globals_in_checkpoint` analyzes the checkpoint statically,
 some types might be built dynamically during the unpickling process and hence will not be reported by
 :func:`torch.serialization.get_unsafe_globals_in_checkpoint`. One such example is ``dtypes`` in numpy. In
-``numpy < 1.25`` you might see an error like
+``numpy < 1.25`` after allowlisting all the functions/classes reported by
+:func:`torch.serialization.get_unsafe_globals_in_checkpoint` you might see an error like
 
 ..code::
     WeightsUnpickler error: Can only build Tensor, Parameter, OrderedDict or types allowlisted via `add_safe_globals`,
