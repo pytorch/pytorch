@@ -558,7 +558,7 @@ class DequeVariable(CommonListMethodsVariable):
             assert not kwargs
             if maxlen is not None and len(self.items) == maxlen:
                 raise_observed_exception(
-                    IndexError, tx, args=("deque already at its maximum size",)
+                    IndexError, tx, args=["deque already at its maximum size"]
                 )
             result = super().call_method(tx, name, args, kwargs)
         else:
