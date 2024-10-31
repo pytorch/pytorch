@@ -79,6 +79,85 @@ class CKGemmTemplate(CKTemplate):
     } // extern C
     """
 
+    standalone_runner_template = r"""
+    extern "C" {
+    int run_main(int argc, char** argv) {
+        const int32_t M = {{M}};
+        const int32_t N = {{N}};
+        const int32_t K = {{K}};
+        const int32_t LDA = {{LDA}};
+        const int32_t LDB = {{LDB}};
+        const int32_t LDC = {{LDC}};
+        const int32_t LDD = {{LDD}};
+
+        using AElementType = {{a_element_dtype}};
+        using BElementType = {{b_element_dtype}};
+        using CElementType = {{c_element_dtype}};
+        using BiasElementType = {{bias_element_dtype}};
+
+        using ALayout = {{a_layout}};
+        using BLayout = {{b_layout}};
+        using CLayout = {{c_layout}};
+        using BiasLayout = {{bias_layout}};
+
+        using strides_t = std::array<int32_t, 2>;
+
+        auto get_strides = [](int32_t leading_dimension, auto layout) -> strides_t {
+            if constexpr (std::is_same_v<decltype(layout), Row>) {
+                return {leading_dimension, 1};
+            }
+            return {1, leading_dimension};
+        };
+
+        Tensor<AElementType> a_m_k ( HostTensorDescriptor ( strides_t{M, K}, get_strides(LDA, ALayout{}) ) );
+        Tensor<BElementType> b_k_n ( HostTensorDescriptor ( strides_t{N, K}, get_strides(LDB, BLayout{}) ) );
+        Tensor<BiasElementType> d_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDD, DLayout{}) ) );
+
+        Tensor<CElementType> c_m_n_host ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
+        Tensor<CElementType> c_m_n_device ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
+
+        a_m_k.GenerateTensorValue(GeneratorTensor_2<AElementType>());
+        b_k_n.GenerateTensorValue(GeneratorTensor_2<BElementType>());
+        d_m_n.GenerateTensorValue(GeneratorTensor_2<BiasElementType>());
+
+        DeviceMem a_m_k_device_buf(sizeof(AElementType) * a_m_k.mDesc.GetElementSpaceSize());
+        DeviceMem b_k_n_device_buf(sizeof(BElementType) * b_k_n.mDesc.GetElementSpaceSize());
+        DeviceMem d_m_n_device_buf(sizeof(BiasElementType) * d_m_n.mDesc.GetElementSpaceSize());
+        DeviceMem c_m_n_device_buf(sizeof(CElementType) * c_m_n_device.mDesc.GetElementSpaceSize());
+
+        a_m_k_device_buf.ToDevice(a_m_k.mData.data());
+        b_k_n_device_buf.ToDevice(b_k_n.mData.data());
+        d_m_n_device_buf.ToDevice(d_m_n.mData.data());
+
+        auto stream_config = StreamConfig{nullptr, true, 1};
+
+        rocm_ck_gemm_template(
+            static_cast<const ADataType*>(a_m_k_device_buf.GetDeviceBuffer()),
+            static_cast<const BDataType*>(b_k_n_device_buf.GetDeviceBuffer()),
+            static_cast<const BiasDataType*>(d_m_n_device_buf.GetDeviceBuffer()),
+            static_cast<CDataType*>(c_m_n_device_buf.GetDeviceBuffer()),
+            M,
+            N,
+            K,
+            LDA,
+            LDB,
+            LDC,
+            LDD,
+            nullptr, // workspace_size
+            nullptr, // workspace
+            stream_config.stream_id_);
+
+        hip_check_error(hipDeviceSynchronize());
+
+        return 0;
+    } // run_main
+    } // extern C
+
+    int main(int argc, char** argv) {
+        return run_main(argc, argv);
+    }
+    """
+
     def __init__(
         self,
         input_nodes: List[Buffer],
