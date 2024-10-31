@@ -68,7 +68,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Dict, List, Set
+from typing import Any, Callable, Dict, List, Set, Tuple
 
 import torch
 from torch._utils import IMPORT_MAPPING, NAME_MAPPING
@@ -207,6 +207,18 @@ def _get_allowed_globals():
     return rc
 
 
+def _read_global_instruction(readline: Callable) -> Tuple[str, str]:
+    module = readline()[:-1].decode("utf-8")
+    name = readline()[:-1].decode("utf-8")
+    # Patch since torch.save default protocol is 2
+    # users will be running this code in python > 3
+    if (module, name) in NAME_MAPPING:
+        module, name = NAME_MAPPING[(module, name)]
+    elif module in IMPORT_MAPPING:
+        module = IMPORT_MAPPING[module]
+    return module, name
+
+
 def get_globals_in_pkl(file) -> Set[str]:
     globals_in_checkpoint = set()
     protocol = None
@@ -248,13 +260,7 @@ def get_globals_in_pkl(file) -> Set[str]:
             raise EOFError
         assert isinstance(key, bytes_types)
         if key[0] == GLOBAL[0]:
-            module = readline()[:-1].decode("utf-8")
-            name = readline()[:-1].decode("utf-8")
-            if protocol == 2:
-                if (module, name) in NAME_MAPPING:
-                    module, name = NAME_MAPPING[(module, name)]
-                elif module in IMPORT_MAPPING:
-                    module = IMPORT_MAPPING[module]
+            module, name = _read_global_instruction(readline)
             globals_in_checkpoint.add(f"{module}.{name}")
         elif key[0] in op_to_bytes_to_read:
             bytes_to_read = op_to_bytes_to_read[key[0]]
@@ -306,15 +312,7 @@ class Unpickler:
             assert isinstance(key, bytes_types)
             # Risky operators
             if key[0] == GLOBAL[0]:
-                module = readline()[:-1].decode("utf-8")
-                name = readline()[:-1].decode("utf-8")
-                # Patch since torch.save default protocol is 2
-                # users will be running this code in python > 3
-                if self.proto == 2:
-                    if (module, name) in NAME_MAPPING:
-                        module, name = NAME_MAPPING[(module, name)]
-                    elif module in IMPORT_MAPPING:
-                        module = IMPORT_MAPPING[module]
+                module, name = _read_global_instruction(self.readline)
                 full_path = f"{module}.{name}"
                 if module in _blocklisted_modules:
                     raise UnpicklingError(
@@ -366,15 +364,15 @@ class Unpickler:
                 elif type(inst) in _get_user_allowed_globals().values():
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
-                    else:
-                        slotstate = None
-                        if isinstance(state, tuple) and len(state) == 2:
-                            state, slotstate = state
+                    elif hasattr(inst, "__slots__"):
+                        # if slots are defined, state will be a tuple (state, slotstate)
+                        state, slotstate = state
+                        for k, v in slotstate.items():
+                            setattr(inst, k, v)
                         if state:
                             inst.__dict__.update(state)
-                        if slotstate:
-                            for k, v in slotstate.items():
-                                setattr(inst, k, v)
+                    else:
+                        inst.__dict__.update(state)
                 else:
                     raise UnpicklingError(
                         "Can only build Tensor, Parameter, OrderedDict or types allowlisted "
