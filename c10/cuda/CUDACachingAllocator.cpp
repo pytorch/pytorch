@@ -2718,7 +2718,8 @@ class DeviceCachingAllocator {
       return bool(p.block);
     } else {
       auto active_pool = MemPoolContext::getActiveMemPool();
-      if (active_pool && active_pool->allocator() && p.pool->owner_PrivatePool) {
+      if (active_pool && active_pool->allocator() &&
+          p.pool->owner_PrivatePool) {
         // Ensure that active_pool and p.pool are the same
         auto pp = get_private_pool(active_pool->id());
         TORCH_INTERNAL_ASSERT(pp == p.pool->owner_PrivatePool);
