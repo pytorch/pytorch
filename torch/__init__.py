@@ -281,16 +281,6 @@ def _preload_pypi_cuda_deps() -> None:
     if platform.system() != "Linux":
         return
 
-    for path in sys.path:
-        if not path.endswith('site-packages'):
-            continue
-        nvidia_path = os.path.join(path, "nvidia")
-        if os.path.exists(nvidia_path):
-            break
-    else:
-        # no `site-packages/nvidia`
-        return
-
     cuda_libs: _Dict[str, str] = {
         "cublas": "libcublas.so.*[0-9]",
         "cudnn": "libcudnn.so.*[0-9]",
@@ -306,17 +296,27 @@ def _preload_pypi_cuda_deps() -> None:
         "nvtx": "libnvToolsExt.so.*[0-9]",
     }
 
-    for lib_folder, lib_name in cuda_libs.items():
-        candidate_lib_paths = glob.glob(
-            os.path.join(nvidia_path, lib_folder, "lib", lib_name)
-        )
-        if candidate_lib_paths:
-            ctypes.CDLL(candidate_lib_paths[0])
-        else:
+    try:
+        lib = None
+        import nvidia
+
+        for lib, lib_name in cuda_libs.items():
+            lib_pkg = importlib.import_module(lib, package='nvidia')
+            candidate_lib_paths = glob.glob(
+                os.path.join(lib_pkg.__path__[0], "lib", lib_name)
+            )
+            if candidate_lib_paths:
+                ctypes.CDLL(candidate_lib_paths[0])
+                lib = None
+            else:
+                break
+    finally:
+        # if importing failed during iteration
+        if lib is not None:
             import warnings
 
             warnings.warn(
-                f"Failed to load {lib_name} library in {nvidia_path}, please try to reinstall PyTorch.",
+                f"Failed to load {lib_name} library, please check your environment.",
             )
 
 
