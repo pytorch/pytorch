@@ -497,6 +497,9 @@ def run_joint_graph_passes_on_hops(
                 )
                 new_hop_graphs[identifier].partitioning_done = True
 
+    if not new_hop_graphs:
+        return joint_gm
+
     # Step 3) Restitch the new fw and bw graphs back into the main graph.
     #
     # This is a very mechanical process. There are a quite of pieces that we
