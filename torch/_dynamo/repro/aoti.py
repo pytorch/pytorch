@@ -11,12 +11,9 @@ import sys
 import textwrap
 import uuid
 from importlib import import_module
-from tempfile import TemporaryFile
 from typing import Any, Callable, Dict, Optional, Union
 
 import torch
-import torch.fx as fx
-import torch.nn as nn
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
     AccuracyError,
@@ -26,35 +23,16 @@ from torch._dynamo.debug_utils import (
     extra_imports,
     generate_config_string,
     helper_for_dump_minify,
-    InputReader,
-    InputWriter,
-    MAX_CONSTANT_NUMEL_INLINE,
     minifier_dir,
-    NNModuleToString,
-    NopInputReader,
-    same_two_models,
 )
-from torch._dynamo.utils import clone_inputs, counters, same
-
-from torch._functorch.aot_autograd import aot_export_module, get_aot_graph_name
 
 from torch.export import export, ExportedProgram
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import (
-    fx_placeholder_targets,
-    has_free_symbols,
-)
-from torch.hub import tqdm
-
-from .. import config
 
 log = logging.getLogger(__name__)
 
 
 inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
-
-# TODO: consider combine with after_aot.py?
 
 
 def dump_to_minify(
@@ -167,26 +145,9 @@ isolate_fails_code_str = None
             model_str += f"# torch git version: {torch.version.git_version}\n\n\n"
         model_str += _cuda_system_info_comment()
 
-    # model_str += NNModuleToString.convert(gm)
-
     ep_path = os.path.join(save_dir, "exported_program.pt2")
     torch.export.save(exported_program, ep_path)
 
-    # writer = InputWriter(save_dir)
-    # for placeholder, arg in zip(fx_placeholder_targets(gm), args):
-    #     if isinstance(arg, (int, torch.SymInt)):
-    #         writer.symint(placeholder, arg)
-    #     elif isinstance(arg, torch.Tensor):
-    #         # TODO: improve these names with FQN
-    #         writer.tensor(placeholder, arg)
-    #     elif arg is None:
-    #         writer.const(placeholder)
-    #     else:
-    #         raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
-
-    # model_str += "\n".join(writer.lines()) + "\n"
-
-    # model_str += "mod = Repro()\n"
     model_str += f"exported_program = torch.export.load('{ep_path}')\n"
     model_str += f"# print(exported_program.graph)\n"
     model_str += f"options={options}\n"
@@ -194,34 +155,6 @@ isolate_fails_code_str = None
 
 
 def repro_common(options, exported_program):
-
-    # if not hasattr(load_args, "_version"):
-    #     log.warning(
-    #         "load_args does not have a _version attribute, please file a bug to PyTorch "
-    #         "and describe how you generate this repro script"
-    #     )
-    # else:
-    #     if load_args._version > 0:
-    #         log.warning(
-    #             "load_args is version %s, but this version of PyTorch only supports "
-    #             "version 0.  We will try to run it anyway but there may be an incompatibility; "
-    #             "if so, try upgrading your version of PyTorch.",
-    #             load_args._version,
-    #         )
-
-    # nop_reader = NopInputReader()
-    # load_args(nop_reader)
-
-    # with tqdm(desc="Loading inputs", total=nop_reader.total) as pbar:
-    #     input_reader = InputReader(save_dir=options.save_dir, pbar=pbar)
-    #     load_args(input_reader)
-    #     args = input_reader.args
-
-    # # convert args from list to tuple to respect export input spec
-    # args = tuple(args)
-    # # Export the model to FX graph
-    # mod = export(mod, args).module()
-
     # torch._inductor.config.generate_intermediate_hooks = True
     mod = exported_program.module()
     args, kwargs = exported_program.example_inputs
@@ -238,14 +171,8 @@ def repro_run(options, exported_program, config_patches):
 
     mod, args, kwargs = repro_common(options, exported_program)
 
-    # device = options.device
-    # if device != "cpu" and not device.startswith("cuda"):
-    #     raise RuntimeError("Unsupported device " + device)
-
     from torch.cuda import synchronize
 
-    # so_path = compile_fx_aot(mod, args, config_patches=config_patches)
-    # compiled = torch._export.aot_load(so_path, device=device)
     package_path = _aoti_compile_and_package_inner(
         mod,
         args,
@@ -284,9 +211,6 @@ def repro_minify(options, exported_program, config_patches):
         if isinstance(arg, torch.Tensor) and arg.is_cuda:
             need_sync = True
             break
-    # device = options.device
-    # if device != "cpu" and not device.startswith("cuda"):
-    #     raise RuntimeError("Unsupported device " + device)
 
     def module_fails(gm, flat_example_inputs, check_str=None):
         # we have to export first so the in_spec and out_spec are populated
@@ -381,12 +305,6 @@ default settings on this script:
             const=None,
             help="don't use any directory for saved inputs",
         )
-        # parser.add_argument(
-        #     "--device",
-        #     type=str,
-        #     default="cpu",
-        #     help="The device used in _export.aot_load. Default is cpu.",
-        # )
 
     subparsers = parser.add_subparsers(
         dest="command", metavar="{run,minify,analyze}", required=True
