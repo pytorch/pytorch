@@ -198,7 +198,8 @@ struct DumpPipe {
     if (fd_ == -1) {
       return false;
     }
-    char buf[128];
+    // NOLINTNEXTLINE(*array*)
+    char buf[128]{};
     // non-blocking from O_NONBLOCK above.
     // Ignore EINTR because we already will poll this
     // again later.
@@ -461,8 +462,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // NOTE: We intentionally store raw pointers so that
     // we do not attempt to destroy the event objects on process exit,
     // because cuda may be gone.
-    std::deque<at::cuda::CUDAEvent*>
-        eventsArray_[2]; // 0 for timing=false, 1 for timing=true
+    std::array<std::deque<at::cuda::CUDAEvent*>, 2>
+        eventsArray_; // 0 for timing=false, 1 for timing=true
   };
 
   struct Options : Backend::Options {
@@ -1181,7 +1182,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool dumpOnTimeoutOrEx_;
 
   // Whether or not to sleep after an exception is thrown in the watchdog.
-  bool sleepAfterException_;
+  bool sleepAfterException_{};
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;

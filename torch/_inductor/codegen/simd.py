@@ -321,6 +321,7 @@ class SIMDKernel(Kernel):
     sexpr = pexpr
     kexpr: Callable[[sympy.Expr], str]
     allow_block_ptr = False
+    kernel_name: str
 
     def __init__(
         self,
@@ -1366,7 +1367,7 @@ class SIMDScheduling(BaseScheduling):
 
         # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
         # so taking the hit of non-coalesced loads is okay
-        if has_sort := schedule_contains_op(node_schedule, "sort"):
+        if schedule_contains_op(node_schedule, "sort"):
             kernel_kwargs["override_persistent_reduction"] = True
 
         kernel = kernel_type(
@@ -1375,35 +1376,26 @@ class SIMDScheduling(BaseScheduling):
         )
         kernel.buf_accesses = buf_accesses
 
-        kernel2: Optional[SIMDKernel] = None
-        if kernel.persistent_reduction and config.triton.multi_kernel and not has_sort:
-            kernel2 = self.kernel_type(
-                *kernel_args,
-                **kernel_kwargs,
-                override_persistent_reduction=False,
-            )
-            self.codegen_node_schedule_with_kernel(node_schedule, kernel2)
-            with V.set_kernel_handler(kernel2):
-                src_code2 = kernel2.codegen_kernel()
-            kernel_name2 = self.define_kernel(src_code2, node_schedule, kernel)
-            kernel2.kernel_name = kernel_name2
-            kernel2.code_hash = code_hash(src_code2)
+        kernels = self.add_multi_kernel_choices(
+            kernel, kernel_args, kernel_kwargs, node_schedule
+        )
+        for kernel in kernels:
+            self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        MultiKernel.merge_workspaces_inplace(kernels)
+        for kernel in kernels:
+            with V.set_kernel_handler(kernel):
+                src_code = kernel.codegen_kernel()
+            kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+            log.debug("Generating kernel code with kernel_name: %s", kernel_name)
+            kernel.kernel_name = kernel_name
+            kernel.code_hash = code_hash(src_code)
+        del kernel
 
-            # Keep buffers needed by the non-persistent reduction so both
-            # kernels have the same arguments
-            kernel.must_keep_buffers = set(kernel2.must_keep_buffers)
-
-        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-
-        with V.set_kernel_handler(kernel):
-            src_code = kernel.codegen_kernel()
-
-        kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
-        kernel.kernel_name = kernel_name
-        kernel.code_hash = code_hash(src_code)
-
-        final_kernel = MultiKernel([kernel, kernel2]) if kernel2 is not None else kernel
+        final_kernel: Union[SIMDKernel, MultiKernel]
+        if len(kernels) > 1:
+            final_kernel = MultiKernel(kernels)
+        else:
+            (final_kernel,) = kernels
 
         with V.set_kernel_handler(final_kernel):
             for node in node_schedule:
@@ -1416,7 +1408,7 @@ class SIMDScheduling(BaseScheduling):
         if config.nan_asserts:
             final_kernel.codegen_nan_check()
         if config.warn_mix_layout:
-            final_kernel.warn_mix_layout(kernel_name)
+            final_kernel.warn_mix_layout(kernels[0].kernel_name)
 
         V.graph.removed_buffers |= final_kernel.removed_buffers
         V.graph.inplaced_to_remove |= final_kernel.inplaced_to_remove
@@ -1427,7 +1419,7 @@ class SIMDScheduling(BaseScheduling):
         ):
             # Not every node in the schedule will actually be live on output;
             # we can't check dead buffers.
-            live_outs = kernel.args.live_output_buffers()
+            live_outs = kernels[0].args.live_output_buffers()
             for node in node_schedule:
                 if not isinstance(node, scheduler.BaseSchedulerNode):
                     continue
@@ -1443,6 +1435,11 @@ class SIMDScheduling(BaseScheduling):
                     )
 
         self.scheduler.free_buffers()
+
+    def add_multi_kernel_choices(
+        self, kernel, kernel_args, kernel_kwargs, node_schedule
+    ) -> List[SIMDKernel]:
+        return [kernel]
 
     def codegen_node_schedule_with_kernel(self, node_schedule, kernel):
         def current_reduction_nodes(nodes):
