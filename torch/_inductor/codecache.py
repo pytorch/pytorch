@@ -72,7 +72,6 @@ from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler, TritonKernelArtifacts
-from .utils import _align
 
 
 T = TypeVar("T")
@@ -1896,19 +1895,43 @@ class AotCodeCompiler:
                 if name not in graph.folded_constants
             )
 
-            def get_nbytes_of_tensor(tensor: torch.Tensor, all_cuda: bool) -> int:
-                n_bytes = (
-                    torch.ops.mkldnn._nbytes(tensor)
-                    if tensor.is_mkldnn
-                    else tensor.untyped_storage().nbytes()
-                )
-                return n_bytes if all_cuda else _align(n_bytes)
+            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
+                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
+                    padded_bytes = raw_bytes.ljust(
+                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
+                        b"\x00",
+                    )
+                    return padded_bytes
 
-            consts_size = sum(
-                get_nbytes_of_tensor(tensor, all_cuda)
-                for (name, tensor) in graph.constants.items()
+                # This serializes the tensor's untyped_storage to bytes by accessing
+                # the raw data of the underlying structure.
+                import ctypes
+
+                if t.numel() == 0:
+                    return b""
+
+                if t.is_mkldnn:
+                    data_ptr = torch.ops.mkldnn.data_ptr(t)
+                    nbytes = torch.ops.mkldnn._nbytes(t)
+                else:
+                    t_cpu = t.untyped_storage().cpu()
+                    data_ptr = t_cpu.data_ptr()
+                    nbytes = t_cpu.nbytes()
+
+                raw_array = ctypes.cast(
+                    data_ptr,
+                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
+                )
+                raw_bytes = bytes(raw_array.contents)
+                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
+
+            serialized_weights = b"".join(
+                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
+                for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
+            consts_size = len(serialized_weights)
+
             # TODO: Fix mmap weights with cuda
             use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
             if config.aot_inductor.force_mmap_weights:
@@ -1948,41 +1971,6 @@ class AotCodeCompiler:
                 compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
                 object_build_options.save_flags_to_file(compile_flags)
 
-            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
-                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
-                    padded_bytes = raw_bytes.ljust(
-                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
-                        b"\x00",
-                    )
-                    return padded_bytes
-
-                # This serializes the tensor's untyped_storage to bytes by accessing
-                # the raw data of the underlying structure.
-                import ctypes
-
-                if t.numel() == 0:
-                    return b""
-
-                if t.is_mkldnn:
-                    data_ptr = torch.ops.mkldnn.data_ptr(t)
-                    nbytes = torch.ops.mkldnn._nbytes(t)
-                else:
-                    t_cpu = t.untyped_storage().cpu()
-                    data_ptr = t_cpu.data_ptr()
-                    nbytes = t_cpu.nbytes()
-
-                raw_array = ctypes.cast(
-                    data_ptr,
-                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
-                )
-                raw_bytes = bytes(raw_array.contents)
-                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
-
-            serialized_weights = b"".join(
-                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                for name in graph.constants.keys()
-                if name not in graph.folded_constants
-            )
             if not use_mmap_weights:
                 aot_constants = serialized_weights
                 magic_number = 0
