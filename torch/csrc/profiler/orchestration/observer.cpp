@@ -38,14 +38,16 @@ ProfilerConfig::ProfilerConfig(
     bool with_stack,
     bool with_flops,
     bool with_modules,
-    ExperimentalConfig experimental_config)
+    ExperimentalConfig experimental_config,
+    const std::string& trace_id)
     : state{state},
       experimental_config{std::move(experimental_config)},
       report_input_shapes{report_input_shapes},
       profile_memory{profile_memory},
       with_stack{with_stack},
       with_flops{with_flops},
-      with_modules{with_modules} {}
+      with_modules{with_modules},
+      trace_id{trace_id} {}
 
 bool ProfilerConfig::disabled() const {
   return state == torch::profiler::impl::ProfilerState::Disabled;
