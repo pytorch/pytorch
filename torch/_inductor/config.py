@@ -590,6 +590,11 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
 _micro_pipeline_tp: bool = False
 
 
+class _collective:
+    auto_select: bool = False
+    one_shot_all_reduce_threshold_bytes: int = 128 * 1024
+
+
 def parallel_compile_enabled_internally() -> bool:
     """
     TODO: Remove when parallel compiled is fully enabled internally. For rollout, use a
@@ -744,9 +749,7 @@ freezing_discard_parameters: bool = False
 
 # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
 # should be run with this flag both on and off to make sure we have coverage.
-allow_stack_allocation: bool = (
-    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1" if is_fbcode() else "0") == "1"
-)
+allow_stack_allocation: bool = False
 
 # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
 # to maximize performance for use cases that it can accommodate at the expense of
