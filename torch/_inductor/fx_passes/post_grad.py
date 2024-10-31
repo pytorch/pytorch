@@ -98,9 +98,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
-        with GraphTransformObserver(
-            gm, "post_grad_custom_pre_pass", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "post_grad_custom_pre_pass"):
             apply_pass(
                 lambda: post_grad_custom_pre_pass(gm.graph), "post_grad_custom_pre_pass"
             )
@@ -145,9 +143,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
-        with GraphTransformObserver(
-            gm, "post_grad_custom_post_pass", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "post_grad_custom_post_pass"):
             apply_pass(
                 lambda: post_grad_custom_post_pass(gm.graph),
                 "post_grad_custom_post_pass",
