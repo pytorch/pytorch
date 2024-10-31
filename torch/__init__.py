@@ -301,7 +301,7 @@ def _preload_pypi_cuda_deps() -> None:
         import nvidia
 
         for lib, lib_name in cuda_libs.items():
-            lib_pkg = importlib.import_module(lib, package='nvidia')
+            lib_pkg = importlib.import_module('.' + lib, package='nvidia')
             candidate_lib_paths = glob.glob(
                 os.path.join(lib_pkg.__path__[0], "lib", lib_name)
             )
