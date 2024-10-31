@@ -272,12 +272,9 @@ def get_globals_in_pkl(file) -> Set[str]:
             if strlen > maxsize:
                 raise UnpicklingError("String is too long")
             read(strlen)
-        elif key[0] == SHORT_BINSTRING[0]:
+        elif key[0] in {SHORT_BINSTRING[0], LONG1[0]}:
             strlen = read(1)[0]
             read(strlen)
-        elif key[0] == LONG1[0]:
-            n = read(1)[0]
-            read(n)
         # first and last op
         elif key[0] == PROTO[0]:
             protocol = read(1)[0]
