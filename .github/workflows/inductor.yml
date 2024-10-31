@@ -1,5 +1,10 @@
+# Workflow: Inductor
+# runs all inductor tests, including both benchmark tests and unit tests.
+# To add new test:
+#  1. Unit Tests: inductor-unittest.yml
+#  2. Benchmark Tests: this workflow
+#  3. Mixed: inductor-unittest.yml, and skip benchmark tests in test script.
 name: inductor
-
 on:
   push:
     branches:
@@ -10,14 +15,13 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 permissions: read-all
 
 jobs:
   inductor-unittest:
-    if: github.repository_owner == 'pytorch'
     name: inductor-unittest
     uses: ./.github/workflows/inductor-unittest.yml
 
