@@ -62,6 +62,10 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 
 #include <torch/csrc/distributed/c10d/cuda/cutlass/gemm/kernel/persistent_async_input_scheduler.cuh>
 
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+#define BUILD_ASYNC_MM_KERNEL
+#endif
+
 namespace {
 
 using namespace cute;
@@ -260,11 +264,16 @@ at::Tensor async_input_mm_out(
   TORCH_CHECK_EQ(out.sizes()[0], M);
   TORCH_CHECK_EQ(out.sizes()[1], N);
 
+#if defined(BUILD_ASYNC_MM_KERNEL)
   DISPATCH_LAYOUT_B(is_b_row_major, [&]() {
     // TODO(yifu): tuning
     async_input_mm_impl<LayoutB, Shape<_128, _256, _64>, Shape<_2, _1, _1>>(
         a, b, a_chunk_signals, a_chunk_pivot, out);
   });
+#else
+  TORCH_CHECK(
+      false, "async_input_mm is not currenlty supported on your device");
+#endif
   return out;
 }
 
