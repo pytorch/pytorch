@@ -355,12 +355,13 @@ void gemm(
    // The documented MKL behavior when FP16 support is not available
    // is to upconvert to fp32 and call sgemm. We can do better by
    // fusing the conversion.
-   const bool fp16_gemv_trans_fast_path_would_be_beneficial =
-     cpuinfo_initialize() && cpuinfo_has_x86_f16c() && !cpuinfo_has_x86_avx512fp16();
-   const bool use_fp16_gemv_trans =
-     fp16_gemv_trans_fast_path_would_be_beneficial && transa == TransposeType::Transpose &&
+   const bool fp16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
+     cpuinfo_has_x86_f16c() && !cpuinfo_has_x86_avx512fp16();
+   const bool use_fp16_gemv_trans = fp16_gemv_trans_would_be_faster &&
+     transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
-   if (!use_fp16_gemv_trans && mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+   if (!use_fp16_gemv_trans &&
+       mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
    }
 #endif
