@@ -1400,17 +1400,17 @@ void prelu_backward_kernel(TensorIterator& iter) {
 } // namespace
 
 
-REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
-REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
-REGISTER_DISPATCH(threshold_stub, &threshold_kernel);
-REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel);
-REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel);
-REGISTER_DISPATCH(prelu_stub, &prelu_kernel);
-REGISTER_DISPATCH(prelu_backward_stub, &prelu_backward_kernel);
-REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
-REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
-REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
-REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
+REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel)
+REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel)
+REGISTER_DISPATCH(threshold_stub, &threshold_kernel)
+REGISTER_DISPATCH(leaky_relu_stub, &leaky_relu_kernel)
+REGISTER_DISPATCH(leaky_relu_backward_stub, &leaky_relu_backward_kernel)
+REGISTER_DISPATCH(prelu_stub, &prelu_kernel)
+REGISTER_DISPATCH(prelu_backward_stub, &prelu_backward_kernel)
+REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel)
+REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel)
+REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel)
+REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel)
 
 ALSO_REGISTER_AVX512_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_cpu_kernel);
