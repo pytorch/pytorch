@@ -54,9 +54,6 @@ struct PyNode : public Node {
 
   // The AutogradCompilerCall::hooks idx corresponding to this node's backward
   std::optional<int> _backward_idx;
-  std::optional<int> _backward_prologue_idx;
-  std::optional<int> _backward_impl_idx;
-  std::optional<int> _backward_epilogue_idx;
 
   // The AutogradCompilerCall::hooks idx corresponding to this node's
   // backward_state
