@@ -12642,6 +12642,32 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue("in_out_ptr" not in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
+        def test_donated_buffer_inplace(self):
+            batch_size = 32
+            seq_length = 50
+            hidden_size = 768
+
+            inp = torch.randn(batch_size, seq_length, hidden_size, requires_grad=True, device=self.device)
+            weight = torch.randn(hidden_size, hidden_size, requires_grad=True, device=self.device)
+
+            layer_norm = torch.nn.LayerNorm(hidden_size)
+
+            @torch.compile()
+            def foo(inp, weight):
+                matmul_output = inp @ weight
+                final_output = layer_norm(matmul_output)
+                return final_output
+
+            def wrapper(inp, weight):
+                return foo(inp, weight).sum().backward()
+
+            _, code = run_and_get_code(wrapper, inp, weight)
+            self.assertTrue("in_out_ptr" in code[1])
+
+
+
+
+
     class RNNTest(TestCase):
         device_type = GPU_TYPE
 
