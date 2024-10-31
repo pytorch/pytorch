@@ -27,7 +27,6 @@ from torch._guards import (
 )
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
-from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -54,7 +53,7 @@ from .schemas import (
 from .subclass_utils import (
     get_types_for_subclass,
     requires_subclass_dispatch,
-    unwrap_tensor_subclasses,
+    runtime_unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
 )
 from .traced_function_transforms import aot_dispatch_subclass
@@ -627,8 +626,10 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: List[Any]):
-            unwrapped_args = unwrap_tensor_subclasses(
-                args, is_joint_structure=self.trace_joint
+            unwrapped_args = runtime_unwrap_tensor_subclasses(
+                args,
+                subclass_metas=runtime_metadata.subclass_inp_meta,
+                append_symints=True,
             )
             args.clear()
             # expectation: runtime_fn is a boxed fn
@@ -638,6 +639,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 subclass_metas=subclass_metas,
                 num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 is_runtime=True,
+                included_subclass_symints=True,
             )
             return wrapped_outs
 
@@ -1444,19 +1446,7 @@ class AOTDispatchAutograd:
             return x
 
         is_subclass: bool = is_traceable_wrapper_subclass(x)
-        mem_format = memory_format
-        if is_subclass:
-            memory_format_for_dense_tensor = not isinstance(memory_format, list)
-            if isinstance(x, AsyncCollectiveTensor) and memory_format_for_dense_tensor:
-                # This is AsyncCollectiveTensor, that we have not seen during tracing time.
-                while True:
-                    x = x.trigger_wait()
-                    # Checking recursive AsyncCollectiveTensor
-                    if not isinstance(x, AsyncCollectiveTensor):
-                        break
-                is_subclass = False
-            else:
-                mem_format = memory_format[0]
+        mem_format = memory_format[0] if is_subclass else memory_format
 
         if not x.is_contiguous(memory_format=mem_format):
             x = x.contiguous(memory_format=mem_format)
@@ -1900,8 +1890,16 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         )
                         for i, t in enumerate(all_args)
                     ]
-                    all_args = unwrap_tensor_subclasses(
-                        all_args, is_joint_structure=False
+
+                    all_args = runtime_unwrap_tensor_subclasses(
+                        all_args,
+                        # SymInts that are inputs to the backward graph are
+                        # already included in the "all_args" list.
+                        # Any symints coming from tensor subclasses should always
+                        # come from primals, and so they will show up as extra
+                        # arguments to the forward graph, and they will be saved
+                        # as activation in the backward graph.
+                        append_symints=False,
                     )
                 else:
                     assert (
@@ -2068,6 +2066,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                 outs_wrapped = wrap_tensor_subclasses(
                                     outs,
                                     subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
+                                    included_subclass_symints=False,
                                 )
                                 return outs_wrapped
                             return outs
@@ -2096,6 +2095,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     outs_wrapped = wrap_tensor_subclasses(
                         out,
                         subclass_metas=CompiledFunction.maybe_subclass_metadata.grad_input_metas,
+                        included_subclass_symints=True,
+                        is_runtime=True,
                     )
                     return outs_wrapped
                 return out
@@ -2198,3 +2199,7 @@ def make_runtime_safe(
     fw_metadata.make_runtime_safe()
     if maybe_subclass_meta is not None:
         maybe_subclass_meta.fw_metadata.make_runtime_safe()
+        if maybe_subclass_meta.grad_input_metas:
+            for meta in maybe_subclass_meta.grad_input_metas:
+                if isinstance(meta, SubclassCreationMeta):
+                    meta.make_runtime_safe()
