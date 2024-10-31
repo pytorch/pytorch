@@ -336,7 +336,7 @@ def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
         f: File-like object or string containing the checkpoint object saved via ``torch.save``
 
     Returns:
-        A list of strings corresponding to pickle GLOBALs in the checkpoint that are marked safe for ``weights_only``.
+        A list of strings of pickle GLOBALs in the checkpoint that are not allowlisted for ``weights_only``.
     """
     safe_global_strings = set(_weights_only_unpickler._get_allowed_globals().keys())
 
