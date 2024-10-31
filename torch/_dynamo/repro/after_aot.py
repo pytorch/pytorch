@@ -14,6 +14,7 @@ import uuid
 from importlib import import_module
 from tempfile import TemporaryFile
 from typing import Any, Callable, Dict, Sequence, TYPE_CHECKING, Union
+from typing_extensions import Unpack
 
 import torch
 import torch.fx as fx
@@ -42,7 +43,6 @@ from torch.fx.experimental.symbolic_shapes import (
     has_free_symbols,
 )
 from torch.hub import tqdm
-from typing_extensions import Unpack
 
 from .. import config
 

@@ -44,7 +44,6 @@ verbose_progress = False
 
 # dump an aoti minifier if program errors
 dump_aoti_minifier = False
-aoti_minifier_accuracy_check = False
 
 # use fx aot graph codegen cache
 fx_graph_cache = (

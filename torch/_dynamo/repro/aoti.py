@@ -1,32 +1,26 @@
 # mypy: allow-untyped-defs
 import argparse
-import copy
 import functools
 import io
 import logging
 import os
 import shutil
-import subprocess
 import sys
 import textwrap
-import uuid
 from importlib import import_module
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import torch
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
-    AccuracyError,
-    backend_accuracy_fails,
     BuckTargetWriter,
-    cast_to_fp64,
     extra_imports,
     generate_config_string,
     helper_for_dump_minify,
     minifier_dir,
 )
+from torch.export import ExportedProgram
 
-from torch.export import export, ExportedProgram
 
 log = logging.getLogger(__name__)
 
@@ -149,13 +143,13 @@ isolate_fails_code_str = None
     torch.export.save(exported_program, ep_path)
 
     model_str += f"exported_program = torch.export.load('{ep_path}')\n"
-    model_str += f"# print(exported_program.graph)\n"
+    model_str += "# print(exported_program.graph)\n"
     model_str += f"options={options}\n"
     return model_str
 
 
 def repro_common(options, exported_program):
-    # torch._inductor.config.generate_intermediate_hooks = True
+    torch._inductor.config.generate_intermediate_hooks = True
     mod = exported_program.module()
     args, kwargs = exported_program.example_inputs
     return mod, args, kwargs
