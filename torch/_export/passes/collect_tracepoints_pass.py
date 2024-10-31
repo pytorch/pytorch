@@ -87,19 +87,25 @@ class CollectTracepointsPass(PassBase):
                 if node.target == torch.ops.higher_order._export_tracepoint:
                     path = node.kwargs["path"]
                     module_key = next(reversed(node.meta["nn_module_stack"]))
+                    fqn, _ = next(reversed(node.meta["nn_module_stack"].values()))
                     if "@" in module_key:
                         call_path = f"{path}@{module_key.split('@')[-1]}"
+                        call_fqn = f"{fqn}@{module_key.split('@')[-1]}"
                         if call_path not in self.specs:
                             self.specs[call_path] = copy_sig(self.specs[path])
+                        if call_fqn not in self.specs:
+                            self.specs[call_fqn] = copy_sig(self.specs[fqn])
                         path = call_path
+                        fqn = call_fqn
                     kind = node.kwargs["kind"]
                     for i, arg in enumerate(node.args):
-                        if kind == "module_call_inputs":
-                            self.specs[path].inputs.append(get_arg_spec(arg))
-                        elif kind == "module_call_outputs":
-                            self.specs[path].outputs.append(get_arg_spec(arg))
-                        else:
-                            raise AssertionError(f"Unknown tracepoint kind: {kind}")
+                        if fqn == path:
+                            if kind == "module_call_inputs":
+                                self.specs[path].inputs.append(get_arg_spec(arg))
+                            elif kind == "module_call_outputs":
+                                self.specs[path].outputs.append(get_arg_spec(arg))
+                            else:
+                                raise AssertionError(f"Unknown tracepoint kind: {kind}")
                         if isinstance(arg, torch.fx.Node):
                             for user in node.users:
                                 assert user.op == "call_function"
