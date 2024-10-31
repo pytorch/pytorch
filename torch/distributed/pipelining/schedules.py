@@ -1478,11 +1478,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 stage_uses_fsdp = isinstance(stage.submod, FSDPModule)
                 # see [Note: V-schedule special case]
                 is_next_stage_on_this_rank = stage_idx + 1 in stage_index_to_stage
-<<<<<<< HEAD
                 is_prev_stage_on_this_rank = stage_idx - 1 in stage_index_to_stage
-=======
-                is_prev_stage_on_this_rank = stage_idx + 1 in stage_index_to_stage
->>>>>>> 9eb54a4094e ([Pipelining] Support V-schedules in IR and Runtime)
 
                 logger.debug(
                     "_PipelineScheduleRuntime running time_step %d, action %s",
