@@ -88,7 +88,7 @@ class BenchmarkTensors:
     output_tensor: Optional[torch.Tensor]
 
     def unpack(self):
-        return dataclasses.astuple(self)
+        return self.input_tensors, self.output_tensor
 
 
 @dataclasses.dataclass
@@ -126,6 +126,7 @@ class AutotuneArgs:
 
     def verify(self, **kwargs):
         """Verify the correctness of the benchmarking results"""
+
         torch.testing.assert_close(self.extern.output_tensor, self.expected, **kwargs)
 
 
@@ -1559,21 +1560,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
-
-        def debug_str(example_inputs, out):
-            def tensor_repr(x):
-                return (
-                    f"torch.empty_strided({tuple(x.size())!r}, {tuple(x.stride())!r}, "
-                    f"dtype={x.dtype!r}, device={x.device.type!r})"
-                )
-
-            lines = [
-                "inputs = [",
-            ]
-            for x in example_inputs:
-                lines.append(f"    {tensor_repr(x)},")
-            lines += ["]", f"out = {tensor_repr(out)}", ""]
-            return "\n".join(lines)
 
         def benchmark_choice_in_current_process(
             choice: ChoiceCaller, autotune_args: AutotuneArgs
