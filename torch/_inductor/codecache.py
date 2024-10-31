@@ -812,7 +812,7 @@ class FxGraphHashDetails:
 
 
 def has_frozen_params(gm: torch.fx.GraphModule) -> bool:
-    return "_frozen_param" in str(gm)
+    return getattr(gm, "_has_frozen_params", False)
 
 
 def compiled_fx_graph_hash(
@@ -1598,6 +1598,7 @@ class CompiledFxGraph:
         self,
         current_callable: Optional[Callable[..., Any]],
         graph: GraphLowering,
+        gm: torch.fx.GraphModule,
         output_strides: List[Optional[Tuple[_StrideExprStr, ...]]],
         disabled_cudagraphs_reason: Optional[str],
         metrics_deltas: metrics.CachedMetricsDeltas,
@@ -1614,7 +1615,7 @@ class CompiledFxGraph:
         self.device_idxs = set(graph.device_idxs)
         self.mutated_inputs = set(graph.mutated_inputs)
         self.mutated_input_idxs = set(graph.mutated_input_idxs)
-        if has_frozen_params(graph.orig_gm):
+        if has_frozen_params(gm):
             self.allocated_constant_name = graph.allocated_constant_name
             self.constants = None
         else:

@@ -974,6 +974,7 @@ def fx_codegen_and_compile(
                 compiled_graph = CompiledFxGraph(
                     compiled_fn,
                     graph,
+                    gm,
                     output_strides,
                     V.graph.disable_cudagraphs_reason,
                     metrics_helper.get_deltas(),
@@ -1243,6 +1244,8 @@ def fw_compiler_freezing(
         aot_autograd_model,
         aot_example_inputs,  # type: ignore[arg-type]
     )
+
+    setattr(opt_model, "_has_frozen_params", True)  # noqa: B010
 
     aot_example_inputs = [aot_example_inputs[ind] for ind in preserved_arg_indices]
     num_fixed = len(preserved_arg_indices) - num_example_inputs
