@@ -3162,6 +3162,7 @@ class TritonKernel(SIMDKernel):
             sorted(f"{tree.prefix}mask" for tree in self.range_trees)
         )
 
+    @cache_on_self
     def get_reduction_prefixes(self) -> List[str]:
         return [
             prefix_str[symt]
@@ -3169,6 +3170,9 @@ class TritonKernel(SIMDKernel):
         ]
 
     def codegen_reduction_numels(self, buffer) -> None:
+        """
+        Generates code that flattens ND reduction numels, block sizes, etc. into 1D.
+        """
         # rnumel = r0_numel * ... * r(n-1)_numel
         reduction_trees = [tree for tree in self.range_trees if tree.is_reduction]
         rnumel = " * ".join(sorted(f"{tree.prefix}numel" for tree in reduction_trees))
@@ -3183,42 +3187,56 @@ class TritonKernel(SIMDKernel):
         rblock = sympy_product(rn_blocks)
         buffer.splice(f"RBLOCK: tl.constexpr = {self.kexpr(rblock)}")
 
-    def codegen_reduction_inds(self, buffer) -> None:
+        # If the kernel contains loops, compute rbase.
+        if any(tree.is_loop for tree in self.range_trees):
+            rn_bases = self._get_reduction_symbols(
+                "base", integer=True, nonnegative=True
+            )
+            rbase = self._flatten_reduction_inds(rn_bases)
+            buffer.splice(f"rbase = {self.index_to_str(rbase)}")
+
+    def _get_reduction_symbols(self, suffix: str, **kwargs) -> List[sympy.Symbol]:
         """
-        Converts ND reduction indices into rindex, rbase, roffset, etc.
+        Helper to initialize symbols like rn_numel, rn_base, etc.
         """
         rn_prefixes = self.get_reduction_prefixes()
-        if len(rn_prefixes) < 1:
-            return
+        return [sympy.Symbol(f"{prefix}{suffix}", **kwargs) for prefix in rn_prefixes]
 
-        def get_rsymbols(suffix: str, **kwargs) -> List[sympy.Symbol]:
-            return [
-                sympy.Symbol(f"{prefix}{suffix}", **kwargs) for prefix in rn_prefixes
-            ]
-
-        # Gather relevant numels, indices, etc.
-        rn_numels = get_rsymbols("numel", integer=True, positive=True)
-        rn_bases = get_rsymbols("base", integer=True, nonnegative=True)
-        rn_offsets = get_rsymbols("offset", integer=True, nonnegative=True)
-        rn_inds = get_rsymbols("index", integer=True, nonnegative=True)
-
-        # Compute coefficients to convert ND indices to linear.
-        # For example:
-        #   rindex = r0_index * r1_numel * ... * rn_numel + ... + rn_index.
-        ridx_coeffs = [
+    @cache_on_self
+    def _get_reduction_index_coeffs(self) -> List[sympy.Expr]:
+        """
+        Compute coefficients to convert ND reduction indices to linear indices.
+        For example:
+          rindex = r0_index * r1_numel * ... * rn_numel + ... + rn_index.
+        """
+        rn_prefixes = self.get_reduction_prefixes()
+        rn_numels = self._get_reduction_symbols("numel", integer=True, positive=True)
+        return [
             sympy_product(rn_numels[idx + 1 :]) for idx in range(len(rn_prefixes) - 1)
         ] + [sympy.Integer(1)]
 
-        # Compute roffset and rindex.
-        roffset = sympy_dot(ridx_coeffs, rn_offsets)
-        buffer.splice(f"roffset = {self.index_to_str(roffset)}")
-        rindex = sympy_dot(ridx_coeffs, rn_inds)
-        buffer.splice(f"rindex = {self.index_to_str(rindex)}")
+    def _flatten_reduction_inds(self, multi_inds: List[sympy.Expr]) -> sympy.Expr:
+        """
+        Compute linear reduction indices from N dimensional ones.
+        """
+        coeffs = self._get_reduction_index_coeffs()
+        return sympy_dot(coeffs, multi_inds)
 
-        # If inside a loop, compute rbase.
-        if any(tree.is_loop for tree in self.range_trees):
-            rbase = sympy_dot(ridx_coeffs, rn_bases)
-            buffer.splice(f"rbase = {self.index_to_str(rbase)}")
+    def codegen_reduction_inds(self, buffer) -> None:
+        """
+        Generates code that converts ND reduction indices into linear indices.
+        """
+        # Gather relevant numels, indices, etc.
+        rn_offsets = self._get_reduction_symbols(
+            "offset", integer=True, nonnegative=True
+        )
+        rn_inds = self._get_reduction_symbols("index", integer=True, nonnegative=True)
+
+        # Compute roffset and rindex.
+        roffset = self._flatten_reduction_inds(rn_offsets)
+        buffer.splice(f"roffset = {self.index_to_str(roffset)}")
+        rindex = self._flatten_reduction_inds(rn_inds)
+        buffer.splice(f"rindex = {self.index_to_str(rindex)}")
 
     def iteration_ranges_codegen_header(self, entry: IterationRangesRoot, code):
         x = entry.prefix
