@@ -18,6 +18,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from .collector import get_args_of_node_type
 from .collector import Collector, CantChunk
+from .partitioner import Partitioner
 from .collector import get_fake_tensor_from_node, maybe_permuted
 
 aten = torch.ops.aten
@@ -713,6 +714,10 @@ class AutoChunker:
             print("Chunking subgraph nodes:")
             for node in chunking_subgraph_nodes:
                 print(f"  {node.format_node()}")
+
+            reordered_graph = Partitioner.reorder_nodes(graph, chunking_subgraph_nodes)
+            print("reordered graph is:")
+            print(reordered_graph) # TODO
             assert False
 
             propagator = ChunkingMetaPropagator()
