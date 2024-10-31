@@ -147,6 +147,8 @@ class TritonBundler:
                             with open(filepath, "rb") as file:
                                 payload = file.read()
                                 if filepath.endswith(".json"):
+                                    # Make sure there's no sentinel value
+                                    assert TritonBundler._REPLACE_BYTES not in payload
                                     # Remove the path from payload
                                     payload = payload.replace(
                                         str.encode(path), TritonBundler._REPLACE_BYTES
