@@ -1647,7 +1647,46 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def backward(ctx, *flat_args):
-                return CompiledFunction._backward_prologue(ctx, *flat_args)
+                boxed_args = CompiledFunction._backward_prologue(ctx, *flat_args)
+
+                def impl_fn(boxed_args):
+                    out = CompiledFunction._backward_impl(ctx, boxed_args)
+                    return CompiledFunction._backward_epilogue(ctx, out)
+
+                needs_grad = torch.is_grad_enabled() and any(
+                    t.requires_grad for t in boxed_args if isinstance(t, torch.Tensor)
+                )
+                if needs_grad:
+                    # double backward
+                    return CompiledFunction._double_backward(ctx, boxed_args, impl_fn)
+                else:
+                    return impl_fn(boxed_args)
+
+            @staticmethod
+            def _double_backward(aot_ctx, impl_fn, boxed_args):
+                # Ensure that the graph is connected, and error if double backward is performed.
+                # See comment for why once_differentiable is not sufficient:
+                # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
+                class CompiledFunctionBackward(torch.autograd.Function):
+                    # CompiledFunctionBackward is not yet supported in dynamo skipfiles
+                    _compiled_autograd_should_lift = False
+                    _aot_id = aot_config.aot_id
+
+                    @staticmethod
+                    def forward(_, impl_fn, boxed_args):
+                        return impl_fn(boxed_args)
+
+                    @staticmethod
+                    def backward(_, *args):
+                        raise RuntimeError(
+                            "torch.compile with aot_autograd does not currently support double backward"
+                        )
+
+                CompiledFunctionBackward._compiled_autograd_key = (  # type: ignore[method-assign]
+                    CompiledFunction._compiled_autograd_key
+                )
+
+                return CompiledFunctionBackward.apply(impl_fn, boxed_args)
 
             @staticmethod
             def _backward_prologue(ctx, *flat_args):
@@ -1933,37 +1972,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         "aot_autograd does not support input mutations with requires_grad in backward for create_graph=True"
                     )
 
-                if torch.is_grad_enabled() and any(
-                    t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
-                ):
-                    # Ensure that the graph is connected, and error if double backward is performed.
-                    # See comment for why once_differentiable is not sufficient:
-                    # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
-                    class CompiledFunctionBackward(torch.autograd.Function):
-                        # CompiledFunctionBackward is not yet supported in dynamo skipfiles
-                        _compiled_autograd_should_lift = False
-                        _aot_id = aot_config.aot_id
-
-                        @staticmethod
-                        def forward(_, boxed_args):
-                            return CompiledFunction._backward_impl(ctx, boxed_args)
-
-                        @staticmethod
-                        def backward(_, *args):
-                            raise RuntimeError(
-                                "torch.compile with aot_autograd does not currently support double backward"
-                            )
-
-                    CompiledFunctionBackward._compiled_autograd_key = (  # type: ignore[method-assign]
-                        CompiledFunction._compiled_autograd_key
-                    )
-
-                    # Pass args even though they're unused, so that the graph is built
-                    out = CompiledFunctionBackward.apply(all_args)
-                else:
-                    out = CompiledFunction._backward_impl(ctx, all_args)
-
-                return out
+                return all_args
 
             @staticmethod
             def _backward_impl(ctx, all_args):
@@ -2056,7 +2065,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     steal_args=True,
                     disable_amp=disable_amp,
                 )
-                return CompiledFunction._backward_epilogue(ctx, out)
+                return out
 
             @staticmethod
             def _backward_epilogue(ctx, out):
