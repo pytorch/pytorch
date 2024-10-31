@@ -333,12 +333,12 @@ def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...]
     return artifact
 
 
-def _sympy_int_to_int(val: sympy.Expr, adjust: str) -> Optional[int]:
+def _sympy_int_to_int(val: sympy.Expr, adjust: str):
     # Convert simple sympy Integers into concrete int
     if val in (sympy.oo, int_oo):
-        return None
+        return math.inf
     if val in (-sympy.oo, -int_oo):
-        return None
+        return -math.inf
     if isinstance(val, sympy.Integer):
         return int(val)
 
@@ -357,10 +357,8 @@ def _sympy_int_to_int(val: sympy.Expr, adjust: str) -> Optional[int]:
         raise RuntimeError(f"Got invalid adjustment {adjust}")
 
 
-def _int_to_sympy_int(val: Optional[int], default) -> sympy.Expr:
+def _int_to_sympy_int(val) -> sympy.Expr:
     # Convert concrete int into simple sympy Integers
-    if val is None:
-        return default
     if val == math.inf:
         return int_oo
     if val == -math.inf:
@@ -1912,7 +1910,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     lower = vr.lower
                     if vr.upper >= 2:  # max is >= 2, not sym bool range
                         lower = max(2, lower)
-                    self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower, -int_oo), vr.upper)
+                    self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
 
             if example_inputs is not None and len(example_inputs) > 0:
                 self.example_inputs = deserialize_torch_artifact(example_inputs)
@@ -2329,7 +2327,7 @@ class ExportedProgramDeserializer(metaclass=Final):
 
         symbol_name_to_range = {
             k: symbolic_shapes.ValueRanges(
-                _int_to_sympy_int(v.min_val, -int_oo), _int_to_sympy_int(v.max_val, int_oo)
+                _int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val)
             )
             for k, v in exported_program.range_constraints.items()
         }
