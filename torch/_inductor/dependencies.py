@@ -736,7 +736,8 @@ class FreeUnbackedSymbolsOpsHandler:
 
     def masked(self, mask, body, other) -> None:
         if callable(body):
-            # The body is typically a lambda.
+            # The body is typically a lambda which can make
+            # additional calls like ops.indirect_indexing.
             try:
                 body()
             except TypeError:
