@@ -30,7 +30,7 @@ jobs:
     name: inductor-unittest
     uses: ./.github/workflows/inductor-unittest.yml
     with:
-      job_name: unit-test
+      additional_name: unit-test
 
   get-label-type:
     name: get-label-type
