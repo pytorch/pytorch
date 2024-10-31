@@ -1,6 +1,6 @@
 # Workflow: Inductor
 # runs all inductor tests, including both benchmark tests and unit tests.
-# Adding New Tests:
+# adding New Tests:
 #  1. inductor-cu124-unittest.yml:
 #      - Unit Tests
 #      - Mixed Tests
