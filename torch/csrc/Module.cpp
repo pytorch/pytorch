@@ -326,7 +326,7 @@ static PyObject* THPModule_setNumThreads(PyObject* module, PyObject* arg) {
 static PyObject* THPModule_getNumInteropThreads(
     PyObject* module,
     PyObject* noargs) {
-  return THPUtils_packInt32(at::get_num_interop_threads());
+  return THPUtils_packUInt64(at::get_num_interop_threads());
 }
 
 static PyObject* THPModule_setNumInteropThreads(
