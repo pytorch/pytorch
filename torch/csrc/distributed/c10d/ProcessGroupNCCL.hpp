@@ -746,9 +746,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::string& devicesKey,
       int p2pRank);
 
-  // Helper that either looks up the cached NCCL communicators or creates
-  // a new set of NCCL communicators as a cache entry
-  std::shared_ptr<NCCLComm> getNCCLComm(
+  // Helper that looks up the cached NCCL communicators only
+  std::shared_ptr<NCCLComm> getNCCLComm(const std::string& deviceKey);
+
+  std::shared_ptr<NCCLComm> initNCCLComm(
       const std::string& deviceKey,
       at::Device& device,
       OpType opType,
