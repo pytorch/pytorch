@@ -864,7 +864,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 final_tmp_name = f"wrap_with_raii_handle_if_needed_{final_tmp_name}"
             else:
                 call_strs.append(
-                    f"RAIIAtenTensorHandle {final_tmp_name}_raii({final_tmp_name})"
+                    f"RAIIAtenTensorHandle {final_tmp_name}_raii({final_tmp_name});"
                 )
                 final_tmp_name = f"{final_tmp_name}_raii"
 
