@@ -737,7 +737,7 @@ class WhyNoFuse:
 
         import traceback
 
-        traceback.print_stack()
+        # traceback.print_stack()
 
     def __str__(self) -> str:
         return f"cannot fuse {self.node1.get_name()} with {self.node2.get_name()}: " + (
@@ -2303,7 +2303,7 @@ class Scheduler:
 
         import traceback
 
-        traceback.print_stack()
+        # traceback.print_stack()
 
         for i in range(10):
             old_len = len(nodes)
@@ -2853,6 +2853,8 @@ class Scheduler:
         but ideally we should have some heuristics to reorder the loop for node2
         to be compatibile with node1 if that's more efficient.
         """
+
+        node1, node2 = node2, node1
 
         # TODO Don't do loop reordering for CPU for now.
         # Should debug more why it does not work for CPU codegen

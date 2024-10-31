@@ -865,6 +865,7 @@ class Reduction(Loops):
             and _is_static(numel_hint)
         )
 
+        return 4096, 4096
         # TODO: add a config option to skip reducton split
         # Defer the reduction splitting, will split in the scheduler
         should_split = False
