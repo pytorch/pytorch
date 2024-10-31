@@ -15,12 +15,19 @@ on:
     - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests.
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event.inputs.job_name || 'default' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-unittest
   cancel-in-progress: true
 
 permissions: read-all
 
 jobs:
+  echo-event:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo GitHub Event
+        env:
+          GITHUB_EVENT: ${{ toJson(github.event) }}
+        run: echo "$GITHUB_EVENT"
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
