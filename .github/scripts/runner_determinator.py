@@ -1,5 +1,9 @@
 # flake8: noqa: G004
 
+# Note: Copies of this script in runner_determinator.py and _runner-determinator.yml
+#       must be kept in sync. You can do it easily by running the following command:
+#           python .github/scripts/update_runner_determinator.py
+
 """
 This runner determinator is used to determine which set of runners to run a
 GitHub job on. It uses the first comment of a GitHub issue (by default
@@ -35,7 +39,8 @@ Example config:
     experiments:
       lf:
         rollout_percent: 25
-
+        all_branches: false
+        default: true
     ---
 
     # Opt-ins:
@@ -53,7 +58,7 @@ import os
 import random
 from argparse import ArgumentParser
 from logging import LogRecord
-from typing import Any, Dict, Iterable, List, NamedTuple, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, NamedTuple, Tuple
 
 import yaml
 from github import Auth, Github
@@ -78,6 +83,12 @@ CANARY_FLEET_SUFFIX = ".c"
 class Experiment(NamedTuple):
     rollout_perc: float = (
         0  # Percentage of workflows to experiment on when user is not opted-in.
+    )
+    all_branches: bool = (
+        False  # If True, the experiment is also enabled on the exception branches
+    )
+    default: bool = (
+        True  # If True, the experiment is enabled by default for all queries
     )
 
     # Add more fields as needed
@@ -133,6 +144,12 @@ def set_github_output(key: str, value: str) -> None:
         f.write(f"{key}={value}\n")
 
 
+def _str_comma_separated_to_set(value: str) -> FrozenSet[str]:
+    return frozenset(
+        filter(lambda itm: itm != "", map(str.strip, value.strip(" \n\t").split(",")))
+    )
+
+
 def parse_args() -> Any:
     parser = ArgumentParser("Get dynamic rollout settings")
     parser.add_argument("--github-token", type=str, required=True, help="GitHub token")
@@ -166,6 +183,13 @@ def parse_args() -> Any:
         type=str,
         required=True,
         help="Current GitHub ref type, branch or tag",
+    )
+    parser.add_argument(
+        "--eligible-experiments",
+        type=_str_comma_separated_to_set,
+        required=False,
+        default="",
+        help="comma separated list of experiments to check, if omitted all experiments marked with default=True are checked",
     )
 
     return parser.parse_args()
@@ -212,7 +236,7 @@ def get_potential_pr_author(
 
 def is_exception_branch(branch: str) -> bool:
     """
-    Branches that get opted out of all experiments and should always use Meta runners
+    Branches that get opted out of experiments by default, until they're explicitly enabled.
     """
     return branch.split("/")[0] in {"main", "nightly", "release", "landchecks"}
 
@@ -338,7 +362,11 @@ def is_user_opted_in(user: str, user_optins: UserOptins, experiment_name: str) -
 
 
 def get_runner_prefix(
-    rollout_state: str, workflow_requestors: Iterable[str], is_canary: bool = False
+    rollout_state: str,
+    workflow_requestors: Iterable[str],
+    branch: str,
+    eligible_experiments: FrozenSet[str] = frozenset(),
+    is_canary: bool = False,
 ) -> str:
     settings = parse_settings(rollout_state)
     user_optins = parse_users(rollout_state)
@@ -346,7 +374,24 @@ def get_runner_prefix(
     fleet_prefix = ""
     prefixes = []
     for experiment_name, experiment_settings in settings.experiments.items():
-        enabled = False
+        if not experiment_settings.all_branches and is_exception_branch(branch):
+            log.info(
+                f"Branch {branch} is an exception branch. Not enabling experiment {experiment_name}."
+            )
+            continue
+
+        if eligible_experiments:
+            if experiment_name not in eligible_experiments:
+                exp_list = ", ".join(eligible_experiments)
+                log.info(
+                    f"Skipping experiment '{experiment_name}', as it is not in the eligible_experiments list: {exp_list}"
+                )
+                continue
+        elif not experiment_settings.default:
+            log.info(
+                f"Skipping experiment '{experiment_name}', as it is not a default experiment"
+            )
+            continue
 
         # Is any workflow_requestor opted in to this experiment?
         opted_in_users = [
@@ -355,11 +400,13 @@ def get_runner_prefix(
             if is_user_opted_in(requestor, user_optins, experiment_name)
         ]
 
+        enabled = False
         if opted_in_users:
             log.info(
                 f"{', '.join(opted_in_users)} have opted into experiment {experiment_name}."
             )
             enabled = True
+
         elif experiment_settings.rollout_perc:
             # If no user is opted in, then we randomly enable the experiment based on the rollout percentage
             if random.uniform(0, 100) <= experiment_settings.rollout_perc:
@@ -407,35 +454,35 @@ def get_rollout_state_from_issue(github_token: str, repo: str, issue_num: int) -
 def main() -> None:
     args = parse_args()
 
-    if args.github_ref_type == "branch" and is_exception_branch(args.github_branch):
-        log.info(
-            f"Exception branch: '{args.github_branch}', using Meta runners and no experiments."
+    runner_label_prefix = DEFAULT_LABEL_PREFIX
+
+    try:
+        rollout_state = get_rollout_state_from_issue(
+            args.github_token, args.github_issue_repo, args.github_issue
         )
-        runner_label_prefix = DEFAULT_LABEL_PREFIX
-    else:
-        try:
-            rollout_state = get_rollout_state_from_issue(
-                args.github_token, args.github_issue_repo, args.github_issue
-            )
 
-            username = get_potential_pr_author(
-                args.github_token,
-                args.github_repo,
-                args.github_actor,
-                args.github_ref_type,
-                args.github_branch,
-            )
+        username = get_potential_pr_author(
+            args.github_token,
+            args.github_repo,
+            args.github_actor,
+            args.github_ref_type,
+            args.github_branch,
+        )
 
-            is_canary = args.github_repo == "pytorch/pytorch-canary"
+        is_canary = args.github_repo == "pytorch/pytorch-canary"
 
-            runner_label_prefix = get_runner_prefix(
-                rollout_state, (args.github_issue_owner, username), is_canary
-            )
+        runner_label_prefix = get_runner_prefix(
+            rollout_state,
+            (args.github_issue_owner, username),
+            args.github_branch,
+            args.eligible_experiments,
+            is_canary,
+        )
 
-        except Exception as e:
-            log.error(
-                f"Failed to get issue. Defaulting to Meta runners and no experiments. Exception: {e}"
-            )
+    except Exception as e:
+        log.error(
+            f"Failed to get issue. Defaulting to Meta runners and no experiments. Exception: {e}"
+        )
 
     set_github_output(GH_OUTPUT_KEY_LABEL_TYPE, runner_label_prefix)
 

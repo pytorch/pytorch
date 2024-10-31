@@ -6,10 +6,10 @@ import torch
 
 
 class Benchmark(BenchmarkBase):
-    N = 1000
+    N = 20
 
     def name(self):
-        return "update_hint_regression_1000"
+        return "update_hint_regression"
 
     def description(self):
         return "information at https://github.com/pytorch/pytorch/pull/129893"

@@ -184,9 +184,7 @@ def returntype_type(t: Type, *, mutable: bool) -> CType:
         elif t.name == BaseTy.Scalar:
             return BaseCType(scalarT)
     elif isinstance(t, ListType):
-        assert (
-            not mutable
-        ), "Native functions should never return a mutable tensor list. They should return void."
+        assert not mutable, "Native functions should never return a mutable tensor list. They should return void."
         elem = returntype_type(t.elem, mutable=False)
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return VectorCType(elem)
@@ -244,7 +242,7 @@ def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequenc
 JIT_TO_CPP_DEFAULT = {
     "False": "false",
     "True": "true",
-    "None": "torch::executorch::nullopt",  # UGH this one is type directed
+    "None": "torch::execustd::nullopt",  # UGH this one is type directed
     "[]": "{}",
     "contiguous_format": "torch::executorch::MemoryFormat::Contiguous",
     "long": "torch::executorch::kLong",
