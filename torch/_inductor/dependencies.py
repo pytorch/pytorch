@@ -734,6 +734,14 @@ class FreeUnbackedSymbolsOpsHandler:
         num_values = reduction_num_outputs(reduction_type)
         return (None,) * num_values if num_values > 1 else None
 
+    def masked(self, mask, body, other) -> None:
+        if callable(body):
+            # The body is typically a lambda.
+            try:
+                body()
+            except TypeError:
+                pass
+
 
 def _typecheck_FreeUnbackedSymbolsOpsHandler(
     h: FreeUnbackedSymbolsOpsHandler,
