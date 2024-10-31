@@ -3210,6 +3210,149 @@ class AssociativeScanTests(TestCase):
         )
 
     @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars2(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        H = torch.rand(2, device=device)
+
+        def fct_freevars1(x: torch.Tensor, y: torch.Tensor):
+            return x * H + y * 2
+
+        def fct_freevars2(x: torch.Tensor, y: torch.Tensor):
+            return x * H + y * H
+
+        H1 = torch.rand(1, device=device)
+        H2 = torch.rand(1, device=device)
+
+        def fct_freevars3(x: torch.Tensor, y: torch.Tensor):
+            return x * H1 + y * H2
+
+        inp = torch.randn(3, 2, 2, device=device)
+
+        for fct, param in [
+            (fct_freevars1, (H,)),
+            (fct_freevars2, (H,)),
+            (fct_freevars3, (H1, H2)),
+        ]:
+            kwargs = {
+                "dim": 0,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_fn": fct,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            self._run_test(
+                model=AssociativeScanModels.CombineFn(**kwargs),
+                model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+                inputs=inp,
+            )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_shape_check(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        H = torch.eye(2, device=device, requires_grad=True)
+
+        def fct_freevars(x: torch.Tensor, y: torch.Tensor):
+            return x @ H + y
+
+        inp = torch.randn(2, 2, 3, device=device, requires_grad=True)
+
+        kwargs = {
+            "dim": 2,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_freevars,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    # TODO: Support Autograd for associative scan
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_pytree(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        xf = torch.randn(2, 2, device=device, requires_grad=True)
+        yf = torch.randn(2, 2, device=device, requires_grad=True)
+        zf = torch.randn(2, 2, device=device, requires_grad=True)
+        inpf = {"i": xf, "j": ([yf], [{"o": zf}])}
+
+        def fct_pointwise(x, y):
+            return {
+                "i": (x["i"] * y["i"]) + inpf["i"],
+                "j": (
+                    [(x["j"][0][0] * y["j"][0][0]) + inpf["j"][0][0]],
+                    [
+                        {
+                            "o": (x["j"][1][0]["o"] + y["j"][1][0]["o"])
+                            + inpf["j"][1][0]["o"]
+                        }
+                    ],
+                ),
+            }
+
+        x = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        y = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        z = torch.randn(3, 2, 2, device=device, requires_grad=True)
+        inp = {"i": x, "j": ([y], [{"o": z}])}
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_pointwise,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
     def test_associative_scan_sparse_tensor(self):
         x = torch.tensor(
