@@ -6,7 +6,7 @@
 #      - Mixed Tests
 #      - Flaky Benchmark tests
 #  2. inductor.yml(this workflow):
-#      - non-flaky benchmakr tests
+#      - non-flaky benchmark tests
 name: inductor
 
 on:
