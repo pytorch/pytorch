@@ -384,7 +384,12 @@ option(USE_MIMALLOC "Use mimalloc" OFF)
 option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
 if(WIN32)
   set(USE_MIMALLOC ON)
-  set(USE_MIMALLOC_ON_MKL ON)
+
+  # Not enable USE_MIMALLOC_ON_MKL due to it caused issue:
+  # https://github.com/pytorch/pytorch/issues/138994
+  # Will turn on when we can fix USE_STATIC_MKL lost functionality:
+  # https://github.com/pytorch/pytorch/pull/138996
+  # set(USE_MIMALLOC_ON_MKL ON)
 endif()
 
 if(USE_CCACHE)
