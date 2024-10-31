@@ -19,6 +19,7 @@ from typing import Any, Container, Dict, List, Optional, Set, Tuple
 
 import torch
 
+from ..triton_bundler import TritonBundler
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
@@ -33,7 +34,6 @@ from .hints import (
     TRITON_MAX_RSPLIT,
 )
 from .runtime_utils import (
-    cache_dir,
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
@@ -42,6 +42,7 @@ from .runtime_utils import (
     get_max_y_grid,
     get_num_bytes,
     next_power_of_2,
+    triton_cache_dir,
     triton_config_to_hashable,
     validate_triton_config,
 )
@@ -229,10 +230,8 @@ class CachingAutotuner(KernelInterface):
         self.launchers = []  # type: ignore[var-annotated]
         self.lock = threading.Lock()
         if os.getenv("TRITON_CACHE_DIR") is None:
-            os.environ["TRITON_CACHE_DIR"] = os.path.join(
-                cache_dir(),
-                "triton",
-                str(self.triton_meta.get("device", 0)),
+            os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(
+                self.triton_meta.get("device", 0)
             )
         log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
@@ -460,10 +459,10 @@ class CachingAutotuner(KernelInterface):
             compile_kwargs = compile_meta
 
         if warm_cache_only:
-            return (
-                triton.compile(*compile_args, **compile_kwargs),
-                None,
-            )
+            binary = triton.compile(*compile_args, **compile_kwargs)
+            launcher = None
+            TritonBundler.put(binary.hash, self.triton_meta.get("device", 0))
+            return binary, launcher
 
         # importing from torch is safe now that precompile has returned
         from torch._dynamo.device_interface import DeviceGuard
@@ -701,6 +700,8 @@ class CachingAutotuner(KernelInterface):
         if launcher.store_cubin:
             launcher.fn = self.fn
             launcher.bin = binary
+
+        TritonBundler.put(binary.hash, self.triton_meta.get("device", 0))
 
         return binary, launcher
 
@@ -1885,6 +1886,19 @@ def cooperative_reduction_grid(xnumel):
         return (meta["RSPLIT"], ceildiv(xnumel, meta.get("XBLOCK", 1)), 1)
 
     grid_fn_str = f"cooperative_reduction_grid({xnumel})"
+    setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
+    return grid_fn
+
+
+def maybe_cooperative_reduction_grid(xnumel):
+    def grid_fn(meta):
+        if "RSPLIT" in meta:
+            return coop_grid(meta)
+        return normal_grid(meta)
+
+    coop_grid = cooperative_reduction_grid(xnumel)
+    normal_grid = grid(xnumel)
+    grid_fn_str = f"maybe_cooperative_reduction_grid({xnumel})"
     setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
     return grid_fn
 
