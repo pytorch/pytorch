@@ -50,6 +50,7 @@ from torch.utils._triton import has_triton_tma
 
 if HAS_CUDA:
     import triton  # @manual
+    from triton import language as tl
 
     from torch.testing._internal.triton_utils import (
         add_kernel,
@@ -1102,6 +1103,56 @@ class AOTInductorTestsTemplate:
             torch.ones(8, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
+
+    def test_fallback_kernel_with_symexpr_output(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Module(torch.nn.Module):
+            def forward(self, q, k, v):
+                q = q.reshape(
+                    q.shape[0],
+                    2,
+                    q.shape[2] * q.shape[3],
+                    q.shape[1] // 2,
+                )
+                k = k.reshape(
+                    k.shape[0],
+                    2,
+                    k.shape[2] * k.shape[3],
+                    k.shape[1] // 2,
+                )
+                v = v.reshape(
+                    v.shape[0],
+                    2,
+                    v.shape[2] * v.shape[3],
+                    v.shape[1] // 2,
+                )
+
+                res = torch.ops.aten._scaled_dot_product_flash_attention.default(
+                    q,
+                    k,
+                    v,
+                )
+                return res[0]
+
+        m = Module().to(device=self.device)
+        tensor_shape = (4, 32, 4, 4)
+        inputs = (
+            torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
+            torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
+        )
+
+        dynamic_shapes = {
+            "q": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
+            "k": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
+            "v": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
+        }
+        ep = torch.export.export(m, inputs, dynamic_shapes=dynamic_shapes, strict=False)
+        path = torch._inductor.aot_compile(ep.module(), inputs)
+        aot_model = torch._export.aot_load(path, device=self.device)
+        torch.testing.assert_close(m(*inputs), aot_model(*inputs))
 
     def test_large_grid(self):
         if self.device != "cuda":
@@ -3815,6 +3866,56 @@ class AOTInductorTestsTemplate:
             ).run(code)
 
         self.check_model(Model(), example_inputs)
+
+    def test_none_args_aot_codegen(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 32}, num_stages=5, num_warps=2),
+                triton.Config({"BLOCK_SIZE": 64}, num_stages=4, num_warps=4),
+            ],
+            key=["n_elements"],
+        )
+        @triton.jit
+        def sin_kernel(
+            in_ptr0,
+            out_ptr,
+            # We want to include an arg known to be 1 at compile time
+            # This is because we remove None args from the arg list; changing the eq_1/constexpr arg indices.
+            # We want to make sure we recompute these correctly
+            EQ_1_ARG,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            if in_ptr0 is not None:
+                x = tl.load(in_ptr0 + offsets, mask=mask)
+            else:
+                x = 0.0
+            output = tl.sin(x) + EQ_1_ARG
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def sin_triton(x, out):
+            n_elements = out.numel()
+            sin_kernel[(n_elements,)](x, out, 1, n_elements)
+            return out
+
+        x = torch.randn(65, device=self.device)
+        out = torch.empty_like(x)
+
+        not_none_inputs = (x, out)
+        none_inputs = (None, out)
+
+        # AOTI compilation specializes on either None or non-None inputs
+        # So we have to check twice here
+
+        self.check_model(sin_triton, none_inputs)
+        self.check_model(sin_triton, not_none_inputs)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):

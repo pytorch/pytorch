@@ -501,11 +501,14 @@ class CachingAutotuner(KernelInterface):
                     so we use self.fn.constexprs instead.
             3. It isn't in the compile_meta signature
         """
-        none_args = set(compile_meta["constants"].keys())
         known_constants = {
             arg for i, arg in enumerate(self.fn.arg_names) if i in self.fn.constexprs
         }
-        none_args = none_args.difference(known_constants)
+        none_args = {
+            k
+            for k, v in compile_meta["constants"].items()
+            if v is None and k not in known_constants
+        }
         none_args = none_args.difference(set(compile_meta["signature"].keys()))
 
         call_args = [
@@ -1882,6 +1885,19 @@ def cooperative_reduction_grid(xnumel):
         return (meta["RSPLIT"], ceildiv(xnumel, meta.get("XBLOCK", 1)), 1)
 
     grid_fn_str = f"cooperative_reduction_grid({xnumel})"
+    setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
+    return grid_fn
+
+
+def maybe_cooperative_reduction_grid(xnumel):
+    def grid_fn(meta):
+        if "RSPLIT" in meta:
+            return coop_grid(meta)
+        return normal_grid(meta)
+
+    coop_grid = cooperative_reduction_grid(xnumel)
+    normal_grid = grid(xnumel)
+    grid_fn_str = f"maybe_cooperative_reduction_grid({xnumel})"
     setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
     return grid_fn
 
