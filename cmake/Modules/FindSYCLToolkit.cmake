@@ -83,7 +83,6 @@ function(parse_sycl_compiler_version version_number)
   set(${version_number} "${VERSION_NUMBER_MATCH}" PARENT_SCOPE)
 endfunction()
 
-# target 20240104
 parse_sycl_compiler_version(SYCL_COMPILER_VERSION)
 
 if(NOT SYCL_COMPILER_VERSION)
@@ -112,35 +111,6 @@ find_file(
 # Due to the unrecognized compilation option `-fsycl` in other compiler.
 list(APPEND SYCL_INCLUDE_DIR ${SYCL_INCLUDE_SYCL_DIR})
 
-# Find include/sycl/version.hpp to fetch sycl compiler version
-find_file(
-  SYCL_VERSION_HEADER_FILE
-  NAMES version.hpp
-  HINTS ${SYCL_INCLUDE_SYCL_DIR}
-  NO_DEFAULT_PATH
-  )
-
-if(NOT SYCL_VERSION_HEADER_FILE)
-  set(SYCL_FOUND False)
-  set(SYCL_REASON_FAILURE "Cannot find include/sycl/version.hpp to get SYCL_COMPILER_VERSION!")
-  set(SYCL_NOT_FOUND_MESSAGE "${SYCL_REASON_FAILURE}")
-  return()
-endif()
-
-macro(parse_version_number_from_header_file header_file version_name version_number)
-  # Read the version header file into a variable
-  file(READ ${header_file} header_content)
-  # Parse the version number from the version header content.
-  # 1. Match the regular expression to find the version string by version name.
-  # 2. Replace the version name part with an empty string.
-  # 3. Strip leading and trailing spaces to get the version number.
-  string(REGEX MATCH "${version_name}[ ]+[0-9]+" _VERSION_MATCH ${header_content})
-  string(REPLACE "${version_name}" "" _VERSION_NUMBER ${_VERSION_MATCH})
-  string(STRIP ${_VERSION_NUMBER} ${version_number})
-endmacro()
-
-parse_version_number_from_header_file(${SYCL_VERSION_HEADER_FILE} "__SYCL_COMPILER_VERSION" SYCL_COMPILER_VERSION)
-
 # Find library directory from binary.
 find_file(
   SYCL_LIBRARY_DIR
@@ -150,7 +120,7 @@ find_file(
   )
 
 # Define the old version of SYCL toolkit that is compatible with the current version of PyTorch.
-set(PYTORCH_2_5_SYCL_TOOLKIT_VERSION 20240703)
+set(PYTORCH_2_5_SYCL_TOOLKIT_VERSION 20249999)
 
 # By default, we use libsycl.so on Linux and sycl.lib on Windows as the SYCL library name.
 if (SYCL_COMPILER_VERSION VERSION_LESS_EQUAL PYTORCH_2_5_SYCL_TOOLKIT_VERSION)
