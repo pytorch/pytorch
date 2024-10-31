@@ -28,6 +28,39 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def _normalize_model_output_as_tuple(output: Any) -> Tuple[Any]:
+    """[Note: pipeline model output type]
+
+    The output of the model passed to pipelining can be any type, controlled by the user.
+
+    However, there are 2 API surfaces that complicate this.
+    (1) the outputs of intermediate stages are passed via Send/Recv ops to subsequent stages. The implicit assumption
+    is that each element of the outputs is a tensor.  Otherwise, Send/Recv would not be supported.  The exception
+    is the last layer of the model, which can output anything any which won't be communicated via Send/Recv.
+    (2) the outputs of the last layer of the model are returned to the user, or, passed to the loss function.
+    The loss function can be written in any way, such that its inputs match the outputs of the model.
+
+    It would be convenient if we could strictly type the output signature of the pipeline stage wrapping the model,
+    but we do not want to impose an unnecessary constraint on user provided models.
+
+    Currently, we let user provided models return either a Tensor or a tuple of Tensors from each stage. Due to
+    torch.export tracing, compiled models may also return a list instead of a Tuple, which we will normalize back to a
+    tuple for consistency.
+
+    TODO: should we be stricter about asserting that stage modules (intermediate and output) all return only Tensor
+    values?
+    """
+    if type(output) is list:
+        # HACK: this is a hacky workaround for the fact that export creates
+        # output in list format
+        output = tuple(output)
+
+    # Unify output form to tuple for easy correspondance with
+    # `act_send_info`
+    output_tuple = output if type(output) is tuple else (output,)
+    return output_tuple
+
+
 class _RootArgPlaceholder:
     """
     Placeholder for model-level inputs.
@@ -300,6 +333,84 @@ class _PipelineStageBase(ABC):
             )
 
         return ops
+
+    """[Note: V-schedule special case]
+
+    V-Schedules have a special case where 2 stages with adjacent stage_id are on the same rank.
+
+    ex: 2 ranks, 4 stages forms a simple V:
+    rank0:  stage 0                   stage 3
+    rank1:          stage 1  stage 2
+
+    stage 0,1 and 2,3 communicate activations using send/recv as usual, but stage 1,2 do not need to
+    use communication ops.  Instead, they should pass tensor data directly via function call.
+
+    set_local_fwd_input and (get_local_bwd_output + set_local_bwd_input) facilitate this optimization, and
+    should be called at the appropriate time during the pipeline schedule (after forward or backward execution).
+    """
+
+    def set_local_fwd_input(self, prev_stage_outputs: Any, mb_index: int):
+        """
+        Moves 'prev_stage_outputs' from another stage on the same rank into place as inputs for this stage. Avoids
+        copying tensor data or using send/recv op.  Detaches original tensor and sets requires_grad so the
+        tensor can serve as a leaf for autograd and gradients can be collected from it during backward.
+        """
+        recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[mb_index]
+
+        # See [Note: pipeline model output type]
+        prev_stage_outputs = _normalize_model_output_as_tuple(prev_stage_outputs)
+
+        for info, tensor in zip(recv_infos, prev_stage_outputs):
+            assert isinstance(
+                tensor, torch.Tensor
+            ), f"expected tensor values as outputs from prev stage, got {type(tensor)}"
+            if not isinstance(info, _RecvInfo):
+                # TODO: when would info not be a _RecvInfo? should this be an error?
+                continue
+
+            # We don't need to do a data copy here, since we can directly pass the activation tensor reference from
+            # one stage to the next.  However, we do need to mark the activation as a leaf tensor since it will serve
+            # as the input tensor for a fresh autograd graph, not part of the previous stage's autograd graph.
+            # TODO: confirm, do we use this activation as the root of the backward call for the previous stage? does
+            # detach have any affect on that?
+            info.buffer = tensor.detach().requires_grad_(True)
+
+    def get_local_bwd_output(self, mb_index):
+        """
+        Returns the input grad tensors for this stage, which correspond to the stage inputs during forward.
+        """
+        assert (
+            self.has_backward
+        ), "can't steal_bwd_input if this stage doesn't have backward"
+        assert not self.is_first, "can't get bwd output if this stage is first"
+
+        self._check_chunk_id(mb_index)
+        # TODO(whc) we should be indexing mb_index into self.grads_input, but it appears we are only storing
+        # the most recently created grads which needs to be fixed not only here but also for get_bwd_send_ops.
+
+        return self.grads_input
+
+    def set_local_bwd_input(self, next_stage_bwd_outputs: Tuple[Any], mb_index: int):
+        """
+        Moves 'grad input' tensors from the next stage to 'grad_output' on this stage, avoiding a copy or send/recv.
+        Does not detach or set '_requires_grad'.
+        """
+        # TODO(whc) discrepancy between list/tuple type here. need to clean up
+        # assert isinstance(next_stage_bwd_outputs, tuple), f"Expected tuple, got {type(next_stage_bwd_outputs)}"
+
+        assert (
+            self.has_backward
+        ), "can't set bwd input if this stage doesn't have backward"
+        assert not self.is_last, "can't set bwd input if this stage is last"
+        recv_infos = self.grad_recv_info[mb_index]
+        for info, tensor in zip(recv_infos, next_stage_bwd_outputs):
+            assert isinstance(
+                tensor, torch.Tensor
+            ), f"expected tensor values as outputs from prev stage, got {type(tensor)}"
+            assert isinstance(
+                info, _RecvInfo
+            ), f"Expected a recv info, got {type(info)}"
+            info.buffer = tensor
 
     def get_fwd_recv_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
         """
@@ -587,14 +698,9 @@ class _PipelineStageBase(ABC):
             """
             raise RuntimeError(exc_msg) from e
 
-        if type(output) is list:
-            # HACK: this is a hacky workaround for the fact that export creates
-            # output in list format
-            output = tuple(output)
+        # See [Note: pipeline model output type]
+        output_tuple = _normalize_model_output_as_tuple(output)
 
-        # Unify output form to tuple for easy correspondance with
-        # `act_send_info`
-        output_tuple = output if type(output) is tuple else (output,)
         # Prepare for final output merge or reduction
         self.output_chunks.append(output)
 
@@ -614,6 +720,9 @@ class _PipelineStageBase(ABC):
             map_debug_info(output),
         )
         self._validate_fwd_outputs(output_tuple)
+
+        # We return the original user-provied output, not normalized to tuple.
+        # See [Note: pipeline model output type]
         return output
 
     def backward_one_chunk(
