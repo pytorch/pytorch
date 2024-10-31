@@ -19454,25 +19454,6 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_out=False,
            ),
-    OpInfo('unbind_copy',
-           dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
-           ref=reference_unbind,
-           sample_inputs_func=sample_inputs_unbind,
-           error_inputs_func=error_inputs_unbind,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_gradgrad=True,
-           supports_out=True,
-           check_batched_grad=False,
-           skips=(
-               # Expected __torch_dispatch__ for aten::unbind_copy.int_out to return None
-               # but it returned something else instead.
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestProxyTensorOpInfo',
-                   'test_make_fx_symbolic_exhaustive_out'
-               ),
-           )),
     OpInfo('vstack',
            aliases=('row_stack',),
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
@@ -24074,6 +24055,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.transpose_copy",
         torch_opinfo_name="transpose_copy",
+        skips=(
+            # RuntimeError: no _refs support for torch.Tensor.is_conj
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        ),
         supports_out=True,
     ),
     PythonRefInfo(
@@ -24089,10 +24074,6 @@ python_ref_db = [
         "_refs.T",
         torch_opinfo_name="T",
         error_inputs_func=partial(error_inputs_T, has_ndims_error=True),
-    ),
-    PythonRefInfo(
-        "_refs.unbind_copy",
-        torch_opinfo_name="unbind_copy",
     ),
     PythonRefInfo(
         "_refs.unfold",

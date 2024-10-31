@@ -315,7 +315,7 @@ def uninteresting_files():
 _CLOSURE_VARS: Optional[Dict[str, object]] = None
 
 
-def _get_closure_vars():
+def get_closure_vars():
     global _CLOSURE_VARS
     if _CLOSURE_VARS is None:
         _CLOSURE_VARS = {
@@ -556,23 +556,10 @@ class GuardBuilder(GuardBuilderBase):
         # tensor match guards make sure we actually have tensors)
         self.shape_env_code: List[GuardCodeList] = []
 
-        # [Note - On Eager Tensor Guards]
-        # Most of the time, we generate Python code in a guard to directly
-        # check various properties.  However, tensors are a bit special;
-        # it is too slow to check their properties one-by-one in Python.
-        # Instead, there is a C++ function TensorGuards.check which takes
-        # all of the tensor arguments and checks them all against compile-time
-        # examples entirely in C++.  Thus, every time we process a
-        # TENSOR_MATCH guard, we just add another entry to
-        # tensor_check_names/tensor_check_examples, saying "for this local,
-        # check it against this example", and it all ends up getting
-        # swept up into a single call to ___check_tensors.  Invariant:
-        # len(tensor_check_names) == len(tensor_check_examples).
-        # TODO: something here
-        self.tensor_check_names: List[str] = []
-        self.tensor_check_examples: List[torch.Tensor] = []
-        self.tensor_check_guards: List[Guard] = []
-        self.tensor_check_guard_managers: List[GuardManagerWrapper] = []
+        # Collect the guard managers and debug info to insert no tensor aliasing
+        # guards.
+        self.no_tensor_aliasing_names: List[str] = []
+        self.no_tensor_aliasing_guard_managers: List[GuardManagerWrapper] = []
 
         self.check_fn_manager: CheckFunctionManager = check_fn_manager
 
@@ -1163,7 +1150,7 @@ class GuardBuilder(GuardBuilderBase):
         is_epilogue=True,
     ):
         if closure_vars is None:
-            closure_vars = _get_closure_vars()
+            closure_vars = get_closure_vars()
         # Adds a lambda leaf guard to the root guard manager. It wraps the
         # code_parts in a function object which is then passed on to the leaf
         # guard.
@@ -1190,7 +1177,7 @@ class GuardBuilder(GuardBuilderBase):
     # (like its type) which is what you permanently install into the
     # guard code.
     def get(self, name: str) -> Any:
-        return eval(name, self.scope, _get_closure_vars())
+        return eval(name, self.scope, get_closure_vars())
 
     # Registers the usage of the source name referenced by the
     # string (or stored in the Guard) as being guarded upon.  It's important
@@ -1510,7 +1497,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__math_isnan"],
+                get_closure_vars()["__math_isnan"],
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -1523,7 +1510,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__numpy_isnan"],
+                get_closure_vars()["__numpy_isnan"],
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -1799,7 +1786,7 @@ class GuardBuilder(GuardBuilderBase):
         self.add_python_lambda_leaf_guard_to_root(
             code_parts,
             verbose_code_parts,
-            closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+            closure_vars={**SYMPY_INTERP, **get_closure_vars()},
         )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
@@ -1865,14 +1852,23 @@ class GuardBuilder(GuardBuilderBase):
                     else:
                         code.append(f"{tensor_name}.{term} == {real_value}")
             else:
-                self.tensor_check_examples.append(value)
-                self.tensor_check_names.append(tensor_name)
-                self.tensor_check_guards.append(guard)
-
                 guard_manager = self.get_guard_manager(guard)
-                # Keep track of all the tensor guard managers to insert
-                # NoAliasing check at the end.
-                self.tensor_check_guard_managers.append(guard_manager)
+
+                # skip_no_tensor_aliasing_guards_on_parameters bring
+                # unsoundness. If you compile a function with two different
+                # parameters, but later on you pass on same tensor as two
+                # different outputs (aliasing), Dynamo will not detect this.
+                # But we deliberately take this soundness hit because this
+                # usecase is quite rare and there is substantial reduction in
+                # guard overhead.
+                if not (
+                    config.skip_no_tensor_aliasing_guards_on_parameters
+                    and istype(value, torch.nn.Parameter)
+                ):
+                    # Keep track of all the tensor guard managers to insert
+                    # NoAliasing check at the end.
+                    self.no_tensor_aliasing_names.append(tensor_name)
+                    self.no_tensor_aliasing_guard_managers.append(guard_manager)
 
                 output_graph = self.check_fn_manager.output_graph
                 metadata = output_graph.input_source_to_sizes_strides[
@@ -2319,17 +2315,17 @@ class CheckFunctionManager:
                     add_code_part(code, gcl.guard, True)
                     seen.add(code)
 
-        tensor_check_names = builder.tensor_check_names
+        no_tensor_aliasing_names = builder.no_tensor_aliasing_names
         check_tensors_fn = None
         check_tensors_verbose_fn = None
 
-        if len(tensor_check_names) > 1:
+        if len(no_tensor_aliasing_names) > 1:
             # Install tensor aliasing guard. TENSOR_MATCH guards are already
             # installed for cpp guard manager.
             install_no_tensor_aliasing_guard(
-                builder.tensor_check_guard_managers,
-                tensor_check_names,
-                ["check_no_aliasing(" + ", ".join(tensor_check_names) + ")"],
+                builder.no_tensor_aliasing_guard_managers,
+                no_tensor_aliasing_names,
+                ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
             )
 
         aotautograd_guards: List[GuardEnvExpr] = (
@@ -2378,9 +2374,8 @@ class CheckFunctionManager:
             "___check_tensors_verbose": check_tensors_verbose_fn,
             "___check_global_state": global_state.check,
             "___check_torch_function_mode_stack": torch_function_mode_stack_check_fn,
-            "tensor_check_names": tensor_check_names,
             **SYMPY_INTERP,
-            **_get_closure_vars(),
+            **get_closure_vars(),
         }
 
         globals_for_guard_fn = {"G": builder.scope["G"]}
@@ -2399,7 +2394,7 @@ class CheckFunctionManager:
         # when the CacheEntry is constructed
         self.guard_manager.cache_entry = None
         self.guard_manager.extra_state = None
-        self.guard_manager.no_tensor_aliasing_sources = tensor_check_names
+        self.guard_manager.no_tensor_aliasing_sources = no_tensor_aliasing_names
 
     def invalidate(self):
         # Some tests reveal that CheckFunctionManager has no attribute
