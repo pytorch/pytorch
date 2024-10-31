@@ -4,7 +4,7 @@
 #include <torch/library.h>
 
 #include <iostream>
-#include "c10/core/ScalarType.h"
+#include <c10/core/ScalarType.h>
 
 using namespace at::native::onednn;
 namespace at::native::xpu {
@@ -165,7 +165,7 @@ class QConvoneDNNXPU final {
     auto dst_dtype = fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : c10::kByte);
     Tensor output = at::empty(
         dst_tz, device(c10::kXPU).dtype(dst_dtype).memory_format(mfmt));
-    
+
     return quantized_convolution_pt2(
         act,
         act_scale,
