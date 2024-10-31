@@ -8,7 +8,7 @@ from typing import Callable, List, Optional, Union
 import torch
 import torch._inductor.runtime.runtime_utils
 from torch import Tensor
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import utils
 from torch._inductor.autoheuristic.autoheuristic import (
     AHContext,
@@ -381,7 +381,12 @@ def should_pad_mm_bf16(dtype, M, N, K):
     return False
 
 
-def should_pad_bench(
+def should_pad_bench(*args, **kwargs):
+    with dynamo_timed("pad_mm_benchmark"):
+        return _should_pad_bench(*args, **kwargs)
+
+
+def _should_pad_bench(
     match, mat1: Tensor, mat2: Tensor, op, input: Optional[Tensor] = None
 ) -> bool:
     do_bench = functools.partial(
