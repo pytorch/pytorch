@@ -439,9 +439,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     lazy_init()
     count = 0
     if config.joint_custom_pre_pass is not None:
-        with GraphTransformObserver(
-            graph, "joint_custom_pre_pass", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(graph, "joint_custom_pre_pass"):
             config.joint_custom_pre_pass(graph.graph)
             count += 1
 
@@ -450,9 +448,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     remove_noop_ops(graph.graph)
 
     if config.joint_graph_constant_folding:
-        with GraphTransformObserver(
-            graph, "constant_fold_uniform_value", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(graph, "constant_fold_uniform_value"):
             constant_fold_uniform_value(graph)
 
     if config.pattern_matcher:
@@ -463,9 +459,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         count += replace_random_passes(graph)
 
     if config.joint_custom_post_pass is not None:
-        with GraphTransformObserver(
-            graph, "joint_custom_post_pass", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(graph, "joint_custom_post_pass"):
             config.joint_custom_post_pass(graph.graph)
             count += 1
 

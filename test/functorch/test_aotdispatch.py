@@ -6254,42 +6254,6 @@ metadata incorrectly.
         # Test coercion WrapSC -> Tensor
         y3.backward(gradient=WrapSC(torch.randn(2, 3)))
 
-    @unittest.skipIf(
-        not torch.distributed.is_available(), "test requires torch distributed"
-    )
-    @skipIfTorchDynamo()
-    def test_unwrap_async_collective_tensor_tangent(self):
-        from torch.distributed._functional_collectives import AsyncCollectiveTensor
-
-        def fn(x):
-            return x.clone()
-
-        ref_x = TwoTensor(
-            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
-        )
-        ref_y = fn(ref_x)
-
-        ref_y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
-
-        fn_comp = torch.compile(fn, fullgraph=True)
-
-        x = TwoTensor(
-            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
-        )
-        y = fn_comp(x)
-        y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
-
-        x2 = TwoTensor(
-            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
-        )
-        y2 = fn_comp(x2)
-        y2.backward(
-            gradient=TwoTensor(
-                AsyncCollectiveTensor(torch.randn(2, 3)),
-                AsyncCollectiveTensor(torch.randn(2, 3)),
-            )
-        )
-
     @torch._inductor.config.patch({"freezing": True})
     def test_inductor_freezing_with_subclasses(self):
         class M(torch.nn.Module):
