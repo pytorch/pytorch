@@ -1647,23 +1647,23 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def backward(ctx, *flat_args):
-                boxed_args = CompiledFunction._backward_prologue(ctx, *flat_args)
+                all_args = CompiledFunction._backward_prologue(ctx, *flat_args)
 
-                def impl_fn(boxed_args):
-                    out = CompiledFunction._backward_impl(ctx, boxed_args)
+                def impl_fn(double_ctx=None):
+                    out = CompiledFunction._backward_impl(ctx, all_args)
                     return CompiledFunction._backward_epilogue(ctx, out)
 
                 needs_grad = torch.is_grad_enabled() and any(
-                    t.requires_grad for t in boxed_args if isinstance(t, torch.Tensor)
+                    t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
                 )
                 if needs_grad:
                     # double backward
-                    return CompiledFunction._double_backward(ctx, boxed_args, impl_fn)
+                    return CompiledFunction._double_backward(ctx, impl_fn, all_args)
                 else:
-                    return impl_fn(boxed_args)
+                    return impl_fn()
 
             @staticmethod
-            def _double_backward(aot_ctx, impl_fn, boxed_args):
+            def _double_backward(ctx, impl_fn, all_args):
                 # Ensure that the graph is connected, and error if double backward is performed.
                 # See comment for why once_differentiable is not sufficient:
                 # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
@@ -1673,11 +1673,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     _aot_id = aot_config.aot_id
 
                     @staticmethod
-                    def forward(_, impl_fn, boxed_args):
-                        return impl_fn(boxed_args)
+                    def forward(double_ctx, *unused_args):
+                        return impl_fn(double_ctx)
 
                     @staticmethod
-                    def backward(_, *args):
+                    def backward(double_ctx, *args):
                         raise RuntimeError(
                             "torch.compile with aot_autograd does not currently support double backward"
                         )
@@ -1686,7 +1686,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     CompiledFunction._compiled_autograd_key
                 )
 
-                return CompiledFunctionBackward.apply(impl_fn, boxed_args)
+                return CompiledFunctionBackward.apply(*all_args)
 
             @staticmethod
             def _backward_prologue(ctx, *flat_args):
