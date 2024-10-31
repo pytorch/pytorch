@@ -28,7 +28,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-def normalize_model_output_as_tuple(output: Any) -> Tuple[Any]:
+def _normalize_model_output_as_tuple(output: Any) -> Tuple[Any]:
     """[Note: pipeline model output type]
 
     The output of the model passed to pipelining can be any type, controlled by the user.
@@ -350,10 +350,15 @@ class _PipelineStageBase(ABC):
     """
 
     def set_local_fwd_input(self, prev_stage_outputs: Any, mb_index: int):
+        """
+        Moves 'prev_stage_outputs' from another stage on the same rank into place as inputs for this stage. Avoids
+        copying tensor data or using send/recv op.  Detaches original tensor and sets requires_grad so the
+        tensor can serve as a leaf for autograd and gradients can be collected from it during backward.
+        """
         recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[mb_index]
 
         # See [Note: pipeline model output type]
-        prev_stage_outputs = normalize_model_output_as_tuple(prev_stage_outputs)
+        prev_stage_outputs = _normalize_model_output_as_tuple(prev_stage_outputs)
 
         for info, tensor in zip(recv_infos, prev_stage_outputs):
             assert isinstance(
@@ -371,6 +376,9 @@ class _PipelineStageBase(ABC):
             info.buffer = tensor.detach().requires_grad_(True)
 
     def get_local_bwd_output(self, mb_index):
+        """
+        Returns the input grad tensors for this stage, which correspond to the stage inputs during forward.
+        """
         assert (
             self.has_backward
         ), "can't steal_bwd_input if this stage doesn't have backward"
@@ -383,6 +391,10 @@ class _PipelineStageBase(ABC):
         return self.grads_input
 
     def set_local_bwd_input(self, next_stage_bwd_outputs: Tuple[Any], mb_index: int):
+        """
+        Moves 'grad input' tensors from the next stage to 'grad_output' on this stage, avoiding a copy or send/recv.
+        Does not detach or set '_requires_grad'.
+        """
         # TODO(whc) discrepancy between list/tuple type here. need to clean up
         # assert isinstance(next_stage_bwd_outputs, tuple), f"Expected tuple, got {type(next_stage_bwd_outputs)}"
 
@@ -687,7 +699,7 @@ class _PipelineStageBase(ABC):
             raise RuntimeError(exc_msg) from e
 
         # See [Note: pipeline model output type]
-        output_tuple = normalize_model_output_as_tuple(output)
+        output_tuple = _normalize_model_output_as_tuple(output)
 
         # Prepare for final output merge or reduction
         self.output_chunks.append(output)
