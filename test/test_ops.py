@@ -59,7 +59,6 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     is_iterable_of_tensors,
     IS_SANDCASTLE,
-    IS_WINDOWS,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -624,9 +623,6 @@ class TestCommon(TestCase):
 
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
-    # TODO: get working with Windows by addressing failing operators
-    # TODO: get working with ASAN by addressing failing operators
-    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
