@@ -532,8 +532,8 @@ class DequeVariable(CommonListMethodsVariable):
             prefix.reverse()
             tx.output.side_effects.mutation(self)
             self.items = prefix + list(self.items)
+            result = ConstantVariable.create(None)
         elif name == "popleft" and self.is_mutable():
-            return ConstantVariable.create(None)
             assert not args
             assert not kwargs
             item = self.items[0]
