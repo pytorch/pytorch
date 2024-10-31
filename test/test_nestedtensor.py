@@ -4971,7 +4971,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             if nt.dim() > reduce_dim[-1]:
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "not supported along a ragged and non-batch dimension for NestedTensor",
+                    "reducing along a ragged and non-batch dimension is not supported"
                 ):
                     out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
 
@@ -5010,7 +5010,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             if nt.dim() > reduce_dim[-1]:
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "not supported along the batch dimension but not the ragged dimension for NestedTensor",
+                    "reducing along the batch dimension but not the ragged dimension "
+                    + "is not supported"
                 ):
                     out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
 
@@ -5048,7 +5049,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
             with self.assertRaisesRegex(
                 RuntimeError,
-                "reducing along the batch dimension but not the ragged dimension is not supported",
+                "reducing along the batch dimension but not the ragged dimension "
+                + "is not supported"
             ):
                 out = func(nt, dim=reduce_dim, keepdim=keepdim)
 
