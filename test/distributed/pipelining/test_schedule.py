@@ -1,10 +1,15 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+import copy
 import logging
 from typing import List
 
+from model_registry import MultiMLP
+
 import torch
 from torch.distributed.pipelining import (
+    Schedule1F1B,
+    ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleInterleavedZeroBubble,
     ScheduleLoopedBFS,
@@ -15,23 +20,26 @@ from torch.distributed.pipelining.schedules import (
     _add_unshard_reshard,
     _format_pipeline_order,
     _PipelineSchedule,
+    _simulate_comms_compute,
     _validate_pipeline_order,
     B,
     F,
     get_schedule_class,
+    PipelineScheduleSingle,
     RECV_F,
     RESHARD,
     SEND_B,
     UNSHARD,
     W,
 )
-from torch.distributed.pipelining.stage import _PipelineStageBase
+from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 logger = logging.getLogger(__name__)
@@ -88,6 +96,100 @@ class ScheduleTest(TestCase):
             # Test that the original name is included in the error message
             with self.assertRaisesRegex(ValueError, f"{name}"):
                 get_schedule_class(name)
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            Schedule1F1B,
+            ScheduleGPipe,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleLoopedBFS,
+        ],
+    )
+    def test_schedule_with_single_stage(self, ScheduleClass):
+        """
+        Test that schedules with only a single stage work as expected for all schedules.
+        """
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=1, store=store
+        )
+        d_hid, batch_size = 512, 256
+        n_stages = 1
+        device = "cpu"
+        full_mod = MultiMLP(d_hid, n_layers=n_stages)
+        full_mod.to(device)
+
+        x = torch.randn(batch_size, d_hid, device=device)
+        ref_mod = copy.deepcopy(full_mod)
+        with torch.no_grad():
+            y = ref_mod(x)
+            # Add a small perturbation
+            target = y + torch.randn(batch_size, d_hid, device=device)
+
+        loss_fn = torch.nn.MSELoss(reduction="sum")
+        # Run reference
+        for _ in range(2):
+            ref_mod.zero_grad()
+            ref_out = ref_mod(x)
+            ref_loss = loss_fn(ref_out, target)
+            ref_loss.backward()
+
+        submod_name = "layers.0"
+        stage_module = full_mod.get_submodule(submod_name)
+
+        # Create a pipeline stage to wrap that submodule
+        num_microbatches = 2
+        stages = [
+            PipelineStage(
+                stage_module,
+                0,
+                n_stages,
+                device,
+            )
+        ]
+
+        if issubclass(ScheduleClass, PipelineScheduleSingle):
+            stages = stages[0]
+
+        # Attach to a schedule
+        schedule = ScheduleClass(
+            stages,
+            num_microbatches,
+            loss_fn=loss_fn,
+        )
+        # Run
+        for _ in range(2):
+            # Zero gradients
+            stage_module.zero_grad()
+            losses = []
+            out = schedule.step(x, target=target, losses=losses)
+
+        # Check output
+        torch.testing.assert_close(out, ref_out)
+        # Check loss
+        # Since the reduction used in the loss function above is "sum", we use
+        # "sum" here to reduce microbatch losses into a single value too.
+        pipe_loss = sum(losses)
+        torch.testing.assert_close(pipe_loss, ref_loss)
+
+        # Check gradients
+        # Get corresponding submodule from reference model
+        ref_submod = ref_mod.get_submodule(submod_name)
+        # Check gradients per parameter
+        for name, p in stage_module.named_parameters():
+            ref_p = ref_submod.get_parameter(name)
+            try:
+                torch.testing.assert_close(p.grad, ref_p.grad, rtol=1e-5, atol=4e-5)
+            except AssertionError:
+                print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
+                raise
+
+        torch.distributed.destroy_process_group()
+
+
+instantiate_parametrized_tests(ScheduleTest)
 
 
 class TestSchedulePlan(TestCase):
@@ -315,6 +417,16 @@ class TestScheduleLowering(TestCase):
                     ),
                 )
             self.assertEqual(len(comms_sch[rank]), len(expected_comms_sch[rank]))
+
+        simulated_schedule = _simulate_comms_compute(
+            comms_sch,
+            stage_to_rank=test_info["stage_to_rank"],
+            num_stages=test_info["num_stages"],
+        )
+        # _dump_chrometrace(simulated_schedule, "lowered_comms.json")
+        # print(_format_pipeline_order(simulated_schedule))
+        num_steps = max([len(simulated_schedule[rank]) for rank in simulated_schedule])
+        self.assertEqual(num_steps, 9)
 
 
 instantiate_parametrized_tests(TestScheduleLowering)
