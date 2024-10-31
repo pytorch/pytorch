@@ -205,10 +205,9 @@ PyObject* THPVariableClass = nullptr;
 
 PyObject* ParameterClass = nullptr;
 
-template <typename T>
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
-    T&& _var,
+    at::TensorBase&& _var,
     c10::impl::PyInterpreterStatus status,
     bool allow_preexisting_pyobj = false);
 
@@ -255,8 +254,7 @@ void activateGPUTrace() {
   c10::impl::GPUTrace::set_trace(getPyInterpreter());
 }
 
-template <typename T>
-PyObject* THPVariable_Wrap_impl(T&& var) {
+PyObject* THPVariable_Wrap_impl(at::TensorBase&& var) {
   if (!var.defined()) {
     Py_RETURN_NONE;
   }
@@ -264,7 +262,7 @@ PyObject* THPVariable_Wrap_impl(T&& var) {
   if (c10::impl::HermeticPyObjectTLS::get_state()) {
     return THPVariable_NewWithVar(
         (PyTypeObject*)THPVariableClass,
-        ::std::forward<T>(var),
+        std::move(var),
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   }
 
@@ -282,14 +280,8 @@ PyObject* THPVariable_Wrap_impl(T&& var) {
         // (Python owns C++) as it would now be unsound to deallocate the C++
         // object if all C++ references go to zero
         var.unsafeGetTensorImpl()->pyobj_slot()->set_owns_pyobj(false);
-        if constexpr (std::is_rvalue_reference_v<decltype(::std::forward<T>(
-                          var))>) {
-          reinterpret_cast<THPVariable*>(obj)->cdata =
-              MaybeOwned<Variable>::owned(::std::forward<T>(var));
-        } else {
-          reinterpret_cast<THPVariable*>(obj)->cdata =
-              MaybeOwned<Variable>::owned(Variable(::std::forward<T>(var)));
-        }
+        reinterpret_cast<THPVariable*>(obj)->cdata =
+            MaybeOwned<Variable>::owned(std::move(var));
         // NB: incref is not necessary, because we are "stealing" the previous
         // ownership from the Variable to return it here for the wrap
         return obj;
@@ -316,24 +308,23 @@ PyObject* THPVariable_Wrap_impl(T&& var) {
 
   if (C10_LIKELY(var.device().type() != c10::kXLA)) {
     return THPVariable_NewWithVar(
-        (PyTypeObject*)THPVariableClass, ::std::forward<T>(var), status);
+        (PyTypeObject*)THPVariableClass, std::move(var), status);
   }
 
   if (auto clazz = getPythonTensorClass(var.device())) {
-    return THPVariable_NewWithVar(
-        (PyTypeObject*)clazz, ::std::forward<T>(var), status);
+    return THPVariable_NewWithVar((PyTypeObject*)clazz, std::move(var), status);
   }
 
   return THPVariable_NewWithVar(
-      (PyTypeObject*)THPVariableClass, ::std::forward<T>(var), status);
+      (PyTypeObject*)THPVariableClass, std::move(var), status);
 }
 
 PyObject* THPVariable_Wrap(const at::TensorBase& var) {
-  return THPVariable_Wrap_impl<const at::TensorBase&>(var);
+  return THPVariable_Wrap_impl(at::Tensor(var));
 }
 
 PyObject* THPVariable_Wrap(at::TensorBase&& var) {
-  return THPVariable_Wrap_impl<at::TensorBase&&>(std::move(var));
+  return THPVariable_Wrap_impl(std::move(var));
 }
 
 bool isResurrectable(THPVariable* self) {
@@ -2026,10 +2017,9 @@ void THPVariable_subclass_dealloc(PyObject* self) {
 // TAGGED_BY_US or MAYBE_UNINITIALIZED; in other cases, you know where
 // var came from and can directly assert that it's DEFINITELY_UNINITIALIZED.
 // It's ALWAYS safe (albeit slower) to call this with MAYBE_UNINITIALIZED.
-template <typename T>
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
-    T&& _var,
+    at::TensorBase&& _var,
     c10::impl::PyInterpreterStatus status,
     bool allow_preexisting_pyobj) {
   // Make sure that the reinterpret into a THPVariable* will be valid
@@ -2099,21 +2089,15 @@ static PyObject* THPVariable_NewWithVar(
         " which is not a subclass of the "
         "requested type");
     // We may (in fact, we typically will) need to resurrect this
-    return THPVariable_Wrap(::std::forward<T>(_var));
+    return THPVariable_Wrap(std::move(_var));
   }
 
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
     auto v = (THPVariable*)obj;
     auto has_state = c10::impl::HermeticPyObjectTLS::get_state();
-    if constexpr (std::is_rvalue_reference_v<decltype(::std::forward<T>(
-                      _var))>) {
-      new (&v->cdata) MaybeOwned<Variable>(
-          MaybeOwned<Variable>::owned(::std::forward<T>(_var)));
-    } else {
-      new (&v->cdata) MaybeOwned<Variable>(
-          MaybeOwned<Variable>::owned(Variable(::std::forward<T>(_var))));
-    }
+    new (&v->cdata)
+        MaybeOwned<Variable>(MaybeOwned<Variable>::owned(std::move(_var)));
     if (has_state) {
       // Do NOT initialize pyobj field on the tensor, you own the C++
 
