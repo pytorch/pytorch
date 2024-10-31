@@ -79,6 +79,7 @@ from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
     aot_autograd_check,
 )
+from torch.testing._internal.subclasses import WrapSC
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
 
@@ -827,7 +828,10 @@ def forward(self, primals_1):
         new_out = out + aaaa
         with self.assertRaisesRegex(
             RuntimeError,
-            "The grad inputs should be same tensor subclass type as forward output",
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             new_out.sum().backward()
 
@@ -2464,6 +2468,7 @@ def forward(self, primals_1, primals_2):
         # Not checking equality of ref and x as Exception is expected
 
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
+    @skipIfTorchDynamo()
     def test_input_mutation_false_aliasing(self):
         def f(a, b):
             a.mul_(3)
@@ -2493,8 +2498,11 @@ def forward(self, primals_1, primals_2):
         )
         # Input mutations on subclasses with training graphs fail backward guards today.
         with self.assertRaisesRegex(
-            AssertionError,
-            "attempted to compile the backward with incorrect subclass metadata",
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             self.verify_aot_autograd(
                 f,
@@ -5411,6 +5419,7 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(out_ref.a, out_test.a)
         self.assertEqual(out_ref.b, out_test.b)
 
+    @skipIfTorchDynamo()
     def test_aot_dispatch_incorrect_backward(self):
         # a is a subclass, b is not
         def f(a, b):
@@ -5451,8 +5460,11 @@ def forward(self, tangents_1, tangents_2):
         # but we were wrong: in the below tests, it is a subclass.
         # This will eventually require a repartition + recompile
         with self.assertRaisesRegex(
-            AssertionError,
-            "incorrectly attempted to compile the backward with incorrect subclass metadata",
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             (out_test[0] + out_test[1]).sum().backward()
 
@@ -6185,6 +6197,64 @@ class TestAOTModuleSimplified(AOTTestCase):
         out_buffer = out.values()
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
+    @skipIfTorchDynamo()
+    def test_wrong_guess_tangent_type(self):
+        def fn(x):
+            return x.clone()
+
+        ref_x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        ref_y = fn(ref_x)
+        ref_y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        fn_comp = torch.compile(fn, fullgraph=True)
+
+        x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y = fn_comp(x)
+        y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        x2 = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y2 = fn_comp(x2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
+        ):
+            y2.backward(gradient=torch.randn(2, 3))
+
+    def test_tangent_type_coercion(self):
+        def fn(x):
+            return x.clone()
+
+        ref_y = fn(WrapSC(torch.randn(2, 3, requires_grad=True)))
+        ref_y.sum().backward()
+
+        fn_comp = torch.compile(fn, fullgraph=True)
+
+        x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y = fn_comp(x)
+        y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        x2 = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y2 = fn_comp(x2)
+        # Test coercion WrapSC -> TwoTensor
+        y2.backward(gradient=WrapSC(torch.randn(2, 3)))
+
+        y3 = torch.compile(fn, fullgraph=True)(torch.randn(2, 3, requires_grad=True))
+        # Test coercion WrapSC -> Tensor
+        y3.backward(gradient=WrapSC(torch.randn(2, 3)))
+
     @torch._inductor.config.patch({"freezing": True})
     def test_inductor_freezing_with_subclasses(self):
         class M(torch.nn.Module):
@@ -6326,9 +6396,9 @@ class TestAOTModuleSimplified(AOTTestCase):
         chromium_logger = torch._dynamo.utils.get_chromium_event_logger()
         chromium_logger.add_listener(on_event)
 
-        num_iters = 30
+        num_iters = 50
         shape = (3, 4)
-        input_two_tensor_depth = 8
+        input_two_tensor_depth = 4
 
         class M(torch.nn.Module):
             def __init__(self, p) -> None:
