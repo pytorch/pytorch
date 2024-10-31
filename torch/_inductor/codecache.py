@@ -71,7 +71,7 @@ from torch._utils_internal import log_cache_bypass
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
-from .utils import _align
+from .triton_bundler import TritonBundler, TritonKernelArtifacts
 
 
 T = TypeVar("T")
@@ -198,6 +198,15 @@ def get_cpp_wrapper_cubin_path_name() -> str:
     return "cubin_path" if torch.version.hip is None else "hsaco_path"
 
 
+@functools.lru_cache(None)
+def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
+    return (
+        Path(os.path.join(global_cache_dir, CacheBase.get_system()["hash"]))
+        if global_cache_dir is not None
+        else None
+    )
+
+
 class CacheBase:
     @staticmethod
     @functools.lru_cache(None)
@@ -244,13 +253,8 @@ class CacheBase:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
 
     @staticmethod
-    @functools.lru_cache(None)
     def get_global_cache_path() -> Optional[Path]:
-        return (
-            Path(os.path.join(config.global_cache_dir, CacheBase.get_system()["hash"]))
-            if config.global_cache_dir is not None
-            else None
-        )
+        return get_global_cache_path_impl(config.global_cache_dir)
 
     def __init__(self) -> None:
         self.system = CacheBase.get_system()
@@ -1048,7 +1052,7 @@ class FxGraphCache:
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         gm: Optional[torch.fx.GraphModule],
-    ) -> Optional[CompiledFxGraph]:
+    ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
@@ -1089,6 +1093,7 @@ class FxGraphCache:
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
         graph = None
+        cache_info: Dict[str, Any] = dict()
 
         for candidate in iterate_over_candidates():
             if not candidate.guards_expr:
@@ -1115,7 +1120,7 @@ class FxGraphCache:
                 break
 
         if graph is None:
-            return None
+            return None, cache_info
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
@@ -1136,6 +1141,14 @@ class FxGraphCache:
 
             write_atomic(artifact_path, code, make_dirs=True)
 
+        if bundle := graph._triton_bundle:
+            triton_bundler_meta = TritonBundler.read_and_emit(bundle)
+            if (meta := triton_bundler_meta) is not None:
+                cache_info["triton_bundler_meta"] = str(meta)
+                get_chromium_event_logger().add_event_data(
+                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                )
+
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
@@ -1150,7 +1163,7 @@ class FxGraphCache:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
             log.error("Failed to load cached artifact: %s", artifact_path)
-            return None
+            return None, cache_info
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
@@ -1179,7 +1192,7 @@ class FxGraphCache:
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
         )
-        return graph
+        return graph, cache_info
 
     @staticmethod
     def post_compile(
@@ -1410,10 +1423,11 @@ class FxGraphCache:
         Doesn't do any logging on its own, because AOTAutograd handles a cache miss
         differently from FXGraphCache.
         """
-        compiled_graph = FxGraphCache._lookup_graph(
+        compiled_graph, cache_info = FxGraphCache._lookup_graph(
             key, example_inputs, local, remote_cache, gm
         )
         cache_info = {
+            **cache_info,
             "key": key,
             "components": debug_lines,
             "cache_event_time": time_ns(),
@@ -1491,6 +1505,9 @@ class FxGraphCache:
             compiled_graph._time_taken_ns = time_ns() - start_time
             cache_key = key_info[0]
             compiled_graph._fx_graph_cache_key = cache_key
+            compiled_graph._triton_bundle, triton_bundler_meta = TritonBundler.collect()
+            if triton_bundler_meta is not None:
+                cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
             cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
             FxGraphCache._save_graph(
                 cache_key,
@@ -1521,6 +1538,18 @@ class FxGraphCache:
             cache_info["cache_event_time"],
             metadata=cache_info,
         )
+        # Add event data about cache hits/miss
+        # TODO: add remote cache get/put timings here too
+        chromium_log.add_event_data(
+            "inductor_compile",
+            cache_state=cache_state,
+            cache_event_time=cache_info["cache_event_time"],
+            key=cache_info.get("key"),
+            components=cache_info.get("components"),
+            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+            remote_cache_enabled=remote,
+            local_cache_enabled=local,
+        )
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
@@ -1531,7 +1560,7 @@ class FxGraphCache:
         )
         # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
         FxGraphCache.post_compile(
-            compiled_graph, example_inputs, fx_kwargs["cudagraphs"]  # type: ignore[arg-type]
+            compiled_graph, example_inputs, fx_kwargs["cudagraphs"], gm  # type: ignore[arg-type]
         )
         return compiled_graph
 
@@ -1593,6 +1622,7 @@ class CompiledFxGraph:
     _time_taken_ns: Optional[int] = None
     _boxed_call: Optional[bool] = None
     _fx_graph_cache_key: Optional[str] = None
+    _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
 
     def __init__(
         self,
@@ -1932,19 +1962,43 @@ class AotCodeCompiler:
                 if name not in graph.folded_constants
             )
 
-            def get_nbytes_of_tensor(tensor: torch.Tensor, all_cuda: bool) -> int:
-                n_bytes = (
-                    torch.ops.mkldnn._nbytes(tensor)
-                    if tensor.is_mkldnn
-                    else tensor.untyped_storage().nbytes()
-                )
-                return n_bytes if all_cuda else _align(n_bytes)
+            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
+                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
+                    padded_bytes = raw_bytes.ljust(
+                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
+                        b"\x00",
+                    )
+                    return padded_bytes
 
-            consts_size = sum(
-                get_nbytes_of_tensor(tensor, all_cuda)
-                for (name, tensor) in graph.constants.items()
+                # This serializes the tensor's untyped_storage to bytes by accessing
+                # the raw data of the underlying structure.
+                import ctypes
+
+                if t.numel() == 0:
+                    return b""
+
+                if t.is_mkldnn:
+                    data_ptr = torch.ops.mkldnn.data_ptr(t)
+                    nbytes = torch.ops.mkldnn._nbytes(t)
+                else:
+                    t_cpu = t.untyped_storage().cpu()
+                    data_ptr = t_cpu.data_ptr()
+                    nbytes = t_cpu.nbytes()
+
+                raw_array = ctypes.cast(
+                    data_ptr,
+                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
+                )
+                raw_bytes = bytes(raw_array.contents)
+                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
+
+            serialized_weights = b"".join(
+                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
+                for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
+            consts_size = len(serialized_weights)
+
             # TODO: Fix mmap weights with cuda
             use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
             if config.aot_inductor.force_mmap_weights:
@@ -1984,41 +2038,6 @@ class AotCodeCompiler:
                 compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
                 object_build_options.save_flags_to_file(compile_flags)
 
-            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
-                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
-                    padded_bytes = raw_bytes.ljust(
-                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
-                        b"\x00",
-                    )
-                    return padded_bytes
-
-                # This serializes the tensor's untyped_storage to bytes by accessing
-                # the raw data of the underlying structure.
-                import ctypes
-
-                if t.numel() == 0:
-                    return b""
-
-                if t.is_mkldnn:
-                    data_ptr = torch.ops.mkldnn.data_ptr(t)
-                    nbytes = torch.ops.mkldnn._nbytes(t)
-                else:
-                    t_cpu = t.untyped_storage().cpu()
-                    data_ptr = t_cpu.data_ptr()
-                    nbytes = t_cpu.nbytes()
-
-                raw_array = ctypes.cast(
-                    data_ptr,
-                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
-                )
-                raw_bytes = bytes(raw_array.contents)
-                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
-
-            serialized_weights = b"".join(
-                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                for name in graph.constants.keys()
-                if name not in graph.folded_constants
-            )
             if not use_mmap_weights:
                 aot_constants = serialized_weights
                 magic_number = 0
@@ -2426,7 +2445,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
 
         template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
-            static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
+            static_assert(std::is_pointer_v<T>, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
         }
         template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {
