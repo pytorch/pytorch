@@ -2445,7 +2445,9 @@ Call this whenever a new thread is created in order to propagate values from
       PyObject_GetAttrString(module, "_disabled_torch_dispatch_impl"));
   ASSERT_TRUE(torch::disabled_torch_dispatch_impl() != nullptr);
   // init kineto here
+#ifdef USE_KINETO
   torch::global_kineto_init();
+#endif
   return module;
   END_HANDLE_TH_ERRORS
 }
