@@ -698,7 +698,9 @@ void PyTorchStreamWriter::writeRecord(
       detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   if (!compute_crc32_) {
+#if (!defined(FBCODE_CAFFE2))
     flags |= MZ_ZIP_FLAG_DO_NOT_COMPUTE_CRC32;
+#endif
   }
   mz_zip_writer_add_mem_ex_v2(
       /*pZip=*/ar_.get(),

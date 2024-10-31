@@ -541,18 +541,9 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     MPSShape* mpsShape = getMPSShape(_tensor);
     MPSShape* mpsStrides = getMPSShape(_tensor.strides());
 
-    IntArrayRef baseShape;
-    if (src.is_view()) {
-      baseShape = src._base().sizes();
-    } else {
-      baseShape = getIMPSAllocator()->getBufferShape(src.storage().data());
-    }
-    int flattenedShaped = 1;
-    for (const auto i : c10::irange(baseShape.size())) {
-      flattenedShaped *= baseShape[i];
-    }
-    MPSShape* mpsBaseShape = @[ @(flattenedShaped) ];
-    MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType shape:mpsBaseShape];
+    auto storage_numel = src.storage().nbytes() / src.element_size();
+    MPSNDArrayDescriptor* srcTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:dataType
+                                                                                 shape:@[ @(storage_numel) ]];
     srcTensorDesc.preferPackedRows = YES;
     MPSNDArray* srcNDArray = [[[MPSNDArray alloc] initWithBuffer:srcBuf
                                                           offset:src.storage_offset() * src.element_size()
@@ -848,7 +839,10 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 }
 
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
-  static const char* fast_math = std::getenv("PYTORCH_MPS_FAST_MATH");
+  static auto fast_math = []() {
+    auto val = std::getenv("PYTORCH_MPS_FAST_MATH");
+    return val && std::stoi(val) != 0;
+  }();
   NSError* error = nil;
   MTLCompileOptions* options = compile_options;
   if (!options) {
@@ -856,7 +850,15 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
     // Need 3.0 for atomic oprations, 3.1 introduces bfloat support
     [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
                                                                                         : MTLLanguageVersion3_0];
-    [options setFastMathEnabled:(!fast_math || std::stoi(fast_math) == 0) ? NO : YES];
+    if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+      options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
+      options.mathFloatingPointFunctions =
+          fast_math ? MTLMathFloatingPointFunctionsFast : MTLMathFloatingPointFunctionsPrecise;
+    } else {
+      C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
+      [options setFastMathEnabled:fast_math ? YES : NO];
+      C10_DIAGNOSTIC_POP()
+    }
   }
 
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];

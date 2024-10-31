@@ -12,10 +12,10 @@ namespace at::native {
 namespace{
 
 template <typename scalar_t, typename opmath_t, ADAM_MODE adam_mode>
-typename std::enable_if<
-    std::is_same<scalar_t, Half>::value || std::is_same<scalar_t, BFloat16>::value,
-    void>::
-    type inline adam_math(
+std::enable_if_t<
+    std::is_same_v<scalar_t, Half> || std::is_same_v<scalar_t, BFloat16>,
+    void>
+    inline adam_math(
   scalar_t* param_ptr,
   scalar_t* exp_avg_ptr,
   scalar_t* exp_avg_sq_ptr,
@@ -155,10 +155,10 @@ typename std::enable_if<
 
 
 template <typename scalar_t, typename opmath_t, ADAM_MODE adam_mode>
-typename std::enable_if<
-    std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value,
-    void>::
-    type inline adam_math(
+std::enable_if_t<
+    std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>,
+    void>
+    inline adam_math(
   scalar_t* param_ptr,
   scalar_t* exp_avg_ptr,
   scalar_t* exp_avg_sq_ptr,
@@ -364,5 +364,5 @@ void fused_adam_kernel(
 
 }
 
-REGISTER_DISPATCH(fused_adam_stub, &fused_adam_kernel);
+REGISTER_DISPATCH(fused_adam_stub, &fused_adam_kernel)
 } // namespace at::native
