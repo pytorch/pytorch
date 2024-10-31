@@ -21,13 +21,6 @@ concurrency:
 permissions: read-all
 
 jobs:
-  echo-event:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Echo GitHub Event
-        env:
-          GITHUB_EVENT: ${{ toJson(github.event) }}
-        run: echo "$GITHUB_EVENT"
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
