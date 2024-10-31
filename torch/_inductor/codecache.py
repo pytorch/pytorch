@@ -1122,12 +1122,17 @@ class FxGraphCache:
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
         try:
-            graph.current_callable = PyCodeCache.load_by_key_path(
-                graph.cache_key,
-                artifact_path,
-                graph.cache_linemap,
-                graph.constants,
-            ).call
+            with dynamo_timed(
+                "PyCodeCache.load_by_key_path",
+                log_pt2_compile_event=True,
+                fwd_only=False,
+            ):
+                graph.current_callable = PyCodeCache.load_by_key_path(
+                    graph.cache_key,
+                    artifact_path,
+                    graph.cache_linemap,
+                    graph.constants,
+                ).call
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
