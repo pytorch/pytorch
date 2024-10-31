@@ -35,6 +35,7 @@ from .autotune_process import (
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
+from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -138,13 +139,12 @@ class TritonTemplateKernel(TritonKernel):
         epilogue_fn=identity,
         subgraphs: Optional[List[ir.ComputedBuffer]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
-        *,
-        index_dtype,
     ) -> None:
+        numel = sympy_product(output_node.get_size())
         super().__init__(
-            sympy_product(output_node.get_size()),
+            numel,
             sympy.Integer(1),
-            index_dtype=index_dtype,
+            features=SIMDKernelFeatures([], numel),
         )
         self.input_nodes = input_nodes
         self.output_node = output_node
@@ -690,7 +690,6 @@ class TritonTemplate(KernelTemplate):
             "prefix_args": prefix_args,
             "suffix_args": suffix_args,
             "epilogue_fn": epilogue_fn,
-            "index_dtype": "tl.int32",
             "subgraphs": subgraphs,
         }
 

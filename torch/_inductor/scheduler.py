@@ -391,7 +391,7 @@ class BaseSchedulerNode:
         from .codegen.wrapper import buffer_reuse_key
 
         if not (
-            isinstance(self, (SchedulerNode,))
+            isinstance(self, SchedulerNode)
             and config.inplace_buffers
             and V.graph.has_feature(self.get_device(), BackendFeature.INPLACE_BUFFERS)
             and (
@@ -406,9 +406,6 @@ class BaseSchedulerNode:
             node.get_name()
             for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
         }
-
-        ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
-
         for buf in self.get_outputs():
             buf_node = buf.node
             assert buf_node is not None
@@ -420,7 +417,7 @@ class BaseSchedulerNode:
             ):
                 continue
 
-            for read in ordered_reads:
+            for read in self.read_writes.reads:
                 input_buf: Optional[SchedulerBuffer] = self.scheduler.name_to_buf.get(
                     read.name
                 )
@@ -472,9 +469,6 @@ class BaseSchedulerNode:
                         ):
                             V.kernel.mutations.add(input_buf.get_name())
                             V.kernel.mutations.add(buf.get_name())
-
-                        # update last usage of reused node
-                        self.last_usage.discard(input_buf.get_name())
 
                         V.kernel.inplace_update_buffers[
                             buf.get_name()
