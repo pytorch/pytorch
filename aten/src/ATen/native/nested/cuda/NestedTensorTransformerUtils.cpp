@@ -89,7 +89,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
     const Tensor& tensor_strides = tensor->get_nested_strides();
 
     const int64_t n_tensors = tensor_strides.size(0);
-    constexpr int64_t n_dims = 3;
+    constexpr int n_dims = 3;
     // This is safe since head_dim is assured to be consistent
     const int64_t num_heads = tensor -> opt_size(2).value();
     const int64_t tensor_stride_0 = tensor_strides.stride(0);
