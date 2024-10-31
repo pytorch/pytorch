@@ -2007,7 +2007,8 @@ def all_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.to_padded_tensor.default, "self: jt, padding: any, output_size: any?"
+    torch.ops.aten.to_padded_tensor.default,
+    "self: jt_all, padding: any, output_size: any?",
 )
 def to_padded_tensor_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -2016,6 +2017,11 @@ def to_padded_tensor_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
 
+    if inp._lengths is not None:
+        raise RuntimeError(
+            "to_padded_tensor(): not supported for nested tensors with holes"
+        )
+
     # TODO: Handle the rest of output_size
     output_size = new_kwargs["output_size"]
     if output_size is not None:
@@ -2023,9 +2029,11 @@ def to_padded_tensor_default(func, *args, **kwargs):
     else:
         max_seq_len = inp._max_seqlen
 
-    # only 2D values is supported by the underlying FBGEMM kernel so do shape
-    # gymnastics if needed
+    # only 2D values with ragged packed dim=0 is supported by the underlying FBGEMM
+    # kernel so do shape gymnastics if needed
     values = inp.values()
+    if inp._ragged_idx > 1:
+        values = values.transpose(inp._ragged_idx - 1, 0)
     values_shape = values.shape
     if values.dim() > 2:
         values = values.flatten(start_dim=1)
@@ -2051,6 +2059,8 @@ def to_padded_tensor_default(func, *args, **kwargs):
         padded_out = padded_out.unflatten(-1, values_shape[1:])
     elif len(values_shape) == 1:
         padded_out = padded_out.squeeze(-1)
+    if inp._ragged_idx > 1:
+        padded_out = padded_out.transpose(inp._ragged_idx, 1)
 
     return padded_out
 
