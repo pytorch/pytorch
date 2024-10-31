@@ -24,7 +24,7 @@ import sys
 import threading
 import traceback
 from collections import defaultdict
-from contextlib import contextmanager
+from contextlib import _GeneratorContextManager, contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -380,6 +380,21 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
         return expr
 
 
+def _guard_sizes_oblivious(
+    lhs_sizes: Sequence[Union[torch.SymInt, bool]],
+    rhs_sizes: Sequence[Union[torch.SymInt, bool]],
+) -> bool:
+    """
+    Leverage guard_size_oblivious to compare if two lists of int/symint are equal.
+    Useful to compare sizes, strides etc.
+    """
+
+    return len(lhs_sizes) == len(rhs_sizes) and all(
+        guard_size_oblivious(lhs_item == rhs_item)
+        for lhs_item, rhs_item in zip(lhs_sizes, rhs_sizes)
+    )
+
+
 def check_consistent(new: _T, old: _T) -> None:
     """
     Test that two "meta" values (typically either Tensor or SymInt) have
@@ -457,6 +472,11 @@ def rebind_unbacked(
                     u1,
                 )
                 continue
+
+            # We only care about rebinding unbacked things
+            if u1.node.hint is not None:
+                continue
+
             raw_u1 = u1.node.expr
             # Simplify SymBool binding
             if (
@@ -2436,7 +2456,12 @@ class DimConstraints:
                 ):
                     if self._is_supported_congruence(congruence):
                         base, divisor = congruence.args
-                        tmp_name = f"_{self._dcp.source_name_to_debug_name[self._dcp.symbol_to_source[s][0].name()]}"
+                        tmp_name = "_" + str(
+                            self._dcp.source_name_to_debug_name.get(
+                                self._dcp.symbol_to_source[s][0].name(),
+                                self._dcp.symbol_to_source[s][0].name(),
+                            )
+                        )
                         tmp = sympy.Symbol(tmp_name, integer=True)
                         from torch._dynamo.source import ConstantSource
 
@@ -2871,6 +2896,15 @@ class ValueRangesSLoc:
     upper: SLoc
 
 
+@contextmanager
+def _suppress_guards(shape_env: ShapeEnv) -> Iterator[None]:
+    shape_env._suppress_guards_enter()
+    try:
+        yield
+    finally:
+        shape_env._suppress_guards_exit()
+
+
 class ShapeEnv:
     # This is a wrapper over the actual __init__ function.
     #
@@ -3002,6 +3036,7 @@ class ShapeEnv:
         )
 
         self.guards: List[ShapeGuard] = []
+        self.axioms: Dict[sympy.Expr, sympy.Expr] = {}
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
@@ -3536,20 +3571,24 @@ class ShapeEnv:
 
     @record_shapeenv_event()
     def _suppress_guards_enter(self) -> None:
+        if not hasattr(TLS, "suppress_guards_stack"):
+            TLS.suppress_guards_stack = []
+        old = self._suppress_guards_tls()
+        TLS.suppress_guards_stack.append(old)
         TLS.suppress_guards = True
 
     @record_shapeenv_event()
     def _suppress_guards_exit(self) -> None:
-        TLS.suppress_guards = False
+        old = (
+            TLS.suppress_guards_stack.pop()
+            if len(TLS.suppress_guards_stack) > 0
+            else False
+        )
+        TLS.suppress_guards = old
 
-    @contextmanager
-    def suppress_guards(self) -> Iterator[None]:
+    def suppress_guards(self) -> _GeneratorContextManager[None]:
         """Context manager to ignore all guards generated inside"""
-        self._suppress_guards_enter()
-        try:
-            yield
-        finally:
-            self._suppress_guards_exit()
+        return _suppress_guards(self)
 
     def _get_key(self) -> object:
         """
@@ -4048,6 +4087,7 @@ class ShapeEnv:
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
+        symbolic_context: Optional[StatelessSymbolicContext] = None,
     ) -> sympy.Expr:
         """
         Create a symbol with an unspecified value
@@ -4067,7 +4107,7 @@ class ShapeEnv:
             constraint_dim,
             positive=None,
             do_not_specialize_zero_one=True,
-            symbolic_context=None,
+            symbolic_context=symbolic_context,
         )
 
     @record_shapeenv_event()
@@ -5323,15 +5363,16 @@ class ShapeEnv:
         expr = canonicalize_bool_expr(expr)
 
         # Pattern matching
-        symbols = tuple(expr.free_symbols)
         if axioms is None:
-            axioms = self.get_axioms(symbols, compute_hint=compute_hint)
-        subst = {}
-        for e in axioms:
-            if e.free_symbols.issubset(expr.free_symbols):
-                subst.update(dict(self.get_implications(self.simplify(e))))
+            subst = self.axioms
+        else:
+            subst = {}
+            for e in axioms:
+                if e.free_symbols.issubset(expr.free_symbols):
+                    subst.update(dict(self.get_implications(self.simplify(e))))
 
         expr = expr.xreplace(subst)
+        # TODO: compute hint might have gotten broken here
 
         fs = expr.free_symbols
 
@@ -6083,6 +6124,12 @@ class ShapeEnv:
 
         # TODO: split conjunctions and evaluate them separately
 
+        if isinstance(
+            orig_expr,
+            (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse),
+        ):
+            return orig_expr
+
         # Don't track this one
         @functools.lru_cache(None)
         def compute_concrete_val() -> sympy.Basic:
@@ -6255,6 +6302,7 @@ class ShapeEnv:
                     # or defer to runtime assert on.
                     guard = ShapeGuard(g, self._get_sloc())
                     self.guards.append(guard)
+                    self.axioms.update(dict(self.get_implications(self.simplify(g))))
                 else:
                     # it's fine to defer simple guards here without checking,
                     # the _maybe_guard_rel() call above will set replacements if possible,
@@ -6376,6 +6424,7 @@ class ShapeEnv:
             # and the guard in question has no unbacked SymInts in front
             ix = cands[-1] if cands else None
             self.deferred_runtime_asserts.setdefault(ix, []).append(ra)
+            self.axioms.update(dict(self.get_implications(self.simplify(expr))))
             self.num_deferred_runtime_asserts += 1
             self._update_version_counter()
             self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
