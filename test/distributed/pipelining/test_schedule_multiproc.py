@@ -364,7 +364,7 @@ class ScheduleTest(MultiProcContinousTest):
         "ScheduleClass",
         [ScheduleInterleaved1F1B, ScheduleLoopedBFS, ScheduleInterleavedZeroBubble],
     )
-    @parametrize("use_new_runtime", [False])
+    @parametrize("use_new_runtime", [False, True])
     def test_grad_with_manual_interleaved(self, ScheduleClass, use_new_runtime):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
