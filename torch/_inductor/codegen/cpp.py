@@ -3982,8 +3982,6 @@ class CppScheduling(BaseScheduling):
                 if vars1 == vars2:
                     return FusedSchedulerNode.fuse(node1, node2)
 
-                # We can not recompute sizes and body for nodes other than SchedulerNode
-                # TODO: we can extend the support for FusedSchedulerNode
                 assert isinstance(ref_node, SchedulerNode)
 
                 node_to_recomp_indexing_constraints = get_indexing_ranges_exprs(
@@ -4059,6 +4057,11 @@ class CppScheduling(BaseScheduling):
                 if isinstance(snode.node, ir.TemplateBuffer):
                     break
                 assert isinstance(snode.node, ir.ComputedBuffer)
+                assert isinstance(snode, SchedulerNode)
+                # The ref_node is a FusedSchedulerNode, and it has changed the ranges
+                # TODO: we can extend the support for this when having the example
+                if snode.get_ranges()[0] != snode.node.data.get_size():  # type: ignore[attr-defined]
+                    return False
                 ranges_set.add(tuple(snode.node.data.get_size()))
 
             if len(ranges_set) != 1:
