@@ -28,21 +28,18 @@ class Config:
     This configs must be installed with install_config_module to be used
 
     Precedence Order:
-        env_name_override: If the environment variable is set, it will take priority
-            over everything after this.
+        env_name_force: If set, this environment variable overrides everything
         user_override: If a user sets a value (i.e. foo.bar=True), that
-            has the highest precendance over all following values.
-        env_name_default: If the environment variable is set, it will take priority 
-            over everything after this.
+            has precedence over everything after this.
+        env_name_default: If set, this environment variable will override everything
+            after this.
         justknob: If this pytorch installation supports justknobs, that will
             override defaults, but will not override the user_override precendence.
         default: This value is the lowest precendance, and will be used if nothing is
             set.
 
-    i.e. if set, env_name_force would override a user override, but a user override will override a JK.
-
     Environment Variables:
-        These are interpreted to be true / false variables.
+        These are interpreted to be either "0" or "1" to represent true and false.
 
     Arguments:
         justknob: the name of the feature / JK. In OSS this is unused.
