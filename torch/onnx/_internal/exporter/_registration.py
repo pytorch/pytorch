@@ -22,7 +22,7 @@ from typing_extensions import TypeAlias
 
 import torch
 import torch._ops
-from torch.onnx._internal._lazy_import import onnxscript_apis
+from torch.onnx._internal._lazy_import import onnxscript, onnxscript_apis
 from torch.onnx._internal.exporter import _schemas
 
 
@@ -149,9 +149,6 @@ class ONNXRegistry:
             try:
                 # NOTE: This is heavily guarded with try-except because we don't want
                 # to fail the entire registry population if one function fails.
-                if qualified_name.startswith("internal::"):
-                    # Skip the custom defined internal functions
-                    continue
                 target = _get_overload(qualified_name)
                 if target is None:
                     continue
@@ -209,6 +206,22 @@ class ONNXRegistry:
             function: The onnx-script function to register.
             is_complex: Whether the function is a function that handles complex valued inputs.
         """
+        if not hasattr(function, "signature"):
+            try:
+                # TODO(justinchuby): Use the op_signature attribute when onnxscript is updated in CI
+                if isinstance(function, onnxscript.OnnxFunction):
+                    function.signature = _schemas.OpSignature.from_function(
+                        function, function.function_ir.domain, function.name
+                    )
+                else:
+                    function.signature = _schemas.OpSignature.from_function(
+                        function, "__custom", function.__name__
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to infer the signature for function '%s'", function
+                )
+
         onnx_decomposition = OnnxDecompMeta(
             onnx_function=function,
             fx_target=target,

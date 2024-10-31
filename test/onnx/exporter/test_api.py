@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import os
 
+from onnxscript import BOOL, FLOAT, opset18 as op
+
 import torch
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
@@ -212,9 +214,9 @@ class TestExportAPIDynamo(common_utils.TestCase):
             def forward(self, x, y):
                 return x + y
 
-        def custom_add(x, y):
+        def custom_add(self, other):
             # Replace add with sub
-            return op.Sub(x, y)
+            return op.Sub(self, other)
 
         custom_translation_table = {torch.ops.aten.add.Tensor: custom_add}
 
@@ -229,19 +231,17 @@ class TestExportAPIDynamo(common_utils.TestCase):
         self.assertNotIn("Add", all_nodes)
 
     def test_custom_translation_table_supports_overloading_ops(self):
-        from onnxscript import BOOL, FLOAT, opset18 as op
-
         class Model(torch.nn.Module):
             def forward(self, x, y):
                 return torch.ops.aten.logical_and.default(x, y)
 
-        def custom_add_bool(x: BOOL, y: BOOL) -> BOOL:
+        def custom_add_bool(self: BOOL, other: BOOL) -> BOOL:
             # Replace add with sub
-            return op.Sub(x, y)
+            return op.Sub(self, other)
 
-        def custom_add(x: FLOAT, y: FLOAT) -> FLOAT:
+        def custom_add(self: FLOAT, other: FLOAT) -> FLOAT:
             # Replace add with mul
-            return op.Mul(x, y)
+            return op.Mul(self, other)
 
         custom_translation_table = {
             torch.ops.aten.logical_and.default: [custom_add, custom_add_bool],
@@ -254,10 +254,12 @@ class TestExportAPIDynamo(common_utils.TestCase):
             dynamo=True,
         )
         all_nodes = [n.op_type for n in onnx_program.model.graph]
-        print(onnx_program.exported_program)
+        # The dispatcher should pick the correct overload based on the input types
         self.assertIn("Sub", all_nodes)
         self.assertNotIn("Add", all_nodes)
         self.assertNotIn("Mul", all_nodes)
+
+        # TODO: test custom op when there is no signature in the target op
 
 
 if __name__ == "__main__":
