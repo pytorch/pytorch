@@ -29,6 +29,8 @@ jobs:
     if: github.repository_owner == 'pytorch'
     name: unit-test
     uses: ./.github/workflows/inductor-unittest.yml
+    with:
+      job_name: unit-test
 
   get-label-type:
     name: get-label-type
