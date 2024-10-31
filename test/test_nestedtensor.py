@@ -8,7 +8,6 @@ import random
 import sys
 import tempfile
 import unittest
-from contextlib import nullcontext
 from functools import partial
 from typing import Optional, Tuple
 
@@ -5049,7 +5048,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
             with self.assertRaisesRegex(
                 RuntimeError,
-                "not supported along the batch dimension but not the ragged dimension for NestedTensor",
+                "reducing along the batch dimension but not the ragged dimension is not supported",
             ):
                 out = func(nt, dim=reduce_dim, keepdim=keepdim)
 
@@ -5103,8 +5102,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 if nt_with_holes._ragged_idx in reduce_dim:
                     with self.assertRaisesRegex(
                         RuntimeError,
-                        "not supported where lengths is not None "
-                        + "if reducing across the ragged dimension for NestedTensor",
+                        "reducing across the ragged dimension is not supported for "
+                        + "non-contiguous nested tensors with holes",
                     ):
                         out = func(nt_with_holes, dim=reduce_dim, keepdim=keepdim)
                 else:
