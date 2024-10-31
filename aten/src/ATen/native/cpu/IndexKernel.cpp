@@ -388,7 +388,7 @@ void cpu_masked_select_serial_kernel(TensorIterator& iter, const func_t& f) {
     char* mask = data[2];
     for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
-      if constexpr (!std::is_same<mask_t, bool>::value) {
+      if constexpr (!std::is_same_v<mask_t, bool>) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
       if (mask_value) {
@@ -426,7 +426,7 @@ void cpu_masked_select_kernel(TensorIterator& iter, const func_t& f) {
     char* mask_prefix_sum = data[3];
     for (const auto i : c10::irange(n)) {
       mask_t mask_value = *(mask_t*)(mask + strides[2] * i);
-      if constexpr (!std::is_same<mask_t, bool>::value) {
+      if constexpr (!std::is_same_v<mask_t, bool>) {
         TORCH_CHECK(mask_value == 0 || mask_value == 1, "Mask tensor can take 0 and 1 values only");
       }
       if (mask_value) {
@@ -781,16 +781,16 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(index_stub, &index_kernel);
-REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
-REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-REGISTER_DISPATCH(put_stub, &put_kernel);
-REGISTER_DISPATCH(take_stub, &take_kernel);
-REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
-REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
-REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
-REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
-REGISTER_DISPATCH(flip_stub, &flip_kernel);
+REGISTER_DISPATCH(index_stub, &index_kernel)
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel)
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel)
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel)
+REGISTER_DISPATCH(put_stub, &put_kernel)
+REGISTER_DISPATCH(take_stub, &take_kernel)
+REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel)
+REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel)
+REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel)
+REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel)
+REGISTER_DISPATCH(flip_stub, &flip_kernel)
 
 } // namespace at::native
