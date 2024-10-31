@@ -1,0 +1,59 @@
+name: inductor-rocm
+
+on:
+  schedule:
+    # We have several schedules so jobs can check github.event.schedule to activate only for a fraction of the runs.
+    # Also run less frequently on weekends.
+    - cron: 45 0,4,8,12,16,20 * * 1-5
+    - cron: 45 4,12 * * 0,6
+    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+  push:
+    branches:
+#     - main
+      - release/*
+    tags:
+      - ciflow/inductor-rocm/*
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-focal-rocm6_2-py3_10-inductor-build:
+    name: rocm6.2-py3.10-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-focal-rocm6.2-py3.10
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      test-matrix: |
+        { include: [
+          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
+        ]}
+
+  linux-focal-rocm6_2-py3_10-inductor-test:
+    permissions:
+      id-token: write
+      contents: read
+    name: rocm6.2-py3.10-inductor
+    uses: ./.github/workflows/_rocm-test.yml
+    needs: linux-focal-rocm6_2-py3_10-inductor-build
+    with:
+      build-environment: linux-focal-rocm6.2-py3.10
+      docker-image: ${{ needs.linux-focal-rocm6_2-py3_10-inductor-build.outputs.docker-image }}
+      test-matrix:  ${{ needs.linux-focal-rocm6_2-py3_10-inductor-build.outputs.test-matrix }}
