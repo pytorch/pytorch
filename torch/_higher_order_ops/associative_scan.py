@@ -220,15 +220,15 @@ def associative_scan(
             combine_fn=torch.vmap(
                 combine_fn,
                 in_dims=(
-                    pytree.tree_unflatten([dim] * len(leaves), spec),
-                    pytree.tree_unflatten([dim] * len(leaves), spec)
+                    pytree.tree_unflatten([0] * len(leaves), spec),
+                    pytree.tree_unflatten([0] * len(leaves), spec),
                 ),
-                out_dims=dim,
+                out_dims=0,
             ),
             spec=spec,
             num_leaves=len(leaves),
         )
-        result_flat = generic_associative_scan(combine_fn, leaves, dim)
+        result_flat = generic_associative_scan(combine_fn, leaves)
     else:
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
@@ -236,14 +236,12 @@ def associative_scan(
             spec=spec,
             num_leaves=len(leaves),
         )
-        result_flat = associative_scan_op(combine_fn, leaves, dim)
+        result_flat = associative_scan_op(combine_fn, leaves)
 
     if reverse:
         result_flat = [torch.flip(elem, [0]) for elem in result_flat]
 
-    result_flat = [
-        torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat
-    ]
+    result_flat = [torch.movedim(elem, 0, orig_scan_dim) for elem in result_flat]
 
     return pytree.tree_unflatten(result_flat, spec)
 
@@ -345,10 +343,10 @@ def generic_associative_scan(operator, leaves, dim=0):
 
 
 def trace_associative_scan(
-    proxy_mode, func_overload, combine_fn: Callable, xs: List[torch.Tensor], dim: int
+    proxy_mode, func_overload, combine_fn: Callable, xs: List[torch.Tensor]
 ):
     with disable_proxy_modes_tracing():
-        sample_xs = [first_slice_copy(x, dim) for x in itertools.chain(xs, xs)]
+        sample_xs = [first_slice_copy(x) for x in itertools.chain(xs, xs)]
         combine_graph = reenter_make_fx(combine_fn)(*sample_xs)
 
     outputs = None
@@ -392,8 +390,8 @@ def trace_associative_scan(
 
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def associative_scan_op_dense(combine_fn, xs, dim):
-    return generic_associative_scan(combine_fn, xs, dim)
+def associative_scan_op_dense(combine_fn, xs):
+    return generic_associative_scan(combine_fn, xs)
 
 
 associative_scan_op.py_impl(DispatchKey.Autograd)(
