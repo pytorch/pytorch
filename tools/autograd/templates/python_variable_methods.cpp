@@ -1177,7 +1177,7 @@ static PyObject* THPVariable_set_(
     case 1: {
       // aten::set_.source_Storage(Tensor(a!) self, Storage source) ->
       // Tensor(a!)
-      at::ScalarType storage_scalar_type;
+      at::ScalarType storage_scalar_type{};
       bool is_typed_storage = true;
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
@@ -1186,14 +1186,14 @@ static PyObject* THPVariable_set_(
         " for argument 1 'storage'");
       auto dispatch_set_ = [](const Tensor& self, Storage source) -> Tensor {
         pybind11::gil_scoped_release no_gil;
-        return self.set_(source);
+        return self.set_(std::move(source));
       };
       return wrap(dispatch_set_(self, storage));
     }
     case 2: {
       // aten::set_.source_Storage_storage_offset(Tensor(a!) self, Storage
       // source, int storage_offset, int[] size, int[] stride=[]) -> Tensor(a!)
-      at::ScalarType storage_scalar_type;
+      at::ScalarType storage_scalar_type{};
       bool is_typed_storage = true;
       at::Storage storage = _r.storage(0, storage_scalar_type, is_typed_storage);
       TORCH_CHECK(storage_scalar_type == self.dtype() || !is_typed_storage,
@@ -1206,7 +1206,7 @@ static PyObject* THPVariable_set_(
                               c10::SymIntArrayRef size,
                               c10::SymIntArrayRef stride) -> Tensor {
         pybind11::gil_scoped_release no_gil;
-        return self.set__symint(source, storage_offset, size, stride);
+        return self.set__symint(std::move(source), std::move(storage_offset), size, stride);
       };
       return wrap(dispatch_set_(
           self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlist(3)));
@@ -1230,7 +1230,7 @@ static PyObject* THPVariable_set_(
                               c10::SymIntArrayRef size,
                               c10::SymIntArrayRef stride) -> Tensor {
         pybind11::gil_scoped_release no_gil;
-        return self.set__symint(source, storage_offset, size, stride);
+        return self.set__symint(source, std::move(storage_offset), size, stride);
       };
       return wrap(dispatch_set_(
           self, storage, _r.toSymInt(1), _r.symintlist(2), _r.symintlist(3)));

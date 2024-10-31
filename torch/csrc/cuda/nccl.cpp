@@ -265,7 +265,9 @@ struct NcclCommList {
   NcclCommList(const std::vector<int>& devices)
       : comms(new ncclComm_t[devices.size()]), ndevices(devices.size()) {
     NCCL_CHECK(ncclCommInitAll(
-        to_nccl_comm(comms.get()), devices.size(), devices.data()));
+        to_nccl_comm(comms.get()),
+        static_cast<int>(devices.size()),
+        devices.data()));
   }
   NcclCommList(NcclCommList&& foo) = default;
   ~NcclCommList() {

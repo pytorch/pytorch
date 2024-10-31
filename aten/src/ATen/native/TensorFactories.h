@@ -136,7 +136,7 @@ struct ZeroTensorAllocator final : public at::Allocator {
 
 using binary_fn = void (*)(TensorIterator&);
 
-DECLARE_DISPATCH(binary_fn, complex_stub);
-DECLARE_DISPATCH(binary_fn, polar_stub);
+DECLARE_DISPATCH(binary_fn, complex_stub)
+DECLARE_DISPATCH(binary_fn, polar_stub)
 
 } // namespace at::native
