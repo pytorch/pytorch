@@ -425,7 +425,7 @@ def run_joint_graph_passes_on_hops(
                     *old_outputs[-num_fw_outputs:],
                     *old_outputs[:-num_fw_outputs],
                 )
-                new_outputs = [env[n] for n in new_outputs]
+                new_outputs = [env[n] if n else None for n in new_outputs]
                 new_graph.output(tuple(new_outputs))
             else:
                 env[node] = new_graph.node_copy(node, lambda n: env[n])
@@ -434,7 +434,6 @@ def run_joint_graph_passes_on_hops(
         new_graph.lint()
 
         out = torch.fx.GraphModule(joint_gm, new_graph)
-        # breakpoint()
         return out
 
     new_hop_graphs: Dict[str, InvokeSubgraphHopGraphs] = defaultdict(
@@ -564,7 +563,7 @@ def run_joint_graph_passes_on_hops(
         new_call_function_node.meta = copy.copy(old_call_function_node.meta)
 
         output = new_hop_gm.graph.find_nodes(op="output")[0]
-        out_example_vals = [n.meta["val"] for n in output.args[0]]
+        out_example_vals = [n.meta["val"] if n else None for n in output.args[0]]
         new_call_function_node.meta["val"] = tuple(out_example_vals)
 
     for node in joint_gm.graph.nodes:
