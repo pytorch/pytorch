@@ -315,7 +315,7 @@ def uninteresting_files():
 _CLOSURE_VARS: Optional[Dict[str, object]] = None
 
 
-def _get_closure_vars():
+def get_closure_vars():
     global _CLOSURE_VARS
     if _CLOSURE_VARS is None:
         _CLOSURE_VARS = {
@@ -1150,7 +1150,7 @@ class GuardBuilder(GuardBuilderBase):
         is_epilogue=True,
     ):
         if closure_vars is None:
-            closure_vars = _get_closure_vars()
+            closure_vars = get_closure_vars()
         # Adds a lambda leaf guard to the root guard manager. It wraps the
         # code_parts in a function object which is then passed on to the leaf
         # guard.
@@ -1177,7 +1177,7 @@ class GuardBuilder(GuardBuilderBase):
     # (like its type) which is what you permanently install into the
     # guard code.
     def get(self, name: str) -> Any:
-        return eval(name, self.scope, _get_closure_vars())
+        return eval(name, self.scope, get_closure_vars())
 
     # Registers the usage of the source name referenced by the
     # string (or stored in the Guard) as being guarded upon.  It's important
@@ -1497,7 +1497,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__math_isnan"],
+                get_closure_vars()["__math_isnan"],
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -1510,7 +1510,7 @@ class GuardBuilder(GuardBuilderBase):
             self._set_guard_export_info(guard, code)
 
             self.get_guard_manager(guard).add_lambda_guard(
-                _get_closure_vars()["__numpy_isnan"],
+                get_closure_vars()["__numpy_isnan"],
                 get_verbose_code_parts(code, guard),
             )
             return
@@ -1786,7 +1786,7 @@ class GuardBuilder(GuardBuilderBase):
         self.add_python_lambda_leaf_guard_to_root(
             code_parts,
             verbose_code_parts,
-            closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+            closure_vars={**SYMPY_INTERP, **get_closure_vars()},
         )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
@@ -2375,7 +2375,7 @@ class CheckFunctionManager:
             "___check_global_state": global_state.check,
             "___check_torch_function_mode_stack": torch_function_mode_stack_check_fn,
             **SYMPY_INTERP,
-            **_get_closure_vars(),
+            **get_closure_vars(),
         }
 
         globals_for_guard_fn = {"G": builder.scope["G"]}

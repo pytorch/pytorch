@@ -63,7 +63,8 @@ inline PyObject* THPUtils_packString(const char* str) {
 }
 
 inline PyObject* THPUtils_packString(const std::string& str) {
-  return PyUnicode_FromStringAndSize(str.c_str(), str.size());
+  return PyUnicode_FromStringAndSize(
+      str.c_str(), static_cast<Py_ssize_t>(str.size()));
 }
 
 inline PyObject* THPUtils_internString(const std::string& str) {
