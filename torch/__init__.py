@@ -681,6 +681,10 @@ class SymFloat:
         """Returns the complex conjugate of the float."""
         return self
 
+    def hex(self) -> "SymFloat":
+        """Returns the hexadecimal representation of the float."""
+        return self
+
 
 class SymBool:
     """
