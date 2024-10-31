@@ -1237,7 +1237,7 @@ ApplyInputGradientsChannelsLastRowMov(
 
 template <typename T, typename PT, typename opmath_t>
 inline typename std::
-    enable_if<std::is_same<T, opmath_t>::value, std::tuple<opmath_t, opmath_t>>::type
+    enable_if<std::is_same_v<T, opmath_t>, std::tuple<opmath_t, opmath_t>>::type
     CalcInternalGradientsChannelsLast(
     const T* X_data,
     const T* dY_data,
@@ -1292,7 +1292,7 @@ inline typename std::
 
 template <typename T, typename PT, typename opmath_t>
 inline typename std::
-    enable_if<!std::is_same<T, opmath_t>::value, std::tuple<opmath_t, opmath_t>>::type
+    enable_if<!std::is_same_v<T, opmath_t>, std::tuple<opmath_t, opmath_t>>::type
     CalcInternalGradientsChannelsLast(
         const T* X_data,
         const T* dY_data,
@@ -1584,7 +1584,7 @@ void GroupNormBackwardKernelImpl(
 
 } // namespace
 
-REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl);
-REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl);
+REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl)
+REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl)
 
 } // namespace at::native
