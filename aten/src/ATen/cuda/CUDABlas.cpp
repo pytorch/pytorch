@@ -188,8 +188,11 @@ static size_t _parseChosenWorkspaceSize() {
     // accept either env var
     val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
   }
-#endif
+  size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
+#else
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+#endif
+
   if (val.has_value()) {
     try {
       workspace_size = std::stoi(val.value());
