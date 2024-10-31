@@ -648,6 +648,36 @@ class TritonBlockPointerTest(InductorTestCase):
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
+    def test_2d_reduction_multi_kernel(self):
+        """
+        Test a 2D reduction in multi kernel mode.
+        """
+        view = self._discontiguous_tensor((2, 4, 1024))
+
+        def foo(x):
+            """
+            Reshape to 2D and take the softmax of all trailing dims.
+            """
+            x = x.reshape(x.shape[0], -1)
+            return torch.softmax(x, -1)
+
+        result, (code,) = self.run_and_compare(
+            foo,
+            view,
+            expected_num_block_pointers=6,
+            expected_num_triton_kernels=2,
+            config_patches={
+                "triton.multi_kernel": True,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Check for multi kernel mode.
+        self.assertIn("multi_kernel", code)
+
+        # Check for 2 reduction dimensions.
+        self._assert_reduction_ndims(code, 2)
+
     @parametrize(
         "tile_reductions",
         [False, True],
