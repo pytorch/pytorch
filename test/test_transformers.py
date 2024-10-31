@@ -2567,46 +2567,24 @@ class TestSDPACudaOnly(NNTestCase):
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_preserves_query_layout(self, device):
-        class Config:
-            n_embd: int = 512
-            n_head: int = 8
-            n_layer: int = 6
-            n_ctx: int = 2048
-            bias: bool = False
-
-        class CausalSelfAttention(nn.Module):
-
-            def __init__(self, config, test):
-                super().__init__()
-                assert config.n_embd % config.n_head == 0
-                # key, query, value projections for all heads, but in a batch
-                self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
-                # output projection
-                self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-                self.n_head = config.n_head
-                self.n_embd = config.n_embd
-                self.test = test
-
-            def forward(self, x, permute_order):
-                B, T, C = x.size()  # batch size, sequence length, embedding dimensionality (n_embd)
-                q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
-                k = k.view(B, T, self.n_head, C // self.n_head).permute(permute_order)
-                q = q.view(B, T, self.n_head, C // self.n_head).permute(permute_order)
-                v = v.view(B, T, self.n_head, C // self.n_head).permute(permute_order)
-
-                y = F.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
-                reverse_order = [permute_order.index(i) for i in range(4)]
-                self.test.assertTrue(y.permute(reverse_order).is_contiguous())
-                y = y.permute(reverse_order).view(B, T, C)
-                y = self.c_proj(y)
-                return y
 
         def test_attention(backend: SDPBackend, permute_order: List[List[int]]):
-            config = Config()
-            Attention = CausalSelfAttention(config, self).to("cuda", dtype=torch.float16)
-            sample_input = torch.randn(1, 2048, config.n_embd, device="cuda", dtype=torch.float16)
+            BHSqD = [4, 16, 256, 64]
+            BHSkvD = [4, 16, 512, 64]
+
+            shape_q = [BHSqD[idx] for idx in permute_order]
+            shape_kv = [BHSkvD[idx] for idx in permute_order]
+            reverse = [permute_order.index(idx) for idx in range(4)]
+            q = torch.randn(*shape_q, dtype=torch.bfloat16, device='cuda').permute(reverse)
+            k = torch.randn(*shape_kv, dtype=torch.bfloat16, device='cuda').permute(reverse)
+            v = torch.randn(*shape_kv, dtype=torch.bfloat16, device='cuda').permute(reverse)
+            self.assertEqual(q.shape, BHSqD)
+            self.assertEqual(k.shape, BHSkvD)
+            self.assertEqual(v.shape, BHSkvD)
+
             with sdpa_kernel(backend):
-                out = Attention(sample_input, permute_order)
+                out = F.scaled_dot_product_attention(q, k, v)
+                self.assertTrue(out.permute(permute_order).is_contiguous())
 
         permute_orders = list()
         permutable = (0, 1, 2)
@@ -2623,7 +2601,6 @@ class TestSDPACudaOnly(NNTestCase):
                 curr2 += [3]
                 permute_orders.append(curr2)
 
-        width = 100
         for permute_order in permute_orders:
             test_attention(SDPBackend.CUDNN_ATTENTION, permute_order)
 
