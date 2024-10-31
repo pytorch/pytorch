@@ -948,6 +948,10 @@ class triton:
     # Setting to None means uninitialized
     autotune_at_compile_time: Optional[bool] = None
 
+    # Allows tiling reductions into multiple dimensions.
+    # For best results, this should be used with prefer_nd_tiling.
+    tile_reductions: bool = False
+
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
     tiling_prevents_reduction_fusion = True

@@ -29,6 +29,12 @@ importlib.import_module("filelock")
 
 max_block: int = TRITON_MAX_BLOCK["X"]
 
+# Config shortcuts
+tiled_reduction_config = {
+    "triton.prefer_nd_tiling": True,
+    "triton.tile_reductions": True,
+}
+
 
 @requires_gpu()
 @config.patch("triton.use_block_ptr", True)
@@ -520,7 +526,7 @@ class TritonBlockPointerTest(InductorTestCase):
             view,
             expected_num_block_pointers=num_block_pointers,
             expected_num_triton_kernels=num_triton_kernels,
-            config_patches={"triton.prefer_nd_tiling": True},
+            config_patches=tiled_reduction_config,
         )
 
         # Check the code for multiple Rn_BLOCK's
@@ -540,7 +546,7 @@ class TritonBlockPointerTest(InductorTestCase):
             view,
             expected_num_block_pointers=1,
             expected_num_triton_kernels=1,
-            config_patches={"triton.prefer_nd_tiling": True},
+            config_patches=tiled_reduction_config,
         )
 
         # Check that there's no X dimension in the signature.
@@ -583,7 +589,7 @@ class TritonBlockPointerTest(InductorTestCase):
             view,
             expected_num_block_pointers=expected_num_block_pointers,
             expected_num_triton_kernels=expected_num_triton_kernels,
-            config_patches={"triton.prefer_nd_tiling": True},
+            config_patches=tiled_reduction_config,
         )
 
         # Check for a Welford reduction.
@@ -633,12 +639,38 @@ class TritonBlockPointerTest(InductorTestCase):
             view,
             expected_num_block_pointers=0,
             expected_num_triton_kernels=1,
-            config_patches={"triton.prefer_nd_tiling": True},
+            config_patches=tiled_reduction_config,
         )
 
         # Check for 2 reduction dimensions.
         for block in ["R0_BLOCK", "R1_BLOCK"]:
             self.assertIn(block, code)
+
+    @parametrize(
+        "tile_reductions",
+        [False, True],
+    )
+    def test_enable_tiled_reductions(self, tile_reductions: bool):
+        """
+        Tests enabling and disabling tiled reductions.
+        """
+        view = self._discontiguous_tensor((9, 11))
+
+        # If tiled, we expect 1 block pointer for the input.
+        result, (code,) = self.run_and_compare(
+            torch.sum,
+            view,
+            expected_num_block_pointers=1 if tile_reductions else 0,
+            expected_num_triton_kernels=1,
+            config_patches={
+                "triton.prefer_nd_tiling": True,
+                "triton.tile_reductions": tile_reductions,
+            },
+        )
+
+        # Check the code for multiple Rn_BLOCK's
+        num_rblocks = sum(int(block in code) for block in ["R0_BLOCK", "R1_BLOCK"])
+        self.assertEqual(num_rblocks, 2 if tile_reductions else 1)
 
     def test_complex_reshape_block_ptr(self):
         def func(x, y):

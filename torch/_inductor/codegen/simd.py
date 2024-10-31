@@ -9,6 +9,7 @@ import itertools
 import logging
 import math
 import operator
+import textwrap
 from typing import (
     Any,
     Callable,
@@ -1746,7 +1747,7 @@ class SIMDScheduling(BaseScheduling):
 
     @classmethod
     @functools.lru_cache(32)
-    def candidate_tilings(cls, node, is_pointwise: bool) -> Iterable[CandidateTiling]:
+    def candidate_tilings(cls, node, is_pointwise: bool) -> List[CandidateTiling]:
         def tile_ranges(is_pointwise: bool, ranges, rw) -> List[CandidateTiling]:
             """
             Compute tiling candidates by dividing up the iteration ranges.
@@ -1844,7 +1845,7 @@ class SIMDScheduling(BaseScheduling):
 
         pointwise_ranges, reduction_ranges = node.get_ranges()
         if len(pointwise_ranges) <= 1 and len(reduction_ranges) <= 1:
-            return ()
+            return []
 
         # Tile either pointwise or reduction dims.
         pointwise_ranges, reduction_ranges = node.get_ranges()
@@ -1998,8 +1999,26 @@ class SIMDScheduling(BaseScheduling):
         # If this is a reduction, only tile reduction dims.
         is_pointwise = reduction_numel == 1
 
+        # Tiled reductions are gated by a config flag.
         default_tiling = cls.create_tiling([numel], [reduction_numel])
-        if config.triton.max_tiles <= 1:
+        if (
+            not is_pointwise and not config.triton.tile_reductions
+        ) or config.triton.max_tiles <= 1:
+            # Emit a perf hint in case we miss an opportunity to tile a reduction.
+            if perf_hint_log.level <= logging.WARNING:
+                for node in EnableReduction.filter(node_schedule):
+                    if len(cls.candidate_tilings(node, is_pointwise)) > 0:
+                        perf_hint_log.info(
+                            textwrap.dedent(
+                                """
+                                Reduction over non-contiguous dims.
+                                Consider setting config.triton.tile_reductions to True.
+                                Current value: %s
+                                """
+                            ),
+                            config.triton.tile_reductions,
+                        )
+                        break
             return default_tiling
 
         seen_names: OrderedSet[str] = OrderedSet()
