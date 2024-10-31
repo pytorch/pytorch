@@ -364,9 +364,9 @@ class _PipelineStageBase(ABC):
             assert isinstance(
                 tensor, torch.Tensor
             ), f"expected tensor values as outputs from prev stage, got {type(tensor)}"
-            if not isinstance(info, _RecvInfo):
-                # TODO: when would info not be a _RecvInfo? should this be an error?
-                continue
+            assert isinstance(
+                info, _RecvInfo
+            ), "set_local_Fwd_input should only be called on non-first stage, which should always have RecvInfo"
 
             # We don't need to do a data copy here, since we can directly pass the activation tensor reference from
             # one stage to the next.  However, we do need to mark the activation as a leaf tensor since it will serve
