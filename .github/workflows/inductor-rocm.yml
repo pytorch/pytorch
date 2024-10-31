@@ -3,7 +3,7 @@ name: inductor-rocm
 on:
   pull_request:
     paths:
-      # from "ciflow/inductor" in .github/labeler.yml 
+      # from "ciflow/inductor" in .github/labeler.yml
       - 'torch/_decomp/**'
       - 'torch/_dynamo/**'
       - 'torch/_export/**'
