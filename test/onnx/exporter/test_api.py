@@ -225,7 +225,6 @@ class TestExportAPIDynamo(common_utils.TestCase):
             dynamo=True,
         )
         all_nodes = [n.op_type for n in onnx_program.model.graph]
-        print(all_nodes)
         self.assertIn("Sub", all_nodes)
         self.assertNotIn("Add", all_nodes)
 
