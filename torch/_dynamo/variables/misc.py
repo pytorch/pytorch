@@ -1465,7 +1465,14 @@ class LoggingLoggerVariable(VariableTracker):
         if tx.export:
             # For export cases, we can just make debugging functions no-ops
             return
-        unimplemented("Logger not supported for non-export cases")
+        if config.disable_logs:
+            if name == "isEnabledFor":
+                return variables.ConstantVariable.create(False)
+            if name in ['info', 'debug', 'error', 'warning', 'critical', 'exception']:
+                return
+        unimplemented("Logger not supported for non-export cases. "
+                      "To avoid graph breaks caused by logger in compile-mode, it is recommended to"
+                               " disable logging by setting env var DISABLE_LOGS_WHILE_COMPILING=1")
 
 
 class ConstantLikeVariable(VariableTracker):
