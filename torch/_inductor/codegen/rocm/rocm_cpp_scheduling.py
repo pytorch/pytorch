@@ -62,7 +62,7 @@ class ROCmCPPScheduling(BaseScheduling):
             compile_wrapper.writeline("async_compile.rocm(r'''")
             compile_wrapper.splice(src_code, strip=True)
             compile_wrapper.writeline(
-                f"''', 'so', aot_compile={str(V.graph.aot_mode)})"
+                f"''', 'so', aot_compile={str(V.graph.aot_mode)}, generate_standalone={config.rocm.generate_test_runner})"
             )
 
             metadata_comment = f"# kernel path: {kernel_path}"

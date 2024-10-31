@@ -8,6 +8,7 @@ import sympy
 
 import torch
 from torch._inductor import config
+from torch._inductor.codegen.cpp_utils import DTYPE_TO_CPP
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.ir import Buffer, Layout
@@ -80,6 +81,11 @@ class CKGemmTemplate(CKTemplate):
     """
 
     standalone_runner_template = r"""
+    #ifdef GENERATE_CK_STANDALONE_RUNNER
+    // standalone runner for the generated CK GEMM kernel
+
+    {{inline_utils}}
+
     extern "C" {
     int run_main(int argc, char** argv) {
         const int32_t M = {{M}};
@@ -90,15 +96,26 @@ class CKGemmTemplate(CKTemplate):
         const int32_t LDC = {{LDC}};
         const int32_t LDD = {{LDD}};
 
-        using AElementType = {{a_element_dtype}};
-        using BElementType = {{b_element_dtype}};
-        using CElementType = {{c_element_dtype}};
-        using BiasElementType = {{bias_element_dtype}};
+        using AElementType = {{a_ck_dtype}};
+        using BElementType = {{b_ck_dtype}};
+        using CElementType = {{c_ck_dtype}};
+        {% if has_bias %}
+        using BiasElementType = {{bias_ck_dtype}};
+        {% endif %}
+
+        using AArgType = {{a_torch_dtype}};
+        using BArgType = {{b_torch_dtype}};
+        using CArgType = {{c_torch_dtype}};
+        {% if has_bias %}
+        using BiasArgType = {{bias_torch_dtype}};
+        {% endif %}
 
         using ALayout = {{a_layout}};
         using BLayout = {{b_layout}};
         using CLayout = {{c_layout}};
+        {% if has_bias %}
         using BiasLayout = {{bias_layout}};
+        {% endif %}
 
         using strides_t = std::array<int32_t, 2>;
 
@@ -111,31 +128,39 @@ class CKGemmTemplate(CKTemplate):
 
         Tensor<AElementType> a_m_k ( HostTensorDescriptor ( strides_t{M, K}, get_strides(LDA, ALayout{}) ) );
         Tensor<BElementType> b_k_n ( HostTensorDescriptor ( strides_t{N, K}, get_strides(LDB, BLayout{}) ) );
-        Tensor<BiasElementType> d_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDD, DLayout{}) ) );
+        {% if has_bias %}
+        Tensor<BiasElementType> d_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDD, BiasLayout{}) ) );
+        {% endif %}
 
         Tensor<CElementType> c_m_n_host ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
         Tensor<CElementType> c_m_n_device ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
 
         a_m_k.GenerateTensorValue(GeneratorTensor_2<AElementType>());
         b_k_n.GenerateTensorValue(GeneratorTensor_2<BElementType>());
+        {% if has_bias %}
         d_m_n.GenerateTensorValue(GeneratorTensor_2<BiasElementType>());
-
+        {% endif %}
         DeviceMem a_m_k_device_buf(sizeof(AElementType) * a_m_k.mDesc.GetElementSpaceSize());
         DeviceMem b_k_n_device_buf(sizeof(BElementType) * b_k_n.mDesc.GetElementSpaceSize());
+        {% if has_bias %}
         DeviceMem d_m_n_device_buf(sizeof(BiasElementType) * d_m_n.mDesc.GetElementSpaceSize());
+        {% endif %}
         DeviceMem c_m_n_device_buf(sizeof(CElementType) * c_m_n_device.mDesc.GetElementSpaceSize());
 
         a_m_k_device_buf.ToDevice(a_m_k.mData.data());
         b_k_n_device_buf.ToDevice(b_k_n.mData.data());
+        {% if has_bias %}
         d_m_n_device_buf.ToDevice(d_m_n.mData.data());
-
+        {% endif %}
         auto stream_config = StreamConfig{nullptr, true, 1};
 
-        rocm_ck_gemm_template(
-            static_cast<const ADataType*>(a_m_k_device_buf.GetDeviceBuffer()),
-            static_cast<const BDataType*>(b_k_n_device_buf.GetDeviceBuffer()),
-            static_cast<const BiasDataType*>(d_m_n_device_buf.GetDeviceBuffer()),
-            static_cast<CDataType*>(c_m_n_device_buf.GetDeviceBuffer()),
+        {{kernel_name}}(
+            static_cast<const AArgType*>(a_m_k_device_buf.GetDeviceBuffer()),
+            static_cast<const BArgType*>(b_k_n_device_buf.GetDeviceBuffer()),
+            {% if has_bias %}
+            static_cast<const BiasArgType*>(d_m_n_device_buf.GetDeviceBuffer()),
+            {% endif %}
+            static_cast<CArgType*>(c_m_n_device_buf.GetDeviceBuffer()),
             M,
             N,
             K,
@@ -156,6 +181,7 @@ class CKGemmTemplate(CKTemplate):
     int main(int argc, char** argv) {
         return run_main(argc, argv);
     }
+    #endif // GENERATE_CK_STANDALONE_RUNNER
     """
 
     def __init__(
@@ -198,6 +224,16 @@ class CKGemmTemplate(CKTemplate):
                 using BlockGemmPipelineScheduler = ck::BlockGemmPipelineScheduler;
                 using GemmSpecialization = ck::tensor_operation::device::GemmSpecialization;
                 using BlockGemmPipelineVersion = ck::BlockGemmPipelineVersion;
+            """
+        )
+        return res
+
+    def inline_utils(self):
+        res = IndentedBuffer()
+        res.splice(
+            """
+                #include "host_tensor.cpp"
+                #include "device_memory.cpp"
             """
         )
         return res
@@ -412,7 +448,8 @@ class CKGemmTemplate(CKTemplate):
 
         assert epilogue is not None, "CK GEMM epilogue is not set"
 
-        return self._template_from_string(self.gemm_template).render(
+        res = self._template_from_string(self.gemm_template).render(
+            inline_utils=self.inline_utils(),
             headers=self.header().getvalue(),
             globals=self.globals().getvalue(),
             instance_definition=instance_definition,
@@ -458,6 +495,36 @@ class CKGemmTemplate(CKTemplate):
             ),
             version_comment=version_comment,
         )
+
+        if config.rocm.generate_test_runner:
+            M, N, K, LDA, LDB, LDC, LDD = self.size_args()
+            runner_code = self._template_from_string(self.standalone_runner_template).render(
+                inline_utils=self.inline_utils().getvalue(),
+                kernel_name=kernel.kernel_name,
+                M=M,
+                N=N,
+                K=K,
+                LDA=LDA,
+                LDB=LDB,
+                LDC=LDC,
+                LDD=LDD,
+                has_bias=Bias is not None,
+                a_ck_dtype=op.a_element_dtype,
+                b_ck_dtype=op.b_element_dtype,
+                c_ck_dtype=op.c_element_dtype,
+                bias_ck_dtype=op.ds_element_dtypes[0] if Bias is not None else "",
+                a_torch_dtype=DTYPE_TO_CPP[X.get_layout().dtype],
+                b_torch_dtype=DTYPE_TO_CPP[W.get_layout().dtype],
+                c_torch_dtype=DTYPE_TO_CPP[Y.get_layout().dtype],
+                bias_torch_dtype=DTYPE_TO_CPP[Bias.get_layout().dtype] if Bias is not None else "",
+                a_layout=torch_layout_to_ck_layout(X.get_layout()),
+                b_layout=torch_layout_to_ck_layout(W.get_layout()),
+                c_layout=torch_layout_to_ck_layout(Y.get_layout()),
+                bias_layout=torch_layout_to_ck_layout(Bias.get_layout()) if Bias is not None else "",
+            )
+            res += runner_code
+
+        return res
 
     def _is_rcr_f16(self):
         X_meta, W_meta, Y_meta = (

@@ -140,6 +140,8 @@ def rocm_compile_command(
         options.append("-c")
     elif dst_file_ext == "so":
         options.append("-shared")
-    elif dst_file_ext != "exe":
+    elif dst_file_ext == "exe":
+        options.append("-DGENERATE_CK_STANDALONE_RUNNER")
+    else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
     return f"{compiler} {' '.join(options)} -o {dst_file} {src_file}"
