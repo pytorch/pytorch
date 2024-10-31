@@ -2059,14 +2059,21 @@ class PythonWrapperCodegen(CodeGen):
         reinterpret_view = self.codegen_reinterpret_view(
             old, new.get_size(), new.get_stride(), 0, self.wrapper_call
         )
-        return f"{self.declare_maybe_reference}{new_name} = {reinterpret_view}{del_line}  {self.comment} reuse"
+        move_begin = "std::move(" if V.graph.cpp_wrapper else ""
+        move_end = ")" if V.graph.cpp_wrapper else ""
+        return (
+            f"{self.declare_maybe_reference}{new_name} = {move_begin}{reinterpret_view}{move_end}{del_line}"
+            f"  {self.comment} reuse"
+        )
 
     def codegen_deferred_allocation(self, name, layout):
+        move_begin = "std::move(" if V.graph.cpp_wrapper else ""
+        move_end = ")" if V.graph.cpp_wrapper else ""
         self.writeline(
             DeferredLine(
                 name,
-                f"{self.declare_maybe_reference}{name} = {layout.view.codegen_reference()}{self.ending}  "
-                f"{self.comment} alias",
+                f"{self.declare_maybe_reference}{name} = {move_begin}{layout.view.codegen_reference()}{move_end}{self.ending}"
+                f"  {self.comment} alias",
             )
         )
 
