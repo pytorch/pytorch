@@ -7,7 +7,6 @@
 // applies to other files under torch/csrc/inductor/aoti_runtime/.
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 
-
 namespace torch::aot_inductor {
 
 inline void delete_xpu_guard(void* ptr) {
