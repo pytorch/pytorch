@@ -1,12 +1,11 @@
-from torch.utils._ordered_set import OrderedSet
 ignored = set()  # noqa: set_linter
-a = OrderedSet()
+a = set()
 b = 'set()'
-c = OrderedSet
+c = set
 ignored = set()  # noqa: set_linter
 d = c.set
 f = (
-   OrderedSet(
+   set(
    )
 )
 ignored = (
@@ -26,4 +25,6 @@ class A:
 set = A().set  # Also gets ignored!
 
 good = {}
-bad = {1}  # TODO: Should get caught
+replace1 = {1}
+replace2 = {1, 2}
+replace3 = {'a': {2, 3}, 'b': {i for i in range(3)}}

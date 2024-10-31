@@ -1,23 +1,23 @@
 from __future__ import annotations
 
-import argparse
 import dataclasses as dc
 import json
 import sys
 import token
-from argparse import Namespace
+from argparse import ArgumentParser, Namespace
 from functools import cached_property
 from pathlib import Path
 from tokenize import generate_tokens, TokenInfo
 from typing import Any, Iterator, Sequence
 
 
-IMPORT_LINE = "from torch.utils._ordered_set import OrderedSet\n"
-DEBUG = False
-
-ERROR = "Builtin `set` is deprecated"
-
-CONFIG_FILE = "setlint.json"
+BRACKETS = {
+    "{": "}",
+    "(": ")",
+    "[": "]",
+}
+BRACKETS_INV = {j: i for i, j in BRACKETS.items()}
+CFG_FILE = ".set_linter.json"
 EMPTY_TOKENS = {
     token.COMMENT,
     token.DEDENT,
@@ -26,28 +26,26 @@ EMPTY_TOKENS = {
     token.NEWLINE,
     token.NL,
 }
-
-BRACKETS = {
-    "{": "}",
-    "(": ")",
-    "[": "]",
-}
-BRACKETS_INV = {j: i for i, j in BRACKETS.items()}
-
+ERROR = "Builtin `set` is deprecated"
+IMPORT_LINE = "from torch.utils._ordered_set import OrderedSet\n"
 OMIT = "# noqa: set_linter"
 
 
 def main() -> None:
-    args = get_args(CONFIG_FILE)
+    args = get_args(cfg_file=CFG_FILE)
     if not (python_files := resolve_python_files(args.files, args.exclude)):
         sys.exit("No files selected")
 
+    errors = 0
     for f in python_files:
-        error_code = lint_file(f, args)
-        sys.exit(error_code)
+        errors += lint_file(f, args)
+    sys.exit(errors)
 
 
 def lint_file(path: Path, args: Namespace) -> int:
+    """Lint a file, perhaps rewrite it if one of the fix args is turned on,
+    return the number of lint errors remaining in the file."""
+
     def source_line(lineno: Any, text: Any = None) -> None:
         if text is None:
             lineno = text = ""
@@ -57,30 +55,40 @@ def lint_file(path: Path, args: Namespace) -> int:
         print(path, "Reading")
 
     pl = PythonLines(path.read_text())
-    if not pl.sets or pl.braced_sets:
+    errors: tuple[int, ...] = len(pl.braced_sets), len(pl.sets)
+    if not any(errors):
         if args.verbose:
             print(path, "OK")
         return 0
 
-    if not args.fix:
-        return len(pl.sets) + len(pl.braced_sets)
+    if any(fix_counts := pl.fix_all_tokens(args)):
+        with path.open("w") as fp:
+            fp.writelines(pl.lines)
 
-    fix_set_tokens(pl, args.add_any)
-    with path.open("w") as fp:
-        fp.writelines(pl.lines)
+        errors = tuple(e - f for e, f in zip(errors, fix_counts))
+        count = sum(fix_counts)
+        print(f"{path}: Fixed {count} error{'s' * (count != 1)}")
+    else:
+        count = 0
 
-    count = len(pl.sets)
-    print(f"{path}: Fixed {count} error{'s' * (count != 1)}")
+    if not (any(errors) or args.verbose):
+        return 0
 
-    if not args.verbose:
-        return len(pl.braced_sets)
+    # Now print any tokens that are sets in context of the original file.
+    if args.verbose:
+        error_tokens = [b[0] for b in pl.braced_sets] + pl.sets
+    elif errors[0]:
+        error_tokens = [b[0] for b in pl.braced_sets]
+    else:
+        assert errors[1]
+        error_tokens = pl.sets
+
+    error_tokens.sort(key=lambda t: t.start)
 
     padded = [None] * ErrorLines.BEFORE + pl.lines + [None] * ErrorLines.AFTER
     padded_line = list(enumerate(padded))
 
-    errors = pl.sets + [b[0] for b in pl.braced_sets]
-    errors.sort(key=lambda t: t.start)
-    for t in errors:
+    for t in error_tokens:
         print()
         (line, start), (line2, end) = t.start, t.end
 
@@ -97,6 +105,8 @@ def lint_file(path: Path, args: Namespace) -> int:
         for j, text in after:
             source_line(j + line - ErrorLines.BEFORE, text)
         return len(pl.braced_sets)
+
+    return count
 
 
 class ErrorLines:
@@ -175,18 +185,18 @@ class TokenLine:
         if begin + 1 == end or self.tokens[begin].string != "{":
             return False
         i = begin + 1
-        is_set = False
+        empty = True
         while i < end:
             t = self.tokens[i]
-            if t.type == token.OP and t.string == ":":
+            if t.type == token.OP and t.string in (":", "**"):
                 return False
             if brace_end := self.bracket_pairs.get(i):
                 # Skip to the end of a subexpression
-                i = brace_end + 1
+                i = brace_end
             elif t.type not in EMPTY_TOKENS:
-                is_set = True
+                empty = False
             i += 1
-        return is_set
+        return not empty
 
 
 class PythonLines:
@@ -201,8 +211,12 @@ class PythonLines:
     def __init__(self, contents: Path | str) -> None:
         text = contents if isinstance(contents, str) else contents.read_text()
         self.lines = text.splitlines(keepends=True)
+        self.reparse()
+
+    def reparse(self) -> None:
+        # Call this after self.lines has changed
         self.tokens = list(generate_tokens(iter(self.lines).__next__))
-        self.token_lines = list(split_into_token_lines(self.tokens))
+        self.token_lines = list(self._split_into_token_lines())
         self.omitted = OmittedLines(self.lines)
 
         sets = [t for tl in self.token_lines for t in tl.sets]
@@ -211,68 +225,86 @@ class PythonLines:
         braced_sets = [t for tl in self.token_lines for t in tl.braced_sets]
         self.braced_sets = [t for t in braced_sets if not self.omitted(t)]
 
+    def _split_into_token_lines(self) -> Iterator[TokenLine]:
+        token_line = TokenLine([])
 
-def split_into_token_lines(tokens: Sequence[TokenInfo]) -> Iterator[TokenLine]:
-    token_line = TokenLine([])
+        for t in self.tokens:
+            if t.type != token.ENDMARKER:
+                token_line.tokens.append(t)
+                if t.type == token.NEWLINE:
+                    yield token_line
+                    token_line = TokenLine([])
 
-    for t in tokens:
-        if t.type != token.ENDMARKER:
-            token_line.tokens.append(t)
-            if t.type == token.NEWLINE:
-                yield token_line
-                token_line = TokenLine([])
+        if token_line.tokens:
+            yield token_line
 
-    if token_line.tokens:
-        yield token_line
+    def fix_all_tokens(self, args: Namespace) -> tuple[int, int]:
+        ordered_set = "OrderedSet[Any]" if args.add_any else "OrderedSet"
+        brace_count = set_count = 0
 
+        if args.brace_fix:
+            self.fix_braced_sets(ordered_set)
+            brace_count = len(self.braced_sets)
 
-def fix_set_tokens(pl: PythonLines, add_any: bool = False) -> None:
-    if pl.sets:
-        fix_tokens(pl, add_any)
-        add_import(pl)
+        if args.set_fix:
+            if brace_count:
+                self.reparse()  # The tokens will have moved
+            self.fix_set_tokens(ordered_set)
+            set_count = len(self.sets)
 
+        count = brace_count, set_count
+        if any(count):
+            self.add_import()
+        return count
 
-def fix_tokens(pl: PythonLines, add_any: bool) -> None:
-    ordered_set = "OrderedSet[Any]" if add_any else "OrderedSet"
+    def replace_token(self, t: TokenInfo, rep: str, length: int) -> None:
+        assert isinstance(rep, str), str(rep)
+        (lineno, start), (line2, end) = t.start, t.end
+        assert lineno == line2
+        assert end - start == length
 
-    for t in sorted(pl.sets, reverse=True, key=lambda t: t.start):
-        (start_line, start_col), (end_line, end_col) = t.start, t.end
-        assert start_line == end_line
-        line = pl.lines[start_line - 1]
+        line = self.lines[lineno - 1]
+        a, _, c = line[:start], line[start:end], line[end:]
+        self.lines[lineno - 1] = f"{a}{rep}{c}"
 
-        a, b, c = line[:start_col], line[start_col:end_col], line[end_col:]
-        assert b in ("set", "Set")
-        pl.lines[start_line - 1] = f"{a}{ordered_set}{c}"
+    def fix_set_tokens(self, ordered_set: str) -> None:
+        for t in sorted(self.sets, reverse=True, key=lambda t: t.start):
+            self.replace_token(t, ordered_set, 3)
 
+    def fix_braced_sets(self, ordered_set: str) -> None:
+        # NOTE: This will not work right for sets inside other sets on one line!
+        # But this is rare...
+        for t in sorted(self.braced_sets, reverse=True, key=lambda t: t[0].start):
+            first, last = t[0], t[-1]
+            rep = f"{ordered_set}(["
+            self.replace_token(last, "])", 1)
+            self.replace_token(first, rep, 1)
 
-def add_import(pl: PythonLines) -> None:
-    froms, comments, imports = [], [], []
+    def add_import(self) -> None:
+        froms, comments, imports = [], [], []
 
-    for token_line in pl.token_lines:
-        tokens = token_line.tokens
-        t = tokens[0]
-        if t.type == token.INDENT:
-            DEBUG and print("INDENT", tokens)
-            break
-        elif t.type == token.COMMENT:
-            DEBUG and print("COMMENT", tokens)
-            comments.append(tokens)
-        elif t.type == token.NAME and t.string in ("from", "import"):
-            DEBUG and print("import", tokens)
-            if any(i.type == token.NAME and i.string == "OrderedSet" for i in tokens):
-                return
-            elif t.string == "from":
-                froms.append(tokens)
-            else:
-                imports.append(tokens)
+        for token_line in self.token_lines:
+            tokens = token_line.tokens
+            t = tokens[0]
+            if t.type == token.INDENT:
+                break
+            elif t.type == token.COMMENT:
+                comments.append(tokens)
+            elif t.type == token.NAME and t.string in ("from", "import"):
+                if any(
+                    i.type == token.NAME and i.string == "OrderedSet" for i in tokens
+                ):
+                    return
+                elif t.string == "from":
+                    froms.append(tokens)
+                else:
+                    imports.append(tokens)
+
+        if section := froms or imports or comments:
+            insert_before = section[-1][-1].start[0] + 1
         else:
-            DEBUG and print("other", t)
-
-    if section := froms or imports or comments:
-        insert_before = section[-1][-1].start[0] + 1
-    else:
-        insert_before = 0
-    pl.lines.insert(insert_before, IMPORT_LINE)
+            insert_before = 0
+        self.lines.insert(insert_before, IMPORT_LINE)
 
 
 class OmittedLines:
@@ -287,26 +319,31 @@ class OmittedLines:
         return bool(self.omitted.intersection(lines_covered))
 
 
-def get_args(config_filename: str) -> argparse.Namespace:
-    args = make_parser().parse_args()
-    add_configs(args, config_filename)
+def get_args(argv: list[str] | None = None, cfg_file: str | None = None) -> Namespace:
+    args = make_parser().parse_args(argv)
+    if cfg_file:
+        add_configs(args, cfg_file)
+    if args.fix:
+        args.brace_fix = args.set_fix = True
     return args
 
 
-def make_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+def make_parser() -> ArgumentParser:
+    parser = ArgumentParser()
     add = parser.add_argument
 
     add("files", nargs="*", help="Files or directories to include")
     add("-a", "--add-any", action="store_true", help="Insert OrderedSet[Any]")
+    add("-b", "--brace-fix", action="store_true", help="Fix braced sets")
     add("-e", "--exclude", action="append", help="Files to exclude from the check")
-    add("-f", "--fix", default=None, action="store_true", help="Fix any issues")
-    add("-v", "--verbose", default=None, action="store_true", help="Print more info")
+    add("-f", "--fix", action="store_true", help="Fix all issues")
+    add("-s", "--set-fix", action="store_true", help="Fix set-sets")
+    add("-v", "--verbose", action="store_true", help="Print more info")
 
     return parser
 
 
-def add_configs(args: argparse.Namespace, filename: str) -> argparse.Namespace:
+def add_configs(args: Namespace, filename: str) -> Namespace:
     try:
         with open(filename) as fp:
             config = json.load(fp)

@@ -1,10 +1,16 @@
 from torch.utils._ordered_set import OrderedSet
+ignored = set()  # noqa: set_linter
 a = OrderedSet[Any]()
 b = 'set()'
 c = OrderedSet[Any]
+ignored = set()  # noqa: set_linter
 d = c.set
 f = (
    OrderedSet[Any](
+   )
+)
+ignored = (
+   set(  # noqa: set_linter
    )
 )
 e = """ set()
@@ -20,8 +26,6 @@ class A:
 set = A().set  # Also gets ignored!
 
 good = {}
-good = {1: 2}
-
-bad1 = {1}
-bad2 = {'hello: there', 2}
-bad3 = [{1: {i for i in range(5)}}]
+replace1 = {1}
+replace2 = {1, 2}
+replace3 = {'a': {2, 3}, 'b': {i for i in range(3)}}
