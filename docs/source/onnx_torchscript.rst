@@ -682,7 +682,7 @@ Q: Does ONNX support implicit scalar datatype casting?
   Scalars are exported as constant tensors.
   The exporter will figure out the right data type for scalars. In rare cases when it is unable
   to do so, you will need to manually specify the datatype with e.g. `dtype=torch.float32`.
-  If you see any errors, please [create a GitHub issue](https://github.com/pytorch/pytorch/issues).
+  If you see any errors, please `create a GitHub issue <https://github.com/pytorch/pytorch/issues>`_.
 
 Q: Are lists of Tensors exportable to ONNX?
 
