@@ -3492,8 +3492,7 @@ print(ret)
         self._test_copy(x, non_blocking=False)
 
         # Non-contiguous 1D tensor using a Fortran-ordered NumPy array
-        fortran_arr = np.asfortranarray(np.ones(10000000, dtype=np.uint8))
-        x = torch.from_numpy(fortran_arr[::2])  # Slice to make it non-contiguous
+x=torch.ones(1000000, dtype=torch.uint8)[::2]
         self.assertFalse(x.is_contiguous())
         self._test_copy(x, non_blocking=True)
         self._test_copy(x, non_blocking=False)
