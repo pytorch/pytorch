@@ -3228,9 +3228,10 @@ class AssociativeScanTests(TestCase):
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @requires_cuda
-    def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self, device):
+    def test_associative_scan_combine_fn_wrong_meta_in_combine_fn(self):
+        device = torch.device("cuda")
         B, N, C, H, W = 3, 3, 2, 3, 3
-        x = torch.randn(B, N, C, H, W, device=torch.device("cuda"))
+        x = torch.randn(B, N, C, H, W, device=device)
 
         def fct_wrong_dtype(x, y):
             return (x + y).to(torch.int64)
