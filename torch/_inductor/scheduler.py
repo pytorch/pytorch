@@ -77,7 +77,7 @@ class SchedulerDonatedBuffer:
     scheduler: Scheduler
     node: ir.DonatedBuffer
     users: List[NodeUser]
-    defining_op=None
+    defining_op: Optional[BaseSchedulerNode]
 
     def get_name(self) -> str:
         return self.node.get_name()
@@ -133,10 +133,16 @@ class SchedulerBuffer:
             hasattr(V.kernel, "args")
             and self.get_name() in V.kernel.inplace_update_buffers
         ):
+            input_buffer: Union[ir.DonatedBuffer, ir.Buffer]
+            input_buffer_name = V.kernel.inplace_update_buffers[self.get_name()]
+            if input_buffer_name in self.scheduler.name_to_donated_buffer:
+                input_buffer = self.scheduler.name_to_donated_buffer[
+                    input_buffer_name
+                ].node
+            else:
+                input_buffer = self.scheduler.name_to_buf[input_buffer_name].node
             V.graph.wrapper_code.codegen_inplace_reuse(
-                self.scheduler.name_to_buf[
-                    V.kernel.inplace_update_buffers[self.get_name()]
-                ].node,
+                input_buffer,
                 self.node,
             )
         else:
@@ -436,9 +442,7 @@ class BaseSchedulerNode:
                 if read.name in self.scheduler.name_to_donated_buffer:
                     input_buf = self.scheduler.name_to_donated_buffer[read.name]
                 else:
-                    input_buf = self.scheduler.name_to_buf.get(
-                        read.name
-                    )
+                    input_buf = self.scheduler.name_to_buf.get(read.name)
                 if (
                     input_buf
                     and V.graph.wrapper_code.can_reuse(input_buf, self)
@@ -446,8 +450,12 @@ class BaseSchedulerNode:
                 ):
                     # If the writers of input_buf are in the same FusedSchedulerNode as the current op, then there is
                     # no need to inplace.
-                    # TODO: why missing defining_op
-                    if input_buf.defining_op and input_buf.defining_op.get_name() in fused_nodes:
+                    # check if input_buf has defining_op since SchedulerNodatedBuffer is an input
+                    # and does not have defining_op
+                    if (
+                        input_buf.defining_op
+                        and input_buf.defining_op.get_name() in fused_nodes
+                    ):
                         continue
 
                     assert input_buf.users is not None
@@ -1791,8 +1799,9 @@ class Scheduler:
         self.available_buffer_names.update(V.graph.constants.keys())
         for node in self.nodes:
             node.prune_deps()
-
-        self.name_to_donated_buffer: Dict[str, SchedulerDonatedBuffer] = self.get_donated_buffer()
+        self.name_to_donated_buffer: Dict[
+            str, SchedulerDonatedBuffer
+        ] = self.get_donated_buffer()
         self.name_to_node: Dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
@@ -1880,13 +1889,14 @@ class Scheduler:
         name_to_donated_buf = {}
         for node in self.nodes:
             for read in node.read_writes.reads:
-                if read.name in V.graph.graph_inputs and isinstance(V.graph.graph_inputs[read.name].data.data, ir.DonatedBuffer):
-                    # breakpoint()
-                    # assert read.name not in name_to_donated_buf, f"donated buffer {read.name} should only be read once"
+                if read.name in V.graph.graph_inputs and isinstance(
+                    V.graph.graph_inputs[read.name].data.data, ir.DonatedBuffer  # type: ignore[attr-defined]
+                ):
                     name_to_donated_buf[read.name] = SchedulerDonatedBuffer(
                         self,
-                        V.graph.graph_inputs[read.name].data.data,
-                        [NodeUser(node, can_inplace=True, is_weak=False)]
+                        V.graph.graph_inputs[read.name].data.data,  # type: ignore[attr-defined]
+                        [NodeUser(node, can_inplace=True, is_weak=False)],
+                        defining_op=None,
                     )
         return name_to_donated_buf
 

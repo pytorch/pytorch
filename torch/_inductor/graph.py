@@ -992,7 +992,13 @@ class GraphLowering(torch.fx.Interpreter):
             sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
 
         tracing_context = torch._guards.TracingContext.try_get()
-        if self.is_backward and tracing_context is not None and tracing_context.fw_metadata and tracing_context.fw_metadata.bw_donated_idxs and self.placeholder_idx in tracing_context.fw_metadata.bw_donated_idxs:
+        if (
+            self.is_backward
+            and tracing_context is not None
+            and tracing_context.fw_metadata
+            and tracing_context.fw_metadata.bw_donated_idxs
+            and self.placeholder_idx in tracing_context.fw_metadata.bw_donated_idxs
+        ):
             tensor = TensorBox.create(
                 DonatedBuffer(
                     name=target,
