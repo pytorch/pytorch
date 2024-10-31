@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 1)
+SCHEMA_VERSION = (7, 4)
 TREESPEC_VERSION = 1
 
 
@@ -331,8 +331,8 @@ class GraphSignature:
 
 @dataclass
 class RangeConstraint:
-    min_val: Optional[int]
-    max_val: Optional[int]
+    min_val: int
+    max_val: int
 
 
 @dataclass

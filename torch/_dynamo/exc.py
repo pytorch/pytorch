@@ -3,7 +3,7 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import Any, cast, NoReturn, Optional, Tuple, TYPE_CHECKING
+from typing import Any, cast, Dict, List, NoReturn, Optional, Tuple, Type, TYPE_CHECKING
 
 import torch._guards
 
@@ -13,6 +13,8 @@ from .utils import counters
 
 if TYPE_CHECKING:
     from torch._guards import CompileId
+
+    from .symbolic_convert import InstructionTranslator
 
 
 def exportdb_error_message(case_name):
@@ -244,7 +246,13 @@ observed_exception_map = {
 }
 
 
-def raise_observed_exception(exc_type, tx, *, args=None, kwargs=None):
+def raise_observed_exception(
+    exc_type: Type[Exception],
+    tx: "InstructionTranslator",
+    *,
+    args: Optional[List[Any]] = None,
+    kwargs: Optional[Dict[str, Any]] = None,
+) -> NoReturn:
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
