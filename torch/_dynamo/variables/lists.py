@@ -553,6 +553,14 @@ class DequeVariable(CommonListMethodsVariable):
             self.items[:] = [args[0], *self.items]
             slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
+        if name == "insert" and len(args) > 0 and self.mutable_local:
+            assert len(args) == 2
+            assert not kwargs
+            if maxlen is not None and len(self.items) == maxlen:
+                raise_observed_exception(
+                    IndexError, tx, args=("deque already at its maximum size",)
+                )
+            result = super().call_method(tx, name, args, kwargs)
         else:
             result = super().call_method(tx, name, args, kwargs)
 

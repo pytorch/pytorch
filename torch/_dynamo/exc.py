@@ -215,7 +215,17 @@ class ObservedUserStopIteration(ObservedException):
             self.value = None
 
 
-class ObservedKeyError(ObservedException):
+class ObservedLookupError(ObservedException):
+    # A LookupError exception to be raised from inside Dynamo tracing. This can happen on __getitem__
+    pass
+
+
+class ObservedIndexError(ObservedLookupError):
+    # An IndexError exception to be raised from inside Dynamo tracing. This can happen on list __getitem__
+    pass
+
+
+class ObservedKeyError(ObservedLookupError):
     # A KeyError exception to be raised from inside Dynamo tracing. This can happen on dict __getitem__
     pass
 
@@ -227,17 +237,19 @@ class ObservedAttributeError(ObservedException):
 
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
+    LookupError: ObservedLookupError,
+    IndexError: ObservedIndexError,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,
 }
 
 
-def raise_observed_exception(e, tx):
+def raise_observed_exception(e, tx, args=None, kwargs=None):
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
-    exception_vt = BuiltinVariable(e).call_function(tx, [], {})
+    exception_vt = BuiltinVariable(e).call_function(tx, args or [], kwargs or {})
     tx.exn_vt_stack.append(exception_vt)
     raise observed_exception_map[e]
 
