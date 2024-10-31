@@ -863,6 +863,22 @@ class CPUReproTests(TestCase):
             (torch.randn(8),),
         )
 
+    def test_index_put(self):
+        # https://github.com/pytorch/pytorch/issues/138908
+        def fn(x, y):
+            x = x + 10
+            y[x] += y[x]
+            return y
+
+        x = torch.randint(-10, -9, (1, 2), dtype=torch.int64)
+        y = torch.randn((2, 32), dtype=torch.float32)
+        x_clone = x.clone()
+        y_clone = y.clone()
+        with torch.no_grad():
+            fn(x, y)
+            torch.compile(fn)(x_clone, y_clone)
+            self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
+
     def test_ModularIndexing_range_issue_103133(self):
         def fn(q, k):
             einsum = torch.einsum("bcxd,bcyd->bcxy", (q, k))
