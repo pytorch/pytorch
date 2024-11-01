@@ -75,7 +75,26 @@ class CKGemmTemplate(CKTemplate):
             return 0;
         }
         // run the kernel
-        float elapsed_time = invoker.Run(argument, StreamConfig{stream, /* time kernel */ false, /* log level */ kDEBUG_LOG});
+        #ifdef GENERATE_CK_STANDALONE_RUNNER
+        const auto stream_config = StreamConfig{
+            stream,
+            /* time kernel */ 1,
+            /* log level */ 1,
+            /* n_cold_iter */ 100,
+            /* n_hot_iter */ 100,
+            /* flush_l2_cache */ 1,
+            /* rotate_count */ 5};
+        #else
+        const auto stream_config = StreamConfig{stream, /* time kernel */ false, /* log level */ 0};
+        #endif
+
+        const float elapsed_time = invoker.Run(argument, stream_config);
+
+        #ifdef GENERATE_CK_STANDALONE_RUNNER
+        std::cout << "elapsed time: " << elapsed_time << " ms" << std::endl;
+        #else
+        (void)elapsed_time;
+        #endif
         return 0;
     } // kernel definition
     } // extern C
@@ -153,7 +172,7 @@ class CKGemmTemplate(CKTemplate):
         {% if has_bias %}
         d_m_n_device_buf.ToDevice(d_m_n.mData.data());
         {% endif %}
-        auto stream_config = StreamConfig{nullptr, true, 1};
+        const auto stream_config = StreamConfig{nullptr};
 
         {{kernel_name}}(
             static_cast<const AArgType*>(a_m_k_device_buf.GetDeviceBuffer()),
