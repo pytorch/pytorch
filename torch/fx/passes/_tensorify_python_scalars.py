@@ -97,7 +97,7 @@ def tensorify_python_scalars(
     import sympy
 
     knob = True
-    if ((env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None):
+    if (env := os.getenv("TENSORIFY_PYTHON_SCALARS")) is not None:
         if env in ("0", "FALSE"):
             knob = False
     else:

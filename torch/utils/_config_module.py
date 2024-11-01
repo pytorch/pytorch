@@ -17,13 +17,13 @@ from unittest import mock
 from torch._utils_internal import justknobs_check
 
 
-@dataclass(kw_only=True)
+@dataclass
 class Config:
     """Represents a config with richer behaviour than just a default value.
-::
-    i.e.
-    foo = Config(justknob="//foo:bar", default=False)
-    install_config_module(...)
+    ::
+        i.e.
+        foo = Config(justknob="//foo:bar", default=False)
+        install_config_module(...)
 
     This configs must be installed with install_config_module to be used
 
@@ -50,15 +50,28 @@ class Config:
             default behaviour. I.e. user overrides take preference.
     """
 
-    default: Any = None
+    default: Any = True
     justknob: Optional[str] = None
-    env_name_literal: bool = False
     env_name_default: Optional[str] = None
     env_name_force: Optional[str] = None
+
+    def __init__(
+        self,
+        default: Any = True,
+        justknob: Optional[str] = None,
+        env_name_default: Optional[str] = None,
+        env_name_force: Optional[str] = None,
+    ):
+        # python 3.9 does not support kw_only on the dataclass :(.
+        self.default = default
+        self.justknob = justknob
+        self.env_name_default = env_name_default
+        self.env_name_force = env_name_force
 
 
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+
 
 def _read_env_variable(name: str) -> Optional[bool]:
     value = os.environ.get(name)
@@ -67,6 +80,7 @@ def _read_env_variable(name: str) -> Optional[bool]:
     if value == "0":
         return False
     return None
+
 
 def install_config_module(module: ModuleType) -> None:
     """
