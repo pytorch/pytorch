@@ -4540,6 +4540,9 @@ def interpolate(  # noqa: F811
             "Anti-alias option is restricted to bilinear and bicubic modes and requires a 4-D tensor as input"
         )
 
+    # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
+    scale_factors = [float(f) if isinstance(f, torch.SymFloat) else f for f in scale_factors]
+
     if input.dim() == 3 and mode == "nearest":
         return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)
     if input.dim() == 4 and mode == "nearest":
