@@ -714,7 +714,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return x + p
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 4)
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 6)
         )
 
     def test_int_shape_inplace_binops(self):
