@@ -3361,11 +3361,17 @@ def index_put_impl_(self, indices, values, accumulate, check):
     def try_get_name(x):
         if isinstance(x, ir.TensorBox):
             x = x.data
+        if isinstance(x, ir.BaseView):
+            x = x.data
         if isinstance(x, ir.StorageBox):
             x = x.data
         return x.get_name() if isinstance(x, ir.Buffer) else None
 
     if try_get_name(self) in values.get_read_names():
+        # Fix issue: https://github.com/pytorch/pytorch/issues/138908
+        # When self and values have memory overlapping, indices may
+        # contain duplicate values, potentially causing incorrect results.
+        # To address this, store values in a temporary buffer in such cases.
         values.realize()
 
     # Dispatch to masked fill for single boolean index with single value
