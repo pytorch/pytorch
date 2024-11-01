@@ -34,7 +34,7 @@ from ..codecache import HalideCodeCache
 from ..ir import get_reduction_combine_fn
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..ops_handler import AddParenHandler, MockHandler
-from ..runtime.hints import HalideInputSpec, HalideMeta, ReductionHint
+from ..runtime.hints import HalideInputSpec, HalideMeta
 from ..utils import (
     get_bounds_index_expr,
     get_kernel_metadata,
@@ -59,8 +59,6 @@ from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
-    from torch.utils._ordered_set import OrderedSet
-
     from ..ops_handler import ReductionType, StoreMode
 
 log = logging.getLogger(__name__)
@@ -676,20 +674,9 @@ class HalideKernel(SIMDKernel):
     def __init__(
         self,
         *groups,
-        index_dtype: str,
-        mutations: Optional[OrderedSet[str]] = None,
-        pid_cache=None,
-        reduction_hint=ReductionHint.DEFAULT,
-        override_persistent_reduction=None,
+        **kwargs,
     ) -> None:
-        super().__init__(
-            *groups,
-            index_dtype=index_dtype,
-            mutations=mutations,
-            reduction_hint=reduction_hint,
-            pid_cache=pid_cache,
-            override_persistent_reduction=override_persistent_reduction,
-        )
+        super().__init__(*groups, **kwargs)
         # For halide, we just write directly to the body
         self.compute = self.body
         self.loads = self.body
@@ -710,6 +697,9 @@ class HalideKernel(SIMDKernel):
         # {"in_ptr0": ["in_ptr0_view0"], ...}
         self.buffer_aliases: Dict[str, List[str]] = defaultdict(list)
         self.has_indirect_indexing = False
+
+    def dtype_to_str(self, dtype: torch.dtype) -> str:
+        return halide_type(dtype)
 
     def create_cse_var(self, name, bounds=None, dtype=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
@@ -1657,9 +1647,6 @@ class HalideKernel(SIMDKernel):
 
 
 class HalideScheduling(SIMDScheduling):
-    int32_type = "hl.Int(32)"
-    # TODO(jansel): Halide doesn't actually support 64 bit indexing...
-    int64_type = "hl.Int(64)"
     kernel_type = HalideKernel  # type: ignore[arg-type,assignment]
 
     @classmethod
