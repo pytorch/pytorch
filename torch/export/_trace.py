@@ -1549,7 +1549,11 @@ def _export_to_aten_ir_make_fx(
         # graph, the node.meta here actually doesn't matter. But
         # we do this to make spec verifier happy.
         for node in gm.graph.nodes:
-            if node.op == "call_function" and len(node.users) == 0:
+            if (
+                node.op == "call_function"
+                and len(node.users) == 0
+                and "val" not in node.meta
+            ):
                 node.meta["val"] = None
 
         if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
