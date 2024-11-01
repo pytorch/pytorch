@@ -72,6 +72,7 @@ if(INTERN_BUILD_ATEN_OPS)
   # RowwiseScaled.cu requires sm90a flags
   if(USE_CUDA)
     set(ROWWISE_SCALED_MM_FILE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu")
+    set(ASYNC_MM_FILE "${CMAKE_CURRENT_LIST_DIR}/../torch/csrc/distributed/c10d/cuda/AsyncMM.cu")
 
     # Get existing arch flags
     torch_cuda_get_nvcc_gencode_flag(EXISTING_ARCH_FLAGS)
@@ -80,6 +81,8 @@ if(INTERN_BUILD_ATEN_OPS)
     if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0 AND
       EXISTING_ARCH_FLAGS MATCHES ".*compute_90.*")
       set_source_files_properties(${ROWWISE_SCALED_MM_FILE}
+        PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
+      set_source_files_properties(${ASYNC_MM_FILE}
         PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
     endif()
   endif()
