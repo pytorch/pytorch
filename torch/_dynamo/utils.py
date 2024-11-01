@@ -2187,7 +2187,12 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
 
     if not config.specialize_float:
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
-        args = tuple(float(arg) if isinstance(arg, torch.SymFloat) and arg.node.hint is not None else arg for arg in args)
+        args = tuple(
+            float(arg)
+            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+            else arg
+            for arg in args
+        )
 
     try:
         with tx.fake_mode, enable_python_dispatcher():
