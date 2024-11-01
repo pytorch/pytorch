@@ -505,17 +505,17 @@ class ConvertFrameAssert:
             # len keyword in LIST_LEN guard.
             return None
 
-        # is_ctx_manager = lambda x: (
-        #     type(x) is contextlib._GeneratorContextManager or
-        #     '_GeneratorContextManager' in str(type(x))
-        # )
+        is_ctx_manager = lambda x: (
+            type(x) is contextlib._GeneratorContextManager or
+            '_GeneratorContextManager' in str(type(x))
+        )
 
-        # if frame.f_code.co_name in ('__init__', '__enter__', '__exit__') and \
-        # if frame.f_code.co_name in ('__enter__',) and \
-        #         'self' in frame.f_locals.keys() and \
-        #         is_ctx_manager(frame.f_locals['self']):
-        #     print(f'skipping {frame.f_code.co_name=}')
-        #     return torch._C._dynamo.eval_frame.skip_code_recursive_flag
+        if frame.f_code.co_name == '__enter__' and \
+            any(is_ctx_manager(a) for a in frame.f_locals.values()):
+            # ctx = next(a for a in frame.f_locals.values() if is_ctx_manager(a))
+            # skip_code(frame.f_code)
+            # skip_code(ctx.gen.gi_frame.f_code)
+            return torch._C._dynamo.eval_frame.skip_code_recursive_flag
 
         if not has_tensor_in_frame(frame):
             return None
@@ -672,7 +672,7 @@ def _compile(
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()
             raise
-        except (exc.SpeculationRestartAnalysis, exc.SkipFrame, exc.SkipCodeRecursiveException):
+        except (exc.SpeculationRestartAnalysis, exc.SkipFrame):
             raise
         except Exception:
             if translation_validation_enabled():
@@ -1020,7 +1020,6 @@ def _compile(
                     ValidationException,
                     UncapturedHigherOrderOpError,
                     BisectValidationException,
-                    SkipCodeRecursiveException,
                 ),
             ):
                 raise
@@ -1274,9 +1273,6 @@ class ConvertFrame:
                             exc_info=True,
                         )
 
-            if isinstance(e, SkipCodeRecursiveException):
-                return torch._C._dynamo.eval_frame.skip_code_recursive_flag
-
             if not config.suppress_errors and not soft_fail:
                 raise
 
@@ -1295,8 +1291,6 @@ class ConvertFrame:
 
             # If we encounter SkipCodeRecursiveException, return skip_code_recursive_flag
             # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
-            # Code below will never be reached because the raise above will re-raise
-            # any dynamo exception
             if isinstance(e, SkipCodeRecursiveException):
                 return torch._C._dynamo.eval_frame.skip_code_recursive_flag
             elif isinstance(e, CacheLimitExceeded):
