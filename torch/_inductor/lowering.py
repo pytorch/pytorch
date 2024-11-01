@@ -3366,7 +3366,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
         return x.get_name() if isinstance(x, ir.Buffer) else None
 
     if try_get_name(self) in values.get_read_names():
-        return index_put_fallback(self, indices, values, accumulate)
+        values.realize()
 
     # Dispatch to masked fill for single boolean index with single value
     if (
