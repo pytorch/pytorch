@@ -725,6 +725,11 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
 
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeStream();
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<
+            ProcessGroupNCCL::WorkNCCL>::unsafe_reclaim_from_nonowning(this));
+  }
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
@@ -1058,7 +1063,7 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   const auto key = getKeyFromDevice(device);
   LOG(INFO) << logPrefix() << "Eagerly connecting nccl backend with device "
             << device;
-  getNCCLComm(key, device, OpType::ALLREDUCE);
+  initNCCLComm(key, device, OpType::ALLREDUCE);
 }
 
 bool ProcessGroupNCCL::useNonblocking() {
@@ -1104,7 +1109,11 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
             << device << ", key " << key << ", i am " << this;
   bool useNb = useNonblocking();
   options_->config.blocking = useNb ? 0 : 1;
-  auto comm = getNCCLComm(key, device, OpType::ALLREDUCE);
+  auto comm = getNCCLComm(key);
+  if (comm == nullptr) {
+    LOG(ERROR) << logPrefix()
+               << "No parent communicator exists for nocolor split";
+  }
   NCCLComm::split(
       comm.get(),
       NCCL_SPLIT_NOCOLOR,
@@ -2301,7 +2310,7 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   ncclCommDevIdxMapMutex.unlock();
 }
 
-std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
+std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     const std::string& deviceKey,
     at::Device& device,
     OpType opType,
@@ -2325,14 +2334,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 
   usedDeviceIdxs_.insert(device.index());
-
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (devNCCLCommMap_.find(deviceKey) != devNCCLCommMap_.end()) {
-      // Reuse the cached communicator if there is one.
-      return devNCCLCommMap_[deviceKey];
-    }
-  }
 
   // NCCL communicator not cached, create a new entry
   std::shared_ptr<NCCLComm> ncclComm;
@@ -2540,8 +2541,17 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   it = devNCCLCommMap_.find(deviceKey);
   TORCH_INTERNAL_ASSERT(
       it != devNCCLCommMap_.end(), "Communicators not populated in cache!");
-
   return it->second;
+}
+
+std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
+    const std::string& deviceKey) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (devNCCLCommMap_.find(deviceKey) != devNCCLCommMap_.end()) {
+    // Reuse the cached communicator if there is one.
+    return devNCCLCommMap_[deviceKey];
+  }
+  return nullptr;
 }
 
 uint64_t ProcessGroupNCCL::getCommSplitCounter() const {
@@ -2882,7 +2892,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   op_id_++;
 
   const auto key = getKeyFromDevice(device);
-  auto ncclComm = getNCCLComm(key, device, opType);
+  std::shared_ptr<NCCLComm> ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    ncclComm = initNCCLComm(key, device, opType);
+  }
 
   if (coalescing_state_ & CoalActive) {
     if ((coalescing_state_ & CoalColl) == 0) {
@@ -3074,7 +3087,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   op_id_++;
 
   const auto key = getKeyFromDevice(device);
-  auto ncclComm = getNCCLComm(key, device, opType);
+  std::shared_ptr<NCCLComm> ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    ncclComm = initNCCLComm(key, device, opType);
+  }
 
   if (coalescing_state_ & CoalActive) {
     coalescing_state_ |= CoalColl;
@@ -3299,7 +3315,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // coalesced or individual
   op_id_++;
 
-  auto ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
+  std::shared_ptr<NCCLComm> ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    ncclComm = initNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
+  }
 
   if (coalescing_state_ & CoalActive) {
     // Bump  seqP2P_ once per coalesced group, not once per individual op.

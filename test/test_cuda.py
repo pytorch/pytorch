@@ -31,7 +31,6 @@ from torch.cuda._memory_viz import (
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
-    _get_torch_cuda_version,
     TEST_CUDNN,
     TEST_MULTIGPU,
 )
@@ -63,6 +62,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     serialTest,
+    setBlasBackendsToDefaultFinally,
     skipCUDAMemoryLeakCheckIf,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
@@ -417,19 +417,23 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertEqual(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
-    @unittest.skipIf(
-        TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "temporarily disabled for async"
-    )
-    @unittest.skipIf(
-        _get_torch_cuda_version() >= (12, 2),
-        "skipped as explicit workspace allocation is removed",
-    )
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
+    @setBlasBackendsToDefaultFinally
     def test_cublas_workspace_explicit_allocation(self):
+        torch.backends.cuda.preferred_blas_library("cublas")
         a = torch.randn(7, 7, device="cuda", requires_grad=False)
-        default_workspace_size = 4096 * 2 * 1024 + 16 * 8 * 1024  # :4096:2:16:8
-        # different size (32 MiB) expected on Hopper GPU
-        if torch.cuda.get_device_capability() == (9, 0):
-            default_workspace_size = 4096 * 8 * 1024
+        if torch.version.hip:
+            default_workspace_size = 1024 * 32 * 1024  # :1024:32  32MiB
+            # different size (128 MiB) expected on MI300 GPU
+            if torch.cuda.get_device_capability() >= (9, 4):
+                default_workspace_size = 1024 * 128 * 1024  # :1024:128
+        else:
+            default_workspace_size = (
+                4096 * 2 * 1024 + 16 * 8 * 1024
+            )  # :4096:2:16:8  8MiB
+            # different size (32 MiB) expected on Hopper GPU
+            if torch.cuda.get_device_capability() == (9, 0):
+                default_workspace_size = 4096 * 8 * 1024
 
         def check_workspace_size(inp):
             torch._C._cuda_clearCublasWorkspaces()
@@ -1919,7 +1923,9 @@ exit(2)
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     @serialTest()
+    @setBlasBackendsToDefaultFinally
     def test_repeat_graph_capture_cublas_workspace_memory(self):
+        torch.backends.cuda.preferred_blas_library("cublas")
         (x, y, z) = 1024, 512, 64
         a = torch.rand((x, y), device="cuda")
         b = torch.rand((y, z), device="cuda")
@@ -4538,13 +4544,18 @@ class TestMemPool(TestCase):
         # holds a reference
         self.assertEqual(pool.use_count(), 1)
 
-        # no allocations happened yet, so called_dummy_alloc should be 0
+        # no allocations happened yet, so called_dummy_alloc and
+        # called_dummy_free should be 0
         alloc_lib = ctypes.CDLL(dummy_allocator)
         called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
         self.assertEqual(called_dummy_alloc.value, 0)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        nelem_1mb = 1024 * 1024 // 4
 
         with torch.cuda.use_mem_pool(pool):
-            out_0 = torch.randn(1, device="cuda")
+            out_0 = torch.randn(nelem_1mb, device="cuda")
 
             # pool's use count should be 2 at this point as use_mem_pool
             # holds a reference
@@ -4557,6 +4568,32 @@ class TestMemPool(TestCase):
         # called_dummy_alloc should be 123 if dummy_alloc was used to allocate
         # out tensor
         self.assertEqual(called_dummy_alloc.value, 123)
+
+        with torch.cuda.use_mem_pool(pool):
+            # pool should have 1 segment since we made a small allocation (1 MB)
+            # above and so the CUDACachingAllocator packed it into a 2 MB buffer
+            self.assertEqual(len(pool.snapshot()), 1)
+
+            out_1 = torch.randn(nelem_1mb, device="cuda")
+
+            # pool should still have 1 segment since we made another small allocation
+            # (1 MB) that got packed into the existing 2 MB buffer
+            self.assertEqual(len(pool.snapshot()), 1)
+
+            out_2 = torch.randn(nelem_1mb, device="cuda")
+
+            # pool now should have 2 segments since the CUDACachingAllocator had
+            # to make a new 2 MB buffer to accomodate out_2
+            self.assertEqual(len(pool.snapshot()), 2)
+
+        del out_0, out_1, out_2
+
+        # pool's destructor calls emptyCache()
+        del pool
+
+        # called_dummy_free should be 321 if dummy_free was used to deallocate
+        # out tensor
+        self.assertEqual(called_dummy_free.value, 321)
 
     def test_mempool_context(self):
         active_pool = torch.cuda.MemPoolContext.active_pool()
