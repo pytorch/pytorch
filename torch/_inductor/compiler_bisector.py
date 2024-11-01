@@ -97,8 +97,8 @@ class BisectionResult:
 
 class CompilerBisector:
     """
-    This class iteratively runs torch.compile backends (eager, aot_eager, inductor) to find the 
-    first backend that can repro an issue. 
+    This class iteratively runs torch.compile backends (eager, aot_eager, inductor) to find the
+    first backend that can repro an issue.
 
     Once it discovers the offending backend it will iteratively disable subsystems within the backend.
     For subsystems which are applied repeatedly, such as the number of post grad passes or number
@@ -108,7 +108,7 @@ class CompilerBisector:
     `TORCH_BISECT_BACKEND`, `TORCH_BISECT_SUBSYSTEM` and `TORCH_BISECT_MAX`.
 
     It also supports a CLI interface, although this is less well tested.
-    
+
     You must run python compiler_bisector.py [start | good | bad | end]
     """
 

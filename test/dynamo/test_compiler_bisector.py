@@ -6,10 +6,10 @@ from importlib import import_module
 
 import torch
 import torch._prims_common as utils
-from torch._inductor.test_case import TestCase
 from torch._dynamo.utils import preserve_rng_state
 from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
+from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
