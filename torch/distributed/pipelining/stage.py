@@ -173,6 +173,16 @@ class _PipelineStageBase(ABC):
                 f"Pipeline group size {self.group_size} cannot be larger than number of stages {self.num_stages}"
             )
 
+        def stage_global_rank(peer_rank):
+            return (
+                peer_rank
+                if self.group is None
+                else dist.get_global_rank(self.group, peer_rank)
+            )
+
+        self.prev_rank = stage_global_rank((self.group_rank - 1) % self.group_size)
+        self.next_rank = stage_global_rank((self.group_rank + 1) % self.group_size)
+
         # Run time states
         self._outputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
         # map microbatch ID to list of forward tensor args
@@ -1446,16 +1456,6 @@ class PipelineStage(_PipelineStageBase):
 
         # these are the buffers used in backwards send/recv, they are allocated later
         self.outputs_grad: List[torch.Tensor] = []
-
-        def stage_global_rank(peer_rank):
-            return (
-                peer_rank
-                if self.group is None
-                else dist.get_global_rank(self.group, peer_rank)
-            )
-
-        self.prev_rank = stage_global_rank((self.group_rank - 1) % self.group_size)
-        self.next_rank = stage_global_rank((self.group_rank + 1) % self.group_size)
 
         dbg_str = (
             f"Finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004

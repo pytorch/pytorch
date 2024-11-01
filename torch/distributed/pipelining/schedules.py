@@ -1041,6 +1041,70 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 "Simply stop passing it, and everything should still work fine."
             )
 
+    def initialize_stages(
+        self,
+        stage_initializer: Callable[[torch.nn.Module], None],
+        mode: str = "parallel",
+        initial_seed: int = 0,
+    ):
+        """
+        Call 'stage_initializer(stage.submod) once per stage owned by this schedule, but configure the RNG seeds before
+        doing so.
+
+        If mode is "parallel", RNG seed is configured once per Pipeline RANK to a value of 'initial_seed' + 'PP RANK'.
+
+        If mode is 'serial', stage 0 uses seed 'initial_seed', then the RNG state is read out after each stage init and
+        transferred to the rank holding the next stage and set before performing next stage init.  Note: when two stages
+        are colocated on the same rank (See Note: V-schedule) there is no need to transfer the RNG state.
+
+        Currently, supports CPU and CUDA RNG states.  Uses device index specified by the 'stage'.  In the future, we may
+        change how 'device' is passed in.
+        """
+        assert mode in ("parallel", "serial"), f"unsupported mode {mode}"
+
+        if mode == "parallel":
+            seed = initial_seed + self.rank
+            torch.manual_seed(seed)
+            logger.info("PP Rank %d using parallel init, seed=%d", self.rank, seed)
+
+        local_stage_indices = set({stage.stage_index for stage in self._stages})
+
+        for stage in self._stages:
+            next_stage_is_rank_local = stage.stage_index + 1 in local_stage_indices
+            prev_stage_is_rank_local = stage.stage_index - 1 in local_stage_indices
+            device = stage.device
+
+            # recv, set RNG seed
+            if mode == "serial":
+                if stage.is_first:
+                    torch.manual_seed(initial_seed)
+                elif not prev_stage_is_rank_local:
+                    # need to know the size/dtype of the state tensors so might as well get current state then overwrite
+                    state_cpu = torch.get_rng_state().to(device)
+                    state_cuda = torch.cuda.get_rng_state(device=device).to(device)
+                    torch.distributed.recv(
+                        state_cpu, src=stage.prev_rank, group=stage.group
+                    )
+                    torch.distributed.recv(
+                        state_cuda, src=stage.prev_rank, group=stage.group
+                    )
+                    torch.set_rng_state(state_cpu.cpu())
+                    torch.cuda.set_rng_state(state_cuda.cpu(), device=device)
+
+            # initalize
+            stage_initializer(stage.submod)
+
+            # send new RNG seed
+            if mode == "serial" and not next_stage_is_rank_local:
+                state_cpu = torch.get_rng_state().to(device)
+                state_cuda = torch.cuda.get_rng_state(device=device).to(device)
+                torch.distributed.send(
+                    state_cpu, dst=stage.next_rank, group=stage.group
+                )
+                torch.distributed.send(
+                    state_cuda, dst=stage.next_rank, group=stage.group
+                )
+
     def _initialize_stages(self, args: Tuple[Any, ...], kwargs):
         # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
         # or real value (if this stage and next stage are on the same device)
