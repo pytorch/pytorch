@@ -28,29 +28,58 @@ class Config:
     This configs must be installed with install_config_module to be used
 
     Precedence Order:
+        env_name_force: If set, this environment variable overrides everything
         user_override: If a user sets a value (i.e. foo.bar=True), that
-            has the highest precendance and is always respected
+            has precedence over everything after this.
+        env_name_default: If set, this environment variable will override everything
+            after this.
         justknob: If this pytorch installation supports justknobs, that will
             override defaults, but will not override the user_override precendence.
         default: This value is the lowest precendance, and will be used if nothing is
             set.
 
+    Environment Variables:
+        These are interpreted to be either "0" or "1" to represent true and false.
+
     Arguments:
         justknob: the name of the feature / JK. In OSS this is unused.
         default: is the value to default this knob to in OSS.
+        env_name_force: The environment variable to read that is a FORCE
+            environment variable. I.e. it overrides everything
+        env_name_default: The environment variable to read that changes the
+            default behaviour. I.e. user overrides take preference.
     """
 
     default: Any = True
     justknob: Optional[str] = None
+    env_name_default: Optional[str] = None
+    env_name_force: Optional[str] = None
 
-    def __init__(self, default: Any = True, justknob: Optional[str] = None):
+    def __init__(
+        self,
+        default: Any = True,
+        justknob: Optional[str] = None,
+        env_name_default: Optional[str] = None,
+        env_name_force: Optional[str] = None,
+    ):
         # python 3.9 does not support kw_only on the dataclass :(.
         self.default = default
         self.justknob = justknob
+        self.env_name_default = env_name_default
+        self.env_name_force = env_name_force
 
 
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+
+
+def _read_env_variable(name: str) -> Optional[bool]:
+    value = os.environ.get(name)
+    if value == "1":
+        return True
+    if value == "0":
+        return False
+    return None
 
 
 def install_config_module(module: ModuleType) -> None:
@@ -87,6 +116,7 @@ def install_config_module(module: ModuleType) -> None:
                     delattr(module, key)
             elif isinstance(value, Config):
                 config[name] = _ConfigEntry(value)
+
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -167,10 +197,19 @@ class _ConfigEntry:
     user_override: Any = _UNSET_SENTINEL
     # The justknob to check for this config
     justknob: Optional[str] = None
+    # environment variables are read at install time
+    env_value_force: Any = _UNSET_SENTINEL
+    env_value_default: Any = _UNSET_SENTINEL
 
     def __init__(self, config: Config):
         self.default = config.default
         self.justknob = config.justknob
+        if config.env_name_default is not None:
+            if (env_value := _read_env_variable(config.env_name_default)) is not None:
+                self.env_value_default = env_value
+        if config.env_name_force is not None:
+            if (env_value := _read_env_variable(config.env_name_force)) is not None:
+                self.env_value_force = env_value
 
 
 class ConfigModule(ModuleType):
@@ -202,8 +241,15 @@ class ConfigModule(ModuleType):
     def __getattr__(self, name: str) -> Any:
         try:
             config = self._config[name]
+
+            if config.env_value_force is not _UNSET_SENTINEL:
+                return config.env_value_force
+
             if config.user_override is not _UNSET_SENTINEL:
                 return config.user_override
+
+            if config.env_value_default is not _UNSET_SENTINEL:
+                return config.env_value_default
 
             if config.justknob is not None:
                 # JK only supports bools and ints
