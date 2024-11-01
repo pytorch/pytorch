@@ -2368,14 +2368,13 @@ class SubgraphTracer(fx.Tracer):
                 )
 
     # Lookup the proxy in current tracer for each symbol in expressions of s,
-    # We store the basic symbol to proxy mapping in bound_symbols when
-    # 1. we create_graph_input for inputs that have symbols in them (currently, tensor), or
-    # 2. lazy_bind_unbacked_symbols for unbacked symbol created by ops such as nonzero.
     # See Note [Auto lift basic free symbols when create_graph_input]
-    def lookup_bounded_symbols(self, s: torch.SymInt):
+    def lookup_bounded_symbols(
+        self, s: torch.SymInt
+    ) -> Tuple[Dict[sympy.Symbol, torch.fx.Proxy], Set[sympy.Symbol]]:
         free_symbols = s.node.expr.free_symbols
         if len(free_symbols) == 0:
-            return {}, {}
+            return {}, set()
 
         bounded = {}
         to_be_bound = set()
