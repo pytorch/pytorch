@@ -353,8 +353,9 @@ static void unfolded2d_copy_channels_last(
     int64_t x = 0;
     data_index_init(start, y, output_height, x, output_width);
 
-    for (const auto k C10_UNUSED: c10::irange(start, end)) {
-      scalar_t* dst = finput_data + y * output_width * kH * kW * n_input_plane + x * kH * kW * n_input_plane;
+    for (const auto k [[maybe_unused]] : c10::irange(start, end)) {
+      scalar_t* dst = finput_data + y * output_width * kH * kW * n_input_plane +
+          x * kH * kW * n_input_plane;
       const scalar_t* src = input_data;
 
       if (padW > 0 || padH > 0) {
@@ -445,7 +446,7 @@ void unfolded2d_copy_kernel(
 
 } // namespace
 
-REGISTER_DISPATCH(unfolded2d_copy_stub, &unfolded2d_copy_kernel);
-REGISTER_DISPATCH(unfolded2d_acc_stub, &unfolded2d_acc_kernel);
+REGISTER_DISPATCH(unfolded2d_copy_stub, &unfolded2d_copy_kernel)
+REGISTER_DISPATCH(unfolded2d_acc_stub, &unfolded2d_acc_kernel)
 
 } // namespace at::native
