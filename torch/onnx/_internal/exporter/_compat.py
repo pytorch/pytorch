@@ -26,6 +26,29 @@ def _signature(model) -> inspect.Signature:
     raise ValueError("model has no forward method and is not callable")
 
 
+def _rename_dynamic_shapes_with_model_inputs(
+    model,
+    *,
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any],
+    input_names: Sequence[str],
+) -> dict[str, Any] | tuple[Any] | list[Any]:
+    if isinstance(dynamic_shapes, (tuple, list)):
+        # It doesn not specify input names if it's a tuple
+        return dynamic_shapes
+
+    sig = _signature(model)
+    if len(input_names) != len(sig.parameters):
+        raise ValueError(
+            f"Number of input names ({len(input_names)}) does not match "
+            f"the number of model inputs ({len(sig.parameters)})"
+        )
+    renamed_dynamic_shapes = {}
+    for idx, param_name in enumerate(sig.parameters):
+        renamed_dynamic_shapes[param_name] = dynamic_shapes[input_names[idx]]
+
+    return renamed_dynamic_shapes
+
+
 def _from_dynamic_axes_to_dynamic_shapes(
     model,
     *,
@@ -100,6 +123,85 @@ def _from_dynamic_axes_to_dynamic_shapes(
     return dynamic_shapes_to_exported_program
 
 
+def _from_dynamic_shapes_to_dynamic_axes(
+    model,
+    *,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any],
+    input_names: Sequence[str] | None = None,
+) -> dict[str, Any] | None:
+    """
+    Converts dynamic_shapes into dynamic_axes by removing torch.export.Dim wrapping
+    and converting to list or dict form based on whether dimension names are present.
+
+    dynamic_shapes examples:
+    (1) dynamic_shapes = {"x": {0: Dim("my_custom_axis_name_1")}, "y": {1: Dim("my_custom_axis_name_2")}}
+    (2) dynamic_shapes = ({0: Dim("my_custom_axis_name_1"}, {1: Dim("my_custom_axis_name_2")})
+
+    these will be converted to dynamic_axes respectively:
+    (1) dynamic_axes = {"x": {0: "my_custom_axis_name_1"}, "y": {1: "my_custom_axis_name_2"}}
+    (2) dynamic_axes = {"x": [0], "y": [1]}
+    """
+
+    # 1. if dynamic shapes is dict, use its keys as input names, as
+    #    it is already corrected by `_rename_dynamic_shapes_with_model_inputs`
+    if isinstance(dynamic_shapes, dict):
+        dynamic_axes = {}
+        for input_name, axes in dynamic_shapes.items():
+            assert (
+                isinstance(axes, dict) or axes is None
+            ), f"dynamic_shapes value must be either a dict or None, but got {type(axes)}"
+            if axes is None:
+                continue
+            converted_axes = {}
+            for axis, dim in axes.items():
+                assert isinstance(dim, torch.export.Dim) and hasattr(
+                    dim, "__name__"
+                ), f"dynamic shape: {input_name} has a dimension without a name"
+                converted_axes[axis] = dim.__name__
+            dynamic_axes[input_name] = converted_axes
+        return dynamic_axes
+
+    # 2. if dynamic shapes is tuple, use input names and model inputs to assign axes
+    if isinstance(dynamic_shapes, (tuple, list)):
+        dynamic_axes = {}
+        if input_names is None:
+            input_names = []
+        sig = _signature(model)
+        # input_names should have the same length as dynamic_shapes
+        input_names = (
+            input_names
+            + list(sig.parameters)[
+                len(input_names) : len(dynamic_shapes) - len(input_names) + 1
+            ]
+        )
+        assert len(input_names) == len(dynamic_shapes), (
+            f"Number of input names ({len(input_names)}) should match "
+            f"the number of model inputs ({len(dynamic_shapes)})"
+        )
+        assert len(input_names) == len(dynamic_shapes), (
+            f"Number of input names ({len(input_names)}) should match "
+            f"the number of model inputs ({len(dynamic_shapes)})"
+        )
+        # input names are assigned in order
+        for input_name, axes in zip(input_names, dynamic_shapes):
+            assert (
+                isinstance(axes, dict) or axes is None
+            ), f"dynamic_shapes value must be either a dict or None, but got {type(axes)}"
+            if axes is None:
+                continue
+            converted_axes = {}
+            for axis, dim in axes.items():
+                assert isinstance(dim, torch.export.Dim) and hasattr(
+                    dim, "__name__"
+                ), f"dynamic shape: {input_name} has a dimension without a name"
+                converted_axes[axis] = dim.__name__
+                dynamic_axes[input_name] = converted_axes
+        return dynamic_axes
+    raise TypeError(
+        f"dynamic_shapes must be either a dict or a tuple, but got {type(dynamic_shapes)}"
+    )
+
+
 def _get_torch_export_args(
     args: tuple[Any, ...],
     kwargs: dict[str, Any] | None,
@@ -157,6 +259,15 @@ def export_compat(
                 input_names=input_names,
                 output_names=set(output_names or ()),
             )
+        elif dynamic_shapes is not None and input_names is not None:
+            # NOTE: If dynamic_shapes and input_names are both provided, we need to check
+            # if dynamic_shapes is using input_names. If so, we need to internally change it to
+            # model inputs to be compatible with torch.export.export
+            dynamic_shapes = _rename_dynamic_shapes_with_model_inputs(
+                model,
+                dynamic_shapes=dynamic_shapes,
+                input_names=input_names,
+            )
 
     try:
         onnx_program = _core.export(
@@ -184,6 +295,12 @@ def export_compat(
                 )
             if f is None:
                 raise TypeError("f must be provided when fallback is enabled") from e
+            if dynamic_shapes is not None and dynamic_axes is None:
+                dynamic_axes = _from_dynamic_shapes_to_dynamic_axes(
+                    model,
+                    dynamic_shapes=dynamic_shapes,
+                    input_names=input_names,
+                )
             torch.onnx.utils.export(
                 model,  # type: ignore[arg-type]
                 args,
