@@ -193,6 +193,8 @@ _SYM_BOOL_OPS = {
     operator.ge,
     operator.lt,
     operator.gt,
+    operator.neg,
+    operator.pos,
     torch.sym_not,
 }
 
@@ -331,12 +333,12 @@ def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...]
     return artifact
 
 
-def _sympy_int_to_int(val: sympy.Expr, adjust: str):
+def _sympy_int_to_int(val: sympy.Expr, adjust: str) -> Optional[int]:
     # Convert simple sympy Integers into concrete int
     if val in (sympy.oo, int_oo):
-        return math.inf
+        return None
     if val in (-sympy.oo, -int_oo):
-        return -math.inf
+        return None
     if isinstance(val, sympy.Integer):
         return int(val)
 
@@ -355,8 +357,10 @@ def _sympy_int_to_int(val: sympy.Expr, adjust: str):
         raise RuntimeError(f"Got invalid adjustment {adjust}")
 
 
-def _int_to_sympy_int(val) -> sympy.Expr:
+def _int_to_sympy_int(val: Optional[int], default) -> sympy.Expr:
     # Convert concrete int into simple sympy Integers
+    if val is None:
+        return default
     if val == math.inf:
         return int_oo
     if val == -math.inf:
@@ -1699,6 +1703,13 @@ class GraphModuleDeserializer(metaclass=Final):
 
         elif isinstance(target, torch._ops.HigherOrderOperator):
             args, kwargs = self.deserialize_hoo_inputs(serialized_node.inputs)
+            metadata = self.deserialize_metadata(serialized_node.metadata)
+            for x in (*args, *kwargs.values()):
+                if isinstance(x, torch.fx.Node) and x.op == "get_attr":
+                    # this means that we have deserialized a graph argument, but
+                    # unfortunately the schema for it does not include metadata;
+                    # so we reuse the metadata of the HOP call for such arguments
+                    x.meta.update(metadata)
             # If HOP returns a single tensor, name the
             # newly-created node after it. This ensures that these tensor values
             # have names that are consistent with serialized.
@@ -1714,7 +1725,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 "call_function", target, args, kwargs, name
             )
             self.deserialize_outputs(serialized_node, fx_node)
-            fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
+            fx_node.meta.update(metadata)
 
         elif isinstance(target, (torch._ops.OpOverload, *_registered_extension_types())):
             # For convenience: if this node returns a single tensor, name the
@@ -1901,7 +1912,7 @@ class GraphModuleDeserializer(metaclass=Final):
                     lower = vr.lower
                     if vr.upper >= 2:  # max is >= 2, not sym bool range
                         lower = max(2, lower)
-                    self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
+                    self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower, -int_oo), vr.upper)
 
             if example_inputs is not None and len(example_inputs) > 0:
                 self.example_inputs = deserialize_torch_artifact(example_inputs)
@@ -2318,7 +2329,7 @@ class ExportedProgramDeserializer(metaclass=Final):
 
         symbol_name_to_range = {
             k: symbolic_shapes.ValueRanges(
-                _int_to_sympy_int(v.min_val), _int_to_sympy_int(v.max_val)
+                _int_to_sympy_int(v.min_val, -int_oo), _int_to_sympy_int(v.max_val, int_oo)
             )
             for k, v in exported_program.range_constraints.items()
         }
