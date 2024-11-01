@@ -1741,7 +1741,6 @@ class OutputGraph:
         self.tracing_context.clear()
         self.input_source_to_var.clear()
         self.unspec_variable_map.clear()
-        self.random_calls.clear()
         self.backward_state.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
