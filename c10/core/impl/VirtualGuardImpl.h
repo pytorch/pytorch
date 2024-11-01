@@ -20,6 +20,7 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   VirtualGuardImpl& operator=(const VirtualGuardImpl&) = default;
   VirtualGuardImpl(VirtualGuardImpl&&) noexcept = default;
   VirtualGuardImpl& operator=(VirtualGuardImpl&&) noexcept = default;
+  ~VirtualGuardImpl() override = default;
 
   DeviceType type() const override {
     return impl_->type();
