@@ -12,7 +12,7 @@ from torch._higher_order_ops.utils import (
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     UnsupportedAliasMutationException,
-    validate_lifted_arg_types,
+    validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
@@ -86,7 +86,7 @@ class FlexAttentionHOP(HigherOrderOperator):
         score_mod_other_buffers: Tuple = (),
         mask_mod_other_buffers: Tuple = (),
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        validate_lifted_arg_types(score_mod_other_buffers + mask_mod_other_buffers)
+        validate_subgraph_args_types(score_mod_other_buffers + mask_mod_other_buffers)
         return super().__call__(
             query,
             key,
@@ -126,7 +126,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
     ) -> Tuple[
         torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
     ]:
-        validate_lifted_arg_types(score_mod_other_buffers + mask_mod_other_buffers)
+        validate_subgraph_args_types(score_mod_other_buffers + mask_mod_other_buffers)
         return super().__call__(
             query,
             key,

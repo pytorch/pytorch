@@ -12,7 +12,7 @@ from torch._higher_order_ops.utils import (
     autograd_not_implemented,
     reenter_make_fx,
     UnsupportedAliasMutationException,
-    validate_lifted_arg_types,
+    validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -52,7 +52,7 @@ class WhileLoopOp(HigherOrderOperator):
                 f"{carried_inputs}"
             )
 
-        validate_lifted_arg_types(additional_inputs)
+        validate_subgraph_args_types(additional_inputs)
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 

@@ -16,7 +16,7 @@ from torch._higher_order_ops.utils import (
     reenter_make_fx,
     unique_graph_id,
     UnsupportedAliasMutationException,
-    validate_lifted_arg_types,
+    validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -231,7 +231,7 @@ class ScanOp(HigherOrderOperator):
 
     def __call__(self, combine_fn, init, xs, dim, reverse, additional_inputs):
         assert isinstance(additional_inputs, list), "additional_inputs must be a list."
-        validate_lifted_arg_types(additional_inputs)
+        validate_subgraph_args_types(additional_inputs)
         return super().__call__(combine_fn, init, xs, dim, reverse, additional_inputs)
 
 

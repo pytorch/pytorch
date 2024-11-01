@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import logging
+import warnings
 from typing import Any, Callable, List, Tuple, Union
 
 import torch
@@ -27,7 +28,7 @@ from torch._higher_order_ops.utils import (
     saved_tensors_and_symints,
     unique_graph_id,
     UnsupportedAliasMutationException,
-    validate_lifted_arg_types,
+    validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -58,7 +59,7 @@ class CondOp(HigherOrderOperator):
         super().__init__("cond")
 
     def __call__(self, pred, true_fn, false_fn, operands):
-        validate_lifted_arg_types(operands)
+        validate_subgraph_args_types(operands)
         return super().__call__(pred, true_fn, false_fn, operands)
 
 
@@ -147,10 +148,15 @@ def cond(
     )
 
     if isinstance(pred, (bool, int, float)):
-        log.warning(
-            "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
-            " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
-        )
+        # This is the non-strict export case. Strict export and torch.compile are
+        # handled above in dynamo.
+        if torch.compiler.is_compiling():
+            warnings.warn(
+                "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
+                " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
+                UserWarning,
+            )
+        # This is the eager case. We can just run the true or false branch.
         if pred:
             return true_fn(*operands)
         else:
