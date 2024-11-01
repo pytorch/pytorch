@@ -931,6 +931,28 @@ namespace {
             test_case,
             RESOLVE_OVERLOAD(filter_fmadd));
     }
+#if defined(CPU_CAPABILITY_NEON)
+    TEST(BitwiseFloatsAdditional, HalfToFloatFmadd) {
+        using vec = vhalf;
+        using VT = ValueType<vec>;
+
+        auto test_case = TestingCase<vec>::getBuilder()
+          .addDomain(CheckWithinDomains<VT>{
+              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
+              true, getDefaultTolerance<VT>()})
+          .setTestSeed(TestSeed());
+
+        test_ternary<vec>(
+            NAME_INFO(half_to_float_fmadd), RESOLVE_OVERLOAD(local_fmadd),
+            [](const vec& v0, const vec& v1, const vec& v2) {
+              const auto [v2_float0, v2_float1] = convert_half_float(v2);
+              const auto [result_float0, result_float1] = at::vec::fmadd(v0, v1, v2_float0, v2_float1);
+              return convert_float_half(result_float0, result_float1);
+            },
+            test_case,
+            RESOLVE_OVERLOAD(filter_fmadd));
+    }
+#endif
     template<typename vec, typename VT, int64_t mask>
     typename std::enable_if_t<(mask < 0 || mask> 255), void>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
