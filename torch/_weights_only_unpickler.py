@@ -169,6 +169,7 @@ def _get_allowed_globals():
         "torch.device": torch.device,
         "_codecs.encode": encode,  # for bytes
         "builtins.bytearray": bytearray,  # for bytearray
+        "builtins.set": set,  # for set
     }
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
@@ -291,6 +292,13 @@ class Unpickler:
                 elif type(inst) in _get_user_allowed_globals().values():
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
+                    elif hasattr(inst, "__slots__"):
+                        # if slots are defined, state will be a tuple (state, slotstate)
+                        state, slotstate = state
+                        for k, v in slotstate.items():
+                            setattr(inst, k, v)
+                        if state:
+                            inst.__dict__.update(state)
                     else:
                         inst.__dict__.update(state)
                 else:
