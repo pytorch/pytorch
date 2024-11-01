@@ -38,6 +38,9 @@ void initDynamoBindings(PyObject* torch) {
   if (dynamo == nullptr || PyModule_AddObject(torch, "_dynamo", dynamo) != 0) {
     throw python_error();
   }
+#ifdef Py_GIL_DISABLED
+  PyUnstable_Module_SetGIL(dynamo, Py_MOD_GIL_NOT_USED);
+#endif
 
   PyObject* eval_frame = torch_c_dynamo_eval_frame_init();
   if (eval_frame == nullptr ||
@@ -64,9 +67,10 @@ void initDynamoBindings(PyObject* torch) {
   auto m = py::handle(eval_frame).cast<py::module>();
 
   py::class_<CacheEntry>(m, "_CacheEntry")
-      .def_readonly("check_fn", &CacheEntry::check_fn)
+      .def_readonly("guard_manager", &CacheEntry::guard_manager)
       .def_readonly("code", &CacheEntry::code)
       .def_readonly("compile_id", &CacheEntry::compile_id)
+      .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
       .def_property_readonly("next", &CacheEntry::next);
 
   py::class_<ExtraState>(m, "_ExtraState")

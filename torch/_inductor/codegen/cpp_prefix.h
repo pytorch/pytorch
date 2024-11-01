@@ -28,7 +28,7 @@
 #include <c10/util/TypeCast.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE256)
 #define INDUCTOR_USE_VECTOR_TYPES() 1
 #else
 #define INDUCTOR_USE_VECTOR_TYPES() 0
@@ -459,7 +459,7 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
   case 4:
     return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
   }
-  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+  throw std::runtime_error("Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -481,7 +481,7 @@ inline at::vec::Vectorized<float> vec_shuffle_down(at::vec::Vectorized<float> x,
       return vec_t(_mm512_permutexvar_ps(
           _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
   }
-  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
+  throw std::runtime_error("Unhandled vec_shuffle_down value " + std::to_string(n));
 }
 #endif
 
@@ -537,7 +537,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::VectorizedN<scalar_t, 
 #endif
 
 
-template <typename T, typename U> inline typename std::common_type<T, U>::type mod(T a, U b) { return a % b; }
+template <typename T, typename U> inline typename std::common_type_t<T, U> mod(T a, U b) { return a % b; }
 template <> inline float mod(float a, float b) { return std::fmod(a, b); }
 template <> inline double mod(double a, double b) { return std::fmod(a, b); }
 
@@ -637,8 +637,8 @@ void atomic_add_vec(T *addr, at::vec::VectorizedN<int64_t, NI> index, at::vec::V
   static_assert(len <= at::vec::VectorizedN<T, NV>::size());
   __at_align__ std::array<T, len> tmpbuf;
   __at_align__ std::array<int64_t, len> tmpidx;
-  offset.store(tmpbuf.data());
-  index.store(tmpidx.data());
+  offset.store(tmpbuf.data(), len);
+  index.store(tmpidx.data(), len);
   for (int i = 0; i < len; i++){
     atomic_add(addr + tmpidx[i], tmpbuf[i]);
   }

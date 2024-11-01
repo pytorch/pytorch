@@ -733,8 +733,9 @@ struct HelperInterpBase {
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
 
-    for (const auto j C10_UNUSED : c10::irange(interp_size)) {
-      output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+    for ([[maybe_unused]] const auto j : c10::irange(interp_size)) {
+      output.emplace_back(
+          empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
       output.emplace_back(empty(new_shape, CPU(output_type)));
     }
   }
@@ -1047,8 +1048,9 @@ struct HelperInterpNearest : public HelperInterpBase {
     auto new_shape = std::vector<int64_t>(ndims, 1);
     new_shape[reshape_dim] = output_size;
 
-    for (const auto j C10_UNUSED : c10::irange(interp_size)) {
-      output.emplace_back(empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+    for ([[maybe_unused]] const auto j : c10::irange(interp_size)) {
+      output.emplace_back(
+          empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
       // Defines weights for consistency, but not used
       output.emplace_back(at::ones(new_shape, CPU(output_type)));
     }
@@ -2058,20 +2060,20 @@ void upsample_bicubic2d_aa_backward_kernel_impl(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(upsample_nearest1d_kernel, &upsample_nearest1d_kernel_impl);
-REGISTER_DISPATCH(_upsample_nearest_exact1d_kernel, &_upsample_nearest_exact1d_kernel_impl);
-REGISTER_DISPATCH(upsample_nearest2d_kernel, &upsample_nearest2d_kernel_impl);
-REGISTER_DISPATCH(_upsample_nearest_exact2d_kernel, &_upsample_nearest_exact2d_kernel_impl);
-REGISTER_DISPATCH(upsample_nearest3d_kernel, &upsample_nearest3d_kernel_impl);
-REGISTER_DISPATCH(_upsample_nearest_exact3d_kernel, &_upsample_nearest_exact3d_kernel_impl);
+REGISTER_DISPATCH(upsample_nearest1d_kernel, &upsample_nearest1d_kernel_impl)
+REGISTER_DISPATCH(_upsample_nearest_exact1d_kernel, &_upsample_nearest_exact1d_kernel_impl)
+REGISTER_DISPATCH(upsample_nearest2d_kernel, &upsample_nearest2d_kernel_impl)
+REGISTER_DISPATCH(_upsample_nearest_exact2d_kernel, &_upsample_nearest_exact2d_kernel_impl)
+REGISTER_DISPATCH(upsample_nearest3d_kernel, &upsample_nearest3d_kernel_impl)
+REGISTER_DISPATCH(_upsample_nearest_exact3d_kernel, &_upsample_nearest_exact3d_kernel_impl)
 
-REGISTER_DISPATCH(upsample_linear1d_kernel, &upsample_linear1d_kernel_impl);
-REGISTER_DISPATCH(upsample_bilinear2d_kernel, &upsample_bilinear2d_kernel_impl);
-REGISTER_DISPATCH(_upsample_bilinear2d_aa_kernel, &upsample_bilinear2d_aa_kernel_impl);
-REGISTER_DISPATCH(_upsample_bilinear2d_aa_backward_kernel, &upsample_bilinear2d_aa_backward_kernel_impl);
-REGISTER_DISPATCH(upsample_trilinear3d_kernel, &upsample_trilinear3d_kernel_impl);
+REGISTER_DISPATCH(upsample_linear1d_kernel, &upsample_linear1d_kernel_impl)
+REGISTER_DISPATCH(upsample_bilinear2d_kernel, &upsample_bilinear2d_kernel_impl)
+REGISTER_DISPATCH(_upsample_bilinear2d_aa_kernel, &upsample_bilinear2d_aa_kernel_impl)
+REGISTER_DISPATCH(_upsample_bilinear2d_aa_backward_kernel, &upsample_bilinear2d_aa_backward_kernel_impl)
+REGISTER_DISPATCH(upsample_trilinear3d_kernel, &upsample_trilinear3d_kernel_impl)
 
-REGISTER_DISPATCH(upsample_bicubic2d_kernel, &upsample_bicubic2d_kernel_impl);
-REGISTER_DISPATCH(_upsample_bicubic2d_aa_kernel, &upsample_bicubic2d_aa_kernel_impl);
-REGISTER_DISPATCH(_upsample_bicubic2d_aa_backward_kernel, &upsample_bicubic2d_aa_backward_kernel_impl);
+REGISTER_DISPATCH(upsample_bicubic2d_kernel, &upsample_bicubic2d_kernel_impl)
+REGISTER_DISPATCH(_upsample_bicubic2d_aa_kernel, &upsample_bicubic2d_aa_kernel_impl)
+REGISTER_DISPATCH(_upsample_bicubic2d_aa_backward_kernel, &upsample_bicubic2d_aa_backward_kernel_impl)
 } // namespace at::native
