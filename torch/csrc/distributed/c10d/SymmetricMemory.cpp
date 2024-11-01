@@ -71,12 +71,8 @@ static at::Tensor empty_strided_p2p_persistent(
         "is still active.");
   }
 
-  const size_t numel = std::accumulate(
-      size.begin(),
-      size.end(),
-      size_t(1),
-      // NOLINTNEXTLINE(modernize-use-transparent-functors)
-      std::multiplies<size_t>());
+  const size_t numel =
+      std::accumulate(size.begin(), size.end(), size_t(1), std::multiplies<>());
   const size_t element_size = c10::elementSize(dtype);
   const size_t alloc_size = numel * element_size;
 
@@ -159,12 +155,8 @@ at::Tensor empty_strided_p2p(
     return empty_strided_p2p_persistent(
         size, stride, dtype, device, group_name, *alloc_id);
   }
-  const size_t numel = std::accumulate(
-      size.begin(),
-      size.end(),
-      size_t(1),
-      // NOLINTNEXTLINE(modernize-use-transparent-functors)
-      std::multiplies<size_t>());
+  const size_t numel =
+      std::accumulate(size.begin(), size.end(), size_t(1), std::multiplies<>());
   const size_t element_size = c10::elementSize(dtype);
   const size_t alloc_size = numel * element_size;
 

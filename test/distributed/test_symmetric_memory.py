@@ -135,6 +135,17 @@ class SymmetricMemoryTest(MultiProcessTestCase):
             self.assertEqual(len(row), torch.cuda.device_count())
 
     @skipIfRocm
+    def test_large_alloc(self) -> None:
+        t = _SymmetricMemory.empty_strided_p2p(
+            (2 * 1024**3,),
+            (1,),
+            dtype=torch.uint8,
+            device=self.device,
+            group_name="0",
+        )
+        self.assertEqual(t.numel() * t.element_size(), 2 * 1024**3)
+
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     def test_empty_strided_p2p(self) -> None:
         self._init_process()
