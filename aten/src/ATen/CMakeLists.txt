@@ -577,7 +577,12 @@ if(USE_MPS)
         endforeach()
         air_to_metallib(kernels_basic.metallib ${AIR_BASIC})
         air_to_metallib(kernels_bfloat.metallib ${AIR_BFLOAT})
-        add_custom_target(metallibs DEPENDS kernels_basic.metallib kernels_bfloat.metallib)
+        add_custom_command(
+                          COMMAND echo "// $$(date)" > metallib_dummy.cpp
+                          DEPENDS kernels_basic.metallib kernels_bfloat.metallib
+                          OUTPUT metallib_dummy.cpp
+                          COMMENT "Updating metallibs timestamp")
+        add_custom_target(metallibs DEPENDS kernels_basic.metallib kernels_bfloat.metallib metallib_dummy.cpp)
     else()
         file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native/mps")
         foreach(SHADER ${native_mps_metal})
