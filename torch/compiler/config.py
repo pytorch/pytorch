@@ -18,30 +18,64 @@ from typing import Optional
 
 
 __all__ = [
-    "workflow_id",
+    "job_id",
+    "clone_job_id",
 ]
 
 
 # NB: Docblocks go UNDER variable definitions!  Use spacing to make the
 # grouping clear.
 
-workflow_id: Optional[str] = os.environ.get("TORCH_COMPILE_WORKFLOW_ID", None)
+# FB-internal note: you do NOT have to specify this explicitly specify this if
+# you run on MAST, we will automatically default this to
+# mast:MAST_JOB_NAME:MAST_JOB_VERSION.
+job_id: Optional[str] = os.environ.get("TORCH_COMPILE_JOB_ID", None)
 """
 Semantically, this should be an identifier that uniquely identifies, e.g., a
-training job  (e.g., at Meta, this would be both the MAST Job Name + MAST Job
-Version).  You might have multiple runs of the same job, e.g., if it was
-preempted or needed to be restarted.
+training job.  You might have multiple attempts of the same job, e.g., if it was
+preempted or needed to be restarted, but each attempt should be running
+substantially the same workload with the same distributed topology.  You can
+set this by environment variable with :envvar:`TORCH_COMPILE_JOB_ID`.
 
 Operationally, this controls the effect of profile-guided optimization related
-persistent state on the local filesystem.  PGO state can affect how we perform
-compilation across multiple invocations of PyTorch, e.g., the first time you
-run your program we may compile twice as we discover what inputs are dynamic,
-and then PGO will save this state so subsequent invocations only need to compile
-once, because they remember it is dynamic.  This profile information, however,
-is sensitive to what workload you are running, so we require you to tell us
-that two jobs are *related* (i.e., are the same workload) before we are willing
-to reuse this information.  So PGO is not enabled unless a valid job_id is
-available.
+persistent state.  PGO state can affect how we perform compilation across
+multiple invocations of PyTorch, e.g., the first time you run your program we
+may compile twice as we discover what inputs are dynamic, and then PGO will
+save this state so subsequent invocations only need to compile once, because
+they remember it is dynamic.  This profile information, however, is sensitive
+to what workload you are running, so we require you to tell us that two jobs
+are *related* (i.e., are the same workload) before we are willing to reuse
+this information.  Notably, PGO does nothing (even if explicitly enabled)
+unless a valid ``job_id`` is available.  In some situations, PyTorch can
+configured to automatically compute a ``job_id`` based on the environment it
+is running in.
+
+Profiles are always collected on a per rank basis, so different ranks may have
+different profiles.  If you know your workload is truly SPMD, you can run with
+:data:`torch._dynamo.config.enable_compiler_collectives` to ensure nodes get
+consistent profiles across all ranks.
+"""
+
+
+# FB-internal note: you can specify 'mast:MAST_JOB_NAME:MAST_JOB_VERSION' to
+# clone from a pre-existing MAST job's profile.  These names are only valid
+# for clone job ids, you cannot use them as base job id.
+clone_job_id: Optional[str] = os.environ.get("TORCH_COMPILE_CLONE_JOB_ID", None)
+"""
+If you have an existing profile at an old job ID, and you'd like to clone
+it into a new job ID, you can specify this to indicate that the profile for
+this job ID should be read and copied to your new job.  We guarantee not
+to write to this job ID (writes are only done to the actual job ID).  You can
+set this by environment variable with :envvar:`TORCH_COMPILE_CLONE_JOB_ID`.
+
+If you changed the topology of the job from the clone job ID to the new job,
+it is also recommended to run with
+:data:`torch._dynamo.config.enable_compiler_collectives`
+(:envvar:`TORCH_COMPILER_COLLECTIVES`) so that all nodes get consistent
+profiles, since any node that didn't exist in the previous job will get a
+blank profile; profile divergence can potentially cause a NCCL timeout as
+inconsistent profiles can result in some ranks recompiling while others do
+not.
 """
 
 

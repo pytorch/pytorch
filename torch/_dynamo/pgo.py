@@ -4,6 +4,7 @@ import base64
 import copy
 import dataclasses
 import enum
+import json
 import logging
 import os
 import pickle
@@ -15,7 +16,8 @@ from typing_extensions import Self
 import torch._dynamo.config
 import torch._utils_internal
 import torch.compiler.config
-from torch._dynamo.utils import get_chromium_event_logger
+import torch.distributed as dist
+from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once
 from torch._environment import is_fbcode
 from torch._inductor.remote_cache import create_cache
 from torch._logging._internal import trace_structured_artifact
@@ -26,6 +28,10 @@ if TYPE_CHECKING:
 
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._inductor.remote_cache import JsonDataTy, RemoteCache
+
+
+class ReservedWorkflowIdUserError(ValueError):
+    pass
 
 
 log = logging.getLogger(__name__)
@@ -41,30 +47,31 @@ LOCK_TIMEOUT = 10
 # don't mind leaking it.
 
 
-# How does the filesystem/remote cache work?  Here are the extra knobs:
+# How exactly did we design the cache key?  Here are some of the questions:
 #
-# - WORKFLOW_ID: Do we have a unique identifier for the "training run"  (such that it
-#   stays the same if we're running the same code, and changes if we're
+# - JOB_ID: Do we have a unique identifier for the "training run"  (such that
+#   it stays the same if we're running the same code, and changes if we're
 #   running something different).
 #
-# - RANK_SHARING: Are we sharing the cache across ranks, or does each rank get
+# - RANK: Are we sharing the cache across ranks, or does each rank get
 #   an individual cache?
 #
-# With no WORKFLOW_ID, we don't enable PGO cache by default.  This is to prevent
+# We choose to require job_id for PGO cache.  This is to prevent
 # situations where unrelated invocations of PyTorch unpredictably cause
-# changes to each other's behavior.  With a WORKFLOW_ID, at least you know there
+# changes to each other's behavior.  With a job_id, at least you know there
 # is some "state" associated with it.  (State dict might be another way to
 # tell if a run is related or not.)  You can opt-in to YOLO everything
-# aliases everything by passing a shared WORKFLOW_ID for all your invocations.
+# aliases everything by passing a shared job_id for all your invocations.
 #
-# So cache is per WORKFLOW_ID.  With no RANK_SHARING, there is never contention
-# between runs, so we can leisurely update a bundle with information we need.
-# Because we are grouped by WORKFLOW_ID, we can have a single consolidated bundle
-# for everything (or not; maybe worry about O(n^2) IO if we updated every
-# compile--let's just instrument this.)  Can even take a filelock for extra
-# safety (expect no contention); expect 50ns overhead from uncontended filelock.
+# We choose to NOT share PGO cache across ranks.  With no RANK_SHARING, there
+# is never contention between runs, so we can leisurely update a bundle with
+# information we need.  Because we are grouped by job_id, we can have a single
+# consolidated bundle for everything (or not; maybe worry about O(n^2) IO if
+# we updated every compile--let's just instrument this.)  Can even take a
+# filelock for extra safety (expect no contention); expect 50ns overhead from
+# uncontended filelock.
 #
-# With RANK_SHARING, everyone is storming to modify the same cache files.
+# If we did share ranks, everyone is storming to modify the same cache files.
 # We can do this by having folks atomic write to a CAS-store and then having
 # readers do on-the-fly merging (this can be implemented in remote using
 # prefix iteration).  As an optional optimization, one rank can be elected to
@@ -74,10 +81,12 @@ LOCK_TIMEOUT = 10
 # up with some new entries we need to pull them in ASAP (unless you want to
 # delay bundling).
 #
-# With compiler collective, life is easier.  Compiler chat with each other so
-# rank 0 has collected everything.  So elect rank 0 only to write the bundle.
-# Don't even need CAS-store atomic write; just one rank writing an updating
-# bundles.  So maybe don't bother with RANK_SHARING in that case.
+# But compiler collectives fill a similar niche:  compilers chat with each
+# other so rank 0 has collected everything.  So elect rank 0 only to write the
+# bundle.  Don't even need CAS-store atomic write; just one rank writing an
+# updating bundles.  The point is that use compiler collectives to share
+# profiles across ranks, but use the PGO cache to persist profiles per rank
+# across attempts.  No need to have one mechanism to do everything.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -272,6 +281,7 @@ def update_automatic_dynamic(
                 "cached": str(old_entry.scalar),
                 "new": str(entry.scalar),
             },
+            log_pt2_compile_event=True,
         )
         if is_unspecialized_nn_module:
             log.info(
@@ -311,6 +321,7 @@ def update_automatic_dynamic(
                 "cached": str(old_entry_tup),
                 "new": str(entry_tup),
             },
+            log_pt2_compile_event=True,
         )
 
     if is_update and old_entry.size != mut_entry.size:
@@ -384,32 +395,49 @@ def process_automatic_dynamic(
         return res
 
 
-def get_workflow_id() -> Optional[str]:
+def get_cache_key() -> Optional[str]:
     # TODO: info versions of these logs that log only once
     if torch._inductor.config.force_disable_caches:
-        log.debug(
-            "automatic_dynamic_local_pgo force disabled by torch._inductor.config.force_disable_caches"
+        warn_once(
+            "dynamo_pgo force disabled by torch._inductor.config.force_disable_caches"
         )
         return None
 
-    if (r := torch.compiler.config.workflow_id) is not None:
-        return "user_" + r
+    # NB: We always use global rank for keys, even though they are overkill
+    # for local only cache
+    rank = None
+    if dist.is_available() and dist.is_initialized():
+        rank = dist.get_rank()
 
-    if (r := torch._utils_internal.get_workflow_id()) is not None:
-        return "mast_" + r
+    # NB: We namespace the cache keys so that only user-specified job id
+    # can alias with each other.
+    if (r := torch.compiler.config.job_id) is not None:
+        if r.startswith("mast:"):
+            raise ReservedWorkflowIdUserError(
+                "torch.compiler.config.job_id with prefix 'mast:' is reserved for "
+                "automatically generated job id associated with a specific MAST job "
+                "name and version.  To reuse the profile from a preexisting MAST job, "
+                f"run instead with env var TORCH_COMPILE_CLONE_JOB_ID={r} (the "
+                "accepted syntax is mast:MAST_JOB_NAME:MAST_JOB_VERSION)"
+            )
+        return f"{r}:{rank}"
+
+    if (name_version := torch._utils_internal.get_mast_job_name_version()) is not None:
+        mast_job_name, mast_job_version = name_version
+        return f"mast:{mast_job_name}:{mast_job_version}:{rank}"
 
     return None
 
 
-# NB: This currently also controls if pgo is enabled at all
-def code_state_path(workflow_id: str) -> Optional[str]:
+# This solely controls local PGO
+def code_state_path(cache_key: str) -> Optional[str]:
     if not torch._dynamo.config.automatic_dynamic_local_pgo:
         log.debug("automatic_dynamic_local_pgo not enabled")
         return None
 
     from torch._inductor.runtime.runtime_utils import cache_dir
 
-    return os.path.join(cache_dir(), "dynamo", f"code_state_{workflow_id}.pkl")
+    return os.path.join(cache_dir(), "dynamo", f"code_state_{cache_key}.pkl")
 
 
 def should_use_remote_dynamo_pgo_cache() -> bool:
@@ -447,16 +475,47 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
     )
 
 
+# TODO: this dump format sucks but apparently it's very difficult to json.dumps
+# while not indenting inner lists SIGH
+
+
+def _key_asdict(x: object) -> object:
+    if isinstance(x, CodeId):
+        return f"{x.filename}:{x.firstlineno}:{x.name}"
+    else:
+        return x
+
+
+def _asdict(x: object) -> object:
+    if isinstance(x, (dict, defaultdict)):
+        return {_key_asdict(k): _asdict(v) for k, v in x.items()}
+    elif isinstance(x, (list, tuple)):
+        return [_asdict(v) for v in x]
+    elif dataclasses.is_dataclass(x):
+        return {
+            field.name: _asdict(getattr(x, field.name))
+            for field in dataclasses.fields(x)
+        }
+    elif x is auto_unset:
+        return "auto_unset"
+    elif x is auto_dynamic:
+        return "auto_dynamic"
+    else:
+        return x
+
+
 def get_code_state() -> DefaultDict[CodeId, CodeState]:
     global _CODE_STATE, _INIT_CODE_STATE
     if _CODE_STATE is not None:
         return _CODE_STATE
 
+    chromium_log = get_chromium_event_logger()
+
     # Initialize it (even if we don't look up profile)
     _CODE_STATE = defaultdict(CodeState)
 
-    workflow_id = get_workflow_id()
-    if workflow_id is None:
+    cache_key = get_cache_key()
+    if cache_key is None:
         return _CODE_STATE
 
     def hit(ty: str) -> DefaultDict[CodeId, CodeState]:
@@ -466,43 +525,62 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
         trace_structured_artifact(
             "get_code_state",
             "string",
-            lambda: repr(_CODE_STATE),
+            lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
         )
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
         return _CODE_STATE
 
     # Attempt local
-    path = code_state_path(workflow_id)
+    path = code_state_path(cache_key)
     if path is not None and os.path.exists(path):
-        # Read lock not necessary as we always write atomically write to
-        # the actual location
-        with open(path, "rb") as f:
-            try:
-                _CODE_STATE = pickle.load(f)
-            except Exception:
-                log.warning(
-                    "get_code_state failed while reading %s", path, exc_info=True
-                )
-            else:
-                return hit("local")
+        with dynamo_timed(
+            name := "pgo.get_local_code_state", log_pt2_compile_event=True
+        ):
+            chromium_log.add_event_data(name, cache_key=cache_key)
+            # Read lock not necessary as we always write atomically write to
+            # the actual location
+            with open(path, "rb") as f:
+                try:
+                    _CODE_STATE = pickle.load(f)
+                except Exception:
+                    log.warning(
+                        "get_code_state failed while reading %s", path, exc_info=True
+                    )
+                else:
+                    return hit("local")
 
     # Attempt remote
     remote_cache = get_remote_cache()
     if remote_cache is not None:
-        # TODO: I don't really understand why there's a JSON container format
-        try:
-            cache_data = remote_cache.get(workflow_id)
-            assert isinstance(cache_data, dict)
-            data = cache_data["data"]
-            assert isinstance(data, str)
-            payload = base64.b64decode(data)
-            _CODE_STATE = pickle.loads(payload)
-        except Exception:
-            log.warning(
-                "get_code_state failed remote read on %s", workflow_id, exc_info=True
-            )
-        else:
-            return hit("remote")
+        with dynamo_timed(
+            name := "pgo.get_remote_code_state", log_pt2_compile_event=True
+        ):
+            chromium_log.add_event_data(name, cache_key=cache_key)
+            # TODO: I don't really understand why there's a JSON container format
+            try:
+                cache_data = remote_cache.get(cache_key)
+            except Exception:
+                log.warning(
+                    "get_code_state failed remote read on %s", cache_key, exc_info=True
+                )
+            else:
+                if cache_data is not None:
+                    try:
+                        assert isinstance(cache_data, dict)
+                        data = cache_data["data"]
+                        assert isinstance(data, str)
+                        payload = base64.b64decode(data)
+                        _CODE_STATE = pickle.loads(payload)
+                    except Exception:
+                        log.warning(
+                            "get_code_state failed parsing remote result on %s",
+                            cache_key,
+                            exc_info=True,
+                        )
+                    else:
+                        return hit("remote")
+                else:
+                    log.info("get_code_state remote miss on %s", cache_key)
 
     log.info("get_code_state using default")
 
@@ -519,67 +597,78 @@ def put_code_state() -> None:
         log.info("put_code_state: no change, skipping")
         return
 
-    workflow_id = get_workflow_id()
-    if workflow_id is None:
-        log.info("put_code_state: no workflow id, skipping")
+    cache_key = get_cache_key()
+    if cache_key is None:
+        log.info("put_code_state: no cache key, skipping")
         return
 
-    put_local_code_state(workflow_id)
-    put_remote_code_state(workflow_id)
+    put_local_code_state(cache_key)
+    put_remote_code_state(cache_key)
 
 
-def put_local_code_state(workflow_id: str) -> None:
-    assert _CODE_STATE is not None
+def put_local_code_state(cache_key: str) -> None:
+    with dynamo_timed(name := "pgo.put_local_code_state", log_pt2_compile_event=True):
+        chromium_log = get_chromium_event_logger()
+        chromium_log.add_event_data(name, cache_key=cache_key)
+        assert _CODE_STATE is not None
 
-    path = code_state_path(workflow_id)
+        path = code_state_path(cache_key)
 
-    if path is None:
-        log.info("put_code_state: local cache disabled")
-        return
+        if path is None:
+            log.info("put_code_state: local cache disabled")
+            return
 
-    tmp_path = path + ".tmp"
-    lock_path = path + ".lock"
-    # We /mostly/ don't need the lock but the tmp file could be clobbered
-    # TODO: use a safe tempfile create to eliminate lock
-    from filelock import FileLock
+        # If the user isn't misusing our API, we should have exclusive access to
+        # this directory.  But it's not too hard
 
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp_path = path + ".tmp"
+        lock_path = path + ".lock"
+        # We /mostly/ don't need the lock but the tmp file could be clobbered
+        # TODO: use a safe tempfile create to eliminate lock
+        from filelock import FileLock
 
-    with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        with open(tmp_path, "wb") as f:
-            pickle.dump(_CODE_STATE, f)
-        os.rename(tmp_path, path)
-        log.info("put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+            with open(tmp_path, "wb") as f:
+                pickle.dump(_CODE_STATE, f)
+            os.rename(tmp_path, path)
+            log.info(
+                "put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE)
+            )
+            trace_structured_artifact(
+                "put_code_state",
+                "string",
+                lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
+            )
+
+
+def put_remote_code_state(cache_key: str) -> None:
+    with dynamo_timed(name := "pgo.put_remote_code_state", log_pt2_compile_event=True):
+        chromium_log = get_chromium_event_logger()
+        chromium_log.add_event_data(name, cache_key=cache_key)
+        assert _CODE_STATE is not None
+
+        remote_cache = get_remote_cache()
+
+        if remote_cache is None:
+            log.info("put_code_state: remote cache disabled")
+            return
+
+        content = pickle.dumps(_CODE_STATE)
+        cache_data: JsonDataTy = {
+            "data": base64.b64encode(content).decode("ascii"),
+        }
+        remote_cache.put(cache_key, cache_data)
+        log.info(
+            "put_code_state: wrote remote %s, %d entries", cache_key, len(_CODE_STATE)
+        )
+        # TODO: don't log this multiple times
         trace_structured_artifact(
             "put_code_state",
             "string",
-            lambda: repr(_CODE_STATE),
+            lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
         )
-
-
-def put_remote_code_state(workflow_id: str) -> None:
-    assert _CODE_STATE is not None
-
-    remote_cache = get_remote_cache()
-
-    if remote_cache is None:
-        log.info("put_code_state: remote cache disabled")
-        return
-
-    content = pickle.dumps(_CODE_STATE)
-    cache_data: JsonDataTy = {
-        "data": base64.b64encode(content).decode("ascii"),
-    }
-    remote_cache.put(workflow_id, cache_data)
-    log.info(
-        "put_code_state: wrote remote %s, %d entries", workflow_id, len(_CODE_STATE)
-    )
-    # TODO: don't log this multiple times
-    trace_structured_artifact(
-        "put_code_state",
-        "string",
-        lambda: repr(_CODE_STATE),
-    )
 
 
 # NB: this does NOT reset the cached code state on disk

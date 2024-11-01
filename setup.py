@@ -232,7 +232,7 @@ import platform
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
 BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
 
-python_min_version = (3, 8, 0)
+python_min_version = (3, 9, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
@@ -440,10 +440,6 @@ def check_submodules():
         )
     check_for_files(
         os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
-        ["CMakeLists.txt"],
-    )
-    check_for_files(
-        os.path.join(third_party_path, "onnx", "third_party", "benchmark"),
         ["CMakeLists.txt"],
     )
 
@@ -1284,6 +1280,8 @@ def main():
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
         "include/ATen/native/mps/*.h",
+        "include/ATen/native/mkldnn/xpu/*.h",
+        "include/ATen/native/mkldnn/xpu/detail/*.h",
         "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",

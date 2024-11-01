@@ -222,9 +222,11 @@ exclude_patterns = [
     # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
     # CUDA files are also excluded.
     '**/fb/**',
+    '**/generated/**',
     '**/*pb.h',
     'c10/xpu/**/*.h',
     'c10/xpu/**/*.cpp',
+    'c10/benchmark/intrusive_ptr_benchmark.cpp',
     'c10/cuda/CUDAAlgorithm.h',
     'c10/util/complex_math.h',
     'c10/util/complex_utils.h',
@@ -250,6 +252,8 @@ exclude_patterns = [
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
     'torch/csrc/jit/serialization/mobile_bytecode_generated.h',
+    'torch/csrc/utils/pythoncapi_compat.h',
+    'torch/csrc/utils/throughput_benchmark-inl.h',
 ]
 init_command = [
     'python3',
@@ -999,6 +1003,28 @@ command = [
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
     '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'PyYAML==6.0.1',
+]
+
+[[linter]]
+code = 'NO_WORKFLOWS_ON_FORK'
+include_patterns = [
+    '.github/**/*.yml',
+    '.github/**/*.yaml',
+]
+exclude_patterns = [
+    '**/fb/**',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/no_workflows_on_fork.py',
+    '--',
+    '@{{PATHSFILE}}',
 ]
 init_command = [
     'python3',

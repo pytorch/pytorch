@@ -79,7 +79,15 @@ if torch.manual_seed is torch.random.manual_seed:
 
 
 def reset() -> None:
-    """Clear all compile caches and restore initial state"""
+    """
+    Clear all compile caches and restore initial state.  This function is intended
+    to reset Dynamo's state *as if* you had started a fresh process invocation, which
+    makes it good for testing scenarios where you want to behave as if you started
+    a new process.  It does NOT affect any file system caches.
+
+    NB: this does NOT reset logging state.  Don't use this to test logging
+    initialization/reinitialization.
+    """
     # TODO: https://github.com/pytorch/pytorch/issues/139200
     import logging
 
@@ -107,6 +115,11 @@ def reset() -> None:
 
 
 def reset_code_caches() -> None:
+    """
+    Clears in-memory code cache, which is what stores compiled products.  This
+    resets less state than :func:`reset` and is mostly only used for testing
+    purposes.
+    """
     # TODO: https://github.com/pytorch/pytorch/issues/139200
     import logging
 
