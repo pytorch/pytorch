@@ -6201,7 +6201,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         def split(x):
             return x.split(4, 0)
 
-        x = torch.randn(12)
+        x = torch.zeros(12)
         res = split(x)
 
         with torch.device("cpu"):
