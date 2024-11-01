@@ -5,7 +5,6 @@ if(TARGET torch::xpurt)
   return()
 endif()
 
-# Thses variables should be empty if XPU is disabled.
 set(XPU_HOST_CXX_FLAGS)
 set(XPU_DEVICE_CXX_FLAGS)
 

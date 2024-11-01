@@ -32,23 +32,21 @@ find_program(
   )
 
 function(parse_sycl_compiler_version version_number)
-  # 1. Execute the SYCL compiler with the --version flag to get the version string.
+  # Execute the SYCL compiler with the --version flag to match the version string.
   execute_process(COMMAND ${SYCL_COMPILER} --version OUTPUT_VARIABLE SYCL_VERSION_STRING)
-  # 2. Use a regular expression to extract the version number from the version string.
   string(REGEX REPLACE "Intel\\(R\\) (.*) Compiler ([0-9]+\\.[0-9]+\\.[0-9]+) (.*)" "\\2"
                SYCL_VERSION_STRING_MATCH ${SYCL_VERSION_STRING})
   string(REPLACE "." ";" SYCL_VERSION_LIST ${SYCL_VERSION_STRING_MATCH})
-  # 3. Split the version number into major, minor, and patch components.
+  # Split the version number list into major, minor, and patch components.
   list(GET SYCL_VERSION_LIST 0 VERSION_MAJOR)
   list(GET SYCL_VERSION_LIST 1 VERSION_MINOR)
   list(GET SYCL_VERSION_LIST 2 VERSION_PATCH)
-  # 4. Calculate a single version number using the formula (major * 10000 + minor * 100 + patch).
+  # Calculate the version number in the format XXXXYYZZ, using the formula (major * 10000 + minor * 100 + patch).
   math(EXPR VERSION_NUMBER_MATCH "${VERSION_MAJOR} * 10000 + ${VERSION_MINOR} * 100 + ${VERSION_PATCH}")
   set(${version_number} "${VERSION_NUMBER_MATCH}" PARENT_SCOPE)
 endfunction()
 
 parse_sycl_compiler_version(SYCL_COMPILER_VERSION)
-message(FATAL_ERROR ${SYCL_COMPILER_VERSION})
 
 if(NOT SYCL_COMPILER_VERSION)
   set(SYCL_FOUND False)
