@@ -193,6 +193,8 @@ _SYM_BOOL_OPS = {
     operator.ge,
     operator.lt,
     operator.gt,
+    operator.neg,
+    operator.pos,
     torch.sym_not,
 }
 
