@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set,
 
 import torch
 from torch import _C, _ops, Tensor
+from torch._utils_internal import log_custom_op_registration
 from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
@@ -113,6 +114,7 @@ def custom_op(
         >>> bar("cpu")
 
     """
+    log_custom_op_registration(name)
 
     def inner(fn):
         import torch
@@ -425,6 +427,9 @@ class CustomOpDef:
             >>> assert torch.allclose(out, x.nonzero())
 
         """
+        log_custom_op_registration(
+            f"{self._namespace}::{self._name}", is_fake_impl=True
+        )
         self._abstract_fn = fn
         return fn
 

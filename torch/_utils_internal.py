@@ -371,3 +371,7 @@ def log_chromium_event_internal(
     start_time_ns: int,
 ):
     return None
+
+
+def log_custom_op_registration(name, is_fake_impl=False):
+    pass
