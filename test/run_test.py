@@ -70,6 +70,7 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
+from tools.testing.upload_artifacts import zip_and_upload_artifacts
 
 
 # Make sure to remove REPO_ROOT after import is done
@@ -170,9 +171,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/checkpoint/test_checkpoint"
     "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
-    "distributed/_shard/sharding_plan/test_sharding_plan",
-    "distributed/_shard/sharded_tensor/test_sharded_tensor",
-    "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/ops/test_embedding",
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
@@ -290,23 +288,26 @@ if dist.is_available():
         }
     if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
-            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+            "WORLD_SIZE": f"{torch.cuda.device_count()}",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-nccl",
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
-            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+            # TODO: retire testing gloo with CUDA
+            "WORLD_SIZE": f"{torch.cuda.device_count()}",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
         }
-    if dist.is_ucc_available():
-        DISTRIBUTED_TESTS_CONFIG["ucc"] = {
-            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
-            "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
-            "UCX_TLS": "tcp,cuda",
-            "UCC_TLS": "nccl,ucp,cuda",
-            "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
-            "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
-        }
+    # Test with UCC backend is deprecated.
+    # See https://github.com/pytorch/pytorch/pull/137161
+    # if dist.is_ucc_available():
+    #     DISTRIBUTED_TESTS_CONFIG["ucc"] = {
+    #         "WORLD_SIZE": f"{torch.cuda.device_count()}",
+    #         "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
+    #         "UCX_TLS": "tcp,cuda",
+    #         "UCC_TLS": "nccl,ucp,cuda",
+    #         "UCC_TL_UCP_TUNE": "cuda:0",  # don't use UCP TL on CUDA as it is not well supported
+    #         "UCC_EC_CUDA_USE_COOPERATIVE_LAUNCH": "n",  # CI nodes (M60) fail if it is on
+    #     }
 
 # https://stackoverflow.com/questions/2549939/get-signal-names-from-numbers-in-python
 SIGNALS_TO_NAMES_DICT = {
@@ -1331,6 +1332,10 @@ def parse_args():
         action="store_false",
         help="Run tests without translation validation.",
     )
+    parser.add_argument(
+        "--upload-artifacts-while-running",
+        action="store_true",
+    )
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -1677,6 +1682,8 @@ def run_tests(
 
     def parallel_test_completion_callback(failure):
         test_failed = handle_error_messages(failure)
+        if IS_CI and options.upload_artifacts_while_running:
+            zip_and_upload_artifacts(test_failed)
         if (
             test_failed
             and not options.continue_through_error
@@ -1769,6 +1776,8 @@ def main():
     selected_tests = get_selected_tests(options)
 
     test_prioritizations = import_results()
+    if len(test_prioritizations.get_all_tests()) == 0:
+        options.enable_td = False
     test_prioritizations.amend_tests(selected_tests)
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
