@@ -607,10 +607,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         if expected_type is not torch.Tensor:
             return None
 
-        t = self.trigger_wait()
-        while isinstance(t, AsyncCollectiveTensor):
-            t = t.trigger_wait()
-        return t
+        return self.trigger_wait()
 
     def __repr__(self) -> str:  # type: ignore[override]
         return f"AsyncCollectiveTensor({self.trigger_wait()})"
