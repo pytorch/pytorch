@@ -77,7 +77,7 @@ class Benchmarker:
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
-        fn_args: Tuple[Any],
+        fn_args: Tuple[Any, ...],
         fn_kwargs: Dict[str, Any],
         **kwargs: Any,
     ) -> float:

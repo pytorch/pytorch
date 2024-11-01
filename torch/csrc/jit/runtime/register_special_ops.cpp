@@ -77,7 +77,8 @@ std::vector<int64_t> compute_sizes(const IValue& seq) {
 
 void checkSequenceSize(int64_t n, int64_t dim, int64_t seq_size) {
   if (seq_size != n) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Expected sequence of length ",
         n,
         " at dim ",
