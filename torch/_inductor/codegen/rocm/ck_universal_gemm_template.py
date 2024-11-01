@@ -120,7 +120,7 @@ class CKGemmTemplate(CKTemplate):
 
         using strides_t = std::array<int32_t, 2>;
 
-        auto get_strides = [](int32_t leading_dimension, auto layout) -> strides_t {
+        auto get_strides = [](int32_t leading_dimension, auto layout) constexpr -> strides_t {
             if constexpr (std::is_same_v<decltype(layout), Row>) {
                 return {leading_dimension, 1};
             }
