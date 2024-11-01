@@ -8026,13 +8026,13 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                     self.assertEqualIgnoringNestedInts(sample.input, out_ref)
                 else:
                     self.assertEqual(sample.input, out_ref)
-                #else:
+                else:
                 #    # see https://github.com/pytorch/pytorch/issues/106456
                 #    with self.assertRaisesRegex(
                 #        RuntimeError,
                 #        "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
                 #    ):
-                #        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                    compiled_in_f(sample.input, *sample.args, **sample.kwargs)
 
     @withXFails(COMPILE_BACKWARD_FAILURES)
     @ops(
