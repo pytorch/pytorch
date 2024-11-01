@@ -9,6 +9,7 @@ import torch
 from torch._inductor.runtime.cache_dir_utils import (  # noqa: F401
     cache_dir,
     default_cache_dir,
+    triton_cache_dir,
 )
 
 

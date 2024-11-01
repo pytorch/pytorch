@@ -478,6 +478,7 @@ class _PipelineStageBase(ABC):
             last_backward = self._seen_bwd_chunks == self.chunks - 1  # type: ignore[operator]
         else:
             # For backwards are split into weight and input, we will see twice as many bwd_chunks
+            # -1 because we skip the first bwd_chunk backward
             last_backward = self._seen_bwd_chunks == 2 * self.chunks - 1  # type: ignore[operator]
 
         def perform_backward(backward_type):
@@ -538,8 +539,6 @@ class _PipelineStageBase(ABC):
         else:
             # Non-DP submodule, regular backward
             result = perform_backward(backward_type)()
-
-        self._seen_bwd_chunks += 1
 
         if isinstance(result, tuple) and len(result) == 2:
             # for stage_backward_input()
@@ -676,14 +675,19 @@ class _PipelineStageBase(ABC):
                     "full", bwd_kwargs
                 )
             else:
-                # perform the partial backwards for the inputs with a custom backward function
-                # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
-                if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
-                    bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
+                grads_input = []
+                param_groups = []
+                # Skip the backward for the first stage since we will perform the weight update with
+                # autograd.backward in backward_weight_one_chunk
+                if not self.is_first:
+                    if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
+                        bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
 
-                grads_input, param_groups = self.backward_maybe_with_nosync(
-                    "input", bwd_kwargs
-                )
+                    # perform the partial backwards for the inputs with a custom backward function
+                    # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
+                    grads_input, param_groups = self.backward_maybe_with_nosync(
+                        "input", bwd_kwargs
+                    )
 
                 # TODO: we dont need to save this, add to dw_runner?
                 self.backward_state[bwd_chunk_id] = (
@@ -696,7 +700,7 @@ class _PipelineStageBase(ABC):
                 # Save a placeholder for the dw_runner
                 self.dw_runner[bwd_chunk_id] = lambda: None
 
-        if self.is_last:
+        if self.is_last and not self.is_first:
             # Autograd dependencies:
             #    rest_of_autograd_graph -> stage_output -> loss
             # stage_output is no longer used in the last stage for backward and only needed
@@ -704,6 +708,8 @@ class _PipelineStageBase(ABC):
             # this should be detached to release autograd graph context and free memory earlier
             for t in stage_output:
                 t.detach_()
+
+        self._seen_bwd_chunks += 1
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
     def backward_weight_one_chunk(self, bwd_chunk_id: int):
@@ -742,6 +748,8 @@ class _PipelineStageBase(ABC):
                     "full_backward": False,
                 }
                 self.backward_maybe_with_nosync("full", bwd_kwargs)
+
+        self._seen_bwd_chunks += 1
 
     def _validate_fwd_input(self, args, kwargs):
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
