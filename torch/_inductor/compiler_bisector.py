@@ -95,7 +95,23 @@ class BisectionResult:
     debug_info: Optional[str] = None
 
 
-class BisectionManager:
+class CompilerBisector:
+    """
+    This class iteratively runs torch.compile backends (eager, aot_eager, inductor) to find the
+    first backend that can repro an issue.
+
+    Once it discovers the offending backend it will iteratively disable subsystems within the backend.
+    For subsystems which are applied repeatedly, such as the number of post grad passes or number
+    of lowering of nodes to inductor ir, it will bisect to find the offending application.
+
+    The idiomatic way to run it is with `do_bisect`. You can also use it by setting the env flags
+    `TORCH_BISECT_BACKEND`, `TORCH_BISECT_SUBSYSTEM` and `TORCH_BISECT_MAX`.
+
+    It also supports a CLI interface, although this is less well tested.
+
+    You must run python compiler_bisector.py [start | good | bad | end]
+    """
+
     bisection_enabled: bool = False
 
     @classmethod
@@ -461,6 +477,10 @@ class BisectionManager:
     def do_bisect(
         cls, fn: Callable[[], bool], cli_interface: bool = False
     ) -> Optional[BisectionResult]:
+        """
+        Run fn repeatedly attempting to bisect torch.compile. fn should return True on success and False on failure.
+        """
+
         if not cli_interface:
             bisection_enabled_orig = cls.bisection_enabled
             cls.delete_bisect_status()
@@ -557,7 +577,7 @@ def command_line_usage() -> None:
         print("Usage: python bisect_update.py <start|end|good|bad>")
         sys.exit(1)
 
-    bisection_manager = BisectionManager()
+    bisection_manager = CompilerBisector()
     command = sys.argv[1]
 
     if command == "end":
@@ -584,12 +604,12 @@ def command_line_usage() -> None:
 
 def get_is_bisection_enabled() -> bool:
     return (
-        BisectionManager.get_subsystem() is not None
-        or BisectionManager.get_backend() is not None
+        CompilerBisector.get_subsystem() is not None
+        or CompilerBisector.get_backend() is not None
     )
 
 
-BisectionManager.bisection_enabled = get_is_bisection_enabled()
+CompilerBisector.bisection_enabled = get_is_bisection_enabled()
 
 if __name__ == "__main__":
     command_line_usage()
