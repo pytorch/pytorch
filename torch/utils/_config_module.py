@@ -16,13 +16,13 @@ from unittest import mock
 from torch._utils_internal import justknobs_check
 
 
-@dataclass(kw_only=True)
+@dataclass
 class Config:
     """Represents a config with richer behaviour than just a default value.
-::
-    i.e.
-    foo = Config(justknob="//foo:bar", default=False)
-    install_config_module(...)
+    ::
+        i.e.
+        foo = Config(justknob="//foo:bar", default=False)
+        install_config_module(...)
 
     This configs must be installed with install_config_module to be used
 
@@ -39,8 +39,13 @@ class Config:
         default: is the value to default this knob to in OSS.
     """
 
-    default: Any = None
+    default: Any = True
     justknob: Optional[str] = None
+
+    def __init__(self, default: Any = True, justknob: Optional[str] = None):
+        # python 3.9 does not support kw_only on the dataclass :(.
+        self.default = default
+        self.justknob = justknob
 
 
 # Types saved/loaded in configs

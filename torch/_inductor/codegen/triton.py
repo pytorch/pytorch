@@ -1372,28 +1372,12 @@ class TritonKernel(SIMDKernel):
     def __init__(
         self,
         *groups,
-        index_dtype: str,
-        mutations: Optional[OrderedSet[str]] = None,
-        pid_cache=None,
-        reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
-        override_persistent_reduction=None,
-        override_cooperative_reduction=None,
         optimize_mask=True,
+        **kwargs,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
-        if pid_cache:
-            # foreach kernels don't work with cooperative reductions
-            override_cooperative_reduction = False
-        super().__init__(
-            *groups,
-            index_dtype=index_dtype,
-            mutations=mutations,
-            reduction_hint=reduction_hint,
-            pid_cache=pid_cache,
-            override_persistent_reduction=override_persistent_reduction,
-            override_cooperative_reduction=override_cooperative_reduction,
-        )
+        super().__init__(*groups, **kwargs)
         self.post_loop_combine: IndentedBuffer = IndentedBuffer()
         self.post_loop_store: IndentedBuffer = IndentedBuffer()
         self.outside_loop_vars: OrderedSet[Any] = OrderedSet()
@@ -1409,6 +1393,9 @@ class TritonKernel(SIMDKernel):
             self.init_cooperative_reduction()
 
         self.codegen_range_tree()
+
+    def dtype_to_str(self, dtype: torch.dtype) -> str:
+        return triton_type(dtype)
 
     def should_use_cooperative_reduction(self) -> bool:
         """Heuristic to decide self.cooperative_reduction should be used."""
@@ -1494,7 +1481,7 @@ class TritonKernel(SIMDKernel):
             return False
         threshold = {
             ReductionHint.INNER: 1024,
-        }.get(self.reduction_hint, 64)
+        }.get(self.features.get_reduction_hint(), 64)
 
         if self.cooperative_reduction:
             # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
@@ -1515,9 +1502,9 @@ class TritonKernel(SIMDKernel):
 
     def want_no_x_dim(self):
         return (
-            self.reduction_hint == ReductionHint.INNER
-            and self.persistent_reduction
+            self.persistent_reduction
             and len(self.numels) == 2
+            and self.features.get_reduction_hint() == ReductionHint.INNER
             and V.graph.sizevars.statically_known_geq(self.numels[-1], 256)  # type: ignore[arg-types]
         )
 
@@ -3151,7 +3138,7 @@ class TritonKernel(SIMDKernel):
             code.splice(helper)
 
         if self.inside_reduction:
-            reduction_hint = self.reduction_hint
+            reduction_hint = self.features.get_reduction_hint()
             heuristics_line = f"""
                 @triton_heuristics.{heuristics}(
                     size_hints={size_hints!r},
@@ -3413,8 +3400,6 @@ class TritonKernel(SIMDKernel):
 
 
 class TritonScheduling(SIMDScheduling):
-    int32_type = "tl.int32"
-    int64_type = "tl.int64"
     kernel_type = TritonKernel
     backend_features = dict.fromkeys(  # dict for deterministic order
         [
