@@ -199,7 +199,7 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
   // etc. can be done faster in a different way.
   Vectorized<c10::Half> isnan() const {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    return vreinterpretq_f16_u32(vmvnq_u32(vceqq_f16(values, values)));
+    return vreinterpretq_f16_u16(vmvnq_u16(vceqq_f16(values, values)));
 #else
     // NOTE: we could make this faster by doing vectorized checks of
     // exponent/payload bits.
