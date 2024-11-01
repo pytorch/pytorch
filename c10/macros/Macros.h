@@ -217,7 +217,9 @@ using namespace c10::xpu;
 // Unlike C10_ALWAYS_INLINE, C10_ALWAYS_INLINE_ATTRIBUTE can be used
 // on a lambda.
 #if defined(_MSC_VER)
-#define C10_ALWAYS_INLINE_ATTRIBUTE [[msvc::forceinline]]
+// MSVC 14.39 is reasonably recent and doesn't like
+// [[msvc::forceinline]] on a lambda, so don't try to use it.
+#define C10_ALWAYS_INLINE_ATTRIBUTE
 #elif __has_attribute(always_inline) || defined(__GNUC__)
 #define C10_ALWAYS_INLINE_ATTRIBUTE __attribute__((__always_inline__))
 #else

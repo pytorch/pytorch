@@ -601,6 +601,33 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         compl_fn = torch.compile(fn, dynamic=True, backend="eager")
         self.assertEqual(compl_fn(inputs), fn(inputs))
 
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_symfloat_no_replacement(self):
+        # See https://github.com/pytorch/pytorch/pull/139250 for more context
+        # The high level idea is if we don't want to set a replacement where a
+        # symbol is on both the right and left side, otherwise we'll end up
+        # in an infinite self._find recursion.
+        def fn(t, m):
+            return 2 * t if m.is_integer() else t
+
+        t = torch.tensor([1])
+        compl_fn = torch.compile(fn, dynamic=True, backend="eager")
+        self.assertEqual(fn(t, 1.0), compl_fn(t, 1.0))
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_unspec_roundtrip_float_input(self):
+        def f(x, y):
+            if y == 5.0:
+                return x + 2
+            else:
+                return x + y
+            return (x, y)
+
+        cf = torch.compile(backend="eager", fullgraph=True)(f)
+        x = 1.1234567891234568
+        y = 1.1234567891234569
+        self.assertAlmostEqual(f(x, y), cf(x, y))
+
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=True)
     def test_unspec_float_input(self):
         cnts = torch._dynamo.testing.CompileCounter()

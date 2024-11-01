@@ -390,6 +390,8 @@ The following utility functions are related to serialization:
 .. currentmodule:: torch.serialization
 
 .. autofunction:: register_package
+.. autofunction:: get_crc32_options
+.. autofunction:: set_crc32_options
 .. autofunction:: get_default_load_endianness
 .. autofunction:: set_default_load_endianness
 .. autofunction:: get_default_mmap_options
@@ -397,5 +399,6 @@ The following utility functions are related to serialization:
 .. autofunction:: add_safe_globals
 .. autofunction:: clear_safe_globals
 .. autofunction:: get_safe_globals
+.. autofunction:: get_unsafe_globals_in_checkpoint
 .. autoclass:: safe_globals
 .. autoclass:: skip_data
