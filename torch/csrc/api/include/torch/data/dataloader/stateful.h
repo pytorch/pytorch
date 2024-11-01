@@ -7,8 +7,7 @@
 #include <thread>
 #include <utility>
 
-namespace torch {
-namespace data {
+namespace torch::data {
 
 /// A dataloader for stateful datasets.
 ///
@@ -59,5 +58,4 @@ class StatefulDataLoader : public DataLoaderBase<
     return this->options_.batch_size;
   }
 };
-} // namespace data
-} // namespace torch
+} // namespace torch::data

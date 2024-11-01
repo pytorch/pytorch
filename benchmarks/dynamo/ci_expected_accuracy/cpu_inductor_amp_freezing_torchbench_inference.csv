@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,fail_accuracy,46
 
 
 
-detectron2_fcos_r_50_fpn,fail_accuracy,23
+detectron2_fcos_r_50_fpn,pass,24
 
 
 
@@ -190,11 +190,11 @@ maml,pass_due_to_skip,0
 
 
 
-mnasnet1_0,pass,0
-
-
-
 maml_omniglot,pass,0
+
+
+
+mnasnet1_0,pass,0
 
 
 

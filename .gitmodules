@@ -127,3 +127,7 @@
 [submodule "third_party/NVTX"]
 	path = third_party/NVTX
 	url = https://github.com/NVIDIA/NVTX.git
+[submodule "third_party/composable_kernel"]
+	path = third_party/composable_kernel
+	url = https://github.com/ROCm/composable_kernel.git
+	branch = develop

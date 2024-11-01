@@ -1343,8 +1343,7 @@ TEST_F(FunctionalTest, GumbelSoftmax) {
 
     auto counts = torch::zeros_like(logits);
     torch::Tensor y_draw;
-    for (const auto i : c10::irange(num_draws)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(num_draws)) {
       y_draw =
           F::gumbel_softmax(logits, F::GumbelSoftmaxFuncOptions().hard(true));
       counts += y_draw;
@@ -2330,7 +2329,7 @@ TEST_F(FunctionalTest, Interpolate) {
     auto tensor = torch::rand({2, 3, 32, 32});
     std::vector<int64_t> osize = {8, 10};
     auto expected =
-        at::native::_upsample_nearest_exact2d(tensor, osize, torch::nullopt);
+        at::native::_upsample_nearest_exact2d(tensor, osize, std::nullopt);
 
     auto options = F::InterpolateFuncOptions()
                        .size(osize)
@@ -2343,8 +2342,8 @@ TEST_F(FunctionalTest, Interpolate) {
   {
     auto tensor = torch::rand({2, 3, 32, 32});
     std::vector<int64_t> osize = {8, 10};
-    auto expected = at::native::_upsample_bilinear2d_aa(
-        tensor, osize, false, torch::nullopt);
+    auto expected =
+        at::native::_upsample_bilinear2d_aa(tensor, osize, false, std::nullopt);
 
     auto options = F::InterpolateFuncOptions()
                        .size(osize)
@@ -2357,8 +2356,8 @@ TEST_F(FunctionalTest, Interpolate) {
   {
     auto tensor = torch::rand({2, 3, 32, 32});
     std::vector<int64_t> osize = {8, 10};
-    auto expected = at::native::_upsample_bicubic2d_aa(
-        tensor, osize, false, torch::nullopt);
+    auto expected =
+        at::native::_upsample_bicubic2d_aa(tensor, osize, false, std::nullopt);
 
     auto options = F::InterpolateFuncOptions()
                        .size(osize)

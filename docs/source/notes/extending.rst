@@ -13,8 +13,7 @@ and have it behave like PyTorch's built-in operators. In order to do so, you mus
 register the custom operation with PyTorch via the Python :ref:`torch-library-docs` or C++ TORCH_LIBRARY
 APIs.
 
-
-Please see :ref:`custom-ops-landing-page` for more details.
+Please see `PyTorch Custom Operators Landing Page <https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html>`_ for more details.
 
 .. _extending-autograd:
 

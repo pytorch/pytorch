@@ -25,6 +25,10 @@ PyObject* torch_c_dynamo_utils_init() {
   if (m == nullptr)
     return nullptr;
 
+#ifdef Py_GIL_DISABLED
+  PyUnstable_Module_SetGIL(m, Py_MOD_GIL_NOT_USED);
+#endif
+
   auto py_m = py::handle(m).cast<py::module>();
   py_m.def("is_instancemethod", is_instancemethod);
   return m;
