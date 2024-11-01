@@ -74,6 +74,7 @@ class FakeBackwardCFunction:
         self.real = real
         self.saved_tensors = saved_tensors
         self.aot_symints = real._get_compiled_autograd_symints()
+        self.bw_module = real._forward_cls._lazy_backward_info.bw_module
 
     def __getattr__(self, name: str) -> Any:
         if name == "saved_variables":
@@ -109,15 +110,40 @@ def create_fake_ctx(
 #     fakectx = FakeBackwardCFunction(ctx, saved_tensors)
 #     return fakectx._forward_cls._backward_impl(fakectx, *args)  # type: ignore[attr-defined]
 
+# def call_backward_impl(
+#     # ctx: torch.autograd.function.BackwardCFunction, saved_tensors: List[torch.Tensor],
+#     fakectx: FakeBackwardCFunction,
+#     *args: Any,
+# ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+#     torch._dynamo.comptime.comptime.breakpoint()
+
+#     # fakectx = FakeBackwardCFunction(ctx, saved_tensors)
+#     return fakectx._forward_cls._backward_impl(fakectx, *args)  # type: ignore[attr-defined]
+
+
+def normalize_as_list(x):
+    if isinstance(x, tuple):
+        return list(x)
+    elif isinstance(x, list):
+        return x
+    return [x]
+
 def call_backward_impl(
     # ctx: torch.autograd.function.BackwardCFunction, saved_tensors: List[torch.Tensor],
-    fakectx: FakeBackwardCFunction,
+    ctx: FakeBackwardCFunction,
     *args: Any,
 ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
-    torch._dynamo.comptime.comptime.breakpoint()
-
     # fakectx = FakeBackwardCFunction(ctx, saved_tensors)
-    return fakectx._forward_cls._backward_impl(fakectx, *args)  # type: ignore[attr-defined]
+    # assert len(args) == 1  # data-dependent jump? 
+    all_args = args[0]
+    # return fakectx._forward_cls._backward_impl(fakectx, *args)  # type: ignore[attr-defined]
+    # bw_module = ctx._forward_cls._lazy_backward_info.bw_module
+    bw_module = ctx.bw_module
+    symints = ctx.aot_symints
+    # assert len(symints) == ctx.symints  # data-dependent jump?
+    # backward_state_indices
+    # context = torch._C._DisableAutocast if disable_amp else nullcontext
+    return normalize_as_list(bw_module(*all_args))
 
 
 # def call_backward_epilogue(
@@ -170,3 +196,6 @@ def call_module_hooks_from_backward_state(
         if new_result is not None:
             result = new_result
     return result
+
+class CustomObj:
+    pass

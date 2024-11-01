@@ -1515,9 +1515,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
 
-            @staticmethod
-            def create_fake_ctx(ctx, saved_tensors):
-                return torch._dynamo.external_utils.FakeBackwardCFunction(ctx, saved_tensors)
+            # @staticmethod
+            # def create_fake_ctx(ctx, saved_tensors):
+            #     return torch._dynamo.external_utils.FakeBackwardCFunction(ctx, saved_tensors)
 
             @staticmethod
             def _compiled_autograd_key(ctx):
@@ -1690,7 +1690,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 return CompiledFunctionBackward.apply(*all_args)
 
-            @torch._dynamo.allow_in_graph
             @staticmethod
             def _backward_prologue(ctx, *flat_args):
                 # Calling convention: we expect a grad_out passed to the backward:
@@ -1844,6 +1843,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 grad_output_types_ = [
                     torch.Tensor if x is FakeTensor else x for x in grad_output_types
                 ]
+                # breakpoint()
+                # AOTDispatcher inlines through this, with functional tensors
+                # so this errors
                 assert (
                     grad_output_types_ == CompiledFunction.metadata.output_types
                 ), f"""\
@@ -1977,7 +1979,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 return all_args
 
-            @torch._dynamo.allow_in_graph
             @staticmethod
             def _backward_impl(ctx, all_args):
                 if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
@@ -2070,7 +2071,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 )
                 return out
 
-            @torch._dynamo.allow_in_graph
             @staticmethod
             def _backward_epilogue(ctx, out):
                 # Toss out the backward output tokens

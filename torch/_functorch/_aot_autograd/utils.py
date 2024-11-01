@@ -31,6 +31,7 @@ KNOWN_TYPES = [
     *py_sym_types,
     FakeScriptObject,
     torch.ScriptObject,
+    torch.autograd.function.FunctionCtx,
 ]
 
 original_zip = zip

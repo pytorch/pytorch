@@ -330,6 +330,9 @@ class FunctionMeta(type):
         backward_fn = type(
             name + "Backward", (BackwardCFunction,), {"_forward_cls": cls}
         )
+        # if name ==  "CompiledFunction":
+        #     # setattr(torch.autograd.function, "CompiledFunctionBackward", backward_fn)
+        #     breakpoint()
         backward_fn._autograd_function_id = next(AUTOGRAD_FUNCTION_COUNTER)  # type: ignore[attr-defined]
         backward_fn._compiled_autograd_should_lift = attrs.get(  # type: ignore[attr-defined]
             "_compiled_autograd_should_lift", True

@@ -160,18 +160,19 @@ class AutogradCompilerInstance:
     ):
         # self.overriden_hooks.append(FakeBackwardCFunction(ctx, saved_tensors))
         assert self.hooks_proxy is not None
-        pfakectx = self.hooks_proxy[bwd_idx]  # type: ignore[index]
-        # psaved_tensors = self.to_proxy(saved_tensors)
+        pctx = self.hooks_proxy[bwd_idx]  # type: ignore[index]
+        psaved_tensors = self.to_proxy(saved_tensors)
         # torch._dynamo.allow_in_graph(create_fake_ctx)
-        # pfakectx = self.fx_tracer.create_proxy(
-        #     kind="call_function",
-        #     target=create_fake_ctx,
-        #     args=(
-        #         pctx,
-        #         psaved_tensors,
-        #     ),
-        #     kwargs={},
-        # )
+        torch._dynamo.allow_in_graph(create_fake_ctx)
+        pfakectx = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=create_fake_ctx,
+            args=(
+                pctx,
+                psaved_tensors,
+            ),
+            kwargs={},
+        )
 
         def call_backward_prologue(
             # ctx: torch.autograd.function.BackwardCFunction, saved_tensors: List[torch.Tensor],
@@ -180,15 +181,6 @@ class AutogradCompilerInstance:
         ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
             # fakectx = FakeBackwardCFunction(ctx, saved_tensors)
             return fakectx._forward_cls._backward_prologue(fakectx, *args)  # type: ignore[attr-defined]
-
-
-        # def call_backward_impl(
-        #     # ctx: torch.autograd.function.BackwardCFunction, saved_tensors: List[torch.Tensor],
-        #     fakectx: FakeBackwardCFunction,
-        #     *args: Any,
-        # ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
-        #     # fakectx = FakeBackwardCFunction(ctx, saved_tensors)
-        #     return fakectx._forward_cls._backward_impl(fakectx, *args)  # type: ignore[attr-defined]
 
 
         def call_backward_epilogue(

@@ -311,6 +311,7 @@ def unimplemented(
     if from_exc is not _NOTHING:
         breakpoint()
         raise Unsupported(msg, case_name=case_name) from from_exc
+    breakpoint()
     raise Unsupported(msg, case_name=case_name)
 
 
