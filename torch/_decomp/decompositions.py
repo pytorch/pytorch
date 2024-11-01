@@ -445,27 +445,27 @@ def masked_select(input: Tensor, mask: Tensor) -> torch.Tensor:
         ],
     )
 
-    # Avoid importing sympy at a module level
-    from torch.fx.experimental.symbolic_shapes import (
-        _constrain_range_for_size,
-        has_free_symbols,
-    )
-    from torch.utils._sympy.numbers import IntInfinity
-    from torch.utils._sympy.value_ranges import bound_sympy
+    # # Avoid importing sympy at a module level
+    # from torch.fx.experimental.symbolic_shapes import (
+    #     _constrain_range_for_size,
+    #     has_free_symbols,
+    # )
+    # from torch.utils._sympy.numbers import IntInfinity
+    # from torch.utils._sympy.value_ranges import bound_sympy
 
-    # If num elements is expressed symbolically, calculate
-    # the concrete value based on upper bounds. Otherwise,
-    # we can set max val directly.
-    maxval = sys.maxsize - 1
-    if not has_free_symbols(input.numel()):
-        num_elements = int(input.numel())
-    else:
-        prod_node = math.prod(input.shape).node  # type: ignore[attr-defined]
-        prod_range = bound_sympy(prod_node.expr, prod_node.shape_env.var_to_range)
-        if not isinstance(prod_range.upper, IntInfinity) and prod_range.upper > 2:
-            num_elements = prod_range.upper
+    # # If num elements is expressed symbolically, calculate
+    # # the concrete value based on upper bounds. Otherwise,
+    # # we can set max val directly.
+    # maxval = sys.maxsize - 1
+    # if not has_free_symbols(input.numel()):
+    #     num_elements = int(input.numel())
+    # else:
+    #     prod_node = math.prod(input.shape).node  # type: ignore[attr-defined]
+    #     prod_range = bound_sympy(prod_node.expr, prod_node.shape_env.var_to_range)
+    #     if not isinstance(prod_range.upper, IntInfinity) and prod_range.upper > 2:
+    #         num_elements = prod_range.upper
 
-    _constrain_range_for_size(res.size(0), max=maxval)
+    # _constrain_range_for_size(res.size(0), max=maxval)
     return res
 
 
