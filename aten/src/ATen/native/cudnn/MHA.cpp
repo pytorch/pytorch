@@ -348,7 +348,7 @@ bool same_strides(const Tensor& t1, const Tensor& t2) {
   const auto t1strides = t1.strides();
   const auto t2strides = t2.strides();
   const int dim = t1strides.size();
-  if (dim != t2strides.size()) {
+  if (dim != (int) t2strides.size()) {
     return false;
   }
   const auto t1sizes = t1.sizes();
