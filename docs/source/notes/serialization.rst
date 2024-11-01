@@ -236,7 +236,7 @@ tensor subclasses, there will likely be functions/classes that need to be allowl
 If the ``weights_only`` Unpickler encounters a function or class that is not allowlisted
 by default within the pickle file, you should see an actionable error like such
 
-..code::
+.. code::
 
     _pickle.UnpicklingError: Weights only load failed. This file can still be loaded,
     to do so you have two options, do those steps only if you trust the source of the checkpoint.
@@ -245,8 +245,8 @@ by default within the pickle file, you should see an actionable error like such
         2. Alternatively, to load with `weights_only=True` please check the recommended
            steps in the following error message.
            WeightsUnpickler error: Unsupported global: GLOBAL {__module__}.{__name__} was not an allowed global by
-           default. Please use `torch.serialization.add_safe_globals([MyDataClass])` or the
-           `torch.serialization.safe_globals([MyDataClass])` context manager to allowlist this global
+           default. Please use `torch.serialization.add_safe_globals([{__name__}])` or the
+           `torch.serialization.safe_globals([{__name__}])` context manager to allowlist this global
            if you trust this class/function.
 
 Please follow the steps in the error message and allowlist the functions or classes only if you trust them.
