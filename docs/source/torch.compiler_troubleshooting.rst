@@ -290,12 +290,19 @@ More ``TORCH_LOGS`` options are :ref:`detailed below <troubleshooting_torch_logs
 For the full list of options, see `torch._logging <https://pytorch.org/docs/stable/logging.html>`__
 and `torch._logging.set_logs <https://pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs>`__.
 
-``tlparse`` is ideal for debugging large models and gaining a high-level overview of how your model was compiled,
-while ``TORCH_LOGS`` is preferred for small examples and fine-grained debugging detail,
+tlparse vs. TORCH_LOGS
+----------------------
+
+Generally, we suggest first using ``tlparse`` when encountering issues.
+``tlparse`` is ideal for debugging large models and gaining a high-level overview of how your model was compiled.
+On the other hand, ``TORCH_LOGS`` is preferred for small examples and fine-grained debugging detail,
 when we already have an idea of which ``torch.compile`` component is causing the problem.
 
 Simple Workarounds
 ~~~~~~~~~~~~~~~~~~
+
+Here, we describe some workarounds to ``torch.compile`` issues involving small code modifications
+or changing some ``torch.compile`` settings.
 
 Where to apply torch.compile?
 ---------------------------------
@@ -393,21 +400,29 @@ disable annotations as necessary.
 Resolving graph breaks
 ----------------------
 
-To maximize optimization opportunities,  it's important to reduce the number of graph breaks.
+To maximize optimization opportunities, it's important to reduce the number of graph breaks.
+Recall that you can see what graph breaks are happening using ``tlparse`` or ``TORCH_LOGS="graph_breaks"``.
 In general, graph breaks are caused by one of the following:
 
-- You're trying to do something that fundamentally cannot be traced, such as data-dependent control flow.
-- You're trying to do something not yet supported. .
-  For example, we currently have limited support for tracing code that uses the built-in Python ``inspect`` module.
-- Your code has an error in it. For example, you may have tried calling a function with an incorrect number of arguments.
+1. You're trying to do something that fundamentally cannot be traced, such as data-dependent control flow.
+2. You're trying to do something not yet supported. .
+   For example, we currently have limited support for tracing code that uses the built-in Python ``inspect`` module.
+3. Your code has an error in it. For example, you may have tried calling a function with an incorrect number of arguments.
 
+Graph break logs will tell you the user code location and reason for the graph break.
 Unfortunately, many graph breaks are not actionable without a deeper understanding of Dynamo.
 It can even be challenging to determine which of the three causes was the true cause of your graph break.
 We are working on making graph break messages more actionable.
 
-If the graph break message doesn't suggest any action and you suspect that the cause of your graph break is (2),
-please report the graph break as an issue. If a function has many graph breaks,
-consider disabling compilation on that function, the overhead cost for the graph breaks may become prohibitive.
+Additionally, the impact of lost optimization opportunities differs between graph breaks.
+For example, graph breaks that happen in the middle of your model's ``forward`` are likely to have a more negatie impact than
+graph breaks in a preprocessing part at the beginning of the ``forward``. So it is not crucial to prevent *every single*
+break, but rather to prevent the ones that cause significant performance hits.
+
+If a graph break message doesn't suggest any action, you suspect that the cause of your graph break is (2),
+and you believe that the graph break is causing performance hits,
+then please report the graph break as an issue. If a function has many graph breaks,
+consider disabling compilation on that function, as the overhead cost for the graph breaks may become prohibitive.
 
 Below are some common graph breaks and some workarounds.
 
@@ -557,7 +572,8 @@ thus avoiding a graph break. However, the logged contents may differ if, for exa
 Incorrect code
 ^^^^^^^^^^^^^^
 
-Your code may be wrong, or is causing an error. We have limited support for exception handling.
+Your code may be wrong, or is otherwise encountering an error from outside ``torch.compile``.
+In the code below, we made a typo in the ``torch.sin`` call by providing an extra argument.
 
 .. code-block:: py
 
@@ -580,8 +596,13 @@ Your code may be wrong, or is causing an error. We have limited support for exce
         y = torch.sin(x, x)
     ...
 
+It can be difficult to tell from the logs if the error is caused by your code or because of a ``torch.compile`` bug.
+In order to differentiate, we recommend trying to run your code without ``torch.compile`` to see if you still get the error.
+
 Dealing with recompilations
 ---------------------------
+
+You can view recompilations and their reasons using ``tlparse`` or ``TORCH_LOGS=recompiles``.
 
 Is dynamic shapes enabled?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -601,8 +622,10 @@ For more information on dynamic shapes, see `The dynamic shapes manual <https://
 Changing the cache size limit
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-There is a limit to how many times a function can be recompiled, determined by ``torch._dynamo.config.cache_size_limit``.
-If this limit is exceeded, then we will not attempt to compile the function again and instead will run the function eagerly.
+There is a limit to how many times a function can be recompiled, determined by ``torch._dynamo.config.cache_size_limit``
+and ``torch._dynamo.config.accumulated_cache_size_limit``.
+If either limit is exceeded, then we will not attempt to compile the function again and instead will run the function eagerly.
+``torch.compile`` will also issue a warning containing the affected function and which limit was hit.
 In the example below, each function call results in a recompile attempt.
 When we hit the cache size limit (8), we stop attempting to recompile.
 
@@ -763,13 +786,12 @@ Here's a list of useful reproducers, ranked from most to least preferred:
 3. **Non-self-contained reproducer with manageable dependencies:**
     For example, if you can reproduce the problem by running a script after ``pip install transformers``,
    that's manageable. We can likely run it and investigate.
-4. **Non-self-contained reproducer requiring substantial setup:**  This might involve downloading datasets, 
-multiple environment setup steps, or specific system library versions requiring a Docker image. 
-   The more complex the setup, the harder it is for us to recreate the environment. 
-   
-   .. note:: Docker simplifies setup but complicates changes to the environment, so it's not a perfect solution, though we'll use it if necessary.
-   NB: Docker makes it "easier" to setup the environment, but it makes it more difficult to change things about the environment
-   / use our preferred development environment, so it's not really a magic bullet, although we'll take it in a pinch.
+4. **Non-self-contained reproducer requiring substantial setup:**  This might involve downloading datasets,
+   multiple environment setup steps, or specific system library versions requiring a Docker image.
+   The more complex the setup, the harder it is for us to recreate the environment.
+
+   .. note::
+       Docker simplifies setup but complicates changes to the environment, so it's not a perfect solution, though we'll use it if necessary.
 
 Somewhat orthogonally, a reproducer that can be run in a single process is better than a reproducer
 that requires multiprocess training (but once again, if you only have a multiprocess reproducer, we'll take it!).
@@ -799,7 +821,7 @@ This assumes that we were able to successfully trace through code.
 
 Unfortunately, most of the time nowadays, the minifier doesn't work as expected, and alternative methods may be necessary.
 This is likely because bugs that can be automatically reproduced in this manner are generally easier to fix
- and have already been addressed, leaving more complex issues that do not reproduce easily.
+and have already been addressed, leaving more complex issues that do not reproduce easily.
 However, it is straightforward to attempt using the minifier, so it is worth trying even if it may not succeed.
 
 Instructions for operating the minifier can be found `here <https://pytorch.org/docs/stable/torch.compiler_troubleshooting_old.html>`__.
@@ -1017,8 +1039,10 @@ AOTAutograd
 AOTAutograd errors are typically difficult to debug - we recommend just submitting an issue.
 AOTAutograd logging output is primarily helpful to see what the input to Inductor is.
 
-TorchInductor
--------------
+..
+    TODO
+    TorchInductor
+    -------------
 
 .. TODO
 
@@ -1076,12 +1100,18 @@ A summary of helpful ``TORCH_LOGS`` options is:
     * - fusion
       - Output Inductor fusion logs
 
+For the full list of options, see `torch._logging <https://pytorch.org/docs/stable/logging.html>`__
+and `torch._logging.set_logs <https://pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs>`__.
+
 Related Articles
 ~~~~~~~~~~~~~~~~
 
 - `torch.compile tutorial <https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html>`__
 - `torch.compile fine-grained APIs <https://pytorch.org/docs/stable/torch.compiler_fine_grain_apis.html>`__
 - `torch.compile FAQ <https://pytorch.org/docs/stable/torch.compiler_faq.html>`__
+- `torch.compiler namespace overview <https://pytorch.org/docs/stable/torch.compiler.html#torch-compiler-overview>`__
+- `torch.compiler API reference <https://pytorch.org/docs/stable/torch.compiler_api.html>`__
 - `Profiling torch.compile <https://pytorch.org/docs/stable/torch.compiler_profiling_torch_compile.html>`__
 - `torch.compile missing manual <https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit?usp=sharing>`__
 - `The dynamic shapes manual <https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.fh8zzonyw8ng>`__
+- `TorchInductor caching tutorial <https://pytorch.org/tutorials/recipes/torch_compile_caching_tutorial.html>`__
