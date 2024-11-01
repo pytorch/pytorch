@@ -955,17 +955,17 @@ void scatter_scalar_reduce_cpu_kernel(const Tensor& self, const int64_t dim, con
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
-REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel);
-REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel);
-REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);
-REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cpu_kernel);
-REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cpu_kernel);
-REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cpu_kernel);
+REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel)
+REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel)
+REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel)
+REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel)
+REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cpu_kernel)
+REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cpu_kernel)
+REGISTER_DISPATCH(scatter_reduce_two_stub, &scatter_reduce_two_cpu_kernel)
 
 // fast paths for GNN usage
-REGISTER_DISPATCH(scatter_add_expanded_index_stub, &scatter_add_expanded_index_kernel);
-REGISTER_DISPATCH(scatter_reduce_expanded_index_stub, &scatter_reduce_expanded_index_kernel);
-REGISTER_DISPATCH(gather_expanded_index_stub, &gather_expanded_index_kernel);
+REGISTER_DISPATCH(scatter_add_expanded_index_stub, &scatter_add_expanded_index_kernel)
+REGISTER_DISPATCH(scatter_reduce_expanded_index_stub, &scatter_reduce_expanded_index_kernel)
+REGISTER_DISPATCH(gather_expanded_index_stub, &gather_expanded_index_kernel)
 
 } // namespace at::native
