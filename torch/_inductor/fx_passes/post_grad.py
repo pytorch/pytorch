@@ -119,9 +119,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 pattern_matcher_pass.apply
             )
             if not is_same_dict(counters["inductor"], inductor_before_change):
-                optimus_scuba_log[
-                    f"{pattern_matcher_pass.pass_name}_post_grad"
-                ] = upload_graph(gm.graph)
+                optimus_scuba_log[f"{pattern_matcher_pass.pass_name}_post_grad"] = (
+                    upload_graph(gm.graph)
+                )
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
@@ -158,6 +158,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
         decompose_auto_functionalized
     )
+    GraphTransformObserver(
+        gm, "decompose_triton_kernel_wrapper_functional"
+    ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
     GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
         comms.reinplace_fsdp_all_gather
     )
@@ -770,26 +773,6 @@ def decompose_auto_functionalized(graph):
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
-        pass_dict=graph_pass,
-    )
-    def _(match: Match, *args, **kwargs):
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            triton_kernel_wrapper_functional_dense,
-        )
-
-        flat_args, spec = pytree.tree_flatten((args, kwargs))
-
-        # NB: we combine (args, kwargs) into flat args for replacing.
-        # This is replace_by_example uses make_fx which does not support
-        # tracing a function with kwargs.
-        def decomp(*flat_args):
-            args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
-
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
-
-    @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
         pass_dict=graph_pass,
     )
@@ -828,6 +811,33 @@ def decompose_auto_functionalized(graph):
         op="call_function", target=torch.ops.higher_order.auto_functionalized_v2
     ):
         raise AssertionError("auto_functionalized_v2 was not removed")
+
+
+def decompose_triton_kernel_wrapper_functional(graph):
+    """ """
+    graph_pass = PatternMatcherPass()
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional_dense,
+        )
+
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
+
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
+    graph_pass.apply(graph)
 
     for node in graph.find_nodes(
         op="call_function",
