@@ -498,7 +498,9 @@ class CKGemmTemplate(CKTemplate):
 
         if config.rocm.generate_test_runner:
             M, N, K, LDA, LDB, LDC, LDD = self.size_args()
-            runner_code = self._template_from_string(self.standalone_runner_template).render(
+            runner_code = self._template_from_string(
+                self.standalone_runner_template
+            ).render(
                 inline_utils=self.inline_utils().getvalue(),
                 kernel_name=kernel.kernel_name,
                 M=M,
@@ -516,11 +518,15 @@ class CKGemmTemplate(CKTemplate):
                 a_torch_dtype=DTYPE_TO_CPP[X.get_layout().dtype],
                 b_torch_dtype=DTYPE_TO_CPP[W.get_layout().dtype],
                 c_torch_dtype=DTYPE_TO_CPP[Y.get_layout().dtype],
-                bias_torch_dtype=DTYPE_TO_CPP[Bias.get_layout().dtype] if Bias is not None else "",
+                bias_torch_dtype=DTYPE_TO_CPP[Bias.get_layout().dtype]
+                if Bias is not None
+                else "",
                 a_layout=torch_layout_to_ck_layout(X.get_layout()),
                 b_layout=torch_layout_to_ck_layout(W.get_layout()),
                 c_layout=torch_layout_to_ck_layout(Y.get_layout()),
-                bias_layout=torch_layout_to_ck_layout(Bias.get_layout()) if Bias is not None else "",
+                bias_layout=torch_layout_to_ck_layout(Bias.get_layout())
+                if Bias is not None
+                else "",
             )
             res += runner_code
 
