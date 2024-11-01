@@ -6,14 +6,18 @@
 
 CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend)
     : backend{backend} {
-  this->check_fn = guarded_code.attr("check_fn");
+  this->guard_manager = guarded_code.attr("guard_manager");
   this->code = guarded_code.attr("code");
   this->compile_id = guarded_code.attr("compile_id");
-  // TODO - clean this up when enable_cpp_guard_manager is True by default
-  if (py::hasattr(this->check_fn, "root")) {
-    this->root_mgr = torch::dynamo::convert_to_root_guard_manager(
-        this->check_fn.attr("root"));
+  py::object trace_annotation = guarded_code.attr("trace_annotation");
+  const char* trace_annotation_str = PyUnicode_AsUTF8(trace_annotation.ptr());
+  if (trace_annotation) {
+    this->trace_annotation = std::string(trace_annotation_str);
+  } else {
+    this->trace_annotation = "Unknown";
   }
+  this->root_mgr = torch::dynamo::convert_to_root_guard_manager(
+      this->guard_manager.attr("root"));
 }
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
@@ -21,9 +25,9 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED(
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-copy-dtor")
 // NOLINTNEXTLINE(bugprone-exception-escape)
 CacheEntry::~CacheEntry() {
-  // prevent check_fn from use-after-free when invalidating
-  this->check_fn.attr("cache_entry") = py::none();
-  this->check_fn.attr("extra_state") = py::none();
+  // prevent guard_manager from use-after-free when invalidating
+  this->guard_manager.attr("cache_entry") = py::none();
+  this->guard_manager.attr("extra_state") = py::none();
 }
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
@@ -40,6 +44,10 @@ py::object CacheEntry::next() {
 
 PyCodeObject* CacheEntry_get_code(CacheEntry* e) {
   return (PyCodeObject*)e->code.ptr();
+}
+
+const char* CacheEntry_get_trace_annotation(CacheEntry* e) {
+  return e->trace_annotation.c_str();
 }
 
 PyObject* CacheEntry_to_obj(CacheEntry* e) {

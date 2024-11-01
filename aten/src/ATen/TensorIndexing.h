@@ -255,7 +255,9 @@ inline Tensor applySelect(
     // the other hand, indexing wraping is valid for all negative int64_t
     // values, as x[INT64_MIN] is the same as x[INT64_MAX]
     TORCH_CHECK_INDEX(
-        size > -1 - index && size > index,
+        size.sym_gt(-1 - index)
+            .sym_and(size.sym_gt(index))
+            .expect_true(__FILE__, __LINE__),
         "index ",
         index,
         " is out of bounds for dimension ",
@@ -317,7 +319,7 @@ inline void recordTensorIndex(
   outIndices.resize(*dim_ptr + 1);
   outIndices[*dim_ptr] = tensor;
   (*dim_ptr)++;
-};
+}
 
 inline c10::List<::std::optional<Tensor>> typeConvertIndices(
     const Tensor& /*self*/,

@@ -2577,6 +2577,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
+    def test_weighted_mse_loss(self):
+        inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+        targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
+        weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        loss = F.mse_loss(inputs, targets, weight=weight, reduction='mean')
+        expected_loss = torch.tensor(0.25)
+        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+
+    def test_weighted_l1_loss_with_weights(self):
+        inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+        targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
+        weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        loss = F.l1_loss(inputs, targets, weight=weight, reduction='mean')
+        expected_loss = torch.tensor(0.5)
+        self.assertTrue(torch.isclose(loss, expected_loss), f"Expected {expected_loss}, but got {loss}")
+
+    def test_weighted_huber_loss(self):
+        inputs = torch.tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+        targets = torch.tensor([1.5, 2.5, 3.5, 4.5])
+        weight = torch.tensor([1.0, 2.0, 3.0, 4.0])
+        loss = F.huber_loss(input=inputs, target=targets, weight=weight, reduction='mean', delta=1.0)
+        expected_loss = torch.tensor(0.25)
+        print(torch.isclose(loss, expected_loss, atol=1e-6), f"Expected {expected_loss}, but got {loss}")
+
     def test_gaussian_nll_loss_broadcasting(self):
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
         target_full = torch.tensor([[1., 2., 3.], [1., 2., 3.]])
@@ -8970,8 +8994,8 @@ class TestNNDeviceType(NNTestCase):
                     else:
                         self.assertEqual(hx.grad, hx_device.grad)
 
-    @dtypesIfMPS(torch.float)
     @dtypes(torch.double)
+    @dtypesIfMPS(torch.float)
     def test_BatchNorm_empty(self, device, dtype):
         mod = torch.nn.BatchNorm2d(3).to(device)
         inp = torch.randn(0, 3, 2, 2, device=device, dtype=dtype)
@@ -9000,8 +9024,12 @@ class TestNNDeviceType(NNTestCase):
 
     def test_one_hot(self, device):
         # cuda throws device assert for invalid data
-        # xla ignores out of bound indices
-        if self.device_type not in ('cuda', 'mps', 'xla'):
+        # xla & mps ignore out of bound indices
+        if (
+            self.device_type != 'cuda'
+            and self.device_type != 'xla'
+            and self.device_type != 'mps'
+        ):
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.one_hot(torch.tensor([3, 4, -1, 0], device=device), -1)
 
@@ -12721,6 +12749,8 @@ if __name__ == '__main__':
     def test_clip_grad_value(self, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
             raise SkipTest('foreach not supported on XLA')
+        if torch.device(device).type == 'mps' and foreach:
+            raise SkipTest('foreach not supported on MPS')
 
         l = nn.Linear(10, 10).to(device)
         clip_value = 2.5
@@ -12750,6 +12780,8 @@ if __name__ == '__main__':
     def test_clip_grad_norm(self, norm_type, foreach, device):
         if torch.device(device).type == 'xla' and foreach:
             raise SkipTest('foreach not supported on XLA')
+        if torch.device(device).type == 'mps' and foreach:
+            raise SkipTest('foreach not supported on MPS')
 
         l = nn.Linear(10, 10).to(device)
         max_norm = 2

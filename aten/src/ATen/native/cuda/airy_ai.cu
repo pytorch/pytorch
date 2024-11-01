@@ -20,7 +20,7 @@
 
 namespace at::native {
 namespace {
-CONSTEXPR_EXCEPT_WIN_CUDA char airy_ai_name[] = "airy_ai_forward";
+constexpr char airy_ai_name[] = "airy_ai_forward";
 
 void airy_ai_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()

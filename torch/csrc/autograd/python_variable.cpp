@@ -184,7 +184,7 @@ void pushPyOutToStack(
 namespace {
 
 c10::TensorImpl::SizesStridesPolicy parseSizesStridesPolicyArgument(
-    c10::string_view arg) {
+    std::string_view arg) {
   if (arg == "strides") {
     return c10::TensorImpl::SizesStridesPolicy::CustomStrides;
   }
@@ -207,7 +207,7 @@ PyObject* ParameterClass = nullptr;
 
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
-    Variable _var,
+    const at::TensorBase& _var,
     c10::impl::PyInterpreterStatus status,
     bool allow_preexisting_pyobj = false);
 
@@ -254,8 +254,7 @@ void activateGPUTrace() {
   c10::impl::GPUTrace::set_trace(getPyInterpreter());
 }
 
-// TODO: Make this take Variable by const reference
-PyObject* THPVariable_Wrap(at::TensorBase var) {
+PyObject* THPVariable_Wrap(const at::TensorBase& var) {
   if (!var.defined()) {
     Py_RETURN_NONE;
   }
@@ -263,7 +262,7 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
   if (c10::impl::HermeticPyObjectTLS::get_state()) {
     return THPVariable_NewWithVar(
         (PyTypeObject*)THPVariableClass,
-        std::move(var),
+        var,
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   }
 
@@ -282,7 +281,7 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
         // object if all C++ references go to zero
         var.unsafeGetTensorImpl()->pyobj_slot()->set_owns_pyobj(false);
         reinterpret_cast<THPVariable*>(obj)->cdata =
-            MaybeOwned<Variable>::owned(std::move(var));
+            MaybeOwned<Variable>::owned(Variable(var));
         // NB: incref is not necessary, because we are "stealing" the previous
         // ownership from the Variable to return it here for the wrap
         return obj;
@@ -308,16 +307,14 @@ PyObject* THPVariable_Wrap(at::TensorBase var) {
   }
 
   if (C10_LIKELY(var.device().type() != c10::kXLA)) {
-    return THPVariable_NewWithVar(
-        (PyTypeObject*)THPVariableClass, std::move(var), status);
+    return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var, status);
   }
 
   if (auto clazz = getPythonTensorClass(var.device())) {
-    return THPVariable_NewWithVar((PyTypeObject*)clazz, std::move(var), status);
+    return THPVariable_NewWithVar((PyTypeObject*)clazz, var, status);
   }
 
-  return THPVariable_NewWithVar(
-      (PyTypeObject*)THPVariableClass, std::move(var), status);
+  return THPVariable_NewWithVar((PyTypeObject*)THPVariableClass, var, status);
 }
 
 bool isResurrectable(THPVariable* self) {
@@ -409,7 +406,7 @@ static bool THPVariable_tryResurrect(THPVariable* self) {
   return true;
 }
 
-static int THPVariable_clear(THPVariable* self) {
+static int THPVariable_subclass_clear(THPVariable* self) {
   // Is it OK for an object to still be live after running
   // tp_clear? Yes. When Python is breaking reference cycles, it can't assume
   // that an object will dealloc after it's cleared.  The source code explicitly
@@ -465,7 +462,7 @@ static int THPVariable_clear(THPVariable* self) {
       //  !tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()INTERNAL
       //  ASSERT FAILED at "../torch/csrc/autograd/python_variable.cpp":171,
       //  please report a bug to PyTorch. Exception raised from
-      //  THPVariable_clear at
+      //  THPVariable_subclass_clear at
       //  ../torch/csrc/autograd/python_variable.cpp:171 (most recent call
       //  first): frame #0: c10::Error::Error(c10::SourceLocation,
       //  std::__1::basic_string<char, std::__1::char_traits<char>,
@@ -475,7 +472,7 @@ static int THPVariable_clear(THPVariable* self) {
       //  c10::detail::torchInternalAssertFail(char const*, char const*,
       //  unsigned int, char const*, c10::detail::CompileTimeEmptyString) + 9
       //  (0x1141e3f89 in libtorch_python.dylib) frame #3:
-      //  THPVariable_clear(THPVariable*) + 412 (0x1148a547c in
+      //  THPVariable_subclass_clear(THPVariable*) + 412 (0x1148a547c in
       //  libtorch_python.dylib) frame #4:
       //  THPVariable_subclass_dealloc(_object*) + 453 (0x1148a5035 in
       //  libtorch_python.dylib) frame #5: (anonymous
@@ -507,9 +504,15 @@ static int THPVariable_clear(THPVariable* self) {
   return 0;
 }
 
-int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
+int THPFake_traverse(THPVariable* self, visitproc visit, void* arg) {
   TORCH_INTERNAL_ASSERT(
-      false, "Tensor tp_traverse function was not overriden properly");
+      false, "TensorBase tp_traverse function was not overriden properly");
+  return 0;
+}
+
+int THPFake_clear(THPVariable* self) {
+  TORCH_INTERNAL_ASSERT(
+      false, "TensorBase tp_clear function was not overriden properly");
   return 0;
 }
 
@@ -613,7 +616,7 @@ static PyObject* view_func_impl(
       }
     }
   }
-  return THPVariable_Wrap(std::move(out));
+  return THPVariable_Wrap(out);
   END_HANDLE_TH_ERRORS
 }
 
@@ -649,7 +652,7 @@ static PyObject* rev_view_func_impl(PyObject* self_, PyObject* arg) {
     TORCH_CHECK(view_info.has_view_fn(), "No _rev_view_func() found");
     out = view_info.rev_view_fn()(new_view);
   }
-  return THPVariable_Wrap(std::move(out));
+  return THPVariable_Wrap(out);
   END_HANDLE_TH_ERRORS
 }
 
@@ -677,6 +680,10 @@ static PyObject* THPVariable_as_subclass(
       "cls must be a type (got ",
       Py_TYPE(cls)->tp_name,
       ")");
+  // guard completely turns off torch dispatch modes, doesn't just pop off the
+  // stack
+  torch_dispatch_mode::StashTorchDispatchStackGuard td_g;
+  c10::impl::DisablePythonDispatcher dpd_g;
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
       self.alias(),
@@ -1781,9 +1788,8 @@ struct THPVariableMeta {
 int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs);
 
 PyTypeObject THPVariableMetaType = {
-    PyVarObject_HEAD_INIT(
-        DEFERRED_ADDRESS(&PyType_Type),
-        0) "torch._C._TensorMeta", /* tp_name */
+    PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
+    "torch._C._TensorMeta", /* tp_name */
     sizeof(THPVariableMeta), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -1824,9 +1830,8 @@ PyTypeObject THPVariableMetaType = {
 };
 
 PyTypeObject THPVariableType = {
-    PyVarObject_HEAD_INIT(
-        &THPVariableMetaType,
-        0) "torch._C.TensorBase", /* tp_name */
+    PyVarObject_HEAD_INIT(&THPVariableMetaType, 0)
+    "torch._C.TensorBase", /* tp_name */
     sizeof(THPVariable), /* tp_basicsize */
     0, /* tp_itemsize */
     // This is unspecified, because it is illegal to create a THPVariableType
@@ -1852,8 +1857,8 @@ PyTypeObject THPVariableType = {
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
     // Also set by metaclass
-    (traverseproc)THPFunction_traverse, /* tp_traverse */
-    (inquiry)THPVariable_clear, /* tp_clear */
+    (traverseproc)THPFake_traverse, /* tp_traverse */
+    (inquiry)THPFake_clear, /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
@@ -1890,7 +1895,7 @@ PyObject* THPVariable_pynew(
   // these to be passed on directly.
   return THPVariable_NewWithVar(
       type,
-      std::move(tensor),
+      tensor,
       c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED,
       /*allow_preexisting_pyobj=*/true);
   END_HANDLE_TH_ERRORS
@@ -1986,7 +1991,7 @@ void THPVariable_subclass_dealloc(PyObject* self) {
   TORCH_INTERNAL_ASSERT(Py_TYPE(self) == type);
 
   // Finally clear out the base THPVariable
-  THPVariable_clear((THPVariable*)self);
+  THPVariable_subclass_clear((THPVariable*)self);
   ((THPVariable*)self)->cdata.~MaybeOwned<Variable>();
   Py_TYPE(self)->tp_free(self);
 
@@ -2004,7 +2009,7 @@ void THPVariable_subclass_dealloc(PyObject* self) {
 // It's ALWAYS safe (albeit slower) to call this with MAYBE_UNINITIALIZED.
 static PyObject* THPVariable_NewWithVar(
     PyTypeObject* type,
-    Variable _var,
+    const at::TensorBase& _var,
     c10::impl::PyInterpreterStatus status,
     bool allow_preexisting_pyobj) {
   // Make sure that the reinterpret into a THPVariable* will be valid
@@ -2074,7 +2079,7 @@ static PyObject* THPVariable_NewWithVar(
         " which is not a subclass of the "
         "requested type");
     // We may (in fact, we typically will) need to resurrect this
-    return THPVariable_Wrap(std::move(_var));
+    return THPVariable_Wrap(_var);
   }
 
   PyObject* obj = type->tp_alloc(type, 0);
@@ -2084,7 +2089,7 @@ static PyObject* THPVariable_NewWithVar(
     new (&v->cdata) MaybeOwned<Variable>();
     if (c10::impl::HermeticPyObjectTLS::get_state()) {
       // Do NOT initialize pyobj field on the tensor, you own the C++
-      v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
+      v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
       TORCH_INTERNAL_ASSERT(
           !check_has_torch_dispatch(obj),
           "While HermeticPyObject was enabled, we attempted to create a tensor "
@@ -2096,7 +2101,7 @@ static PyObject* THPVariable_NewWithVar(
           "Python op registration.");
     } else {
       // Normal codepath
-      v->cdata = MaybeOwned<Variable>::owned(std::move(_var));
+      v->cdata = MaybeOwned<Variable>::owned(Variable(_var));
       const auto& var = THPVariable_Unpack(v);
       var.unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(
           getPyInterpreter(), obj, status);
@@ -2279,9 +2284,17 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
     return -1;
   }
+  // It is important for all three of these to be overriden correctly for the
+  // resurrection checks to properly happen. In particular, an older version
+  // was not overriding tp_clear here. This lead to the default subtype_clear
+  // running on the Tensor object (as only TensorBase tp_clear was custom),
+  // clearing the __dict__ field, before the TensorBase custom clear was called
+  // and would properly detect the resurrect.
+  // See https://github.com/pytorch/pytorch/issues/136358 for the exact behavior
   ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPVariable_subclass_dealloc;
   ((PyTypeObject*)cls)->tp_traverse =
       (traverseproc)THPVariable_subclass_traverse;
+  ((PyTypeObject*)cls)->tp_clear = (inquiry)THPVariable_subclass_clear;
 
   // Don't do anything for the base Tensor class
   if (!THPVariableClass) {
@@ -2373,6 +2386,7 @@ bool THPVariable_initModule(PyObject* module) {
     return false;
   Py_INCREF(&THPVariableType);
   PyModule_AddObject(module, "TensorBase", (PyObject*)&THPVariableType);
+  Py_INCREF(&THPVariableType);
   PyModule_AddObject(module, "_TensorBase", (PyObject*)&THPVariableType);
   torch::autograd::initTorchFunctions(module);
   torch::autograd::initTensorImplConversion(module);

@@ -10,9 +10,7 @@
 #include <limits>
 #include <utility>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -372,7 +370,7 @@ inline Tensor glu(const Tensor& input, const GLUFuncOptions& options = {}) {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
-inline Tensor gelu(const Tensor& input, string approximate) {
+inline Tensor gelu(const Tensor& input, const string& approximate) {
   return torch::gelu(input, approximate);
 }
 } // namespace detail
@@ -693,7 +691,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       // encoder-decoder attention
       // This is inline in_proj function with in_proj_weight and in_proj_bias
       auto _b = in_proj_bias;
-      auto _start = 0;
+      int64_t _start = 0;
       auto _end = embed_dim;
       auto _w = in_proj_weight.slice(/*dim=*/0, _start, _end);
       if (_b.defined()) {
@@ -720,7 +718,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     } else {
       // This is inline in_proj function with in_proj_weight and in_proj_bias
       auto _b = in_proj_bias;
-      auto _start = 0;
+      int64_t _start = 0;
       auto _end = embed_dim;
       auto _w = in_proj_weight.slice(/*dim=*/0, _start, _end);
       if (_b.defined()) {
@@ -903,8 +901,7 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
     attn_output_weights =
         attn_output_weights.view({bsz * num_heads, tgt_len, src_len});
   }
-  // NOLINTNEXTLINE(bugprone-argument-comment)
-  attn_output_weights = F::softmax(attn_output_weights, /*dim=*/-1);
+  attn_output_weights = F::softmax(attn_output_weights, /*options=*/-1);
   attn_output_weights = F::dropout(
       attn_output_weights,
       F::DropoutFuncOptions().p(dropout_p).training(training));
@@ -961,6 +958,4 @@ inline std::tuple<Tensor, Tensor> multi_head_attention_forward(
       options.average_attn_weights());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

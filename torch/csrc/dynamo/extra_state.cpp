@@ -109,10 +109,12 @@ bool backend_match(PyObject* saved_backend, PyObject* backend) {
   return true;
 }
 
-PyObject* lookup(
+void lookup(
     ExtraState* extra_state,
     PyObject* f_locals,
-    PyObject* backend) {
+    PyObject* backend,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation) {
   size_t index = 0;
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
@@ -124,19 +126,13 @@ PyObject* lookup(
 
     if (valid) {
       try {
-        // TODO(anijain2305) - Clean this up when enable_cpp_guard_manager is
-        // True by default
-        if (cache_entry.root_mgr != nullptr) {
-          valid = torch::dynamo::run_root_guard_manager(
-              cache_entry.root_mgr, f_locals);
-        } else {
-          valid = cache_entry.check_fn(locals).cast<bool>();
-        }
+        valid = torch::dynamo::run_root_guard_manager(
+            cache_entry.root_mgr, f_locals);
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
           py::handle guard_error_hook_handle(guard_error_hook);
           guard_error_hook_handle(
-              cache_entry.check_fn,
+              cache_entry.guard_manager,
               cache_entry.code,
               locals,
               index,
@@ -145,7 +141,8 @@ PyObject* lookup(
         // this function is called from C, so we cannot repropagate
         // the exception
         e.restore();
-        return nullptr;
+        *maybe_cached_code = nullptr;
+        return;
       }
     }
     if (valid) {
@@ -156,9 +153,11 @@ PyObject* lookup(
   }
   if (found) {
     extra_state->move_to_front(found);
-    return found->code.ptr();
+    *maybe_cached_code = found->code.ptr();
+    *trace_annotation = found->trace_annotation.c_str();
+    return;
   }
-  return py::none().ptr();
+  *maybe_cached_code = py::none().ptr();
 }
 
 CacheEntry* create_cache_entry(
@@ -169,12 +168,12 @@ CacheEntry* create_cache_entry(
   auto new_iter = extra_state->cache_entry_list.begin();
   new_iter->_owner = extra_state;
   new_iter->_owner_loc = new_iter;
-  // Set check_fn references to extra_state and CacheEntry
+  // Set guard_manager references to extra_state and CacheEntry
   // Warning: lifetime is controlled by C++!
-  py::handle check_fn = py::handle(guarded_code).attr("check_fn");
-  check_fn.attr("cache_entry") =
+  py::handle guard_manager = py::handle(guarded_code).attr("guard_manager");
+  guard_manager.attr("cache_entry") =
       py::cast(*new_iter, py::return_value_policy::reference);
-  check_fn.attr("extra_state") =
+  guard_manager.attr("extra_state") =
       py::cast(extra_state, py::return_value_policy::reference);
   return &*new_iter;
 }
