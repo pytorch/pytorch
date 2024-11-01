@@ -1176,11 +1176,11 @@ def dispatch_trace(
 def wrap_key(
     f: Callable[_P, R], tensors: _P.args, tracer: _ProxyTracer, pre_dispatch: bool
 ) -> Callable[_P, R]:
-    flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
+    flat_tensors, _tensors_spec = pytree.tree_flatten(tensors)
 
     @functools.wraps(f)
     def wrapped(*proxies: _P.args, **_unused: _P.kwargs) -> R:
-        flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
+        flat_proxies, _proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
         with disable_proxy_modes_tracing() as m:
             assert isinstance(m, ProxyTorchDispatchMode)
@@ -1251,10 +1251,14 @@ _temp_remove_metadata_torch_function_mode = _make_temp_remove_mode_context_manag
 class PreDispatchTorchFunctionMode(TorchFunctionMode):
     def __init__(self, tracer: _ProxyTracer) -> None:
         self.tracer = tracer
+        # The input to torch.amp.autocast_mode._exit_autocast graph node should be the
+        # enter_autocast node. So we have to save the enter autocast node here, and assign it
+        # to the exit_autocast call_function node.
+        self.enter_autocast_nodes: List[torch.fx.Node] = []
 
     def __torch_function__(
         self,
-        func: OpOverload,
+        func: Union[OpOverload, Callable],
         types: Tuple[torch._C._TensorMeta, ...],
         args: Tuple[object, ...] = (),
         kwargs: Optional[Dict[str, object]] = None,
@@ -1265,7 +1269,12 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # TODO(tmanlaibaatar): we should systematically couple it with expoert verifier,
             # instead of hardcoding it here.
             # T203648563
+            if func == torch.amp.autocast_mode._exit_autocast:
+                enter_node = self.enter_autocast_nodes.pop()
+                args = (enter_node,)
             node = self.tracer.create_node("call_function", func, args, {})  # type: ignore[arg-type]
+            if func == torch.amp.autocast_mode._enter_autocast:
+                self.enter_autocast_nodes.append(node)
             if func in [
                 torch._C._set_grad_enabled,
                 torch.amp.autocast_mode._enter_autocast,
@@ -1360,12 +1369,24 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     def _compute_proxy(
         self, func: OpOverload, args: Tuple[object, ...], out: PySymType
     ) -> Proxy:
-        n_args = tuple(
-            get_proxy_slot(a, self.tracer).force().node
-            if isinstance(a, py_sym_types)
-            else a
-            for a in args
-        )
+        # Handle torch.sym_sum
+        n_args: Tuple[object, ...]
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            n_args = (
+                tuple(
+                    get_proxy_slot(a, self.tracer).force().node
+                    if isinstance(a, py_sym_types)
+                    else a
+                    for a in args[0]
+                ),
+            )
+        else:
+            n_args = tuple(
+                get_proxy_slot(a, self.tracer).force().node
+                if isinstance(a, py_sym_types)
+                else a
+                for a in args
+            )
 
         # func doesn't have a __torch_function__ that Proxy can interpose, so
         # we gotta do it manually
@@ -1724,7 +1745,7 @@ class _ModuleStackTracer(PythonKeyTracer):
 
         try:
             return Tracer.call_module(self, m, forward, args, kwargs)
-        except _ModuleNotInstalledAsSubmoduleError as e:
+        except _ModuleNotInstalledAsSubmoduleError:
             warnings.warn(
                 f"Unable to find the path of the module {m}. "
                 "This might be because the module was not properly registered "

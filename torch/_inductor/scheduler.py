@@ -113,7 +113,11 @@ class SchedulerBuffer:
         if not self.node.should_allocate():
             return
 
-        if self.node.get_inputs_that_alias_output() or self.node.get_mutation_names():
+        if (
+            self.node.get_inputs_that_alias_output()
+            or self.node.get_mutation_names()
+            or isinstance(self.node.get_layout(), ir.CommBufferLayout)
+        ):
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
 
@@ -391,7 +395,7 @@ class BaseSchedulerNode:
         from .codegen.wrapper import buffer_reuse_key
 
         if not (
-            isinstance(self, (SchedulerNode,))
+            isinstance(self, SchedulerNode)
             and config.inplace_buffers
             and V.graph.has_feature(self.get_device(), BackendFeature.INPLACE_BUFFERS)
             and (
@@ -402,12 +406,13 @@ class BaseSchedulerNode:
             and hasattr(V.kernel, "args")
         ):
             return
-        fused_nodes = {
-            node.get_name()
-            for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
-        }
 
-        ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
+        # NOTE remove V.graph.removed_operations once deps issue is fixed
+        inconsequential_nodes = (
+            (self.ancestors - {self.get_name()})
+            | V.graph.removed_operations
+            | self.scheduler.completed_operations
+        )
 
         for buf in self.get_outputs():
             buf_node = buf.node
@@ -420,7 +425,7 @@ class BaseSchedulerNode:
             ):
                 continue
 
-            for read in ordered_reads:
+            for read in self.read_writes.reads:
                 input_buf: Optional[SchedulerBuffer] = self.scheduler.name_to_buf.get(
                     read.name
                 )
@@ -429,16 +434,11 @@ class BaseSchedulerNode:
                     and V.graph.wrapper_code.can_reuse(input_buf, self)
                     and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
                 ):
-                    # If the writers of input_buf are in the same FusedSchedulerNode as the current op, then there is
-                    # no need to inplace.
-                    if input_buf.defining_op.get_name() in fused_nodes:
-                        continue
-
                     assert input_buf.users is not None
                     remaining_uses = [
                         x
                         for x in input_buf.users
-                        if x.node.get_name() not in self.scheduler.completed_operations
+                        if x.node.get_name() not in inconsequential_nodes
                     ]
                     if (
                         len(remaining_uses) == 1
@@ -472,9 +472,6 @@ class BaseSchedulerNode:
                         ):
                             V.kernel.mutations.add(input_buf.get_name())
                             V.kernel.mutations.add(buf.get_name())
-
-                        # update last usage of reused node
-                        self.last_usage.discard(input_buf.get_name())
 
                         V.kernel.inplace_update_buffers[
                             buf.get_name()
@@ -922,6 +919,15 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.refresh_dependencies(normalize=False)
 
+        from .codegen.simd import SIMDScheduling
+
+        # TODO(shunting) if this cause compilation time increase when
+        # enabling LOAF by default, try just clearing the specific cache
+        # entry by using a customized cache implemetation rather than
+        # lru_cache.
+        SIMDScheduling.candidate_tilings.cache_clear()
+        self.pointwise_read_writes.clear_cache(self)
+
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
     ) -> None:
@@ -1125,7 +1131,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self_sizes = None
         for snode in self.snodes:
             assert isinstance(snode, SchedulerNode)
-            if self_sizes is not None and self_sizes != snode._sizes[0]:
+            if self_sizes is not None and tuple(self_sizes) != tuple(snode._sizes[0]):
                 loop_ordering_log.debug(
                     "Can not reorder fused node due to different sizes"
                 )
@@ -1844,7 +1850,6 @@ class Scheduler:
         self.debug_draw_graph()
 
         # used during codegen:
-        self.current_device: Optional[torch.device] = None
         self.buffer_names_to_free: OrderedSet[str] = OrderedSet()
 
         # fx graph node to the position it appears in the graph
@@ -1859,11 +1864,13 @@ class Scheduler:
             }
         )
 
-    def get_current_device_or_throw(self) -> torch.device:
-        if device := self.current_device:
-            return device
-        else:
-            raise RuntimeError("No current device")
+    @property
+    def current_device(self) -> Optional[torch.device]:
+        return V.graph.current_device
+
+    @current_device.setter
+    def current_device(self, device: Optional[torch.device]) -> None:
+        V.graph.current_device = device
 
     def debug_draw_graph(self) -> None:
         """Generate an image of the graph for debugging"""
@@ -2853,9 +2860,9 @@ class Scheduler:
 
         return str(reasons)
 
-    def has_shared_data_after_reordering_loop(
+    def shared_data_after_reordering_loop(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
+    ) -> int:
         """
         Right now just greedily reorder the loop of node1 to be compatible with node2,
         but ideally we should have some heuristics to reorder the loop for node2
@@ -2867,14 +2874,14 @@ class Scheduler:
         if not config.loop_ordering_after_fusion or any(
             n.get_device().type == "cpu" for n in [node1, node2]
         ):
-            return False
+            return 0
 
         node1_buffer_names = node1.read_writes.buffer_names()
         node2_buffer_names = node2.read_writes.buffer_names()
         # Fast path: no common buffers.
         common_buffer_names = node1_buffer_names & node2_buffer_names
         if not common_buffer_names:
-            return False
+            return 0
 
         node1_name2dep = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
         node2_name2dep = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
@@ -2897,7 +2904,7 @@ class Scheduler:
                 )
 
         if len(candidates) == 0:
-            return False
+            return 0
 
         # Pick the largest buffer to guide the loop reordering
         numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
@@ -2907,7 +2914,9 @@ class Scheduler:
             # We can not do loop reordering in this case right now
             # Simply returning true if the two Deps are the same after
             # normalization (merging loops)
-            return lhs_dep.normalize() == rhs_dep.normalize()
+            if lhs_dep.normalize() == rhs_dep.normalize():
+                return self.dep_size_hint(lhs_dep)
+            return 0
 
         # Only reorder loops for pointwise for now
         if not node1.is_reduction():
@@ -2921,7 +2930,7 @@ class Scheduler:
                 node2.get_name(),
             )
 
-        return self.score_fusion_memory(node1, node2) > 0
+        return self.score_fusion_memory(node1, node2)
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:
         """
@@ -2989,19 +2998,17 @@ class Scheduler:
             return False
         del device2
 
-        no_shared_data = self.score_fusion_memory(node1, node2) == 0
-        if no_shared_data:
-            no_shared_data = not self.has_shared_data_after_reordering_loop(
-                node1, node2
-            )
+        shared_data_score = self.score_fusion_memory(node1, node2)
+        if shared_data_score == 0:
+            shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
 
         loop_ordering_log.debug(
             "%s and %s has%s shared data",
             node1.get_name(),
             node2.get_name(),
-            " no" if no_shared_data else "",
+            " no" if shared_data_score == 0 else "",
         )
-        if no_shared_data and (
+        if shared_data_score == 0 and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
@@ -3043,6 +3050,13 @@ class Scheduler:
                 return False
             return self.get_backend(device).can_fuse_vertical(node1, node2)
         else:  # nodes don't depend on each other, but may have common reads
+            if (
+                # only apply score_fusion_memory_threshold to horizontal fusions
+                shared_data_score
+                < config.score_fusion_memory_threshold
+            ):
+                why("score_fusion_memory_threshold")
+                return False
             if self.can_fusion_increase_peak_memory(node1, node2):
                 why("will increase peak memory")
                 return False
@@ -3315,67 +3329,6 @@ class Scheduler:
 
         self.buffer_names_to_free.clear()
 
-    def remove_kernel_local_buffers(self) -> None:
-        """
-        Any buffers that are both created and have a last use in the
-        same kernel can be removed.
-        """
-
-        fused_node_names = OrderedSet(
-            self.name_to_buf[buf].defining_op.get_name()
-            for buf in V.kernel.store_buffer_names
-            if buf in self.name_to_buf
-        )
-        names_to_remove = []
-        for out_buf in V.kernel.store_buffer_names:
-            if out_buf not in self.name_to_buf:
-                # Aux buffers created during kernel codegen
-                names_to_remove.append(out_buf)
-                continue
-            users = self.name_to_buf[out_buf].users
-            assert users is not None
-            users = OrderedSet(user.get_name() for user in users if not user.is_weak)
-            if users.issubset(fused_node_names):
-                names_to_remove.append(out_buf)
-
-        def remove_filter(n: str) -> bool:
-            return (
-                n not in V.kernel.must_keep_buffers
-                and n not in V.kernel.args.input_buffers
-                and n not in self.mutation_renames
-                and n not in self.mutation_real_name
-            )
-
-        names_to_remove = list(filter(remove_filter, names_to_remove))
-
-        for name in names_to_remove:
-            if name in V.kernel.args.inplace_buffers:
-                buf = V.kernel.args.inplace_buffers[name]
-                if isinstance(buf, str) and buf.startswith("REMOVED"):
-                    continue
-                remove = all(n in names_to_remove for n in buf.other_names)
-                if remove:
-                    self.remove_inplace_buffer(name)
-                V.kernel.inplaced_to_remove.add(name)
-            else:
-                self.remove_buffer(name)
-
-    def remove_buffer(self, name: str) -> None:
-        # Assign a special value instead of deleting the entry
-        # because we still rely on output_buffers's length to
-        # generate unique arg name.
-        log.debug("remove_buffer(%r)", name)
-        V.kernel.args.output_buffers[name] = "REMOVED"
-        V.kernel.removed_buffers.add(name)
-
-    def remove_inplace_buffer(self, name: str) -> None:
-        log.debug("removing_inplace_buffer(%r)", name)
-        inner_name = V.kernel.args.inplace_buffers[name].inner_name
-        V.kernel.args.inplace_buffers[name] = inner_name.replace(
-            "in_out_ptr", "REMOVED"
-        )
-        V.kernel.removed_buffers.add(name)
-
     def flush(self) -> None:
         for backend in self.backends.values():
             backend.flush()
@@ -3444,6 +3397,19 @@ class Scheduler:
             _, last = max(origins, key=operator.itemgetter(0))
             V.graph.wrapper_code.enter_context(last)
 
+    def can_buffer_be_removed_through_fusion(
+        self, name: str, fused_node_names: OrderedSet[str]
+    ) -> bool:
+        try:
+            users = self.name_to_buf[name].users
+        except KeyError:
+            return False
+        return (
+            all(user.is_weak or user.get_name() in fused_node_names for user in users)
+            and name not in self.mutation_renames
+            and name not in self.mutation_real_name
+        )
+
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
             return self._codegen()
@@ -3469,6 +3435,7 @@ class Scheduler:
                 )
                 seen.add(key)
 
+        self.current_device = None
         for node in self.nodes:
             if log.isEnabledFor(logging.DEBUG):
                 try:
