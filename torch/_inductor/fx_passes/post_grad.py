@@ -120,9 +120,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             )
             if not is_same_dict(counters["inductor"], inductor_before_change):
                 optimus_scuba_log[
-                    f"{pattern_matcher_pass.pass_name}_post_grad"] = (
-                        upload_graph(gm.graph)
-                )
+                    f"{pattern_matcher_pass.pass_name}_post_grad"
+                ] = upload_graph(gm.graph)
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
