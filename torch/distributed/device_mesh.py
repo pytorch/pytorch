@@ -93,11 +93,10 @@ else:
             # If we want to slice out mesh["dp", "cp"], then submesh_dims = [(0,), (1,)] and submesh_dim_size = [2, 2].
             slice_dim_size = [
                 reduce(
-                    lambda x, y: device_mesh.mesh.size(x) * device_mesh.mesh.size(y),
+                    lambda x, y: x * device_mesh.mesh.size(y),
                     mesh_dim,
+                    1,
                 )
-                if len(mesh_dim) > 1
-                else device_mesh.mesh.size(mesh_dim[0])
                 for mesh_dim in submesh_dims
             ]
 

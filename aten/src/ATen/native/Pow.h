@@ -61,8 +61,8 @@ inline HOST_DEVICE T powi(T a, T b) {
 using pow_tensor_tensor_fn = void (*)(TensorIteratorBase&);
 using pow_tensor_scalar_fn = void (*)(TensorIteratorBase&, const c10::Scalar&);
 
-DECLARE_DISPATCH(pow_tensor_tensor_fn, pow_tensor_tensor_stub);
-DECLARE_DISPATCH(pow_tensor_scalar_fn, pow_tensor_scalar_stub);
+DECLARE_DISPATCH(pow_tensor_tensor_fn, pow_tensor_tensor_stub)
+DECLARE_DISPATCH(pow_tensor_scalar_fn, pow_tensor_scalar_stub)
 
 } // namespace native
 
