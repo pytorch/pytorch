@@ -3362,7 +3362,7 @@ def index_put_impl_(self, indices, values, accumulate, check):
         if isinstance(x, ir.TensorBox):
             x = x.data
         if isinstance(x, ir.BaseView):
-            x = x.data
+            x = x.unwrap_view()
         if isinstance(x, ir.StorageBox):
             x = x.data
         return x.get_name() if isinstance(x, ir.Buffer) else None
