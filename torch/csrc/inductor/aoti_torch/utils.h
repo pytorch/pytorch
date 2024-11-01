@@ -148,7 +148,7 @@ inline std::vector<at::Tensor> pointer_to_list(
   std::vector<at::Tensor> result;
   result.reserve(len);
   for (int64_t i = 0; i < len; i++) {
-    result.emplace_back(*tensor_handle_to_tensor_pointer(*ptr));
+    result.emplace_back(*tensor_handle_to_tensor_pointer(ptr[i]));
   }
   return result;
 }
