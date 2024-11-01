@@ -132,7 +132,7 @@ def ignore_builtins(op: torch._ops.OpOverload) -> bool:
 
 
 def get_nop_func():
-    if torch._functorch.config.fake_tensor_crossref == False:
+    if not torch._functorch.config.fake_tensor_crossref:
         return boxed_nop
     elif torch._functorch.config.fake_tensor_crossref == "all":
         return fake_crossref_boxed_nop
