@@ -76,11 +76,21 @@ loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 class SchedulerDonatedBuffer:
     scheduler: Scheduler
     node: ir.DonatedBuffer
-    users: List[NodeUser]
     defining_op: Optional[BaseSchedulerNode]
+    users: List[NodeUser] = dataclasses.field(default_factory=list)
 
     def get_name(self) -> str:
         return self.node.get_name()
+
+    def set_users(self, users: List[NodeUser]) -> None:
+        # deduplicate
+        result: Dict[int, NodeUser] = {}
+        for use in users:
+            if id(use.node) in result:
+                result[id(use.node)] = use.merge(result[id(use.node)])
+            else:
+                result[id(use.node)] = use
+        self.users = list(result.values())
 
 
 @dataclasses.dataclass
@@ -400,7 +410,9 @@ class BaseSchedulerNode:
     def has_side_effects(self) -> bool:
         return False
 
-    def decide_inplace_update(self) -> None:
+    def decide_inplace_update(
+        self, local_completed_operations: Optional[OrderedSet[str]] = None
+    ) -> None:
         """
         Decide if there should be inplace updates for the node
         and record the decision in the active kernel.
@@ -459,10 +471,15 @@ class BaseSchedulerNode:
                         continue
 
                     assert input_buf.users is not None
+                    completed_operations = (
+                        local_completed_operations
+                        if local_completed_operations
+                        else self.scheduler.completed_operations
+                    )
                     remaining_uses = [
                         x
                         for x in input_buf.users
-                        if x.node.get_name() not in self.scheduler.completed_operations
+                        if x.node.get_name() not in completed_operations
                     ]
                     if (
                         len(remaining_uses) == 1
@@ -1895,7 +1912,6 @@ class Scheduler:
                     name_to_donated_buf[read.name] = SchedulerDonatedBuffer(
                         self,
                         V.graph.graph_inputs[read.name].data.data,  # type: ignore[attr-defined]
-                        [NodeUser(node, can_inplace=True, is_weak=False)],
                         defining_op=None,
                     )
         return name_to_donated_buf
@@ -2175,6 +2191,20 @@ class Scheduler:
         for node in self.nodes:
             for buf in node.get_outputs():
                 buf.set_users(name_to_users[buf.get_name()].items)
+
+        # compute and copy user information of donated buffer
+        for node in self.nodes:
+            for read in node.read_writes.reads:
+                if (
+                    read.name in V.graph.graph_inputs
+                    and isinstance(
+                        V.graph.graph_inputs[read.name].data.data, ir.DonatedBuffer  # type: ignore[attr-defined]
+                    )
+                    and not isinstance(read, WeakDep)
+                ):
+                    add_user(read.name, node, node.can_inplace(read))
+        for name in self.name_to_donated_buffer:
+            self.name_to_donated_buffer[name].set_users(name_to_users[name].items)
 
     def dead_node_elimination(self) -> None:
         """
