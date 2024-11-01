@@ -295,15 +295,14 @@ bool gemv_use_fast_path<at::Half>(
     at::Half alpha,
     [[maybe_unused]] int64_t lda,
     [[maybe_unused]] int64_t incx,
-    at::Half beta,
+    [[maybe_unused]] at::Half beta,
     [[maybe_unused]] int64_t incy) {
   // clang is capable of constant-folding fp16_ieee_from_fp32_value,
   // so use it to get simple integer comparisons.
   // https://godbolt.org/z/v936hroYb
   using c10::detail::fp16_ieee_from_fp32_value;;
   return (trans == 'T' || trans == 't') && incx == 1 &&
-    alpha.x == fp16_ieee_from_fp32_value(1.0f) &&
-    beta.x == fp16_ieee_from_fp32_value(0.0f);
+    alpha.x == fp16_ieee_from_fp32_value(1.0f);
 }
 template <>
 void gemv_fast_path<at::Half>(
@@ -342,7 +341,7 @@ bool scal_use_fast_path<at::Half>(
 
 template <>
 bool gemv_use_fast_path<at::Half>(
-    [[maybe_unused]] char trans,
+    char trans,
     [[maybe_unused]] int64_t m,
     [[maybe_unused]] int64_t n,
     at::Half alpha,
@@ -351,7 +350,8 @@ bool gemv_use_fast_path<at::Half>(
     at::Half beta,
     [[maybe_unused]] int64_t incy) {
   return incx == 1 && c10::detail::fp16_from_bits(alpha.x) == 1.0f &&
-      c10::detail::fp16_from_bits(beta.x) == 0.0f;
+      // TODO: enable nonzero beta for fp16_gemv_notrans
+      (c10::detail::fp16_from_bits(beta.x) == 0.0f || trans == 't' || trans == 'T');
 }
 
 template <>
