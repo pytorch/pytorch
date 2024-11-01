@@ -208,9 +208,12 @@ static void reduction_out_mps(const Tensor& input_t,
       case MPSReductionType::COUNT_NONZERO:
         output_t.zero_();
         break;
+      case MPSReductionType::AMAX:
+      case MPSReductionType::AMIN:
       case MPSReductionType::MAX:
       case MPSReductionType::MIN:
         TORCH_CHECK(opt_dim.has_value(), "Expected reduction dim to be specified for input.numel() == 0");
+        break;
       default:
         TORCH_INTERNAL_ASSERT(false, "Unexpected reduction type ", reduction_type);
         break;
