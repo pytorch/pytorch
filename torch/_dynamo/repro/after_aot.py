@@ -36,6 +36,7 @@ from torch._dynamo.debug_utils import (
     NopInputReader,
     same_two_models,
 )
+from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -225,6 +226,35 @@ def wrap_compiler_debug(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
+def maybe_fbcode_instructions():
+    if is_fbcode:
+        return """\
+\"\"\"
+To run this script in fbcode:
+- Create a directory (//scripts/{your_unixname}/repro)
+- Put this file in scripts/{your_unixname}/repro/fx_graph_runnable.py
+- Add a TARGETS file that looks like the following
+- `buck2 run //scripts/{unixname}/repro:repro`
+
+NOTE: you may need additional deps to actually be able to run the script.
+```
+# Contents of TARGETS file
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+python_binary(
+    name = "repro",
+    main_src = "fx_graph_runnable.py",
+    deps = [
+        "//caffe2:torch",
+    ],
+)
+```
+\"\"\"
+"""
+    else:
+        return ""
+
+
 def generate_compiler_repro_string(
     gm, args, *, stable_output=False, save_dir=None, stable_hash=False
 ):
@@ -243,6 +273,7 @@ isolate_fails_code_str = None
 
 {extra_imports}
 
+{maybe_fbcode_instructions()}
         """
     )
     if not stable_output:
