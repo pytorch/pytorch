@@ -22,68 +22,33 @@ if(nosyclfound)
   return()
 endif()
 
-if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-  set(SYCL_EXECUTABLE_NAME icpx)
-elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
-  set(SYCL_EXECUTABLE_NAME icx)
-endif()
-
 # Find SYCL compiler executable.
 find_program(
   SYCL_COMPILER
-  NAMES ${SYCL_EXECUTABLE_NAME}
+  NAMES icx
   PATHS "${SYCL_ROOT}"
   PATH_SUFFIXES bin bin64
   NO_DEFAULT_PATH
   )
 
 function(parse_sycl_compiler_version version_number)
-  # Generate a small C++ source code file to determine the SYCL compiler version.
-  set(SOURCE_CODE
-  "
-    #include <iostream>
-    int main() {
-    #if defined(__INTEL_LLVM_COMPILER)
-      std::cout << \"__INTEL_LLVM_COMPILER=\" << __INTEL_LLVM_COMPILER << std::endl;
-    #endif
-      return 0;
-    }
-  ")
-  set(SOURCE_CODE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
-  set(SOURCE_CODE_FILE "${SOURCE_CODE_DIR}/sycl_compiler_version.cpp")
-  set(SOURCE_CODE_EXCUTABLE_NAME "${SOURCE_CODE_FILE}.exe")
-  file(WRITE ${SOURCE_CODE_FILE} "${SOURCE_CODE}")
-  # Compile the source code file.
-  execute_process(
-    COMMAND "${SYCL_COMPILER}"
-    "-fsycl"
-    ${SOURCE_CODE_FILE}
-    "-o"
-    ${SOURCE_CODE_EXCUTABLE_NAME}
-    WORKING_DIRECTORY ${SOURCE_CODE_DIR}
-    RESULT_VARIABLE result
-    TIMEOUT 60
-    )
-  if(result)
-    return()
-  endif()
-  # Run the generated executable to output et the SYCL compiler version.
-  execute_process(
-    COMMAND ${SOURCE_CODE_EXCUTABLE_NAME}
-    WORKING_DIRECTORY ${SOURCE_CODE_DIR}
-    OUTPUT_VARIABLE output
-    RESULT_VARIABLE result
-    TIMEOUT 60
-    )
-  if(result)
-    return()
-  endif()
-  # Parse the version number from the output.
-  string(REGEX REPLACE "^__INTEL_LLVM_COMPILER=" "" VERSION_NUMBER_MATCH "${output}")
+  # 1. Execute the SYCL compiler with the --version flag to get the version string.
+  execute_process(COMMAND ${SYCL_COMPILER} --version OUTPUT_VARIABLE SYCL_VERSION_STRING)
+  # 2. Use a regular expression to extract the version number from the version string.
+  string(REGEX REPLACE "Intel\\(R\\) (.*) Compiler ([0-9]+\\.[0-9]+\\.[0-9]+) (.*)" "\\2"
+               SYCL_VERSION_STRING_MATCH ${SYCL_VERSION_STRING})
+  string(REPLACE "." ";" SYCL_VERSION_LIST ${SYCL_VERSION_STRING_MATCH})
+  # 3. Split the version number into major, minor, and patch components.
+  list(GET SYCL_VERSION_LIST 0 VERSION_MAJOR)
+  list(GET SYCL_VERSION_LIST 1 VERSION_MINOR)
+  list(GET SYCL_VERSION_LIST 2 VERSION_PATCH)
+  # 4. Calculate a single version number using the formula (major * 10000 + minor * 100 + patch).
+  math(EXPR VERSION_NUMBER_MATCH "${VERSION_MAJOR} * 10000 + ${VERSION_MINOR} * 100 + ${VERSION_PATCH}")
   set(${version_number} "${VERSION_NUMBER_MATCH}" PARENT_SCOPE)
 endfunction()
 
 parse_sycl_compiler_version(SYCL_COMPILER_VERSION)
+message(FATAL_ERROR ${SYCL_COMPILER_VERSION})
 
 if(NOT SYCL_COMPILER_VERSION)
   set(SYCL_FOUND False)
