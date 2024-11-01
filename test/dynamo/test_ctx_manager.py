@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     TEST_WITH_ROCM,
+    TestCase,
 )
 
 
@@ -1956,7 +1957,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y, x.sin().cos())
 
 
-class CPythonContextManagerTestCase(unittest.TestCase):
+class CPythonContextManagerTestCase(TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
     # https://github.com/python/cpython/blob/d48cc82ed25e26b02eb97c6263d95dcaa1e9111b/Lib/test/test_contextlib.py#L70
 
