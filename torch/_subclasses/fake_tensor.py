@@ -36,8 +36,10 @@ from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
+import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
@@ -152,22 +154,21 @@ def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, Non
 
 
 def get_plain_tensors(
-    subclass: Tensor, out_append_list: Optional[List[Tensor]] = None
-) -> List[Tensor]:
+    subclass: Tensor, *, out: List[Union[Tensor, int, SymInt]]
+) -> List[Union[Tensor, int, SymInt]]:
     # This function is used in Runtime, do not add redundant asserts
-    plain_tensors: List[Tensor] = [] if out_append_list is None else out_append_list
     todo = [subclass]
     while todo:
         curr = todo.pop()
         if not is_traceable_wrapper_subclass(curr):
-            plain_tensors.append(curr)
+            out.append(curr)
             continue
 
         inner_keys, _ = curr.__tensor_flatten__()
         for key in reversed(inner_keys):
             todo.append(getattr(curr, key))
 
-    return plain_tensors
+    return out
 
 
 def is_fake(x: object) -> TypeGuard[Tensor]:
@@ -1947,7 +1948,9 @@ class FakeTensorMode(TorchDispatchMode):
         args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
 
-        def maybe_to_real_tensor(t: T) -> Optional[Union[T, Tensor]]:
+        def maybe_to_real_tensor(
+            t: T,
+        ) -> Optional[Union[T, Tensor, torch._C.ScriptObject]]:
             if isinstance(t, FakeTensor):
                 return t.real_tensor
             elif isinstance(t, py_sym_types):
@@ -1957,6 +1960,8 @@ class FakeTensorMode(TorchDispatchMode):
                         self.shape_env.unbacked_var_to_val
                     )
                 )
+            elif isinstance(t, FakeScriptObject):
+                return t.real_obj
             else:
                 return t
 
@@ -1985,7 +1990,19 @@ class FakeTensorMode(TorchDispatchMode):
             log.debug("propagate_real_tensors %s", func)
             real_flat_args = [maybe_to_real_tensor(a) for a in flat_args]
             real_args, real_kwargs = pytree.tree_unflatten(real_flat_args, args_spec)
+
+            is_builtin = library_utils.is_builtin(func)
+            if not is_builtin:
+                mutation_checker = library_utils.MutationChecker(
+                    func, real_flat_args, args_spec
+                )
+
             real_out = func(*real_args, **real_kwargs)
+
+            if not is_builtin:
+                mutation_checker.check()  # type: ignore[possibly-undefined]
+                library_utils.check_aliasing_constraint(func._name, flat_args, real_out)
+
         elif self.propagate_real_tensors:
             # This can happen occasionally legitimately, specifically when you
             # are inside the meta of a data dependent operation and you create
@@ -2106,6 +2123,17 @@ class FakeTensorMode(TorchDispatchMode):
         if profiles is not None:
             if func in profiles.data:
                 return profiles.generic_fake_kernel(func, self, *args, **kwargs)
+
+        if (
+            self.propagate_real_tensors
+            and real_out is not nil
+            and not library_utils.is_builtin(func)
+            and self.shape_env is not None
+        ):
+            # Automatically infer a Fake kernel if there isn't one.
+            if not library_utils.has_fake_kernel(func):
+                result = inferred_fake_kernel_from_real_out(self, func, real_out)
+                return maybe_propagate_real_tensors(result)
 
         # Users can register FakeTensor rules for custom operators
         # Call them if they exist.
@@ -2572,3 +2600,79 @@ def dump_cache_stats() -> None:
         width = max(len(k) for k in bypasses)
         for k, v in sorted(bypasses.items(), key=lambda i: -i[1]):
             log.info("    %-*s %s", width + 1, f"{k}:", v)
+
+
+def inferred_fake_kernel_from_real_out(
+    mode: FakeTensorMode, op: torch._ops.OpOverload, real_out: Any
+) -> Any:
+    assert mode.shape_env is not None
+
+    # Only support operators that have all Tensor outputs
+    # This is a general limitation on custom ops that we impose for PT2
+    # to avoid baking non-symbolic float/int outputs into the graph.
+    real_flat_out, spec = pytree.tree_flatten(real_out)
+    if not all(isinstance(t, torch.Tensor) for t in real_flat_out):
+        raise RuntimeError(
+            f"propagate_real_tensors: we don't support operators that return "
+            f"non-Tensors. Got {op._schema}"
+        )
+
+    def make_fake(real_out: torch.Tensor) -> torch.Tensor:
+        def unsupported(reason: str) -> None:
+            raise RuntimeError(
+                f"propagate_real_tensors: we cannot infer a Fake kernel "
+                f"(meta kernel) for operator {op._name} because {reason}. "
+                f"Please use torch.library.register_fake to add a Fake kernel."
+            )
+
+        if real_out.storage_offset() != 0:
+            unsupported(
+                f"a return has a non-zero storage offset {real_out.storage_offset()}"
+            )
+
+        # Since PT2 is rank specialized, there's no such thing as a symbolic
+        # output rank. So we can assume the fake tensor has the same number of
+        # dimensions as the real tensor output.
+        #
+        # We shouldn't assume the Fake sizes/strides are exactly what we see on
+        # the real tensor output (perhaps we should give users a lever to toggle
+        # this). This is because there's a good amount of operators that return
+        # outputs with data-dependent output shape.
+        # So we infer the output sizes to all be unbacked symints
+        fake_shape = [
+            torch._library.fake_impl.allocate_size(mode.shape_env)
+            for _ in range(real_out.dim())
+        ]
+
+        # We infer what the strides are. We had a couple of options for this:
+        # - assume the strides are computable from the sizes
+        # - use new fresh unbacked symints in the strides
+        #   This doesn't work that well (PT2 doesn't support unbacked symint strides well)
+        # - use the real strides
+        #   This can only be used if we assume the strides are static.
+        # We went with the first option.
+        fake_strides = [-1] * real_out.dim()
+        strides = [(s, idx) for idx, s in enumerate(real_out.stride())]
+        strides.sort()
+        expected = 1
+        fake_stride = expected
+        for s, idx in strides:
+            if s != expected:
+                unsupported(
+                    f"a return was not dense in memory (sizes {real_out.shape} strides {real_out.stride()})"
+                )
+            fake_strides[idx] = fake_stride
+            expected = expected * real_out.shape[idx]
+            fake_stride = fake_stride * fake_shape[idx]
+
+        with mode:
+            return torch.empty_strided(
+                fake_shape,
+                fake_strides,
+                device=real_out.device,
+                dtype=real_out.dtype,
+                layout=real_out.layout,
+            )
+
+    fake_flat_out = [make_fake(t) for t in real_flat_out]
+    return pytree.tree_unflatten(fake_flat_out, spec)
