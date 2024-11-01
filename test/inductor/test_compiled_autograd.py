@@ -2852,18 +2852,14 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             "aot0_mm",
             "aot0_permute_3",
             "aot0_mm_1",
-            "aot0_permute_4",
             "aot0_sum_1",
             "aot0_view",
-            "aot0_permute_5",
             "aot0_le_1",
             "aot0_where_1",
             "aot0_permute_6",
             "aot0_mm_2",
-            "aot0_permute_7",
             "aot0_sum_2",
             "aot0_view_1",
-            "aot0_permute_8",
         ]
 
         found = 0
@@ -3057,6 +3053,105 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         ]
 
         self.assertEqual(sum(1 for e in unexpected_logs if e in logs.getvalue()), 0)
+
+    # https://github.com/pytorch/pytorch/issues/138920
+    def test_compiled_autograd_does_not_specialize_on_bw_symints(self):
+        class Mod(torch.nn.Module):
+            def __init__(self, a, b, c):
+                super().__init__()
+                self.a = a
+                self.c = c
+                self.b = b
+                self.lin1 = torch.nn.Linear(b * a, b * c, device="cpu")
+
+            def forward(self, x):
+                x = x.view(-1, self.a * self.b)
+                y = self.lin1(x)
+                y = y.view(-1, self.c, self.b).contiguous()
+                y = torch.flatten(y, start_dim=1)
+                return y
+
+        class Mod2(torch.nn.Module):
+            def __init__(self, a, b, c):
+                super().__init__()
+                self.mod = Mod(a, b, c)
+
+            def forward(self, s, tensor_dict):
+                args = tensor_dict[s]
+                x = torch.cat(list(args))
+                out = self.mod(x)
+                return out
+
+        class Mod3(torch.nn.Module):
+            def __init__(self, mods):
+                super().__init__()
+                self.mods = mods
+
+            def forward(self, strs, tensor_dict, x):
+                outs = [x]
+                for i, m in enumerate(self.mods):
+                    s = strs[i]
+                    print("graph break")
+                    out = m(s, tensor_dict)
+                    outs.append(out)
+                return torch.cat(outs).sum(0)
+
+        def gen_tensor_dict(sizes):
+            tensor_dict = {
+                "a": [torch.randn(sizes[0], 48, device="cpu") for _ in range(4)],
+                "b": [torch.randn(sizes[1], 48, device="cpu") for _ in range(7)],
+            }
+            return tensor_dict
+
+        mods = [
+            Mod2(192, 1, 48),
+            Mod2(336, 1, 48),
+        ]
+        m = Mod3(mods)
+
+        strs = ["a", "b"]
+
+        m = torch.compile(m)
+
+        graphs = []
+
+        def compiler_fn(gm):
+            def inner_compiler(gm_, example_inputs_):
+                graphs.append(gm_)
+                return gm_
+
+            return torch.compile(
+                gm, backend=inner_compiler, fullgraph=True, dynamic=True
+            )
+
+        x = torch.zeros(100, 48, device="cpu")
+        tensor_dict = gen_tensor_dict([101, 102])
+        out = m(strs, tensor_dict, x)
+
+        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
+            out.sum().backward()
+
+        x = torch.zeros(103, 48, device="cpu")
+        tensor_dict = gen_tensor_dict([104, 105])
+        out = m(strs, tensor_dict, x)
+
+        with torch._dynamo.compiled_autograd.enable(compiler_fn) as ctx:
+            out.sum().backward()
+
+        # This test is a bit fragile (I failed to create a better repro).
+        # The important bit is that the second CA graph has not specialized the value
+        # of aot4_sym_size_int_ to a constant.
+        # This happens via suppressing any dynamic shape guards that CA generates
+        # when it runs make_fx.
+        # Suppressing these guards is strictly better than the current state,
+        # because we ignore all of these guards anyway in CA.
+        # Once we stop using make_fx in CA, we won't have to worry about this specialization.
+        view_nodes = graphs[1].graph.find_nodes(
+            op="call_function", target=torch.ops.aten.view.default
+        )
+        # First 2 view nodes have a first argument that is a SymInt, not an int burned into the graph
+        self.assertTrue(isinstance(view_nodes[0].args[1][0], torch.fx.Node))
+        self.assertTrue(isinstance(view_nodes[1].args[1][0], torch.fx.Node))
 
     @unittest.expectedFailure
     def test_saved_tensor_unpack_hook_ordering(self):

@@ -102,6 +102,7 @@
 
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <torch/csrc/profiler/combined_traceback.h>
+#include <torch/csrc/profiler/kineto_client_interface.h>
 #include <sstream>
 
 #ifdef USE_CUDA
@@ -326,7 +327,7 @@ static PyObject* THPModule_setNumThreads(PyObject* module, PyObject* arg) {
 static PyObject* THPModule_getNumInteropThreads(
     PyObject* module,
     PyObject* noargs) {
-  return THPUtils_packInt32(at::get_num_interop_threads());
+  return THPUtils_packUInt64(at::get_num_interop_threads());
 }
 
 static PyObject* THPModule_setNumInteropThreads(
@@ -2443,6 +2444,10 @@ Call this whenever a new thread is created in order to propagate values from
   torch::set_disabled_torch_dispatch_impl(
       PyObject_GetAttrString(module, "_disabled_torch_dispatch_impl"));
   ASSERT_TRUE(torch::disabled_torch_dispatch_impl() != nullptr);
+  // init kineto here
+#ifdef USE_KINETO
+  torch::global_kineto_init();
+#endif
   return module;
   END_HANDLE_TH_ERRORS
 }
