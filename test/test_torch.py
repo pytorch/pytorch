@@ -10057,6 +10057,19 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(MyStorage.finalized_count, 1)
         self.assertTrue(m[0])
 
+    @unittest.skipIf(not torch.cuda.is_available(), "_storage_Use_Count only registered when CUDA is available")
+    def test_storage__use_count_APIs_align(self):
+        a = torch.rand(2, 3)
+        s = a.untyped_storage()
+        init_use_count = s._use_count()
+        self.assertEqual(init_use_count, torch._C._storage_Use_Count(s._cdata))
+        b = a.t()
+        self.assertEqual(s._use_count(), init_use_count + 1)
+        self.assertEqual(s._use_count(), torch._C._storage_Use_Count(s._cdata))
+        del b
+        self.assertEqual(s._use_count(), init_use_count)
+        self.assertEqual(s._use_count(), torch._C._storage_Use_Count(s._cdata))
+
     def test_tensor_ressurecting_clear(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/136358
         # A Tensor with custom __dict__
