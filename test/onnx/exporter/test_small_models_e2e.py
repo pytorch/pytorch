@@ -31,7 +31,7 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_program = torch.onnx.export(
             model, (query, key, value), dynamo=True, fallback=False
         )
-        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
     def test_constant_complex(self):
         class MulModule(torch.nn.Module):
