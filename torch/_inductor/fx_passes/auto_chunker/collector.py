@@ -239,7 +239,7 @@ class Collector:
 
         # The chunking subgraph should contains nodes reachable from
         # the source_ndoe
-        chunking_subgraph_nodes = set(cls._find_reachable_nodes(source_node, _can_expand))
+        chunking_subgraph_nodes = set(cls._find_reachable_nodes(source_user, _can_expand))
 
         # The chunking subgraph should also contains nodes reachable from
         # tangents.

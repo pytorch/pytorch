@@ -19,6 +19,7 @@ from torch.utils._ordered_set import OrderedSet
 from .collector import get_args_of_node_type
 from .collector import Collector, CantChunk
 from .partitioner import Partitioner
+from .propagator import Propagator, format_node_with_chunking_meta
 from .collector import get_fake_tensor_from_node, maybe_permuted
 
 aten = torch.ops.aten
@@ -43,12 +44,6 @@ def _add_chunking_meta_to_source_node(source_node):
     meta = ChunkingMeta(chunking_dim=0, is_source=True)
     source_node.meta["chunking"] = meta
 
-def _format_node_with_chunking_meta(node: torch.fx.Node):
-    from torch._inductor.runtime.runtime_utils import green_text
-    print(f"  {node.format_node()}")
-
-    if meta := node.meta.get("chunking"):
-        print(f"    {green_text(str(meta))}")
 
 def _print_graph_with_chunking_meta(graph: torch.fx.Graph):
     """
@@ -56,7 +51,7 @@ def _print_graph_with_chunking_meta(graph: torch.fx.Graph):
     """
     print("Graph_with_chunking_meta:")
     for node in graph.nodes:
-        _format_node_with_chunking_meta(node)
+        format_node_with_chunking_meta(node)
 
 def _print_node_input_output_chunking_meta(nd: torch.fx.Node):
     """
@@ -65,7 +60,7 @@ def _print_node_input_output_chunking_meta(nd: torch.fx.Node):
     print(f"Input/output chunking metadata for {nd}")
     for x in [*_pytree.tree_flatten((nd.args, nd.kwargs))[0], nd]:
         if isinstance(x, torch.fx.Node):
-            _format_node_with_chunking_meta(x)
+            format_node_with_chunking_meta(x)
 
 # Rules to propagate chunking metadata from inputs to the current node
 propagate_rules = {
@@ -82,14 +77,14 @@ def _register_propagate_rule(aten_op, handler):
 def register_propagate_rule(aten_op):
     return functools.partial(_register_propagate_rule, aten_op)
 
-def _get_chunking_meta(nd):
+def get_chunking_meta(nd):
     return nd.meta.get("chunking")
 
 def _set_chunking_meta(nd, meta):
     nd.meta["chunking"] = meta
 
 def copy_chunking_meta(dst_node: torch.fx.Node, source_node: torch.fx.Node, is_source=False, only_chunk_dim=False):
-    source_meta = _get_chunking_meta(source_node)
+    source_meta = get_chunking_meta(source_node)
     assert source_meta
 
     if only_chunk_dim:
@@ -107,8 +102,8 @@ def copy_chunking_meta(dst_node: torch.fx.Node, source_node: torch.fx.Node, is_s
 def propagate_addmm(nd):
     bias_nd, input_nd, weight_nd = nd.args
 
-    if _get_chunking_meta(bias_nd) is None and _get_chunking_meta(weight_nd) is None and _get_chunking_meta(input_nd) is not None:
-        # only input is chunked
+    # only input is chunked
+    if get_chunking_meta(bias_nd) is None and get_chunking_meta(weight_nd) is None and get_chunking_meta(input_nd) is not None:
         copy_chunking_meta(nd, input_nd)
         return True
 
@@ -117,8 +112,8 @@ def propagate_addmm(nd):
 @register_propagate_rule(aten.div.Tensor)
 def propagate_div(div_nd):
     lhs_nd, rhs_nd = div_nd.args[:2]
-    lhs_meta = _get_chunking_meta(lhs_nd)
-    rhs_meta = _get_chunking_meta(rhs_nd)
+    lhs_meta = get_chunking_meta(lhs_nd)
+    rhs_meta = get_chunking_meta(rhs_nd)
 
     if lhs_nd.meta["val"].numel() == 1 and rhs_nd.meta["val"].numel() == 1 and rhs_meta is None and lhs_meta is not None:
         # Scalar division used to compute loss
@@ -135,18 +130,18 @@ def propagate_div(div_nd):
 def proparate_where(where_node):
     cond_node, lhs_node, rhs_node = where_node.args
 
-    if _get_chunking_meta(rhs_node) is not None or rhs_node.meta["val"].numel() != 1:
+    if get_chunking_meta(rhs_node) is not None or rhs_node.meta["val"].numel() != 1:
         # assume rhs_node is a non-chunked scalar tensor
         return False
 
-    lhs_meta = _get_chunking_meta(lhs_node)
+    lhs_meta = get_chunking_meta(lhs_node)
     if lhs_meta is None:
         return None
 
-    cond_meta = _get_chunking_meta(cond_node)
+    cond_meta = get_chunking_meta(cond_node)
     if cond_meta is None:
         copy_chunking_meta(cond_node, lhs_node, is_source=True, only_chunk_dim=True)
-        cond_meta = _get_chunking_meta(cond_node)
+        cond_meta = get_chunking_meta(cond_node)
     if lhs_meta == cond_meta:
         copy_chunking_meta(where_node, lhs_node)
         return True
@@ -155,7 +150,7 @@ def proparate_where(where_node):
 @register_propagate_rule(aten.sum.default)
 def propagate_sum_to_scalar(sum_node):
     input_node = sum_node.args[0]
-    input_meta = _get_chunking_meta(input_node)
+    input_meta = get_chunking_meta(input_node)
     assert input_meta
 
     # Input is not chunked
@@ -174,7 +169,7 @@ def propagate_sum_to_scalar(sum_node):
 ])
 def propagate_unary_pointwise(nd):
     node_args = get_args_of_node_type(nd)
-    if len(node_args) == 1 and _get_chunking_meta(node_args[0]) is not None:
+    if len(node_args) == 1 and get_chunking_meta(node_args[0]) is not None:
         copy_chunking_meta(nd, node_args[0])
         return True
     return False
@@ -189,8 +184,8 @@ def _mark_extra_source_node(lhs_nd, rhs_nd):
     TODO: In theory we could 'propagate back' a bit to find a better up-stream node
     to chunk.
     """
-    lhs_meta = _get_chunking_meta(lhs_nd)
-    rhs_meta = _get_chunking_meta(rhs_nd)
+    lhs_meta = get_chunking_meta(lhs_nd)
+    rhs_meta = get_chunking_meta(rhs_nd)
 
     if lhs_meta is None and rhs_meta is None:
         return
@@ -220,8 +215,8 @@ def propagate_binary_pointwise(binary_nd):
 
     _mark_extra_source_node(lhs_nd, rhs_nd)
 
-    lhs_meta = _get_chunking_meta(lhs_nd)
-    rhs_meta = _get_chunking_meta(rhs_nd)
+    lhs_meta = get_chunking_meta(lhs_nd)
+    rhs_meta = get_chunking_meta(rhs_nd)
     if lhs_meta is None or rhs_meta is None or lhs_meta != rhs_meta:
         return False
     copy_chunking_meta(binary_nd, lhs_nd)
@@ -236,7 +231,7 @@ def propagate_reduce_non_chunk_dim(reduce_node):
     A reduction that reduces across non-chunked dimension
     """
     arg_node, reduce_dims = reduce_node.args[0: 2]
-    arg_meta = _get_chunking_meta(arg_node)
+    arg_meta = get_chunking_meta(arg_node)
     if not arg_meta or arg_meta.chunking_dim in reduce_dims:
         return False
     
@@ -715,9 +710,9 @@ class AutoChunker:
             for node in chunking_subgraph_nodes:
                 print(f"  {node.format_node()}")
 
-            reordered_graph = Partitioner.reorder_nodes(graph, chunking_subgraph_nodes)
-            print("reordered graph is:")
-            print(reordered_graph) # TODO
+            reordered_graph, chunking_subgraph_nodes = Partitioner.reorder_nodes(graph, chunking_subgraph_nodes)
+
+            Propagator.add_chunking_meta(reordered_graph, chunking_subgraph_nodes)
             assert False
 
             propagator = ChunkingMetaPropagator()

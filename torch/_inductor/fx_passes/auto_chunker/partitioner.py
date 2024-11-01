@@ -45,13 +45,13 @@ class Partitioner:
             _copy_node("prechunking", node)
 
         # add nodes in the chunking subgraph
-        new_chunking_subgraph_nodes = []
+        new_chunking_subgraph_nodes = OrderedSet()
         for node in graph.nodes:
             if node in pre_chunking_nodes:
                 continue
             elif node in chunking_subgraph_nodes:
                 _copy_node("chunking", node)
-                new_chunking_subgraph_nodes.append(node)
+                new_chunking_subgraph_nodes.add(env[node])
             else:
                 post_chunking_nodes.append(node)
 
