@@ -159,6 +159,9 @@ class TensorVariable(VariableTracker):
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
+        # if not self.source:
+        #     print(proxy)
+            # breakpoint()
 
     def debug_repr(self):
         # TODO: strip off fake tensor from repr here

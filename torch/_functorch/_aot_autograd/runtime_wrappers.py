@@ -1516,6 +1516,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             _lazy_backward_info = lazy_backward_info
 
             @staticmethod
+            def create_fake_ctx(ctx, saved_tensors):
+                return torch._dynamo.external_utils.FakeBackwardCFunction(ctx, saved_tensors)
+
+            @staticmethod
             def _compiled_autograd_key(ctx):
                 return (ctx._autograd_function_id, *ctx.symints)
 
@@ -1984,7 +1988,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         )
                     bw_module = lazy_backward_info.bw_module
                     # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
-                    symints = ctx._get_compiled_autograd_symints()
+                    symints = ctx.aot_symints
                     assert len(symints) == len(ctx.symints)
                     all_args[: len(symints)] = symints
                     if backward_state_indices:

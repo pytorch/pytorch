@@ -63,6 +63,8 @@ class BaseListVariable(VariableTracker):
         items: List[VariableTracker],
         **kwargs,
     ) -> None:
+        if "dtype" in kwargs:
+            breakpoint()
         super().__init__(**kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)

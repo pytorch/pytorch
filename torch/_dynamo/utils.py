@@ -2122,6 +2122,8 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
             # ensure_graph_fake
             return get_fake_value(n, tx, allow_non_graph_fake)
 
+        if "example_value" not in n.meta:
+            breakpoint()
         out = n.meta["example_value"]
         if not allow_non_graph_fake and isinstance(out, torch.Tensor):
             return ensure_graph_fake(out, tx)

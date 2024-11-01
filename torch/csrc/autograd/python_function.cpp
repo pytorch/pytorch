@@ -339,9 +339,22 @@ void PyNode::compiled_args(CompiledNodeArgs& args) {
   args.collect(f->input_info);
 
   if (compiled_autograd_should_lift()) {
-    Py_INCREF(obj);
+    // Py_INCREF(obj);
+    // _backward_idx =
+    //     args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
+
+    static PyObject* method_name =
+        PyUnicode_InternFromString("create_fake_ctx");
+    // fires unpack hooks :(
+    THPFunction* py_fn = (THPFunction*)obj;
+    THPObjectPtr saved_tensors(unpack_saved_variables(
+        py_fn, [](const Variable& var) { return THPVariable_Wrap(var); }));
+
+    THPObjectPtr forward_class{PyObject_GetAttrString(obj, "_forward_cls")};
+    THPObjectPtr fakeobj(PyObject_CallMethodObjArgs(forward_class.get(), method_name, obj, saved_tensors.get(), nullptr));
+    Py_INCREF(fakeobj);
     _backward_idx =
-        args.add_backward(c10::SafePyObject(obj, getPyInterpreter()));
+        args.add_backward(c10::SafePyObject(fakeobj.get(), getPyInterpreter()));
   }
 
   PyObject* bw_state = f->compiled_autograd_backward_state;

@@ -764,6 +764,46 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        # elif isinstance(value, torch._dynamo.external_utils.FakeBackwardCFunction) and torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+        #     breakpoint()
+        #     new_name = re.sub(r"[^a-zA-Z0-9]+", "_", self.name)
+        #     new_source = LocalSource(local_name=new_name)
+        #     pctx = self.tx.output.root_tracer.create_graph_input(
+        #         new_name,
+        #         type(value),
+        #         source=new_source,
+        #     )
+        #     set_example_value(pctx.node, value)
+        #     # res = self.tx.output.side_effects.track_object_existing(
+        #     #     value,
+        #     return AutogradFunctionContextVariable(
+        #         value,
+        #         # source=self.source,
+        #         source=new_source,
+        #         saved_tensors=SavedTensorBox([]),
+        #         proxy=pctx,
+        #     )
+        elif torch._dynamo.compiled_autograd.in_compiled_autograd_region and (isinstance(value, torch.autograd.function.FunctionCtx) or isinstance(value, torch._dynamo.external_utils.FakeBackwardCFunction)):
+            breakpoint()
+            new_name = re.sub(r"[^a-zA-Z0-9]+", "_", self.name)
+            new_source = LocalSource(local_name=new_name)
+            pctx = self.tx.output.root_tracer.create_graph_input(
+                new_name,
+                type(value),
+                source=new_source,
+            )
+            set_example_value(pctx.node, value)
+            # res = self.tx.output.side_effects.track_object_existing(
+            #     value,
+            return AutogradFunctionContextVariable(
+                value,
+                # source=self.source,
+                source=new_source,
+                saved_tensors=SavedTensorBox([]),
+                proxy=pctx,
+            )
+            # )
+            # return res
         elif isinstance(value, torch.autograd.function.FunctionCtx):
             actual_saved_tensors = None
             try:
@@ -1495,6 +1535,7 @@ class VariableBuilder:
             )
 
     def wrap_tensor(self, value: torch.Tensor):
+        breakpoint()
         source = self.get_source()
 
         # We cannot already be tracking the tensor, which implies
@@ -2164,6 +2205,8 @@ def _wrap_fx_preexisting_tensor(
                 "is_tensor": target_cls
                 in (TensorVariable, TensorWithTFOverrideVariable),
             }
+            if "source" not in options or options["source"] is None:
+                breakpoint()
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
             tensor = wrap_to_fake_tensor_and_record(tensor, tx=tx, **kwargs)
@@ -2269,26 +2312,38 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
                     kwargs={},
                 )
 
+                options_i = options.copy()
                 if "source" in options:
                     source = options["source"]
-                    options_i = options.copy()
                     options_i["source"] = GetItemSource(
                         base=source, index=i, index_is_slice=False
                     )
-                else:
-                    # use the same options object as parent
-                    options_i = options
 
                 # WARNING: this assumes the same target_cls as this tuple/list call
-                unpacked.append(
-                    wrap_fx_proxy_cls(
-                        target_cls=target_cls,
-                        tx=tx,
-                        proxy=proxy_i,
-                        example_value=val,
-                        **options_i,
+                if "source" not in options_i:
+                    breakpoint()
+                    # traced output list has new tensors
+                    unpacked.append(
+                        handle_traced_output(
+                            example_value=val,
+                            tx=tx,
+                            proxy=proxy_i,
+                            options=options_i,
+                            subclass_type=subclass_type,
+                            target_cls=target_cls,
+                        )
                     )
-                )
+                else:
+                    unpacked.append(
+                        wrap_fx_proxy_cls(
+                            target_cls=target_cls,
+                            tx=tx,
+                            proxy=proxy_i,
+                            example_value=val,
+                            **options_i,
+                        )
+                    )
+        breakpoint()
         if isinstance(example_value, torch.Size):
             # NB: Keep the old proxy around.  See SizeVariable for an
             # explanation why
