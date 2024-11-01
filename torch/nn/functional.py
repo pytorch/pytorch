@@ -4540,7 +4540,7 @@ def interpolate(  # noqa: F811
             "Anti-alias option is restricted to bilinear and bicubic modes and requires a 4-D tensor as input"
         )
 
-    if scale_factors is not None:
+    if not torch.jit.is_scripting() and scale_factors is not None:
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         scale_factors = [
             float(f) if isinstance(f, torch.SymFloat) else f for f in scale_factors
