@@ -172,12 +172,14 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
+    "test_masked_select_dynamic": fail_stack_allocation(is_skip=True),
     "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
 }
 
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(AOTITestCase):
     device = "cpu"
+    device_type = "cpu"
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
@@ -197,6 +199,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterf
     TestCase
 ):
     device = "cpu"
+    device_type = "cpu"
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
