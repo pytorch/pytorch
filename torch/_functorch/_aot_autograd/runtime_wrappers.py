@@ -8,11 +8,12 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import builtins
 import collections
+import itertools
 import pprint
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils.dlpack
@@ -45,13 +46,13 @@ from .schemas import (
     InputAliasInfo,
     MutationType,
     OutputType,
+    PlainTensorMeta,
     SubclassCreationMeta,
     SubclassMeta,
     TensorAlias,
     ViewAndMutationMeta,
 )
 from .subclass_utils import (
-    get_types_for_subclass,
     requires_subclass_dispatch,
     runtime_unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
@@ -1441,55 +1442,85 @@ class AutogradLazyBackwardCompileInfo:
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
     @staticmethod
-    def coerce_runtime_tangent_tracing_memory_format(x, memory_format):
+    def process_runtime_tangent(x, meta: Union[PlainTensorMeta, SubclassCreationMeta]):
         if not isinstance(x, torch.Tensor):
-            return x
+            return x, [x]
 
-        is_subclass: bool = is_traceable_wrapper_subclass(x)
-        mem_format = memory_format[0] if is_subclass else memory_format
+        if isinstance(x, FakeTensor):
+            if not x.is_contiguous(memory_format=meta.memory_format):
+                x = x.contiguous(memory_format=meta.memory_format)
+            return x, [x]
 
-        if not x.is_contiguous(memory_format=mem_format):
-            x = x.contiguous(memory_format=mem_format)
+        expected_type: Optional[type] = torch.Tensor
+        expected_meta = None
+        if isinstance(meta, SubclassCreationMeta):
+            expected_type = meta.original_subclass_type
+            expected_meta = meta.meta
 
-        if not is_subclass:
-            return x
-        for i, attr in enumerate(x.__tensor_flatten__()[0]):  # type: ignore[attr-defined]
-            elem = getattr(x, attr)
-            new_elem = AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
-                elem, memory_format[1 + i]
-            )
-            if new_elem is not elem:
-                setattr(x, attr, new_elem)
+        runtime_type = type(x)
+        runtime_meta = None
+        runtime_subclass_keys: Sequence[str] = []
 
-        return x
+        if is_traceable_wrapper_subclass(x):
+            runtime_subclass_keys, runtime_meta = x.__tensor_flatten__()
 
-    # See Note [Tangents memory format, Part 2]
-    @staticmethod
-    def coerce_runtime_tangent(x, metadata):
-        if not isinstance(x, torch.Tensor):
-            return x
-        if not is_traceable_wrapper_subclass(x):
-            return x
-        assert metadata is not None
-        (_, expected_tangent_metadata) = metadata
-        _, runtime_tangent_metadata = x.__tensor_flatten__()  # type: ignore[attr-defined]
-        if runtime_tangent_metadata == expected_tangent_metadata:
-            return x
-        if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
+        def maybe_coerce(x):
+            same_type: bool = expected_type == runtime_type
+            same_meta: bool = expected_meta == runtime_meta
+
+            if same_type and same_meta:
+                return x
+
+            if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
+                return None
+
+            if same_type:
+                # Backward Compatibility, as some Subclass impls can have original 1-arg function.
+                return x.__coerce_same_metadata_as_tangent__(expected_meta)
+
+            return None
+
+        # Coerce to expected type and metadata
+        orig_x = x
+        x = maybe_coerce(x)
+        if x is None:
             raise RuntimeError(
                 f"""
 During the backward, we encountered a tensor subclass where we guessed its
 metadata incorrectly.
 
-Expected metadata: {str(expected_tangent_metadata)}
+Expected metadata: {str(expected_meta)}, expected type: {str(expected_type)}
 
-Runtime metadata: {str(runtime_tangent_metadata)}
+Runtime metadata: {str(runtime_meta)}, runtime type: {str(runtime_type)}
 
-shape: {str(cast(torch.Tensor, x).shape)}
+shape: {str(orig_x.shape)}
 To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
 """
             )
-        return x.__coerce_same_metadata_as_tangent__(expected_tangent_metadata)  # type: ignore[attr-defined]
+
+        # Coerce to expected memory format
+        if not x.is_contiguous(memory_format=meta.memory_format):
+            x = x.contiguous(memory_format=meta.memory_format)
+
+        if not is_traceable_wrapper_subclass(x):
+            return x, [x]
+
+        assert isinstance(meta, SubclassCreationMeta)
+        if orig_x is not x:
+            runtime_subclass_keys = x.__tensor_flatten__()[0]
+
+        assert len(meta.attrs) == len(runtime_subclass_keys)
+        leaves = []
+        for i, (attr, attr_meta) in enumerate(meta.attrs.items()):
+            elem = getattr(x, attr)
+            new_elem, elem_leaves = AOTDispatchAutograd.process_runtime_tangent(
+                elem, attr_meta
+            )
+            if new_elem is not elem:
+                setattr(x, attr, new_elem)
+            leaves.extend(elem_leaves)
+
+        return x, leaves
 
     @staticmethod
     def post_compile(
@@ -1826,29 +1857,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # In the future, we should add backward guards that would allow us to
                 # properly handle this case instead of erroring: we would need to retrace the backward graph,
                 # since we might produce an entirely different trace if our grad_outputs are subclass or not.
-                assert (
-                    len(CompiledFunction.metadata.output_types)
-                    == num_flat_bw_args_with_grads
-                )
-
-                grad_output_types = [type(x) for x in flat_bw_args_with_grads]
-                # In general, we can add more asserts/guards here for when we partitioned
-                # with incorrect assumptions about the grad_outputs.
-                # Normalize FakeTensor -> torch.Tensor
-                # - during tracing our types are FakeTensor
-                # - at runtime in the backward our types are torch.Tensor...
-                # - unless we're running compiled backward, in which case they are also FakeTensor
-                grad_output_types_ = [
-                    torch.Tensor if x is FakeTensor else x for x in grad_output_types
-                ]
-                assert (
-                    grad_output_types_ == CompiledFunction.metadata.output_types
-                ), f"""\
-    We incorrectly attempted to compile the backward with incorrect subclass metadata.
-    If you run into this error, please file an issue.
-    Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
-    Got grad_output types: {str(grad_output_types)}"""
-
                 del flat_bw_args_with_grads
 
                 tangents_start_idx = (
@@ -1865,98 +1873,52 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 if CompiledFunction.maybe_subclass_metadata is not None:
                     tangents = all_args[tangents_start_idx:tangents_end_idx]
 
-                    def get_types_for_tangents(tangents):
-                        infos = []
-                        idx = 0
-                        for a in tangents:
-                            if isinstance(a, Tensor) and is_traceable_wrapper_subclass(
-                                a
-                            ):
-                                infos.append(get_types_for_subclass(a))
-                            else:
-                                infos.append(idx)
-                            idx += 1
-                        return infos
-
-                    runtime_subclass_info = get_types_for_tangents(tangents)
-
-                    if len(runtime_subclass_info) != len(
+                    if len(tangents) != len(
                         CompiledFunction.metadata.subclass_tangent_meta
                     ):
                         raise RuntimeError(
                             "The grad inputs should be same number as forward output tangents"
                         )
-                    for a, b in zip(
-                        runtime_subclass_info,
-                        CompiledFunction.metadata.subclass_tangent_meta,
-                    ):
-                        # Types should match between runtime and traced tangents.
-                        # TODO (tmanlaibaatar) Should actually call coerce_runtime_tangent
-                        if isinstance(a, List) and (
-                            isinstance(b, SubclassCreationMeta) and b.subclass_type
-                        ):
-                            if not a == b.subclass_type:
-                                raise RuntimeError(
-                                    "The grad inputs should be same tensor subclass type as forward output"
-                                )
 
-                    assert CompiledFunction.metadata.traced_tangent_metas is not None
-                    all_args = [
-                        (
-                            AOTDispatchAutograd.coerce_runtime_tangent(
+                    flat_processed_tangents = list(
+                        itertools.chain.from_iterable(
+                            AOTDispatchAutograd.process_runtime_tangent(
                                 t,
-                                CompiledFunction.metadata.traced_tangent_metas[
-                                    i - tangents_start_idx
-                                ],
+                                m,
+                            )[1]
+                            for t, m in zip(
+                                tangents,
+                                CompiledFunction.metadata.subclass_tangent_meta,
                             )
-                            if tangents_start_idx <= i < tangents_end_idx
-                            else t
                         )
-                        for i, t in enumerate(all_args)
-                    ]
-                    # Coercing tangents memory format before unwrapping tensor subclasses,
-                    # As we have to coerce Subclass tangent first and then its Tensor attributes.
-                    assert (
-                        CompiledFunction.metadata.traced_tangent_memory_formats
-                        is not None
                     )
-                    all_args = [
-                        (
-                            AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
-                                t,
-                                CompiledFunction.metadata.traced_tangent_memory_formats[
-                                    i - tangents_start_idx
-                                ],
-                            )
-                            if tangents_start_idx <= i < tangents_end_idx
-                            else t
-                        )
-                        for i, t in enumerate(all_args)
-                    ]
 
-                    all_args = runtime_unwrap_tensor_subclasses(
-                        all_args,
-                        # SymInts that are inputs to the backward graph are
-                        # already included in the "all_args" list.
-                        # Any symints coming from tensor subclasses should always
-                        # come from primals, and so they will show up as extra
-                        # arguments to the forward graph, and they will be saved
-                        # as activation in the backward graph.
-                        append_symints=False,
+                    all_args = (
+                        runtime_unwrap_tensor_subclasses(
+                            all_args[:tangents_start_idx],
+                            # SymInts that are inputs to the backward graph are
+                            # already included in the "all_args" list.
+                            # Any symints coming from tensor subclasses should always
+                            # come from primals, and so they will show up as extra
+                            # arguments to the forward graph, and they will be saved
+                            # as activation in the backward graph.
+                            append_symints=False,
+                        )
+                        + flat_processed_tangents
+                        + runtime_unwrap_tensor_subclasses(
+                            all_args[tangents_end_idx:],
+                            append_symints=False,
+                        )
                     )
                 else:
-                    assert (
-                        CompiledFunction.metadata.traced_tangent_memory_formats
-                        is not None
-                    )
                     all_args = [
                         (
-                            AOTDispatchAutograd.coerce_runtime_tangent_tracing_memory_format(
+                            AOTDispatchAutograd.process_runtime_tangent(
                                 t,
-                                CompiledFunction.metadata.traced_tangent_memory_formats[
+                                CompiledFunction.metadata.subclass_tangent_meta[
                                     i - tangents_start_idx
                                 ],
-                            )
+                            )[0]
                             if (tangents_start_idx <= i < tangents_end_idx)
                             else t
                         )
