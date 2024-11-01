@@ -609,7 +609,7 @@ void LayerNormBackwardKernelImpl(
 
 } // namespace
 
-REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
-REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
+REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl)
+REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl)
 
 } // namespace at::native
