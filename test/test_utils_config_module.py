@@ -312,6 +312,13 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
         revert()
         self.assertTrue(config.e_bool)
 
+    def test_bad_jk_type(self):
+        with self.assertRaises(
+            AssertionError,
+            msg="AssertionError: justknobs only support booleans, thisisnotvalid is not a boolean",
+        ):
+            pass
+
 
 if __name__ == "__main__":
     run_tests()
