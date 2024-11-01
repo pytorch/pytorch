@@ -669,8 +669,15 @@ def track_tensor_tree(
             set_meta(proxy, e)
             e.proxy = proxy
         else:
-            # intentionally pass on primitives
-            pass
+            # [NOTE] In training IR, we don't run
+            # any DCE as a result we preserve constant
+            # nodes in the graph. make_fx invariant is that
+            # they don't guarantee every node gets a meta['val']
+            # field. Since the actual value is already hardcoded in
+            # graph, the node.meta here actually doesn't matter. But
+            # we do this to make spec verifier happy.
+            assert isinstance(proxy, Proxy)
+            set_meta(proxy, e)
 
     wrap_with_proxy(inner_res, proxy_res, constant)
 
