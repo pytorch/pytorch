@@ -47,7 +47,7 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_useCount(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage__useCount(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   return py::cast(THPStorage_Unpack(self).use_count()).release().ptr();
@@ -620,7 +620,6 @@ static PyMethodDef THPStorage_methods[] = {
     {"resize_", THPStorage_resize_, METH_O, nullptr},
     {"nbytes", THPStorage_nbytes, METH_NOARGS, nullptr},
     {"data_ptr", THPStorage_dataPtr, METH_NOARGS, nullptr},
-    {"use_count", THPStorage_useCount, METH_NOARGS, nullptr},
     {"resizable", THPStorage_resizable, METH_NOARGS, nullptr},
     {"_write_file", THPStorage_writeFile, METH_VARARGS, nullptr},
     {"_new_with_file",
@@ -628,6 +627,7 @@ static PyMethodDef THPStorage_methods[] = {
      METH_VARARGS | METH_STATIC,
      nullptr},
     {"_set_from_file", THPStorage_setFromFile, METH_VARARGS, nullptr},
+    {"_use_count", THPStorage__useCount, METH_NOARGS, nullptr},
     {"from_buffer",
      castPyCFunctionWithKeywords(THPStorage_fromBuffer),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
