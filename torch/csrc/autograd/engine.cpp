@@ -1066,11 +1066,6 @@ void Engine::evaluate_function(
         ss << "Function '" << fn.name() << "' returned nan values in its " << i
            << "th output.";
         at::_assert_async(~(isnan(output).any()), ss.str());
-        // std::stringstream ss;
-        // ss << "Function '" << fn.name() << "' returned nan values in its " <<
-        // i
-        //    << "th output.";
-        // throw std::runtime_error(ss.str());
       }
     }
   }
