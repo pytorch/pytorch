@@ -367,9 +367,9 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         outer_fused_nodes: List[Union[FusedSchedulerNode, SchedulerNode]],
         outer_loop_fusion_depth,
     ):
-        self.outer_fused_nodes: List[Union[FusedSchedulerNode, SchedulerNode]] = (
-            outer_fused_nodes
-        )
+        self.outer_fused_nodes: List[
+            Union[FusedSchedulerNode, SchedulerNode]
+        ] = outer_fused_nodes
         self.outer_loop_fusion_depth = outer_loop_fusion_depth
         flatten_snodes = []
         for _node in self.outer_fused_nodes:
@@ -2585,9 +2585,9 @@ class CppVecKernel(CppKernel):
                 self.weight_recps_val = self.weight_recps_cse.generate(
                     self.compute, f"reduction {self.weight_recp_vec_range}", write=False
                 )
-                self.weight_recps_cse.reduction_cache[self.weight_recp_vec_range] = (
-                    self.weight_recps_val
-                )
+                self.weight_recps_cse.reduction_cache[
+                    self.weight_recp_vec_range
+                ] = self.weight_recps_val
                 self.non_parallel_reduction_prefix.writeline(
                     self.welford_weight_reciprocal_vec(dtype)
                 )

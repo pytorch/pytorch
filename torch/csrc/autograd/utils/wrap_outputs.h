@@ -81,7 +81,7 @@ inline PyObject* wrap(at::QScheme qscheme) {
 }
 
 inline PyObject* wrap(at::TensorList tl) {
-  auto r = THPObjectPtr{PyTuple_New(tl.size())};
+  auto r = THPObjectPtr{PyTuple_New(static_cast<Py_ssize_t>(tl.size()))};
   if (!r)
     throw python_error();
   for (const auto i : c10::irange(tl.size())) {
@@ -91,7 +91,7 @@ inline PyObject* wrap(at::TensorList tl) {
 }
 
 inline PyObject* wrap(at::IntArrayRef list) {
-  auto r = THPObjectPtr{PyTuple_New(list.size())};
+  auto r = THPObjectPtr{PyTuple_New(static_cast<Py_ssize_t>(list.size()))};
   if (!r)
     throw python_error();
   for (const auto i : c10::irange(list.size())) {
