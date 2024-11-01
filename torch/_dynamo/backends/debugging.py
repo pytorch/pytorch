@@ -172,10 +172,10 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
             "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
         )
 
-    from torch._inductor.bisect_helper import BisectionManager
+    from torch._inductor.compiler_bisector import CompilerBisector
 
     config_patches = {"unlift_effect_tokens": True}
-    if bisect_changes := BisectionManager.get_config_change(
+    if bisect_changes := CompilerBisector.get_config_change(
         "aot_eager_decomp_partition"
     ):
         config_patches.update(bisect_changes)
