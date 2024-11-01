@@ -56,12 +56,14 @@ BACKENDS: Dict[str, List[Subsystem]] = {
     # applies CrossRefFakeMode on invocation
     "aot_eager_decomp_partition_crossref": [],
     "inductor": [
+        BisectSubsystem("joint_graph_passes"),  # passes applied on joint graph
         BisectSubsystem(
             "post_grad_passes"
         ),  # passes applied individually on forward, and backward in inductor
+        ConfigChange("inductor", "fallback_random", True),
         ConfigChange("inductor", "emulate_precision_casts", True),
         BisectSubsystem("lowerings"),  # lowering aten operators to inductor
-    ],  # TODO - add more - fusions, amp numeric mode ?
+    ],  # TODO - add more - fusions ?
 }
 
 subsystem_call_counter: Dict[str, int] = collections.Counter()
@@ -401,7 +403,7 @@ class BisectionManager:
                 else:
                     if isinstance(curr_subsystem, ConfigChange):
                         print(
-                            f"Setting config {curr_subsystem.config_name} field {curr_subsystem.config_field}"
+                            f"Setting config {curr_subsystem.config_name} field {curr_subsystem.config_field} "
                             f"to {curr_subsystem.config_value} fixed the issue"
                         )
                     else:
