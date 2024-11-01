@@ -1,18 +1,19 @@
 # mypy: allow-untyped-defs
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Set
-from collections import OrderedDict
 import logging
+from collections import OrderedDict
+from typing import Any, Callable, Dict, List, Optional, Set
 
 import torch
 from torch.fx._compatibility import compatibility
+from torch.fx._utils import lazy_format_graph_code
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx._utils import lazy_format_graph_code
 
 
 __all__ = ["Partition", "split_module"]
 log = _LOGGER = logging.getLogger(__name__)
+
 
 @compatibility(is_backward_compatible=True)
 class Partition:
@@ -37,6 +38,15 @@ class Partition:
             f" partitions depended on: {self.dependencies},\n"
             f" partition dependents: {self.dependents}"
         )
+
+
+def _get_attr_from_qualname(mod: torch.nn.Module, qualname: str) -> Any:
+    attr_val = mod
+    for atom in qualname.split("."):  # type: ignore[union-attr]
+        if not hasattr(attr_val, atom):
+            raise AttributeError(f"Node target {qualname} not found!")
+        attr_val = getattr(attr_val, atom)
+    return attr_val
 
 
 # Creates subgraphs out of main graph
@@ -146,9 +156,7 @@ def split_module(
 
     log.debug(
         "%s",
-        lazy_format_graph_code(
-            "pre split_module", m, colored=True
-        ),
+        lazy_format_graph_code("pre split_module", m, colored=True),
     )
 
     def construct_graph(
@@ -161,21 +169,27 @@ def split_module(
                 node.args[0] if len(node.args) > 0 else inspect.Signature.empty
             )
             if keep_original_node_name:
-                args = () if default_value is inspect.Signature.empty else (default_value,)
-                base_mod_env[node.name] = base_mod_graph.create_node('placeholder', node.name, args=args, type_expr=node.type)  # type: ignore[arg-type]
+                args = (
+                    () if default_value is inspect.Signature.empty else (default_value,)
+                )
+                base_mod_env[node.name] = base_mod_graph.create_node(
+                    "placeholder",
+                    node.name,
+                    args=args,  # type: ignore[arg-type]
+                    type_expr=node.type,
+                )
             else:
                 base_mod_env[node.name] = base_mod_graph.placeholder(
-                    node.target, type_expr=node.type, default_value=default_value  # type: ignore[arg-type]
+                    node.target,  # type: ignore[arg-type]
+                    type_expr=node.type,
+                    default_value=default_value,
                 )
             base_mod_env[node.name].meta = node.meta.copy()
         elif node.op == "get_attr":
             base_mod_env[node.name] = base_mod_graph.get_attr(node.target)  # type: ignore[arg-type]
             base_mod_env[node.name].meta = node.meta.copy()
-            attr_val = m
-            for atom in node.target.split("."):  # type: ignore[union-attr]
-                if not hasattr(attr_val, atom):
-                    raise AttributeError(f"Node target {node.target} not found!")
-                attr_val = getattr(attr_val, atom)
+            assert isinstance(node.target, str)
+            attr_val = _get_attr_from_qualname(m, node.target)
             base_mod_attrs[node.target] = attr_val  # type: ignore[index]
         return base_mod_env, base_mod_attrs
 
@@ -185,9 +199,7 @@ def split_module(
     orig_nodes: Dict[str, Node] = {}
     symbol_to_node: Dict[sympy.Symbol, Node] = {}
 
-    def record_cross_partition_use(
-        def_node: Node, use_node: Optional[Node]
-    ):  # noqa: B950
+    def record_cross_partition_use(def_node: Node, use_node: Optional[Node]):
         from torch.fx.experimental.symbolic_shapes import free_symbols
 
         defined = getattr(def_node, "_fx_partition", None)
@@ -195,7 +207,10 @@ def split_module(
 
         log.debug(
             "record_cross_partition_use %s (%s) %s (%s)",
-            def_node.name, defined, use_node.name if use_node is not None else "-", used
+            def_node.name,
+            defined,
+            use_node.name if use_node is not None else "-",
+            used,
         )
 
         if defined != used:
@@ -234,7 +249,9 @@ def split_module(
 
     def instantiate_node_partition_mapping(node):
         partition_name = str(split_callback(node))
-        log.debug("instantiate_node_partition_mapping %s (%s)", node.name, partition_name)
+        log.debug(
+            "instantiate_node_partition_mapping %s (%s)", node.name, partition_name
+        )
 
         # add node to partitions
         partition = partitions.get(partition_name)
@@ -249,7 +266,7 @@ def split_module(
     GLOBAL_STATE_NODES = [
         torch.amp._enter_autocast,
         torch.amp._exit_autocast,
-        torch._C._set_grad_enabled
+        torch._C._set_grad_enabled,
     ]
 
     # For grad regions:
@@ -280,10 +297,10 @@ def split_module(
         # rely on later, but this needs some extra work.  Quick fix first.
         # See https://github.com/pytorch/pytorch/issues/130534
         if (
-            (val := node.meta.get("example_value")) is not None and
-            isinstance(val, torch.SymInt) and
-            isinstance(s0 := val.node.expr, sympy.Symbol) and
-            s0 not in symbol_to_node
+            (val := node.meta.get("example_value")) is not None
+            and isinstance(val, (torch.SymInt, torch.SymFloat))
+            and isinstance(s0 := val.node.expr, sympy.Symbol)
+            and s0 not in symbol_to_node
         ):
             symbol_to_node[val.node.expr] = node
 
@@ -344,9 +361,10 @@ def split_module(
 
         if assert_monotonically_increasing:
             pid = split_callback(node)
-            assert highest_partition <= pid, \
-                ("autocast or set_grad_enabled require monotonically increasing partitions:"
-                 f"highest: {highest_partition}, this node's: {pid}")
+            assert highest_partition <= pid, (
+                "autocast or set_grad_enabled require monotonically increasing partitions:"
+                f"highest: {highest_partition}, this node's: {pid}"
+            )
             highest_partition = pid
 
         # do not capture cross-partition dependencies for global state nodes as they will be
@@ -392,19 +410,42 @@ def split_module(
                     kwargs={},
                     type_expr=node.type,
                 )
-                new_node.meta = node.meta.copy()  # is it really a good idea to copy this?
+                new_node.meta = (
+                    node.meta.copy()
+                )  # is it really a good idea to copy this?
                 partition.environment[node] = new_node
 
     # add placeholders to partition inputs
     for partition_name in sorted_partitions:
         partition = partitions[partition_name]
+        new_inputs: Dict[str, None] = {}
         for inp in partition.inputs:
-            placeholder = partition.graph.placeholder(
-                inp,
-                type_expr=orig_nodes[inp].type,
-            )
+            orig_node = orig_nodes[inp]
+            # We don't pass in get_attr nodes as inputs to the partition, but
+            # instead set them as targets and use getattr within the module
+
+            if orig_node.op == "get_attr":
+                assert isinstance(orig_node.target, str)
+
+                orig_attr = _get_attr_from_qualname(m, orig_node.target)
+                if isinstance(orig_attr, torch.nn.Module):
+                    placeholder = partition.graph.get_attr(orig_node.target)
+                    partition.targets[orig_node.target] = orig_attr
+                else:
+                    placeholder = partition.graph.placeholder(
+                        inp,
+                        type_expr=orig_nodes[inp].type,
+                    )
+                    new_inputs[inp] = None
+            else:
+                placeholder = partition.graph.placeholder(
+                    inp,
+                    type_expr=orig_nodes[inp].type,
+                )
+                new_inputs[inp] = None
             placeholder.meta = orig_nodes[inp].meta.copy()
             partition.environment[orig_nodes[inp]] = placeholder
+        partition.inputs = new_inputs
 
     # Transform nodes and collect targets for partition's submodule
     for node in m.graph.nodes:
@@ -421,14 +462,8 @@ def split_module(
             if node.op not in ["call_module", "get_attr"]:
                 target = node.target
             else:
-                target_atoms = node.target.split(".")
-                target_attr = m
-                for atom in target_atoms:
-                    if not hasattr(target_attr, atom):
-                        raise AttributeError(f"Operator target {node.target} not found!")
-                    target_attr = getattr(target_attr, atom)
-                # target = target_atoms[-1]
-                target = "_".join(target_atoms)
+                target_attr = _get_attr_from_qualname(m, node.target)
+                target = node.target.replace(".", "_")
                 partition.targets[target] = target_attr
                 # Fill in the passed-in mapping from new qualname to old qualname
                 if qualname_map is not None:
@@ -467,7 +502,9 @@ def split_module(
                     kwargs={},
                     type_expr=exit_node.type,
                 )
-                new_node.meta = exit_node.meta.copy()  # is it really a good idea to copy this?
+                new_node.meta = (
+                    exit_node.meta.copy()
+                )  # is it really a good idea to copy this?
 
     # original module environment dict mapping node names to nodes
     orig_mod_env: Dict[str, Node] = {}
@@ -516,17 +553,22 @@ def split_module(
             partition.graph.output(output_vals[0])
         elif num_output_vals > 1:
             partition.graph.output(output_vals)
+        else:
+            # Invariant - Graph should always have an output node.
+            partition.graph.output(())
 
         if keep_original_order:
             # first get the attr nodes required by this partition
             orig_mod_attr_nodes: List[Node] = [
-                orig_mod_env[key] for key in partition.inputs if key not in original_order
+                orig_mod_env[key]
+                for key in partition.inputs
+                if key not in original_order
             ]
 
             for node in original_order:
                 if node in already_constructed_attr_nodes:
                     continue  # already added this attr to the base graph
-                base_mod_env, based_mod_attrs = construct_graph(
+                base_mod_env, _based_mod_attrs = construct_graph(
                     node, base_mod_env, base_mod_attrs
                 )
                 already_constructed_attr_nodes.add(node)
@@ -568,8 +610,6 @@ def split_module(
     ret = torch.fx.graph_module.GraphModule(base_mod_attrs, base_mod_graph)
     log.debug(
         "%s",
-        lazy_format_graph_code(
-            "post split_module", ret, colored=True
-        ),
+        lazy_format_graph_code("post split_module", ret, colored=True),
     )
     return ret
