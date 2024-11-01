@@ -27,6 +27,7 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
   DETECT_AND_ASSIGN_ACCELERATOR(XPU)
   DETECT_AND_ASSIGN_ACCELERATOR(HIP)
   DETECT_AND_ASSIGN_ACCELERATOR(MPS)
+  DETECT_AND_ASSIGN_ACCELERATOR(HPU)
   if (checked) {
     TORCH_CHECK(
         device_type, "Cannot access accelerator device when none is available.")
@@ -43,6 +44,7 @@ bool isAccelerator(c10::DeviceType d) {
     case at::kXPU:
     case at::kHIP:
     case at::kMPS:
+    case at::kHPU:
     case at::kPrivateUse1:
       return true;
     default:

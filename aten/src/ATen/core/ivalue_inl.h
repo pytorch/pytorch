@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <memory>
 #include <optional>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -1680,7 +1681,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 namespace detail {
 
 struct _guarded_unsigned_long_unique_dummy final {
-  _guarded_unsigned_long_unique_dummy(int64_t){};
+  _guarded_unsigned_long_unique_dummy(int64_t){}
 };
 using _guarded_unsigned_long = std::conditional_t<
     std::is_same_v<unsigned long, uint32_t> ||
@@ -1727,7 +1728,7 @@ DEFINE_TO(uint64_t, toInt)
 DEFINE_TO(detail::_guarded_unsigned_long, toInt)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(bool, toBool)
-DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob);
+DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
@@ -1771,8 +1772,8 @@ struct _fake_type {};
 template <class Elem>
 // TODO this is deprecated but we don't throw a warning because a lot of ops in
 // native_functions.yaml still return std::vector.
-// [[deprecated("IValues based on std::vector<T> are potentially slow
-// and deprecated. Please use torch::List<T> instead.")]]
+// C10_DEPRECATED_MESSAGE("IValues based on std::vector<T> are potentially slow
+// and deprecated. Please use torch::List<T> instead.")
 std::vector<Elem> generic_to(IValue ivalue, _fake_type<std::vector<Elem>>) {
   // We need to do a deep copy of the vector because there might be other
   // references to this same IValue that also use the list. We can't just
@@ -1908,8 +1909,8 @@ c10::Dict<Key, Value> generic_to(
 }
 
 template <typename K, typename V>
-[[deprecated(
-    "IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")]]
+C10_DEPRECATED_MESSAGE(
+    "IValues based on std::unordered_map are slow and deprecated. Please use c10::Dict<K, V> instead.")
 std::unordered_map<K, V> generic_to(
     IValue ivalue,
     _fake_type<std::unordered_map<K, V>>) {
