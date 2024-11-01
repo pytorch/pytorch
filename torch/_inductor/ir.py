@@ -78,6 +78,7 @@ from .runtime.benchmarking import benchmarker
 from .runtime.hints import ReductionHint
 from .utils import (
     argsort,
+    argsort_sym,
     cache_on_self,
     ceildiv,
     convert_shape_to_inductor,
@@ -235,11 +236,17 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
-def get_fill_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[int]:
+def get_fill_order(
+    seq: Sequence[Union[int, torch.SymInt, Expr]], shape_env=None
+) -> Sequence[int]:
     """
     Convert strides to fill order (argsort)
     """
-    sorted_idx: Sequence[int] = argsort(seq)
+    if shape_env is None:
+        sorted_idx: Sequence[int] = argsort(seq)
+    else:
+        # argsort_sym handles unbacked symints (with the help of the shape_env)
+        sorted_idx = argsort_sym(shape_env, seq)
     return sorted_idx
 
 
@@ -255,11 +262,13 @@ def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[in
     return fill_order
 
 
-def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[int]:
+def get_stride_order(
+    seq: Sequence[Union[int, torch.SymInt, Expr]], shape_env=None
+) -> Sequence[int]:
     """
     Convert strides to stride order
     """
-    sorted_idx: Sequence[int] = get_fill_order(seq)
+    sorted_idx: Sequence[int] = get_fill_order(seq, shape_env)
     out = [0 for _ in range(len(seq))]
     for i, elem in enumerate(sorted_idx):
         out[elem] = i
@@ -3017,10 +3026,15 @@ class Layout(IRNode):
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
         for i in range(len(order)):
-            stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
+            stride_ordered[order[i]] = stride[i]
         # check if it is in ascending order
         for i in range(len(order) - 1):
-            if stride_ordered[i] > stride_ordered[i + 1]:
+            expr = stride_ordered[i] > stride_ordered[i + 1]
+            if not isinstance(expr, bool):
+                expr = V.graph._shape_env.evaluate_expr(
+                    stride_ordered[i] > stride_ordered[i + 1], size_oblivious=True
+                )
+            if expr:
                 return False
         return True
 

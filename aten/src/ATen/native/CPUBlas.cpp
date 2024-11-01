@@ -363,11 +363,12 @@ void gemm(
    at::Half *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
 #if AT_MKLDNN_ENABLED()
-   // The documented MKL behavior when FP16 support is not available
-   // is to upconvert to fp32 and call sgemm. We can do better by
-   // fusing the conversion.
+   // Per https://github.com/pytorch/pytorch/pull/137918#discussion_r1825460179 ,
+   // we should not bother checking for !cpuinfo_has_x86_avx512fp16() here,
+   // because "onednn (mkldnn) won't use avx512fp16 to compute gemms by default
+   // because the avx512fp16 fma would incur accuracy loss".
    const bool fp16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
-     cpuinfo_has_x86_f16c() && !cpuinfo_has_x86_avx512fp16();
+     cpuinfo_has_x86_f16c();
    const bool use_fp16_gemv_trans = fp16_gemv_trans_would_be_faster &&
      transa == TransposeType::Transpose &&
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
