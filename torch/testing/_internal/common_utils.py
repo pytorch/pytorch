@@ -5463,6 +5463,7 @@ def scoped_load_inline(func):
                 return cpp_extension.load_inline(*args, **kwargs)
 
         return func(*args, load_inline=load_inline, **kwargs)
+    return wrapper
 
 def recover_orig_fp32_precision(fn):
     @contextlib.contextmanager
