@@ -109,6 +109,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclInt;
     case at::kChar:
       return ncclDataType_t::ncclChar;
+    // NOLINTNEXTLINE(*-narrowing-conversions)
     case at::kByte:
       return ncclDataType_t::ncclUint8;
     case at::kBool:
@@ -260,8 +261,9 @@ void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
 }
 
 struct NcclCommList {
+  // NOLINTNEXTLINE(*array*)
   std::unique_ptr<ncclComm_t[]> comms;
-  int ndevices;
+  size_t ndevices;
   NcclCommList(const std::vector<int>& devices)
       : comms(new ncclComm_t[devices.size()]), ndevices(devices.size()) {
     NCCL_CHECK(ncclCommInitAll(
@@ -309,8 +311,8 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
 static inline void check_tensor(
     const at::Tensor& input,
     const std::optional<at::Tensor>& output,
-    int input_multiplier,
-    int output_multiplier,
+    size_t input_multiplier,
+    size_t output_multiplier,
     int64_t ref_numel,
     ScalarType ref_dtype) {
   auto check_one = [&](const at::Tensor& tensor) {
@@ -355,12 +357,12 @@ static inline void check_tensor(
 void check_inputs(
     TensorList inputs,
     TensorList outputs,
-    int input_multiplier,
-    int output_multiplier) {
+    size_t input_multiplier,
+    size_t output_multiplier) {
   // len(inputs) == len(outputs)
   size_t len = inputs.size();
 
-  if (len <= 0) {
+  if (len == 0) {
     throw std::runtime_error("input sequence can't be empty");
   }
 
@@ -967,7 +969,7 @@ void all2all(
   uintptr_t recvBase = reinterpret_cast<uintptr_t>(outputTensors[0].data_ptr());
   size_t dtypeSize = inputTensors.front().element_size();
 
-  for (const auto r : c10::irange(outputTensors.size())) {
+  for (const int r : c10::irange(outputTensors.size())) {
     sendCounts[r] = inputTensors[r].numel();
     auto sendOffset =
         reinterpret_cast<uintptr_t>(inputTensors[r].data_ptr()) - sendBase;
@@ -995,7 +997,7 @@ void all2all(
       stream.stream()));
 #else
   NCCL_CHECK(ncclGroupStart());
-  for (const auto r : c10::irange(outputTensors.size())) {
+  for (const int r : c10::irange(static_cast<int>(outputTensors.size()))) {
     at::Tensor& input = inputTensors[r];
     at::Tensor& output = outputTensors[r];
 
