@@ -741,7 +741,6 @@ void run_cudnn_SDP_bprop(
     TORCH_WARN_ONCE("output: ", o.strides(), " grad_output: ", dO_.strides());
     permute_to_matching_layout(o, dO_);
   }
-  TORCH_WARN("output: ", o.strides(), " grad_output: ", dO_.strides());
   TORCH_INTERNAL_ASSERT(
       same_strides(o, dO_),
       "cuDNN SDPA expected grad_output.strides() == output.strides(), "
