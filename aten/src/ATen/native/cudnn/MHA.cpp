@@ -347,13 +347,15 @@ bool same_strides(const Tensor& t1, const Tensor& t2) {
   std::vector<int> t2_strides_no_ones;
   const auto t1strides = t1.strides();
   const auto t2strides = t2.strides();
-  if (t1strides.size() != t2strides.size()) {
+  const int dim = t1strides.size();
+  if (dim != t2strides.size()) {
     return false;
   }
   const auto t1sizes = t1.sizes();
   const auto t2sizes = t2.sizes();
+  
   // we are going through strides backward here, but if both are backward it's comparable
-  for (int i = 0; i < t1strides.size(); i++) {
+  for (int i = 0; i < dim; i++) {
     if (t1sizes[i] > 1) {
       t1_strides_no_ones.push_back(t1strides[i]);
     }
