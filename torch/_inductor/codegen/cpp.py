@@ -3982,16 +3982,21 @@ class CppScheduling(BaseScheduling):
                 if vars1 == vars2:
                     return FusedSchedulerNode.fuse(node1, node2)
 
-                assert isinstance(ref_node, SchedulerNode)
-
+                # recompute ref_node if its ranges are also changed
                 node_to_recomp_indexing_constraints = get_indexing_ranges_exprs(
                     node_to_recomp
                 )
-
-                # recompute ref_node if its ranges are also changed
-                ref_node.recompute_size_and_body(
-                    extra_indexing_constraints=node_to_recomp_indexing_constraints
-                )
+                if isinstance(ref_node, SchedulerNode):
+                    ref_node.recompute_size_and_body(
+                        extra_indexing_constraints=node_to_recomp_indexing_constraints
+                    )
+                else:
+                    assert isinstance(ref_node, FusedSchedulerNode)
+                    for snode in ref_node.snodes:
+                        snode.recompute_size_and_body(  # type: ignore[attr-defined]
+                            extra_indexing_constraints=node_to_recomp_indexing_constraints
+                        )
+                    ref_node = FusedSchedulerNode(ref_node.scheduler, ref_node.snodes)
 
                 _, (vars1, _) = node1.group
                 _, (vars2, _) = node2.group
@@ -4057,11 +4062,6 @@ class CppScheduling(BaseScheduling):
                 if isinstance(snode.node, ir.TemplateBuffer):
                     break
                 assert isinstance(snode.node, ir.ComputedBuffer)
-                assert isinstance(snode, SchedulerNode)
-                # The ref_node is a FusedSchedulerNode, and it has changed the ranges
-                # TODO: we can extend the support for this when having the example
-                if snode.get_ranges()[0] != snode.node.data.get_size():  # type: ignore[attr-defined]
-                    return False
                 ranges_set.add(tuple(snode.node.data.get_size()))
 
             if len(ranges_set) != 1:
