@@ -3007,7 +3007,15 @@ def nonzero_static(self, *, size: int, fill_value: int = -1):
     return self.new_empty((size, self.dim()), dtype=torch.long)
 
 
-@register_meta([aten.index.Tensor, aten._unsafe_index.Tensor])
+@register_meta(aten._unsafe_index.Tensor)
+def meta_unsafe_index_Tensor(self, indices):
+    return aten.index(self, indices)
+
+
+# @register_meta(aten.index.Tensor)
+# NOTE: the strides in this implementation is wrong. Since there is a
+# meta function for this op in C++, this implementation is unused even if the
+# meta function is registered here.
 def meta_index_Tensor(self, indices):
     torch._check(bool(indices), lambda: "at least one index must be provided")
     # aten::index is the internal advanced indexing implementation
