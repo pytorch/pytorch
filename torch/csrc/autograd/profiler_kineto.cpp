@@ -603,7 +603,8 @@ void prepareProfiler(
           at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
           c10::get_privateuse1_backend() != "privateuseone"),
       activities,
-      config.experimental_config);
+      config.experimental_config,
+      config.trace_id);
 
   if (!config.experimental_config.performance_events.empty()) {
     /* For now only CPU activity is supported */
