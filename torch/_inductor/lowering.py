@@ -3370,7 +3370,8 @@ def index_put_impl_(self, indices, values, accumulate, check):
     if try_get_name(self) in values.get_read_names():
         # Fix issue: https://github.com/pytorch/pytorch/issues/138908
         # When self and values have memory overlapping, indices may
-        # contain duplicate values, potentially causing incorrect results.
+        # contain duplicate values, potentially causing incorrect results since
+        # the load of `values` might contain modified value from the store of `self`.
         # To address this, store values in a temporary buffer in such cases.
         values.realize()
 
