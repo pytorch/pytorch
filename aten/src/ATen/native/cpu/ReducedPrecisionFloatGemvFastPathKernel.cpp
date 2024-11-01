@@ -196,9 +196,9 @@ dot_with_fp32_arith_main_inner_loop_bfdot(
     const BFloat16* vec2,
     vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
     int registerPairIndex) {
-  const bfloat16x8_t temp_vec1 = vld1q_bf16(reinterpret_cast<const __bf16*>(
+  const bfloat16x8_t temp_vec1 = vld1q_bf16(reinterpret_cast<const at::vec::at_bfloat16_t*>(
                                                 &vec1[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-  const bfloat16x8_t temp_vec2 = vld1q_bf16(reinterpret_cast<const __bf16*>(
+  const bfloat16x8_t temp_vec2 = vld1q_bf16(reinterpret_cast<const at::vec::at_bfloat16_t*>(
                                                 &vec2[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
   sum[registerPairIndex] =
     f32_dot_bf16(sum[registerPairIndex], temp_vec1, temp_vec2);
