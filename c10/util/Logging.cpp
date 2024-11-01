@@ -209,10 +209,6 @@ void SetPyTorchDDPUsageLogger(
 
 static int64_t GLOBAL_RANK = -1;
 
-int64_t GetGlobalRank() {
-  return GLOBAL_RANK;
-}
-
 void SetGlobalRank(int64_t rank) {
   GLOBAL_RANK = rank;
 }
