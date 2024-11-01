@@ -162,8 +162,8 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
 
   Vectorized<c10::BFloat16> map_with_vec_float_method(
       Vectorized<float> (Vectorized<float>::*m)() const) const {
-    float32x4_t v00 = convert_f32_bf16(vget_low_f16(values));
-    float32x4_t v01 = convert_f32_bf16(vget_high_f16(values));
+    float32x4_t v00 = convert_f32_bf16(at_vget_low_bf16(values));
+    float32x4_t v01 = convert_f32_bf16(at_vget_high_bf16(values));
     Vectorized<float> mv0 = (Vectorized<float>(v00).*m)();
     Vectorized<float> mv1 = (Vectorized<float>(v01).*m)();
     at_bfloat16x4_t r00 = convert_bf16_f32(mv0);
@@ -175,10 +175,10 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
       const Vectorized<c10::BFloat16>& second,
       Vectorized<float> (Vectorized<float>::*m)(const Vectorized<float>&)
           const) const {
-    float32x4_t v00 = convert_f32_bf16(vget_low_f16(values));
-    float32x4_t v01 = convert_f32_bf16(vget_high_f16(values));
-    float32x4_t second_v00 = convert_f32_bf16(vget_low_f16(second.values));
-    float32x4_t second_v01 = convert_f32_bf16(vget_high_f16(second.values));
+    float32x4_t v00 = convert_f32_bf16(at_vget_low_bf16(values));
+    float32x4_t v01 = convert_f32_bf16(at_vget_high_bf16(values));
+    float32x4_t second_v00 = convert_f32_bf16(at_vget_low_bf16(second.values));
+    float32x4_t second_v01 = convert_f32_bf16(at_vget_high_bf16(second.values));
     Vectorized<float> mv0 = (Vectorized<float>(v00).*m)(second_v00);
     Vectorized<float> mv1 = (Vectorized<float>(v01).*m)(second_v01);
     at_bfloat16x4_t r00 = convert_bf16_f32(mv0);

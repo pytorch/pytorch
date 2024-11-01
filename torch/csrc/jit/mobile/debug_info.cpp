@@ -115,9 +115,9 @@ MobileDebugTable::MobileDebugTable(
     const std::shared_ptr<CompilationUnit>& cu) {
   ska::flat_hash_map<int64_t, SourceRange> source_range_map;
   const std::vector<std::string>& record_names = reader->getAllRecords();
-  const c10::string_view suffix(".debug_pkl");
+  constexpr std::string_view suffix(".debug_pkl");
   for (const auto& record_name : record_names) {
-    if (c10::string_view(record_name).ends_with(suffix)) {
+    if (c10::string_view_ends_with(std::string_view(record_name), suffix)) {
       auto [debug_data, debug_size] = reader->getRecord(record_name);
       auto ivalueTuple = jit::unpickle(
           reinterpret_cast<const char*>(debug_data.get()),
