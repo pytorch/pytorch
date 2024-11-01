@@ -348,6 +348,13 @@ class TestAutocastMPS(TestCase):
             s.backward()
         self.assertEqual(weight_dtype_cast_counter, 2)
 
+    def test_mps_autocast_error_message(self):
+        with self.assertWarnsRegex(
+            UserWarning, "MPS Autocast only supports dtype of torch.float16 currently."
+        ):
+            with torch.autocast(device_type="mps", dtype=torch.bfloat16):
+                _ = torch.ones(10)
+
 
 class TestTorchAutocast(TestCase):
     def test_autocast_fast_dtype(self):

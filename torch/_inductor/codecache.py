@@ -71,6 +71,7 @@ from torch._utils_internal import log_cache_bypass
 from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
+from .triton_bundler import TritonBundler, TritonKernelArtifacts
 from .utils import _align
 
 
@@ -506,9 +507,7 @@ def _ident(x: T) -> T:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(
-    device_map: Dict[torch.device, torch.device], t: Tensor
-) -> TensorMetadata:
+def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -517,32 +516,19 @@ def extract_tensor_metadata_for_cache_key(
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
 
-    # The pickle implementation avoids serializing the same object more than once.
-    # That behavior means the byte stream we create to hash will vary if, for example,
-    # we see two tensor objects with the same device, but the torch.device object is
-    # actually the same object vs. merely equivalent. We want to produce the same hash
-    # value in either situation, so we memoize the device objects and always reference
-    # the same object for a given device. It's possible other metadata fields deserve
-    # the same treatment, but so far we've only observed this issue with the device.
-    if meta.device not in device_map:
-        device_map[meta.device] = meta.device
-    meta = dataclasses.replace(meta, device=device_map[meta.device])
-
     return meta
 
 
-def _reduce_fake_tensor(
-    device_map: Dict[torch.device, torch.device], t: Tensor
-) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
+def _reduce_fake_tensor(t: Tensor) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
-    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
+    metadata = extract_tensor_metadata_for_cache_key(t)
     return (_ident, (metadata,))
 
 
 def _reduce_tensor(
-    device_map: Dict[torch.device, torch.device], t: Tensor
+    t: Tensor,
 ) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
@@ -570,7 +556,7 @@ def _reduce_tensor(
             f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
         )
 
-    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
+    metadata = extract_tensor_metadata_for_cache_key(t)
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
@@ -600,46 +586,48 @@ class FxGraphCachePickler(pickle.Pickler):
     data that allow us to compute a stable, but safe hash.
     """
 
-    # See extract_tensor_metadata_for_cache_key. Whenever we extract metadata during
-    # pickling, we make sure devices always reference the same torch.device object.
-    _device_map: Dict[torch.device, torch.device] = {}
+    def __init__(self) -> None:
+        self._stream = io.BytesIO()
+        super().__init__(self._stream)
 
-    dispatch_table = copyreg.dispatch_table.copy()
-    dispatch_table[FakeTensor] = functools.partial(_reduce_fake_tensor, _device_map)
-    dispatch_table[torch.Tensor] = functools.partial(_reduce_tensor, _device_map)
-    dispatch_table[torch.SymInt] = _reduce_symint
-    dispatch_table[
-        torch.fx.experimental._backward_state.BackwardState
-    ] = _reduce_unsupported
+        self.dispatch_table = copyreg.dispatch_table.copy()
+        self.dispatch_table.update(
+            {
+                FakeTensor: _reduce_fake_tensor,
+                torch.Tensor: _reduce_tensor,
+                torch.SymInt: _reduce_symint,
+                torch.fx.experimental._backward_state.BackwardState: _reduce_unsupported,
+            }
+        )
 
-    @classmethod
-    def dumps(cls, obj: Any) -> bytes:
-        """
-        Pickle an object using the FxGraphCachePickler.
-        """
-        with io.BytesIO() as stream:
-            pickler = cls(stream)
-            # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
-            pickler.fast = True  # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
-            try:
-                pickler.dump(obj)
-            except (TypeError, AttributeError) as e:
-                # Some configs options may not pickle.
-                log.warning("Can't pickle", exc_info=True)
-                raise BypassFxGraphCache("Config options may be unpickleable") from e
-            return stream.getvalue()
+        # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
+        # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
+        self.fast = True
 
-    @classmethod
-    def get_hash(cls, obj: Any) -> str:
+    def dumps(self, obj: Any) -> bytes:
         """
-        Serialize an object using the FxGraphCachePickler and return a hash
-        of the pickled object.
+        Pickle an object and return a byte string.
         """
-        serialized_data = cls.dumps(obj)
+        try:
+            self.dump(obj)
+            return self._stream.getvalue()
+        except (TypeError, AttributeError) as e:
+            # Some configs options may not pickle.
+            log.warning("Failed to pickle cache key", exc_info=True)
+            raise BypassFxGraphCache("Failed to pickle cache key") from e
+        finally:
+            # Reset our stream for the next dump.
+            self._stream.seek(0)
+            self._stream.truncate(0)
+
+    def get_hash(self, obj: Any) -> str:
+        """
+        Serialize an object and return a hash of the bytes.
+        """
+        serialized_data = self.dumps(obj)
         return sha256_hash(serialized_data)
 
-    @classmethod
-    def debug_lines(cls, inp: FxGraphHashDetails) -> List[str]:
+    def debug_lines(self, inp: FxGraphHashDetails) -> List[str]:
         """
         Get a printable string describing in more detail all the attributes
         comprising an object. Useful for debugging when one graph hashes
@@ -648,12 +636,12 @@ class FxGraphCachePickler(pickle.Pickler):
 
         def get_str(obj: Any) -> str:
             if isinstance(obj, torch.Tensor):
-                return str(extract_tensor_metadata_for_cache_key(cls._device_map, obj))
+                return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
-            elif type(obj) in cls.dispatch_table:
+            elif type(obj) in self.dispatch_table:
                 # Run the reducer on the object
-                return str(cls.dispatch_table[type(obj)](obj)[1])
+                return str(self.dispatch_table[type(obj)](obj)[1])
             else:
                 return str(obj)
 
@@ -661,14 +649,14 @@ class FxGraphCachePickler(pickle.Pickler):
         for attr, obj in vars(inp).items():
             if isinstance(obj, list):
                 for ii in range(len(obj)):
-                    h = cls.get_hash(obj[ii])
+                    h = self.get_hash(obj[ii])
                     lines.append(f"[{h}] {attr}[{ii}]: {get_str(obj[ii])}")
             elif isinstance(obj, dict):
                 for k, v in obj.items():
-                    h = cls.get_hash(v)
+                    h = self.get_hash(v)
                     lines.append(f"[{h}] {attr}[{k}]: {get_str(v)}")
             else:
-                h = cls.get_hash(obj)
+                h = self.get_hash(obj)
                 lines.append(f"[{h}] {attr}: {get_str(obj)}")
         return lines
 
@@ -815,14 +803,6 @@ class FxGraphHashDetails:
         assert isinstance(custom_pass, CustomGraphPass)
         return custom_pass.uuid()
 
-    def debug_lines(self) -> List[str]:
-        """
-        Get a printable string describing in more detail all the attributes
-        comprising this object. Useful for debugging when one graph hashes
-        to a different value than another.
-        """
-        return FxGraphCachePickler.debug_lines(self)
-
 
 def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
@@ -834,10 +814,11 @@ def compiled_fx_graph_hash(
     Generate a unique hash of the FX graph for caching.
     """
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
+    pickler = FxGraphCachePickler()
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
-    key = "f" + FxGraphCachePickler.get_hash(details)
-    debug_lines = details.debug_lines()
+    key = "f" + pickler.get_hash(details)
+    debug_lines = pickler.debug_lines(details)
     debug_str = "\n".join(debug_lines)
     log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
     return key, debug_lines
@@ -1049,7 +1030,7 @@ class FxGraphCache:
         example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
-    ) -> Optional[CompiledFxGraph]:
+    ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
@@ -1090,6 +1071,7 @@ class FxGraphCache:
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
         graph = None
+        cache_info: Dict[str, Any] = dict()
 
         for candidate in iterate_over_candidates():
             if not candidate.guards_expr:
@@ -1116,7 +1098,7 @@ class FxGraphCache:
                 break
 
         if graph is None:
-            return None
+            return None, cache_info
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
@@ -1137,6 +1119,14 @@ class FxGraphCache:
 
             write_atomic(artifact_path, code, make_dirs=True)
 
+        if bundle := graph._triton_bundle:
+            triton_bundler_meta = TritonBundler.read_and_emit(bundle)
+            if (meta := triton_bundler_meta) is not None:
+                cache_info["triton_bundler_meta"] = str(meta)
+                get_chromium_event_logger().add_event_data(
+                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                )
+
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
 
@@ -1151,7 +1141,7 @@ class FxGraphCache:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
             log.error("Failed to load cached artifact: %s", artifact_path)
-            return None
+            return None, cache_info
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
@@ -1180,7 +1170,7 @@ class FxGraphCache:
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
         )
-        return graph
+        return graph, cache_info
 
     @staticmethod
     def post_compile(
@@ -1402,10 +1392,11 @@ class FxGraphCache:
         Doesn't do any logging on its own, because AOTAutograd handles a cache miss
         differently from FXGraphCache.
         """
-        compiled_graph = FxGraphCache._lookup_graph(
+        compiled_graph, cache_info = FxGraphCache._lookup_graph(
             key, example_inputs, local, remote_cache
         )
         cache_info = {
+            **cache_info,
             "key": key,
             "components": debug_lines,
             "cache_event_time": time_ns(),
@@ -1482,6 +1473,9 @@ class FxGraphCache:
             compiled_graph._time_taken_ns = time_ns() - start_time
             cache_key = key_info[0]
             compiled_graph._fx_graph_cache_key = cache_key
+            compiled_graph._triton_bundle, triton_bundler_meta = TritonBundler.collect()
+            if triton_bundler_meta is not None:
+                cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
             cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
             FxGraphCache._save_graph(
                 cache_key,
@@ -1588,6 +1582,7 @@ class CompiledFxGraph:
     _time_taken_ns: Optional[int] = None
     _boxed_call: Optional[bool] = None
     _fx_graph_cache_key: Optional[str] = None
+    _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
 
     def __init__(
         self,
