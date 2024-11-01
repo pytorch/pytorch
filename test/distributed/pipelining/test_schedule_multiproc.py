@@ -364,7 +364,7 @@ class ScheduleTest(MultiProcContinousTest):
         "ScheduleClass",
         [ScheduleInterleaved1F1B, ScheduleLoopedBFS, ScheduleInterleavedZeroBubble],
     )
-    @parametrize("use_new_runtime", [False])
+    @parametrize("use_new_runtime", [False, True])
     def test_grad_with_manual_interleaved(self, ScheduleClass, use_new_runtime):
         stages_per_rank = 2
         n_stages = stages_per_rank * self.world_size
@@ -422,7 +422,6 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
             )
             tmp_schedule._load_actions(old_schedule.pipeline_order)
             # test that csv round-trip works for compute_comms schedule
@@ -431,7 +430,6 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
             )
             with tempfile.NamedTemporaryFile() as f:
                 tmp_schedule._dump_csv(f.name)
@@ -442,7 +440,6 @@ class ScheduleTest(MultiProcContinousTest):
                 num_microbatches,
                 loss_fn=loss_fn,
                 stage_index_to_group_rank=old_schedule.stage_index_to_group_rank,
-                use_full_backward=old_schedule.use_full_backward,
             )
             one_more_schedule._load_actions(
                 schedule.pipeline_order_with_comms, format="compute_comms"
