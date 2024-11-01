@@ -393,7 +393,7 @@ def generate_wheels_matrix(
                     "Please modify the matrix generation to exclude this combination."
                 )
 
-            # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
+            # cuda linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
 
             if (
                 arch_version in ["12.6", "12.4", "11.8"]
