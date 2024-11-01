@@ -1714,10 +1714,14 @@ class BuiltinVariable(VariableTracker):
             if config.replay_record_enabled:
                 tx.exec_recorder.record_module_access(obj.value, name, member)
             return VariableTracker.build(tx, member, source)
+
         elif istype(obj, UserFunctionVariable) and name in ("__name__", "__module__"):
             return ConstantVariable.create(getattr(obj.fn, name))
         else:
-            return obj.var_getattr(tx, name)
+            try:
+                return obj.var_getattr(tx, name)
+            except NotImplementedError:
+                return GetAttrVariable(obj, name, source=source)
 
     def call_setattr(
         self,
