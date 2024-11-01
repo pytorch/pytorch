@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 
 import torch
+import torch.onnx._flags
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 
@@ -149,8 +150,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
         )
 
     def test_auto_convert_all_axes_to_dynamic_shapes_with_dynamo_export(self):
-        os.environ["TORCH_ONNX_USE_EXPERIMENTAL_LOGIC"] = "1"
-        assert os.environ.get("TORCH_ONNX_USE_EXPERIMENTAL_LOGIC") == "1"
+        torch.onnx._flags.USE_EXPERIMENTAL_LOGIC = True
 
         class Nested(torch.nn.Module):
             def forward(self, x):

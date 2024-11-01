@@ -34,7 +34,7 @@ from ..codecache import HalideCodeCache
 from ..ir import get_reduction_combine_fn
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..ops_handler import AddParenHandler, MockHandler
-from ..runtime.hints import HalideInputSpec, HalideMeta, ReductionHint
+from ..runtime.hints import HalideInputSpec, HalideMeta
 from ..utils import (
     get_bounds_index_expr,
     get_kernel_metadata,
@@ -59,8 +59,6 @@ from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
-    from torch.utils._ordered_set import OrderedSet
-
     from ..ops_handler import ReductionType, StoreMode
 
 log = logging.getLogger(__name__)
@@ -572,8 +570,13 @@ def _typecheck_HalideOverrides(h: HalideOverrides) -> OpsHandler[str]:
 class HalideCSEVariable(CSEVariable):
     undefined_re = re.compile(r"\b(tmp\d+)\[\?\]")
 
-    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
-        super().__init__(name, bounds)
+    def __init__(
+        self,
+        name,
+        bounds: ValueRanges[Any],
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        super().__init__(name, bounds, dtype)
         self.used_dims: Optional[List[sympy.Symbol]] = None
 
     def update_on_args(self, name, args, kwargs):
@@ -671,20 +674,9 @@ class HalideKernel(SIMDKernel):
     def __init__(
         self,
         *groups,
-        index_dtype: str,
-        mutations: Optional[OrderedSet[str]] = None,
-        pid_cache=None,
-        reduction_hint=ReductionHint.DEFAULT,
-        override_persistent_reduction=None,
+        **kwargs,
     ) -> None:
-        super().__init__(
-            *groups,
-            index_dtype=index_dtype,
-            mutations=mutations,
-            reduction_hint=reduction_hint,
-            pid_cache=pid_cache,
-            override_persistent_reduction=override_persistent_reduction,
-        )
+        super().__init__(*groups, **kwargs)
         # For halide, we just write directly to the body
         self.compute = self.body
         self.loads = self.body
@@ -706,9 +698,12 @@ class HalideKernel(SIMDKernel):
         self.buffer_aliases: Dict[str, List[str]] = defaultdict(list)
         self.has_indirect_indexing = False
 
-    def create_cse_var(self, name, bounds=None):
+    def dtype_to_str(self, dtype: torch.dtype) -> str:
+        return halide_type(dtype)
+
+    def create_cse_var(self, name, bounds=None, dtype=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
-        return HalideCSEVariable(name, bounds)
+        return HalideCSEVariable(name, bounds, dtype)
 
     def finalize_indexing(self, indices: Sequence[sympy.Expr]):
         """
@@ -1652,10 +1647,7 @@ class HalideKernel(SIMDKernel):
 
 
 class HalideScheduling(SIMDScheduling):
-    int32_type = "hl.Int(32)"
-    # TODO(jansel): Halide doesn't actually support 64 bit indexing...
-    int64_type = "hl.Int(64)"
-    kernel_type = HalideKernel  # type: ignore[arg-type]
+    kernel_type = HalideKernel  # type: ignore[arg-type,assignment]
 
     @classmethod
     def get_backend_features(cls, device: torch.device):

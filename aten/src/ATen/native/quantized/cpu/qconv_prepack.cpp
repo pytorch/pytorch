@@ -618,8 +618,7 @@ at::Tensor _qconv_prepack_onednn(
 
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 template <int kSpatialDim = 2>
@@ -858,5 +857,4 @@ TORCH_LIBRARY_IMPL(onednn, CPU, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native
