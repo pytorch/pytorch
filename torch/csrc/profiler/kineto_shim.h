@@ -111,7 +111,8 @@ using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
 void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
-    const torch::profiler::impl::ExperimentalConfig& config);
+    const torch::profiler::impl::ExperimentalConfig& config,
+    const std::string& trace_id = "");
 
 void toggleCollectionDynamic(const bool enable);
 void startTrace();

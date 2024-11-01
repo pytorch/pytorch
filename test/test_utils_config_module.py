@@ -3,8 +3,8 @@ import os
 import pickle
 
 
-os.environ["ENV_TRUE"] = "TRUE"
-os.environ["ENV_FALSE"] = "FALSE"
+os.environ["ENV_TRUE"] = "1"
+os.environ["ENV_FALSE"] = "0"
 
 from torch.testing._internal import fake_config_module as config
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -202,7 +202,7 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
 
     def test_dict_copy_semantics(self):
         p = config.shallow_copy_dict()
-        self.assertEqual(
+        self.assertDictEqual(
             p,
             {
                 "e_bool": True,
