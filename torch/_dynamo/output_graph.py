@@ -2153,15 +2153,15 @@ class SubgraphTracer(fx.Tracer):
 
         example_value = proxy.node.meta["example_value"]
 
-        # For SymInt with basic symbols, it's possible that the basic symbol has already been lifted
-        # for current subgraph when we automatically lift basic symbols in the sizes/strides of a tensor t.
-        # However, suppose in parent graph users call sz = t.size()[0], it create
-        # a proxy in parent and the subgraph access sz via closure. sz's proxy is not tracked
-        # in current sub-tracer so we end up lifting the symbol to it twice.
-        # To avoid lifting the basic symbol twice, we call the _lift_symbols_in_symint to
-        # handle this case.
+        # For SymInt with basic symbols, it's possible that the basic symbols are lifted twice.
+        # For example, the basica symbols may have already been lifted for current subgraph when
+        # we automatically lift basic symbols in the sizes/strides of a tensor t.
+        # Suppose parent graph calls sz = t.size()[0], it creates
+        # a proxy in parent and the subgraph accesses sz via closure. sz's proxy is not tracked
+        # in current sub-tracer so we may lift the same symbol twice.
+        # To avoid this case, we always call _lift_symbols_in_symint to handle basic symbols.
         #
-        # For SymInt with compound expresssion, we allow them to lifted as subgraph's input.
+        # For SymInt with compound expresssion, we allow them to be lifted as subgraph's input.
         if isinstance(example_value, torch.SymInt):
             expr = example_value.node.expr
             if isinstance(expr, sympy.Symbol):
@@ -2198,20 +2198,24 @@ class SubgraphTracer(fx.Tracer):
             return arg
         return self.lift_tracked_freevar_to_input(arg)
 
-    # When binding the symbols in an exmaple_value, we bind the symbols
-    # to the proxy's associatied Tracer instead of current tracer.
-    # This is because:
-    # 1. We maybe calling wrap_tensors during speculate_subgraph because
-    # the variables are lazily realized. The proxy are top-level phs but
-    # current tracer is a subtracer.
-    # 2. For autograd.Function, we trace the backward graph with a new tracer
-    # whose parent is the forward tracer, but we're using all the proxies created
-    # in forward tracer to trace the backward.
-    # For example, forward calls save_for_backward for a input tensor t.
-    # Backward calls t.tolist(). In this case, all the proxies that backward tracer
-    # sees are from parent tracer (i.e. the forward tracer). (e.g. t[0].item())
-    # See test_validate_outputs_unbacked for repro on 2.
+    # See NOTE: [Auto lift basic free symbols when create_graph_input] for overall design
+    # This function should be used to track the unbacked symbols with its proxy created during
+    # dynamo tracing. It's invoked in wrap_fx_proxy for every proxied call for tensors and symbols.
+    # So that subgraph knows how to bind a symbol input with parent's proxy.
     def lazy_bind_unbacked_symbols(self, example_value, e_proxy: torch.fx.Proxy):
+        # When binding the symbols in an exmaple_value, we bind the symbols
+        # to the proxy's associatied Tracer instead of current tracer.
+        # This is because:
+        # 1. We maybe calling wrap_tensors during speculate_subgraph because
+        # the variables are lazily realized. The proxy are top-level phs but
+        # current tracer is a subtracer.
+        # 2. For autograd.Function, we trace the backward graph with a new tracer
+        # whose parent is the forward tracer, but we're using all the proxies created
+        # in forward tracer to trace the backward.
+        # For example, forward calls save_for_backward for a input tensor t.
+        # Backward calls t.tolist(). In this case, all the proxies that backward tracer
+        # sees are from parent tracer (i.e. the forward tracer). (e.g. t[0].item())
+        # See test_validate_outputs_unbacked for repro on 2.
         assert isinstance(e_proxy.tracer, SubgraphTracer)
         if isinstance(example_value, torch.Tensor):
             self._lazy_bind_unbacked_symbols_in_tensors(
@@ -2222,10 +2226,10 @@ class SubgraphTracer(fx.Tracer):
             set_example_value(e_proxy.node, example_value)
 
     # Unbacked symbols may be created as a function call in parent (e.g. t.nonzero).
-    # We use a lazy proxy for tracking, so that only when the unbacked symbol is actually used
-    # we create the proxy for it. The exact use case is when a child subgraph look up the proxy
-    # for an unbacked Symbol created in parent graph, we create a proxy in parent graph so
-    # that the subgraph can use the proxy to properly set up the calls to subgraph.
+    # We use a lazy proxy for tracking, so that only when the unbacked symbol is actually used,
+    # we create the proxy for it. The exact use case is when a child subgraph looks for the proxy
+    # of an unbacked Symbol created in parent graph, we create a proxy in parent graph so
+    # that the subgraph bind the lifted symbol to subgraph.
     def _lazy_bind_unbacked_symbols_in_tensors(
         self, tracer, t: torch.Tensor, t_proxy: torch.fx.Proxy
     ):
@@ -2286,8 +2290,27 @@ class SubgraphTracer(fx.Tracer):
                 assert isinstance(s, torch.SymInt)  # to make linter happy
                 tracer.bound_symbols[s.node.expr] = lazy_proxy
 
-    # Do not use this function direclty. This is used for automatically lifting the symbols
-    # in example_value when create_graph_input.
+    # NOTE: [Auto lift basic free symbols when create_graph_input]
+    # Whenever we call create_graph_input, we try to also lift the basic symbols in example values
+    # as graph input.
+    # This applies to both top-level graph and subgraphs in higher order ops.
+    # This has several cases:
+    #  1. When create_graph_input for a tensor that has symbolic shapes,
+    #     we look for basic symbols in its size and stride, we check if the symbol is bound
+    #     in current graph (i.e. bound_symbols), it it's not bound, we'll create a placeholder
+    #     for it then recursively check its parent, creates ph if not bound.
+    #     Every tracer maintains a mapping (i.e. lifted_freevars)
+    #     that maps from parent proxy to proxy in current tracer for the symbol.
+    #  2. When create_graph_input for a tensor with unbacked symbolic shapes,
+    #     Backed symbols all come from inputs's symbolic shape. But unbacked symbols
+    #     can be created while tracing. So we use lazy_bind_unbacked_symbols will intercept
+    #     at wrap_fx_proxy, and try to bind the unbacked symbols immediately after they're
+    #     created.
+    #  3. subgraph will also lifted basic symbols in compound exprs.
+    #     For example, if an input to subgraph takes size [s1+s2//8], we'll look for the
+    #     the free symbols in the sizes and lift as inputs similar to 1 in _lift_symbols_in_symint)
+    # Do not call this function direclty. This is used in create_graph_input for
+    # automatically lifting the free basic symbols in example_value.
     def _lift_basic_symbols(self, example_value, src: Optional[Source]):
         # See note [Export inputs must be explicitly passed in]
         is_strict_export = self.is_export
@@ -2298,8 +2321,7 @@ class SubgraphTracer(fx.Tracer):
         if isinstance(example_value, torch.Tensor):
             return self._lift_symbols_in_tensor(example_value, src)
 
-    # Do not use this function direclty. This is used for automatically lifting the symbols
-    # in tensor when create_graph_input with tensor input.
+    # See Note [Auto lift basic free symbols when create_graph_input]
     def _lift_symbols_in_tensor(self, t: torch.Tensor, src: Optional[Source]):
         for i, s in enumerate(t.size()):
             self._lift_symbols_in_symint(
@@ -2349,6 +2371,7 @@ class SubgraphTracer(fx.Tracer):
     # We store the basic symbol to proxy mapping in bound_symbols when
     # 1. we create_graph_input for inputs that have symbols in them (currently, tensor), or
     # 2. lazy_bind_unbacked_symbols for unbacked symbol created by ops such as nonzero.
+    # See Note [Auto lift basic free symbols when create_graph_input]
     def lookup_bounded_symbols(self, s: torch.SymInt):
         free_symbols = s.node.expr.free_symbols
         if len(free_symbols) == 0:
@@ -2370,6 +2393,7 @@ class SubgraphTracer(fx.Tracer):
             bounded[s0] = proxy
         return bounded, to_be_bound
 
+    # See NOTE: [Auto lift basic free symbols when create_graph_input]
     def _lift_symbols_in_symint(
         self, s: Union[int, torch.SymInt], source: Optional[Source]
     ):
@@ -2415,7 +2439,7 @@ class SubgraphTracer(fx.Tracer):
                 "this could be because it's not tracked with lazy_bind_unbacked_symbols. "
                 f"Otherwise, should provide a source when create_graph_input for `{s}` at root tracer."
             )
-            s0 = next(self_to_be_bound)
+            s0 = next(iter(self_to_be_bound))
             ph = self.create_graph_input(
                 str(s0),
                 type(s),
