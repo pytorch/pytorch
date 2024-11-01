@@ -273,6 +273,7 @@ some types might be built dynamically during the unpickling process and hence wi
 :func:`torch.serialization.get_unsafe_globals_in_checkpoint` you might see an error like
 
 .. code::
+
     WeightsUnpickler error: Can only build Tensor, Parameter, OrderedDict or types allowlisted via `add_safe_globals`,
     but got <class 'numpy.dtype[float32]'>
 
@@ -281,6 +282,7 @@ This can be allowlisted via ``{add_}safe_globals([type(np.dtype(np.float32))])``
 In ``numpy >=1.25`` you would see
 
 .. code::
+
     WeightsUnpickler error: Can only build Tensor, Parameter, OrderedDict or types allowlisted via `add_safe_globals`,
     but got <class 'numpy.dtypes.Float32DType'>
 
