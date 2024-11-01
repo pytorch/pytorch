@@ -64,7 +64,7 @@ jobs:
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: 3.8
+          python-version: 3.9
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}.txt
 
       - name: Install NDK

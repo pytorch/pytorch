@@ -395,7 +395,7 @@ struct Dist {
     const scalar_t * t1_end = t1 + l1_size;
     const scalar_t * t2_end = t2 + l2_size;
 
-    for (const auto l C10_UNUSED : c10::irange(d)) {
+    for ([[maybe_unused]] const auto l : c10::irange(d)) {
       for (; t1 != t1_end; t1 += m, res += m) {
         const Vec vec_t1 = Vec::loadu(t1, count);
         Vec res_vec = Vec::loadu(res, count);
@@ -443,9 +443,9 @@ static void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const
 
 }  // anonymous namespace
 
-REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl);
-REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
-REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
-REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
+REGISTER_DISPATCH(pdist_forward_stub, &pdist_forward_kernel_impl)
+REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl)
+REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl)
+REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl)
 
 }  // namespace at::native

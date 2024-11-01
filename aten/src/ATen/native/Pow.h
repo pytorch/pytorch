@@ -23,7 +23,7 @@ namespace native {
 // e.g. since 2**-1==0.5, the truncated integral result is zero. 1**negative_exponent is the
 // only non-zero result.
 template <class T,
-  typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
+  std::enable_if_t<std::is_integral_v<T>, T>* = nullptr>
 inline HOST_DEVICE __ubsan_ignore_signed_int_overflow__ T powi_impl(T a, T b) {
   T result = 1;
   while (b) {
@@ -37,13 +37,13 @@ inline HOST_DEVICE __ubsan_ignore_signed_int_overflow__ T powi_impl(T a, T b) {
 }
 
 template <class T,
-  typename std::enable_if<std::is_integral<T>::value && !std::is_signed<T>::value, T>::type* = nullptr>
+  std::enable_if_t<std::is_integral_v<T> && !std::is_signed_v<T>, T>* = nullptr>
 inline HOST_DEVICE T powi(T a, T b) {
   return powi_impl(a, b);
 }
 
 template <class T,
-  typename std::enable_if<std::is_integral<T>::value && std::is_signed<T>::value, T>::type* = nullptr>
+  std::enable_if_t<std::is_integral_v<T> && std::is_signed_v<T>, T>* = nullptr>
 inline HOST_DEVICE T powi(T a, T b) {
   if ( b < 0 ) {
       if ( a == 1 ) {
@@ -61,8 +61,8 @@ inline HOST_DEVICE T powi(T a, T b) {
 using pow_tensor_tensor_fn = void (*)(TensorIteratorBase&);
 using pow_tensor_scalar_fn = void (*)(TensorIteratorBase&, const c10::Scalar&);
 
-DECLARE_DISPATCH(pow_tensor_tensor_fn, pow_tensor_tensor_stub);
-DECLARE_DISPATCH(pow_tensor_scalar_fn, pow_tensor_scalar_stub);
+DECLARE_DISPATCH(pow_tensor_tensor_fn, pow_tensor_tensor_stub)
+DECLARE_DISPATCH(pow_tensor_scalar_fn, pow_tensor_scalar_stub)
 
 } // namespace native
 
