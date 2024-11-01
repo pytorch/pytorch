@@ -2051,6 +2051,10 @@ class AotCodeCompiler:
                 else:
                     run_command_and_check(link_cmd)
 
+                for o_file in [output_o, consts_o]:
+                    # remove .o files to save disk space since we already have the .so file
+                    os.remove(o_file)
+
                 if use_mmap_weights:
                     import resource
 
