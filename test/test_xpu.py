@@ -428,6 +428,10 @@ print(torch.xpu.device_count())
         for arch in arch_list:
             self.assertTrue(arch in flags)
 
+    def test_torch_version_xpu(self):
+        self.assertTrue(len(torch.version.xpu) == 8)
+        self.assertTrue(int(torch.version.xpu) >= 20230000)
+
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
 
