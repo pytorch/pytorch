@@ -1041,10 +1041,10 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 "Simply stop passing it, and everything should still work fine."
             )
 
-    def initialize_stages(
+    def seeded_module_init(
         self,
         stage_initializer: Callable[[torch.nn.Module], None],
-        mode: str = "parallel",
+        mode: str = "serial",
         initial_seed: int = 0,
     ):
         """
@@ -1061,11 +1061,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
         change how 'device' is passed in.
         """
         assert mode in ("parallel", "serial"), f"unsupported mode {mode}"
-
         if mode == "parallel":
             seed = initial_seed + self.rank
             torch.manual_seed(seed)
-            logger.info("PP Rank %d using parallel init, seed=%d", self.rank, seed)
+            logger.info(
+                "Pipeline using parallel init: rank %d using seed=%d", self.rank, seed
+            )
 
         local_stage_indices = set({stage.stage_index for stage in self._stages})
 
@@ -1078,6 +1079,12 @@ class PipelineScheduleMulti(_PipelineSchedule):
             if mode == "serial":
                 if stage.is_first:
                     torch.manual_seed(initial_seed)
+                    logger.info(
+                        "Pipeline using serial init: rank %d stage %d using manual seed %d and sending RNG state to next rank...",
+                        self.rank,
+                        stage.stage_index,
+                        initial_seed,
+                    )
                 elif not prev_stage_is_rank_local:
                     # need to know the size/dtype of the state tensors so might as well get current state then overwrite
                     state_cpu = torch.get_rng_state().to(device)
@@ -1095,7 +1102,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
             stage_initializer(stage.submod)
 
             # send new RNG seed
-            if mode == "serial" and not next_stage_is_rank_local:
+            if mode == "serial" and not next_stage_is_rank_local and not stage.is_last:
                 state_cpu = torch.get_rng_state().to(device)
                 state_cuda = torch.cuda.get_rng_state(device=device).to(device)
                 torch.distributed.send(

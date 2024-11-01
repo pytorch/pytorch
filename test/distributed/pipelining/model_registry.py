@@ -87,6 +87,12 @@ class MLPModule(torch.nn.Module):
         x = self.net2(x)
         return x
 
+    def init_weights(self):
+        torch.nn.init.xavier_uniform_(self.net1.weight)
+        torch.nn.init.xavier_uniform_(self.net2.weight)
+        torch.nn.init.zeros_(self.net1.bias)
+        torch.nn.init.zeros_(self.net2.bias)
+
 
 # Multi-MLP model
 class MultiMLP(torch.nn.Module):
@@ -102,6 +108,10 @@ class MultiMLP(torch.nn.Module):
         for layer in self.layers:
             x = layer(x)
         return x
+
+    def init_weights(self):
+        for l in self.layers:
+            l.init_weights()
 
 
 class CustomLinearDx(Function):

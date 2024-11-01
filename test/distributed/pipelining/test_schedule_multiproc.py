@@ -6,7 +6,7 @@ import os
 import sys
 import tempfile
 
-from model_registry import ModelWithKwargs, MultiMLP, MultiMLPWithDw
+from model_registry import MLPModule, ModelWithKwargs, MultiMLP, MultiMLPWithDw
 from schedule_registry import ScheduleUnbalanced, ScheduleVShaped, ScheduleWithW
 
 import torch
@@ -380,6 +380,11 @@ class ScheduleTest(MultiProcContinousTest):
 
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
+        # initialize ref_mod and pipeline mod with the same seed and expect matching output/grad
+        seed = 123
+        torch.manual_seed(seed)
+        ref_mod.init_weights()
+
         # Run reference
         for _ in range(2):
             ref_mod.zero_grad()
@@ -402,7 +407,6 @@ class ScheduleTest(MultiProcContinousTest):
             if hasattr(ScheduleClass, "num_microbatches")
             else 8
         )
-        input_args = x.chunk(num_microbatches)[0]
         stages = [
             PipelineStage(
                 stage_module,
@@ -462,6 +466,14 @@ class ScheduleTest(MultiProcContinousTest):
                     one_more_schedule.pipeline_order_with_comms[rank],
                 ):
                     self.assertEqual(a, b)
+
+        # Ensure that serial initialization mode produces the same weights as the reference model when starting
+        # from the same seed.  Note: i manually tested that using 'parallel' mode leads to mismatched inits and
+        # therefore failing output and gradient checks, as expected.  Skipped adding a version of the test
+        # that asserts this mismatch.
+        schedule.seeded_module_init(
+            stage_initializer=MLPModule.init_weights, mode="serial", initial_seed=seed
+        )
 
         # Run
         with check_leaked_tensors() as garbage_tensors:
@@ -613,6 +625,11 @@ class ScheduleTest(MultiProcContinousTest):
 
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
+        # initialize ref_mod and pipeline mod with the same seed and expect matching output/grad
+        seed = 123
+        torch.manual_seed(seed)
+        ref_mod.init_weights()
+
         # Run reference
         for _ in range(2):
             ref_mod.zero_grad()
@@ -646,6 +663,12 @@ class ScheduleTest(MultiProcContinousTest):
         }
         schedule = ScheduleClass(
             stages, chunks, stage_index_to_group_rank, loss_fn=loss_fn
+        )
+
+        # ensure serial initialization is tested on V-schedule
+        # (special case to not send RNG states to local next stage)
+        schedule.seeded_module_init(
+            stage_initializer=MLPModule.init_weights, mode="serial", initial_seed=seed
         )
 
         # Run
