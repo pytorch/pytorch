@@ -707,7 +707,7 @@ from a multi-output view call"
         traced_tangent_memory_formats = [t[1] for t in tangents_and_memory_formats]
         nonlocal static_input_indices
         static_input_indices = static_input_indices or []
-        if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
+        if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
             passed_indices = set(static_input_indices)
             static_input_indices = [
                 i
@@ -768,7 +768,9 @@ from a multi-output view call"
             traced_tangent_memory_formats=traced_tangent_memory_formats,
             subclass_inp_meta=create_subclass_meta(flat_args),
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
-            subclass_tangent_meta=create_subclass_meta(traced_tangents),
+            subclass_tangent_meta=create_subclass_meta(
+                traced_tangents, count_symints=False
+            ),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,

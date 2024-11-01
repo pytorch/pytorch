@@ -1023,6 +1023,8 @@ class ChromiumEventLogger:
             metadata,
         )
         self.get_stack().append(event_name)
+        # Add metadata from start event
+        self.add_event_data(event_name, **metadata)
 
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
@@ -3175,7 +3177,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         # fast path, avoid pytree overhead
         # compiled autograd inputs are always a list of tensors, maybe followed by symints
         assert inputs_idx_to_clear == [0]
@@ -3285,6 +3287,11 @@ def set_torch_function_mode_stack(stack):
 def clear_torch_function_mode_stack():
     for i in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
+
+
+# call from C dynamo in order to inspect values in pdb
+def _breakpoint_for_c_dynamo(*args):
+    breakpoint()
 
 
 def verify_guard_fn_signature(value):
