@@ -360,8 +360,7 @@ void gemm(
      cpuinfo_has_x86_f16c();
    const bool use_fp16_gemv_trans = fp16_gemv_trans_would_be_faster &&
      transa == TransposeType::Transpose &&
-     transb == TransposeType::NoTranspose && n == 1 && beta == 0.0 &&
-     alpha == 1.0;
+     transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
    if (!use_fp16_gemv_trans &&
        mkldnn_fp16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
      return;
