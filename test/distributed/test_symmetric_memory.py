@@ -1,6 +1,7 @@
 # Owner(s): ["module: c10d"]
 
 import os
+from unittest import skipIf
 
 import torch
 import torch.distributed as dist
@@ -18,6 +19,7 @@ from torch.distributed._symmetric_memory import (
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
@@ -292,6 +294,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @skipIfRocm
+    @skipIf(not SM90OrLater)
     @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     @parametrize("is_b_row_major", [True, False])

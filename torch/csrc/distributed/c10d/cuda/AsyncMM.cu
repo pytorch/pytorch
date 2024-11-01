@@ -5,6 +5,13 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAGuard.h>
 
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
+    CUDA_VERSION >= 12000
+#define BUILD_ASYNC_MM_KERNEL
+#endif
+
+#if defined(BUILD_ASYNC_MM_KERNEL)
+
 // We are going to override the cuTensorMapEncodeTiled driver api with our lazy
 // loader
 static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
@@ -61,10 +68,6 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 // clang-format on
 
 #include <torch/csrc/distributed/c10d/cuda/cutlass/gemm/kernel/persistent_async_input_scheduler.cuh>
-
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
-#define BUILD_ASYNC_MM_KERNEL
-#endif
 
 namespace {
 
@@ -223,6 +226,8 @@ at::Tensor async_input_mm_impl(
 }
 
 } // namespace
+
+#endif
 
 namespace c10d::symmetric_memory::cuda {
 
