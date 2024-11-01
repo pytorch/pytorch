@@ -1805,7 +1805,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z, 100)
         self.assertEqual(k, 100)
 
-    @unittest.expectedFailure
     def test_contextlib_contextmanager_change_parent_nonlocal_1(self):
         # test if finally is executed and it is reading the correct variable
         z = 1
