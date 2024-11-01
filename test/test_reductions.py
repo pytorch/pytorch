@@ -2251,23 +2251,25 @@ class TestReductions(TestCase):
         self.assertEqual(x[:, :2].max().item(), 5)
         self.assertEqual(x[:, :2].amax().item(), 5)
         self.assertEqual(x[:, :2].argmax().item(), 2)
+
     @onlyCPU
     @dtypes(*integral_types_and(torch.bool))
     def test_nanmean_integral_types(self, device, dtype):
 
         # List of tensor shapes to test
         shapes = [
-            (),           # Scalar tensor
-            (0,),         # Empty tensor
-            (1,),         # Single-element tensor
-            (3, 4, 5),     # Standard multi-dimensional tensor
-            (2, 0, 3),     # Tensor with an empty dimension
-            (10, 10, 10),  # Larger tensor
-            (2, 3, 0, 4),   # Tensor with multiple empty dimensions
-            (100,),         # High-dimensional tensor with 1D shape
-            (1, 1, 1),      # Tensor with singleton dimensions
-            (5, 5, 5, 5, 5), # High-dimensional tensor
+            (),
+            (0,),
+            (1,),
+            (3, 4, 5),
+            (2, 0, 3),
+            (10, 10, 10),
+            (2, 3, 0, 4),
+            (100,),
+            (1, 1, 1),
+            (5, 5, 5, 5, 5),
         ]
+
         for shape in shapes:
             # Tensor of the specified shape and dtype
             t = make_tensor(shape, dtype=dtype, device=device)
