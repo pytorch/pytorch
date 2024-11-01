@@ -559,7 +559,7 @@ void lstm_mkldnn(Tensor& output, Tensor& hy, Tensor& cy,
 }
 } // anonymous namespace
 
-REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn);
+REGISTER_ALL_CPU_DISPATCH(lstm_mkldnn_stub, &lstm_mkldnn)
 
 } // namespace at::native
 
