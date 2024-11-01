@@ -22,6 +22,8 @@
 #include <ATen/ops/isnan.h>
 #endif
 
+#include <ATen/ops/_assert_async.h>
+
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/Event.h>
 #include <c10/core/Stream.h>
@@ -1059,11 +1061,11 @@ void Engine::evaluate_function(
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && isnan(output)._is_any_true().item<bool>()) {
+      if (output.defined()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i
            << "th output.";
-        throw std::runtime_error(ss.str());
+        at::_assert_async(~(isnan(output).any()), ss.str());
       }
     }
   }
