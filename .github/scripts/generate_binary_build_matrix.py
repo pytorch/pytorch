@@ -18,10 +18,10 @@ from typing import Dict, List, Optional, Tuple
 CUDA_ARCHES = ["11.8", "12.4", "12.6"]
 
 
-CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1", "12.4": "12.4.1", "12.6": "12.6.2"}
+CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.4": "12.4.1", "12.6": "12.6.2"}
 
 
-CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.1": "9", "12.4": "9", "12.6": "9"}
+CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.4": "9", "12.6": "9"}
 
 
 ROCM_ARCHES = ["6.1", "6.2"]
@@ -53,20 +53,6 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusparse-cu11==11.7.5.86; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu11==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu11==11.8.86; platform_system == 'Linux' and platform_machine == 'x86_64'"
-    ),
-    "12.1": (
-        "nvidia-cuda-nvrtc-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
-        "nvidia-cuda-runtime-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cuda-cupti-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cudnn-cu12==9.1.0.70; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cublas-cu12==12.1.3.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cufft-cu12==11.0.2.54; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
     "12.4": (
         "nvidia-cuda-nvrtc-cu12==12.4.127; platform_system == 'Linux' and platform_machine == 'x86_64' | "
@@ -399,10 +385,10 @@ def generate_wheels_matrix(
                 continue
 
             if use_split_build and (
-                arch_version not in ["12.6", "12.4", "12.1", "11.8", "cpu"] or os != "linux"
+                arch_version not in ["12.6", "12.4", "11.8", "cpu"] or os != "linux"
             ):
                 raise RuntimeError(
-                    "Split build is only supported on linux with cuda 12.6, 12.4, 12.1, 11.8, and cpu.\n"
+                    "Split build is only supported on linux with cuda 12.6, 12.4, 11.8, and cpu.\n"
                     f"Currently attempting to build on arch version {arch_version} and os {os}.\n"
                     "Please modify the matrix generation to exclude this combination."
                 )
@@ -438,26 +424,6 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
-                # Special build building to use on Colab. Python 3.11 for 12.1 CUDA
-                if python_version == "3.11" and arch_version == "12.1":
-                    ret.append(
-                        {
-                            "python_version": python_version,
-                            "gpu_arch_type": gpu_arch_type,
-                            "gpu_arch_version": gpu_arch_version,
-                            "desired_cuda": translate_desired_cuda(
-                                gpu_arch_type, gpu_arch_version
-                            ),
-                            "use_split_build": "True" if use_split_build else "False",
-                            "devtoolset": "",
-                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                            "package_type": package_type,
-                            "pytorch_extra_install_requirements": "",
-                            "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-full".replace(  # noqa: B950
-                                ".", "_"
-                            ),
-                        }
-                    )
             else:
                 ret.append(
                     {
