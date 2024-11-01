@@ -2,7 +2,7 @@ Understanding TorchDynamo-based ONNX Exporter Memory Usage
 ==========================================================
 The previous TorchScript-based ONNX exporter would execute the model once to trace its execution, which could cause it to run out of
 memory on your GPU if the model's memory requirements exceeded the available GPU memory. This issue has been addressed with the new
-TorchDynamo-based ONNX exporter."
+TorchDynamo-based ONNX exporter.
 
 The TorchDynamo-based ONNX exporter leverages `FakeTensorMode <https://pytorch.org/docs/stable/torch.compiler_fake_tensor.html>`_ to
 avoid performing actual tensor computations during the export process. This approach results in significantly lower memory usage
@@ -18,7 +18,7 @@ In this example, we use the HighResNet model from MONAI. Before proceeding, plea
 
 PyTorch offers a tool for capturing and visualizing memory usage traces. We will use this tool to record the memory usage of the two
 exporters during the export process and compare the results. You can find more details about this tool on
-`this page <https://pytorch.org/docs/stable/torch_cuda_memory.html>`_.
+`Understanding CUDA Memory Usage <https://pytorch.org/docs/stable/torch_cuda_memory.html>`_.
 
 
 TorchScript-based exporter
@@ -57,7 +57,7 @@ The code below could be run to generate a snapshot file which records the state 
     print(f"Export is done.")
 
 Open `pytorch.org/memory_viz <https://pytorch.org/memory_viz>`_ and drag/drop the generated pickled snapshot file into the visualizer.
-The memeory usage is described as below:
+The memory usage is described as below:
 
 .. image:: _static/img/onnx/torch_script_exporter_memory_usage.png
 
