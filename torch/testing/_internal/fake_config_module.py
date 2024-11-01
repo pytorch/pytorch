@@ -21,6 +21,9 @@ e_compile_ignored = True
 e_config = Config(default=True)
 e_jk = Config(justknob="does_not_exist")
 e_jk_false = Config(justknob="does_not_exist", default=False)
+e_env_default = Config(env_name_default="ENV_TRUE", default=False)
+e_env_default_FALSE = Config(env_name_default="ENV_FALSE", default=True)
+e_env_force = Config(env_name_force="ENV_TRUE", default=False)
 
 
 class nested:
