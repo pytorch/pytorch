@@ -29,7 +29,6 @@ from weakref import ReferenceType
 import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
-from torch._C._dynamo.eval_frame import skip_code_recursive_flag
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.utils import CompileTimeInstructionCounter
 from torch._guards import compile_context, CompileContext, CompileId, tracing
@@ -215,6 +214,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
             py_rng_state = random.getstate()
+            prior_dtype = torch.get_default_dtype()
             torch_rng_state = torch.random.get_rng_state()
             cuda_rng_state = None
             if torch.cuda.is_available():
@@ -242,6 +242,7 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     prior_deterministic, warn_only=prior_warn_only
                 )
                 random.setstate(py_rng_state)
+                torch.set_default_dtype(prior_dtype)
                 torch.random.set_rng_state(torch_rng_state)
                 if cuda_rng_state is not None:
                     torch.cuda.set_rng_state(cuda_rng_state)
@@ -504,16 +505,17 @@ class ConvertFrameAssert:
             # len keyword in LIST_LEN guard.
             return None
 
-        is_ctx_manager = lambda x: (
-            isinstance(x, contextlib._GeneratorContextManager) or
-            '_GeneratorContextManager' in str(type(x))
-        )
+        # is_ctx_manager = lambda x: (
+        #     type(x) is contextlib._GeneratorContextManager or
+        #     '_GeneratorContextManager' in str(type(x))
+        # )
 
-        if frame.f_code.co_name in ('__init__', '__enter__', '__exit__') and \
-                'self' in frame.f_locals.keys() and \
-                is_ctx_manager(frame.f_locals['self']):
-            # print(f'skipping {frame.f_code.co_name=}')
-            return skip_code_recursive_flag
+        # if frame.f_code.co_name in ('__init__', '__enter__', '__exit__') and \
+        # if frame.f_code.co_name in ('__enter__',) and \
+        #         'self' in frame.f_locals.keys() and \
+        #         is_ctx_manager(frame.f_locals['self']):
+        #     print(f'skipping {frame.f_code.co_name=}')
+        #     return torch._C._dynamo.eval_frame.skip_code_recursive_flag
 
         if not has_tensor_in_frame(frame):
             return None
@@ -670,7 +672,7 @@ def _compile(
         except exc.UnspecializeRestartAnalysis:
             speculation_log.clear()
             raise
-        except (exc.SpeculationRestartAnalysis, exc.SkipFrame):
+        except (exc.SpeculationRestartAnalysis, exc.SkipFrame, exc.SkipCodeRecursiveException):
             raise
         except Exception:
             if translation_validation_enabled():
@@ -1018,6 +1020,7 @@ def _compile(
                     ValidationException,
                     UncapturedHigherOrderOpError,
                     BisectValidationException,
+                    SkipCodeRecursiveException,
                 ),
             ):
                 raise
@@ -1271,6 +1274,9 @@ class ConvertFrame:
                             exc_info=True,
                         )
 
+            if isinstance(e, SkipCodeRecursiveException):
+                return torch._C._dynamo.eval_frame.skip_code_recursive_flag
+
             if not config.suppress_errors and not soft_fail:
                 raise
 
@@ -1289,6 +1295,8 @@ class ConvertFrame:
 
             # If we encounter SkipCodeRecursiveException, return skip_code_recursive_flag
             # to signal to Dynamo eval frame to skip the current frame and any recursive calls.
+            # Code below will never be reached because the raise above will re-raise
+            # any dynamo exception
             if isinstance(e, SkipCodeRecursiveException):
                 return torch._C._dynamo.eval_frame.skip_code_recursive_flag
             elif isinstance(e, CacheLimitExceeded):
