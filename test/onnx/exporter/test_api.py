@@ -207,6 +207,8 @@ class TestExportAPIDynamo(common_utils.TestCase):
         input = torch.randn(2)
         self.assert_export(Model(), (input))
 
+
+class TestCustomTranslationTable(common_utils.TestCase):
     def test_custom_translation_table_overrides_ops(self):
         from onnxscript import opset18 as op
 
