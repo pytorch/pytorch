@@ -1544,17 +1544,6 @@ def _export_to_aten_ir_make_fx(
         if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
             gm.meta.update(mod.meta)
 
-    # [NOTE] In training IR, we don't run
-    # any DCE as a result we preserve constant
-    # nodes in the graph. make_fx invariant is that
-    # they don't guarantee every node gets a meta['val']
-    # field. Since the actual value is already hardcoded in
-    # graph, the node.meta here actually doesn't matter. But
-    # we do this to make spec verifier happy.
-    for node in gm.graph.nodes:
-        if "val" not in node.meta:
-            node.meta["val"] = None
-
     # See comment in _export_to_aten_ir()
     if produce_guards_callback:
         try:
