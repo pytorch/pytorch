@@ -35,7 +35,13 @@ from ._remove_effect_tokens_pass import _remove_effect_tokens
 log = logging.getLogger(__name__)
 
 
-__all__ = ["InterpreterModule", "UnflattenedModule", "unflatten", "FlatArgsAdapter"]
+__all__ = [
+    "FlatArgsAdapter",
+    "InterpreterModule",
+    "InterpreterModuleDispatcher",
+    "UnflattenedModule",
+    "unflatten",
+]
 
 
 class _AttrKind(Enum):
@@ -195,6 +201,12 @@ class InterpreterModule(torch.nn.Module):
 
 
 class InterpreterModuleDispatcher(torch.nn.Module):
+    """
+    A module that carries a sequence of InterpreterModules corresponding to
+    a sequence of calls of that module. Each call to the module dispatches
+    to the next InterpreterModule, and wraps back around after the last.
+    """
+
     def __init__(self, call_modules: List[InterpreterModule]):
         super().__init__()
         assert call_modules
@@ -580,13 +592,21 @@ class UnflattenedModule(torch.nn.Module):
         return pytree.tree_unflatten(tree_out, signature.out_spec)
 
     def _dispatch_modules(self, redirected_call_indices):
+        """For a module whose call signatures are preserved, replace
+        multiple modules corresponding to multiple calls to that module
+        with a single dispatcher module that tracks which module to call.
+        """
+
+        # some modules were removed and their fqns redirected to other
+        # fqns during deduplication; make a consolidated fqn -> module map
         all_modules = {}
         for fqn, mod in self.named_modules(remove_duplicate=False):
             all_modules[fqn] = mod
         for fqn, fqn_ in redirected_call_indices.items():
             all_modules[fqn] = all_modules[fqn_]
 
-        # map each fqn to a list of called_modules
+        # for each fqn whose module call signature is preserved,
+        # map that fqn to a list of called modules
         module_call_graph = {
             entry.fqn
             for entry in self.module_call_graph
@@ -601,19 +621,18 @@ class UnflattenedModule(torch.nn.Module):
         for orig_fqn, call_modules in called_modules.items():
             if len(call_modules) > 1:
                 for i, call_module in enumerate(call_modules):
-                    fqn = _call_name(orig_fqn, i+1)
+                    fqn = _call_name(orig_fqn, i + 1)
                     if fqn not in redirected_call_indices:
                         self._modules.pop(fqn)
-                self.set_submodule(
-                    orig_fqn, InterpreterModuleDispatcher(call_modules)
-                )
+                self.set_submodule(orig_fqn, InterpreterModuleDispatcher(call_modules))
 
+        # elide call indices in call modules because they are
+        # tracked automatically inside the dispatcher module
         for node in self.graph.nodes:
             if node.op == "call_module":
                 fqn = node.target.split("@")[0]
                 if fqn in called_modules:
                     node.target = fqn
-
 
     def print_readable(
         self,
@@ -1065,7 +1084,7 @@ class _ModuleFrame:
                     return self.node_to_placeholder[seen_node]
                 else:
                     raise RuntimeError(
-                        f"Could not find output node {output}. Graph [{self.child_fqn}]: {self.graph}"
+                        f"Could not find output node {output}. Graph: {self.graph}"
                     )
 
             tree_out_node = _generate_unflatten(
