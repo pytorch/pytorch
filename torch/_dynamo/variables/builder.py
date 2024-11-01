@@ -32,6 +32,8 @@ from typing import (
     Union,
 )
 
+import sympy
+
 import torch
 from torch import SymInt
 from torch._guards import GuardSource, TracingContext
@@ -973,7 +975,11 @@ class VariableBuilder:
             )
             # We bind the new_symint to graph input.
             set_example_value(sym_node_proxy.node, new_symint)
-            self.tx.output.bound_symbols.add(new_symint.node.expr)
+            sym_expr = new_symint.node.expr
+            assert isinstance(
+                sym_expr, sympy.Symbol
+            ), f"{sym_expr} is not a basic Symbol."
+            self.tx.output.root_tracer.bound_symbols[sym_expr] = sym_node_proxy
             self.tx.output.tracked_fakes.append(
                 TrackedFake(new_symint, new_source, None)
             )
@@ -1757,7 +1763,6 @@ class VariableBuilder:
         if TracingContext.get().force_unspec_int_unbacked_size_like:
             wrapped_value = shape_env.create_unbacked_symint()
             _constrain_range_for_size(wrapped_value)
-            self.tx.output.bound_symbols.add(wrapped_value.node.expr)
             self.tx.output.tracked_fakes.append(
                 TrackedFake(wrapped_value, self.source, None)
             )
@@ -1803,7 +1808,6 @@ class VariableBuilder:
                 source=self.source,
                 dynamic_dim=dynamic_dim,
             )
-            self.tx.output.bound_symbols.add(wrapped_value.node.expr)
 
             self.tx.output.tracked_fakes.append(
                 TrackedFake(wrapped_value, self.source, None)
@@ -1825,6 +1829,9 @@ class VariableBuilder:
             source=self.get_source(),
         )
 
+        sym_expr = wrapped_value.node.expr
+        assert isinstance(sym_expr, sympy.Symbol), f"{sym_expr} is not a basic Symbol."
+        self.tx.output.root_tracer.bound_symbols[sym_expr] = proxy
         set_example_value(proxy.node, wrapped_value)
         unspec_var = SymNodeVariable(proxy, wrapped_value, **options)
         self.tx.output.unspec_variable_map[self.name] = unspec_var
