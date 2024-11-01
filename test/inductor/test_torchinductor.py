@@ -5156,6 +5156,31 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_matmul_layer_norm(self):
+        batch_size = 32
+        seq_length = 50
+        hidden_size = 256
+
+        inp = torch.randn(
+            batch_size,
+            seq_length,
+            hidden_size,
+            requires_grad=True,
+            device=self.device,
+        )
+        weight = torch.randn(
+            hidden_size, hidden_size, requires_grad=True, device=self.device
+        )
+
+        layer_norm = torch.nn.LayerNorm(hidden_size, device=self.device)
+
+        def foo(inp, weight):
+            matmul_output = inp @ weight
+            final_output = layer_norm(matmul_output)
+            return final_output
+
+        self.common(foo, (inp, weight), check_lowp=False)
+
     def test_transpose_add(self):
         def fn(a, b):
             return a.t() + b
@@ -12645,28 +12670,33 @@ if HAS_GPU and not TEST_WITH_ASAN:
         def test_donated_buffer_inplace(self):
             batch_size = 32
             seq_length = 50
-            hidden_size = 768
+            hidden_size = 256
 
-            inp = torch.randn(batch_size, seq_length, hidden_size, requires_grad=True, device=self.device)
-            weight = torch.randn(hidden_size, hidden_size, requires_grad=True, device=self.device)
+            inp = torch.randn(
+                batch_size,
+                seq_length,
+                hidden_size,
+                requires_grad=True,
+                device=self.device,
+            )
+            weight = torch.randn(
+                hidden_size, hidden_size, requires_grad=True, device=self.device
+            )
 
-            layer_norm = torch.nn.LayerNorm(hidden_size)
+            layer_norm = torch.nn.LayerNorm(hidden_size, device=self.device)
 
-            @torch.compile()
-            def foo(inp, weight):
+            def fn(inp, weight):
                 matmul_output = inp @ weight
                 final_output = layer_norm(matmul_output)
                 return final_output
 
+            fn_opt = torch.compile(fn)
+
             def wrapper(inp, weight):
-                return foo(inp, weight).sum().backward()
+                return fn_opt(inp, weight).sum().backward()
 
             _, code = run_and_get_code(wrapper, inp, weight)
             self.assertTrue("in_out_ptr" in code[1])
-
-
-
-
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
