@@ -332,7 +332,6 @@ intern_build_aten_ops(
         "@fbgemm",
         "@mkl",
         "@sleef",
-        "@mkl_dnn//:mkl-dnn",
     ],
 )
 
