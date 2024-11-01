@@ -34,12 +34,16 @@ __device__
 inline thrust::pair<int64_t, int64_t> get_index_mapping1d(
     int64_t input_w, int64_t output_w,
     int64_t output_x,
-    int64_t pad_l) {
+    int64_t pad_l, int64_t nplane) {
   // 3D grid of 1D blocks
+
+  int64_t lane_id = threadIdx.y + blockIdx.y * blockDim.y;
+  int64_t batch_id = threadIdx.z + blockIdx.z * blockDim.z;
+
   auto input_offset =
-    (blockIdx.y + blockIdx.z * gridDim.y) * input_w;
+    (lane_id + batch_id * nplane) * input_w;
   auto output_offset =
-    (blockIdx.y + blockIdx.z * gridDim.y) * output_w;
+    (lane_id + batch_id * nplane) * output_w;
 
   auto i_start_x = ::max(int64_t(0), -pad_l);
   auto o_start_x = ::max(int64_t(0), pad_l);
@@ -96,12 +100,12 @@ template<typename scalar_t>
 __global__ void reflection_pad1d_out_kernel(
     const scalar_t * input, scalar_t * output,
     int64_t input_w,
-    int64_t pad_l, int64_t pad_r) {
+    int64_t pad_l, int64_t pad_r, int64_t nplane) {
   auto output_x = threadIdx.x + blockIdx.x * blockDim.x;
   auto output_w = input_w + pad_l + pad_r;
 
   if (output_x < output_w) {
-    auto index_pair = get_index_mapping1d(input_w, output_w, output_x, pad_l);
+    auto index_pair = get_index_mapping1d(input_w, output_w, output_x, pad_l, nplane);
     output[index_pair.second] = input[index_pair.first];
   }
 }
@@ -110,12 +114,12 @@ template <typename scalar_t>
 __global__ void reflection_pad1d_backward_out_kernel(
     scalar_t * grad_input, const scalar_t * grad_output,
     int64_t input_w,
-    int64_t pad_l, int64_t pad_r) {
+    int64_t pad_l, int64_t pad_r, int64_t nplane) {
   auto output_x = threadIdx.x + blockIdx.x * blockDim.x;
   auto output_w = input_w + pad_l + pad_r;
 
   if (output_x < output_w) {
-    auto index_pair = get_index_mapping1d(input_w, output_w, output_x, pad_l);
+    auto index_pair = get_index_mapping1d(input_w, output_w, output_x, pad_l, nplane);
     gpuAtomicAddNoReturn(
       &grad_input[index_pair.first], grad_output[index_pair.second]);
   }
@@ -454,8 +458,8 @@ TORCH_IMPL_FUNC(reflection_pad1d_out_cuda)
   int64_t input_w = input_.size(dim_w);
   int64_t output_w = input_w + pad_l + pad_r;
 
-  dim3 block_size(output_w > 256 ? 256 : output_w);
-  dim3 grid_size((int)::ceil(output_w / 256.0), nplane, nbatch);
+  dim3 block_size(output_w > 256 ? 256 : output_w, nplane > 65535 ? 65535 : nplane, nbatch > 65535 ? 65535 : nbatch);
+  dim3 grid_size((int)::ceil(output_w / 256.0), (int)::ceil(nplane / 65535.0), (int)::ceil(nbatch / 65535.0));
 
   Tensor input = input_.contiguous();
 
@@ -470,7 +474,8 @@ TORCH_IMPL_FUNC(reflection_pad1d_out_cuda)
             output.mutable_data_ptr<scalar_t>(),
             input_w,
             pad_l,
-            pad_r);
+            pad_r,
+            nplane);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
@@ -521,7 +526,7 @@ TORCH_IMPL_FUNC(reflection_pad1d_backward_out_cuda)(const Tensor& grad_output_,
       reflection_pad1d_backward_out_kernel<<<
         grid_size, block_size, 0, at::cuda::getCurrentCUDAStream()>>>(
           grad_input.mutable_data_ptr<scalar_t>(), grad_output.const_data_ptr<scalar_t>(),
-          input_w, pad_l, pad_r);
+          input_w, pad_l, pad_r, nplane);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   );
