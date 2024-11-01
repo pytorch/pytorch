@@ -333,16 +333,17 @@ def create_flex_decoding_kernel(*args, **kwargs):
         _,  # q_indices
         _,  # full_q_num_blocks,
         _,  # full_q_indices,
-        SPARSE_KV_BLOCK_SIZE,
         _,  # SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE,
         _,
     ) = block_mask
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
-        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
+    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
 
     B = Bq
     kernel_options = dict(kernel_options)
@@ -389,6 +390,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             full_kv_indices,
         ]
     )
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int]] = []
@@ -477,6 +480,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
+    original_kernel_options = kernel_options.copy()
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
@@ -484,9 +488,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0:
             continue
 
+        cur_kernel_options = original_kernel_options.copy()
         # Performance tuning
-        kernel_options.setdefault("BLOCK_N", BLOCK_N)
-        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         # Work around https://github.com/pytorch/pytorch/issues/129625
         if num_stages == 2:
@@ -513,7 +518,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            **kernel_options,
+            **cur_kernel_options,
         )
 
     inputs_for_flex_decoding = (
