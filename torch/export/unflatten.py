@@ -990,7 +990,7 @@ class _ModuleFrame:
                     return self.node_to_placeholder[seen_node]
                 else:
                     raise RuntimeError(
-                        f"Could not find output node {output}. Graph [{self.child_fqn}]: {self.graph}"
+                        f"Could not find output node {output}. Graph: {self.graph}"
                     )
 
             tree_out_node = _generate_unflatten(
