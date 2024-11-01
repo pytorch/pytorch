@@ -83,7 +83,7 @@ if(INTERN_BUILD_ATEN_OPS)
       set_source_files_properties(${ROWWISE_SCALED_MM_FILE}
         PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
       set_source_files_properties(${ASYNC_MM_FILE}
-        PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a")
+        PROPERTIES COMPILE_FLAGS "-gencode arch=compute_90a,code=sm_90a -Wno-unused-but-set-variable")
     endif()
   endif()
 

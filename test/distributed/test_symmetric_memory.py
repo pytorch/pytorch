@@ -294,7 +294,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @skipIfRocm
-    @skipIf(not SM90OrLater)
+    @skipIf(not SM90OrLater, "_fused_all_gather_matmul_native currently only supports sm>=90")
     @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     @parametrize("is_b_row_major", [True, False])
