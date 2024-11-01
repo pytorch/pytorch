@@ -345,14 +345,22 @@ void permute_to_matching_layout(const Tensor& output, Tensor& grad_output)
 bool same_strides(const Tensor& t1, const Tensor& t2) {
   std::vector<int> t1_strides_no_ones;
   std::vector<int> t2_strides_no_ones;
-  std::copy_if(t1.strides().begin(), t1.strides().end(),
-               std::back_inserter(t1_strides_no_ones), [](int i) {
-                 return i > 1;
-               });
-  std::copy_if(t2.strides().begin(), t2.strides().end(),
-               std::back_inserter(t2_strides_no_ones), [](int i) {
-                 return i > 1;
-               });
+  const auto t1strides = t1.strides();
+  const auto t2strides = t2.strides();
+  if (t1strides.size() != t2strides.size()) {
+    return false;
+  }
+  const auto t1sizes = t1.sizes();
+  const auto t2sizes = t2.sizes();
+  // we are going through strides backward here, but if both are backward it's comparable
+  for (int i = 0; i < t1strides.size(); i++) {
+    if (t1sizes[i] > 1) {
+      t1_strides_no_ones.push_back(t1strides[i]);
+    }
+    if (t2sizes[i] > 1) {
+      t2_strides_no_ones.push_back(t2strides[i]);
+    }
+  }
   return std::equal(t1_strides_no_ones.begin(), t1_strides_no_ones.end(), t2_strides_no_ones.begin(), t2_strides_no_ones.end());
 }
 } // namespace
