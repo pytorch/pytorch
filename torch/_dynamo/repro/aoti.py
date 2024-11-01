@@ -47,7 +47,6 @@ def dump_to_minify(
         command="minify",
         options=options,
     )
-    print(subdir)
     return helper_for_dump_minify(out.getvalue())
 
 
