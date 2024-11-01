@@ -265,23 +265,6 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-latest" },
         ]}
 
-  android-emulator-build-test:
-    if: github.repository_owner == 'pytorch'
-    name: android-emulator-build-test
-    uses: ./.github/workflows/_run_android_tests.yml
-    with:
-      test-matrix: |
-        { include: [
-          { config: 'default',
-            shard: 1,
-            num_shards: 1,
-            runner: 'ubuntu-20.04-16x',
-            use_lite_interpreter: 1,
-            # Just set x86 for testing here
-            support_abi: 'x86',
-          },
-        ]}
-
   linux-vulkan-focal-py3_11-clang10-build:
     name: linux-vulkan-focal-py3.11-clang10
     uses: ./.github/workflows/_linux-build.yml
