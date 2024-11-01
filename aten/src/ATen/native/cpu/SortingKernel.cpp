@@ -264,7 +264,7 @@ static void topk_kernel(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(sort_stub, &sort_kernel);
-REGISTER_DISPATCH(topk_stub, &topk_kernel);
+REGISTER_DISPATCH(sort_stub, &sort_kernel)
+REGISTER_DISPATCH(topk_stub, &topk_kernel)
 
 } //at::native
