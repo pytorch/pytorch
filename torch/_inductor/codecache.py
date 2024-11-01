@@ -65,10 +65,13 @@ from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
 )
+from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._utils_internal import log_cache_bypass
 
 from .remote_cache import create_cache
-from .utils import _align
+from .runtime import autotune_cache
+from .runtime.autotune_cache import AutotuneCacheBundler
+from .triton_bundler import TritonBundler, TritonKernelArtifacts
 
 
 T = TypeVar("T")
@@ -77,7 +80,9 @@ T = TypeVar("T")
 if TYPE_CHECKING:
     from collections.abc import KeysView
 
+    from .compile_fx import _CompileFxKwargs
     from .remote_cache import JsonDataTy, RemoteCache
+    from .utils import InputType
 
 
 """
@@ -193,6 +198,15 @@ def get_cpp_wrapper_cubin_path_name() -> str:
     return "cubin_path" if torch.version.hip is None else "hsaco_path"
 
 
+@functools.lru_cache(None)
+def get_global_cache_path_impl(global_cache_dir: str) -> Optional[Path]:
+    return (
+        Path(os.path.join(global_cache_dir, CacheBase.get_system()["hash"]))
+        if global_cache_dir is not None
+        else None
+    )
+
+
 class CacheBase:
     @staticmethod
     @functools.lru_cache(None)
@@ -239,13 +253,8 @@ class CacheBase:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
 
     @staticmethod
-    @functools.lru_cache(None)
     def get_global_cache_path() -> Optional[Path]:
-        return (
-            Path(os.path.join(config.global_cache_dir, CacheBase.get_system()["hash"]))
-            if config.global_cache_dir is not None
-            else None
-        )
+        return get_global_cache_path_impl(config.global_cache_dir)
 
     def __init__(self) -> None:
         self.system = CacheBase.get_system()
@@ -469,7 +478,17 @@ def write_atomic(
     write_mode = "w" if isinstance(content, str) else "wb"
     with tmp_path.open(write_mode, encoding="utf-8" if encode_utf_8 else None) as f:
         f.write(content)
-    tmp_path.rename(path)
+    try:
+        tmp_path.rename(target=path)
+    except FileExistsError as e_file_exist:
+        if not _IS_WINDOWS:
+            raise
+        # On Windows file exist is expected: https://docs.python.org/3/library/pathlib.html#pathlib.Path.rename
+        # Below two lines code is equal to `tmp_path.rename(path)` on non-Windows OS.
+        # 1. Copy tmp_file to Target(Dst) file.
+        shutil.copy2(src=tmp_path, dst=path)
+        # 2. Delete tmp_file.
+        os.remove(tmp_path)
 
 
 @dataclasses.dataclass
@@ -487,9 +506,7 @@ def _ident(x: T) -> T:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(
-    device_map: Dict[torch.device, torch.device], t: Tensor
-) -> TensorMetadata:
+def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -498,79 +515,7 @@ def extract_tensor_metadata_for_cache_key(
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
 
-    # The pickle implementation avoids serializing the same object more than once.
-    # That behavior means the byte stream we create to hash will vary if, for example,
-    # we see two tensor objects with the same device, but the torch.device object is
-    # actually the same object vs. merely equivalent. We want to produce the same hash
-    # value in either situation, so we memoize the device objects and always reference
-    # the same object for a given device. It's possible other metadata fields deserve
-    # the same treatment, but so far we've only observed this issue with the device.
-    if meta.device not in device_map:
-        device_map[meta.device] = meta.device
-    meta = dataclasses.replace(meta, device=device_map[meta.device])
-
     return meta
-
-
-def _reduce_fake_tensor(
-    device_map: Dict[torch.device, torch.device], t: Tensor
-) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
-    """
-    See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
-    """
-    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
-    return (_ident, (metadata,))
-
-
-def _reduce_tensor(
-    device_map: Dict[torch.device, torch.device], t: Tensor
-) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
-    """
-    See FxGraphCachePickler. Custom reducer to pickle Tensors.
-    If we see tensors, we know they're constants stored as attributes on
-    the GraphModule. Include the values in the key calculation. Small
-    tensors will be inlined, so we can't serve the same cache entry for
-    different values anyway. Large constants are treated as parameters,
-    so we could conceivably reuse a cache entry. To do that, however,
-    PyCodeCache would need more complexity to create a new module from its
-    cache, but with the right constants attached as attributes.
-    """
-    if t.is_mkldnn:
-        # TODO: These tensors don't currently pickle, so we can't cache a
-        # compiled graph containing them. Just fail now. If mkldnn tensors
-        # get pickling support, we can remove this.
-        raise BypassFxGraphCache("mkldnn tensors unpickleable")
-
-    # Very large tensors could be expensive to copy to cpu and hash. Let's
-    # at least report if we find slowness.
-    start = time()
-    values = t.tolist()
-    elapsed = time() - start
-    if elapsed > 1.0:
-        warnings.warn(
-            f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
-        )
-
-    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
-    return (_ident, (TensorMetadataAndValues(metadata, values),))
-
-
-def _reduce_symint(s: SymInt) -> Tuple[Callable[[T], T], Tuple[str]]:
-    """
-    See FxGraphCachePickler. Custom reducer to pickle SymInts.
-    """
-    # For hashing purposes, we only care about the name of the symbol and
-    # not the backed value. We evaluate guards stored with a cached graph
-    # to ensure a cached entity with SymInt args is safe to reuse.
-    return (_ident, (str(s),))
-
-
-def _reduce_unsupported(s: Any) -> NoReturn:
-    """
-    See FxGraphCachePickler. Custom reducer to handle any objects that we don't
-    support and therefore raise to bypass caching.
-    """
-    raise BypassFxGraphCache("Reduce unsupported")
 
 
 class FxGraphCachePickler(pickle.Pickler):
@@ -581,47 +526,108 @@ class FxGraphCachePickler(pickle.Pickler):
     data that allow us to compute a stable, but safe hash.
     """
 
-    # See extract_tensor_metadata_for_cache_key. Whenever we extract metadata during
-    # pickling, we make sure devices always reference the same torch.device object.
-    _device_map: Dict[torch.device, torch.device] = {}
+    def __init__(self) -> None:
+        self._stream = io.BytesIO()
+        super().__init__(self._stream)
 
-    dispatch_table = copyreg.dispatch_table.copy()
-    dispatch_table[FakeTensor] = functools.partial(_reduce_fake_tensor, _device_map)
-    dispatch_table[torch.Tensor] = functools.partial(_reduce_tensor, _device_map)
-    dispatch_table[torch.SymInt] = _reduce_symint
-    dispatch_table[
-        torch.fx.experimental._backward_state.BackwardState
-    ] = _reduce_unsupported
+        self.dispatch_table = copyreg.dispatch_table.copy()
+        self.dispatch_table.update(
+            {
+                FakeTensor: functools.partial(self._reduce_fake_tensor),
+                torch.Tensor: functools.partial(self._reduce_tensor),
+                torch.SymInt: functools.partial(self._reduce_symint),
+                torch.fx.experimental._backward_state.BackwardState: functools.partial(
+                    self._reduce_unsupported
+                ),
+            }
+        )
 
-    @classmethod
-    def dumps(cls, obj: Any) -> bytes:
-        """
-        Pickle an object using the FxGraphCachePickler.
-        """
-        with io.BytesIO() as stream:
-            pickler = cls(stream)
-            # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
-            pickler.fast = True  # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
-            try:
-                pickler.dump(obj)
-            except (TypeError, AttributeError) as e:
-                # Some configs options are callables, e.g., post_grad_custom_pre_pass,
-                # and may not pickle.
-                log.warning("Can't pickle", exc_info=True)
-                raise BypassFxGraphCache("Config options may be unpickleable") from e
-            return stream.getvalue()
+        # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
+        # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
+        self.fast = True
 
-    @classmethod
-    def get_hash(cls, obj: Any) -> str:
+    def _reduce_fake_tensor(
+        self, t: Tensor
+    ) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
         """
-        Serialize an object using the FxGraphCachePickler and return a hash
-        of the pickled object.
+        Custom reducer to pickle FakeTensors.
         """
-        serialized_data = cls.dumps(obj)
+        metadata = extract_tensor_metadata_for_cache_key(t)
+        return (_ident, (metadata,))
+
+    def _reduce_tensor(
+        self,
+        t: Tensor,
+    ) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
+        """
+        Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
+        stored as attributes on the GraphModule. Include the values in the key
+        calculation. Small tensors will be inlined, so we can't serve the same cache
+        entry for different values anyway. Large constants are treated as parameters, so
+        we could conceivably reuse a cache entry. To do that, however, PyCodeCache would
+        need more complexity to create a new module from its cache, but with the right
+        constants attached as attributes.
+        """
+        if t.is_mkldnn:
+            # TODO: These tensors don't currently pickle, so we can't cache a compiled
+            # graph containing them. Just fail now. If mkldnn tensors get pickling
+            # support, we can remove this.
+            raise BypassFxGraphCache("mkldnn tensors unpickleable")
+
+        # Very large tensors could be expensive to copy to cpu and hash. Let's at least
+        # report if we find slowness.
+        start = time()
+        values = t.tolist()
+        elapsed = time() - start
+        if elapsed > 1.0:
+            warnings.warn(
+                f"FX graph cache handling of a large constant took {elapsed:.1}s. "
+                "Please file an issue."
+            )
+
+        metadata = extract_tensor_metadata_for_cache_key(t)
+        return (_ident, (TensorMetadataAndValues(metadata, values),))
+
+    def _reduce_symint(self, s: SymInt) -> Tuple[Callable[[T], T], Tuple[str]]:
+        """
+        Custom reducer to pickle SymInts.
+        """
+        # For hashing purposes, we only care about the name of the symbol and not the
+        # backed value. We evaluate guards stored with a cached graph to ensure a cached
+        # entity with SymInt args is safe to reuse.
+        return (_ident, (str(s),))
+
+    def _reduce_unsupported(self, s: Any) -> NoReturn:
+        """
+        Custom reducer to handle any objects that we don't support and therefore
+        raise to bypass caching.
+        """
+        raise BypassFxGraphCache("Reduce unsupported")
+
+    def dumps(self, obj: Any) -> bytes:
+        """
+        Pickle an object and return a byte string.
+        """
+        try:
+            self.dump(obj)
+            return self._stream.getvalue()
+        except (TypeError, AttributeError) as e:
+            # Some configs options may not pickle.
+            log.warning("Failed to pickle cache key", exc_info=True)
+            raise BypassFxGraphCache("Failed to pickle cache key") from e
+        finally:
+            # Reset our stream for the next dump.
+            self._stream.seek(0)
+            self._stream.truncate(0)
+
+    def get_hash(self, obj: Any) -> str:
+        """
+        Serialize an object and return a hash of the bytes.
+        """
+        serialized_data = self.dumps(obj)
         return sha256_hash(serialized_data)
 
-    @classmethod
-    def debug_lines(cls, inp: FxGraphHashDetails) -> List[str]:
+    def debug_lines(self, inp: FxGraphHashDetails) -> List[str]:
         """
         Get a printable string describing in more detail all the attributes
         comprising an object. Useful for debugging when one graph hashes
@@ -630,12 +636,12 @@ class FxGraphCachePickler(pickle.Pickler):
 
         def get_str(obj: Any) -> str:
             if isinstance(obj, torch.Tensor):
-                return str(extract_tensor_metadata_for_cache_key(cls._device_map, obj))
+                return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
-            elif type(obj) in cls.dispatch_table:
+            elif type(obj) in self.dispatch_table:
                 # Run the reducer on the object
-                return str(cls.dispatch_table[type(obj)](obj)[1])
+                return str(self.dispatch_table[type(obj)](obj)[1])
             else:
                 return str(obj)
 
@@ -643,14 +649,14 @@ class FxGraphCachePickler(pickle.Pickler):
         for attr, obj in vars(inp).items():
             if isinstance(obj, list):
                 for ii in range(len(obj)):
-                    h = cls.get_hash(obj[ii])
+                    h = self.get_hash(obj[ii])
                     lines.append(f"[{h}] {attr}[{ii}]: {get_str(obj[ii])}")
             elif isinstance(obj, dict):
                 for k, v in obj.items():
-                    h = cls.get_hash(v)
+                    h = self.get_hash(v)
                     lines.append(f"[{h}] {attr}[{k}]: {get_str(v)}")
             else:
-                h = cls.get_hash(obj)
+                h = self.get_hash(obj)
                 lines.append(f"[{h}] {attr}: {get_str(obj)}")
         return lines
 
@@ -676,34 +682,35 @@ def torch_key() -> bytes:
     """
     Compute a key that contains relevant information about torch source files
     """
-    if not config.is_fbcode():
+    with dynamo_timed("inductor_codecache_torch_key", log_pt2_compile_event=True):
+        if not config.is_fbcode():
 
-        def get_code_hash(root: str) -> bytes:
-            # This function isn't meant to be used outside of torch_key, just a
-            # helper for clarity. Instead, use torch_key() directly when you need
-            # a hash representing the state of the source code.
-            extra_files = (
-                "codegen/aoti_runtime/interface.cpp",
-                "codegen/aoti_runtime/implementation.cpp",
-                "codegen/cpp_prefix.h",
-                "script.ld",
-            )
-            inductor_root = os.path.dirname(__file__)
-            extra_files = [os.path.join(inductor_root, x) for x in extra_files]
-            hasher = hashlib.sha256()
-            hasher.update(torch.__version__.encode("utf-8"))
-            build_code_hash([root], "", hasher)
-            for path in extra_files:
-                if os.path.exists(path):
-                    with open(path, "rb") as f:
-                        hasher.update(f.read())
-            return hasher.digest()
+            def get_code_hash(root: str) -> bytes:
+                # This function isn't meant to be used outside of torch_key, just a
+                # helper for clarity. Instead, use torch_key() directly when you need
+                # a hash representing the state of the source code.
+                extra_files = (
+                    "codegen/aoti_runtime/interface.cpp",
+                    "codegen/aoti_runtime/implementation.cpp",
+                    "codegen/cpp_prefix.h",
+                    "script.ld",
+                )
+                inductor_root = os.path.dirname(__file__)
+                extra_files = [os.path.join(inductor_root, x) for x in extra_files]
+                hasher = hashlib.sha256()
+                hasher.update(torch.__version__.encode("utf-8"))
+                build_code_hash([root], "", hasher)
+                for path in extra_files:
+                    if os.path.exists(path):
+                        with open(path, "rb") as f:
+                            hasher.update(f.read())
+                return hasher.digest()
 
-        return get_code_hash(_TORCH_PATH)
+            return get_code_hash(_TORCH_PATH)
 
-    from libfb.py import parutil
+        from libfb.py import parutil
 
-    return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
+        return parutil.get_file_contents("torch/src_hash.txt").rstrip().encode("ascii")
 
 
 def get_inductor_root() -> str:
@@ -738,23 +745,25 @@ class FxGraphHashDetails:
     def __init__(
         self,
         gm: torch.fx.GraphModule,
-        example_inputs: List[torch.Tensor],
-        fx_kwargs: Dict[str, Any],
+        example_inputs: Sequence[InputType],
+        fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
     ) -> None:
         self.gm = gm
         self.example_inputs = example_inputs
 
-        # Order kwargs so hashing is stable to changes in kwarg order.
-        self.fx_kwargs = {}
-        for k in sorted(fx_kwargs):
+        # Order kwargs so hashing is stable to changes in kwarg order. Although
+        # it's technically a _CompileFxKwargs we don't actually need it typed as
+        # such since we're just using it to generate a hash.
+        self.fx_kwargs: Dict[str, object] = {}
+        for k, v in sorted(fx_kwargs.items()):
             if k not in self.EXCLUDED_KWARGS:
-                if type(fx_kwargs[k]) is set:
+                if type(v) is set:
                     # Special case to handle set params. Python sets can't be
                     # ordered, so sort the elements and store them in a proxy.
-                    self.fx_kwargs[k] = OrderedSetHolder(sorted(fx_kwargs[k]))
+                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))
                 else:
-                    self.fx_kwargs[k] = fx_kwargs[k]
+                    self.fx_kwargs[k] = v
 
         # Alignment checks
         self.inputs_to_check = inputs_to_check
@@ -778,36 +787,45 @@ class FxGraphHashDetails:
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable()
 
-    def debug_lines(self) -> List[str]:
-        """
-        Get a printable string describing in more detail all the attributes
-        comprising this object. Useful for debugging when one graph hashes
-        to a different value than another.
-        """
-        return FxGraphCachePickler.debug_lines(self)
+        # Custom post grad passes should provide an ID to hash.
+        self.post_grad_custom_pre_pass = self._get_custom_pass_detail(
+            config.post_grad_custom_pre_pass
+        )
+        self.post_grad_custom_post_pass = self._get_custom_pass_detail(
+            config.post_grad_custom_post_pass
+        )
+
+    def _get_custom_pass_detail(
+        self, custom_pass: CustomGraphPassType
+    ) -> Optional[Any]:
+        if not custom_pass:
+            return None
+        assert isinstance(custom_pass, CustomGraphPass)
+        return custom_pass.uuid()
 
 
 def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
-    fx_kwargs: Dict[str, Any],
+    example_inputs: Sequence[InputType],
+    fx_kwargs: _CompileFxKwargs,
     inputs_to_check: Sequence[int],
 ) -> Tuple[str, List[str]]:
     """
     Generate a unique hash of the FX graph for caching.
     """
     details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
+    pickler = FxGraphCachePickler()
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
-    key = "f" + FxGraphCachePickler.get_hash(details)
-    debug_lines = details.debug_lines()
+    key = "f" + pickler.get_hash(details)
+    debug_lines = pickler.debug_lines(details)
     debug_str = "\n".join(debug_lines)
     log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
     return key, debug_lines
 
 
 def cudagraph_post_compile(
-    example_inputs: List[Any],
+    example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
 ) -> None:
@@ -850,7 +868,7 @@ def cudagraph_post_compile(
         assert current_callable is not None
         compiled_graph.current_callable = cudagraphify(
             current_callable,
-            static_input_idxs=static_input_idxs,
+            static_input_idxs=static_input_idxs or (),
             device_index=next(iter(compiled_graph.device_idxs)),
             stack_traces=stack_traces,
             is_backward=is_backward,
@@ -989,7 +1007,7 @@ class FxGraphCache:
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
 
     @staticmethod
-    def _filter_backed_symints(inputs: List[Any]) -> List[torch.SymInt]:
+    def _filter_backed_symints(inputs: Sequence[InputType]) -> List[torch.SymInt]:
         """
         Get the backed SymInt objects from the input list. Note that we can never
         have guards that depend on unbacked symint.
@@ -1009,10 +1027,10 @@ class FxGraphCache:
     @staticmethod
     def _lookup_graph(
         key: str,
-        example_inputs: List[torch.Tensor],
+        example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
-    ) -> Optional[CompiledFxGraph]:
+    ) -> Tuple[Optional[CompiledFxGraph], Dict[str, Any]]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
         deserialized CompiledFxGraph object. On a miss, return None.
@@ -1053,6 +1071,7 @@ class FxGraphCache:
         # Iterate over any entries in the subdir for this key and evaluate
         # their guards to determine whether there's a hit.
         graph = None
+        cache_info: Dict[str, Any] = dict()
 
         for candidate in iterate_over_candidates():
             if not candidate.guards_expr:
@@ -1079,7 +1098,7 @@ class FxGraphCache:
                 break
 
         if graph is None:
-            return None
+            return None, cache_info
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
@@ -1100,6 +1119,17 @@ class FxGraphCache:
 
             write_atomic(artifact_path, code, make_dirs=True)
 
+        if bundle := graph._triton_bundle:
+            triton_bundler_meta = TritonBundler.read_and_emit(bundle)
+            if (meta := triton_bundler_meta) is not None:
+                cache_info["triton_bundler_meta"] = str(meta)
+                get_chromium_event_logger().add_event_data(
+                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                )
+
+        inductor_meta = autotune_cache.inductor_meta_from_config()
+        AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
+
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
@@ -1111,7 +1141,7 @@ class FxGraphCache:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
             log.error("Failed to load cached artifact: %s", artifact_path)
-            return None
+            return None, cache_info
 
         # Now re-evaluate with the symints to add any guards to the current env.
         if graph.guards_expr:
@@ -1140,12 +1170,12 @@ class FxGraphCache:
             lambda: {"filename": artifact_path},
             payload_fn=lambda: code,
         )
-        return graph
+        return graph, cache_info
 
     @staticmethod
     def post_compile(
         compiled_graph: CompiledFxGraph,
-        example_inputs: List[torch.Tensor],
+        example_inputs: Sequence[InputType],
         cudagraphs: BoxedBool,
     ) -> CompiledFxGraph:
         """
@@ -1192,7 +1222,7 @@ class FxGraphCache:
     def _save_graph(
         key: str,
         compiled_graph: CompiledFxGraph,
-        example_inputs: List[torch.Tensor],
+        example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
     ) -> None:
@@ -1257,11 +1287,23 @@ class FxGraphCache:
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
+        # Post grad custom passes must implement the CustomGraphPass or we don't
+        # know how to include them in the cache key calculation.
+        for p in (config.post_grad_custom_pre_pass, config.post_grad_custom_post_pass):
+            if p and (not isinstance(p, CustomGraphPass) or not p.uuid()):
+                raise BypassFxGraphCache("Unsupported post grad custom pass")
+
         # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
             raise BypassFxGraphCache(
                 "Freezing may introduce constants that aren't static across runs"
             )
+
+        from torch._inductor.bisect_helper import BisectionManager
+
+        if BisectionManager.bisection_enabled:
+            log.debug("dont cache graph when bisect enabled")
+            raise BypassFxGraphCache
 
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
@@ -1289,8 +1331,8 @@ class FxGraphCache:
     @staticmethod
     def prepare_key(
         gm: torch.fx.GraphModule,
-        example_inputs: List[torch.Tensor],
-        fx_kwargs: Dict[str, Any],
+        example_inputs: Sequence[InputType],
+        fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         remote: bool,
     ) -> Tuple[Optional[Tuple[str, List[str]]], Dict[str, Any]]:
@@ -1340,7 +1382,7 @@ class FxGraphCache:
     def load_with_key(
         key: str,
         debug_lines: List[str],
-        example_inputs: List[torch.Tensor],
+        example_inputs: Sequence[InputType],
         local: bool,
         remote_cache: Optional[RemoteCache[JsonDataTy]],
         is_backward: bool,
@@ -1350,16 +1392,17 @@ class FxGraphCache:
         Doesn't do any logging on its own, because AOTAutograd handles a cache miss
         differently from FXGraphCache.
         """
-        compiled_graph = FxGraphCache._lookup_graph(
+        compiled_graph, cache_info = FxGraphCache._lookup_graph(
             key, example_inputs, local, remote_cache
         )
         cache_info = {
+            **cache_info,
             "key": key,
             "components": debug_lines,
             "cache_event_time": time_ns(),
         }
         if compiled_graph is not None:
-            log.debug("fx graph cache hit for key %s", key)
+            log.info("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
 
@@ -1373,7 +1416,7 @@ class FxGraphCache:
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
-            log.debug("fx graph cache miss for key %s", key)
+            log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
             cache_info["cache_state"] = "miss"
 
@@ -1383,8 +1426,8 @@ class FxGraphCache:
     def load(  # type: ignore[no-untyped-def]
         compile_fx_fn: Callable[..., Any],
         gm: torch.fx.GraphModule,
-        example_inputs: List[torch.Tensor],
-        fx_kwargs: Dict[str, Any],
+        example_inputs: Sequence[InputType],
+        fx_kwargs: _CompileFxKwargs,
         inputs_to_check: Sequence[int],
         local: bool,
         remote: bool,
@@ -1430,6 +1473,9 @@ class FxGraphCache:
             compiled_graph._time_taken_ns = time_ns() - start_time
             cache_key = key_info[0]
             compiled_graph._fx_graph_cache_key = cache_key
+            compiled_graph._triton_bundle, triton_bundler_meta = TritonBundler.collect()
+            if triton_bundler_meta is not None:
+                cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
             cache_info["time_taken_ns"] = compiled_graph._time_taken_ns
             FxGraphCache._save_graph(
                 cache_key,
@@ -1460,17 +1506,29 @@ class FxGraphCache:
             cache_info["cache_event_time"],
             metadata=cache_info,
         )
+        # Add event data about cache hits/miss
+        # TODO: add remote cache get/put timings here too
+        chromium_log.add_event_data(
+            "inductor_compile",
+            cache_state=cache_state,
+            cache_event_time=cache_info["cache_event_time"],
+            key=cache_info.get("key"),
+            components=cache_info.get("components"),
+            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
+            remote_cache_enabled=remote,
+            local_cache_enabled=local,
+        )
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {
-                "name": "fx_graph_cache_hash",
+                "name": f"fx_graph_cache_{cache_state}",
                 "encoding": "json",
             },
             payload_fn=lambda: json.dumps(cache_info),
         )
         # Use the passed in cudagraphs so that we mutate the BoxedBool correctly
         FxGraphCache.post_compile(
-            compiled_graph, example_inputs, fx_kwargs["cudagraphs"]
+            compiled_graph, example_inputs, fx_kwargs["cudagraphs"]  # type: ignore[arg-type]
         )
         return compiled_graph
 
@@ -1517,13 +1575,14 @@ class CompiledFxGraph:
     guards_expr: Optional[str]
 
     cudagraph_info: Optional[CudagraphCachedInfo]
-    fx_kwargs: Dict[str, Any]
+    fx_kwargs: _CompileFxKwargs
     inputs_to_check: Sequence[int]
     boxed_forward_device_index: Optional[BoxedDeviceIndex]
 
     _time_taken_ns: Optional[int] = None
     _boxed_call: Optional[bool] = None
     _fx_graph_cache_key: Optional[str] = None
+    _triton_bundle: Optional[List[TritonKernelArtifacts]] = None
 
     def __init__(
         self,
@@ -1557,9 +1616,12 @@ class CompiledFxGraph:
         self.inputs_to_check = ()
         self.boxed_forward_device_index = None
 
-    def __call__(self, inputs: List[Any]) -> Any:
+    def __call__(self, inputs: Sequence[Any]) -> Any:
         assert self.current_callable is not None
-        return self.current_callable(inputs)
+        try:
+            return self.current_callable(inputs)
+        finally:
+            AutotuneCacheBundler.end_compile()
 
 
 def run_command_and_check(cmd_: str) -> None:
@@ -1643,15 +1705,15 @@ class AotCodeCompiler:
         fbcode_aot_cpu_re = False
         use_absolute_path = False
         if config.is_fbcode():
-            ld_command = build_paths.ld()
+            ld_command = build_paths.ld
             if device_type == "cpu" and graph.aot_mode:  # Meta internal AOTInductor CPU
-                objcopy_command = build_paths.objcopy_fallback()
+                objcopy_command = build_paths.objcopy_fallback
                 fbcode_aot_cpu_re = True
                 use_absolute_path = True
             else:
-                objcopy_command = build_paths.objcopy()
+                objcopy_command = build_paths.objcopy
         else:
-            ld_command = "ld"
+            ld_command = "ld -z noexecstack"
             objcopy_command = "objcopy"
 
         (
@@ -1834,19 +1896,43 @@ class AotCodeCompiler:
                 if name not in graph.folded_constants
             )
 
-            def get_nbytes_of_tensor(tensor: torch.Tensor, all_cuda: bool) -> int:
-                n_bytes = (
-                    torch.ops.mkldnn._nbytes(tensor)
-                    if tensor.is_mkldnn
-                    else tensor.untyped_storage().nbytes()
-                )
-                return n_bytes if all_cuda else _align(n_bytes)
+            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
+                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
+                    padded_bytes = raw_bytes.ljust(
+                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
+                        b"\x00",
+                    )
+                    return padded_bytes
 
-            consts_size = sum(
-                get_nbytes_of_tensor(tensor, all_cuda)
-                for (name, tensor) in graph.constants.items()
+                # This serializes the tensor's untyped_storage to bytes by accessing
+                # the raw data of the underlying structure.
+                import ctypes
+
+                if t.numel() == 0:
+                    return b""
+
+                if t.is_mkldnn:
+                    data_ptr = torch.ops.mkldnn.data_ptr(t)
+                    nbytes = torch.ops.mkldnn._nbytes(t)
+                else:
+                    t_cpu = t.untyped_storage().cpu()
+                    data_ptr = t_cpu.data_ptr()
+                    nbytes = t_cpu.nbytes()
+
+                raw_array = ctypes.cast(
+                    data_ptr,
+                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
+                )
+                raw_bytes = bytes(raw_array.contents)
+                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
+
+            serialized_weights = b"".join(
+                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
+                for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
+            consts_size = len(serialized_weights)
+
             # TODO: Fix mmap weights with cuda
             use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
             if config.aot_inductor.force_mmap_weights:
@@ -1886,41 +1972,6 @@ class AotCodeCompiler:
                 compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
                 object_build_options.save_flags_to_file(compile_flags)
 
-            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
-                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
-                    padded_bytes = raw_bytes.ljust(
-                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
-                        b"\x00",
-                    )
-                    return padded_bytes
-
-                # This serializes the tensor's untyped_storage to bytes by accessing
-                # the raw data of the underlying structure.
-                import ctypes
-
-                if t.numel() == 0:
-                    return b""
-
-                if t.is_mkldnn:
-                    data_ptr = torch.ops.mkldnn.data_ptr(t)
-                    nbytes = torch.ops.mkldnn._nbytes(t)
-                else:
-                    t_cpu = t.untyped_storage().cpu()
-                    data_ptr = t_cpu.data_ptr()
-                    nbytes = t_cpu.nbytes()
-
-                raw_array = ctypes.cast(
-                    data_ptr,
-                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
-                )
-                raw_bytes = bytes(raw_array.contents)
-                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
-
-            serialized_weights = b"".join(
-                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                for name in graph.constants.keys()
-                if name not in graph.folded_constants
-            )
             if not use_mmap_weights:
                 aot_constants = serialized_weights
                 magic_number = 0
@@ -1935,6 +1986,15 @@ class AotCodeCompiler:
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
 
+            kernels_o = []
+            gpu_codecache: Union[ROCmCodeCache, CUDACodeCache] = (
+                ROCmCodeCache() if torch.version.hip else CUDACodeCache()
+            )
+            for entry in gpu_codecache.cache.values():
+                if entry.output_path.endswith(".o"):
+                    kernels_o.append(entry.output_path)
+            kernels_o = " ".join(kernels_o)
+
             output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
             so_build_options = CppTorchDeviceOptions(
                 vec_isa=picked_vec_isa,
@@ -1944,7 +2004,7 @@ class AotCodeCompiler:
             )
             so_builder = CppBuilder(
                 name=output_name,
-                sources=[output_o, consts_o],
+                sources=[output_o, consts_o, kernels_o],
                 output_dir=output_dir,
                 BuildOption=so_build_options,
             )
@@ -2319,7 +2379,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
 
         template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
-            static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
+            static_assert(std::is_pointer_v<T>, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
         }
         template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {
@@ -2371,7 +2431,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             iss >> addr;
             _torchinductor_pyobject_tensor_data_ptr =
                 reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
-            return PyModule_Create(&py_module);
+            PyObject* module = PyModule_Create(&py_module);
+            if (module == NULL) {
+                return NULL;
+            }
+            #ifdef Py_GIL_DISABLED
+                PyUnstable_Module_SetGIL(mod, Py_MOD_GIL_NOT_USED);
+            #endif
+            return module;
         }
         """
     )
@@ -2996,7 +3063,7 @@ def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
     if config.is_fbcode():
-        return os.path.join(build_paths.cuda(), "bin", "nvcc")
+        return os.path.join(build_paths.sdk_home, "bin", "nvcc")
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
     if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
@@ -3063,6 +3130,8 @@ def _nvcc_compiler_options() -> List[str]:
     options = [
         "-t=0",
         "-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1",
+        "-DCUTLASS_ENABLE_SM90_EXTENDED_MMA_SHAPES=1",
+        "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED",
         "-w",
         f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
         config.cuda.compile_opt_level,
@@ -3071,7 +3140,7 @@ def _nvcc_compiler_options() -> List[str]:
         "-DNDEBUG",
     ]
     if config.is_fbcode():
-        options.extend(["-ccbin", os.path.dirname(build_paths.gcc())])
+        options.extend(["-ccbin", os.path.dirname(build_paths.gcc)])
     if config.cuda.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
     if config.cuda.enable_ptxas_info:

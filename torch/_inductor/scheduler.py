@@ -113,7 +113,11 @@ class SchedulerBuffer:
         if not self.node.should_allocate():
             return
 
-        if self.node.get_inputs_that_alias_output() or self.node.get_mutation_names():
+        if (
+            self.node.get_inputs_that_alias_output()
+            or self.node.get_mutation_names()
+            or isinstance(self.node.get_layout(), ir.CommBufferLayout)
+        ):
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
 
@@ -175,6 +179,9 @@ class BaseSchedulerNode:
 
     def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler: Scheduler = scheduler
+        self.debug_device_str: Callable[
+            [BaseSchedulerNode], List[str]
+        ] = lambda *args, **kwargs: []
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node: Optional[ir.Operation] = node
@@ -225,6 +232,9 @@ class BaseSchedulerNode:
 
     def debug_str_extra(self) -> str:
         return ""
+
+    def _debug_str_for_device(self) -> List[str]:
+        return self.debug_device_str(self)
 
     def debug_str_short(self) -> str:
         maybe_data = getattr(self.node, "data", None)
@@ -396,8 +406,18 @@ class BaseSchedulerNode:
             and hasattr(V.kernel, "args")
         ):
             return
+        fused_nodes = {
+            node.get_name()
+            for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
+        }
 
         ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
+        # NOTE remove V.graph.removed_operations once deps issue is fixed
+        inconsequential_nodes = (
+            (self.ancestors - {self.get_name()})
+            | V.graph.removed_operations
+            | self.scheduler.completed_operations
+        )
 
         for buf in self.get_outputs():
             buf_node = buf.node
@@ -423,7 +443,7 @@ class BaseSchedulerNode:
                     remaining_uses = [
                         x
                         for x in input_buf.users
-                        if x.node.get_name() not in self.scheduler.completed_operations
+                        if x.node.get_name() not in inconsequential_nodes
                     ]
                     if (
                         len(remaining_uses) == 1
@@ -907,6 +927,15 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.refresh_dependencies(normalize=False)
 
+        from .codegen.simd import SIMDScheduling
+
+        # TODO(shunting) if this cause compilation time increase when
+        # enabling LOAF by default, try just clearing the specific cache
+        # entry by using a customized cache implemetation rather than
+        # lru_cache.
+        SIMDScheduling.candidate_tilings.cache_clear()
+        self.pointwise_read_writes.clear_cache(self)
+
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
     ) -> None:
@@ -944,8 +973,7 @@ class SchedulerNode(BaseSchedulerNode):
             lines.append(textwrap.indent(self._body.debug_str(), "    "))
 
         assert self.node is not None
-        if ir.is_triton(self.node.get_device()):
-            lines.extend(debug_triton_code(self))
+        lines.extend(self._debug_str_for_device())
 
         return "\n".join(lines)
 
@@ -1111,7 +1139,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self_sizes = None
         for snode in self.snodes:
             assert isinstance(snode, SchedulerNode)
-            if self_sizes is not None and self_sizes != snode._sizes[0]:
+            if self_sizes is not None and tuple(self_sizes) != tuple(snode._sizes[0]):
                 loop_ordering_log.debug(
                     "Can not reorder fused node due to different sizes"
                 )
@@ -1169,9 +1197,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         ]
         node = self.snodes[0].node
         if node is not None:
-            device = node.get_device()
-            if ir.is_triton(device):
-                lines.extend(debug_triton_code(self))
+            lines.extend(self._debug_str_for_device())
 
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
 
@@ -1832,7 +1858,6 @@ class Scheduler:
         self.debug_draw_graph()
 
         # used during codegen:
-        self.current_device: Optional[torch.device] = None
         self.buffer_names_to_free: OrderedSet[str] = OrderedSet()
 
         # fx graph node to the position it appears in the graph
@@ -1847,11 +1872,13 @@ class Scheduler:
             }
         )
 
-    def get_current_device_or_throw(self) -> torch.device:
-        if device := self.current_device:
-            return device
-        else:
-            raise RuntimeError("No current device")
+    @property
+    def current_device(self) -> Optional[torch.device]:
+        return V.graph.current_device
+
+    @current_device.setter
+    def current_device(self, device: Optional[torch.device]) -> None:
+        V.graph.current_device = device
 
     def debug_draw_graph(self) -> None:
         """Generate an image of the graph for debugging"""
@@ -2364,7 +2391,21 @@ class Scheduler:
                 node.node, ir.MultiTemplateBuffer
             ):
                 multi_node = node.node
-                min_node_unfused, _ = multi_node.get_min_choice()
+                if not config.test_configs.force_extern_kernel_in_multi_template:
+                    min_node_unfused, _ = multi_node.get_min_choice()
+                else:
+                    min_node_unfused = next(
+                        (
+                            timing
+                            for timing in multi_node.choice_timings
+                            if isinstance(
+                                timing,
+                                torch._inductor.select_algorithm.ExternKernelCaller,
+                            )
+                        ),
+                        None,  # type: ignore[arg-type]
+                    )
+                    assert min_node_unfused is not None
 
                 if isinstance(
                     min_node_unfused,
@@ -2827,9 +2868,9 @@ class Scheduler:
 
         return str(reasons)
 
-    def has_shared_data_after_reordering_loop(
+    def shared_data_after_reordering_loop(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
+    ) -> int:
         """
         Right now just greedily reorder the loop of node1 to be compatible with node2,
         but ideally we should have some heuristics to reorder the loop for node2
@@ -2841,14 +2882,14 @@ class Scheduler:
         if not config.loop_ordering_after_fusion or any(
             n.get_device().type == "cpu" for n in [node1, node2]
         ):
-            return False
+            return 0
 
         node1_buffer_names = node1.read_writes.buffer_names()
         node2_buffer_names = node2.read_writes.buffer_names()
         # Fast path: no common buffers.
         common_buffer_names = node1_buffer_names & node2_buffer_names
         if not common_buffer_names:
-            return False
+            return 0
 
         node1_name2dep = {dep.name: dep for dep in node1.read_writes.reads_and_writes()}
         node2_name2dep = {dep.name: dep for dep in node2.read_writes.reads_and_writes()}
@@ -2871,7 +2912,7 @@ class Scheduler:
                 )
 
         if len(candidates) == 0:
-            return False
+            return 0
 
         # Pick the largest buffer to guide the loop reordering
         numel, lhs_dep, rhs_dep = max(candidates, key=lambda x: x[0])
@@ -2881,7 +2922,9 @@ class Scheduler:
             # We can not do loop reordering in this case right now
             # Simply returning true if the two Deps are the same after
             # normalization (merging loops)
-            return lhs_dep.normalize() == rhs_dep.normalize()
+            if lhs_dep.normalize() == rhs_dep.normalize():
+                return self.dep_size_hint(lhs_dep)
+            return 0
 
         # Only reorder loops for pointwise for now
         if not node1.is_reduction():
@@ -2895,7 +2938,7 @@ class Scheduler:
                 node2.get_name(),
             )
 
-        return self.score_fusion_memory(node1, node2) > 0
+        return self.score_fusion_memory(node1, node2)
 
     def unfusable_node(self, node: BaseSchedulerNode) -> bool:
         """
@@ -2963,19 +3006,17 @@ class Scheduler:
             return False
         del device2
 
-        no_shared_data = self.score_fusion_memory(node1, node2) == 0
-        if no_shared_data:
-            no_shared_data = not self.has_shared_data_after_reordering_loop(
-                node1, node2
-            )
+        shared_data_score = self.score_fusion_memory(node1, node2)
+        if shared_data_score == 0:
+            shared_data_score = self.shared_data_after_reordering_loop(node1, node2)
 
         loop_ordering_log.debug(
             "%s and %s has%s shared data",
             node1.get_name(),
             node2.get_name(),
-            " no" if no_shared_data else "",
+            " no" if shared_data_score == 0 else "",
         )
-        if no_shared_data and (
+        if shared_data_score == 0 and (
             not config.aggressive_fusion or node1.is_reduction() or node2.is_reduction()
         ):
             if is_metric_table_enabled("fusion_failure_due_to_indexing_mismatch"):
@@ -3017,6 +3058,13 @@ class Scheduler:
                 return False
             return self.get_backend(device).can_fuse_vertical(node1, node2)
         else:  # nodes don't depend on each other, but may have common reads
+            if (
+                # only apply score_fusion_memory_threshold to horizontal fusions
+                shared_data_score
+                < config.score_fusion_memory_threshold
+            ):
+                why("score_fusion_memory_threshold")
+                return False
             if self.can_fusion_increase_peak_memory(node1, node2):
                 why("will increase peak memory")
                 return False
@@ -3443,6 +3491,7 @@ class Scheduler:
                 )
                 seen.add(key)
 
+        self.current_device = None
         for node in self.nodes:
             if log.isEnabledFor(logging.DEBUG):
                 try:
@@ -3473,11 +3522,10 @@ class Scheduler:
                         self.current_device.type
                     ):
                         V.graph.wrapper_code.codegen_device_guard_exit()
+                    self.current_device = device
                     if device_need_guard(device.type):
                         assert device.index is not None, "device should have an index"
                         V.graph.wrapper_code.codegen_device_guard_enter(device.index)
-
-                    self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
 
@@ -3735,34 +3783,3 @@ class BaseScheduling:
         and memory copy time in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError
-
-
-def debug_triton_code(node: Union[SchedulerNode, FusedSchedulerNode]) -> List[str]:
-    lines = []
-    multi_template = node.get_template_node()
-    assert multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer)
-    if multi_template and multi_template.make_kernel_render is None:
-        lines.append(f"{node.get_name()} Unfinalized multi template buffer")
-    else:
-        from torch._inductor.codegen.cuda_combined_scheduling import (
-            CUDACombinedScheduling,
-        )
-
-        from .codegen.simd import SIMDScheduling
-
-        snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
-        device = snodes[0].get_device()
-        backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling))
-        V.graph.scheduler.current_device = device
-
-        # Don't increment kernel count when generating debug string.
-        # This will confuse some unit tests that check the number of
-        # generated kernels.
-        old_generated_kernel_count = metrics.generated_kernel_count
-        triton_code = backend.generate_kernel_code_from_nodes(snodes).strip()
-        metrics.generated_kernel_count = old_generated_kernel_count
-
-        lines.append(f"{node.get_name()} Triton code:")
-        lines.append(textwrap.indent(triton_code, "    "))
-    return lines

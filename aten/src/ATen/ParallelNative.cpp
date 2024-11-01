@@ -209,8 +209,8 @@ void init_num_threads() {
 }
 
 void set_num_threads(int nthreads) {
-  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
 #ifndef C10_MOBILE
+  TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
   int no_value = NOT_SET;
   if (!num_intraop_threads.compare_exchange_strong(no_value, nthreads)) {
     // num_intraop_threads either stores a positive integer or CONSUMED,
@@ -229,8 +229,9 @@ void set_num_threads(int nthreads) {
     }
   }
 #else
-  caffe2::PThreadPool* const pool = caffe2::pthreadpool(nthreads);
+  caffe2::PThreadPool* const pool = caffe2::pthreadpool();
   TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
+  pool->set_thread_count(nthreads);
 #endif // C10_MOBILE
 }
 
@@ -272,10 +273,10 @@ bool in_parallel_region() {
 #endif // C10_MOBILE
 }
 
-void intraop_launch(std::function<void()> func) {
+void intraop_launch(const std::function<void()>& func) {
 #ifndef C10_MOBILE
   if (!in_parallel_region() && get_num_threads() > 1) {
-    _get_intraop_pool().run(std::move(func));
+    _get_intraop_pool().run(func);
   } else {
     // execute inline if we're in parallel region
     func();
@@ -288,7 +289,7 @@ void intraop_launch(std::function<void()> func) {
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
-    std::function<void()> func) {
+    const std::function<void()>& func) {
 #ifndef C10_MOBILE
   auto future = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
   if (!in_parallel_region() && get_num_threads() > 1) {
