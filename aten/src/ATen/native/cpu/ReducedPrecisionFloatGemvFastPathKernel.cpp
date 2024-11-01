@@ -153,113 +153,6 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
   return reduce(x[0]);
 }
 
-#ifdef __aarch64__
-float32x4_t to_bfloat16(uint16x4_t u16) {
-  int32x4_t shift = vdupq_n_s32(16);
-  return vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16), shift));
-}
-
-inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
-#ifdef __ARM_FEATURE_FMA
-  return vfmaq_f32(a, b, c);
-#else
-  return vaddq_f32(a, vmulq_f32(b, c));
-#endif
-}
-
-float32x4_t f32_fma_bf16(float32x4_t a, uint16x4_t b, uint16x4_t c) {
-  return f32_fma(a, to_bfloat16(b), to_bfloat16(c));
-}
-
-#if defined(__clang__) && __clang_major__ > 15
-// https://godbolt.org/z/z8P4Yncra
-#define COMPILER_SUPPORTS_BF16_TARGET 1
-#elif !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
-// https://gcc.gnu.org/gcc-10/changes.html
-// https://godbolt.org/z/cdGG7vn8o
-#define COMPILER_SUPPORTS_BF16_TARGET 1
-#else
-#define COMPILER_SUPPORTS_BF16_TARGET 0
-#endif
-
-#if COMPILER_SUPPORTS_BF16_TARGET
-#define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("arch=armv8.2-a+bf16")))
-
-TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE float32x4_t
-f32_dot_bf16(float32x4_t a, bfloat16x8_t b, bfloat16x8_t c) {
-  return vbfdotq_f32(a, b, c);
-}
-
-TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE void
-dot_with_fp32_arith_main_inner_loop_bfdot(
-    const BFloat16* vec1,
-    const BFloat16* vec2,
-    vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
-    int registerPairIndex) {
-  const bfloat16x8_t temp_vec1 = vld1q_bf16(reinterpret_cast<const at::vec::at_bfloat16_t*>(
-                                                &vec1[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-  const bfloat16x8_t temp_vec2 = vld1q_bf16(reinterpret_cast<const at::vec::at_bfloat16_t*>(
-                                                &vec2[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-  sum[registerPairIndex] =
-    f32_dot_bf16(sum[registerPairIndex], temp_vec1, temp_vec2);
-}
-
-// See NOTE [GCC code duplication] below for why we have _bfdot and
-// _no_bfdot versions of
-// dot_with_fp32_arith_vectorized_tail_inner_loop.
-TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE
-void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
-    const at::BFloat16* vec1,
-    const at::BFloat16* vec2,
-    vec::Vectorized<float>* tail_sum,
-    int idx) {
-  const auto temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
-  const auto temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
-  *tail_sum = f32_dot_bf16(*tail_sum, temp_vec1, temp_vec2);
-}
-
-#else
-#define TARGET_ARM_BF16_ATTRIBUTE
-#endif // COMPILER_SUPPORTS_BF16_TARGET
-
-C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
-    const BFloat16* vec1,
-    const BFloat16* vec2,
-    vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
-    int registerPairIndex) {
-  const uint16x8_t temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(
-                                             &vec1[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-  const uint16x8_t temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(
-                                             &vec2[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-
-  sum[2 * registerPairIndex] = f32_fma_bf16(
-      sum[2 * registerPairIndex],
-      vget_low_u16(temp_vec1),
-      vget_low_u16(temp_vec2));
-  sum[2 * registerPairIndex + 1] = f32_fma_bf16(
-      sum[2 * registerPairIndex + 1],
-      vget_high_u16(temp_vec1),
-      vget_high_u16(temp_vec2));
-}
-
-C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
-    const at::BFloat16* vec1,
-    const at::BFloat16* vec2,
-    vec::Vectorized<float>* tail_sum,
-    int idx) {
-  const auto temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
-  const auto temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
-  *tail_sum = f32_fma_bf16(
-      f32_fma_bf16(*tail_sum, vget_low_u16(temp_vec1), vget_low_u16(temp_vec2)),
-      vget_high_u16(temp_vec1),
-      vget_high_u16(temp_vec2));
-}
-
-#else // __aarch64__
-// TODO: broaden BF16 support beyond aarch64
-#define COMPILER_SUPPORTS_BF16_TARGET 0
-#endif // __aarch64__
-
 namespace {
 // Returns (acc_low + a_low_half * b_low_half, acc_high + a_high_half * b_high_half)
 std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
@@ -318,6 +211,9 @@ C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
   *tail_sum = f32_dot_f16(*tail_sum, temp_vec1, temp_vec2);
 }
 
+// NOTE: This and some below code is unfortunately duplicated with
+// BlasKernel.cpp for now, but will be consolidated when BF16 moves
+// here as well.
 template <typename T>
 C10_ALWAYS_INLINE auto
 dot_with_fp32_arith_main_loop_no_bfdot(
@@ -335,43 +231,6 @@ dot_with_fp32_arith_main_loop_no_bfdot(
   }
   return reduce(sum);
 }
-
-#if COMPILER_SUPPORTS_BF16_TARGET
-template <int n>
-struct ForcedUnrollTargetBFloat16 {
-  template <typename Func>
-  TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE void operator()(const Func& f) const {
-    ForcedUnrollTargetBFloat16<n - 1>{}(f);
-    f(n - 1);
-  }
-};
-
-template <>
-struct ForcedUnrollTargetBFloat16<1> {
-  template <typename Func>
-  TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE void operator()(const Func& f) const {
-    f(0);
-  }
-};
-
-C10_ALWAYS_INLINE TARGET_ARM_BF16_ATTRIBUTE auto
-dot_with_fp32_arith_main_loop_bfdot(
-    const BFloat16* vec1,
-    const BFloat16* vec2,
-    int64_t len) {
-  vec::VectorizedN<float, kF32RegistersPerIteration> sum(0);
-  const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);
-  for (int j = 0; j < len_aligned ; j += kF32ElementsPerIteration) {
-    const auto* vec1_ = vec1 + j;
-    const auto* vec2_ = vec2 + j;
-    ForcedUnrollTargetBFloat16<kF32RegisterPairsPerIteration>{}([vec1_, vec2_, &sum](auto k)
-                                                                C10_ALWAYS_INLINE_ATTRIBUTE TARGET_ARM_BF16_ATTRIBUTE {
-      dot_with_fp32_arith_main_inner_loop_bfdot(vec1_, vec2_, sum, k);
-    });
-  }
-  return reduce(sum);
-}
-#endif // COMPILER_SUPPORTS_BF16_TARGET
 
 static_assert(
     (vec::Vectorized<Half>::size() & (vec::Vectorized<Half>::size() - 1)) == 0,
@@ -404,14 +263,6 @@ static_assert(
     reduced_sum += x1 * x2;                                             \
   }                                                                     \
   return reduced_sum
-
-#if COMPILER_SUPPORTS_BF16_TARGET
-TARGET_ARM_BF16_ATTRIBUTE float
-dot_with_fp32_arith_bfdot(const BFloat16* vec1, const BFloat16* vec2, int64_t len) {
-  auto reduced_sum = dot_with_fp32_arith_main_loop_bfdot(vec1, vec2, len);
-  DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY(_bfdot);
-}
-#endif // COMPILER_SUPPORTS_BF16_TARGET
 
 template <typename T>
 C10_ALWAYS_INLINE float
@@ -470,52 +321,16 @@ void fp16_gemv_trans(
 #endif
   return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
 }
-
-#ifdef __aarch64__
-float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec2, int64_t len) {
-#if COMPILER_SUPPORTS_BF16_TARGET
-  if (cpuinfo_has_arm_bf16()) {
-    return dot_with_fp32_arith_bfdot(vec1, vec2, len);
-  } else
-#endif // COMPILER_SUPPORTS_BF16_TARGET
-  {
-    return dot_with_fp32_arith_no_bfdot(vec1, vec2, len);
-  }
-}
-
-void bf16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const at::BFloat16* a, const int lda, const at::BFloat16 *x, at::BFloat16* y, int incy) {
-  parallel_for(0, n, 1, [&](int begin, int end) {
-    for (int i = begin; i < end; ++i) {
-      y[i * incy] = bf16_dot_with_fp32_arith(x, a + lda * i, m);
-    }
-  });
-}
-
-void bf16_gemv_trans(
-  const int m,
-  const int n,
-  const at::BFloat16 alpha,
-  const at::BFloat16* a,
-  const int lda,
-  const at::BFloat16* x,
-  const int incx,
-  const at::BFloat16 beta,
-  at::BFloat16* y,
-  const int incy) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
-  return bf16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
-}
-#endif // __aarch64__
 #endif // !defined(C10_MOBILE)
+
 } // namespace CPU_CAPABILITY
 
 #if !defined(C10_MOBILE)
+// NOTE: we don't *need* to go through dispatch for the ARM-only
+// implementation right now, but we will need it when we cover x86.
 REGISTER_DISPATCH(fp16_dot_with_fp32_arith_stub, &fp16_dot_with_fp32_arith);
 REGISTER_DISPATCH(fp16_gemv_trans_stub, &fp16_gemv_trans);
-#ifdef __aarch64__
-REGISTER_DISPATCH(bf16_dot_with_fp32_arith_stub, &bf16_dot_with_fp32_arith);
-REGISTER_DISPATCH(bf16_gemv_trans_stub, &bf16_gemv_trans);
-#endif
-#endif //!defined(C10_MOBILE)
+#else
+#endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
 } // namespace at::native
