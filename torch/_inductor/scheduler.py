@@ -466,7 +466,7 @@ class BaseSchedulerNode:
                 ):
                     # If the writers of input_buf are in the same FusedSchedulerNode as the current op, then there is
                     # no need to inplace.
-                    # check if input_buf has defining_op since SchedulerNodatedBuffer is an input
+                    # check if input_buf has defining_op since SchedulerDonatedBuffer is an input
                     # and does not have defining_op
                     if (
                         input_buf.defining_op
