@@ -6195,7 +6195,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         # Ensure that the listcomp is fully compiled
         self.assertEqual(cnt.op_count, 8)
 
-    # https://github.com/pytorch/pytorch/issues/139183
     def test_tensor_split_within_device_cm(self):
         @torch.compile(fullgraph=True)
         def split(x):
