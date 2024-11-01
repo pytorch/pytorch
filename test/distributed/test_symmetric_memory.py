@@ -766,6 +766,7 @@ class LoweringTest(MultiProcessTestCase):
 
         torch._inductor.config._collective.auto_select = True
 
+    @skipIfRocm  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_lowering_one_shot_all_reduce(self):
