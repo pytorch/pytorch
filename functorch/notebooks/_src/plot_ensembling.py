@@ -16,6 +16,7 @@ for-loops and speeding them up through vectorization.
 
 Let's demonstrate how to do this using an ensemble of simple CNNs.
 """
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
