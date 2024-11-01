@@ -183,6 +183,7 @@ _SYM_INT_OPS = {
     torch.sym_max,
     torch.sym_min,
     torch.sym_sqrt,
+    torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
 }
 
 
