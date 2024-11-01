@@ -62,7 +62,7 @@ def _reducer_allreduce_and_upcast_hook(
 
     # enqueue a callback to wait for this stream at end of backward
     def wait_for_stream_cb():
-        _get_device_module().current_stream().wait_stream(stream)
+        torch.acc.current_stream().wait_stream(stream)
         # Remove post-backward hooks since they are re-installed in next
         # iteration, similar to FSDP.
         # Parameters that don't require grad still needed to be casted since
