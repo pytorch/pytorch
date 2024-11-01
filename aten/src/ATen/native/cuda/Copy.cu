@@ -406,10 +406,8 @@ static bool copy_non_contiguous_2d(
       height = dim0;
   }
 
-  // if conditions not met, fallback needed
-  if (src_pitch < width_in_bytes || dst_pitch < width_in_bytes) {
-    return false;  
-  }
+  TORCH_INTERNAL_ASSERT(src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes, 
+                      "Source and destination pitch must be >= width_in_bytes for non-contiguous copy.");
 
   at::cuda::memcpy2d_conditional_sync(
       dst,
