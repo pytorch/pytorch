@@ -2,8 +2,12 @@ name: linux-aarch64
 
 on:
   push:
+    branches:
+      - main
+      - release/*
     tags:
       - ciflow/linux-aarch64/*
+      - ciflow/trunk/*
   workflow_dispatch:
 
 concurrency:
@@ -13,6 +17,7 @@ concurrency:
 jobs:
 
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:

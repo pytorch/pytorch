@@ -1091,6 +1091,59 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    def test_qconv2d_with_concat_cpu(self):
+        channel_1 = 32
+        channel_2 = 16
+        channel_3 = 8
+        channel_4 = int(channel_2 * 2 + channel_3)
+
+        class Model(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(
+                    channel_1, channel_2, 1, stride=1, dilation=1, padding=0
+                )
+                self.conv2 = torch.nn.Conv2d(
+                    channel_1, channel_2, 1, stride=1, dilation=1, padding=0
+                )
+                self.conv3 = torch.nn.Conv2d(
+                    channel_2, channel_3, 3, stride=1, dilation=1, padding=1
+                )
+
+                self.conv = torch.nn.Conv2d(
+                    channel_4, channel_2, 1, stride=1, dilation=1, padding=0
+                )
+
+            def forward(self, x: torch.Tensor):
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                x3 = self.conv3(x2)
+                res = torch.cat([x1, x2, x3], dim=1)
+                res = self.conv(res)
+                return res
+
+        mod = Model().eval()
+        v = torch.randn(
+            (8, channel_1, 40, 40), dtype=torch.float32, requires_grad=False
+        )
+
+        def matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 4
+            )
+            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 3)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
     def test_qconv2d_add_2(self):
         r"""
         This testcase prevents this pattern be matched as a conv_binary fusion by mistake.

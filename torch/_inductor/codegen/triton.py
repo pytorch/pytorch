@@ -1382,7 +1382,7 @@ class TritonKernel(SIMDKernel):
         optimize_mask=True,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
-        if pid_cache or override_persistent_reduction:
+        if pid_cache:
             # foreach kernels don't work with cooperative reductions
             override_cooperative_reduction = False
         super().__init__(
@@ -1490,14 +1490,19 @@ class TritonKernel(SIMDKernel):
         Heuristic to set self.persistent_reduction and add guards
         if needed.
         """
-        if (
-            not (self.inside_reduction and config.triton.persistent_reductions)
-            or self.cooperative_reduction
-        ):
+        if not (self.inside_reduction and config.triton.persistent_reductions):
             return False
         threshold = {
             ReductionHint.INNER: 1024,
         }.get(self.reduction_hint, 64)
+
+        if self.cooperative_reduction:
+            # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
+            xnumel, _ = self.numels
+            try:
+                threshold *= 32 // V.graph.sizevars.size_hint(xnumel)
+            except ValueError:
+                pass  # unbacked symint
 
         # If multi_kernel is enabled, we do more aggressive persistent reduction.
         # This may result in some persistent reductions slower than the
@@ -2257,10 +2262,16 @@ class TritonKernel(SIMDKernel):
                     self.compute, result_var, masked_value, accumulator_index
                 )
             elif reduction_type == "welford_reduce":
-                # For persistent reductions, don't bother with
-                # welford's algorithm since it uses more registers, and
-                # taking two reductions doesn't increase memory usage.
-                result_var = self.welford_reduce_fallback(dtype, value)
+                if self.cooperative_reduction:
+                    # cooperative reductions require full welford for correctness
+                    result_var = self.welford_reduce(
+                        result_var, reduction_type, value, where_cond, acc_type, dtype
+                    )
+                else:
+                    # For persistent reductions, don't bother with
+                    # welford's algorithm since it uses more registers, and
+                    # taking two reductions doesn't increase memory usage.
+                    result_var = self.welford_reduce_fallback(dtype, value)
             elif reduction_type == "welford_combine":
                 mean, m2, weight = masked_value
                 welford = f"triton_helpers.welford({mean}, {m2}, {weight}, {dim})"
@@ -2307,59 +2318,8 @@ class TritonKernel(SIMDKernel):
                     self.post_loop_combine, result_var, accumulator, accumulator_index
                 )
             elif is_welford_reduction(reduction_type):
-                accumulator = f"{result_var}_mean"
-                accumulator_m2 = f"{result_var}_m2"
-                accumulator_weight = f"{result_var}_weight"
-                self.body.writeline(
-                    f"{accumulator} = tl.zeros({self.dense_size_str()}, {acc_type})"
-                )
-                self.body.writeline(
-                    f"{accumulator_m2} = tl.zeros({self.dense_size_str()}, {acc_type})"
-                )
-                self.body.writeline(
-                    f"{accumulator_weight} = tl.zeros({self.dense_size_str()}, {acc_type})"
-                )
-
-                if reduction_type == "welford_combine":
-                    mean, m2, weight = value
-                    self.compute.splice(
-                        f"""\
-                    {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_combine(
-                        {accumulator}, {accumulator_m2}, {accumulator_weight},
-                        {mean}, {m2}, {weight}
-                    )
-                    """
-                    )
-                else:
-                    assert reduction_type == "welford_reduce"
-                    self.compute.splice(
-                        f"""\
-                    {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
-                        {value}, {accumulator}, {accumulator_m2}, {accumulator_weight}, roffset == 0
-                    )
-                    """
-                    )
-
-                self.compute.splice(
-                    f"""\
-                {accumulator} = {where_cond(f'{accumulator}_next', accumulator)}
-                {accumulator_m2} = {where_cond(f'{accumulator_m2}_next', accumulator_m2)}
-                {accumulator_weight} = {where_cond(f'{accumulator_weight}_next', accumulator_weight)}
-                """
-                )
-
-                result_mean = result_var
-                result_m2 = self.cse.newvar(dtype=dtype)
-                result_weight = self.cse.newvar(dtype=dtype)
-                result_var = self.welford_reduce_final_reduction(
-                    self.post_loop_combine,
-                    result_mean,
-                    result_m2,
-                    result_weight,
-                    accumulator,
-                    accumulator_m2,
-                    accumulator_weight,
-                    dim,
+                result_var = self.welford_reduce(
+                    result_var, reduction_type, value, where_cond, acc_type, dtype
                 )
             else:
                 combine_fn = ir.get_reduction_combine_fn(reduction_type, src_dtype)
@@ -2444,6 +2404,63 @@ class TritonKernel(SIMDKernel):
             self.outside_loop_vars.add(result_var)
 
         return result_var
+
+    def welford_reduce(
+        self, result_var, reduction_type, value, where_cond, acc_type, dtype
+    ):
+        """Helper to codegen a welford reduction"""
+        dim = self.triton_tensor_ndim() - 1
+        accumulator = f"{result_var}_mean"
+        accumulator_m2 = f"{result_var}_m2"
+        accumulator_weight = f"{result_var}_weight"
+        self.body.writeline(
+            f"{accumulator} = tl.zeros({self.dense_size_str()}, {acc_type})"
+        )
+        self.body.writeline(
+            f"{accumulator_m2} = tl.zeros({self.dense_size_str()}, {acc_type})"
+        )
+        self.body.writeline(
+            f"{accumulator_weight} = tl.zeros({self.dense_size_str()}, {acc_type})"
+        )
+        if reduction_type == "welford_combine":
+            mean, m2, weight = value
+            self.compute.splice(
+                f"""\
+                {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_combine(
+                    {accumulator}, {accumulator_m2}, {accumulator_weight},
+                    {mean}, {m2}, {weight}
+                )
+                """
+            )
+        else:
+            assert reduction_type == "welford_reduce"
+            self.compute.splice(
+                f"""\
+                {accumulator}_next, {accumulator_m2}_next, {accumulator_weight}_next = triton_helpers.welford_reduce(
+                    {value}, {accumulator}, {accumulator_m2}, {accumulator_weight}, roffset == 0
+                )
+                """
+            )
+        self.compute.splice(
+            f"""\
+            {accumulator} = {where_cond(f'{accumulator}_next', accumulator)}
+            {accumulator_m2} = {where_cond(f'{accumulator_m2}_next', accumulator_m2)}
+            {accumulator_weight} = {where_cond(f'{accumulator_weight}_next', accumulator_weight)}
+            """
+        )
+        result_mean = result_var
+        result_m2 = self.cse.newvar(dtype=dtype)
+        result_weight = self.cse.newvar(dtype=dtype)
+        return self.welford_reduce_final_reduction(
+            self.post_loop_combine,
+            result_mean,
+            result_m2,
+            result_weight,
+            accumulator,
+            accumulator_m2,
+            accumulator_weight,
+            dim,
+        )
 
     def welford_reduce_final_reduction(
         self,
@@ -3039,6 +3056,7 @@ class TritonKernel(SIMDKernel):
             if mutation in self.args.output_buffers:
                 mutated_args.add(self.args.output_buffers[mutation])
 
+        # Note: [Workspace Mutation]
         # workspace arguments are mutated, but are not marked as mutations in self.mutations
         # because their buffers are added during codegen, and aren't tracked during
         # lowering/scheduling. So we add them as mutated_args explicitly below.
@@ -3595,6 +3613,60 @@ class TritonScheduling(SIMDScheduling):
             )
             store_cache()
             return ms, mod.__file__
+
+    def add_multi_kernel_choices(
+        self,
+        kernel: SIMDKernel,
+        kernel_args: List[Any],
+        kernel_kwargs: Dict[str, Any],
+        node_schedule: List[BaseSchedulerNode],
+    ) -> List[SIMDKernel]:
+        kernels: List[SIMDKernel] = [kernel]
+        if not config.triton.multi_kernel:
+            return kernels
+
+        optional_persistent = kernel.persistent_reduction and not kernel_kwargs.get(
+            "override_persistent_reduction"
+        )
+        optional_cooperative = kernel.cooperative_reduction and not kernel_kwargs.get(
+            "override_cooperative_reduction"
+        )
+        if optional_persistent:
+            kernels.append(
+                self.kernel_type(
+                    *kernel_args,
+                    **kernel_kwargs,
+                    override_persistent_reduction=False,
+                )
+            )
+        if optional_cooperative:
+            _, rnumel = kernel.numels
+            # for larger sizes non-cooperative gets very slow
+            if V.graph.sizevars.statically_known_leq(rnumel, 65536):
+                kernels.append(
+                    other := self.kernel_type(
+                        *kernel_args,
+                        **kernel_kwargs,
+                        override_cooperative_reduction=False,
+                    )
+                )
+                if optional_persistent and other.persistent_reduction:
+                    kernels.append(
+                        self.kernel_type(
+                            *kernel_args,
+                            **kernel_kwargs,
+                            override_cooperative_reduction=False,
+                            override_persistent_reduction=False,
+                        )
+                    )
+
+        if len(kernels) > 1:
+            for kernel2 in kernels[1:]:
+                # Keep buffers needed by the non-persistent reduction so both kernels have the same arguments
+                kernel2.must_keep_buffers = kernel.must_keep_buffers
+            # persistent kernels must be generated last so must_keep_buffers works right
+            kernels.sort(key=lambda k: k.persistent_reduction)
+        return kernels
 
     def benchmark_combo_kernel(self, node_list):
         def cache_file_path():

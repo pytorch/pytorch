@@ -5,9 +5,7 @@
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
-namespace xnnp_utils {
+namespace at::native::xnnp_utils {
 
 std::vector<size_t> get_mem_format_aware_shape(const at::Tensor& in) {
   const auto mem_format = in.suggest_memory_format();
@@ -82,8 +80,6 @@ Tensor convert_conv_weights_to_channel_last_tensor<2>(
                    // 2d conv weight transform
                    : src.contiguous(c10::MemoryFormat::ChannelsLast);
 }
-} // namespace xnnp_utils
-} // namespace native
-} // namespace at
+} // namespace at::native::xnnp_utils
 
 #endif // USE_XNNPACK
