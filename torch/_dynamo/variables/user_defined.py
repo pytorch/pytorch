@@ -181,7 +181,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return super().var_getattr(tx, name)
 
-        obj = inspect.getattr_static(self.value, name, None)
+        try:
+            obj = inspect.getattr_static(self.value, name)
+        except AttributeError:
+            obj = None
 
         if isinstance(obj, staticmethod):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
@@ -203,9 +206,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             ):
                 return VariableTracker.build(tx, obj.__get__(self.value), source)
 
-        if inspect.ismemberdescriptor(obj) or inspect.isdatadescriptor(obj):
-            value = getattr(self.value, name)
-            return VariableTracker.build(tx, value, source)
         if ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)
         elif isinstance(obj, enum.Enum):

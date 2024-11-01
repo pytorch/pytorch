@@ -72,7 +72,6 @@ from .remote_cache import create_cache
 from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .triton_bundler import TritonBundler, TritonKernelArtifacts
-from .utils import _align
 
 
 T = TypeVar("T")
@@ -519,65 +518,6 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     return meta
 
 
-def _reduce_fake_tensor(t: Tensor) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
-    """
-    See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
-    """
-    metadata = extract_tensor_metadata_for_cache_key(t)
-    return (_ident, (metadata,))
-
-
-def _reduce_tensor(
-    t: Tensor,
-) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
-    """
-    See FxGraphCachePickler. Custom reducer to pickle Tensors.
-    If we see tensors, we know they're constants stored as attributes on
-    the GraphModule. Include the values in the key calculation. Small
-    tensors will be inlined, so we can't serve the same cache entry for
-    different values anyway. Large constants are treated as parameters,
-    so we could conceivably reuse a cache entry. To do that, however,
-    PyCodeCache would need more complexity to create a new module from its
-    cache, but with the right constants attached as attributes.
-    """
-    if t.is_mkldnn:
-        # TODO: These tensors don't currently pickle, so we can't cache a
-        # compiled graph containing them. Just fail now. If mkldnn tensors
-        # get pickling support, we can remove this.
-        raise BypassFxGraphCache("mkldnn tensors unpickleable")
-
-    # Very large tensors could be expensive to copy to cpu and hash. Let's
-    # at least report if we find slowness.
-    start = time()
-    values = t.tolist()
-    elapsed = time() - start
-    if elapsed > 1.0:
-        warnings.warn(
-            f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
-        )
-
-    metadata = extract_tensor_metadata_for_cache_key(t)
-    return (_ident, (TensorMetadataAndValues(metadata, values),))
-
-
-def _reduce_symint(s: SymInt) -> Tuple[Callable[[T], T], Tuple[str]]:
-    """
-    See FxGraphCachePickler. Custom reducer to pickle SymInts.
-    """
-    # For hashing purposes, we only care about the name of the symbol and
-    # not the backed value. We evaluate guards stored with a cached graph
-    # to ensure a cached entity with SymInt args is safe to reuse.
-    return (_ident, (str(s),))
-
-
-def _reduce_unsupported(s: Any) -> NoReturn:
-    """
-    See FxGraphCachePickler. Custom reducer to handle any objects that we don't
-    support and therefore raise to bypass caching.
-    """
-    raise BypassFxGraphCache("Reduce unsupported")
-
-
 class FxGraphCachePickler(pickle.Pickler):
     """
     Custom pickler to customize the pickling of some objects (Tensors), only for the
@@ -593,16 +533,76 @@ class FxGraphCachePickler(pickle.Pickler):
         self.dispatch_table = copyreg.dispatch_table.copy()
         self.dispatch_table.update(
             {
-                FakeTensor: _reduce_fake_tensor,
-                torch.Tensor: _reduce_tensor,
-                torch.SymInt: _reduce_symint,
-                torch.fx.experimental._backward_state.BackwardState: _reduce_unsupported,
+                FakeTensor: functools.partial(self._reduce_fake_tensor),
+                torch.Tensor: functools.partial(self._reduce_tensor),
+                torch.SymInt: functools.partial(self._reduce_symint),
+                torch.fx.experimental._backward_state.BackwardState: functools.partial(
+                    self._reduce_unsupported
+                ),
             }
         )
 
         # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
         # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
         self.fast = True
+
+    def _reduce_fake_tensor(
+        self, t: Tensor
+    ) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
+        """
+        Custom reducer to pickle FakeTensors.
+        """
+        metadata = extract_tensor_metadata_for_cache_key(t)
+        return (_ident, (metadata,))
+
+    def _reduce_tensor(
+        self,
+        t: Tensor,
+    ) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
+        """
+        Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
+        stored as attributes on the GraphModule. Include the values in the key
+        calculation. Small tensors will be inlined, so we can't serve the same cache
+        entry for different values anyway. Large constants are treated as parameters, so
+        we could conceivably reuse a cache entry. To do that, however, PyCodeCache would
+        need more complexity to create a new module from its cache, but with the right
+        constants attached as attributes.
+        """
+        if t.is_mkldnn:
+            # TODO: These tensors don't currently pickle, so we can't cache a compiled
+            # graph containing them. Just fail now. If mkldnn tensors get pickling
+            # support, we can remove this.
+            raise BypassFxGraphCache("mkldnn tensors unpickleable")
+
+        # Very large tensors could be expensive to copy to cpu and hash. Let's at least
+        # report if we find slowness.
+        start = time()
+        values = t.tolist()
+        elapsed = time() - start
+        if elapsed > 1.0:
+            warnings.warn(
+                f"FX graph cache handling of a large constant took {elapsed:.1}s. "
+                "Please file an issue."
+            )
+
+        metadata = extract_tensor_metadata_for_cache_key(t)
+        return (_ident, (TensorMetadataAndValues(metadata, values),))
+
+    def _reduce_symint(self, s: SymInt) -> Tuple[Callable[[T], T], Tuple[str]]:
+        """
+        Custom reducer to pickle SymInts.
+        """
+        # For hashing purposes, we only care about the name of the symbol and not the
+        # backed value. We evaluate guards stored with a cached graph to ensure a cached
+        # entity with SymInt args is safe to reuse.
+        return (_ident, (str(s),))
+
+    def _reduce_unsupported(self, s: Any) -> NoReturn:
+        """
+        Custom reducer to handle any objects that we don't support and therefore
+        raise to bypass caching.
+        """
+        raise BypassFxGraphCache("Reduce unsupported")
 
     def dumps(self, obj: Any) -> bytes:
         """
@@ -682,7 +682,7 @@ def torch_key() -> bytes:
     """
     Compute a key that contains relevant information about torch source files
     """
-    with dynamo_timed("inductor_codecache_torch_key"):
+    with dynamo_timed("inductor_codecache_torch_key", log_pt2_compile_event=True):
         if not config.is_fbcode():
 
             def get_code_hash(root: str) -> bytes:
@@ -1896,19 +1896,43 @@ class AotCodeCompiler:
                 if name not in graph.folded_constants
             )
 
-            def get_nbytes_of_tensor(tensor: torch.Tensor, all_cuda: bool) -> int:
-                n_bytes = (
-                    torch.ops.mkldnn._nbytes(tensor)
-                    if tensor.is_mkldnn
-                    else tensor.untyped_storage().nbytes()
-                )
-                return n_bytes if all_cuda else _align(n_bytes)
+            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
+                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
+                    padded_bytes = raw_bytes.ljust(
+                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
+                        b"\x00",
+                    )
+                    return padded_bytes
 
-            consts_size = sum(
-                get_nbytes_of_tensor(tensor, all_cuda)
-                for (name, tensor) in graph.constants.items()
+                # This serializes the tensor's untyped_storage to bytes by accessing
+                # the raw data of the underlying structure.
+                import ctypes
+
+                if t.numel() == 0:
+                    return b""
+
+                if t.is_mkldnn:
+                    data_ptr = torch.ops.mkldnn.data_ptr(t)
+                    nbytes = torch.ops.mkldnn._nbytes(t)
+                else:
+                    t_cpu = t.untyped_storage().cpu()
+                    data_ptr = t_cpu.data_ptr()
+                    nbytes = t_cpu.nbytes()
+
+                raw_array = ctypes.cast(
+                    data_ptr,
+                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
+                )
+                raw_bytes = bytes(raw_array.contents)
+                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
+
+            serialized_weights = b"".join(
+                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
+                for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
+            consts_size = len(serialized_weights)
+
             # TODO: Fix mmap weights with cuda
             use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
             if config.aot_inductor.force_mmap_weights:
@@ -1948,41 +1972,6 @@ class AotCodeCompiler:
                 compile_flags = os.path.splitext(input_path)[0] + "_compile_flags.json"
                 object_build_options.save_flags_to_file(compile_flags)
 
-            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
-                def _pad_to_alignment(raw_bytes: bytes) -> bytes:
-                    padded_bytes = raw_bytes.ljust(
-                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
-                        b"\x00",
-                    )
-                    return padded_bytes
-
-                # This serializes the tensor's untyped_storage to bytes by accessing
-                # the raw data of the underlying structure.
-                import ctypes
-
-                if t.numel() == 0:
-                    return b""
-
-                if t.is_mkldnn:
-                    data_ptr = torch.ops.mkldnn.data_ptr(t)
-                    nbytes = torch.ops.mkldnn._nbytes(t)
-                else:
-                    t_cpu = t.untyped_storage().cpu()
-                    data_ptr = t_cpu.data_ptr()
-                    nbytes = t_cpu.nbytes()
-
-                raw_array = ctypes.cast(
-                    data_ptr,
-                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
-                )
-                raw_bytes = bytes(raw_array.contents)
-                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
-
-            serialized_weights = b"".join(
-                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
-                for name in graph.constants.keys()
-                if name not in graph.folded_constants
-            )
             if not use_mmap_weights:
                 aot_constants = serialized_weights
                 magic_number = 0
