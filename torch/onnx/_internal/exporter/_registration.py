@@ -210,11 +210,11 @@ class ONNXRegistry:
             try:
                 # TODO(justinchuby): Use the op_signature attribute when onnxscript is updated in CI
                 if isinstance(function, onnxscript.OnnxFunction):
-                    function.signature = _schemas.OpSignature.from_function(
+                    function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
                         function, function.function_ir.domain, function.name
                     )
                 else:
-                    function.signature = _schemas.OpSignature.from_function(
+                    function.signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
                         function, "__custom", function.__name__
                     )
             except Exception:
