@@ -190,6 +190,7 @@ class Verifier(metaclass=_VerifierMeta):
                 torch._C._set_grad_enabled,
                 torch.amp.autocast_mode._enter_autocast,
                 torch.amp.autocast_mode._exit_autocast,
+                torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
             )
 
             if not isinstance(op, _allowed_op_types()):
