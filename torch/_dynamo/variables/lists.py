@@ -82,10 +82,7 @@ class BaseListVariable(VariableTracker):
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
     def as_python_constant(self):
-        try:
-            return self.python_type()([x.as_python_constant() for x in self.items])
-        except RecursionError:
-            unimplemented(f"recursive containment {self}")
+        return self.python_type()([x.as_python_constant() for x in self.items])
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
