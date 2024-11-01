@@ -4609,7 +4609,7 @@ def forward(self, x, b, y):
         class ConstantClass:
             def __init__(self, a):
                 self.a = a
-        
+
         @torch._dynamo.assume_constant_result
         def get_constant_class():
             return ConstantClass(10)
@@ -4619,7 +4619,7 @@ def forward(self, x, b, y):
                 return x + 1
             else:
                 return x + 2
-        
+
         tensor = torch.rand((5, 5))
         graph, _ = torch._dynamo.export(fn)(tensor)
         reference = fn(tensor)
