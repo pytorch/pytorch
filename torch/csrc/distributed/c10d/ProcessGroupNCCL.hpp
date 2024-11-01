@@ -198,7 +198,8 @@ struct DumpPipe {
     if (fd_ == -1) {
       return false;
     }
-    char buf[128];
+    // NOLINTNEXTLINE(*array*)
+    char buf[128]{};
     // non-blocking from O_NONBLOCK above.
     // Ignore EINTR because we already will poll this
     // again later.
@@ -461,8 +462,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // NOTE: We intentionally store raw pointers so that
     // we do not attempt to destroy the event objects on process exit,
     // because cuda may be gone.
-    std::deque<at::cuda::CUDAEvent*>
-        eventsArray_[2]; // 0 for timing=false, 1 for timing=true
+    std::array<std::deque<at::cuda::CUDAEvent*>, 2>
+        eventsArray_; // 0 for timing=false, 1 for timing=true
   };
 
   struct Options : Backend::Options {
@@ -745,9 +746,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::string& devicesKey,
       int p2pRank);
 
-  // Helper that either looks up the cached NCCL communicators or creates
-  // a new set of NCCL communicators as a cache entry
-  std::shared_ptr<NCCLComm> getNCCLComm(
+  // Helper that looks up the cached NCCL communicators only
+  std::shared_ptr<NCCLComm> getNCCLComm(const std::string& deviceKey);
+
+  std::shared_ptr<NCCLComm> initNCCLComm(
       const std::string& deviceKey,
       at::Device& device,
       OpType opType,
@@ -777,6 +779,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Abort all communicators on this rank.
   bool abortComms(const std::optional<std::string>& abortReason = std::nullopt);
+
+  // A helper function to check if nonblocking API mode should be used.
+  // Use this helper instead of directly checking `useNonblocking_` variable.
+  bool useNonblocking();
 
  private:
   int globalRankStart;
@@ -1177,7 +1183,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool dumpOnTimeoutOrEx_;
 
   // Whether or not to sleep after an exception is thrown in the watchdog.
-  bool sleepAfterException_;
+  bool sleepAfterException_{};
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;
@@ -1237,6 +1243,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::shared_ptr<ProcessGroupStatus> pgStatus_ =
       std::make_shared<ProcessGroupStatus>();
+
+  // Internal cached value: use NCCL non-blocking API mode or not.
+  // Use `useNonblocking()` method instead of accessing this variable directly.
+  std::optional<bool> useNonblocking_{std::nullopt};
 };
 
 // Dumps the NCCL comm traces and additional information about the Process

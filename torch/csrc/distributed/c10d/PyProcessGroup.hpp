@@ -212,6 +212,7 @@ class TORCH_PYTHON_API PythonOnCompletionHook {
   PythonOnCompletionHook(py::object hook) : hook_(std::move(hook)) {}
   PythonOnCompletionHook(const PythonOnCompletionHook&) = default;
 
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~PythonOnCompletionHook() {
     py::gil_scoped_acquire ag;
     hook_.dec_ref();

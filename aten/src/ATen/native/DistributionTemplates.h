@@ -42,9 +42,9 @@ namespace at::native::templates {
 template<typename scalar_t>
 int64_t update_from(int64_t from) {
   static_assert(
-    std::is_floating_point<scalar_t>::value ||
-    std::is_same<scalar_t, at::Half>::value ||
-    std::is_same<scalar_t, at::BFloat16>::value, "scalar_t must be floating-point type");
+    std::is_floating_point_v<scalar_t> ||
+    std::is_same_v<scalar_t, at::Half> ||
+    std::is_same_v<scalar_t, at::BFloat16>, "scalar_t must be floating-point type");
   const auto from_plus_1 = static_cast<int64_t>(static_cast<scalar_t>(from + 1));
   if (from_plus_1 < from) {
     int64_t from_ = std::abs(from + 1);
@@ -59,9 +59,9 @@ int64_t update_from(int64_t from) {
 template<typename scalar_t>
 int64_t update_to(int64_t to) {
   static_assert(
-    std::is_floating_point<scalar_t>::value ||
-    std::is_same<scalar_t, at::Half>::value ||
-    std::is_same<scalar_t, at::BFloat16>::value, "scalar_t must be floating-point type");
+    std::is_floating_point_v<scalar_t> ||
+    std::is_same_v<scalar_t, at::Half> ||
+    std::is_same_v<scalar_t, at::BFloat16>, "scalar_t must be floating-point type");
   const auto to_minus_1 = static_cast<int64_t>(static_cast<scalar_t>(to - 1));
   if (to_minus_1 >= to) {
     int64_t to_ = std::abs(to - 1);

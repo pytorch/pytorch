@@ -87,6 +87,7 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
 
 bool complexViewAsRealAllowed(const ReduceOp& reduceOp) {
   switch (reduceOp) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     case ReduceOp::SUM:
       return true;
     case ReduceOp::AVG:
@@ -119,6 +120,7 @@ ncclRedOpRAII unpackPreMulSum(
       &preMulSum,
       // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/ops.html#ncclredopcreatepremulsum
       // tells us that the scalar input is strictly a multiplier.
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       /*scalar=*/has_tensor ? const_cast<T*>(ptr_factor) : &scalar_factor,
       dataType,
       residence,
@@ -318,6 +320,7 @@ static void cacheAllocatorRegisterHook(
     auto& ncclComm = it.first;
     auto& devIdx = it.second;
     if (te.device_ == devIdx) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       ncclComm->registerSegment(reinterpret_cast<void*>(te.addr_), te.size_);
     }
   }
@@ -336,6 +339,7 @@ static void cacheAllocatorDeregisterHook(
     auto& ncclComm = it.first;
     auto& devIdx = it.second;
     if (te.device_ == devIdx) {
+      // NOLINTNEXTLINE(performance-no-int-to-ptr)
       ncclComm->deregisterSegment(reinterpret_cast<void*>(te.addr_));
     }
   }
@@ -721,6 +725,11 @@ void ProcessGroupNCCL::WorkNCCL::handleException(
 
 void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeStream();
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<
+            ProcessGroupNCCL::WorkNCCL>::unsafe_reclaim_from_nonowning(this));
+  }
 }
 
 void ProcessGroupNCCL::WorkNCCL::synchronizeStream() {
@@ -869,7 +878,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     : Backend(rank, size),
       store_(std::move(store)),
       options_(std::move(options)),
-
       traceKeyStart_(getTraceStartKey("NCCL", rank)),
       traceKeyEnd_(getTraceEndKey("NCCL", rank)),
       terminateProcessGroup_(false),
@@ -888,7 +896,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // other threads and cause segfaults.
   const auto ncclVersion = getNcclVersion();
   this->setGroupUid(options_->group_name);
-  this->localDeviceCount_ = at::cuda::getNumGPUs();
+  this->localDeviceCount_ = static_cast<int>(at::cuda::getNumGPUs());
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
@@ -987,7 +995,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
-            << ", TORCH_NCCL_USE_COMM_NONBLOCKING: " << nccl_use_nonblocking()
 #ifdef NCCL_HAS_COMM_REGISTER
             << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
             << useTensorRegisterAllocatorHook_
@@ -1014,8 +1021,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     this->globalRankStride = 0;
   } else {
     bool ranksAreStrided = true;
-    int startRank = options_->global_ranks_in_group[0];
-    int stride =
+    auto startRank = options_->global_ranks_in_group[0];
+    auto stride =
         options_->global_ranks_in_group[1] - options_->global_ranks_in_group[0];
     for (std::vector<uint64_t>::size_type i = 0;
          i < options_->global_ranks_in_group.size();
@@ -1056,7 +1063,40 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   const auto key = getKeyFromDevice(device);
   LOG(INFO) << logPrefix() << "Eagerly connecting nccl backend with device "
             << device;
-  getNCCLComm(key, device, OpType::ALLREDUCE);
+  initNCCLComm(key, device, OpType::ALLREDUCE);
+}
+
+bool ProcessGroupNCCL::useNonblocking() {
+#ifndef NCCL_HAS_COMM_NONBLOCKING
+  return false;
+#endif
+  // Already parsed, return the cached value
+  if (useNonblocking_.has_value()) {
+    return useNonblocking_.value();
+  }
+  // Get environment variable.
+  auto nbEnv = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
+
+  // 1st priority: Respect the user's setting
+  if (options_->config.blocking != NCCL_CONFIG_UNDEF_INT) {
+    useNonblocking_ = options_->config.blocking == 0;
+  }
+  // 2nd priority: Respect the environment variable
+  else if (nbEnv.has_value()) {
+    useNonblocking_ = nbEnv.value();
+  }
+  // 3rd priority: automatically use nonblocking if we are in eager init mode
+  else if (getBoundDeviceId()) {
+    useNonblocking_ = true;
+  }
+  // 4th priority: otherwise, nonblocking = false to preserve old behavior
+  else {
+    useNonblocking_ = false;
+  }
+
+  LOG(INFO) << logPrefix()
+            << "Using non-blocking mode: " << useNonblocking_.value();
+  return useNonblocking_.value();
 }
 
 void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
@@ -1067,7 +1107,13 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   const auto key = getKeyFromDevice(device);
   LOG(INFO) << logPrefix() << "Performing nocolor split on backend device "
             << device << ", key " << key << ", i am " << this;
-  auto comm = getNCCLComm(key, device, OpType::ALLREDUCE);
+  bool useNb = useNonblocking();
+  options_->config.blocking = useNb ? 0 : 1;
+  auto comm = getNCCLComm(key);
+  if (comm == nullptr) {
+    LOG(ERROR) << logPrefix()
+               << "No parent communicator exists for nocolor split";
+  }
   NCCLComm::split(
       comm.get(),
       NCCL_SPLIT_NOCOLOR,
@@ -1343,6 +1389,7 @@ void ProcessGroupNCCL::shutdown() {
   this->abort();
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
@@ -2263,7 +2310,7 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   ncclCommDevIdxMapMutex.unlock();
 }
 
-std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
+std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     const std::string& deviceKey,
     at::Device& device,
     OpType opType,
@@ -2287,14 +2334,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 
   usedDeviceIdxs_.insert(device.index());
-
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (devNCCLCommMap_.find(deviceKey) != devNCCLCommMap_.end()) {
-      // Reuse the cached communicator if there is one.
-      return devNCCLCommMap_[deviceKey];
-    }
-  }
 
   // NCCL communicator not cached, create a new entry
   std::shared_ptr<NCCLComm> ncclComm;
@@ -2356,6 +2395,11 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     numRanks = 2;
     rank = p2pRank;
   }
+
+#ifdef NCCL_HAS_COMM_NONBLOCKING
+  bool useNb = useNonblocking();
+  options_->config.blocking = useNb ? 0 : 1;
+#endif
 
 #ifdef NCCL_HAS_COMM_SPLIT
   if (options_->split_from) {
@@ -2497,8 +2541,17 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   it = devNCCLCommMap_.find(deviceKey);
   TORCH_INTERNAL_ASSERT(
       it != devNCCLCommMap_.end(), "Communicators not populated in cache!");
-
   return it->second;
+}
+
+std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
+    const std::string& deviceKey) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (devNCCLCommMap_.find(deviceKey) != devNCCLCommMap_.end()) {
+    // Reuse the cached communicator if there is one.
+    return devNCCLCommMap_[deviceKey];
+  }
+  return nullptr;
 }
 
 uint64_t ProcessGroupNCCL::getCommSplitCounter() const {
@@ -2773,7 +2826,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
     work->ncclStartEvent_->record(ncclStream);
   }
 
-  if (nccl_use_nonblocking()) {
+  if (useNonblocking()) {
     groupEndNonblocking(comm);
   } else {
     groupEnd();
@@ -2839,7 +2892,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   op_id_++;
 
   const auto key = getKeyFromDevice(device);
-  auto ncclComm = getNCCLComm(key, device, opType);
+  std::shared_ptr<NCCLComm> ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    ncclComm = initNCCLComm(key, device, opType);
+  }
 
   if (coalescing_state_ & CoalActive) {
     if ((coalescing_state_ & CoalColl) == 0) {
@@ -3031,7 +3087,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   op_id_++;
 
   const auto key = getKeyFromDevice(device);
-  auto ncclComm = getNCCLComm(key, device, opType);
+  std::shared_ptr<NCCLComm> ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    ncclComm = initNCCLComm(key, device, opType);
+  }
 
   if (coalescing_state_ & CoalActive) {
     coalescing_state_ |= CoalColl;
@@ -3093,8 +3152,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 #endif
 
   {
-    torch::cuda::nccl::AutoNcclGroup nccl_group_guard(
-        comm, nccl_use_nonblocking());
+    torch::cuda::nccl::AutoNcclGroup nccl_group_guard(comm, useNonblocking());
     for (const auto i : c10::irange(inputs.size())) {
       // Both `inputs' and `outputs' are created on a worker stream and used in
       // different ncclStreams.  Hence, both must record the ncclStream to
@@ -3257,7 +3315,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // coalesced or individual
   op_id_++;
 
-  auto ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
+  std::shared_ptr<NCCLComm> ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    ncclComm = initNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
+  }
 
   if (coalescing_state_ & CoalActive) {
     // Bump  seqP2P_ once per coalesced group, not once per individual op.
@@ -3380,10 +3441,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
       fn(tensor, comm_, ncclStream, p2pTargetRank),
       ncclComm->getNcclCommFailureReason());
 #else
-  C10D_NCCL_CHECK_TIMEOUT(
-      fn(tensor, comm_, ncclStream, p2pTargetRank),
-      ncclComm->getNcclComm(),
-      ncclComm->getNcclCommFailureReason());
+  // In non-blocking mode, we need to use ncclGroup semantics to ensure that the
+  // kernel is enqueued for single-P2P ops.  Otherwise, the event record below
+  // may not capture the kernel, leading to data corruption.
+  ncclGroupStart();
+  C10D_NCCL_CHECK_NONBLOCKING(
+      fn(tensor, comm_, ncclStream, p2pTargetRank), std::nullopt);
+  C10D_NCCL_CHECK_TIMEOUT_GROUPEND(
+      ncclGroupEnd(), ncclComm, ncclComm->getNcclCommFailureReason());
 #endif
 
   if (!coalescing_state_) {
@@ -4579,8 +4644,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream,
           int dst) {
-        torch::cuda::nccl::send(input, comm, stream, dst);
-        return ncclSuccess;
+        auto ncclDataType = getNcclDataType(input.scalar_type());
+        return ncclSend(
+            input.data_ptr(),
+            input.numel(),
+            ncclDataType,
+            dst,
+            comm,
+            stream.stream());
       },
       dstRank,
       OpType::SEND,
@@ -4622,8 +4693,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream,
           int src) {
-        torch::cuda::nccl::recv(output, comm, stream, src);
-        return ncclSuccess;
+        auto ncclDataType = getNcclDataType(output.scalar_type());
+        return ncclRecv(
+            output.data_ptr(),
+            output.numel(),
+            ncclDataType,
+            src,
+            comm,
+            stream.stream());
       },
       srcRank,
       OpType::RECV,
@@ -4646,7 +4723,7 @@ void ProcessGroupNCCL::groupEndNonblocking(
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
 #else
-  if (!nccl_use_nonblocking()) {
+  if (!useNonblocking()) {
     C10D_NCCL_CHECK(ncclGroupEnd(), std::nullopt);
   } else {
     C10D_NCCL_CHECK_TIMEOUT_GROUPEND(ncclGroupEnd(), comm, std::nullopt);
