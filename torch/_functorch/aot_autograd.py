@@ -101,7 +101,6 @@ from ._aot_autograd.schemas import (  # noqa: F401
     ViewAndMutationMeta,
 )
 from ._aot_autograd.subclass_utils import (  # noqa: F401
-    create_metadata_for_subclass,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
     unwrap_tensor_subclasses_with_indices_to_original,
@@ -694,7 +693,6 @@ def _create_aot_dispatcher_function(
                             num_intermediate_bases=fw_metadata.num_intermediate_bases,
                             keep_input_mutations=aot_config.keep_inference_input_mutations,
                             traced_tangents=fw_metadata.traced_tangents,
-                            traced_tangent_memory_formats=fw_metadata.traced_tangent_memory_formats,
                             subclass_inp_meta=fw_metadata.subclass_inp_meta,
                             subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
