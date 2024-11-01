@@ -274,14 +274,16 @@ def binary_folding_init():
 
         return False
 
-    def resize_scalar_or_tensor_to_shape(graph, other, shape, dtype):
+    def resize_scalar_or_tensor_to_shape(graph, other, shape, weight):
         if isinstance(other, (int, float)):
             other_tensor = graph.create_node(
                 "call_function",
                 aten.full.default,
                 ([], other),
                 kwargs={
-                    "dtype": dtype,
+                    "dtype": weight.dtype,
+                    "device": weight.device,
+                    "pin_memory": False,
                 },
             )
             res = graph.create_node(
@@ -324,7 +326,7 @@ def binary_folding_init():
                 graph,
                 other,
                 (weight_meta_value.size(0),),
-                dtype=weight_meta_value.dtype,
+                weight_meta_value,
             )
             new_bias = graph.create_node(
                 "call_function",
@@ -340,7 +342,7 @@ def binary_folding_init():
                 graph,
                 other,
                 tuple(weight_broadcast_shape),
-                dtype=weight_meta_value.dtype,
+                weight_meta_value,
             )
             new_weight = graph.create_node(
                 "call_function", binary_node.target, (conv_args[1], other_reshape1)
@@ -352,7 +354,7 @@ def binary_folding_init():
                     graph,
                     other,
                     (weight_meta_value.size(0),),
-                    dtype=weight_meta_value.dtype,
+                    weight_meta_value,
                 )
                 new_bias = graph.create_node(
                     "call_function", binary_node.target, (bias, other_reshape)
@@ -382,7 +384,7 @@ def binary_folding_init():
                 graph,
                 other,
                 (weight_meta_value.size(1),),
-                dtype=weight_meta_value.dtype,
+                weight_meta_value,
             )
             new_bias_node = graph.create_node(
                 "call_function",
@@ -401,7 +403,7 @@ def binary_folding_init():
                 graph,
                 other,
                 tuple(weight_broadcast_shape),
-                dtype=weight_meta_value.dtype,
+                weight_meta_value,
             )
             new_weight_node = graph.create_node(
                 "call_function", binary_node.target, (weight_node, other_reshape1)
@@ -412,7 +414,7 @@ def binary_folding_init():
                     graph,
                     other,
                     (weight_meta_value.size(1),),
-                    dtype=weight_meta_value.dtype,
+                    weight_meta_value,
                 )
                 new_bias_node = graph.create_node(
                     "call_function", binary_node.target, (bias_node, other_reshape)
