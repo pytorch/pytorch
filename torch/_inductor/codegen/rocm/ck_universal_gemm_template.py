@@ -10,6 +10,7 @@ import torch
 from torch._inductor import config
 from torch._inductor.codegen.cpp_utils import DTYPE_TO_CPP
 from torch._inductor.codegen.rocm.ck_template import CKTemplate
+from torch._inductor.codegen.rocm.compile_command import rocm_compile_command
 from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.ir import Buffer, Layout
 
@@ -181,6 +182,7 @@ class CKGemmTemplate(CKTemplate):
     int main(int argc, char** argv) {
         return run_main(argc, argv);
     }
+    // compile with: {{compile_cmd}}
     #endif // GENERATE_CK_STANDALONE_RUNNER
     """
 
@@ -527,6 +529,7 @@ class CKGemmTemplate(CKTemplate):
                 bias_layout=torch_layout_to_ck_layout(Bias.get_layout())
                 if Bias is not None
                 else "",
+                compile_cmd=rocm_compile_command(["<source_file_name>"], "<executable_name>", "exe")
             )
             res += runner_code
 
