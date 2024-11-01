@@ -12,6 +12,9 @@ from torch.export._trace import _export
 from torch.export.dynamic_shapes import refine_dynamic_shapes_from_suggested_fixes
 
 
+log = logging.getLogger(__name__)
+
+
 class FailureType(IntEnum):
     MISSING_FAKE_KERNEL = 1
     DATA_DEPENDENT_ERROR = 2
@@ -84,7 +87,7 @@ class FailureReport:
             return f"""Missing fake kernel.
     torch.ops.{op} is missing a fake kernel implementation.
 
-    Here's a template for registering a fake kernel implementation. Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions.
+    Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a meta implementation.
 """  # noqa: B950
 
         elif self.failure_type == FailureType.CONSTRAINT_VIOLATION_ERROR:
@@ -281,5 +284,6 @@ def draft_export(
         report = DraftExportReport(failures, str_to_filename)
 
     ep._report = report
-    print(report)
+    if not report.successful():
+        log.warning(report)
     return ep, report
