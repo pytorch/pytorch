@@ -416,9 +416,7 @@ def get_cache_key() -> Optional[str]:
             raise ReservedWorkflowIdUserError(
                 "torch.compiler.config.job_id with prefix 'mast:' is reserved for "
                 "automatically generated job id associated with a specific MAST job "
-                "name and version.  To reuse the profile from a preexisting MAST job, "
-                f"run instead with env var TORCH_COMPILE_CLONE_JOB_ID={r} (the "
-                "accepted syntax is mast:MAST_JOB_NAME:MAST_JOB_VERSION)"
+                "name and version."
             )
         return f"{r}:{rank}"
 

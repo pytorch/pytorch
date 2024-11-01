@@ -19,7 +19,6 @@ from typing import Optional
 
 __all__ = [
     "job_id",
-    "clone_job_id",
 ]
 
 
@@ -54,28 +53,6 @@ Profiles are always collected on a per rank basis, so different ranks may have
 different profiles.  If you know your workload is truly SPMD, you can run with
 :data:`torch._dynamo.config.enable_compiler_collectives` to ensure nodes get
 consistent profiles across all ranks.
-"""
-
-
-# FB-internal note: you can specify 'mast:MAST_JOB_NAME:MAST_JOB_VERSION' to
-# clone from a pre-existing MAST job's profile.  These names are only valid
-# for clone job ids, you cannot use them as base job id.
-clone_job_id: Optional[str] = os.environ.get("TORCH_COMPILE_CLONE_JOB_ID", None)
-"""
-If you have an existing profile at an old job ID, and you'd like to clone
-it into a new job ID, you can specify this to indicate that the profile for
-this job ID should be read and copied to your new job.  We guarantee not
-to write to this job ID (writes are only done to the actual job ID).  You can
-set this by environment variable with :envvar:`TORCH_COMPILE_CLONE_JOB_ID`.
-
-If you changed the topology of the job from the clone job ID to the new job,
-it is also recommended to run with
-:data:`torch._dynamo.config.enable_compiler_collectives`
-(:envvar:`TORCH_COMPILER_COLLECTIVES`) so that all nodes get consistent
-profiles, since any node that didn't exist in the previous job will get a
-blank profile; profile divergence can potentially cause a NCCL timeout as
-inconsistent profiles can result in some ranks recompiling while others do
-not.
 """
 
 
