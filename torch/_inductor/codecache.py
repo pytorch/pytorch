@@ -1329,9 +1329,9 @@ class FxGraphCache:
                 "static across runs"
             )
 
-        from torch._inductor.bisect_helper import BisectionManager
+        from torch._inductor.compiler_bisector import CompilerBisector
 
-        if BisectionManager.bisection_enabled:
+        if CompilerBisector.bisection_enabled:
             log.debug("dont cache graph when bisect enabled")
             raise BypassFxGraphCache
 
