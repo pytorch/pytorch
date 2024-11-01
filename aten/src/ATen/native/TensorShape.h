@@ -30,7 +30,7 @@ inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & seco
  }
 
 inline void check_cat_no_zero_dim(const MaterializedITensorListRef& tensors) {
-  int64_t i = 0;
+  [[maybe_unused]] int64_t i = 0;
   for(const Tensor& t : tensors) {
     TORCH_CHECK(t.dim() > 0,
              "zero-dimensional tensor (at position ", i, ") cannot be concatenated");

@@ -106,6 +106,29 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
         args = tree_map(_slice_input, sample.args)
         kwargs = tree_map(_slice_input, sample.kwargs)
 
+        # Handle indices in index_put
+        if "index_put" in op.full_name and "indices" in kwargs:
+            if len(kwargs["indices"]) > 1:
+                # If after unrolling we still have indices left, use them
+                kwargs["indices"] = [t[i] for t in kwargs["indices"][1:]]
+            else:
+                # If no indices are left, create them so they match the NJT implementation
+                sequence_put = kwargs["indices"][0].tolist()
+                if i in sequence_put:
+                    kwargs["indices"] = [
+                        torch.tensor(
+                            list(range(inp.shape[0])),
+                            dtype=torch.int32,
+                            device=kwargs["indices"][0].device,
+                        )
+                    ]
+                else:
+                    kwargs["indices"] = [
+                        torch.tensor(
+                            [], dtype=torch.int32, device=kwargs["indices"][0].device
+                        )
+                    ]
+
         from torch._prims_common import canonicalize_dims
 
         # Need to adjust dim to apply on NJT component
@@ -115,7 +138,6 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 
         # TODO: handle this
         assert "dims" not in kwargs
-
         out_ref_component = op.op(inp, *args, **kwargs)
 
         # TODO: handle list / tuple / non-NJT outputs
@@ -132,7 +154,6 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 def reduction_reference(op, sample):
     assert sample.input.is_nested
     dim = sample.kwargs.get("dim", None)
-    keepdim = sample.kwargs.get("keepdim", False)
     assert dim != 0, "reductions over the batch dim are not supported"
     assert "dims" not in sample.kwargs
     assert sample.input._ragged_idx == 1
@@ -315,6 +336,98 @@ def sample_inputs_special_polygamma_n(n):
     return partial(sample_inputs_elementwise_njt_unary, op_kwargs={"n": n})
 
 
+def sample_inputs_to(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs):
+    for njt in _sample_njts(
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        dims=[2, 3, 4],
+    ):
+        other_dtypes = (
+            d for d in (torch.float32, torch.half, torch.double) if d is not dtype
+        )
+        for other_dtype in other_dtypes:
+            sample_name = f"{njt.dim()}D: {dtype} -> {other_dtype}"
+            yield SampleInput(
+                njt.clone().detach(), kwargs={"dtype": dtype}, name=sample_name
+            )
+
+        # only include device transfer for CUDA inputs
+        if "cuda" in device:
+            other_device = "cpu"
+            sample_name = f"{njt.dim()}D: {device} -> {other_device}"
+            yield SampleInput(
+                njt.clone().detach(), kwargs={"device": other_device}, name=sample_name
+            )
+
+
+def sample_inputs_bmm(op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs):
+    for njt_3d in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3]
+    ):
+        # (B, j1, D) x (B, D, E) => (B, j1, E)
+        B, D = njt_3d.shape[0], njt_3d.shape[-1]
+        E = D + 2
+        other = torch.randn(B, D, E, device=device, dtype=dtype)
+        # used for slicing in unbind_reference()
+        other._batch_dim = 0
+        yield SampleInput(njt_3d.clone().detach(), kwargs={"mat2": other})
+
+        # TODO (need factory functions):
+        # (B, D, j1) x (B, j1, E) => (B, D, E)
+
+
+def reference_bmm(op, sample):
+    # unbind reduces a dim and bmm requires 3D, so use matmul as the reference
+    matmul_op = copy(op)
+    matmul_op.op = torch.matmul
+    # change arg name from mat2 -> other
+    modified_sample = copy(sample)
+    other = modified_sample.kwargs["mat2"]
+    del modified_sample.kwargs["mat2"]
+    modified_sample.kwargs["other"] = other
+    return unbind_reference(matmul_op, modified_sample)
+
+
+def sample_inputs_matmul(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    # also run bmm samples through
+    for sample_input in sample_inputs_bmm(op_info, device, dtype, requires_grad):
+        # change arg name from mat2 -> other
+        other = sample_input.kwargs["mat2"]
+        del sample_input.kwargs["mat2"]
+        sample_input.kwargs["other"] = other
+        yield sample_input
+
+    # 3D cases not covered by bmm
+    for njt_3d in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3]
+    ):
+        # (B, j1, D) x (D, E) => (B, j1, E)
+        D = njt_3d.shape[-1]
+        E = D + 2
+        yield SampleInput(
+            njt_3d.clone().detach(),
+            kwargs={"other": torch.randn(D, E, device=device, dtype=dtype)},
+        )
+
+    # 4D cases
+    for njt_4d in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[4]
+    ):
+        # (B, j1, D, E) x (E, F) => (B, j1, D, F)
+        E = njt_4d.shape[-1]
+        F = E + 2
+        yield SampleInput(
+            njt_4d.clone().detach(),
+            kwargs={"other": torch.randn(E, F, device=device, dtype=dtype)},
+        )
+
+        # TODO (need factory functions):
+        # (B, j1, D, E) x (B, j1, E, F) => (B, j1, D, F)
+
+
 def sample_inputs_masked_select(
     op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
 ):
@@ -324,6 +437,78 @@ def sample_inputs_masked_select(
         yield SampleInput(
             njt, kwargs={"mask": (torch.randn_like(njt, requires_grad=False) < 0.0)}
         )
+
+
+def sample_inputs_nn_functional_embedding(
+    op_info, device, dtype, requires_grad, **kwargs
+):
+    indices = torch.nested.nested_tensor(
+        [
+            torch.tensor([0, 2, 1, 3]),
+            torch.tensor([4, 2, 1]),
+            torch.tensor([6, 7, 5, 2, 4]),
+        ],
+        layout=torch.jagged,
+        dtype=torch.int64,
+        device=device,
+    )
+
+    NUM_EMBEDDINGS = 20
+    EMBEDDING_DIM = 32
+    weight = torch.randn(NUM_EMBEDDINGS, EMBEDDING_DIM, device=device, dtype=dtype)
+
+    # NB: the OpInfo entry for embedding_bag expects weight first so the gradients
+    # can be checked
+    yield SampleInput(
+        weight.clone().detach().requires_grad_(),
+        args=(indices,),
+    )
+
+    yield SampleInput(
+        weight.clone().detach().requires_grad_(),
+        args=(indices,),
+        kwargs={"padding_idx": 1},
+    )
+
+
+def sample_inputs_index_put(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+    ):
+        for dim in range(njt.dim()):
+            indices = [
+                torch.tensor(list(range(njt.size(0))), device=njt.device),
+                *[
+                    torch.tensor([0] * njt.size(0), device=njt.device)
+                    for _ in range(dim - 1)
+                ],
+            ]
+            yield SampleInput(
+                njt.clone().detach(),
+                kwargs={
+                    "indices": indices,
+                    "values": torch.tensor(1.0, device=njt.device),
+                },
+            )
+
+    # Non-cont NJT for completeness
+    offsets = torch.tensor([0, 2, 5, 7], device=device)
+    lengths = torch.tensor([2, 2, 2], device=device)
+    indices = [
+        torch.tensor([0, 1, 2], device=device),
+        torch.tensor([0, 1, 1], device=device),
+        torch.tensor([0, 0, 0], device=device),
+    ]
+    a = torch.nested.nested_tensor_from_jagged(
+        torch.zeros(7, 3, device=device), offsets, lengths
+    )
+
+    yield SampleInput(
+        a.clone().detach(),
+        kwargs={"indices": indices, "values": torch.tensor(1.0, device=a.device)},
+    )
 
 
 def sample_inputs_nn_functional_embedding_bag(
@@ -384,6 +569,39 @@ def reference_nn_functional_embedding_bag(op, sample):
     return torch.cat(output, dim=0)
 
 
+def sample_inputs_nn_functional_linear(op_info, device, dtype, requires_grad, **kwargs):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[3, 4, 5]
+    ):
+        # with bias
+        NUM_OUTPUT = 10
+        weight = torch.randn(
+            NUM_OUTPUT,
+            njt.size(-1),
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+        )
+        bias = torch.randn(
+            NUM_OUTPUT, device=device, dtype=dtype, requires_grad=requires_grad
+        )
+        yield SampleInput(
+            njt,
+            kwargs={
+                "weight": weight,
+                "bias": bias,
+            },
+        )
+
+        # without bias
+        yield SampleInput(
+            njt,
+            kwargs={
+                "weight": weight,
+            },
+        )
+
+
 def sample_inputs_nn_functional_rms_norm(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -422,17 +640,24 @@ sample_inputs_nn_functional_threshold = partial(
 # to specify if they cannot be auto-generated for some reason. Try to keep these sorted
 # in alphabetical order!
 njt_sample_inputs = {
+    "bmm": sample_inputs_bmm,
     "clone": sample_inputs_clone,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
+    "nn.functional.embedding": sample_inputs_nn_functional_embedding,
     "nn.functional.embedding_bag": sample_inputs_nn_functional_embedding_bag,
+    "nn.functional.linear": sample_inputs_nn_functional_linear,
     "nn.functional.rms_norm": sample_inputs_nn_functional_rms_norm,
     "nn.functional.threshold": sample_inputs_nn_functional_threshold,
     **{f"polygamma.polygamma_n_{n}": sample_inputs_polygamma_n(n=n) for n in range(5)},
     "special.polygamma.special_polygamma_n_0": sample_inputs_special_polygamma_n(n=0),
+    "to": sample_inputs_to,
+    "matmul": sample_inputs_matmul,
     "masked_select": sample_inputs_masked_select,
+    "index_put": sample_inputs_index_put,
 }
 
 njt_references = {
+    "bmm": reference_bmm,
     "nn.functional.embedding_bag": reference_nn_functional_embedding_bag,
 }
 

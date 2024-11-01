@@ -255,7 +255,6 @@ def pool2d_shape_check(
     outputWidth: int,
 ):
     ndim = len(input)
-    nOutputPlane = nInputPlane
 
     assert kW > 0 and kH > 0
     assert dW > 0 and dH > 0
@@ -608,12 +607,10 @@ def matmul(tensor1: List[int], tensor2: List[int]):
         # We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
         # we track m1 vs m2 separately even though they must match for nicer error messages
         n = tensor1[-2] if dim_tensor1 > 1 else 1
-        m1 = tensor1[-1]
         batch_tensor1: List[int] = []
         # TODO: handling of slice
         for i in range(dim_tensor1 - 2):
             batch_tensor1.append(tensor1[i])
-        m2 = tensor2[-1] if dim_tensor2 > 1 else 1
         p = tensor2[-1]
         batch_tensor2: List[int] = []
         # TODO: handling of slice

@@ -458,6 +458,16 @@ inline int64_t get_bdim_size2(
   TORCH_INTERNAL_ASSERT(false);
 }
 
+inline c10::SymInt get_bdim_size2_symint(
+    const Tensor& a_value, std::optional<int64_t> a_bdim,
+    const Tensor& b_value, std::optional<int64_t> b_bdim) {
+  if (a_bdim)
+    return a_value.sym_size(*a_bdim);
+  if (b_bdim)
+    return b_value.sym_size(*b_bdim);
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 // [start, start + 1, ..., stop - 1]
 inline VmapDimVector range(int64_t start, int64_t stop) {
   TORCH_INTERNAL_ASSERT(stop >= start);
