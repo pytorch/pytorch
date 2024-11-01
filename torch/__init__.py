@@ -678,6 +678,7 @@ class SymFloat:
         return hash(builtins.float(self))
 
     def conjugate(self) -> "SymFloat":
+        """Returns the complex conjugate of the float."""
         return self
 
 
