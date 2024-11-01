@@ -359,5 +359,4 @@ def dispatch(
     overload, message = get_matching_overload(
         node, [decomp.onnx_function for decomp in decomp_metas]
     )
-    print(node, overload, message)
     return overload, message
