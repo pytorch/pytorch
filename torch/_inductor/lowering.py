@@ -437,9 +437,7 @@ def broadcast_symbolic_shapes(a, b):
     are symbolic sympy formulas.
     """
     output = []
-    for x, y in itertools.zip_longest(
-        reversed(a), reversed(b), fillvalue=sympy.Integer(1)
-    ):
+    for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
         if V.graph.sizevars.shape_env.evaluate_expr(
             sympy.Eq(y, 1), size_oblivious=True
         ):
@@ -1037,7 +1035,7 @@ def expand_as(x, y):
 def repeat(x, repeats):
     old_size = list(x.get_size())
     if len(repeats) > len(old_size):
-        old_size = [sympy.Integer(1)] * (len(repeats) - len(old_size)) + old_size
+        old_size = [sympy.S.One] * (len(repeats) - len(old_size)) + old_size
         x = view(x, list(old_size))
     assert len(repeats) == len(x.get_size())
 
@@ -1062,7 +1060,7 @@ def repeat(x, repeats):
         for i in range(len(repeats)):
             if repeats[i] != 1:
                 if old_size[i] == 1:
-                    index[i] = sympy.Integer(0)
+                    index[i] = sympy.S.Zero
                 else:
                     index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
@@ -1730,7 +1728,7 @@ def unfold(x, dimension, size, step):
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
     new_shape = list(x.get_size())
-    new_shape.insert(dim, sympy.Integer(1))
+    new_shape.insert(dim, sympy.S.One)
     return view(x, new_shape)
 
 
@@ -5264,7 +5262,7 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
     if keepdims:
         new_size = list(size)
         for i in reduced_idx:
-            new_size[i] = sympy.Integer(1)
+            new_size[i] = sympy.S.One
     else:
         new_size = kept_sizes
 
