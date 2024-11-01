@@ -25,6 +25,26 @@ def _register_propagate_rule(aten_op, handler):
 def register_propagate_rule(aten_op):
     return functools.partial(_register_propagate_rule, aten_op)
 
+def get_scale_by_from_metas(*metas):
+    """
+    If there are multiple ChunkingMeta has the scale_by field,
+    raise a CantChunk exception.
+
+    If not ChunkingMeta has scale_by field, return None.
+    Other wise return the only scale_by field.
+    """
+    scale_by_list = []
+
+    # don't do dedup on the scale_by field on purpose for this API
+    for meta in metas:
+        if meta.scale_by is not None:
+            scale_by_list.append(meta.scale_by)
+
+    if len(scale_by_list) > 1:
+        raise CantChunk("Multiple scale_by")
+
+    return scale_by_list[0] if len(scale_by_list) == 1 else None
+
 @dataclasses.dataclass
 class ChunkingMeta:
     # The value of the node should be scaled by the specified scalar
@@ -45,6 +65,9 @@ class ChunkingMeta:
     # chunk_dim should be None if need_sum is True
     need_sum: bool = False
 
+    def copy(self):
+        return ChunkingMeta(**self.__dict__)
+
 def format_node_with_chunking_meta(node: torch.fx.Node):
     from torch._inductor.runtime.runtime_utils import green_text
     fake_tensor = get_fake_tensor_from_node(node)
@@ -55,8 +78,16 @@ def format_node_with_chunking_meta(node: torch.fx.Node):
         print(f"    {green_text(str(meta))}")
 
 def set_chunking_meta(node, meta=None, **kwargs):
+    """
+    kwargs can override fields in the passed in `meta`
+    """
     if meta is None:
         meta = ChunkingMeta(**kwargs)
+    else:
+        # make a copy to avoid override the passed in instance
+        meta = meta.copy()
+        for k, v in kwargs.items():
+            setattr(meta, k, v)
     node.meta["chunking"] = meta
     format_node_with_chunking_meta(node)
 
@@ -168,6 +199,40 @@ def propagate_addmm(addmm_node):
 
     return False
 
+@register_propagate_rule(aten.mm.default)
+def propagate_mm(mm_node):
+    lhs_node, rhs_node = mm_node.args[:2]
+    lhs_meta = get_chunking_meta(lhs_node)
+    rhs_meta = get_chunking_meta(rhs_node)
+
+    # only lhs is chunked
+    if lhs_meta is not None and rhs_meta is None:
+        copy_chunking_meta(mm_node, lhs_meta)
+        return True
+
+    # both lhs and rhs are chunked at the reduction dimension
+    if lhs_meta is not None and rhs_meta is not None and lhs_meta.chunk_dim == 1 and rhs_meta.chunk_dim == 0:
+        # The output is not chunked, but need to be sum'ed up!
+        scale_by = get_scale_by_from_metas(lhs_meta, rhs_meta)
+        set_chunking_meta(mm_node, scale_by=scale_by, chunk_dim=None, need_sum=True)
+        return True
+
+    return False
+
+@register_propagate_rule(aten.permute.default)
+def propagate_permute(permute_node):
+    input_node, order = permute_node.args[:2]
+    input_meta = get_chunking_meta(input_node)
+    if input_meta is None or input_meta.chunk_dim is None:
+        return False
+
+    orig_chunk_dim = input_meta.chunk_dim
+    reverse_lookup = {v: k for k, v in enumerate(order)}
+    new_chunk_dim = reverse_lookup[orig_chunk_dim]
+    set_chunking_meta(permute_node, meta=input_meta, chunk_dim=new_chunk_dim)
+    return True
+
+
 @register_propagate_rule([
     prims.convert_element_type.default,
     aten.sub.Tensor,
@@ -176,6 +241,7 @@ def propagate_addmm(addmm_node):
     aten.squeeze.dim,
     aten.gather.default,
     aten.neg.default,
+    aten.scatter.value,
 ])
 def propagate_general_copy_from_input(out_node, allow_non_chunked_scalar_input=False):
     """
@@ -217,7 +283,46 @@ def propagate_general_copy_from_input(out_node, allow_non_chunked_scalar_input=F
 ])
 def propagate_where(where_node):
     # where_node can have a non-chunked scalar input
-    return propagate_general_copy_from_input(where_node, True)
+    if propagate_general_copy_from_input(where_node, True):
+        return True
+
+    # where(cond_node, true_node, false_node)
+    # We can still propagate if
+    # 1. cond_node is chunked
+    # 2. true_node is not chunked but scaled
+    # 3. false_node is not chunked and is always 0.
+    #    It's important that the value is 0 since in that case
+    #    scaling the output is always numerically safe.
+    cond_node, true_node, false_node = where_node.args
+    cond_meta = get_chunking_meta(cond_node)
+    true_meta = get_chunking_meta(true_node)
+    def can_chunk():
+        # check false_node
+        if get_chunking_meta(false_node) is not None:
+            return False
+        if false_node.target != aten.full.default:
+            return False
+        if false_node.meta["val"].numel() != 1:
+            return False
+        if false_node.args[1] != 0.0:
+            return False
+
+        # check true_node
+        if true_meta.chunk_dim is not None or true_meta.need_sum:
+            return False
+
+        # check cond_meta
+        if cond_meta.scale_by is not None or cond_meta.need_sum:
+            return False
+        
+        return True
+
+    if can_chunk():
+        # the output is scaled if the input is scaled
+        # the output is chunked if cond is chunked
+        set_chunking_meta(where_node, meta=cond_meta, scale_by=true_meta.scale_by)
+        return True
+    return False
 
 @register_propagate_rule(aten.div.Tensor)
 def propagate_div(div_node):
@@ -260,12 +365,59 @@ def propagate_sum_to_scalar(sum_node):
 ])
 def propagate_reduce_non_chunk_dim(reduce_node):
     """
-    A reduction that reduces across non-chunked dimension
+    A reduction that reduces across non-chunked dimension.
+
+    For sum, we also support reducing across the chunk dimension.
     """
     arg_node, reduce_dims = reduce_node.args[0: 2]
     arg_meta = get_chunking_meta(arg_node)
-    if arg_meta is None or arg_meta.chunk_dim in reduce_dims:
-        return False
     
-    copy_chunking_meta(reduce_node, arg_node)
+    if arg_meta is None:
+        return False
+
+    if arg_meta.chunk_dim not in reduce_dims:
+        # Reduce across the none chunk dimension
+        copy_chunking_meta(reduce_node, arg_node)
+        return True
+
+    if reduce_node.target == aten.sum.dim_IntList and list(reduce_dims) == [arg_meta.chunk_dim]:
+        set_chunking_meta(reduce_node, scale_by=arg_meta.scale_by, chunk_dim=None, need_sum=True)
+        return True
+    
+    return False
+
+@register_propagate_rule([
+    aten.full.default,
+])
+def propagate_full(full_node):
+    if full_node.meta["val"].numel() != 1:
+        set_chunking_meta(full_node, chunk_dim=0)
+        return True
+    return False
+
+@register_propagate_rule([
+    aten.mul.Tensor,
+])
+def propagate_mul(mul_node):
+    """
+    We need special handling for `scale_by` for mul node.
+    """
+    lhs_node, rhs_node = mul_node.args[:2]
+    lhs_meta = get_chunking_meta(lhs_node)
+    rhs_meta = get_chunking_meta(rhs_node)
+    if lhs_meta is None or rhs_meta is None:
+        return False
+
+    # Compare disregarding scale_by
+    lhs_meta_copy = lhs_meta.copy()
+    lhs_meta_copy.scale_by = None
+    rhs_meta_copy = rhs_meta.copy()
+    rhs_meta_copy.scale_by = None
+    if lhs_meta_copy != rhs_meta_copy:
+        return False
+
+    # TODO: too restrictive. Loose the check if there is a use case
+    # that both lhs and rhs are scaled.
+    scale_by = get_scale_by_from_metas(lhs_meta, rhs_meta)
+    set_chunking_meta(mul_node, meta=lhs_meta_copy, scale_by=scale_by)
     return True
