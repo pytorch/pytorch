@@ -521,7 +521,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
         assert isinstance(_CODE_STATE, defaultdict)
         log.info("get_code_state %s hit %s, %d entries", path, ty, len(_CODE_STATE))
         trace_structured_artifact(
-            "get_code_state",
+            f"get_{ty}_code_state",
             "string",
             lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
         )
@@ -635,7 +635,7 @@ def put_local_code_state(cache_key: str) -> None:
                 "put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE)
             )
             trace_structured_artifact(
-                "put_code_state",
+                "put_local_code_state",
                 "string",
                 lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
             )
@@ -663,7 +663,7 @@ def put_remote_code_state(cache_key: str) -> None:
         )
         # TODO: don't log this multiple times
         trace_structured_artifact(
-            "put_code_state",
+            "put_remote_code_state",
             "string",
             lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
         )
