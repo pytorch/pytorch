@@ -1,7 +1,6 @@
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/jit/frontend/tracer.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/python/pybind.h>

@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <torch/csrc/jit/ir/irparser.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
 namespace torch {
