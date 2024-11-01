@@ -1541,6 +1541,17 @@ def _export_to_aten_ir_make_fx(
             kwargs=fake_kwargs,
         )
 
+        # [NOTE] In training IR, we don't run
+        # any DCE as a result we preserve constant
+        # nodes in the graph. make_fx invariant is that
+        # they don't guarantee every node gets a meta['val']
+        # field. Since the actual value is already hardcoded in
+        # graph, the node.meta here actually doesn't matter. But
+        # we do this to make spec verifier happy.
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and len(node.users) == 0:
+                node.meta["val"] = None
+
         if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
             gm.meta.update(mod.meta)
 
