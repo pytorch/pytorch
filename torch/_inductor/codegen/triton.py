@@ -30,7 +30,7 @@ import sympy
 import torch
 import torch._inductor.metrics as metrics
 import torch._logging
-from torch._dynamo.utils import preserve_rng_state
+from torch._dynamo.utils import identity, preserve_rng_state
 from torch._inductor.runtime.hints import (
     AutotuneHint,
     DeviceProperties,
@@ -55,6 +55,7 @@ from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
 from ..utils import (
     cache_on_self,
+    DelayReplaceLine,
     get_bounds_index_expr,
     get_fused_kernel_name,
     get_kernel_metadata,
@@ -1384,6 +1385,7 @@ class TritonKernel(SIMDKernel):
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.helper_functions = HelperFunctions()
+        self._load_counts: collections.Counter[str] = collections.Counter()
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
@@ -1725,9 +1727,6 @@ class TritonKernel(SIMDKernel):
                 ):
                     return None
 
-                def identity(expr: sympy.Expr) -> sympy.Expr:
-                    return expr
-
                 # Compute the ND block shape from the linear block size.
                 # Use CielDiv to round leading dimensions up to 1.
                 # Non-leading dimensions are clamped to the size of the iteration range,
@@ -1939,6 +1938,9 @@ class TritonKernel(SIMDKernel):
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
+        load_counts = self._load_counts
+        load_counts[name] += 1
+        make_line: Callable[[str], Union[str, DelayReplaceLine]] = identity
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
         indexing = self.indexing(index, block_ptr=True)
@@ -1963,18 +1965,17 @@ class TritonKernel(SIMDKernel):
         elif not is_coalesced:
             ep = ", eviction_policy='evict_last'"
         elif self.inside_reduction and self.range_trees[-1].is_loop:
-            if name in self.args.inplace_buffers:
-                names: OrderedSet[str] = OrderedSet(
-                    self.args.inplace_buffers[name].other_names
-                )
-            else:
-                names = OrderedSet([name])
-            last_use = len(names & self.last_usage) > 0
-            evict_last = not last_use and (has_rindex or indirect_indexing)
-            if evict_last:
-                ep = ", eviction_policy='evict_last'"
-            else:
-                ep = ", eviction_policy='evict_first'"
+
+            def decide_later():
+                if load_counts[name] > expected_count and (
+                    has_rindex or indirect_indexing
+                ):
+                    return "evict_last"
+                return "evict_first"
+
+            expected_count = load_counts[name]
+            ep = ", eviction_policy='<EP>'"
+            make_line = functools.partial(DelayReplaceLine, "<EP>", decide_later)
         else:
             ep = ""
 
@@ -2022,7 +2023,9 @@ class TritonKernel(SIMDKernel):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
-        result_var = self.cse.generate(load_buffer, line, dtype=dtype)
+        result_var = self.cse.generate(load_buffer, make_line(line), dtype=dtype)
+        if result_var.use_count > 1:
+            load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
         result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
 
