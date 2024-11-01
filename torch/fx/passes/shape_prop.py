@@ -173,6 +173,16 @@ class ShapeProp(torch.fx.Interpreter):
                 f"ShapeProp error for: node={n.format_node()} with " f"meta={n.meta}"
             ) from e
 
+        if self.fake_mode is not None:
+            rebind_unbacked(self.fake_mode, n, result)
+
+            node.meta["val"] = result
+            if (shape_env := V.fake_mode.shape_env) and (
+                symbol_to_path := compute_unbacked_bindings(shape_env, result)
+            ):
+                # Refresh the bindings to the new symbols
+                node.meta["unbacked_bindings"] = symbol_to_path
+
         found_tensor = False
 
         def extract_tensor_meta(obj):
