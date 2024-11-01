@@ -8083,7 +8083,7 @@ class TestNNDeviceType(NNTestCase):
         a_cpu = a.detach().cpu().float()
         m = torch.nn.AvgPool2d(2)
         o = m(a)
-        a_cpu.requires_grad = True@
+        a_cpu.requires_grad = True
         o.sum().backward()
         o_cpu = m(a_cpu)
         o_cpu.sum().backward()
