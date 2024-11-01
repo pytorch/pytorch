@@ -76,14 +76,18 @@ class _GlobalStats(threading.local):
     def __init__(self) -> None:
         self.autotune_local = _GlobalItemStats()
         self.autotune_remote = _GlobalItemStats()
+        self.bundled_autotune = _GlobalItemStats()
         self.fx_graph = _GlobalItemStats()
         self.triton = _GlobalItemStats()
+        self.aot_autograd = _GlobalItemStats()
 
     def reset(self) -> None:
         self.autotune_local.reset()
         self.autotune_remote.reset()
+        self.bundled_autotune.reset()
         self.fx_graph.reset()
         self.triton.reset()
+        self.aot_autograd.reset()
 
     def get_stat(self, name: str) -> _GlobalItemStats:
         return getattr(self, name)
@@ -92,8 +96,10 @@ class _GlobalStats(threading.local):
         subs = (
             ("autotune_local", self.autotune_local),
             ("autotune_remote", self.autotune_remote),
+            ("bundled_autotune", self.bundled_autotune),
             ("fx_graph", self.fx_graph),
             ("triton", self.triton),
+            ("aot_autograd", self.aot_autograd),
         )
 
         print("Cache Stats:", file=sys.stderr)
@@ -148,7 +154,7 @@ _CACHE_CONFIG_EN = (
     "fx_graph_remote_cache",
     "autotune_local_cache",
     "autotune_remote_cache",
-    # "bundled_autotune_cache",
+    "bundled_autotune_remote_cache",
 )
 
 
@@ -192,8 +198,20 @@ class PatchCaches(contextlib.AbstractContextManager):
         self._stack.enter_context(ctx)
 
         ctx = patch(
+            "torch._inductor.remote_cache.RemoteBundledAutotuneCache.backend_override_cls",
+            MockBackend.with_name("bundled_autotune"),
+        )
+        self._stack.enter_context(ctx)
+
+        ctx = patch(
             "torch._inductor.remote_cache.RemoteFxGraphCache.backend_override_cls",
             MockBackend.with_name("fx_graph"),
+        )
+        self._stack.enter_context(ctx)
+
+        ctx = patch(
+            "torch._inductor.remote_cache.RemoteAOTAutogradCache.backend_override_cls",
+            MockBackend.with_name("aot_autograd"),
         )
         self._stack.enter_context(ctx)
 
@@ -201,6 +219,12 @@ class PatchCaches(contextlib.AbstractContextManager):
             ctx = patch(
                 "torch._inductor.fb.remote_cache.FbRemoteAutotuneCache.backend_override_cls",
                 MockBackend.with_name("autotune_remote"),
+            )
+            self._stack.enter_context(ctx)
+
+            ctx = patch(
+                "torch._inductor.fb.remote_cache.FbRemoteBundledAutotuneCache.backend_override_cls",
+                MockBackend.with_name("bundled_autotune"),
             )
             self._stack.enter_context(ctx)
 
@@ -213,6 +237,12 @@ class PatchCaches(contextlib.AbstractContextManager):
             ctx = patch(
                 "triton.fb.fb_memcache.FbMemcacheRemoteKernelCache.backend_override_cls",
                 MockBackend.with_name("triton"),
+            )
+            self._stack.enter_context(ctx)
+
+            ctx = patch(
+                "torch._inductor.fb.remote_cache.FbRemoteAOTAutogradCache.backend_override_cls",
+                MockBackend.with_name("aot_autograd"),
             )
             self._stack.enter_context(ctx)
 
