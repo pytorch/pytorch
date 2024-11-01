@@ -154,9 +154,8 @@ def _from_dynamic_shapes_to_dynamic_axes(
                 continue
             converted_axes = {}
             for axis, dim in axes.items():
-                assert isinstance(dim, torch.export.Dim) and hasattr(
-                    dim, "__name__"
-                ), f"dynamic shape: {input_name} has a dimension without a name"
+                if dim is None:
+                    continue
                 converted_axes[axis] = dim.__name__
             dynamic_axes[input_name] = converted_axes
         return dynamic_axes
@@ -169,14 +168,10 @@ def _from_dynamic_shapes_to_dynamic_axes(
         sig = _signature(model)
         # input_names should have the same length as dynamic_shapes
         input_names = (
-            input_names
+            list(input_names)
             + list(sig.parameters)[
                 len(input_names) : len(dynamic_shapes) - len(input_names) + 1
             ]
-        )
-        assert len(input_names) == len(dynamic_shapes), (
-            f"Number of input names ({len(input_names)}) should match "
-            f"the number of model inputs ({len(dynamic_shapes)})"
         )
         assert len(input_names) == len(dynamic_shapes), (
             f"Number of input names ({len(input_names)}) should match "
@@ -191,9 +186,8 @@ def _from_dynamic_shapes_to_dynamic_axes(
                 continue
             converted_axes = {}
             for axis, dim in axes.items():
-                assert isinstance(dim, torch.export.Dim) and hasattr(
-                    dim, "__name__"
-                ), f"dynamic shape: {input_name} has a dimension without a name"
+                if dim is None:
+                    continue
                 converted_axes[axis] = dim.__name__
                 dynamic_axes[input_name] = converted_axes
         return dynamic_axes
