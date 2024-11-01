@@ -27,7 +27,7 @@ using gemm_fn = void(*)(
     const Scalar& beta,
     void *c, int64_t ldc);
 
-DECLARE_DISPATCH(gemm_fn, gemm_stub);
+DECLARE_DISPATCH(gemm_fn, gemm_stub)
 
 template <typename scalar_t>
 void gemm(
@@ -147,7 +147,7 @@ void gemm_batched_with_stride(
 
 using axpy_fn = void(*)(at::ScalarType type, int64_t n, const Scalar& a, const void *x, int64_t incx, void *y, int64_t incy);
 
-DECLARE_DISPATCH(axpy_fn, axpy_stub);
+DECLARE_DISPATCH(axpy_fn, axpy_stub)
 
 template<typename scalar_t>
 void axpy(int64_t n, scalar_t a, const scalar_t *x, int64_t incx, scalar_t *y, int64_t incy){
@@ -168,7 +168,7 @@ void axpy(int64_t n, c10::complex<float> a, const c10::complex<float> *x, int64_
 
 using copy_fn = void(*)(at::ScalarType type, int64_t n, const void *x, int64_t incx, void *y, int64_t incy);
 
-DECLARE_DISPATCH(copy_fn, copy_stub);
+DECLARE_DISPATCH(copy_fn, copy_stub)
 
 template<typename scalar_t>
 void copy(int64_t n, const scalar_t *x, int64_t incx, scalar_t *y, int64_t incy) {

@@ -70,6 +70,7 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
+from tools.testing.upload_artifacts import zip_and_upload_artifacts
 
 
 # Make sure to remove REPO_ROOT after import is done
@@ -1331,6 +1332,10 @@ def parse_args():
         action="store_false",
         help="Run tests without translation validation.",
     )
+    parser.add_argument(
+        "--upload-artifacts-while-running",
+        action="store_true",
+    )
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -1677,6 +1682,8 @@ def run_tests(
 
     def parallel_test_completion_callback(failure):
         test_failed = handle_error_messages(failure)
+        if IS_CI and options.upload_artifacts_while_running:
+            zip_and_upload_artifacts(test_failed)
         if (
             test_failed
             and not options.continue_through_error
@@ -1769,6 +1776,8 @@ def main():
     selected_tests = get_selected_tests(options)
 
     test_prioritizations = import_results()
+    if len(test_prioritizations.get_all_tests()) == 0:
+        options.enable_td = False
     test_prioritizations.amend_tests(selected_tests)
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)

@@ -163,8 +163,7 @@ std::string stacksToStr(
 static std::vector<std::vector<int64_t>> flattenList(
     const c10::List<c10::IValue>& list) {
   std::vector<std::vector<int64_t>> tensor_dims;
-  for (const auto& input_ref : list) {
-    const c10::IValue& input = input_ref;
+  for (const c10::IValue& input : list) {
     if (input.isTensor()) {
       const at::Tensor& tensor = input.toTensor();
       if (tensor.defined()) {
@@ -313,13 +312,13 @@ std::string ivalueToStr(const c10::IValue& val, bool isString) {
     // json only takes "true" and "false" so we convert the string to lower case
     if (val.isBool()) {
       for (char& c : mystr) {
-        c = std::tolower(c);
+        c = static_cast<char>(std::tolower(c));
       }
     }
 
     // A double quote can cause issues with the chrome tracing so force
     // all inputs to not contain more than the 2 we add in this function
-    int count = std::count(mystr.begin(), mystr.end(), '\"');
+    auto count = std::count(mystr.begin(), mystr.end(), '"');
     return count > 2 ? "\"None\"" : mystr;
   }
 }

@@ -34,6 +34,11 @@ PARAM_LIST = Union[Tuple[Tensor, ...], List[Tensor]]
 def get_ema_multi_avg_fn(decay=0.999):
     """Get the function applying exponential moving average (EMA) across multiple params."""
 
+    if decay < 0.0 or decay > 1.0:
+        raise ValueError(
+            f"Invalid decay value {decay} provided. Please provide a value in [0,1] range."
+        )
+
     @torch.no_grad()
     def ema_update(ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _):
         # foreach lerp only handles float and complex
@@ -82,6 +87,11 @@ def get_swa_multi_avg_fn():
 
 def get_ema_avg_fn(decay=0.999):
     """Get the function applying exponential moving average (EMA) across a single param."""
+
+    if decay < 0.0 or decay > 1.0:
+        raise ValueError(
+            f"Invalid decay value {decay} provided. Please provide a value in [0,1] range."
+        )
 
     @torch.no_grad()
     def ema_update(ema_param: Tensor, current_param: Tensor, num_averaged):

@@ -648,6 +648,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(b(inp), inp + 2)
         self.assertEqual(c(inp), (inp + 1, inp + 2, inp + 1))
 
+        torch.compiler.set_stance("force_eager")
+        self.assertEqual(a(inp), inp + 2)
+        torch.compiler.set_stance("default")
+        self.assertEqual(a(inp), inp + 1)
+
     def test_set_stance_eager_on_recompile(self):
         @torch.compile(backend="eager", dynamic=False)
         def a(x, n):
@@ -681,6 +686,20 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(out1, inp + 2)
         self.assertEqual(out2, inp + 2)
+
+    def test_set_stance_fail_on_recompile_with_disable(self):
+        @torch.compiler.disable
+        def inner(x):
+            return x
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return inner(x)
+
+        f(torch.randn(3, 3))
+        # should not raise error
+        with torch.compiler.set_stance("fail_on_recompile"):
+            f(torch.randn(3, 3))
 
     def test_set_stance_forbid_in_graph(self):
         @torch.compiler.set_stance("force_eager")
@@ -782,6 +801,24 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             @torch.compiler.set_stance("force_eager", force_backend="eager")
             def d(x):
                 pass
+
+    def test_set_stance_force_backend_with_disable(self):
+        @torch.compiler.disable
+        def inner(x):
+            return x
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return inner(x)
+
+        f(torch.randn(3, 3))
+
+        def fail_backend(gm, ex):
+            raise RuntimeError("fail!")
+
+        # should not raise error
+        with torch.compiler.set_stance("default", force_backend=fail_backend):
+            f(torch.randn(3, 3))
 
 
 if __name__ == "__main__":
