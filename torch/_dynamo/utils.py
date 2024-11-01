@@ -269,6 +269,7 @@ def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -
 def dynamo_timed(
     key: str,
     phase_name: Optional[str] = None,
+    log_pt2_compile_event: bool = False,  # Whether or not to log it to internal pt2 compile event
     fwd_only: bool = True,
 ):
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
@@ -302,9 +303,10 @@ def dynamo_timed(
                 end_ns,
                 {},
                 start_ns,
+                log_pt2_compile_event,
             )
         else:
-            chromium_log.log_event_end(key, end_ns, {}, start_ns)
+            chromium_log.log_event_end(key, end_ns, {}, start_ns, log_pt2_compile_event)
         # Only record backward compilation metrics if phase_name is not None!
         if phase_name:
             frame_key = str(curr_frame)
@@ -1041,6 +1043,7 @@ class ChromiumEventLogger:
         time_ns: int,
         metadata: Dict[str, Any],
         start_time_ns: int,
+        log_pt2_compile_event: bool,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -1087,8 +1090,8 @@ class ChromiumEventLogger:
                 "ChromiumEventLogger: Detected overlapping events, fixing stack"
             )
             stack.pop()
-
-        log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+        if log_pt2_compile_event:
+            log_chromium_event_internal(event, stack, self.id_, start_time_ns)
         # Finally pop the actual event off the stack
         stack.pop()
 
@@ -1125,6 +1128,8 @@ class ChromiumEventLogger:
         event_name: str,
         time_ns: int,
         metadata: Optional[Dict[str, Any]] = None,
+        # By default, an instant event isn't logged internally, only to structured logging.
+        log_pt2_compile_event: bool = False,
     ) -> None:
         """
         Log an instant event with no associated duration.
@@ -1154,8 +1159,9 @@ class ChromiumEventLogger:
             suppress_context=False,
             expect_trace_id=True,
         )
-        # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), self.id_, time_ns)
+        if log_pt2_compile_event:
+            # Log an instant event with the same start and end time
+            log_chromium_event_internal(event, self.get_stack(), self.id_, time_ns)
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
