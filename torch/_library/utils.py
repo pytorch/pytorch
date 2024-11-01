@@ -3,7 +3,7 @@ import dataclasses
 import inspect
 import sys
 import warnings
-from typing import Any, Callable, Dict, Iterable, Iterator, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -463,3 +463,15 @@ def has_fake_kernel(op: torch._ops.OpOverload) -> bool:
         if opdef._abstract_fn is not None:
             return True
     return False
+
+
+def mutated_args_kwargs(schema: _C.FunctionSchema) -> Tuple[List[int], List[str]]:
+    idxs = []
+    keys = []
+    for i, info in enumerate(schema.arguments):
+        if info.alias_info is not None and info.alias_info.is_write:
+            if info.kwarg_only:
+                keys.append(info.name)
+            else:
+                idxs.append(i)
+    return idxs, keys
