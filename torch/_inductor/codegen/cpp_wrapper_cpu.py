@@ -1055,9 +1055,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 output_name = f"{output_name_base}_{idx}"
                 self.writeline(f"int64_t {output_name} = {output};")
                 output_args.append(f"&{output_name}")
-            elif isinstance(output, sympy.Symbol):
+            elif isinstance(output, sympy.Expr):
                 output_name = f"{output_name_base}_{idx}"
-                self.writeline(f"auto {output_name} = {output};")
+                self.writeline(f"auto {output_name} = {self.expr_printer(output)};")
                 output_args.append(f"&{output_name}")
             elif output is None:
                 output_args.append("nullptr")
@@ -1174,6 +1174,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return (
             ""
             if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            or isinstance(buffer, ir.TMADescriptor)
             else f"{buffer.get_name()}.reset();"
         )
 

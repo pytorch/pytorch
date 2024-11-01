@@ -114,7 +114,7 @@ static PyObject* THPEvent_record(
     auto stream = (THPStream*)_stream;
     self->event.record(c10::Stream::unpack3(
         stream->stream_id,
-        stream->device_index,
+        static_cast<c10::DeviceIndex>(stream->device_index),
         static_cast<c10::DeviceType>(stream->device_type)));
   } else {
     c10::impl::VirtualGuardImpl impl{
@@ -192,7 +192,7 @@ static PyObject* THPEvent_wait(
       auto stream = (THPStream*)_stream;
       self->event.block(c10::Stream::unpack3(
           stream->stream_id,
-          stream->device_index,
+          static_cast<c10::DeviceIndex>(stream->device_index),
           static_cast<c10::DeviceType>(stream->device_type)));
     } else {
       c10::impl::VirtualGuardImpl impl{
