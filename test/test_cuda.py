@@ -1,7 +1,3 @@
-# Owner(s): ["module: cuda"]
-# ruff: noqa: F841
-
-import numpy as np
 import contextlib
 import ctypes
 import gc
@@ -3484,29 +3480,26 @@ print(ret)
             event.synchronize()
 
         self.assertEqual(x, x_gpu.cpu())
-    
+
     def test_1d_copy(self):
         # Contiguous 1D tensor
         x = torch.ones(10000000, dtype=torch.uint8)
         self._test_copy(x, non_blocking=True)
         self._test_copy(x, non_blocking=False)
-
-        # Non-contiguous 1D tensor using a Fortran-ordered NumPy array
-        x=torch.ones(1000000, dtype=torch.uint8)[::2]
+        # Discontiguous 1D tensor
+        x = torch.ones(1000000, dtype=torch.uint8)[::2]
         self.assertFalse(x.is_contiguous())
         self._test_copy(x, non_blocking=True)
         self._test_copy(x, non_blocking=False)
-   
+
     def test_2d_copy(self):
         rows, cols = 1000, 1000
         # Contiguous 2D tensor
         x = torch.ones((rows, cols), dtype=torch.float32)
         self._test_copy(x, non_blocking=True)
         self._test_copy(x, non_blocking=False)
-
-        # Non-contiguous 2D tensor using Fortran-ordered array
-        x = torch.rand(rows, cols).t()
-        
+        # Discontiguous 2D tensor
+        x = torch.randn(rows, cols)[:, :512]
         self.assertFalse(x.is_contiguous())
         self._test_copy(x, non_blocking=True)
         self._test_copy(x, non_blocking=False)
@@ -4543,7 +4536,7 @@ class TestBlockStateAbsorption(TestCase):
         for i in range(len(reconstructed_tensors)):
             self.assertEqual(reconstructed_tensors[i].mean(dtype=torch.float), 2)
 
-        inp.add_(1)
+        isadd_(1)
         graph.replay()
 
         for i in range(len(reconstructed_tensors)):

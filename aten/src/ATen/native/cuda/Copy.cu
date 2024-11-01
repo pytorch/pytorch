@@ -283,10 +283,38 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   }
 
   bool same_dtype = iter.dtype(0) == iter.dtype(1);
-
+  
   // Check if the tensor is 1D or 2D and non-contiguous
-  if (iter.ndim() <= 2 && !iter.is_contiguous() && same_dtype) { 
-    return false; 
+  if (iter.ndim() <= 2 && !iter.is_contiguous() && same_dtype) {   
+    // Perform pitch checks to determine if a temporary is needed
+    const auto& src_tensor = iter.tensor(1);
+    const auto& dst_tensor = iter.tensor(0);
+
+    size_t element_size = src_tensor.element_size();
+    int64_t dim0 = src_tensor.size(0);
+    int64_t dim1 = iter.ndim() == 1 ? 1 : src_tensor.size(1);
+    int64_t stride0 = src_tensor.stride(0);
+    int64_t stride1 = iter.ndim() == 1 ? 1 : src_tensor.stride(1);
+    int64_t dst_stride0 = dst_tensor.stride(0);
+    int64_t dst_stride1 = iter.ndim() == 1 ? 1 : dst_tensor.stride(1);
+
+    bool is_column_major = (stride0 == 1 && stride1 >= dim0);
+
+    size_t src_pitch, dst_pitch, width_in_bytes;
+    if (is_column_major) {
+        src_pitch = stride1 * element_size;
+        dst_pitch = dst_stride1 * element_size;
+        width_in_bytes = dim0 * element_size;
+    } else {
+        src_pitch = stride0 * element_size;
+        dst_pitch = dst_stride0 * element_size;
+        width_in_bytes = dim1 * element_size;
+    }
+
+    // If pitch conditions are met, no temporary is required
+    if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
+      return false;
+    }
   }
 
   if (same_dtype && iter.is_contiguous()) {
@@ -475,6 +503,12 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
   // Try optimized 1D/2D non-contiguous path first for both blocking and non-blocking
   if (iter.ndim() <= 2 && !iter.is_contiguous()) {       
     if (copy_non_contiguous_2d(dst, src, iter, kind, stream, non_blocking)) {
+      if (iter.tensor(0).is_conj() != iter.tensor(1).is_conj()) {
+        iter.tensor(0).conj_physical_();
+      }
+      if (iter.tensor(0).is_neg() != iter.tensor(1).is_neg()) {
+        iter.tensor(0).neg_();
+      }
       return; 
     }
   } 
