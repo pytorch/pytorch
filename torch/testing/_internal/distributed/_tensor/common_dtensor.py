@@ -307,7 +307,7 @@ class DTensorTestBase(MultiProcessTestCase):
     def build_device_mesh(self) -> DeviceMesh:
         return DeviceMesh(self.device_type, list(range(self.world_size)))
 
-    def init_pg(self, eager_init) -> None:
+    def init_pg(self, eager_init: bool = False) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
@@ -364,7 +364,7 @@ TestFunc = Callable[[object], object]
 
 
 # wrapper to initialize comms (processgroup)
-def with_comms(eager_init: bool = False) -> TestFunc:
+def with_comms(*args, **kwargs) -> TestFunc:
 
     def decorator(func):
 
@@ -378,6 +378,7 @@ def with_comms(eager_init: bool = False) -> TestFunc:
             else:
                 self.device_type = DEVICE_TYPE
 
+            eager_init = kwargs.get("eager_init", False)
             self.init_pg(eager_init)
 
             try:
@@ -390,7 +391,8 @@ def with_comms(eager_init: bool = False) -> TestFunc:
 
         return wrapper
 
-    return decorator(eager_init) if callable(eager_init) else decorator
+    # with_comms can be used with or without a parenthesis.
+    return decorator if len(args) == 1 and callable(args[0]) else decorator
 
 
 class DTensorOpTestBase(MultiThreadedTestCase):

@@ -124,8 +124,6 @@ class DeviceMeshTest(DTensorTestBase):
     # eager_init=True and eager_init=False scenarios.
     @with_comms(eager_init=True)
     def test_2d_mesh_eager_init_subgroup(self):
-        print("test")
-        # self.assertTrue(False)
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
 
@@ -288,12 +286,11 @@ class DeviceMeshTest(DTensorTestBase):
 
     @with_comms
     def test_set_mesh_dim_group_options(self):
-        device_type = "cuda" if torch.cuda.is_available() else "cpu"
         _mesh_resources._set_mesh_dim_group_options(1, "fake", None)
 
         mesh_tensor = torch.arange(4).reshape(2, 2)
-        mesh = DeviceMesh(device_type, mesh_tensor)
-        # Fake pg only have BackendType as BackendType::CUSTOM.
+        mesh = DeviceMesh(self.device_type, mesh_tensor)
+        # # Fake pg only have BackendType as BackendType::CUSTOM.
         self.assertEqual(mesh.get_group(1)._get_backend_name(), "custom")
 
 
