@@ -18,7 +18,7 @@ from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
-from .. import config
+from .. import config, compile_utils
 from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
@@ -167,6 +167,11 @@ def aot_dispatch_base_graph(
     copy_count = assert_functional_graph(fw_module.graph)
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
+
+    # TODO(yf225): is it better to do it here or Inductor post_grad pass?
+    if torch._functorch.partitioners.always_recompute_fsdp_allgather:
+        fw_module.graph = compile_utils.fx_graph_cse(fw_module.graph)
+        fw_module.recompile()
 
     copy_count2 = assert_functional_graph(fw_module.graph)
     propagate_input_mutation_stacktraces(fw_module.graph)

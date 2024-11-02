@@ -170,6 +170,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         lambda: comms.reinplace_fsdp_all_gather(gm.graph), "reinplace_fsdp_all_gather"
     )
 
+    # TODO(yf225): need to do CSE again to dedup torch.ops.fsdp.split_with_sizes_copy.default etc.
+    if torch._functorch.partitioners.always_recompute_fsdp_allgather:
+        gm.graph = torch._functorch.compile_utils.fx_graph_cse(gm.graph)
+
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()

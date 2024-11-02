@@ -351,11 +351,8 @@ class FSDPParamGroup:
             logger.debug("%s", self._with_fqn("FSDP::pre_backward"))
         with record_function(self._with_fqn("FSDP::pre_backward")):
             self._training_state = TrainingState.PRE_BACKWARD
-            # For Traceable FSDP2, we rely on recomputation of forward all-gather ops to do unshard.
-            # TODO: think about the best way to check this condition.
-            if not (compiled_autograd_enabled() and torch._dynamo.eval_frame._stance.stance == "default"):
-                self.unshard(self.unshard_async_op)  # no-op if prefetched
-                self.wait_for_unshard()
+            self.unshard(self.unshard_async_op)  # no-op if prefetched
+            self.wait_for_unshard()
             if default_prefetch and not compiled_autograd_enabled():
                 self._backward_prefetch()
 

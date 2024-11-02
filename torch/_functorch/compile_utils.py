@@ -46,11 +46,11 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     token_map = {}  # map from hash to token
 
     from torch._inductor.pattern_matcher import (
-        compute_mutation_region_ids,
+        compute_mutation_region_ids_fsdp_compatible,
         same_mutation_regions,
     )
 
-    compute_mutation_region_ids(fx_g)  # type: ignore[arg-type]
+    compute_mutation_region_ids_fsdp_compatible(fx_g)  # type: ignore[arg-type]
 
     # Make a set of separate storages returned from the output, which will be preserved
     # when pruning.  This prevents us from deduplicating returned tensors which have

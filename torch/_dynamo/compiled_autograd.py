@@ -227,6 +227,8 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.fake_tensor_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
+        from torch._dispatch.python import enable_python_dispatcher
+        self.stack.enter_context(enable_python_dispatcher())
         return inputs, sizes, scalars
 
     def proxy_call_backward(
