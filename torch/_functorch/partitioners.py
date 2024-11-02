@@ -43,6 +43,9 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
+# TODO(yf225): debug
+special_handling_for_fsdp_ops = True
+
 
 @dataclass
 class OpTypes:
@@ -538,6 +541,30 @@ def sort_depths(args, depth_map: Dict[fx.Node, int]) -> List[Tuple[fx.Node, int]
     return sorted(arg_depths.items(), key=lambda x: x[1], reverse=True)
 
 
+def is_must_recompute_fsdp_mutation_ops(node):
+    return (node.op == "call_function") and (node.target == torch.ops.fsdp.copy_.default or (node.target == torch.ops.inductor.resize_storage_bytes_.default and node.args[1] > 0))
+
+
+def is_fsdp_all_gather_copy_out_op(node):
+    return (node.op == "call_function") and (node.target == torch.ops.higher_order.auto_functionalized_v2) and (node.args[0] == torch.ops.fsdp.split_with_sizes_copy.default)
+
+
+def is_must_recompute_fsdp_all_gather_copy_out_ops(node):
+    # Must recompute these ops:
+    # auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.fsdp.split_with_sizes_copy.default, ...)
+    # getitem_3: "f32[128][1]cuda:0" = auto_functionalized_v2[1]
+    # getitem_4: "f32[256][1]cuda:0" = auto_functionalized_v2[2]
+    # getitem_5: "f32[16][1]cuda:0" = auto_functionalized_v2[3]
+    # getitem_6: "f32[16][1]cuda:0" = auto_functionalized_v2[4];
+    return (
+        is_fsdp_all_gather_copy_out_op(node)
+        or (
+            node.op == "call_function"
+            and node.target == operator.getitem
+            and is_fsdp_all_gather_copy_out_op(node.args[0])
+        )
+    )
+
 def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     """
     This pass finds the first bwd node in the graph (by looking at users of
@@ -572,6 +599,17 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     for idx, node in enumerate(gm.graph.nodes):
         order[node] = idx
 
+    # The mutated arg's all downstream use nodes after an FSDP mutation node (fsdp.copy_ or resize_) should strongly depend on the mutation node
+    if special_handling_for_fsdp_ops:
+        mutation_deps_of_node = defaultdict(set)
+        for idx, node in enumerate(gm.graph.nodes):
+            if is_must_recompute_fsdp_mutation_ops(node):
+                mutation_node = node
+                mutated_node = mutation_node.args[0]
+                for user in sorted(mutated_node.users, key=lambda user: order[user]):
+                    if order[user] > order[mutation_node]:
+                        mutation_deps_of_node[user].add(mutation_node)
+
     def insert_node_in_graph(node):
         cur_nodes = [node]
         insertable_nodes = set()
@@ -584,6 +622,9 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
             # Bias traversal towards the nodes that have higher depth - prioritizes
             # critical path first.
             cur_nodes += node.all_input_nodes
+
+            if special_handling_for_fsdp_ops:
+                cur_nodes += list(mutation_deps_of_node[node])
 
         insertable_nodes = sorted(insertable_nodes, key=lambda n: order[n])
         for node in insertable_nodes:
@@ -899,6 +940,12 @@ def solve_min_cut(
             return False
         if node.target == operator.getitem:
             return False
+        if special_handling_for_fsdp_ops:
+            if is_must_recompute_fsdp_mutation_ops(node) or is_must_recompute_fsdp_all_gather_copy_out_ops(node):
+                return False
+            elif node.op == "call_function" and node.target == torch.ops.inductor.resize_storage_bytes_.default and node.args[1] == 0:
+                # For resize-to-0 nodes, we explicitly ban recomputation because we rely on FSDP2 post-backward hooks to issue the resize-to-0 nodes at the right place in the backward graph.
+                return True
         if node.meta.get("recompute", None) == CheckpointPolicy.MUST_SAVE:
             return True
         if config.recompute_views and op_types.is_view(node):
@@ -999,6 +1046,9 @@ def solve_min_cut(
         nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
         return True
 
+    for i, node in enumerate(joint_graph.nodes):
+        node.meta["id_in_joint_graph"] = i
+
     for node in joint_graph.nodes:
         if node.op == "output":
             continue
@@ -1038,6 +1088,29 @@ def solve_min_cut(
         is_non_tensor_node = (
             "val" not in node.meta and "tensor_meta" not in node.meta
         ) or ("val" in node.meta and not isinstance(node.meta["val"], torch.Tensor))
+
+        if special_handling_for_fsdp_ops:
+            if is_must_recompute_fsdp_mutation_ops(node):
+                mutation_node = node
+                assert len(mutation_node.users) == 0, f"Expected FSDP mutation nodes to have no users (downstream should depend on the mutated arg instead), but got {len(mutation_node.users)} users: {mutation_node.users}"
+
+                # Always recompute the FSDP mutation nodes
+                nx_graph.add_edge(mutation_node.name + "_in", mutation_node.name + "_out", capacity=math.inf)
+                nx_graph.add_edge(mutation_node.name + "_in", "sink", capacity=math.inf)
+
+                # The mutated arg's all downstream use nodes after an FSDP mutation node (fsdp.copy_ or resize_) should strongly depend on the mutation node (they cannot be reordered)
+                mutated_node = mutation_node.args[0]
+                for user in sorted(mutated_node.users, key=lambda user: user.meta["id_in_joint_graph"]):
+                    if user.meta["id_in_joint_graph"] > mutation_node.meta["id_in_joint_graph"]:
+                        nx_graph.add_edge(
+                            mutation_node.name + "_out", user.name + "_in", capacity=math.inf
+                        )
+                continue
+            elif is_must_recompute_fsdp_all_gather_copy_out_ops(node):
+                # Always recompute the FSDP all-gather copy-out nodes
+                nx_graph.add_edge(node.name + "_in", node.name + "_out", capacity=math.inf)
+                nx_graph.add_edge(node.name + "_in", "sink", capacity=math.inf)
+                continue
 
         if is_sym_node(node):
             weight = float(sym_node_size(node))
@@ -1183,7 +1256,7 @@ def solve_min_cut(
 
     cut_nodes = set()
     for node_in, node_out in cutset:
-        assert node_in[:-3] == node_out[:-4]
+        assert node_in[:-3] == node_out[:-4], f"{node_in} {node_out}"
         node_name = node_in[:-3]
         cut_nodes.add(node_name)
 
@@ -1301,6 +1374,8 @@ def get_default_op_list() -> OpTypes:
         aten.as_strided,
         aten.permute,
         aten.select,
+        # TODO(yf225): hack: we want to guarante recompute of this op
+        aten._to_copy,
     ]
     view_ops = recomputable_view_ops
     default_recomputable_ops += [
@@ -1833,6 +1908,9 @@ def min_cut_rematerialization_partition(
                 required_bw_nodes.add(node)
             elif _must_be_in_backward(node):
                 required_bw_nodes.add(node)
+            elif special_handling_for_fsdp_ops:
+                if is_must_recompute_fsdp_mutation_ops(node) or is_must_recompute_fsdp_all_gather_copy_out_ops(node):
+                    required_bw_nodes.add(node)
 
             if node in required_bw_nodes:
                 for user in node.users:
@@ -1920,6 +1998,17 @@ def min_cut_rematerialization_partition(
             fw_module, bw_module = functionalize_rng_ops(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
+
+    bw_module_str = str(bw_module)
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "aot_backward_graph_right_before_reordering_to_mimic_autograd_engine",
+            "encoding": "string",
+        },
+        payload_fn=lambda: bw_module_str,
+    )
+
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
     if AOT_PARTITIONER_DEBUG:

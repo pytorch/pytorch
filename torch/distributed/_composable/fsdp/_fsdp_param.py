@@ -731,7 +731,19 @@ class FSDPParam:
                     t.size() for t in all_gather_inputs
                 ]
                 return [t.view(-1) for t in all_gather_inputs]
-            sharded_param_data = self._sharded_param_data
+            if compiled_autograd_enabled():
+                # With Traceable FSDP2, we always re-create the padded local_tensor instead of
+                # reading it from self._sharded_param_data. This is to avoid duplicated graph inputs
+                # (i.e. to avoid both self._sharded_param_data and self.sharded_param._local_tensor being
+                # captured as compiled autograd bwd graph inputs - they are aliases and share the same storage,
+                # so we don't want them to both be captured).
+                # Note that this has small performance penalty: re-creation of padded local_tensor
+                # involves copying the local_tensor into the bigger (padded) buffer. We will explore ways to
+                # optimize it if it becomes an issue in the future.
+                local_tensor, _ = self._maybe_update_local_tensor(self._sharded_local_tensor)
+                sharded_param_data = local_tensor.view(-1)
+            else:
+                sharded_param_data = self._sharded_param_data
             if self.offload_to_cpu:
                 sharded_param_data = sharded_param_data.to(
                     self.device, non_blocking=True
@@ -799,6 +811,26 @@ class FSDPParam:
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
 
+    def _maybe_update_local_tensor(self, local_tensor):
+        updated_local_tensor = False
+        shard_dim = self.fsdp_placement.dim
+        length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
+        padded_sharded_size = self.padded_sharded_param_size
+        if local_tensor.size() != padded_sharded_size:
+            assert (
+                shard_dim == 0
+            ), f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
+            padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
+            padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
+                local_tensor
+            )
+            local_tensor = padded_local_tensor
+            updated_local_tensor = True
+        if self.pin_memory and not local_tensor.is_pinned():
+            local_tensor = local_tensor.cpu().pin_memory(device=self.device)
+            updated_local_tensor = True
+        return local_tensor, updated_local_tensor
+
     def reset_sharded_param(self):
         # For ops like `nn.Module._apply` or `load_state_dict(assign=True)`
         # that change the sharded parameter tensor, we may need to re-pad the
@@ -815,30 +847,18 @@ class FSDPParam:
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return
-        updated_local_tensor = False
-        padded_sharded_size = self.padded_sharded_param_size
         shard_dim = self.fsdp_placement.dim
         length = local_tensor.size(shard_dim) if local_tensor.numel() > 0 else 0
-        if local_tensor.size() != padded_sharded_size:
-            assert (
-                shard_dim == 0
-            ), f"Shard({shard_dim}) requires even sharding: {local_tensor.size()=}"
-            padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
-            padded_local_tensor.narrow(dim=shard_dim, start=0, length=length).copy_(
-                local_tensor
-            )
-            local_tensor = padded_local_tensor
-            updated_local_tensor = True
-        if self.pin_memory and not local_tensor.is_pinned():
-            local_tensor = local_tensor.cpu().pin_memory(device=self.device)
-            updated_local_tensor = True
+        local_tensor, updated_local_tensor = self._maybe_update_local_tensor(local_tensor)
         self._sharded_param_data = local_tensor.view(-1)
         assert isinstance(self.sharded_param, DTensor)  # mypy
         if updated_local_tensor:
             # Only change the local tensor object if needed
+            # Detach since `self.sharded_param` is the autograd leaf and we don't need gradients of
+            # `self.sharded_param` to flow back to the padded local_tensor.
             self.sharded_param._local_tensor = local_tensor.narrow(
                 dim=shard_dim, start=0, length=length
-            )
+            ).detach()
             assert self.sharded_param._local_tensor.is_contiguous()
         self._sharding_spec = self.sharded_param._spec
 
