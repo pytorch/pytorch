@@ -2291,7 +2291,8 @@ def native_batch_norm_backward(
     mean = save_mean_cast
     invstd = save_invstd_cast
     if train:
-        assert save_mean_cast is not None and save_invstd_cast is not None
+        assert mean is not None and invstd is not None
+
     else:
         assert running_mean_cast is not None and running_var_cast is not None
         mean = running_mean_cast
@@ -2327,7 +2328,6 @@ def native_batch_norm_backward(
         grad_input = grad_out_cast * grad_scale
 
     if output_mask[1]:
-        assert invstd is not None
         grad_weight = dot_p * invstd
     else:
         grad_weight = None  # "None" doesn't work with vjp, should use zeros for vjp
