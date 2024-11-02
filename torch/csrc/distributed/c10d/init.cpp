@@ -397,7 +397,7 @@ static PyObject* reduceopmeta___instancecheck__(
   if (Py_TYPE(self) == Py_TYPE(args)) {
     Py_RETURN_TRUE;
   }
-  if (c10::string_view(args->ob_type->tp_name).find("RedOpType") !=
+  if (std::string_view(args->ob_type->tp_name).find("RedOpType") !=
       c10::string_view::npos) {
     Py_RETURN_TRUE;
   }
@@ -937,6 +937,21 @@ This class does not support ``__members__`` property.)");
       py::arg("tensor"),
       py::arg("work"));
 
+  module.def("_get_work_registry_size", []() {
+    return ::c10d::get_work_registry_size();
+  });
+
+  module.def(
+      "_set_allow_inflight_collective_as_graph_input",
+      [](bool value) {
+        return ::c10d::set_allow_inflight_collective_as_graph_input(value);
+      },
+      py::arg("value"));
+
+  module.def("_allow_inflight_collective_as_graph_input", []() {
+    return ::c10d::allow_inflight_collective_as_graph_input();
+  });
+
   // Remove a group from the native registry
   module.def(
       "_unregister_process_group",
@@ -1078,6 +1093,13 @@ This class does not support ``__members__`` property.)");
           py::arg("rank"),
           py::arg("sizes"),
           py::arg("dtype"),
+          py::arg("storage_offset") = 0)
+      .def(
+          "get_signal_pad",
+          &SymmetricMemory::get_signal_pad,
+          py::arg("rank"),
+          py::arg("sizes") = py::list(),
+          py::arg("dtype") = py::none(),
           py::arg("storage_offset") = 0)
       .def(
           "barrier",
