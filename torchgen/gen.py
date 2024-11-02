@@ -600,19 +600,15 @@ struct TORCH_API {name} {{
   using schema = {sig.type()};
   using ptr_schema = schema*;
   // See Note [static constexpr char* members for windows NVCC]
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(name, "aten::{f.func.name.name}")
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(overload_name, "{f.func.name.overload_name}")
-  STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(schema_str, {cpp_string(str(f.func))})
+  static constexpr const char* name = "aten::{f.func.name.name}";
+  static constexpr const char* overload_name = "{f.func.name.overload_name}";
+  static constexpr const char* schema_str = {cpp_string(str(f.func))};
   static {sig.defn(name="call", is_redispatching_fn=False)};
   static {sig.defn(name="redispatch", is_redispatching_fn=True)};
 }};"""
 
         elif self.target is Target.DEFINITION:
             defns = f"""
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, name, "aten::{f.func.name.name}")
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, overload_name, "{f.func.name.overload_name}")
-STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA({name}, schema_str, {cpp_string(str(f.func))})
-
 // aten::{f.func}
 static C10_NOINLINE c10::TypedOperatorHandle<{name}::schema> create_{name}_typed_handle() {{
   return c10::Dispatcher::singleton()
@@ -695,7 +691,7 @@ inline {sig.decl()} {{
             if has_symint:
                 result += f"""
 namespace symint {{
-  template <typename T, typename = std::enable_if_t<std::is_same<T, {intlike_t}>::value>>
+  template <typename T, typename = std::enable_if_t<std::is_same_v<T, {intlike_t}>>>
   {sig.decl(suppress_symint_suffix=True)} {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
   }}

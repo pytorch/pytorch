@@ -343,7 +343,7 @@ struct MetaAllocator final : public at::Allocator {
 
 static MetaAllocator g_meta_alloc;
 
-REGISTER_ALLOCATOR(kMeta, &g_meta_alloc);
+REGISTER_ALLOCATOR(kMeta, &g_meta_alloc)
 
 TensorBase empty_meta(IntArrayRef size, ScalarType dtype,
                      std::optional<c10::MemoryFormat> memory_format_opt) {

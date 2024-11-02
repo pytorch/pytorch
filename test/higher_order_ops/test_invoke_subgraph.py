@@ -145,7 +145,7 @@ class TestInvokeSubgraphCompile(TestCase):
 
         x_clone = x.clone().detach().requires_grad_(True)
         y_clone = y.clone().detach().requires_grad_(True)
-        res = torch.compile(fn, backend="eager", fullgraph=True)(x_clone, y_clone)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone, y_clone)
 
         # Run backward
         ref.sum().backward()
@@ -254,7 +254,7 @@ class GraphModule(torch.nn.Module):
 
         x_clone = x.clone().detach().requires_grad_(True)
         y_clone = y.clone().detach().requires_grad_(True)
-        res = torch.compile(fn, backend="eager", fullgraph=True)(x_clone, y_clone)
+        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone, y_clone)
 
         # Run backward
         ref.sum().backward()
@@ -373,6 +373,22 @@ class GraphModule(torch.nn.Module):
             torch._dynamo.exc.Unsupported, "NYI: invoke_subgraph with aliasing"
         ):
             opt_fn(x, y)
+
+    def test_simple_module(self):
+        mod = torch.nn.Linear(8, 8)
+
+        def gn(x):
+            return mod(x)
+
+        def fn(x):
+            return invoke_subgraph(gn, mod, (x,))
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+
+        ref = mod(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
     def test_input_aliasing(self):
         def gn(x, y):
