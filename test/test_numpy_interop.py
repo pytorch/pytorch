@@ -412,7 +412,7 @@ class TestNumPyInterop(TestCase):
             self.assertEqual(asarray.dtype, dtype)
             # Only concrete class can be given where "Type[number[_64Bit]]" is expected
             if np.dtype(dtype).kind == "u":  # type: ignore[misc]
-                wrapped_x = np.array([1, -2, 3, -4], dtype=dtype)
+                wrapped_x = np.array([1, -2, 3, -4]).astype(dtype)
                 for i in range(len(x)):
                     self.assertEqual(asarray[i], wrapped_x[i])
             else:

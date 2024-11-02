@@ -1706,8 +1706,12 @@ def choose_saved_values_set(
             )
         dont_ban = set()
         for idx in recomputable_node_idxs:
-            if idx in all_recomputable_banned_nodes:
+            # if idx in all_recomputable_banned_nodes:
+            try:
                 dont_ban.add(all_recomputable_banned_nodes[idx])
+            except BaseException:
+                pass
+
         assert dont_ban.issubset(all_recomputable_banned_nodes)
 
         saved_values, _ = solve_min_cut(
@@ -1722,7 +1726,7 @@ def choose_saved_values_set(
         options = []
         for sweep_memory_budget in range(100, -1, -5):
             saved_values, expected_runtime = get_saved_values_knapsack(
-                sweep_memory_budget / 100, node_info, joint_graph
+                sweep_memory_budget / 100, node_info=node_info, joint_graph=joint_graph
             )
             options.append(
                 (
@@ -1767,7 +1771,9 @@ def choose_saved_values_set(
     # tensors we actually banned from recompute, but there may be other
     # tensors that we choose to save.
 
-    return get_saved_values_knapsack(memory_budget, node_info, joint_graph)[0]
+    return get_saved_values_knapsack(
+        memory_budget=memory_budget, node_info=node_info, joint_graph=joint_graph
+    )[0]
 
 
 def min_cut_rematerialization_partition(
@@ -1954,7 +1960,6 @@ def draw_graph(
     clear_meta: bool = True,
     prog: Optional[Union[str, List[str]]] = None,
     parse_stack_trace: bool = False,
-    dot_graph_shape: Optional[str] = None,
 ) -> None:
     if clear_meta:
         new_graph = copy.deepcopy(traced.graph)
@@ -1969,7 +1974,6 @@ def draw_graph(
         traced,
         figname,
         parse_stack_trace=parse_stack_trace,
-        dot_graph_shape=dot_graph_shape,
     )
     x = g.get_main_dot_graph()
     write_method = getattr(x, "write_" + ext.lstrip("."))

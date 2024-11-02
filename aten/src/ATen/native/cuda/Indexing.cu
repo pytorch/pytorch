@@ -124,6 +124,55 @@ __global__ void indexing_backward_kernel(
   }
 }
 
+#ifdef USE_ROCM
+template <typename scalar_t, bool accumulate>
+__global__ void indexing_backward_kernel_rocm(
+  const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
+  int64_t numel, int64_t stride, int64_t stride_before, int64_t outer_dim) {
+
+  // This implementation is adopted from indexing_backward_kernel above.
+  using opmath_t = at::opmath_type<scalar_t>;
+  for (int64_t z = blockIdx.z; z < outer_dim; z += gridDim.z){
+    int64_t idx = blockIdx.x * blockDim.y + threadIdx.y;
+    if (idx < numel && (idx == 0 || sorted_indices[idx] != sorted_indices[idx - 1])){
+      do {
+        // if not accumulate, we only keep the last duplicate index so skip those before it
+        if constexpr (!accumulate) {
+          if ((idx < numel - 1) && sorted_indices[idx] == sorted_indices[idx + 1]) {
+            idx++;
+            continue;
+          }
+        }
+        const int64_t weight_row = ((int64_t) sorted_indices[idx]) * stride + z * stride_before;
+        const int64_t grad_row = ((int64_t) indices[idx]) * stride + z * numel * stride;
+
+        opmath_t gradient;
+        opmath_t weight;
+
+        int64_t feature_dim = threadIdx.x + blockIdx.y * blockDim.x;
+        while (feature_dim < stride) {
+          gradient = static_cast<opmath_t>(grad_output[grad_row + feature_dim]);
+          if constexpr (accumulate) {
+            weight = static_cast<opmath_t>(grad_weight[weight_row + feature_dim]);
+          }
+
+          if constexpr (accumulate) {
+            weight += gradient;
+          } else {
+            weight = gradient;
+          }
+
+          grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight);
+          feature_dim += gridDim.y * blockDim.x;
+        }
+
+        idx++;
+      } while (idx < numel && sorted_indices[idx] == sorted_indices[idx - 1]);
+    }
+  }
+}
+#endif
+
 template <typename scalar_t>
 __global__ void indexing_backward_kernel_stride_1(
   const int64_t* sorted_indices, const int64_t* indices, const scalar_t* grad_output, scalar_t* grad_weight,
@@ -470,7 +519,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
       // cub on CUDA <= 11.2 have a bug that for small sizes
       // cub's sort can be much slower than thrust's merge sort
       // this bug is fixed in CUDA 11.3
-#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) || defined(USE_ROCM)
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) && !defined(USE_ROCM)
       if (num_indices < 50000) {
         index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
       } else
@@ -491,7 +540,11 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
           linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),
           "number of flattened indices did not match number of elements in the value tensor: ",
           linearIndex.numel()*sliceSize*nElemBefore, " vs ", expandedValue.numel());
+#ifdef USE_ROCM
+      const int UNROLL = 1;
+#else
       const int UNROLL = 4;
+#endif
       const int indices_per_block = 4;
       const int warp_size = at::cuda::warp_size();
       dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
@@ -549,6 +602,54 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             kHalf,
             kBool,
             kBFloat16);
+#ifdef USE_ROCM
+        } else if (UNROLL == 1) {
+          if (accumulate) {
+            AT_DISPATCH_V2(
+              expandedValue.scalar_type(),
+              "indexing_backward",
+              AT_WRAP([&] {
+                indexing_backward_kernel_rocm<scalar_t, true><<<grid, block, 0, stream>>>(
+                  sorted_indices.const_data_ptr<int64_t>(),
+                  orig_indices.const_data_ptr<int64_t>(),
+                  expandedValue.const_data_ptr<scalar_t>(),
+                  src_.mutable_data_ptr<scalar_t>(),
+                  num_indices,
+                  sliceSize,
+                  strideBefore,
+                  nElemBefore);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+              }),
+              AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+              AT_EXPAND(AT_FLOAT8_TYPES),
+              kComplexHalf,
+              kHalf,
+              kBool,
+              kBFloat16);
+          } else {
+            AT_DISPATCH_V2(
+              expandedValue.scalar_type(),
+              "indexing_backward",
+              AT_WRAP([&] {
+                indexing_backward_kernel_rocm<scalar_t, false><<<grid, block, 0, stream>>>(
+                  sorted_indices.const_data_ptr<int64_t>(),
+                  orig_indices.const_data_ptr<int64_t>(),
+                  expandedValue.const_data_ptr<scalar_t>(),
+                  src_.mutable_data_ptr<scalar_t>(),
+                  num_indices,
+                  sliceSize,
+                  strideBefore,
+                  nElemBefore);
+                C10_CUDA_KERNEL_LAUNCH_CHECK();
+              }),
+              AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+              AT_EXPAND(AT_FLOAT8_TYPES),
+              kComplexHalf,
+              kHalf,
+              kBool,
+              kBFloat16);
+          }
+#endif
         } else {
           AT_DISPATCH_V2(
             expandedValue.scalar_type(),
@@ -572,8 +673,8 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<std::optional<Ten
             kHalf,
             kBool,
             kBFloat16);
-          }
         }
+      }
 
       if (permuted) {
         self.copy_(src_.permute(inversePerm));
@@ -624,7 +725,7 @@ void index_put_with_sort_quantized(Tensor & self, const c10::List<std::optional<
       // cub on CUDA <= 11.2 have a bug that for small sizes
       // cub's sort can be much slower than thrust's merge sort
       // this bug is fixed in CUDA 11.3
-#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) || defined(USE_ROCM)
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) && !defined(USE_ROCM)
       if (num_indices < 50000) {
         index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
       } else
@@ -1350,7 +1451,7 @@ template <typename scalar_t>
 void index_select_out_cuda_impl(
     Tensor& out,
     const Tensor& self,
-    uint64_t dim,
+    int64_t dim,
     const Tensor& index) {
   uint64_t numIndices = index.numel();
   auto selfDims = self.dim() == 0 ? 1 : self.dim();
@@ -1506,24 +1607,27 @@ Tensor& index_select_out_cuda(
   dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
-  if (self.is_quantized()){
+  if (self.is_quantized()) {
     TORCH_CHECK(
-      self.qscheme() == kPerTensorAffine,
-      "Only per_tensor quantized quantized tensors are supported by index_select.")
+        self.qscheme() == kPerTensorAffine,
+        "Only per_tensor quantized quantized tensors are supported by index_select.")
     AT_DISPATCH_QINT_TYPES(out.scalar_type(), "index_select_quant_cuda", [&] {
-      index_select_out_cuda_impl<scalar_t>(out, self, (uint64_t) dim, index);
+      index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
     });
   } else {
     AT_DISPATCH_V2(
         out.scalar_type(),
         "index_select_cuda",
-        AT_WRAP([&] { index_select_out_cuda_impl<scalar_t>(out, self, (uint64_t) dim, index); }),
-        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), AT_EXPAND(AT_FLOAT8_TYPES),
+        AT_WRAP([&] {
+          index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
+        }),
+        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+        AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+        AT_EXPAND(AT_FLOAT8_TYPES),
         kComplexHalf,
         kHalf,
         kBool,
-        kBFloat16
-        );
+        kBFloat16);
   }
 
   return out;
