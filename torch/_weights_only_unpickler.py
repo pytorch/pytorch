@@ -83,29 +83,27 @@ _blocklisted_modules = [
     "nt",
 ]
 
-_marked_safe_globals_list: List[Any] = []
+_marked_safe_globals_set: Set[Any] = set()
 
 
 def _add_safe_globals(safe_globals: List[Any]):
-    global _marked_safe_globals_list
-    _marked_safe_globals_list += safe_globals
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
 
 
 def _get_safe_globals() -> List[Any]:
-    global _marked_safe_globals_list
-    return _marked_safe_globals_list
+    global _marked_safe_globals_set
+    return list(_marked_safe_globals_set)
 
 
 def _clear_safe_globals():
-    global _marked_safe_globals_list
-    _marked_safe_globals_list = []
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = set()
 
 
 def _remove_safe_globals(globals_to_remove: List[Any]):
-    global _marked_safe_globals_list
-    _marked_safe_globals_list = list(
-        set(_marked_safe_globals_list) - set(globals_to_remove)
-    )
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = _marked_safe_globals_set - set(globals_to_remove)
 
 
 class _safe_globals:
@@ -128,7 +126,7 @@ class _safe_globals:
 # _get_allowed_globals due to the lru_cache
 def _get_user_allowed_globals():
     rc: Dict[str, Any] = {}
-    for f in _marked_safe_globals_list:
+    for f in _marked_safe_globals_set:
         module, name = f.__module__, f.__name__
         rc[f"{module}.{name}"] = f
     return rc
