@@ -272,7 +272,7 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
 
 template <typename T>
 bool check_both_nan(T x, T y) {
-    if constexpr (std::is_floating_point_v<T>) {
+    if constexpr (std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>) {
         return std::isnan(x) && std::isnan(y);
     }
     return false;
