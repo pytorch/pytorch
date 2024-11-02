@@ -1,7 +1,7 @@
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
-#include <unordered_map>
 
 #if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
     !__has_include("ext/stdio_filebuf.h")
@@ -65,6 +65,10 @@ struct UpgradeExclusive {
     rdlock_.unlock();
     rdlock_.mutex()->lock();
   }
+  UpgradeExclusive(const UpgradeExclusive&) = delete;
+  UpgradeExclusive(UpgradeExclusive&&) = delete;
+  UpgradeExclusive& operator=(const UpgradeExclusive&) = delete;
+  UpgradeExclusive& operator=(UpgradeExclusive&&) = delete;
   ~UpgradeExclusive() {
     rdlock_.mutex()->unlock();
     rdlock_.lock();
@@ -121,8 +125,8 @@ static const char* process_name() {
 }
 
 struct Version {
-  uint64_t adds_ = LONG_LONG_MAX;
-  uint64_t subs_ = LONG_LONG_MAX;
+  uint64_t adds_ = LLONG_MAX;
+  uint64_t subs_ = LLONG_MAX;
 };
 
 struct UnwindCache {
@@ -498,7 +502,10 @@ Stats stats() {
 
 } // namespace torch::unwind
 
-extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
+extern "C" C10_USED void unwind_c(
+    std::vector<void*>* result,
+    int64_t rsp,
+    int64_t rbp) {
   std::shared_lock lock(torch::unwind::cache_mutex_);
   torch::unwind::UnwindState state{};
   // NOLINTNEXTLINE(performance-no-int-to-ptr)

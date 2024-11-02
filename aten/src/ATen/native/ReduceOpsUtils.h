@@ -207,9 +207,13 @@ inline TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result, self.to(in_dtype));
 }
 
-inline C10_UNUSED TensorIterator make_reduction(
-    const char* name, Tensor& result, const Tensor& self,
-    at::OptionalIntArrayRef dim, bool keepdim, ScalarType out_dtype) {
+[[maybe_unused]] inline TensorIterator make_reduction(
+    const char* name,
+    Tensor& result,
+    const Tensor& self,
+    at::OptionalIntArrayRef dim,
+    bool keepdim,
+    ScalarType out_dtype) {
   // special case for type promotion in mixed precision, improves computational
   // efficiency.
   // not generalize this to common mismatched input/output types to avoid cross
@@ -259,9 +263,14 @@ inline TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
 }
 
-inline C10_UNUSED TensorIterator make_reduction(
-    const char* name, Tensor& result1, Tensor& result2, const Tensor& self,
-    at::OptionalIntArrayRef dim, bool keepdim, ScalarType dtype) {
+[[maybe_unused]] inline TensorIterator make_reduction(
+    const char* name,
+    Tensor& result1,
+    Tensor& result2,
+    const Tensor& self,
+    at::OptionalIntArrayRef dim,
+    bool keepdim,
+    ScalarType dtype) {
   return make_reduction(name, result1, result2, self, dim, keepdim, dtype, dtype);
 }
 
@@ -313,9 +322,13 @@ inline std::vector<int64_t> get_zero_numel_tensor_size(
 // This function should be called when you are reducing a zero-numel tensor and want to
 // resize the output and return it. This function exists for resizing zero-numel
 // tensors when the size of the reduction dimension is non-zero.
-inline C10_UNUSED void zero_numel_tensor_resize(Tensor& result, Tensor& result_indices,
-                                     const Tensor& self, const int64_t dim,
-                                     const bool keepdim, const char *fn_name) {
+[[maybe_unused]] inline void zero_numel_tensor_resize(
+    Tensor& result,
+    Tensor& result_indices,
+    const Tensor& self,
+    const int64_t dim,
+    const bool keepdim,
+    const char* fn_name) {
   auto sizes = get_zero_numel_tensor_size(self, dim, keepdim, fn_name);
   at::native::resize_output(result, sizes);
   at::native::resize_output(result_indices, sizes);
@@ -349,11 +362,11 @@ inline ScalarType get_dtype_from_result(Tensor& result, std::optional<ScalarType
 
 namespace at::meta {
 
-inline C10_UNUSED DimVector get_reduction_shape(
+[[maybe_unused]] inline DimVector get_reduction_shape(
     const Tensor& self,
     IntArrayRef dims,
     bool keepdim,
-    bool allow_empty_dims=false) {
+    bool allow_empty_dims = false) {
   auto mask = native::make_dim_mask(dims, self.dim(), allow_empty_dims);
   return native::shape_from_dim_mask(self, mask, keepdim);
 }
@@ -434,7 +447,7 @@ inline TensorIterator make_reduction(
   return TensorIterator::reduce_op(viewed_result1, viewed_result2, self.to(dtype1));
 }
 
-inline C10_UNUSED TensorIterator make_reduction_from_out_ty(
+[[maybe_unused]] inline TensorIterator make_reduction_from_out_ty(
     const Tensor& self,
     const Tensor& result,
     OptionalIntArrayRef opt_dims,
