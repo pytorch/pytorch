@@ -1721,7 +1721,7 @@ class CSE:
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer, DeferredLineBase],
+        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer],
         *,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write=True,
@@ -1731,6 +1731,7 @@ class CSE:
         if isinstance(expr, OpsValue):
             expr = expr.value
 
+        assert isinstance(expr, (str, CSEVariable, IndentedBuffer)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
             # If the expressions were always created with all the information, we could
@@ -1739,13 +1740,7 @@ class CSE:
             expr.bounds = expr.bounds.tighten(bounds)
             expr.use_count += 1
             return expr
-        elif isinstance(expr, IndentedBuffer):
-            cache_key = expr.getvalue()
-        elif isinstance(expr, DeferredLineBase):
-            cache_key = expr.line
-        else:
-            assert isinstance(expr, str)
-            cache_key = expr
+        cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
         var = self.cache.get(cache_key, None)
         if not var:
             var = self.newvar(bounds, dtype)
@@ -1760,11 +1755,6 @@ class CSE:
                         buffer.writeline(f"{self.prefix}{var} =")
                     buffer.splice(expr)
                     buffer.writeline(self.suffix)
-                elif isinstance(expr, DeferredLineBase):
-                    assert assignment
-                    buffer.writeline(
-                        expr._new_line(f"{self.prefix}{var} = {expr.line}{self.suffix}")
-                    )
                 else:
                     if assignment:
                         line = f"{self.prefix}{var} = {expr}{self.suffix}"

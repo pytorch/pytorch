@@ -1087,21 +1087,6 @@ class DeferredLineBase:
         return len(self.line)
 
 
-class DelayReplaceLine(DeferredLineBase):
-    """At end of codegen call `line.replace(key, value_fn())`"""
-
-    def __init__(self, key: str, value_fn: Callable[[], str], line: str):
-        super().__init__(line)
-        self.key = key
-        self.value_fn = value_fn
-
-    def __call__(self) -> str:
-        return self.line.replace(self.key, self.value_fn())
-
-    def _new_line(self, line: str) -> DelayReplaceLine:
-        return DelayReplaceLine(self.key, self.value_fn, line)
-
-
 @functools.lru_cache(None)
 def is_big_gpu(index) -> bool:
     min_sms = 68  # 3080
