@@ -164,31 +164,9 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
 // https://gcc.gnu.org/gcc-10/changes.html
 // https://godbolt.org/z/cdGG7vn8o
 #define COMPILER_SUPPORTS_BF16_TARGET 1
-#else // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
+#else
 #define COMPILER_SUPPORTS_BF16_TARGET 0
-#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
-
-namespace {
-vec::Vectorized<float> fmadd(
-    const vec::Vectorized<float>& acc,
-    const vec::Vectorized<c10::BFloat16>& a,
-    const vec::Vectorized<c10::BFloat16>& b) {
-  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
-  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
-  return fmadd(a_float_high, b_float_high, fmadd(a_float_low, b_float_low, acc));
-}
-// TODO: move this next to the Half overload below once BFloat16 is
-// enabled for non-aarch64 architectures.
-std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
-    const vec::Vectorized<c10::BFloat16>& a,
-    const vec::Vectorized<c10::BFloat16>& b,
-    const vec::Vectorized<float>& acc_low,
-    const vec::Vectorized<float>& acc_high) {
-  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
-  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
-  return std::make_pair(fmadd(a_float_low, b_float_low, acc_low), fmadd(a_float_high, b_float_high, acc_high));
-}
-} // namespace
+#endif // defined(__clang__) && __clang_major__ > 15
 
 #if COMPILER_SUPPORTS_BF16_TARGET
 #define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("arch=armv8.2-a+bf16")))
@@ -222,10 +200,10 @@ void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
 #define TARGET_ARM_BF16_ATTRIBUTE
 #endif // COMPILER_SUPPORTS_BF16_TARGET
 
-#else // __aarch64__
+#else // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
 // TODO: broaden BF16 support beyond aarch64
 #define COMPILER_SUPPORTS_BF16_TARGET 0
-#endif // __aarch64__
+#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
 
 namespace {
 // Returns (acc_low + a_low_half * b_low_half, acc_high + a_high_half * b_high_half)
@@ -260,7 +238,24 @@ vec::Vectorized<float> fmadd(vec::Vectorized<float> a, vec::Vectorized<Half> b, 
 #endif
 }
 
+vec::Vectorized<float> fmadd(
+    const vec::Vectorized<float>& acc,
+    const vec::Vectorized<c10::BFloat16>& a,
+    const vec::Vectorized<c10::BFloat16>& b) {
+  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
+  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
+  return fmadd(a_float_high, b_float_high, fmadd(a_float_low, b_float_low, acc));
+}
 
+std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
+    const vec::Vectorized<c10::BFloat16>& a,
+    const vec::Vectorized<c10::BFloat16>& b,
+    const vec::Vectorized<float>& acc_low,
+    const vec::Vectorized<float>& acc_high) {
+  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
+  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
+  return std::make_pair(fmadd(a_float_low, b_float_low, acc_low), fmadd(a_float_high, b_float_high, acc_high));
+}
 } // namespace
 
 template <typename T>
