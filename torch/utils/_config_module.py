@@ -3,7 +3,6 @@ import copy
 import hashlib
 import inspect
 import io
-import os
 import pickle
 import tokenize
 import unittest
@@ -61,8 +60,7 @@ def install_config_module(module: ModuleType) -> None:
     """
 
     class ConfigModuleInstance(ConfigModule):
-        # __annotations__ is written to by Sphinx autodoc
-        _bypass_keys = set({"_is_dirty", "_hash_digest", "__annotations__"})
+        _bypass_keys = set({"_is_dirty", "_hash_digest"})
 
     def visit(
         source: Union[ModuleType, type],
@@ -498,12 +496,3 @@ def patch_object(obj: object, name: str, value: object) -> object:
     if isinstance(obj, ConfigModule):
         return obj.patch(name, value)
     return mock.patch.object(obj, name, value)
-
-
-def get_tristate_env(name: str) -> Optional[bool]:
-    value = os.environ.get(name)
-    if value == "1":
-        return True
-    if value == "0":
-        return False
-    return None
