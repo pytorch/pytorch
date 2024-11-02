@@ -361,15 +361,17 @@ class Unpickler:
                 elif type(inst) in _get_user_allowed_globals().values():
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
-                    elif hasattr(inst, "__slots__"):
-                        # if slots are defined, state will be a tuple (state, slotstate)
-                        state, slotstate = state
-                        for k, v in slotstate.items():
-                            setattr(inst, k, v)
+                    else:
+                        # mimics load_build in pickle
+                        # https://github.com/python/cpython/blob/f0c6fccd08904787a39269367f09f263d496114c/Lib/pickle.py#L1854-L1867
+                        slotstate = None
+                        if isinstance(state, tuple) and len(state) == 2:
+                            state, slotstate = state
                         if state:
                             inst.__dict__.update(state)
-                    else:
-                        inst.__dict__.update(state)
+                        if slotstate:
+                            for k, v in slotstate.items():
+                                setattr(inst, k, v)
                 else:
                     raise UnpicklingError(
                         "Can only build Tensor, Parameter, OrderedDict or types allowlisted "
