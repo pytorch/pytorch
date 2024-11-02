@@ -93,6 +93,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
+from .pgo import put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -1019,6 +1020,8 @@ def _compile(
                     f"{type(e).__qualname__}: {str(e)}"
                 ).with_traceback(e.__traceback__) from None
         finally:
+            put_code_state()
+
             if tracer:
                 tracer.output.local_scope = {}
 
