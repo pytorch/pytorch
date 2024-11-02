@@ -878,6 +878,22 @@ class CPUReproTests(TestCase):
             torch.compile(fn)(x_clone, y_clone)
             self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
 
+    def test_index_put2(self):
+        # https://github.com/pytorch/pytorch/issues/138908
+        def fn(y, index0, index1):
+            y[index1] += y[index0]
+
+        y = torch.randn((2, 32), dtype=torch.float32)
+        index0 = torch.tensor([[0, 1]])
+        index1 = torch.tensor([[1, 0]])
+        y_clone = y.clone()
+        index0_clone = index0.clone()
+        index1_clone = index1.clone()
+        with torch.no_grad():
+            fn(y, index0, index1)
+            torch.compile(fn)(y_clone, index0_clone, index1_clone)
+            self.assertEqual(y, y_clone, atol=1e-3, rtol=1e-3)
+
     def test_index_add(self):
         # https://github.com/pytorch/pytorch/issues/138908
         def fn(x, y, scale_y, index):
