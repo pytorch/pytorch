@@ -15,7 +15,7 @@
 
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
-#include <torch/csrc/distributed/c10d/cuda/AsyncMM.h>
+#include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 
 #define INT_SWITCH_CASE(name, val, ...) \
   case val: {                           \
