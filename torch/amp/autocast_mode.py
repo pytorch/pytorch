@@ -333,8 +333,7 @@ class autocast:
                 warnings.warn(error_message)
                 enabled = False
             elif self.fast_dtype == torch.bfloat16:
-                mac_ver = platform.mac_ver()[0]
-                if mac_ver and tuple(map(int, mac_ver.split("."))) < (14, 0):
+                if not torch.backends.mps.is_macos_or_newer(14, 0):
                     error_message = (
                         "In MPS autocast, but the target dtype torch.bfloat16 is not supported "
                         "on macOS versions below 14. Disabling autocast."
