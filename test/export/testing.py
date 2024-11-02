@@ -270,6 +270,12 @@ def expectedFailureSerDer(fn):
     return fn
 
 
+# Controls tests generated in test/export/test_serdes.py
+def expectedFailureSerDerNonStrict(fn):
+    fn._expected_failure_serdes_non_strict = True
+    return fn
+
+
 def expectedFailureSerDerPreDispatch(fn):
     fn._expected_failure_serdes_pre_dispatch = True
     return fn

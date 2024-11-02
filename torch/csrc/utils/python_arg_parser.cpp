@@ -1127,7 +1127,7 @@ static inline std::vector<int64_t> parse_intlist_args(
 }
 
 // Parse a string literal to remove quotes and escape sequences
-static std::string parse_string_literal(c10::string_view str) {
+static std::string parse_string_literal(std::string_view str) {
   TORCH_CHECK(str.length() >= 2, "String defaults must be quoted");
 
   if (str.front() == '"') {
