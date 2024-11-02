@@ -774,7 +774,7 @@ class NoopHandler:
 
     @staticmethod
     def indirect_indexing(index_var, size, check=True, wrap_neg=True) -> sympy.Symbol:
-        return sympy.S.Zero
+        return sympy.Integer(0)
 
 
 # Use mypy to check protocol implemented correctly

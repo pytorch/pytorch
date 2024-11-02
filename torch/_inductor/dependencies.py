@@ -204,7 +204,7 @@ class MemoryDep(Dep):
             numel = V.graph.get_numel(self.name)
         else:
             vars: OrderedSet[sympy.Basic] = OrderedSet(self.index.free_symbols)
-            numel = sympy.S.One
+            numel = sympy.Integer(1)
             for var, size in zip(self.var_names, self.size):
                 if var in vars:
                     numel = numel * size
@@ -328,7 +328,7 @@ class WeakDep(Dep):
         raise NotImplementedError("WeakDep does not have an index")
 
     def get_numel(self) -> sympy.Expr:
-        return sympy.S.One
+        return sympy.Integer(1)
 
     def rename(self, renames: Dict[str, str]) -> "WeakDep":
         if self.name in renames:

@@ -298,7 +298,7 @@ class SizeVarAllocator:
             new_index = []
             for size in sizes:
                 if size is None:
-                    new_index.append(sympy.S.Zero)
+                    new_index.append(sympy.Integer(0))
                 else:
                     new_index.append(it.pop())
             assert not it
@@ -617,26 +617,26 @@ class SizeVarAllocator:
         index = self.simplify(index)
         # remove any offset
         index = index - sympy_subs(
-            index, {v: sympy.S.Zero for v in support_vars if v != 0}
+            index, {v: sympy.Integer(0) for v in support_vars if v != 0}
         )
         for i in range(len(vars)):
             # drop all the other dims
             index_dim = sympy_subs(
                 index,
                 {
-                    support_vars[j]: sympy.S.Zero
+                    support_vars[j]: sympy.Integer(0)
                     for j in range(len(support_vars))
                     if vars[i] != support_vars[j] and support_vars[j] != 0
                 },
             )
             v = vars[i]
             if v == 0:
-                strides.append(sympy.S.Zero)
+                strides.append(sympy.Integer(0))
             else:
                 # TODO(jansel): should we use sympy.diff here?
                 strides.append(
-                    sympy_subs(index_dim, {v: sympy.S.One})
-                    - sympy_subs(index_dim, {v: sympy.S.Zero})
+                    sympy_subs(index_dim, {v: sympy.Integer(1)})
+                    - sympy_subs(index_dim, {v: sympy.Integer(0)})
                 )
         return strides
 
@@ -661,7 +661,7 @@ class SizeVarAllocator:
     def offset_var(self, index: Expr, vars: List[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = self.simplify(index)
-        return sympy_subs(index, {v: sympy.S.Zero for v in vars if v != 0})
+        return sympy_subs(index, {v: sympy.Integer(0) for v in vars if v != 0})
 
     def stride_hints(
         self,
@@ -826,7 +826,7 @@ class SizeVarAllocator:
 
         # Construct the new expression and remember the denominator
         denominator = factorlist[floor_div_index]
-        new_index = sympy.S.Zero
+        new_index = sympy.Integer(0)
 
         for var, factor, idx in zip(varlist, factorlist, itertools.count()):
             if idx == floor_div_index:
