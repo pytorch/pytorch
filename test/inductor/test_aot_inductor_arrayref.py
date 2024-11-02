@@ -122,6 +122,7 @@ CPU_TEST_FAILURES = {
     # segfault
     # 'AOTInductorTestABICompatibleCpuWithStackAllocation' object has no attribute 'code_check_count'
     "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
+    "test_zero_size_buffer": fail_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978

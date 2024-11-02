@@ -164,6 +164,7 @@ unlift_effect_tokens = False
 
 
 # Run aot eager decomp partition with CrossRefFakeMode
+# options = False, "all", "custom_ops"
 fake_tensor_crossref = False
 
 # This mode specifies that we should also keep track of the real
