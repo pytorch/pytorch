@@ -59,45 +59,22 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         return super().__call__(subgraph, identifier, operands)
 
 
-class InvokeSubgraphPlaceholderHOP(HigherOrderOperator):
-    """
-    This Higher Order Primitive (HOP) serves as a placeholder for the frontend
-    of `torch.compile`, allowing it to parse arguments (`args` and `kwargs`) and
-    prepare for the actual `InvokeSubgraphHOP`.
-
-    The `InvokeSubgraphHOP` is designed to accept a list or tuple of operands.
-    This placeholder HOP enables the wrapping of a given function or subgraph
-    with arbitrary arguments and keyword arguments. During the
-    `speculate_subgraph` phase, TorchDynamo flattens these arguments into a list
-    or tuple and calls InvokeSubgraph HOP.
-
-    Note: Directly invoking this operation will raise an exception.
-    """
-
-    def __init__(self) -> None:
-        super().__init__("invoke_subgraph_placeholder")
-
-    def __call__(
-        self,
-        subgraph,
-        args,
-        kwargs,
-    ):
-        raise NotImplementedError(
-            "This placeholder should be replaced by torch.compile"
-        )
-
-
 invoke_subgraph = InvokeSubgraphHOP()
-invoke_subgraph_placeholder = InvokeSubgraphPlaceholderHOP()
+
+
+def invoke_subgraph_placeholder(subgraph, *args, **kwargs):
+    # Just a placeholder for Dynamo to replace with invoke_subgraph
+    return subgraph(*args, **kwargs)
 
 
 def wrap_with_invoke_subgraph(fn=None):
     """
-    This is a user facing API to wrap the function with invoke_subgraph HOP. For
-    PyTorch eager, this is a no-op. For torch.compile, we wrap the given
-    function into invoke_subgraph_placeholder, which is parsed by Dynamo and
-    replaced by invoke_subgraph.
+    This wrapper instructs torch.compile to compile the wrapped region once and
+    reuse the compiled artifact, instead of the usual way of aggresively
+    inlining the function.
+
+    Under the hood, it tells TorchDynamo to use InvokeSubgraph HOP for the
+    region. For PyTorch eager, this is a no-op.
     """
 
     def wrap(func):

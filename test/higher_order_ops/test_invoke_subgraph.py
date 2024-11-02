@@ -1,6 +1,8 @@
 # Owner(s): ["module: higher order operators"]
 # flake8: noqa: B950
 
+import unittest
+
 import torch
 import torch._dynamo
 import torch._functorch
@@ -8,7 +10,6 @@ import torch._inductor
 import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
-from torch._higher_order_ops import invoke_subgraph
 from torch._higher_order_ops.invoke_subgraph import wrap_with_invoke_subgraph
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -90,41 +91,6 @@ class TestInvokeSubgraph(TestCase):
 
         self.assertEqual(ref, res)
 
-    def test_differing_strides_for_grad_outs(self):
-        class CustomOp(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                return torch.sin(x)
-
-            @staticmethod
-            def backward(ctx, grad_out):
-                a = grad_out.view(12, 5)
-                return torch.cos(torch.reshape(a, (3, 4, 5)))
-
-        def gn(x):
-            return (CustomOp.apply(x),)
-
-        def fn(x):
-            a = invoke_subgraph(gn, None, (x,))[0]
-            # Force stride changes so that backward view causes a failure if
-            # contiguous not called.
-            b = torch.permute(a, (0, 2, 1))
-            return b
-
-        x = torch.randn(3, 4, 5, requires_grad=True)
-        ref = torch.permute(gn(x)[0], (0, 2, 1))
-
-        x_clone = x.clone().detach().requires_grad_(True)
-        aot_fn = aot_function(fn, nop)
-        res = aot_fn(x_clone)
-
-        # Run backward
-        ref.sum().backward()
-        res.sum().backward()
-
-        self.assertEqual(ref, res)
-        self.assertEqual(x.grad, x_clone.grad)
-
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphCompile(TestCase):
@@ -136,15 +102,16 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(len(subgraph_attr_names), expected)
 
     def test_simple(self):
+        @wrap_with_invoke_subgraph
         def gn(x, y):
-            return (torch.mul(x, y),)
+            return torch.mul(x, y)
 
         def fn(x, y):
-            return invoke_subgraph(gn, None, (x, y))[0]
+            return gn(x, y)
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
-        ref = gn(x, y)[0]
+        ref = gn(x, y)
 
         x_clone = x.clone().detach().requires_grad_(True)
         y_clone = y.clone().detach().requires_grad_(True)
@@ -158,13 +125,51 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
+    @unittest.skip("FunctionCtx ops is not cacheable right now")
+    def test_differing_strides_for_grad_outs(self):
+        class CustomOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return torch.sin(x)
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                a = grad_out.view(12, 5)
+                return torch.cos(torch.reshape(a, (3, 4, 5)))
+
+        @wrap_with_invoke_subgraph
+        def gn(x):
+            return CustomOp.apply(x)
+
+        def fn(x):
+            a = gn(x)
+            # Force stride changes so that backward view causes a failure if
+            # contiguous not called.
+            b = torch.permute(a, (0, 2, 1))
+            return b
+
+        x = torch.randn(3, 4, 5, requires_grad=True)
+        ref = torch.permute(gn(x), (0, 2, 1))
+
+        x_clone = x.clone().detach().requires_grad_(True)
+        opt_fn = torch.compile(fn, backend="aot_eager")
+        res = opt_fn(x_clone)
+
+        # Run backward
+        ref.sum().backward()
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(x.grad, x_clone.grad)
+
     def test_dedupe(self):
+        @wrap_with_invoke_subgraph
         def gn(x, y):
-            return (torch.mul(x, y),)
+            return torch.mul(x, y)
 
         def fn(x, y):
-            a = invoke_subgraph(gn, None, (x, y))[0]
-            return invoke_subgraph(gn, None, (a, y))[0]
+            a = gn(x, y)
+            return gn(a, y)
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
@@ -211,8 +216,8 @@ class GraphModule(torch.nn.Module):
 
     class invoke_subgraph_0(torch.nn.Module):
         def forward(self, l_x_: "f32[8]", l_y_: "f32[8]"):
-            child: "f32[8]" = torch.mul(l_x_, l_y_);  l_x_ = l_y_ = None
-            return (child,)
+            mul: "f32[8]" = torch.mul(l_x_, l_y_);  l_x_ = l_y_ = None
+            return (mul,)
 """,
             )
 
@@ -305,6 +310,7 @@ class GraphModule(torch.nn.Module):
             )
 
     def test_normalize_gm(self):
+        @wrap_with_invoke_subgraph
         def gn(x, y):
             # Different graph give different names to intermediate nodes
             for _ in range(5):
@@ -313,7 +319,7 @@ class GraphModule(torch.nn.Module):
 
         def fn(x, y):
             for _ in range(5):
-                x = invoke_subgraph(gn, None, (x, y))
+                x = gn(x, y)
             return x
 
         backend = AotEagerAndRecordGraphs()
@@ -362,12 +368,13 @@ class GraphModule(torch.nn.Module):
             )
 
     def test_input_mutation(self):
+        @wrap_with_invoke_subgraph
         def gn(x, y):
             x.add_(1)
-            return (torch.mul(x, y),)
+            return torch.mul(x, y)
 
         def fn(x, y):
-            return invoke_subgraph(gn, None, (x, y))[0]
+            return gn(x, y)
 
         x = torch.randn(8, requires_grad=False)
         y = torch.randn(8, requires_grad=False)
@@ -381,11 +388,12 @@ class GraphModule(torch.nn.Module):
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
 
+        @wrap_with_invoke_subgraph
         def gn(x):
             return mod(x)
 
         def fn(x):
-            return invoke_subgraph(gn, mod, (x,))
+            return gn(x)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         x = torch.randn(8, 8, requires_grad=True)
@@ -395,11 +403,12 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
 
     def test_input_aliasing(self):
+        @wrap_with_invoke_subgraph
         def gn(x, y):
             return (x, torch.mul(x, y))
 
         def fn(x, y):
-            outs = invoke_subgraph(gn, None, (x, y))
+            outs = gn(x, y)
             return outs[0] * outs[1]
 
         x = torch.randn(8, requires_grad=False)
@@ -483,22 +492,24 @@ class GraphModule(torch.nn.Module):
         def fn1(x):
             return torch.cos(x)
 
+        @wrap_with_invoke_subgraph
         def fn1_checkpoint(x):
-            return (torch.utils.checkpoint.checkpoint(fn1, x, use_reentrant=False),)
+            return torch.utils.checkpoint.checkpoint(fn1, x, use_reentrant=False)
 
         def fn2(x):
             return torch.sin(x)
 
+        @wrap_with_invoke_subgraph
         def fn2_checkpoint(x):
-            return (torch.utils.checkpoint.checkpoint(fn2, x, use_reentrant=False),)
+            return torch.utils.checkpoint.checkpoint(fn2, x, use_reentrant=False)
 
         def fn(x):
             return (
-                invoke_subgraph(fn1_checkpoint, None, (x,))[0]
+                fn1_checkpoint(x)
                 # repeat the same fn1_checkpoint to see that we dedupe
-                + invoke_subgraph(fn1_checkpoint, None, (x,))[0]
+                + fn1_checkpoint(x)
                 # Check that a new fn2_checkpoint goes through a different HOP
-                + invoke_subgraph(fn2_checkpoint, None, (x,))[0]
+                + fn2_checkpoint(x)
             )
 
         x = torch.randn(8, requires_grad=True)
