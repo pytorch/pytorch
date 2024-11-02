@@ -325,21 +325,25 @@ void alloc_with_matching_layout(
                    at::IntArrayRef(shape), at::IntArrayRef(ordered_strides), 0);
 }
 
-void permute_to_matching_layout(const Tensor& output, Tensor& grad_output)
-{
+void permute_to_matching_layout(const Tensor& output, Tensor& grad_output) {
   const int dims = output.sizes().size();
   std::vector<int64_t> outer_to_inner(dims);
   std::iota(outer_to_inner.begin(), outer_to_inner.end(), 0);
   const auto o_strides = output.strides();
   std::stable_sort(
-      outer_to_inner.begin(), outer_to_inner.end(), [&o_strides](int idx1, int idx2) {
+      outer_to_inner.begin(),
+      outer_to_inner.end(),
+      [&o_strides](int idx1, int idx2) {
         return o_strides[idx1] > o_strides[idx2];
       });
   std::vector<int64_t> inverse(dims);
   for (int d = 0; d < dims; d++) {
-    inverse[d] = std::find(outer_to_inner.begin(), outer_to_inner.end(), d) - outer_to_inner.begin();
+    inverse[d] = std::find(outer_to_inner.begin(), outer_to_inner.end(), d) -
+        outer_to_inner.begin();
   }
-  grad_output = grad_output.permute(at::IntArrayRef(outer_to_inner)).contiguous().permute(at::IntArrayRef(inverse));
+  grad_output = grad_output.permute(at::IntArrayRef(outer_to_inner))
+                    .contiguous()
+                    .permute(at::IntArrayRef(inverse));
 }
 
 bool same_strides(const Tensor& t1, const Tensor& t2) {
@@ -348,13 +352,14 @@ bool same_strides(const Tensor& t1, const Tensor& t2) {
   const auto t1strides = t1.strides();
   const auto t2strides = t2.strides();
   const int dim = t1strides.size();
-  if (dim != (int) t2strides.size()) {
+  if (dim != (int)t2strides.size()) {
     return false;
   }
   const auto t1sizes = t1.sizes();
   const auto t2sizes = t2.sizes();
-  
-  // we are going through strides backward here, but if both are backward it's comparable
+
+  // we are going through strides backward here, but if both are backward it's
+  // comparable
   for (int i = 0; i < dim; i++) {
     if (t1sizes[i] > 1) {
       t1_strides_no_ones.push_back(t1strides[i]);
@@ -363,7 +368,11 @@ bool same_strides(const Tensor& t1, const Tensor& t2) {
       t2_strides_no_ones.push_back(t2strides[i]);
     }
   }
-  return std::equal(t1_strides_no_ones.begin(), t1_strides_no_ones.end(), t2_strides_no_ones.begin(), t2_strides_no_ones.end());
+  return std::equal(
+      t1_strides_no_ones.begin(),
+      t1_strides_no_ones.end(),
+      t2_strides_no_ones.begin(),
+      t2_strides_no_ones.end());
 }
 } // namespace
 
@@ -738,7 +747,6 @@ void run_cudnn_SDP_bprop(
     TORCH_WARN_ONCE(
         "cuDNN SDPA backward got grad_output.strides() != output.strides(), "
         "attempting to materialize a grad_output with matching strides...");
-    TORCH_WARN_ONCE("output: ", o.strides(), " grad_output: ", dO_.strides());
     permute_to_matching_layout(o, dO_);
   }
   TORCH_INTERNAL_ASSERT(
