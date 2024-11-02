@@ -2528,16 +2528,27 @@ class Kernel(CodeGen):
             for buf in self.store_buffer_names
             if buf in scheduler.name_to_buf
         )
-        names_to_remove: OrderedSet[str] = OrderedSet()
-        for name in self.store_buffer_names:
-            if (
-                name not in self.must_keep_buffers
-                and name not in self.args.input_buffers
-                and scheduler.can_buffer_be_removed_through_fusion(
-                    name, fused_node_names
-                )
-            ):
-                names_to_remove.add(name)
+        names_to_remove = []
+        for out_buf in self.store_buffer_names:
+            if out_buf not in scheduler.name_to_buf:
+                # Aux buffers created during kernel codegen
+                names_to_remove.append(out_buf)
+                continue
+            users = scheduler.name_to_buf[out_buf].users
+            assert users is not None
+            users = OrderedSet(user.get_name() for user in users if not user.is_weak)
+            if users.issubset(fused_node_names):
+                names_to_remove.append(out_buf)
+
+        def remove_filter(n: str) -> bool:
+            return (
+                n not in self.must_keep_buffers
+                and n not in self.args.input_buffers
+                and n not in scheduler.mutation_renames
+                and n not in scheduler.mutation_real_name
+            )
+
+        names_to_remove = [*filter(remove_filter, names_to_remove)]
 
         for name in names_to_remove:
             if name in self.args.inplace_buffers:
