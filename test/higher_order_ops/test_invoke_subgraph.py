@@ -402,6 +402,23 @@ class GraphModule(torch.nn.Module):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_fail_with_direct_invoke_subgraph(self):
+        from torch._higher_order_ops import invoke_subgraph
+
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return invoke_subgraph(gn, None, (x,))
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Directly using invoke_subgraph is not"
+        ):
+            opt_fn(x)
+
     def test_input_aliasing(self):
         @wrap_with_invoke_subgraph
         def gn(x, y):
