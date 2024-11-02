@@ -209,7 +209,7 @@ device_tma = r"""
             # idx_n = offs_cn[None, :]
             # mask = (idx_m < M) & (idx_n < N)
             # inductor generates a suffix
-            #store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12)
+            {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12, fake_out=True)}}
             accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 """
 

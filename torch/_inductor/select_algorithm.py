@@ -522,6 +522,7 @@ class TritonTemplateKernel(TritonKernel):
         val: str,
         mask: Optional[str] = None,
         indent_width: int = 4,
+        fake_out: bool = False,
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
 
@@ -585,7 +586,8 @@ class TritonTemplateKernel(TritonKernel):
         def hook():
             # more stuff might have been added since the codegen_body above
             self.codegen_body()
-
+            if fake_out:
+                return ""
             return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
 
         assert "<STORE_OUTPUT>" not in self.render_hooks
@@ -799,8 +801,8 @@ class TritonTemplate(KernelTemplate):
         ) as kernel:
             try:
                 template = kernel.render(self.template, kwargs)
-                # with kernel.set_subgraph_body("<STORE_OUTPUT>"):
-                code = template.finalize_all()
+                with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                    code = template.finalize_all()
             except ZeroDivisionError:
                 # TODO(nmacchioni): fix sympy division by zero
                 return None
