@@ -85,7 +85,6 @@ Read More
 
    torch.compiler_get_started
    torch.compiler_api
-   torch.compiler.config
    torch.compiler_fine_grain_apis
    torch.compiler_aot_inductor
    torch.compiler_inductor_profiling
