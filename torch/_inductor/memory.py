@@ -425,29 +425,16 @@ def topological_sort_lpmf(
     # schedule nodes one at a time
     schedule: List[BaseSchedulerNode] = []
     num_iters: int = 0
-    size_threshold = 2**30 // 2
-    # schedule nodes one at a time
-    while nodes_to_schedule:
+    while num_iters < len(nodes) and nodes_to_schedule:
         # select a node to schedule:
-        # - among nodes with peak_mem <= max_mem, pick the one with the lowest live_memory
-        # - if such a node does not exist, select the one with the lowest peak_memory
-        if min(node.mpi_node.size for node in nodes_to_schedule) > size_threshold:
-            selected_node = min(
-                nodes_to_schedule,
-                key=lambda node: min(
-                    (succ_node. index for succ_node in node.succ_nodes),
-                    default=len(nodes),
-                ),
-            ) ,
-        else:
-            selected_node = min(
-                nodes_to_schedule,
-                key=lambda node: (
-                    max(live_memory + node.mpi_node.size, max_memory),
-                    node.mpi_node.size - node_info[node]["memory_to_free"],
-                    node.mpi_node.index,
-                ),
-            )
+        selected_node = min(
+            nodes_to_schedule,
+            key=lambda node: (
+                max(live_memory + node.mpi_node.size, max_memory),
+                node.mpi_node.size - node_info[node]["memory_to_free"],
+                node.mpi_node.index,
+            ),
+        )
         nodes_to_schedule.remove(selected_node)
         schedule.append(selected_node)
         num_iters += 1
