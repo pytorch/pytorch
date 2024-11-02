@@ -2387,6 +2387,9 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif isinstance(example_value, str) and (proxy.node.target in ["hex"]):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, float):
+        set_example_value(proxy.node, example_value)
+        return ConstantVariable.create(example_value, **options)
     else:
         unimplemented(
             "torch.* op returned non-Tensor "
