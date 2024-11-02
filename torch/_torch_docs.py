@@ -740,7 +740,7 @@ allclose(input: Tensor, other: Tensor, rtol: float = 1e-05, atol: float = 1e-08,
 This function checks if :attr:`input` and :attr:`other` satisfy the condition:
 
 .. math::
-    \lvert \text{input} - \text{other} \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other} \rvert
+    \lvert \text{input}_i - \text{other}_i \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other}_i \rvert
 """
     + r"""
 elementwise, for all elements of :attr:`input` and :attr:`other`. The behaviour of this function is analogous to
@@ -5329,7 +5329,7 @@ Returns a new tensor with boolean elements representing if each element of
 Closeness is defined as:
 
 .. math::
-    \lvert \text{input} - \text{other} \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other} \rvert
+    \lvert \text{input}_i - \text{other}_i \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other}_i \rvert
 """
     + r"""
 

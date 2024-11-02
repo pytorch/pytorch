@@ -886,9 +886,11 @@ std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
   if (symints.has_value()) {
     TORCH_INTERNAL_ASSERT(symints->size() == num_symints());
     first_symints = std::vector<c10::SymInt>(
-        symints->begin(), symints->begin() + first->num_symints());
+        symints->begin(),
+        symints->begin() + static_cast<std::ptrdiff_t>(first->num_symints()));
     second_symints = std::vector<c10::SymInt>(
-        symints->begin() + first->num_symints(), symints->end());
+        symints->begin() + static_cast<std::ptrdiff_t>(first->num_symints()),
+        symints->end());
   }
 
   std::optional<std::vector<at::Tensor>> first_tensors;
@@ -896,9 +898,11 @@ std::unique_ptr<ViewFunc> ChainedViewFunc::clone_and_set(
   if (tensors.has_value()) {
     TORCH_INTERNAL_ASSERT(tensors->size() == num_tensors());
     first_tensors = std::vector<at::Tensor>(
-        tensors->begin(), tensors->begin() + first->num_tensors());
+        tensors->begin(),
+        tensors->begin() + static_cast<std::ptrdiff_t>(first->num_tensors()));
     second_tensors = std::vector<at::Tensor>(
-        tensors->begin() + first->num_tensors(), tensors->end());
+        tensors->begin() + static_cast<std::ptrdiff_t>(first->num_tensors()),
+        tensors->end());
   }
 
   return std::make_unique<ChainedViewFunc>(
