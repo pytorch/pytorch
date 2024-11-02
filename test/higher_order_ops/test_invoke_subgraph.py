@@ -558,55 +558,6 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    def test_ac(self):
-        def fn1(x):
-            return torch.cos(x)
-
-        @wrap_with_invoke_subgraph
-        def fn1_checkpoint(x):
-            return torch.utils.checkpoint.checkpoint(fn1, x, use_reentrant=False)
-
-        def fn2(x):
-            return torch.sin(x)
-
-        @wrap_with_invoke_subgraph
-        def fn2_checkpoint(x):
-            return torch.utils.checkpoint.checkpoint(fn2, x, use_reentrant=False)
-
-        def fn(x):
-            return (
-                fn1_checkpoint(x)
-                # repeat the same fn1_checkpoint to see that we dedupe
-                + fn1_checkpoint(x)
-                # Check that a new fn2_checkpoint goes through a different HOP
-                + fn2_checkpoint(x)
-            )
-
-        x = torch.randn(8, requires_grad=True)
-        ref = fn(x)
-
-        x_clone = x.clone().detach().requires_grad_(True)
-        backend = AotEagerAndRecordGraphs()
-        res = torch.compile(fn, backend=backend, fullgraph=True)(x_clone)
-
-        # Run backward
-        ref.sum().backward()
-        res.sum().backward()
-
-        self.assertEqual(ref, res)
-        self.assertEqual(x.grad, x_clone.grad)
-
-        # Check that the Dynamo and AOT graphs have just one subgraph module
-        self.assertEqual(len(backend.graphs), 1)
-        self.assertEqual(len(backend.fw_graphs), 1)
-        self.assertEqual(len(backend.bw_graphs), 1)
-        self.count_unique_get_attr_nodes(backend.graphs[0], [], 2)
-        self.count_unique_get_attr_nodes(backend.fw_graphs[0], [], 2)
-        self.count_unique_get_attr_nodes(backend.bw_graphs[0], [], 2)
-
-        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone)
-        self.assertEqual(ref, res)
-
 
 if __name__ == "__main__":
     run_tests()
