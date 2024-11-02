@@ -36,6 +36,7 @@ from .autotune_process import (
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
+from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -194,13 +195,12 @@ class TritonTemplateKernel(TritonKernel):
         epilogue_fn=identity,
         subgraphs: Optional[List[ir.ComputedBuffer]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
-        *,
-        index_dtype,
     ) -> None:
+        numel = sympy_product(output_node.get_size())
         super().__init__(
-            sympy_product(output_node.get_size()),
-            sympy.Integer(1),
-            index_dtype=index_dtype,
+            numel,
+            sympy.S.One,
+            features=SIMDKernelFeatures([], numel),
         )
         self.input_nodes = input_nodes
         self.output_node = output_node
@@ -519,9 +519,9 @@ class TritonTemplateKernel(TritonKernel):
             )
             contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(
-                sympy.Integer(1), sympy_product(lengths)
-            ).set_name("xindex")
+            self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths)).set_name(
+                "xindex"
+            )
             self.template_mask = mask
             self.template_out = val
             self.template_indices = indices
@@ -746,7 +746,6 @@ class TritonTemplate(KernelTemplate):
             "prefix_args": prefix_args,
             "suffix_args": suffix_args,
             "epilogue_fn": epilogue_fn,
-            "index_dtype": "tl.int32",
             "subgraphs": subgraphs,
         }
 
