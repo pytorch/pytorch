@@ -234,7 +234,7 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
 
 
 def sympy_product(it):
-    return functools.reduce(operator.mul, it, sympy.S.One)
+    return functools.reduce(operator.mul, it, sympy.Integer(1))
 
 
 def sympy_dot(seq1, seq2):
