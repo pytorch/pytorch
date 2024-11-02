@@ -83,12 +83,13 @@ namespace {
         ::testing::Types<vqint8, vquint8>;
 #endif
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
+    using RealFloatIntReducedFloatTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort, vBFloat16, vHalf>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
     TYPED_TEST_SUITE(Arithmetics, FloatIntTestedTypes);
-    TYPED_TEST_SUITE(Comparison, RealFloatIntTestedTypes);
+    TYPED_TEST_SUITE(Comparison, RealFloatIntReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
     TYPED_TEST_SUITE(MinMax, RealFloatIntTestedTypes);
     TYPED_TEST_SUITE(Nan, RealFloatTestedTypes);
@@ -1791,19 +1792,6 @@ namespace {
       TEST_CONVERT_TO(uint8_t);
       TEST_CONVERT_TO(float);
     #undef TEST_CONVERT_TO
-    }
-    TEST(VecConvertBFloat16, ExhaustiveToFloat) {
-      for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
-        c10::BFloat16 val(ii, c10::BFloat16::from_bits());
-        const auto expected = static_cast<float>(val);
-        CACHE_ALIGN float actual_vals[vfloat::size()];
-        at::vec::convert<float>(vBFloat16(val)).store(actual_vals);
-        for (int jj = 0; jj < vfloat::size(); ++jj) {
-          EXPECT_EQ(c10::bit_cast<uint32_t>(expected), c10::bit_cast<uint32_t>(actual_vals[jj]))
-            << "convert-to-float failure for bf16 bit pattern "
-            << std::hex << ii << std::dec;
-        }
-      }
     }
     TEST(VecConvertBFloat16, ExhaustiveToFloat) {
       for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
