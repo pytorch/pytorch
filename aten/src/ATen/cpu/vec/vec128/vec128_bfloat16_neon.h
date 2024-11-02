@@ -68,11 +68,27 @@ namespace CPU_CAPABILITY {
     }                                                                   \
   }                                                                     \
   template <typename T>                                                 \
+  inline at_bfloat16x4_t at_vreinterpret_bf16_u16(T val) {              \
+    if constexpr (std::is_same_v<at_bfloat16x4_t, uint16x4_t>) {        \
+      return val;                                                       \
+    } else {                                                            \
+      return vreinterpret_bf16_u16(val);                                \
+    }                                                                   \
+  }                                                                     \
+  template <typename T>                                                 \
   inline uint16x8_t at_vreinterpretq_u16_bf16(T val) {                  \
     if constexpr (std::is_same_v<at_bfloat16x8_t, uint16x8_t>) {        \
       return val;                                                       \
     } else {                                                            \
       return vreinterpretq_u16_bf16(val);                               \
+    }                                                                   \
+  }                                                                     \
+  template <typename T>                                                 \
+  inline uint16x4_t at_vreinterpret_u16_bf16(T val) {                   \
+    if constexpr (std::is_same_v<at_bfloat16x4_t, uint16x4_t>) {        \
+      return val;                                                       \
+    } else {                                                            \
+      return vreinterpret_u16_bf16(val);                                \
     }                                                                   \
   }
 
@@ -185,6 +201,23 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
     Vectorized<float> mv1 = (Vectorized<float>(v01).*m)(second_v01);
     at_bfloat16x4_t r00 = convert_bf16_f32(mv0);
     at_bfloat16x4_t r01 = convert_bf16_f32(mv1);
+    return Vectorized<c10::BFloat16>(at_vcombine_bf16(r00, r01));
+  }
+
+  Vectorized<c10::BFloat16> map2_bitmask_with_vec_float_method(
+      const Vectorized<c10::BFloat16>& second,
+      Vectorized<float> (Vectorized<float>::*m)(const Vectorized<float>&)
+          const) const {
+    float32x4_t v00 = convert_f32_bf16(at_vget_low_bf16(values));
+    float32x4_t v01 = convert_f32_bf16(at_vget_high_bf16(values));
+    float32x4_t second_v00 = convert_f32_bf16(at_vget_low_bf16(second.values));
+    float32x4_t second_v01 = convert_f32_bf16(at_vget_high_bf16(second.values));
+    Vectorized<float> mv0 = (Vectorized<float>(v00).*m)(second_v00);
+    Vectorized<float> mv1 = (Vectorized<float>(v01).*m)(second_v01);
+    // Assume the operator returns a bitmask, not "real" floats, and
+    // just narrow the bits. All-ones is a NaN and will get mangled by conversion!
+    at_bfloat16x4_t r00 = at_vreinterpret_bf16_u16(vmovn_u32(vreinterpretq_u32_f32(mv0)));
+    at_bfloat16x4_t r01 = at_vreinterpret_bf16_u16(vmovn_u32(vreinterpretq_u32_f32(mv1)));
     return Vectorized<c10::BFloat16>(at_vcombine_bf16(r00, r01));
   }
 
@@ -301,9 +334,9 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
     return map_with_vec_float_method(&Vectorized<float>::name); \
   }
 
-#define DEFINE_BINARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(name)           \
+#define DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(name)        \
   Vectorized name(const Vectorized& other) const {                      \
-    return map2_with_vec_float_method(other, &Vectorized<float>::name);  \
+    return map2_bitmask_with_vec_float_method(other, &Vectorized<float>::name); \
   }
 
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(abs);
@@ -312,12 +345,12 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(trunc);
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(sqrt);
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(reciprocal);
-  DEFINE_BINARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(operator==);
-  DEFINE_BINARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(operator!=);
-  DEFINE_BINARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(operator<);
-  DEFINE_BINARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(operator<=);
-  DEFINE_BINARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(operator>);
-  DEFINE_BINARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(operator>=);
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator==);
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator!=);
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator<);
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator<=);
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator>);
+  DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator>=);
 
 #undef DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD
 #undef DEFINE_BINARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD
