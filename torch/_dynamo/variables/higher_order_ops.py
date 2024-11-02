@@ -2673,9 +2673,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             treespec,
             body_gmod,
             body_name,
-        ) = self.create_wrapped_node(
-            tx, args[0], args[2].items, kwargs, "invoke_subgraph"
-        )
+        ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, "invoke_subgraph")
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
@@ -2692,5 +2690,10 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             p_args[1:],
         )
         return _call_function_and_unflatten_output(
-            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
+            tx,
+            torch._higher_order_ops.invoke_subgraph,
+            tuple(p_args),
+            p_kwargs,
+            flat_example_value,
+            treespec,
         )
