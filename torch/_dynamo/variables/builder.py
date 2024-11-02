@@ -844,6 +844,10 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return HFPretrainedConfigVariable(value)
         elif isinstance(value, HigherOrderOperator):
+            if value is torch._higher_order_ops.invoke_subgraph:
+                unimplemented(
+                    "Directly using invoke_subgraph is not supported. Use wrap_with_invoke_subgraph"
+                )
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
         elif isinstance(value, torch.cuda.StreamContext):
