@@ -91,6 +91,7 @@ from ..trace_rules import (
 from ..utils import (
     _extract_tensor_dict,
     build_checkpoint_variable,
+    build_invoke_subgraph_variable,
     clone_input,
     common_constant_types,
     get_fake_value,
@@ -98,6 +99,7 @@ from ..utils import (
     get_static_address_type,
     is_frozen_dataclass,
     is_function_or_wrapper,
+    is_invoke_subgraph,
     is_lru_cache_wrapped_function,
     is_namedtuple,
     is_parameter_freezing,
@@ -696,6 +698,8 @@ class VariableBuilder:
             return LoggingLoggerVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
+        elif is_invoke_subgraph(value):
+            return build_invoke_subgraph_variable(source=self.source)
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
