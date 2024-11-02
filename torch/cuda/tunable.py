@@ -140,6 +140,7 @@ __all__ = [
     "write_file",
     "read_file",
     "tune_gemm_in_file",
+    "mgpu_tune_in_file",
 ]
 
 
