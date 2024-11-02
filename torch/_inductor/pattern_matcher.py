@@ -1696,8 +1696,9 @@ def should_compute_mutation_region_ids(graph: torch.fx.GraphModule) -> bool:
     return "mutation_region_id" not in next(iter(graph.nodes)).meta
 
 
-def allowed_fsdp_mutation_op(node):
-    # NOTE: we explicitly don't allow resize-to-0 op (i.e. it counts as mutation)
+def allowed_fsdp_mutation_op_in_mutation_region(node):
+    # These ops are allowed in mutation regions and they don't define mutation region boundaries.
+    # NOTE: we explicitly don't allow resize-to-0 op (i.e. it counts as mutation region boundary when defining mutation regions)
     return (
         node.op == "call_function"
         and (
@@ -1712,7 +1713,7 @@ def compute_mutation_region_ids_fsdp_compatible(graph: torch.fx.GraphModule) -> 
     for nd in graph.nodes:
         # TODO(yf225): workaround: we specifically allow CSE to cross FSDP mutation ops,
         # to be able to de-duplicate forward recompute all-gather and backward hook induced all-gather.
-        if is_mutation_op(nd) and not allowed_fsdp_mutation_op(nd):
+        if is_mutation_op(nd) and not allowed_fsdp_mutation_op_in_mutation_region(nd):
             mutation_region_id += 1
         nd.meta["mutation_region_id"] = mutation_region_id
 
