@@ -987,7 +987,9 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     with maybe_profile(args.export_profiler_trace) as p:
         if args.export_aot_inductor:
-            frozen_model_iter_fn = export_aot_inductor(model, example_inputs)
+            frozen_model_iter_fn = export_aot_inductor(
+                model, example_inputs, args.devices[0]
+            )
         else:
             frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
 
@@ -1485,7 +1487,7 @@ class AOTInductorModelCache:
     cache = {}
 
     @classmethod
-    def load(cls, model, example_inputs):
+    def load(cls, model, example_inputs, device):
         import torch._inductor
         import torch.export._trace
         from torch.export.dynamic_shapes import _tree_map_with_path
@@ -1513,19 +1515,18 @@ class AOTInductorModelCache:
                 _produce_dynamic_shapes_for_export, combined_args
             )
 
-            ep = torch.export.export(
+            gm = torch.export._trace._export(
                 model,
                 example_args,
                 example_kwargs,
                 dynamic_shapes=dynamic_shapes,
+                pre_dispatch=True,
                 strict=False,
-            )
+            ).module()
             with torch.no_grad():
-                package_path = torch._inductor.aoti_compile_and_package(
-                    ep, example_args, example_kwargs
-                )  # type: ignore[arg-type]
+                so_path = torch._inductor.aot_compile(gm, example_args, example_kwargs)  # type: ignore[arg-type]
 
-            cls.cache[key] = torch._inductor.aoti_load_package(package_path)
+            cls.cache[key] = torch._export.aot_load(so_path, device)
 
         return cls.cache[key]
 
@@ -1553,8 +1554,8 @@ def export(model, example_inputs):
     return opt_export
 
 
-def export_aot_inductor(model, example_inputs):
-    optimized = AOTInductorModelCache.load(model, example_inputs)
+def export_aot_inductor(model, example_inputs, device):
+    optimized = AOTInductorModelCache.load(model, example_inputs, device)
 
     def opt_aot_inductor(_, example_inputs, collect_outputs=False):
         example_args, example_kwargs = _normalize_bench_inputs(example_inputs)
@@ -4584,7 +4585,9 @@ def run(runner, args, original_dir=None):
     elif args.backend or args.export_aot_inductor:
         if args.export_aot_inductor:
             assert not args.training, "AOTInductor only supports inference"
-            optimize_ctx = functools.partial(export_aot_inductor)
+            optimize_ctx = functools.partial(
+                export_aot_inductor, device=args.devices[0]
+            )
 
             # AOTInductor doesn't support control flow yet
             runner.skip_models.update(runner.skip_models_due_to_control_flow)
