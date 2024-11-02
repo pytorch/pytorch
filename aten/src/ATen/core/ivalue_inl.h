@@ -302,8 +302,10 @@ struct TORCH_API ConstantString final : c10::intrusive_ptr_target {
  public:
   ConstantString(std::string str) : str_(std::move(str)) {}
   ConstantString(c10::string_view str) : str_(std::string(str)) {}
+  ConstantString(std::string_view str) : str_(std::string(str)) {}
   static c10::intrusive_ptr<ConstantString> create(std::string str_);
   static c10::intrusive_ptr<ConstantString> create(c10::string_view str_);
+  static c10::intrusive_ptr<ConstantString> create(std::string_view str_);
   static c10::intrusive_ptr<ConstantString> create(const char* str_);
 
   const std::string& string() const {
@@ -1728,7 +1730,7 @@ DEFINE_TO(uint64_t, toInt)
 DEFINE_TO(detail::_guarded_unsigned_long, toInt)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(bool, toBool)
-DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob);
+DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob)
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)

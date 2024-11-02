@@ -21,7 +21,7 @@ ThreadLocalState::ThreadLocalState()
       saved_tensors_default_hooks_state_(at::SavedTensorDefaultHooks::get_tls_state()), functionalization_reapply_views_state_(at::functionalization::impl::getFunctionalizationReapplyViewsTLS()),
       saved_objects_(at::impl::ThreadLocalPythonObjects::get_state()) {
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && !defined(BUILD_LITE_INTERPRETER)
-  for(uint8_t i=0; i<autocast_dtypes_.size(); i++) {
+  for(size_t i=0; i<autocast_dtypes_.size(); i++) {
      autocast_dtypes_[i] = at::autocast::get_autocast_dtype(static_cast<at::DeviceType>(i));
   }
 #endif
@@ -62,7 +62,7 @@ void ThreadLocalState::setThreadLocalState(
 
   at::impl::ThreadLocalPythonObjects::set_state(state.saved_objects_);
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && !defined(BUILD_LITE_INTERPRETER)
-  for(uint8_t i=0; i<state.autocast_dtypes_.size(); i++) {
+  for(size_t i=0; i<state.autocast_dtypes_.size(); i++) {
      at::autocast::set_autocast_dtype(static_cast<at::DeviceType>(i), state.autocast_dtypes_[i]);
   }
 #endif
