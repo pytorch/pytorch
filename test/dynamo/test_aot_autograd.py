@@ -1412,6 +1412,45 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         ):
             out.backward(retain_graph=True)
 
+    def test_inputs_overlapping_with_mutation_recompile(self):
+        def f(*args):
+            for a in args:
+                a.add_(1)
+            return args[0]
+
+        def overlapping_args(x):
+            return x[:5], x[7:13], x[9:]
+
+        def non_overlapping_args(x):
+            return x[:5], x[7:13], x[13:15]
+
+        guard_failure = []
+
+        def guard_fail_fn(failure):
+            nonlocal guard_failure
+            guard_failure.append(failure[0])
+
+        input = torch.ones(20)
+        opt_input = input.clone().detach()
+
+        opt_f = torch._dynamo.optimize("aot_eager", dynamic=True, guard_fail_fn=guard_fail_fn)(f)
+
+        out0 = f(*overlapping_args(input))
+        opt_out0 = opt_f(*overlapping_args(opt_input))
+        self.assertEqual(out0, opt_out0)
+
+        out1 = f(*non_overlapping_args(input))
+        opt_out1 = opt_f(*non_overlapping_args(opt_input))
+        self.assertEqual(out1, opt_out1)
+
+        # Check that we only have one instance of guard failure, and that it is due to
+        # the overlapping state not matching.
+        self.assertEqual(len(guard_failure), 1)
+        self.assertExpectedInline(
+            guard_failure[0],
+            """0/0: ___check_overlapping(overlapping=[L['args'][1], L['args'][2]], non_overlapping=[L['args'][0]])"""
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

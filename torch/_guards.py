@@ -370,6 +370,12 @@ class DuplicateInputs(GuardEnvExpr):
         assert self.input_source_a != self.input_source_b
 
 
+@dataclasses.dataclass
+class StorageOverlap(GuardEnvExpr):
+    overlapping_sources: List[Source]
+    non_overlapping_sources: List[Source]
+
+
 """
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
