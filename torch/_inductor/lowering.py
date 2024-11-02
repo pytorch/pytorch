@@ -437,9 +437,7 @@ def broadcast_symbolic_shapes(a, b):
     are symbolic sympy formulas.
     """
     output = []
-    for x, y in itertools.zip_longest(
-        reversed(a), reversed(b), fillvalue=sympy.Integer(1)
-    ):
+    for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
         if V.graph.sizevars.shape_env.evaluate_expr(
             sympy.Eq(y, 1), size_oblivious=True
         ):
@@ -1037,7 +1035,7 @@ def expand_as(x, y):
 def repeat(x, repeats):
     old_size = list(x.get_size())
     if len(repeats) > len(old_size):
-        old_size = [sympy.Integer(1)] * (len(repeats) - len(old_size)) + old_size
+        old_size = [sympy.S.One] * (len(repeats) - len(old_size)) + old_size
         x = view(x, list(old_size))
     assert len(repeats) == len(x.get_size())
 
@@ -1062,7 +1060,7 @@ def repeat(x, repeats):
         for i in range(len(repeats)):
             if repeats[i] != 1:
                 if old_size[i] == 1:
-                    index[i] = sympy.Integer(0)
+                    index[i] = sympy.S.Zero
                 else:
                     index[i] = ModularIndexing(index[i], 1, old_size[i])
         return x_loader(index)
@@ -1730,7 +1728,7 @@ def unfold(x, dimension, size, step):
 def unsqueeze(x, dim):
     dim = _validate_dim(x, dim, 1)
     new_shape = list(x.get_size())
-    new_shape.insert(dim, sympy.Integer(1))
+    new_shape.insert(dim, sympy.S.One)
     return view(x, new_shape)
 
 
@@ -2285,7 +2283,9 @@ def require_channels_last(_, *args, **kwargs):
 def constrain_to_fx_strides(fx_node, *args, **kwargs):
     def apply_constraint(arg, fx_arg):
         if isinstance(arg, ir.IRNode):
-            stride_order = ir.get_stride_order(fx_arg.meta["val"].stride())
+            stride_order = ir.get_stride_order(
+                fx_arg.meta["val"].stride(), V.graph.sizevars.shape_env
+            )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
             return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg.keys()}
@@ -5262,7 +5262,7 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
     if keepdims:
         new_size = list(size)
         for i in reduced_idx:
-            new_size[i] = sympy.Integer(1)
+            new_size[i] = sympy.S.One
     else:
         new_size = kept_sizes
 
@@ -6476,164 +6476,10 @@ def with_effects(token, op, *args, **kwargs):
         return (effectful_kernel, *result)
 
 
-try:
-    import torch.distributed._functional_collectives
+from .comm_lowering import register_comm_lowerings
 
-    _c10d_functional = torch.ops._c10d_functional
 
-    @register_lowering(_c10d_functional.all_reduce)
-    def _all_reduce(inp, reduce_op, group_name):
-        inp = clone(inp)
-        if config.reorder_for_compute_comm_overlap:
-            # The horizontal fusion of this clone often severely delays the
-            # scheduling of the all_reduce_ node. Horizontally fusing this
-            # clone can almost never out-perform scheduling the all_reduce_
-            # earlier. Also in most cases, this clone is eliminated via
-            # in-place reuse. Therefore, we tell the scheduler to not fuse it.
-            inp.realize()
-            V.graph.no_fuse_buffer_names.add(inp.get_name())
-        inp = ir.ExternKernel.require_contiguous(inp)
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
-        )
-        return inp
-
-    @register_lowering(_c10d_functional.all_reduce_)
-    def _all_reduce_(inp, reduce_op, group_name):
-        inp = ir.ExternKernel.require_contiguous(inp)
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_.default, inp, reduce_op, group_name
-        )
-        return inp
-
-    @register_lowering(_c10d_functional.all_reduce_coalesced)
-    def _all_reduce_coalesced(inputs, reduce_op, group_name):
-        inputs = [clone(inp) for inp in inputs]
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_coalesced_.default,
-            inputs,
-            reduce_op,
-            group_name,
-        )
-        return inputs
-
-    @register_lowering(_c10d_functional.all_reduce_coalesced_)
-    def _all_reduce_coalesced_(inputs, reduce_op, group_name):
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_reduce_coalesced_.default,
-            inputs,
-            reduce_op,
-            group_name,
-        )
-        return inputs
-
-    @register_lowering(_c10d_functional.all_gather_into_tensor)
-    def _all_gather_into_tensor(inp, group_size, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.all_gather_into_tensor.default,
-                inp,
-                group_size,
-                group_name,
-            )
-        )
-
-    @register_lowering(_c10d_functional.all_gather_into_tensor_coalesced)
-    def _all_gather_into_tensor_coalesced(inputs, group_size, group_name):
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.all_gather_into_tensor_coalesced.default,
-                inputs,
-                group_size,
-                group_name,
-            ),
-        )
-
-    @register_lowering(_c10d_functional.all_gather_into_tensor_out)
-    def _all_gather_into_tensor_out(inp, group_size, group_name, *, out):
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.all_gather_into_tensor_out.default,
-            inp,
-            group_size,
-            group_name,
-            out=out,
-        )
-        return out
-
-    @register_lowering(_c10d_functional.reduce_scatter_tensor)
-    def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.reduce_scatter_tensor.default,
-                inp,
-                reduce_op,
-                group_size,
-                group_name,
-            )
-        )
-
-    @register_lowering(_c10d_functional.reduce_scatter_tensor_coalesced)
-    def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):
-        return pytree.tree_map(
-            ir.TensorBox.create,
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.reduce_scatter_tensor_coalesced.default,
-                inputs,
-                reduce_op,
-                group_size,
-                group_name,
-            ),
-        )
-
-    @register_lowering(_c10d_functional.all_to_all_single)
-    def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                _c10d_functional.all_to_all_single.default,
-                inp,
-                output_split_sizes,
-                input_split_sizes,
-                group_name,
-            )
-        )
-
-    @register_lowering(_c10d_functional.broadcast)
-    def _broadcast(inp, src, group_name):
-        inp = clone(inp)
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.broadcast_.default, inp, src, group_name
-        )
-        return inp
-
-    @register_lowering(_c10d_functional.broadcast_)
-    def _broadcast_(inp, src, group_name):
-        ir._CollectiveKernel.create_inplace(
-            _c10d_functional.broadcast_.default, inp, src, group_name
-        )
-        return inp
-
-    @register_lowering(_c10d_functional.wait_tensor)
-    def _wait_tensor(inp):
-        ir._WaitKernel.create_wait(_c10d_functional.wait_tensor.default, inp)
-        return inp
-
-    @register_lowering(torch.ops._dtensor.shard_dim_alltoall)
-    def _shard_dim_alltoall(inp, gather_dim, shard_dim, group_name):
-        return ir.TensorBox.create(
-            ir._CollectiveKernel.create_out_of_place(
-                torch.ops._dtensor.shard_dim_alltoall.default,
-                inp,
-                gather_dim,
-                shard_dim,
-                group_name,
-            )
-        )
-
-except (AttributeError, ImportError):
-    log.info(
-        "Inductor support for distributed collectives depends on building torch.distributed"
-    )
+register_comm_lowerings()
 
 # populate lowerings defined in kernel/*
 from . import kernel
