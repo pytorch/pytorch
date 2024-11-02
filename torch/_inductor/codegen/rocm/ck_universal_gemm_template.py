@@ -548,7 +548,9 @@ class CKGemmTemplate(CKTemplate):
                 bias_layout=torch_layout_to_ck_layout(Bias.get_layout())
                 if Bias is not None
                 else "",
-                compile_cmd=rocm_compile_command(["<source_file_name>"], "<executable_name>", "exe")
+                compile_cmd=rocm_compile_command(
+                    ["<source_file_name>"], "<executable_name>", "exe"
+                ),
             )
             res += runner_code
 
