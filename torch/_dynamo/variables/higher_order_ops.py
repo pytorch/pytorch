@@ -2630,7 +2630,11 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # using the saved attr name.
         from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 
-        fake_inputs = [arg.as_proxy().node.meta["example_value"] for arg in fn_args_vt]
+        fake_inputs = [
+            node.meta["example_value"]
+            for node in body_gmod.graph.nodes
+            if node.op == "placeholder"
+        ]
 
         # TODO(anijain2305) - This might be too big of a limitation. Consider
         # supporting mutation/aliasing in HOP itself to remove this restriction.

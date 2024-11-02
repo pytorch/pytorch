@@ -80,6 +80,7 @@ class _GlobalStats(threading.local):
         self.fx_graph = _GlobalItemStats()
         self.triton = _GlobalItemStats()
         self.aot_autograd = _GlobalItemStats()
+        self.dynamo_pgo = _GlobalItemStats()
 
     def reset(self) -> None:
         self.autotune_local.reset()
@@ -88,6 +89,7 @@ class _GlobalStats(threading.local):
         self.fx_graph.reset()
         self.triton.reset()
         self.aot_autograd.reset()
+        self.dynamo_pgo.reset()
 
     def get_stat(self, name: str) -> _GlobalItemStats:
         return getattr(self, name)
@@ -100,6 +102,7 @@ class _GlobalStats(threading.local):
             ("fx_graph", self.fx_graph),
             ("triton", self.triton),
             ("aot_autograd", self.aot_autograd),
+            ("dynamo_pgo", self.dynamo_pgo),
         )
 
         print("Cache Stats:", file=sys.stderr)
@@ -215,6 +218,12 @@ class PatchCaches(contextlib.AbstractContextManager):
         )
         self._stack.enter_context(ctx)
 
+        ctx = patch(
+            "torch._inductor.remote_cache.RemoteDynamoPGOCache.backend_override_cls",
+            MockBackend.with_name("dynamo_pgo"),
+        )
+        self._stack.enter_context(ctx)
+
         if config.is_fbcode():
             ctx = patch(
                 "torch._inductor.fb.remote_cache.FbRemoteAutotuneCache.backend_override_cls",
@@ -243,6 +252,12 @@ class PatchCaches(contextlib.AbstractContextManager):
             ctx = patch(
                 "torch._inductor.fb.remote_cache.FbRemoteAOTAutogradCache.backend_override_cls",
                 MockBackend.with_name("aot_autograd"),
+            )
+            self._stack.enter_context(ctx)
+
+            ctx = patch(
+                "torch._inductor.fb.remote_cache.FbRemoteDynamoPGOCache.backend_override_cls",
+                MockBackend.with_name("dynamo_pgo"),
             )
             self._stack.enter_context(ctx)
 

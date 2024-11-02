@@ -149,14 +149,16 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
 #endif // __ARM_FEATURE_BF16
   }
 
-  static at_bfloat16x4_t convert_bf16_f32(float32x4_t f32) {
+  static at_bfloat16x4_t convert_bf16_f32(const Vectorized<float>& f32) {
 #ifdef __ARM_FEATURE_BF16
     return vcvt_bf16_f32(f32);
 #else
     static_assert(std::is_same_v<uint16x4_t, at_bfloat16x4_t>);
     uint32x4_t as_uint32 = vreinterpretq_u32_f32(f32);
     uint32x4_t rounding_bias = vaddq_u32(vandq_u32(vshrq_n_u32(as_uint32, 16), vdupq_n_u32(1)), vdupq_n_u32(0x7FFF));
-    return vshrn_n_u32(vaddq_u32(as_uint32, rounding_bias), 16);
+    at_bfloat16x4_t rounded = vshrn_n_u32(vaddq_u32(as_uint32, rounding_bias), 16);
+    const auto bf16_nan = vdup_n_u16(0x7FC0);
+    return vbsl_u16(vmovn_u32(vreinterpretq_u32_f32(f32.isnan())), bf16_nan, rounded);
 #endif // __ARM_FEATURE_BF16
   }
 
@@ -337,10 +339,8 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(c
 }
 inline Vectorized<c10::BFloat16> convert_float_bfloat16(const Vectorized<float>& a, const Vectorized<float>& b) {
   static_assert(Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
-  float32x4_t x = a;
-  float32x4_t y = b;
-  at_bfloat16x4_t x1 = Vectorized<c10::BFloat16>::convert_bf16_f32(x);
-  at_bfloat16x4_t x2 = Vectorized<c10::BFloat16>::convert_bf16_f32(y);
+  at_bfloat16x4_t x1 = Vectorized<c10::BFloat16>::convert_bf16_f32(a);
+  at_bfloat16x4_t x2 = Vectorized<c10::BFloat16>::convert_bf16_f32(b);
   return Vectorized<c10::BFloat16>(at_vcombine_bf16(x1, x2));
 }
 
