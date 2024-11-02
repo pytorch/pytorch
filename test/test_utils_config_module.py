@@ -90,6 +90,9 @@ class TestConfigModule(TestCase):
                 "e_compile_ignored": True,
                 "magic_cache_config_ignored": True,
                 "_save_config_ignore": ["e_ignored"],
+                "e_config": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         config.e_bool = False
@@ -117,6 +120,9 @@ class TestConfigModule(TestCase):
                 "nested.e_bool": True,
                 "e_ignored": True,
                 "e_compile_ignored": True,
+                "e_config": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         config.e_bool = False
@@ -146,29 +152,28 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
 
     def test_get_hash(self):
         self.assertEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         # Test cached value
         self.assertEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         self.assertEqual(
-            config._hash_digest, b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         config._hash_digest = "fake"
         self.assertEqual(config.get_hash(), "fake")
 
-        # BUG
         config.e_bool = False
         self.assertNotEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         config.e_bool = True
 
         # Test ignored values
         config.e_compile_ignored = False
         self.assertEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         for k in config._config:
             config._config[k].user_override = _UNSET_SENTINEL
@@ -194,6 +199,9 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
                 "_cache_config_ignore_prefix": ["magic_cache_config"],
                 "_save_config_ignore": ["e_ignored"],
                 "magic_cache_config_ignored": True,
+                "e_config": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         p2 = config.to_dict()
@@ -216,6 +224,9 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
                 "_cache_config_ignore_prefix": ["magic_cache_config"],
                 "_save_config_ignore": ["e_ignored"],
                 "magic_cache_config_ignored": True,
+                "e_config": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         p3 = config.get_config_copy()
@@ -238,6 +249,9 @@ torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""
                 "_cache_config_ignore_prefix": ["magic_cache_config"],
                 "_save_config_ignore": ["e_ignored"],
                 "magic_cache_config_ignored": True,
+                "e_config": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
 
