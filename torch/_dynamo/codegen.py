@@ -64,7 +64,6 @@ class PyCodegen:
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
-        self.mutable_side_effects_from_source = False
         self.value_from_source: bool = True
         # This serves as a way for codegen to use a different source; we need
         # this because sometimes we can't easily modify the original source
@@ -72,14 +71,11 @@ class PyCodegen:
         self.overridden_sources: Dict[Source, Source] = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
-        prior = self.mutable_side_effects_from_source
-        self.mutable_side_effects_from_source = True
         prev = self.value_from_source
         self.value_from_source &= value_from_source
         try:
             self.foreach(stack_values)
         finally:
-            self.mutable_side_effects_from_source = prior
             self.value_from_source = prev
 
     def graph_output_vars(self):
@@ -134,17 +130,6 @@ class PyCodegen:
         if self.top_of_stack is value and allow_cache:
             output.append(create_dup_top())
             return
-
-        if self.mutable_side_effects_from_source:
-            # this is needed to get aliasing relationships right
-            # value.source will get mutated to hold `value`
-            # mutable_side_effects_from_source=False is used to codegen the mutation
-            # mutable_side_effects_from_source=True is used to codegen a reference
-            from .side_effects import MutableSideEffects
-
-            if isinstance(value.mutable_local, MutableSideEffects):
-                self(value.source)
-                return
 
         if allow_cache:
             if self.tempvars.get(value) is not None:
