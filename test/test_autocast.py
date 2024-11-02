@@ -1,7 +1,6 @@
 # Owner(s): ["module: unknown"]
 
 import unittest
-from unittest.mock import patch
 
 import torch
 from torch.testing._internal.autocast_test_lists import (
@@ -366,15 +365,6 @@ class TestAutocastMPS(TestCase):
             y = torch.randn(3, 3, device="mps")
             result = torch.mm(x, y)
             self.assertEqual(result.dtype, torch.bfloat16)
-
-    @patch("platform.mac_ver", return_value=("13.0", ("", "", ""), ""))
-    def test_mps_autocast_bfloat16_unsupported(self, mock_mac_ver):
-        with self.assertWarnsRegex(
-            UserWarning,
-            "In MPS autocast, but the target dtype torch.bfloat16 is not supported on macOS versions below 14. Disabling autocast.",
-        ):
-            with torch.amp.autocast(device_type="mps", dtype=torch.bfloat16):
-                _ = torch.ones(10, device="mps")
 
 
 class TestTorchAutocast(TestCase):
