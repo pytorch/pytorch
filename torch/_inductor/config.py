@@ -107,7 +107,7 @@ custom_op_default_layout_constraint = "needs_fixed_stride_order"
 
 # The default layout constraint for user-defined triton kernels.
 # See "The default layout constraint for custom operators" for options.
-triton_kernel_default_layout_constraint = "flexible_layout"
+triton_kernel_default_layout_constraint = "needs_fixed_stride_order"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
@@ -1048,10 +1048,6 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
-    debug_dump_consts_bin: bool = (
-        os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
-    )
-
     # option for debug printing/saving for intermediate tensor values for aot inductor
     # 0: disable debug dumping
     # 1: enable saving intermediate tensor values
@@ -1281,16 +1277,6 @@ class trace:
 
     # SVG figure showing fx with fusion
     draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
-
-    # We draw our fx graphs with the "record" shape attribute by default.
-    # Sometimes, when the graph is very complex, we may hit dot errors like below:
-    #   "flat edge between adjacent nodes one of which has a record shape -
-    #    replace records with HTML-like labels"
-    # and thus fail to generate a graph. So, let's give the user an option
-    # to specify the shape attribute for the dot graph. For example, passing
-    # INDUCTOR_DOT_GRAPH_SHAPE_SVG = "none" would let us generate HTML-like lables
-    # to workaround the above failure.
-    dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
 
     # If not None, this is the URL that saves the SVG files of the input/output
     # graph of each pass that changed the graph
