@@ -2252,6 +2252,33 @@ class TestReductions(TestCase):
         self.assertEqual(x[:, :2].amax().item(), 5)
         self.assertEqual(x[:, :2].argmax().item(), 2)
 
+    @onlyCPU
+    @dtypes(*integral_types_and(torch.bool))
+    def test_nanmean_integral_types(self, device, dtype):
+
+        # List of tensor shapes to test
+        shapes = [
+            (),
+            (0,),
+            (1,),
+            (3, 4, 5),
+            (2, 0, 3),
+            (10, 10, 10),
+            (2, 3, 0, 4),
+            (100,),
+            (1, 1, 1),
+            (5, 5, 5, 5, 5),
+        ]
+
+        for shape in shapes:
+            # Tensor of the specified shape and dtype
+            t = make_tensor(shape, dtype=dtype, device=device)
+            # Attempt to call torch.nanmean and expect a RuntimeError
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"nanmean\(\): expected input to have floating point or complex dtype but got \w+"
+            ):
+                torch.nanmean(t)
 
     @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
     @dtypes(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.uint8})
