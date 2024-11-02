@@ -1,24 +1,41 @@
 from __future__ import annotations
 
+import base64
 import copy
 import dataclasses
 import enum
+import json
 import logging
+import os
+import pickle
 import time
 from collections import defaultdict
 from typing import DefaultDict, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Self
 
-from torch._dynamo.utils import get_chromium_event_logger
+import torch._dynamo.config
+import torch._utils_internal
+import torch.compiler.config
+import torch.distributed as dist
+from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once
+from torch._environment import is_fbcode
+from torch._logging._internal import trace_structured_artifact
 
 
 if TYPE_CHECKING:
     import types
 
     from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._inductor.remote_cache import JsonDataTy, RemoteCache
+
+
+class ReservedWorkflowIdUserError(ValueError):
+    pass
 
 
 log = logging.getLogger(__name__)
+
+LOCK_TIMEOUT = 10
 
 # How does in memory representation work?  Concretely, this module is
 # responsible for holding GLOBAL state representing the state it holds, no
@@ -27,6 +44,48 @@ log = logging.getLogger(__name__)
 # (similar to how the filesystem doesn't get cleaned up except by tmp
 # cleaner), so the expectation is the information is relatively cheap and we
 # don't mind leaking it.
+
+
+# How exactly did we design the cache key?  Here are some of the questions:
+#
+# - JOB_ID: Do we have a unique identifier for the "training run"  (such that
+#   it stays the same if we're running the same code, and changes if we're
+#   running something different).
+#
+# - RANK: Are we sharing the cache across ranks, or does each rank get
+#   an individual cache?
+#
+# We choose to require job_id for PGO cache.  This is to prevent
+# situations where unrelated invocations of PyTorch unpredictably cause
+# changes to each other's behavior.  With a job_id, at least you know there
+# is some "state" associated with it.  (State dict might be another way to
+# tell if a run is related or not.)  You can opt-in to YOLO everything
+# aliases everything by passing a shared job_id for all your invocations.
+#
+# We choose to NOT share PGO cache across ranks.  With no RANK_SHARING, there
+# is never contention between runs, so we can leisurely update a bundle with
+# information we need.  Because we are grouped by job_id, we can have a single
+# consolidated bundle for everything (or not; maybe worry about O(n^2) IO if
+# we updated every compile--let's just instrument this.)  Can even take a
+# filelock for extra safety (expect no contention); expect 50ns overhead from
+# uncontended filelock.
+#
+# If we did share ranks, everyone is storming to modify the same cache files.
+# We can do this by having folks atomic write to a CAS-store and then having
+# readers do on-the-fly merging (this can be implemented in remote using
+# prefix iteration).  As an optional optimization, one rank can be elected to
+# handling bundling post facto (ideally, this is done async, after quiescence,
+# without compiler collective need to wait for everyone to finish writing
+# their bits.) Not sure how you can avoid a listdir because if some rank shows
+# up with some new entries we need to pull them in ASAP (unless you want to
+# delay bundling).
+#
+# But compiler collectives fill a similar niche:  compilers chat with each
+# other so rank 0 has collected everything.  So elect rank 0 only to write the
+# bundle.  Don't even need CAS-store atomic write; just one rank writing an
+# updating bundles.  The point is that use compiler collectives to share
+# profiles across ranks, but use the PGO cache to persist profiles per rank
+# across attempts.  No need to have one mechanism to do everything.
 
 
 @dataclasses.dataclass(frozen=True)
@@ -47,7 +106,8 @@ class CodeState:
     )
 
 
-CODE_STATE: DefaultDict[CodeId, CodeState] = defaultdict(CodeState)
+_INIT_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
+_CODE_STATE: Optional[DefaultDict[CodeId, CodeState]] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -195,7 +255,7 @@ def update_automatic_dynamic(
     is_unspecialized_nn_module: bool = False,
 ) -> FrameStateSizeEntry:
     code_id = CodeId.make(tx.f_code)
-    frame_state = CODE_STATE[code_id]
+    frame_state = get_code_state()[code_id]
     is_update = name in frame_state.automatic_dynamic
     mut_entry = frame_state.automatic_dynamic[name]
     old_entry = copy.copy(mut_entry)
@@ -332,3 +392,286 @@ def process_automatic_dynamic(
                 )
         assert res is not None
         return res
+
+
+def get_cache_key() -> Optional[str]:
+    # TODO: info versions of these logs that log only once
+    if torch._inductor.config.force_disable_caches:
+        warn_once(
+            "dynamo_pgo force disabled by torch._inductor.config.force_disable_caches"
+        )
+        return None
+
+    # NB: We always use global rank for keys, even though they are overkill
+    # for local only cache
+    rank = None
+    if dist.is_available() and dist.is_initialized():
+        rank = dist.get_rank()
+
+    # NB: We namespace the cache keys so that only user-specified job id
+    # can alias with each other.
+    if (r := torch.compiler.config.job_id) is not None:
+        if r.startswith("mast:"):
+            raise ReservedWorkflowIdUserError(
+                "torch.compiler.config.job_id with prefix 'mast:' is reserved for "
+                "automatically generated job id associated with a specific MAST job "
+                "name and version."
+            )
+        return f"{r}:{rank}"
+
+    if (name_version := torch._utils_internal.get_mast_job_name_version()) is not None:
+        mast_job_name, mast_job_version = name_version
+        return f"mast:{mast_job_name}:{mast_job_version}:{rank}"
+
+    return None
+
+
+# This solely controls local PGO
+def code_state_path(cache_key: str) -> Optional[str]:
+    if not torch._dynamo.config.automatic_dynamic_local_pgo:
+        log.debug("automatic_dynamic_local_pgo not enabled")
+        return None
+
+    from torch._inductor.runtime.runtime_utils import cache_dir
+
+    return os.path.join(cache_dir(), "dynamo", f"code_state_{cache_key}.pkl")
+
+
+def should_use_remote_dynamo_pgo_cache() -> bool:
+    if torch._inductor.config.force_disable_caches:
+        return False
+
+    if (r := torch._dynamo.config.automatic_dynamic_remote_pgo) is not None:
+        return r
+
+    if not is_fbcode():
+        return False
+
+    if torch._utils_internal.is_fb_unit_test():
+        return False
+
+    try:
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
+    except ModuleNotFoundError:
+        return False
+
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:dynamo_pgo_version"
+    )
+
+
+def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
+    from torch._inductor.remote_cache import create_cache
+
+    if not should_use_remote_dynamo_pgo_cache():
+        return None
+
+    return create_cache(
+        "dynamo-pgo",
+        is_fbcode(),
+        "FbRemoteDynamoPGOCache",
+        "RemoteDynamoPGOCache",
+    )
+
+
+# TODO: this dump format sucks but apparently it's very difficult to json.dumps
+# while not indenting inner lists SIGH
+
+
+def _key_asdict(x: object) -> object:
+    if isinstance(x, CodeId):
+        return f"{x.filename}:{x.firstlineno}:{x.name}"
+    else:
+        return x
+
+
+def _asdict(x: object) -> object:
+    if isinstance(x, (dict, defaultdict)):
+        return {_key_asdict(k): _asdict(v) for k, v in x.items()}
+    elif isinstance(x, (list, tuple)):
+        return [_asdict(v) for v in x]
+    elif dataclasses.is_dataclass(x):
+        return {
+            field.name: _asdict(getattr(x, field.name))
+            for field in dataclasses.fields(x)
+        }
+    elif x is auto_unset:
+        return "auto_unset"
+    elif x is auto_dynamic:
+        return "auto_dynamic"
+    else:
+        return x
+
+
+def get_code_state() -> DefaultDict[CodeId, CodeState]:
+    global _CODE_STATE, _INIT_CODE_STATE
+    if _CODE_STATE is not None:
+        return _CODE_STATE
+
+    chromium_log = get_chromium_event_logger()
+
+    # Initialize it (even if we don't look up profile)
+    _CODE_STATE = defaultdict(CodeState)
+
+    cache_key = get_cache_key()
+    if cache_key is None:
+        return _CODE_STATE
+
+    def hit(ty: str) -> DefaultDict[CodeId, CodeState]:
+        global _INIT_CODE_STATE
+        assert isinstance(_CODE_STATE, defaultdict)
+        log.info("get_code_state %s hit %s, %d entries", path, ty, len(_CODE_STATE))
+        trace_structured_artifact(
+            f"get_{ty}_code_state",
+            "string",
+            lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
+        )
+        _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
+        return _CODE_STATE
+
+    # Attempt local
+    path = code_state_path(cache_key)
+    if path is not None and os.path.exists(path):
+        with dynamo_timed(
+            name := "pgo.get_local_code_state", log_pt2_compile_event=True
+        ):
+            chromium_log.add_event_data(name, cache_key=cache_key)
+            # Read lock not necessary as we always write atomically write to
+            # the actual location
+            with open(path, "rb") as f:
+                try:
+                    _CODE_STATE = pickle.load(f)
+                except Exception:
+                    log.warning(
+                        "get_code_state failed while reading %s", path, exc_info=True
+                    )
+                else:
+                    return hit("local")
+
+    # Attempt remote
+    remote_cache = get_remote_cache()
+    if remote_cache is not None:
+        with dynamo_timed(
+            name := "pgo.get_remote_code_state", log_pt2_compile_event=True
+        ):
+            chromium_log.add_event_data(name, cache_key=cache_key)
+            # TODO: I don't really understand why there's a JSON container format
+            try:
+                cache_data = remote_cache.get(cache_key)
+            except Exception:
+                log.warning(
+                    "get_code_state failed remote read on %s", cache_key, exc_info=True
+                )
+            else:
+                if cache_data is not None:
+                    try:
+                        assert isinstance(cache_data, dict)
+                        data = cache_data["data"]
+                        assert isinstance(data, str)
+                        payload = base64.b64decode(data)
+                        _CODE_STATE = pickle.loads(payload)
+                    except Exception:
+                        log.warning(
+                            "get_code_state failed parsing remote result on %s",
+                            cache_key,
+                            exc_info=True,
+                        )
+                    else:
+                        return hit("remote")
+                else:
+                    log.info("get_code_state remote miss on %s", cache_key)
+
+    log.info("get_code_state using default")
+
+    assert _CODE_STATE is not None
+    return _CODE_STATE
+
+
+def put_code_state() -> None:
+    if _CODE_STATE is None:
+        log.info("put_code_state: never initialized, will not write")
+        return
+
+    if _CODE_STATE == _INIT_CODE_STATE:
+        log.info("put_code_state: no change, skipping")
+        return
+
+    cache_key = get_cache_key()
+    if cache_key is None:
+        log.info("put_code_state: no cache key, skipping")
+        return
+
+    put_local_code_state(cache_key)
+    put_remote_code_state(cache_key)
+
+
+def put_local_code_state(cache_key: str) -> None:
+    with dynamo_timed(name := "pgo.put_local_code_state", log_pt2_compile_event=True):
+        chromium_log = get_chromium_event_logger()
+        chromium_log.add_event_data(name, cache_key=cache_key)
+        assert _CODE_STATE is not None
+
+        path = code_state_path(cache_key)
+
+        if path is None:
+            log.info("put_code_state: local cache disabled")
+            return
+
+        # If the user isn't misusing our API, we should have exclusive access to
+        # this directory.  But it's not too hard
+
+        tmp_path = path + ".tmp"
+        lock_path = path + ".lock"
+        # We /mostly/ don't need the lock but the tmp file could be clobbered
+        # TODO: use a safe tempfile create to eliminate lock
+        from filelock import FileLock
+
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        with FileLock(lock_path, timeout=LOCK_TIMEOUT):
+            with open(tmp_path, "wb") as f:
+                pickle.dump(_CODE_STATE, f)
+            os.rename(tmp_path, path)
+            log.info(
+                "put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE)
+            )
+            trace_structured_artifact(
+                "put_local_code_state",
+                "string",
+                lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
+            )
+
+
+def put_remote_code_state(cache_key: str) -> None:
+    with dynamo_timed(name := "pgo.put_remote_code_state", log_pt2_compile_event=True):
+        chromium_log = get_chromium_event_logger()
+        chromium_log.add_event_data(name, cache_key=cache_key)
+        assert _CODE_STATE is not None
+
+        remote_cache = get_remote_cache()
+
+        if remote_cache is None:
+            log.info("put_code_state: remote cache disabled")
+            return
+
+        content = pickle.dumps(_CODE_STATE)
+        cache_data: JsonDataTy = {
+            "data": base64.b64encode(content).decode("ascii"),
+        }
+        remote_cache.put(cache_key, cache_data)
+        log.info(
+            "put_code_state: wrote remote %s, %d entries", cache_key, len(_CODE_STATE)
+        )
+        # TODO: don't log this multiple times
+        trace_structured_artifact(
+            "put_remote_code_state",
+            "string",
+            lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
+        )
+
+
+# NB: this does NOT reset the cached code state on disk
+def reset_code_state() -> None:
+    global _CODE_STATE, _INIT_CODE_STATE
+    _CODE_STATE = None
+    _INIT_CODE_STATE = None
