@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import collections
 import functools
-import platform
 import warnings
 from typing import Any, Optional
 
