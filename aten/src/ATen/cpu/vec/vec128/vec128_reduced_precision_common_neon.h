@@ -139,7 +139,7 @@ struct Vectorized16 {
   Derived angle() const {
     auto zero = Derived(0);
     auto pi = Derived(c10::pi<value_type>);
-    auto tmp = Derived::blendv(zero, pi, *this < zero);
+    auto tmp = Derived::blendv(zero, pi, *static_cast<const Derived*>(this) < zero);
     return Derived::blendv(tmp, *static_cast<const Derived*>(this), static_cast<const Derived*>(this)->isnan());
   }
   Derived real() const {
