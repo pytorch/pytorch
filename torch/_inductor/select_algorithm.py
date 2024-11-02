@@ -260,6 +260,9 @@ class TritonTemplateKernel(TritonKernel):
     def need_numel_args(self):
         return False
 
+    def get_out_name(self):
+        return self.args.output(self.output_node.get_name())
+
     def estimate_kernel_num_bytes(self):
         """
         Estimate the total number of bytes this kernel takes.
@@ -479,6 +482,40 @@ class TritonTemplateKernel(TritonKernel):
             self.cse.invalidate(set())  # type: ignore[arg-type]
             return body_val
 
+    def tma_store(
+        self,
+        indices: Union[List[Any], Tuple[Any]],
+        val: str,
+        tma_descriptor: str,
+        indent_width: int = 4,
+    ):
+        """Generates codgen to store via tma._experimental_descriptor_store
+
+        Args:
+            indices (Union[List, Tuple]):  The index for each dimension of the output
+            val (str): The value to store.
+            tma_descriptor (str): The name of the tma descriptor
+            indent_width (int): The number of spaces to use for indentation. This is used when the call to
+                store_output is indented in the kernel definition.
+
+        """
+        with self.create_subgraph_body("<TMA_STORE>"):
+            assert isinstance(indices, (list, tuple))
+            assert isinstance(val, str)
+            assert isinstance(tma_descriptor, str)
+            assert self.template_mask is None
+            indices = list(map(TritonPrinter.paren, indices))
+            index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
+            lengths = [
+                V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
+            ]
+            assert len(indices) == len(lengths)
+            self.codegen_body()
+            self.body.writeline(
+                f"tl._experimental_descriptor_store({tma_descriptor}, {val}, {index_symbols})"
+            )
+            return textwrap.indent(self.body.getvalue(), " " * indent_width).strip()
+
     def store_output(
         self,
         indices: Union[List[Any], Tuple[Any]],
@@ -592,6 +629,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.modification,
                 self.gen_argdefs,
                 self.gen_defines,
+                self.tma_store,
+                self.get_out_name,
             ]
         }
 
