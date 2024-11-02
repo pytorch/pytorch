@@ -153,16 +153,19 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
   return reduce(x[0]);
 }
 
-#if defined(__aarch64__) && defined(__clang__) && __clang_major__ > 15
+// We would have to write a separate SVE-specific path to use SVE
+// BFDOT. Deferring that for now to get the NEON/ASIMD BFDOT path
+// working.
+#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
 // https://godbolt.org/z/z8P4Yncra
 #define COMPILER_SUPPORTS_BF16_TARGET 1
-#elif defined(__aarch64__) && !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
+#elif defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
 // https://gcc.gnu.org/gcc-10/changes.html
 // https://godbolt.org/z/cdGG7vn8o
 #define COMPILER_SUPPORTS_BF16_TARGET 1
-#else
+#else // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
 #define COMPILER_SUPPORTS_BF16_TARGET 0
-#endif // defined(__aarch64__) && defined(__clang__) && __clang_major__ > 15
+#endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
 
 namespace {
 vec::Vectorized<float> fmadd(
