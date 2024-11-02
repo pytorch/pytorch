@@ -106,23 +106,59 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
         args = tree_map(_slice_input, sample.args)
         kwargs = tree_map(_slice_input, sample.kwargs)
 
-        from torch._prims_common import canonicalize_dims
+        # Handle indices in index_put
+        if "index_put" in op.full_name and "indices" in kwargs:
+            if len(kwargs["indices"]) > 1:
+                # If after unrolling we still have indices left, use them
+                kwargs["indices"] = [t[i] for t in kwargs["indices"][1:]]
+            else:
+                # If no indices are left, create them so they match the NJT implementation
+                sequence_put = kwargs["indices"][0].tolist()
+                if i in sequence_put:
+                    kwargs["indices"] = [
+                        torch.tensor(
+                            list(range(inp.shape[0])),
+                            dtype=torch.int32,
+                            device=kwargs["indices"][0].device,
+                        )
+                    ]
+                else:
+                    kwargs["indices"] = [
+                        torch.tensor(
+                            [], dtype=torch.int32, device=kwargs["indices"][0].device
+                        )
+                    ]
+
+        from torch.nested._internal.ops import _outer_to_inner_dim
 
         # Need to adjust dim to apply on NJT component
         if "dim" in kwargs:
-            kwargs["dim"] = canonicalize_dims(nt_inp.dim(), kwargs["dim"]) - 1
-            assert kwargs["dim"] >= 0
+            kwargs["dim"] = _outer_to_inner_dim(
+                nt_inp.dim(), kwargs["dim"], canonicalize=True
+            )
 
         # TODO: handle this
         assert "dims" not in kwargs
-
         out_ref_component = op.op(inp, *args, **kwargs)
-
-        # TODO: handle list / tuple / non-NJT outputs
-        assert not isinstance(out_ref_component, (list, tuple))
         out_ref_components.append(out_ref_component)
 
     if wrap_output_as_njt:
+        # handle list / tuple of outputs
+        if len(out_ref_components) > 0 and isinstance(
+            out_ref_components[0], (list, tuple)
+        ):
+            num_returns = len(out_ref_components[0])
+            # ensure we get the same number of returns for each invocation
+            assert all(len(o) == num_returns for o in out_ref_components)
+            # construct NJTs from same index returns from each invocation
+            njt_returns = []
+            for r in range(num_returns):
+                njt_returns.append(
+                    torch.nested.as_nested_tensor(
+                        [o[r] for o in out_ref_components], layout=torch.jagged
+                    )
+                )
+            return type(out_ref_components[0])(njt_returns)
         return torch.nested.as_nested_tensor(out_ref_components, layout=torch.jagged)
 
     return out_ref_components
@@ -132,17 +168,56 @@ def unbind_reference(op, sample, wrap_output_as_njt=True):
 def reduction_reference(op, sample):
     assert sample.input.is_nested
     dim = sample.kwargs.get("dim", None)
+    keepdim = sample.kwargs.get("keepdim", False)
     assert dim != 0, "reductions over the batch dim are not supported"
     assert "dims" not in sample.kwargs
     assert sample.input._ragged_idx == 1
+
+    if isinstance(dim, (tuple, list)):
+        reduce_on_ragged = sample.input._ragged_idx in dim
+        reduce_on_batch = 0 in dim
+    else:
+        reduce_on_ragged = sample.input._ragged_idx == dim
+        reduce_on_batch = dim == 0
 
     if dim is None:
         # calculate reference value by running reduction on values buffer
         return op.op(sample.input.values(), *sample.args, **sample.kwargs)
 
-    if dim == sample.input._ragged_idx:
+    if reduce_on_ragged and reduce_on_batch:
+        # run reference directly on buffer with dims converted to inner space
+        from torch.nested._internal.ops import _outer_to_inner_dim
+
+        ref_kwargs = dict(sample.kwargs)
+        ref_kwargs["dim"] = _outer_to_inner_dim(
+            sample.input.dim(), dim, canonicalize=True
+        )
+        out = op.op(sample.input.values(), *sample.args, **ref_kwargs)
+        if keepdim:
+            if isinstance(out, (tuple, list)):
+                # some ops return multiple things; unsqueeze all of them
+                out = type(out)(o.unsqueeze(sample.input._ragged_idx) for o in out)
+            else:
+                out = out.unsqueeze(sample.input._ragged_idx)
+        return out
+
+    if reduce_on_ragged and not reduce_on_batch:
         # calculate reference value by running an unbind reference and stacking
         out_ref_components = unbind_reference(op, sample, wrap_output_as_njt=False)
+        if len(out_ref_components) > 0 and isinstance(
+            out_ref_components[0], (tuple, list)
+        ):
+            # some ops return multiple things; stack all of them
+            num_returns = len(out_ref_components[0])
+            # ensure we get the same number of returns for each invocation
+            assert all(len(o) == num_returns for o in out_ref_components)
+            # stack same index returns from each invocation
+            stacked_returns = []
+            for r in range(num_returns):
+                stacked_returns.append(
+                    torch.stack([o[r] for o in out_ref_components], dim=0)
+                )
+            return type(out_ref_components[0])(stacked_returns)
         return torch.stack(out_ref_components, dim=0)
 
     # unbind reference works for other reductions
@@ -239,7 +314,13 @@ def sample_inputs_elementwise_njt_binary(
 
 
 def sample_inputs_njt_reduction(
-    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    supports_dimlist=True,
+    op_kwargs=None,
+    **kwargs,
 ):
     if not op_kwargs:
         op_kwargs = {}
@@ -247,17 +328,64 @@ def sample_inputs_njt_reduction(
     for njt in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
     ):
-        # dim-wise reduction; includes reduction over the ragged dim
-        # NB: reduction over the batch dim is not supported!
-        # TODO: Cover this in the set of error inputs
-        for dim in range(1, njt.dim()):
-            for keepdim in [False, True]:
+        for keepdim in [False, True]:
+            # single dim-wise reduction; includes reduction over the ragged dim
+            # NB: reduction over the batch dim is not supported!
+            # TODO: Cover this in the set of error inputs
+            for dim in range(1, njt.dim()):
                 yield SampleInput(
-                    njt, kwargs={**op_kwargs, "dim": dim, "keepdim": keepdim}
+                    njt.clone().detach(),
+                    kwargs={**op_kwargs, "dim": dim, "keepdim": keepdim},
                 )
 
+            if supports_dimlist:
+                # reduce on both batch and ragged dims
+                yield SampleInput(
+                    njt.clone().detach(),
+                    kwargs={
+                        **op_kwargs,
+                        "dim": [0, njt._ragged_idx],
+                        "keepdim": keepdim,
+                    },
+                )
+
+                # reduce on batch, ragged, and other dims
+                for other_dim in range(njt._ragged_idx + 1, njt.dim()):
+                    yield SampleInput(
+                        njt.clone().detach(),
+                        kwargs={
+                            **op_kwargs,
+                            "dim": [0, njt._ragged_idx, other_dim],
+                            "keepdim": keepdim,
+                        },
+                    )
+
+                # reduce on two non-ragged, non-batch dims
+                if njt.dim() > 3 and njt._ragged_idx == 1:
+                    yield SampleInput(
+                        njt.clone().detach(),
+                        kwargs={
+                            **op_kwargs,
+                            "dim": [njt.dim() - 2, njt.dim() - 1],
+                            "keepdim": keepdim,
+                        },
+                    )
+
+                # full reduction by specifying all dims
+                yield SampleInput(
+                    njt.clone().detach(),
+                    kwargs={
+                        **op_kwargs,
+                        "dim": list(range(njt.dim())),
+                        "keepdim": keepdim,
+                    },
+                )
+
+                # TODO: Reducing on ragged dim and non-batch dim is not supported;
+                # cover this in the set of error inputs.
+
         # full reduction
-        yield SampleInput(njt, kwargs=dict(op_kwargs))
+        yield SampleInput(njt.clone().detach(), kwargs=dict(op_kwargs))
 
 
 def unsupported_sample_inputs_func(op_name):
@@ -449,6 +577,46 @@ def sample_inputs_nn_functional_embedding(
     )
 
 
+def sample_inputs_index_put(
+    op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
+):
+    for njt in _sample_njts(
+        device=device, dtype=dtype, requires_grad=requires_grad, dims=[2, 3, 4]
+    ):
+        for dim in range(njt.dim()):
+            indices = [
+                torch.tensor(list(range(njt.size(0))), device=njt.device),
+                *[
+                    torch.tensor([0] * njt.size(0), device=njt.device)
+                    for _ in range(dim - 1)
+                ],
+            ]
+            yield SampleInput(
+                njt.clone().detach(),
+                kwargs={
+                    "indices": indices,
+                    "values": torch.tensor(1.0, device=njt.device),
+                },
+            )
+
+    # Non-cont NJT for completeness
+    offsets = torch.tensor([0, 2, 5, 7], device=device)
+    lengths = torch.tensor([2, 2, 2], device=device)
+    indices = [
+        torch.tensor([0, 1, 2], device=device),
+        torch.tensor([0, 1, 1], device=device),
+        torch.tensor([0, 0, 0], device=device),
+    ]
+    a = torch.nested.nested_tensor_from_jagged(
+        torch.zeros(7, 3, device=device), offsets, lengths
+    )
+
+    yield SampleInput(
+        a.clone().detach(),
+        kwargs={"indices": indices, "values": torch.tensor(1.0, device=a.device)},
+    )
+
+
 def sample_inputs_nn_functional_embedding_bag(
     op_info, device, dtype, requires_grad, **kwargs
 ):
@@ -578,6 +746,8 @@ sample_inputs_nn_functional_threshold = partial(
 # to specify if they cannot be auto-generated for some reason. Try to keep these sorted
 # in alphabetical order!
 njt_sample_inputs = {
+    "argmax": partial(sample_inputs_njt_reduction, supports_dimlist=False),
+    "argmin": partial(sample_inputs_njt_reduction, supports_dimlist=False),
     "bmm": sample_inputs_bmm,
     "clone": sample_inputs_clone,
     **{f"mvlgamma.mvlgamma_p_{p}": sample_inputs_mvl_gamma(p=1) for p in (1, 3, 5)},
@@ -591,11 +761,24 @@ njt_sample_inputs = {
     "to": sample_inputs_to,
     "matmul": sample_inputs_matmul,
     "masked_select": sample_inputs_masked_select,
+    "index_put": sample_inputs_index_put,
+    "max.reduction_with_dim": partial(
+        sample_inputs_njt_reduction, supports_dimlist=False
+    ),
+    "min.reduction_with_dim": partial(
+        sample_inputs_njt_reduction, supports_dimlist=False
+    ),
+    "prod": partial(sample_inputs_njt_reduction, supports_dimlist=False),
 }
 
 njt_references = {
+    "argmax": reduction_reference,
+    "argmin": reduction_reference,
     "bmm": reference_bmm,
+    "max.reduction_with_dim": reduction_reference,
+    "min.reduction_with_dim": reduction_reference,
     "nn.functional.embedding_bag": reference_nn_functional_embedding_bag,
+    "prod": reduction_reference,
 }
 
 
