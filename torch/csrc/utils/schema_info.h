@@ -29,9 +29,9 @@ struct TORCH_API SchemaInfo {
 
   bool is_mutable(const c10::SchemaArgument& argument);
 
-  bool is_mutable(c10::string_view name);
+  bool is_mutable(std::string_view name);
 
-  bool has_argument(c10::string_view name);
+  bool has_argument(std::string_view name);
 
   bool is_nondeterministic() const;
 
