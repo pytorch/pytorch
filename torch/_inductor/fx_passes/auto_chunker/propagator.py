@@ -6,6 +6,7 @@ from torch.utils._ordered_set import OrderedSet
 import functools
 
 from .collector import get_args_of_node_type, CantChunk, eligible_source_node_op_to_idx, get_fake_tensor_from_node, compute_tensor_size
+from .chunking_subgraph import ChunkingSubgraph
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -104,26 +105,15 @@ def get_chunking_meta(node):
     return node.meta.get("chunking")
 
 class Propagator:
-    @classmethod
-    def find_nodes_to_recover(cls, chunking_subgraph_nodes: OrderedSet[Node]):
-        """
-        Nodes in chunking_subgraph_nodes that has external usage need
-        to be recovered in the end.
-        """
-        to_recover = OrderedSet()
-        for node in chunking_subgraph_nodes:
-            if any(user not in chunking_subgraph_nodes for user in node.users):
-                to_recover.add(node)
-        return to_recover
 
     @classmethod
-    def chunk_external_nodes(cls, graph, chunking_subgraph_nodes: OrderedSet[Node]):
+    def chunk_external_nodes(cls, chunking_subgraph, graph, chunking_subgraph_nodes: OrderedSet[Node]):
         """
         Find all nodes that are suppose to be input to the chunking
         subgraph. Add chunking metadata to them..
         """
 
-        source_user = next(node for node in chunking_subgraph_nodes if node.op != "placeholder")
+        source_user = chunking_subgraph.source_user
         batch_size = source_user.meta["val"].size(0)
         assert source_user.target in eligible_source_node_op_to_idx
 
@@ -164,11 +154,14 @@ class Propagator:
                 if _should_chunk(node):
                     # attach the chunking metadata
                     set_chunking_meta(node, chunk_dim=0)
+                    chunking_subgraph.add_external_node_to_chunk(node)
 
     @classmethod
-    def add_chunking_meta(cls, graph, chunking_subgraph_nodes: OrderedSet[Node]):
-        # print(f"{cls.find_nodes_to_recover(chunking_subgraph_nodes)=}")
-        cls.chunk_external_nodes(graph, chunking_subgraph_nodes)
+    def add_chunking_meta(cls, chunking_subgraph):
+        graph = chunking_subgraph.parent_graph
+        chunking_subgraph_nodes = chunking_subgraph.subgraph_nodes
+
+        cls.chunk_external_nodes(chunking_subgraph, graph, chunking_subgraph_nodes)
 
         for node in chunking_subgraph_nodes:
             if node.op == "placeholder" and "tangent" in node.target:

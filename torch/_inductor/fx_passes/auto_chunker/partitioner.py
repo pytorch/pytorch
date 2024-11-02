@@ -4,10 +4,11 @@ from torch.fx import Graph
 from torch.utils._ordered_set import OrderedSet
 
 from .collector import get_args_of_node_type, get_fake_tensor_from_node
+from .chunking_subgraph import ChunkingSubgraph
 
 class Partitioner:
     @classmethod
-    def reorder_nodes(cls, graph, chunking_subgraph_nodes) -> Graph:
+    def reorder_nodes(cls, graph, chunking_subgraph_nodes) -> ChunkingSubgraph:
         """
         Create a new graph to be like:
         1. all nodes run before `chunking_subgraph_nodes`
@@ -62,4 +63,4 @@ class Partitioner:
         new_graph.eliminate_dead_code()
         new_graph.lint()
 
-        return new_graph, new_chunking_subgraph_nodes
+        return ChunkingSubgraph(new_graph, new_chunking_subgraph_nodes)

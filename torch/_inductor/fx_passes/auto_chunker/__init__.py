@@ -21,6 +21,7 @@ from .collector import Collector, CantChunk
 from .partitioner import Partitioner
 from .propagator import Propagator, format_node_with_chunking_meta
 from .collector import get_fake_tensor_from_node, maybe_permuted
+from .applier import ChunkingApplier
 
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -525,7 +526,8 @@ class AutoChunkerTransform:
         # TODO need take care of the non-divisible case for numerical
         # parity.
         self.chunk_size = (bs + self.num_chunk - 1) // self.num_chunk
-        out_node = self.gm.graph.call_function(aten.split.Tensor, (source_node, self.chunk_size))
+        # out_node = self.gm.graph.call_function(aten.split.Tensor, (source_node, self.chunk_size))
+        out_node = self.gm.graph.call_function(aten.chunk.default, (source_node, self.num_chunk))
         chunks = []
         for i in range(self.num_chunk):
             chunks.append(self.gm.graph.call_function(operator.getitem, (out_node, i)))
@@ -710,9 +712,12 @@ class AutoChunker:
             for node in chunking_subgraph_nodes:
                 print(f"  {node.format_node()}")
 
-            reordered_graph, chunking_subgraph_nodes = Partitioner.reorder_nodes(graph, chunking_subgraph_nodes)
+            chunking_subgraph = Partitioner.reorder_nodes(graph, chunking_subgraph_nodes)
 
-            Propagator.add_chunking_meta(reordered_graph, chunking_subgraph_nodes)
+            Propagator.add_chunking_meta(chunking_subgraph)
+
+            ChunkingApplier(chunking_subgraph, 2).apply()
+
             assert False
 
             propagator = ChunkingMetaPropagator()
