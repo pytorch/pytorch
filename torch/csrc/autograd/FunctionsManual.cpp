@@ -4779,7 +4779,8 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   }
 
   if (output_mask[1] && !gG.defined()) {
-    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
+    TORCH_INTERNAL_ASSERT(
+        affine, "gamma should always be defined when it requires grad");
   }
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
@@ -4922,7 +4923,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
   }
 
   if (output_mask[1] && !gG.defined()) {
-    AT_ASSERTM(affine, "gamma should always be defined when it requires grad");
+    TORCH_INTERNAL_ASSERT(
+        affine, "gamma should always be defined when it requires grad");
   }
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};

@@ -1102,8 +1102,7 @@ static at::Tensor linear_int8_with_onednn_weight(
 }
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 
   Tensor QLinearOnednn::run_pointwise_tensor(
       Tensor act, // int8 CPU tensor, not QTensor
@@ -1351,5 +1350,4 @@ TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native
