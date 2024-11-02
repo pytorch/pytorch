@@ -2695,7 +2695,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
         target = torch.tensor([[1., 2., 3.], [1., 2., 3.]])
         var = 0.5
-        var_tensor = var*torch.ones_like(input)
+        var_tensor = var * torch.ones_like(input)
         component_wise_loss = 0.5 * (torch.log(var_tensor) + (input - target)**2 / var_tensor)
         self.assertEqual(component_wise_loss,
                          F.gaussian_nll_loss(input, target, var, reduction='none'))
