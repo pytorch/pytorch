@@ -13,6 +13,40 @@ from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Union
 from typing_extensions import deprecated
 from unittest import mock
 
+from torch._utils_internal import justknobs_check
+
+
+@dataclass
+class Config:
+    """Represents a config with richer behaviour than just a default value.
+    ::
+        i.e.
+        foo = Config(justknob="//foo:bar", default=False)
+        install_config_module(...)
+
+    This configs must be installed with install_config_module to be used
+
+    Precedence Order:
+        user_override: If a user sets a value (i.e. foo.bar=True), that
+            has the highest precendance and is always respected
+        justknob: If this pytorch installation supports justknobs, that will
+            override defaults, but will not override the user_override precendence.
+        default: This value is the lowest precendance, and will be used if nothing is
+            set.
+
+    Arguments:
+        justknob: the name of the feature / JK. In OSS this is unused.
+        default: is the value to default this knob to in OSS.
+    """
+
+    default: Any = True
+    justknob: Optional[str] = None
+
+    def __init__(self, default: Any = True, justknob: Optional[str] = None):
+        # python 3.9 does not support kw_only on the dataclass :(.
+        self.default = default
+        self.justknob = justknob
+
 
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
@@ -39,12 +73,18 @@ def install_config_module(module: ModuleType) -> None:
                 key.startswith("__")
                 or isinstance(value, (ModuleType, FunctionType))
                 or (hasattr(value, "__module__") and value.__module__ == "typing")
+                # Handle from torch.utils._config_module import Config
+                or (isinstance(value, type) and issubclass(value, Config))
             ):
                 continue
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
-                config[name] = _ConfigEntry(default=value)
+                config[name] = _ConfigEntry(Config(default=value))
+                if dest is module:
+                    delattr(module, key)
+            elif isinstance(value, Config):
+                config[name] = _ConfigEntry(value)
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -123,6 +163,12 @@ class _ConfigEntry:
     # The value specified by the user when they overrode the configuration
     # _UNSET_SENTINEL indicates the value is not set.
     user_override: Any = _UNSET_SENTINEL
+    # The justknob to check for this config
+    justknob: Optional[str] = None
+
+    def __init__(self, config: Config):
+        self.default = config.default
+        self.justknob = config.justknob
 
 
 class ConfigModule(ModuleType):
@@ -157,6 +203,10 @@ class ConfigModule(ModuleType):
             if config.user_override is not _UNSET_SENTINEL:
                 return config.user_override
 
+            if config.justknob is not None:
+                # JK only supports bools and ints
+                return justknobs_check(name=config.justknob, default=config.default)
+
             # Note that reference types can still be modified, so we
             # copy them to user_overrides in case the user overrides
             # them
@@ -164,6 +214,7 @@ class ConfigModule(ModuleType):
                 config.user_override = copy.deepcopy(config.default)
                 return config.user_override
             return config.default
+
         except KeyError as e:
             # make hasattr() work properly
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
@@ -204,7 +255,7 @@ class ConfigModule(ModuleType):
             if ignored_keys and key in ignored_keys:
                 if skip_default and not self._is_default(key):
                     warnings.warn(
-                        f"Skipping serialization of {key} value {self._config[key]}"
+                        f"Skipping serialization of {key} value {getattr(self, key)}"
                     )
                 continue
             if ignored_prefixes:
