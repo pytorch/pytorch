@@ -280,7 +280,7 @@ def justknobs_feature(
     return justknobs_check(name)
 
 
-def justknobs_check(name: str) -> bool:
+def justknobs_check(name: str, default: bool = True) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
     where you can toggle this value to False in JK without having to
@@ -303,7 +303,7 @@ def justknobs_check(name: str) -> bool:
     fork safe and you will break anyone who forks the process and then
     hits JK again.
     """
-    return True
+    return default
 
 
 def justknobs_getval_int(name: str) -> int:
