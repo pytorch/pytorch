@@ -167,17 +167,6 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
 #define COMPILER_SUPPORTS_BF16_TARGET 0
 #endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
 
-namespace {
-vec::Vectorized<float> fmadd(
-    const vec::Vectorized<float>& acc,
-    const vec::Vectorized<c10::BFloat16>& a,
-    const vec::Vectorized<c10::BFloat16>& b) {
-  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
-  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
-  return fmadd(a_float_high, b_float_high, fmadd(a_float_low, b_float_low, acc));
-}
-} // namespace
-
 #if COMPILER_SUPPORTS_BF16_TARGET
 #define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("arch=armv8.2-a+bf16")))
 
@@ -251,6 +240,15 @@ vec::Vectorized<float> fmadd(vec::Vectorized<float> a, vec::Vectorized<Half> b, 
   const auto first = vec::fmadd(b_float_low, c_float_low, a);
   return vec::fmadd(b_float_high, c_float_high, first);
 #endif
+}
+
+vec::Vectorized<float> fmadd(
+    const vec::Vectorized<float>& acc,
+    const vec::Vectorized<c10::BFloat16>& a,
+    const vec::Vectorized<c10::BFloat16>& b) {
+  const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
+  const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
+  return fmadd(a_float_high, b_float_high, fmadd(a_float_low, b_float_low, acc));
 }
 } // namespace
 
