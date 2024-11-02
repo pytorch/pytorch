@@ -24,6 +24,7 @@ from .mm_common import (
     mm_args,
     mm_grid,
     persistent_grid,
+    persistent_mm_configs,
     scaled_mm_configs,
 )
 
@@ -530,8 +531,8 @@ def tuned_scaled_mm(
     static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
-        for config in scaled_mm_configs(m, n, k):
-            if has_triton_tma():
+        if has_triton_tma():
+            for config in persistent_mm_configs(m, n, k):
                 kwargs = scaled_mm_options_device_tma(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
                 )
@@ -545,7 +546,8 @@ def tuned_scaled_mm(
                     ),
                     **kwargs,
                 )
-            else:
+        else:
+            for config in scaled_mm_configs(m, n, k):
                 if k == 16 and config.kwargs["BLOCK_M"] >= 64:
                     continue  # Triton crashes in this case
                 kwargs = scaled_mm_options(

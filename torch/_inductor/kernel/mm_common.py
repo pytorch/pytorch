@@ -211,6 +211,28 @@ mixed_mm_kernel_configs = (
     else mm_kernel_configs
 )
 
+persistent_mm_kernel_configs = [
+    {"config": (128, 128, 64, 3, 8), "cond": True},
+    {"config": (128, 64, 64, 3, 8), "cond": True},
+    {"config": (64, 128, 64, 3, 8), "cond": True},
+    {"config": (64, 64, 64, 3, 8), "cond": True},
+    {"config": (128, 128, 128, 3, 8), "cond": True},
+    {"config": (128, 64, 128, 3, 8), "cond": True},
+    {"config": (64, 128, 128, 3, 8), "cond": True},
+    {"config": (64, 64, 128, 3, 8), "cond": True},
+    # Varying stages (4)
+    {"config": (128, 128, 64, 4, 4), "cond": True},
+    {"config": (128, 64, 64, 4, 4), "cond": True},
+    {"config": (64, 128, 64, 4, 4), "cond": True},
+    {"config": (64, 64, 64, 4, 4), "cond": True},
+    # Varying stages (5)
+    {"config": (128, 128, 64, 5, 2), "cond": True},
+    {"config": (128, 64, 64, 5, 2), "cond": True},
+    {"config": (64, 128, 64, 5, 2), "cond": True},
+    {"config": (64, 64, 64, 5, 2), "cond": True},
+]
+
+
 scaled_mm_kernel_configs = [
     {"config": (128, 256, 32, 3, 8), "cond": True},
     {"config": (256, 128, 32, 3, 8), "cond": True},
@@ -339,6 +361,12 @@ scaled_mm_platform_configs = tuple(
     if config["cond"]
 )
 
+persistent_mm_platform_configs = tuple(
+    cast(Tuple[int, int, int, int, int], config["config"])
+    for config in persistent_mm_kernel_configs
+    if config["cond"]
+)
+
 # On ROCm convert num_stages to 0 to enable software pipelining
 if torch.version.hip:
     mm_platform_configs = tuple(
@@ -385,6 +413,10 @@ mixed_mm_configs = functools.partial(
 scaled_mm_configs = functools.partial(
     filtered_configs,
     configs=scaled_mm_platform_configs,
+)
+
+persistent_mm_configs = functools.partial(
+    filtered_configs, configs=persistent_mm_platform_configs
 )
 
 
