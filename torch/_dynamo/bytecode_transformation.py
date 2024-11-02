@@ -1417,6 +1417,7 @@ def cleaned_instructions(code, safe=False) -> List[Instruction]:
                 remove_binary_store_slice(instructions)
             if sys.version_info >= (3, 13):
                 remove_fused_load_store(instructions)
+    if sys.version_info >= (3, 11):
         update_offsets(instructions)
         devirtualize_jumps(instructions)
     return instructions
