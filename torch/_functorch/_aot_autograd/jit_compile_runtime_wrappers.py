@@ -738,31 +738,7 @@ def aot_dispatch_autograd(
                 + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
             fake_mode = detect_fake_mode()
-            # TODO(anijain2305) - this changes fx_g signature. But somehow it still
-            # works. I don't understand why it works. There will be some place where we
-            # let go of fx_g and use fw_module and bw_module. The question is - does
-            # joint graph partitioners need to keep the invariant of original fx_g
-            # signature?
             fx_g = run_joint_graph_passes_on_hops(fx_g, joint_inputs, aot_config)
-            if aot_config.enable_log:
-                aot_joint_log.info(
-                    "%s",
-                    lazy_format_graph_code(
-                        "Joint graph",
-                        fx_g,
-                        aot_config.aot_id,
-                        include_stride=True,
-                        include_device=True,
-                        colored=True,
-                    ),
-                )
-                joint_graph_str = fx_g.print_readable(
-                    print_output=False, include_stride=True, include_device=True
-                )
-                trace_structured(
-                    "aot_joint_graph",
-                    payload_fn=lambda: joint_graph_str,
-                )
 
             if fake_mode is not None:
                 tensorify_python_scalars(fx_g, fake_mode.shape_env, fake_mode)
