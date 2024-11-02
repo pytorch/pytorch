@@ -473,6 +473,9 @@ class BaseSchedulerNode:
                             V.kernel.mutations.add(input_buf.get_name())
                             V.kernel.mutations.add(buf.get_name())
 
+                        # update last usage of reused node
+                        self.last_usage.discard(input_buf.get_name())
+
                         V.kernel.inplace_update_buffers[
                             buf.get_name()
                         ] = input_buf.get_name()
