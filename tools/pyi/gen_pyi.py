@@ -250,7 +250,7 @@ def sig_for_ops(opname: str) -> list[str]:
         return [
             # unsafe override https://github.com/python/mypy/issues/5704
             f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ...  # type: ignore[override]",
-            f"def {opname}(self, other: object) -> _bool: ...",
+            f"def {opname}(self, other: Any) -> _bool: ...",
         ]
     elif name in asymmetric_comparison_ops:
         return [
