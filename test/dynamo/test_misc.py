@@ -11772,6 +11772,17 @@ fn
         res = f(torch.tensor(1))
         self.assertEqual(torch.tensor(False), res)
 
+    def test___build_class__(self):
+        @torch.compile(fullgraph=True)
+        def fn(t):
+            class NonTensor:
+                def __repr__(self):
+                    return f"<{self.__class__.__name__}>"
+
+            return t.sin()
+
+        fn(torch.randn(2))
+
 
 class TestTracer(JitTestCase):
     def test_jit_save(self):

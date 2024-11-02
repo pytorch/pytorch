@@ -1822,6 +1822,9 @@ class InstructionTranslatorBase(
         assert len(kwargs) == len(argnames)
         self.call_function(fn, args, kwargs)
 
+    def LOAD_BUILD_CLASS(self, inst):
+        self.load_builtin_from_argval("__build_class__")
+
     def LOAD_METHOD_SUPER(self, inst):
         self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
         arg = inst.argval[0]
