@@ -1689,44 +1689,51 @@ namespace {
       ASSERT_TRUE(vec_ninf.has_inf_nan()) << "Test failed for negative Infinity\n";
     }
 #if !defined(CPU_CAPABILITY_SVE)
+    template <typename vec, typename dst_t>
+    void test_convert_to(const char* dst_t_name) {
+      using src_t = ValueType<vec>;
+      constexpr auto N = vec::size();
+      CACHE_ALIGN src_t x[N];
+      CACHE_ALIGN dst_t y[N];
+      CACHE_ALIGN dst_t ref[N];
+      auto seed = TestSeed();
+      auto low = std::is_signed_v<dst_t> ? src_t(-100) : src_t(0);
+      ValueGen<src_t> generator(low, src_t(100), seed);
+      for (const auto i : c10::irange(N)) {
+        x[i] = generator.get();
+      }
+      for (const auto i : c10::irange(N)) {
+        ref[i] = static_cast<dst_t>(x[i]);
+      }
+      auto x_vec = vec::loadu(x);
+      auto y_vec = at::vec::convert<dst_t>(x_vec);
+      constexpr int num_dst_elements =
+        std::min(N, at::vec::Vectorized<dst_t>::size());
+      y_vec.store(y, num_dst_elements);
+      for (const auto i : c10::irange(num_dst_elements)) {
+        if (check_both_nan(y[i], ref[i])) {
+          continue;
+        }
+        ASSERT_EQ(y[i], ref[i])
+          << "Failure Details:nTest Seed to reproduce: " << seed
+          << " x[" << i << "]=" << x[i] << " dst_t=" << dst_t_name;
+      }
+      constexpr int dst_n = N / num_dst_elements;
+      auto y_vec_n = at::vec::convert<dst_t, dst_n, src_t, 1>(
+          at::vec::VectorizedN<src_t, 1>(x_vec));
+      y_vec_n.store(y, N);
+      for (const auto i : c10::irange(N)) {
+        if (check_both_nan(y[i], ref[i])) {
+          continue;
+        }
+        ASSERT_EQ(y[i], ref[i])
+          << "Failure Details:nTest Seed to reproduce: " << seed
+          << " x[" << i << "]=" << x[i] << " dst_t=" << dst_t_name;
+      }
+    }
     TYPED_TEST(VecConvertTests, Convert) {
       using vec = TypeParam;
-      using src_t = ValueType<TypeParam>;
-      constexpr auto N = vec::size();
-    #define TEST_CONVERT_TO(dst_t)                                     \
-      do {                                                             \
-        CACHE_ALIGN src_t x[N];                                        \
-        CACHE_ALIGN dst_t y[N];                                        \
-        CACHE_ALIGN dst_t ref[N];                                      \
-        auto seed = TestSeed();                                        \
-        auto low = std::is_signed_v<dst_t> ? src_t(-100) : 0;          \
-        ValueGen<src_t> generator(low, src_t(100), seed);              \
-        for (const auto i : c10::irange(N)) {                          \
-          x[i] = generator.get();                                      \
-        }                                                              \
-        for (const auto i : c10::irange(N)) {                          \
-          ref[i] = static_cast<dst_t>(x[i]);                           \
-        }                                                              \
-        auto x_vec = vec::loadu(x);                                    \
-        auto y_vec = at::vec::convert<dst_t>(x_vec);                   \
-        constexpr int num_dst_elements =                               \
-            std::min(N, at::vec::Vectorized<dst_t>::size());           \
-        y_vec.store(y, num_dst_elements);                              \
-        for (const auto i : c10::irange(num_dst_elements)) {           \
-          ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed  \
-              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
-        }                                                              \
-        constexpr int dst_n = N / num_dst_elements;                    \
-        auto y_vec_n = at::vec::convert<dst_t, dst_n, src_t, 1>(       \
-            at::vec::VectorizedN<src_t, 1>(x_vec));                    \
-        y_vec_n.store(y, N);                                           \
-        for (const auto i : c10::irange(N)) {                          \
-          ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed  \
-              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
-        }                                                              \
-      } while (0)
+      #define TEST_CONVERT_TO(dst_t) test_convert_to<vec, dst_t>(#dst_t)
       TEST_CONVERT_TO(int8_t);
       TEST_CONVERT_TO(uint8_t);
       TEST_CONVERT_TO(int16_t);
@@ -1739,59 +1746,15 @@ namespace {
       TEST_CONVERT_TO(c10::Half);
       TEST_CONVERT_TO(float);
       TEST_CONVERT_TO(double);
-    #undef TEST_CONVERT_TO
     }
     TYPED_TEST(VecConvertTestsReducedFloat, ConvertReduced) {
       using vec = TypeParam;
       using src_t = UholdType<TypeParam>;
       constexpr auto N = vec::size();
-    #define TEST_CONVERT_TO(dst_t)                                     \
-      do {                                                             \
-        CACHE_ALIGN src_t x[N];                                        \
-        CACHE_ALIGN dst_t y[N];                                        \
-        CACHE_ALIGN dst_t ref[N];                                      \
-        auto seed = TestSeed();                                        \
-        auto low = std::is_signed_v<dst_t> ? src_t(-100.0) : src_t(0); \
-        ValueGen<src_t> generator(low, src_t(100), seed);              \
-        for (const auto i : c10::irange(N - 1)) {                      \
-          x[i] =  generator.get();                                     \
-        }                                                              \
-        x[N - 1] = std::numeric_limits<src_t>::quiet_NaN();            \
-        for (const auto i : c10::irange(N)) {                          \
-          ref[i] = static_cast<dst_t>(x[i]);                           \
-        }                                                              \
-        auto x_vec = vec::loadu(x);                                    \
-        auto y_vec = at::vec::convert<dst_t>(x_vec);                   \
-        constexpr int num_dst_elements =                               \
-            std::min(N, at::vec::Vectorized<dst_t>::size());           \
-        y_vec.store(y, num_dst_elements);                              \
-        for (const auto i : c10::irange(num_dst_elements)) {           \
-          ASSERT_EQ(std::isnan(y[i]), std::isnan(ref[i]));             \
-          if (std::isnan(y[i])) {                                      \
-            continue;                                                  \
-          }                                                            \
-          ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed  \
-              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
-        }                                                              \
-        constexpr int dst_n = N / num_dst_elements;                    \
-        auto y_vec_n = at::vec::convert<dst_t, dst_n, src_t, 1>(       \
-            at::vec::VectorizedN<src_t, 1>(x_vec));                    \
-        y_vec_n.store(y, N);                                           \
-        for (const auto i : c10::irange(N)) {                          \
-          ASSERT_EQ(std::isnan(y[i]), std::isnan(ref[i]));             \
-          if (std::isnan(y[i])) {                                      \
-            continue;                                                  \
-          }                                                            \
-          ASSERT_EQ(y[i], ref[i])                                      \
-              << "Failure Details:\nTest Seed to reproduce: " << seed  \
-              << " x[" << i << "]=" << x[i] << " dst_t=" #dst_t;       \
-        }                                                              \
-      } while (0)
       TEST_CONVERT_TO(int8_t);
       TEST_CONVERT_TO(uint8_t);
       TEST_CONVERT_TO(float);
-    #undef TEST_CONVERT_TO
+      #undef TEST_CONVERT_TO
     }
     TEST(VecConvertBFloat16, ExhaustiveToFloat) {
       for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
