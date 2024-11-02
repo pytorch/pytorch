@@ -101,8 +101,8 @@ class IterationRanges:
         prefix: str,
         *,
         kernel: SIMDKernel,
-        divisor=sympy.S.One,
-        length=sympy.S.One,
+        divisor=sympy.Integer(1),
+        length=sympy.Integer(1),
         root: IterationRangesRoot,
     ) -> None:
         super().__init__()
@@ -205,7 +205,7 @@ class IterationRangesRoot(IterationRanges):
         return self.nodes[expr]
 
     def construct_entries(self, lengths: List[sympy.Expr]):
-        divisor = sympy.S.One
+        divisor = sympy.Integer(1)
         itervars = []
         for length in reversed(lengths):
             itervars.append(self.lookup(divisor, length))
@@ -224,7 +224,7 @@ class IterationRangesRoot(IterationRanges):
                 x.divisor, fallback=config.unbacked_symint_fallback
             )
         )
-        divisor = sympy.S.One
+        divisor = sympy.Integer(1)
         index_vars = []
         sizes = []
 
@@ -481,7 +481,7 @@ class SIMDKernel(Kernel):
             new_index,
             {
                 tree_node.root.index_sym(): tree_node.root.lookup(
-                    sympy.S.One, tree_node.root.numel
+                    sympy.Integer(1), tree_node.root.numel
                 ).symbol()
             },
         )
@@ -572,7 +572,7 @@ class SIMDKernel(Kernel):
             return_getters = []
             for size in length_group:
                 if sv.statically_known_equals(size, 1):  # type: ignore[arg-type]
-                    return_getters.append(lambda _: sympy.S.Zero)
+                    return_getters.append(lambda _: sympy.Integer(0))
                     continue
 
                 while current_group < len(remaining) and sv.statically_known_equals(
@@ -635,7 +635,7 @@ class SIMDKernel(Kernel):
         """
         groups = [rt.numel for rt in self.range_trees]
         if not self.inside_reduction:
-            groups[-1] = sympy.S.One
+            groups[-1] = sympy.Integer(1)
 
         if len(lengths) == len(self.range_trees) and all(
             V.graph.sizevars.simplify(sympy_product(x) - g) == 0
@@ -1564,7 +1564,7 @@ class SIMDScheduling(BaseScheduling):
         return tilings
 
     @classmethod
-    def select_tiling(cls, node_schedule, numel, reduction_numel=sympy.S.One):
+    def select_tiling(cls, node_schedule, numel, reduction_numel=sympy.Integer(1)):
         """
         Heuristics to decide how to tile kernels.
         Currently, we tile based on stride-1 dimensions.
