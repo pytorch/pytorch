@@ -549,7 +549,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "_async_input_mm(Tensor a, Tensor b, Tensor a_chunk_signals, int a_chunk_pivot) -> Tensor",
       torch::dispatch(
-          c10::DispatchKey::CUDA, c10d::symmetric_memory::cuda::async_input_mm),
+          c10::DispatchKey::CUDA, c10d::cuda::detail::async_input_mm),
       {at::Tag::pt2_compliant_tag});
 }
 

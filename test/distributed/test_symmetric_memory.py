@@ -1,6 +1,7 @@
 # Owner(s): ["module: c10d"]
 
 import os
+from unittest import skipIf
 
 import torch
 import torch.distributed as dist
@@ -18,6 +19,7 @@ from torch.distributed._symmetric_memory import (
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
+from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
@@ -188,6 +190,34 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
+    def test_get_signal_pad(self) -> None:
+        self._init_process()
+
+        t = _SymmetricMemory.empty_strided_p2p(*self._get_test_alloc_args())
+        symm_mem = _SymmetricMemory.rendezvous(t)
+        peer_rank = (self.rank + 1) % self.world_size
+
+        signal_pad = symm_mem.get_signal_pad(peer_rank)
+        self.assertEqual(signal_pad.dtype, torch.uint32)
+        self.assertEqual(signal_pad.numel(), symm_mem.signal_pad_size // 4)
+
+        # Only specify sizes
+        signal_pad = symm_mem.get_signal_pad(peer_rank, (8, 8))
+        self.assertEqual(signal_pad.dtype, torch.uint32)
+        self.assertEqual(signal_pad.numel(), 64)
+
+        # Only specify dtype
+        signal_pad = symm_mem.get_signal_pad(peer_rank, dtype=torch.uint64)
+        self.assertEqual(signal_pad.dtype, torch.uint64)
+        self.assertEqual(signal_pad.numel(), symm_mem.signal_pad_size // 8)
+
+        # Specify both sizes and dtype
+        signal_pad = symm_mem.get_signal_pad(peer_rank, (8, 8), dtype=torch.uint64)
+        self.assertEqual(signal_pad.dtype, torch.uint64)
+        self.assertEqual(signal_pad.numel(), 64)
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
     def test_barrier_timeout(self) -> None:
         self._init_process()
 
@@ -292,6 +322,10 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     @skipIfRocm
+    @skipIf(
+        not SM90OrLater,
+        "_fused_all_gather_matmul_native currently only supports sm>=90",
+    )
     @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     @parametrize("is_b_row_major", [True, False])
@@ -812,6 +846,7 @@ class LoweringTest(MultiProcessTestCase):
 
         torch._inductor.config._collective.auto_select = True
 
+    @skipIfRocm  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_lowering_one_shot_all_reduce(self):

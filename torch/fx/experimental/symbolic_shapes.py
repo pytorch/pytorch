@@ -3021,6 +3021,7 @@ class ShapeEnv:
         )
 
         self.guards: List[ShapeGuard] = []
+        self.axioms: Dict[sympy.Expr, sympy.Expr] = {}
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict[sympy.Symbol, sympy.Integer] = {}
@@ -4280,10 +4281,15 @@ class ShapeEnv:
                 sympy_expr
             ) in config.extended_debug_create_symbol.split(",")
             maybe_more_info = ""
-            if not is_debug:
+            if not is_debug and os.getenv("TORCHDYNAMO_EXTENDED_ADVICE", "1") not in (
+                "0",
+                "",
+            ):
                 maybe_more_info = (
                     ", for more info run with "
-                    f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}"'
+                    f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}" '
+                    "or to suppress this message run with "
+                    'TORCHDYNAMO_EXTENDED_ADVICE="0"'
                 )
             sloc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
@@ -5347,15 +5353,16 @@ class ShapeEnv:
         expr = canonicalize_bool_expr(expr)
 
         # Pattern matching
-        symbols = tuple(expr.free_symbols)
         if axioms is None:
-            axioms = self.get_axioms(symbols, compute_hint=compute_hint)
-        subst = {}
-        for e in axioms:
-            if e.free_symbols.issubset(expr.free_symbols):
-                subst.update(dict(self.get_implications(self.simplify(e))))
+            subst = self.axioms
+        else:
+            subst = {}
+            for e in axioms:
+                if e.free_symbols.issubset(expr.free_symbols):
+                    subst.update(dict(self.get_implications(self.simplify(e))))
 
         expr = expr.xreplace(subst)
+        # TODO: compute hint might have gotten broken here
 
         fs = expr.free_symbols
 
@@ -6285,6 +6292,7 @@ class ShapeEnv:
                     # or defer to runtime assert on.
                     guard = ShapeGuard(g, self._get_sloc())
                     self.guards.append(guard)
+                    self.axioms.update(dict(self.get_implications(self.simplify(g))))
                 else:
                     # it's fine to defer simple guards here without checking,
                     # the _maybe_guard_rel() call above will set replacements if possible,
@@ -6406,6 +6414,7 @@ class ShapeEnv:
             # and the guard in question has no unbacked SymInts in front
             ix = cands[-1] if cands else None
             self.deferred_runtime_asserts.setdefault(ix, []).append(ra)
+            self.axioms.update(dict(self.get_implications(self.simplify(expr))))
             self.num_deferred_runtime_asserts += 1
             self._update_version_counter()
             self._log_guard("runtime_assert", orig_expr, forcing_spec=False)
