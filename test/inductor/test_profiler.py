@@ -206,6 +206,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         from torch._inductor.codecache import code_hash
 
         device = "cuda"
+        debug = False  # set to True to get output file
 
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
@@ -219,7 +220,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         with config.patch(compile_threads=1):
             fn(*inputs)
 
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=False)
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=not debug)
         fp.close()
 
         with torch.profiler.profile(
@@ -234,7 +235,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
                 prof.step()
 
         prof.export_chrome_trace(fp.name)
-        print("Trace written to {fp.name}")
+        print("Trace written to {fp.name}, set debug=True to retain file.")
 
         triton_events = []
         with open(fp.name) as f:
