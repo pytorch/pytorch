@@ -1457,9 +1457,6 @@ class SIMDScheduling(BaseScheduling):
             )
 
             for pn, nodes in zip(node_group, fused_node_lists):
-                if only_gen_src_code:
-                    for n in nodes:
-                        n.last_usage = OrderedSet()
                 self.codegen_node_schedule_with_kernel(
                     node_schedule_map[pn][0],
                     kernel.create_sub_kernel(subkernel_map[pn]),
@@ -1663,9 +1660,6 @@ class SIMDScheduling(BaseScheduling):
         return False
 
     def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
-        for n in nodes:
-            n.last_usage = OrderedSet()
-
         if not nodes[0].is_template():
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
