@@ -36,7 +36,7 @@ install_conda_dependencies() {
 }
 
 install_pip_dependencies() {
-  pushd executorch/.ci/docker
+  pushd executorch
   as_jenkins bash install_requirements.sh --pybind xnnpack
   popd
 }
