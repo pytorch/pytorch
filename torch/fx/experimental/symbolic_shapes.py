@@ -5836,11 +5836,9 @@ class ShapeEnv:
             hint_size = self.size_hint(x, allow_none=True)
             if hint_size is None:
                 size = sys.maxsize
-            elif symbol_is_type(x, SymT.SIZE):
+            else:
                 assert isinstance(hint_size, sympy.Expr)
                 size = int(hint_size)
-            else:
-                size = sys.maxsize
             name = x.name
             # 1 puts ephemeral sourced symbols first when sorting in reverse
             return (1 if has_only_ephemeral_sources else 0, size, name)
