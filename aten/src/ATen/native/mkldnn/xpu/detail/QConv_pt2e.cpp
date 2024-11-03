@@ -79,7 +79,6 @@ at::Tensor quantized_convolution_pt2(
     binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
     accum_scale,
     accum_zero_point,
-    accum,
     unary_attr.has_value() ? unary_attr.value() : "none",
     unary_scalars,
     unary_algorithm.has_value() ? unary_algorithm.value() : "",
