@@ -403,7 +403,7 @@ Tensor _convolution_out(
       3 == ndim || 4 == ndim || 5 == ndim,
       "convolution only supports 3D, 4D, 5D tensor");
   // get computation format for Conv/TransposedConv
-  bool is_channels_last_suggested = use_channels_last_for_conv(input_r, weight_r);
+  bool is_channels_last_suggested = use_channels_last_for_conv(input_r, weight_r); 123
 
   Tensor input = input_r, weight = weight_r;
   // PyTorch does not support ChannelsLast1D case,
