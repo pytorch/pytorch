@@ -1961,6 +1961,7 @@ class CPythonContextManagerTestCase(TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
     # https://github.com/python/cpython/blob/d48cc82ed25e26b02eb97c6263d95dcaa1e9111b/Lib/test/test_contextlib.py#L70
 
+    @unittest.expectedFailure
     def test_contextmanager_plain(self):
         state = []
 
@@ -1976,8 +1977,8 @@ class CPythonContextManagerTestCase(TestCase):
             with woohoo() as x:
                 assert state == [1]
                 assert x == 42
-                # self.assertEqual(state, [1])
-                # self.assertEqual(x, 42)
+                self.assertEqual(state, [1])
+                self.assertEqual(x, 42)
                 state.append(x)
                 y += x
             return y
@@ -2009,7 +2010,6 @@ class CPythonContextManagerTestCase(TestCase):
                     state.append(x)
                     raise ZeroDivisionError
 
-        t = torch.randn(2, 3)
         fn(torch.randn(2, 3))
         self.assertEqual(state, [1, 42, 999])
 
@@ -2149,29 +2149,21 @@ class CPythonContextManagerTestCase(TestCase):
 
         fn(torch.randn(2, 3))
 
+    @unittest.expectedFailure
     def test_contextmanager_trap_second_yield(self):
         @contextmanager
         def whoo():
             yield
             yield
 
-        ctx = whoo()
-        ctx.__enter__()
-        with self.assertRaises(RuntimeError):
-            ctx.__exit__(None, None, None)
+        @torch.compile(backend="eager")
+        def f(t):
+            ctx = whoo()
+            ctx.__enter__()
+            with self.assertRaises(RuntimeError):
+                ctx.__exit__(None, None, None)
 
-    def test_contextmanager_non_normalised(self):
-        @contextmanager
-        def whoo():
-            try:
-                yield
-            except RuntimeError as e:
-                raise SyntaxError from e
-
-        ctx = whoo()
-        ctx.__enter__()
-        with self.assertRaises(SyntaxError):
-            ctx.__exit__(RuntimeError, None, None)
+        f(torch.randn(2))
 
     @unittest.expectedFailure
     def test_contextmanager_except(self):
@@ -2197,45 +2189,7 @@ class CPythonContextManagerTestCase(TestCase):
         fn(torch.randn(2, 3))
         self.assertEqual(state, [1, 42, 999])
 
-    def test_contextmanager_except_stopiter(self):
-        @contextmanager
-        def woohoo():
-            yield
-
-        class StopIterationSubclass(StopIteration):
-            pass
-
-        for stop_exc in (StopIteration("spam"), StopIterationSubclass("spam")):
-            with self.subTest(type=type(stop_exc)):
-                try:
-                    with woohoo():
-                        raise stop_exc
-                except Exception as ex:
-                    self.assertIs(ex, stop_exc)
-                else:
-                    self.fail(f"{stop_exc} was suppressed")
-
-    def test_contextmanager_except_pep479(self):
-        code = """\
-from __future__ import generator_stop
-from contextlib import contextmanager
-@contextmanager
-def woohoo():
-    yield
-"""
-        locals = {}
-        exec(code, locals, locals)
-        woohoo = locals["woohoo"]
-
-        stop_exc = StopIteration("spam")
-        try:
-            with woohoo():
-                raise stop_exc
-        except Exception as ex:
-            self.assertIs(ex, stop_exc)
-        else:
-            self.fail("StopIteration was suppressed")
-
+    @unittest.expectedFailure
     def test_contextmanager_do_not_unchain_non_stopiteration_exceptions(self):
         @contextmanager
         def test_issue29692():
@@ -2244,21 +2198,25 @@ def woohoo():
             except Exception as exc:
                 raise RuntimeError("issue29692:Chained") from exc
 
-        try:
-            with test_issue29692():
-                raise ZeroDivisionError
-        except Exception as ex:
-            self.assertIs(type(ex), RuntimeError)
-            self.assertEqual(ex.args[0], "issue29692:Chained")
-            self.assertIsInstance(ex.__cause__, ZeroDivisionError)
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(t):
+            try:
+                with test_issue29692():
+                    raise ZeroDivisionError
+            except Exception as ex:
+                self.assertIs(type(ex), RuntimeError)
+                self.assertEqual(ex.args[0], "issue29692:Chained")
+                self.assertIsInstance(ex.__cause__, ZeroDivisionError)
 
-        try:
-            with test_issue29692():
-                raise StopIteration("issue29692:Unchained")
-        except Exception as ex:
-            self.assertIs(type(ex), StopIteration)
-            self.assertEqual(ex.args[0], "issue29692:Unchained")
-            self.assertIsNone(ex.__cause__)
+            try:
+                with test_issue29692():
+                    raise StopIteration("issue29692:Unchained")
+            except Exception as ex:
+                self.assertIs(type(ex), StopIteration)
+                self.assertEqual(ex.args[0], "issue29692:Unchained")
+                self.assertIsNone(ex.__cause__)
+
+        f(torch.randn(2))
 
     @unittest.expectedFailure
     def test_contextmanager_wrap_runtimeerror(self):

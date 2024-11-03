@@ -1254,6 +1254,14 @@ PyObject* THPModule_getCurrentNode(PyObject* _unused, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_isDefaultMobileCPUAllocatorSet(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  return PyBool_FromLong(at::globalContext().isDefaultMobileCPUAllocatorSet());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPModule_setDefaultMobileCPUAllocator(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1544,6 +1552,10 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"_current_autograd_node", THPModule_getCurrentNode, METH_NOARGS, nullptr},
+    {"_is_default_mobile_cpu_allocator_set",
+     THPModule_isDefaultMobileCPUAllocatorSet,
+     METH_NOARGS,
+     nullptr},
     {"_set_default_mobile_cpu_allocator",
      THPModule_setDefaultMobileCPUAllocator,
      METH_NOARGS,
