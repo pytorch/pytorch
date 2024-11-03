@@ -1,23 +1,19 @@
 from __future__ import annotations
 
 import collections
-import dataclasses
-import functools
 import itertools
-from typing import Any, Dict, Iterable, List, Sequence, Tuple, Type, Union
+from typing import Any, Dict, Iterable, List, Type, Union
 
 import sympy
 
 import torch
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from ...utils._ordered_set import OrderedSet
 from ..dependencies import Dep, MemoryDep
 from ..runtime.hints import ReductionHint
 from ..scheduler import SchedulerNode
-from ..utils import cache_on_self, sympy_subs
+from ..utils import cache_on_self
 from ..virtualized import V
-from .simd import SIMDKernel
 
 
 class NodeScheduleMarker:

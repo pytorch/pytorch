@@ -176,7 +176,8 @@ def _choices_default():
     """
     from torch._inductor.choices import InductorChoices
 
-    _choices._set_handler(rv := InductorChoices())
+    rv = InductorChoices()
+    setattr(threadlocal, _choices._key, rv)
     return rv
 
 
