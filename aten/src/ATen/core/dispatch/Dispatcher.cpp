@@ -1,5 +1,5 @@
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <list>
 #include <utility>
 
@@ -16,7 +16,7 @@ TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
 #endif
 
 bool show_dispatch_trace() {
-  static auto envar = c10::utils::get_env("TORCH_SHOW_DISPATCH_TRACE");
+  static const auto envar = c10::utils::get_env("TORCH_SHOW_DISPATCH_TRACE");
 
   if (envar.has_value()) {
     if (envar == "0") {
