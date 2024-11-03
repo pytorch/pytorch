@@ -345,7 +345,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
-        print("UNLIFT", mod)
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
@@ -415,7 +414,6 @@ def _decompose_and_get_gm_with_new_signature_constants(
             )
 
         gm = aten_export_artifact.gm
-        print("GMMMM", gm)
         new_graph_signature = aten_export_artifact.sig
 
         _populate_param_buffer_metadata_to_new_gm(
