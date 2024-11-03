@@ -24,6 +24,7 @@ from torch._inductor.select_algorithm import (
 
 
 aten = torch.ops.aten
+from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
@@ -36,12 +37,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-
-
-try:
-    from .mock_cache import global_stats, PatchCaches, Stats
-except ImportError:
-    from mock_cache import global_stats, PatchCaches, Stats  # @manual
 
 
 torch.set_float32_matmul_precision("high")
@@ -76,7 +71,10 @@ class FailChoiceCaller(ChoiceCaller):
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
     def _create_buffer(self, name, shape):
-        return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
+        return Buffer(
+            name=name,
+            layout=FixedLayout(torch.device("cuda:0"), dtype=torch.float32, size=shape),
+        )
 
     def test_benchmark_choice_in_subproc(self):
         gm = make_fx(
@@ -139,7 +137,7 @@ class TestMaxAutotune(TestCase):
             out = AlgorithmSelectorCache.benchmark_example_value(layout)
             expected_out = (mat1 @ mat2) + (mat3 @ mat4)
 
-            choice = FailChoiceCaller("fail_choice_caller", [], None)
+            choice = FailChoiceCaller("fail_choice_caller", [], None, description="")
 
             # use a tensor since python list is not synced back
             timings = torch.zeros(3, dtype=torch.float32)
@@ -236,7 +234,7 @@ class TestMaxAutotune(TestCase):
 
         class FakeChoiceCaller(ChoiceCaller):
             def __init__(self) -> None:
-                super().__init__("none", [], Mock())
+                super().__init__("none", [], Mock(), description="")
                 self.thread_id = None
 
             def precompile(self):

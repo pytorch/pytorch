@@ -406,17 +406,35 @@ class TestWithNCCL(MultiProcessTestCase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    def test_wait_tensor(self) -> None:
+        self._init_process_group()
+
+        input = torch.full((10, 10), float(self.rank), device=self.device)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+        output = torch.ops._c10d_functional.all_reduce(
+            input,
+            "avg",
+            "default",
+        )
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
+        torch.ops._c10d_functional.wait_tensor(output)
+        # `wait_tensor(output)` will pop the work from the work registry immediately
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
+
+    @skip_if_lt_x_gpu(2)
     def test_unwaited(self) -> None:
         # Verify that the process can terminate gracefully
         # even with unwaited tensors
         self._init_process_group()
 
         input = torch.full((10, 10), float(self.rank), device=self.device)
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 0)
         output = torch.ops._c10d_functional.all_reduce(
             input,
             "avg",
             "default",
         )
+        self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
 
     @skip_if_lt_x_gpu(2)
     def test_py_work(self) -> None:
@@ -597,14 +615,11 @@ class CompileTest(TestCase):
         (
             FileCheck()
             .check("buf0 = empty")
-            # Ensure the all_reduce_ input is a view
-            .check(
-                "torch.ops._c10d_functional.all_reduce_.default(reinterpret_tensor(buf0"
-            )
-            .check(
-                "torch.ops._c10d_functional.wait_tensor.default(reinterpret_tensor(buf0"
-            )
-            .check("return (reinterpret_tensor(buf0")
+            # We always call .contiguous() on the input to all_reduce_,
+            # so input will not be a view anymore.
+            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("return (buf0")
             .run(code)
         )
 
@@ -618,6 +633,16 @@ class CompileTest(TestCase):
             return ar0
 
         arg = torch.rand(4, 4, device="cuda").T
+        compiled = torch.compile(func)
+
+        code = run_and_get_triton_code(compiled, arg)
+        # clone induced by non contig input
+        assert "torch.ops._c10d_functional.wait_tensor.default" in code
+
+        def func2(arg: torch.Tensor) -> torch.Tensor:
+            torch.ops._c10d_functional.all_reduce_(arg, "avg", "0")
+            return arg
+
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -717,17 +742,28 @@ class CompileTest(TestCase):
         )
 
         # Test aoti
-        # out = AOTIRunnerUtil.run("cuda", func, (args,))
-        # torch.cuda.synchronize()
+        out = AOTIRunnerUtil.run("cuda", func, (args,))
+        torch.cuda.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
     @fresh_inductor_cache()
-    def test_wait_tensor_temp(self):
+    def test_wait_tensor(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
-            return funcol.wait_tensor(arg)
+            t = torch.ops._c10d_functional.all_reduce(arg, "avg", "0")
+            return funcol.wait_tensor(t)
 
         # Test aoti
         arg = torch.rand(4, 4, device="cuda")
+        compiled = torch.compile(func)
+        code = run_and_get_triton_code(compiled, arg)
+        (
+            FileCheck()
+            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check("return (buf0, )")
+            .run(code)
+        )
+
+        # Test aoti
         out = AOTIRunnerUtil.run("cuda", func, (arg,))
         torch.cuda.synchronize()
 

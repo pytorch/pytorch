@@ -5,7 +5,10 @@ from __future__ import annotations
 
 import os
 
+from onnxscript import BOOL, FLOAT, opset18 as op
+
 import torch
+import torch.onnx._flags
 from torch.onnx._internal.exporter import _testing as onnx_testing
 from torch.testing._internal import common_utils
 
@@ -149,8 +152,7 @@ class TestExportAPIDynamo(common_utils.TestCase):
         )
 
     def test_auto_convert_all_axes_to_dynamic_shapes_with_dynamo_export(self):
-        os.environ["TORCH_ONNX_USE_EXPERIMENTAL_LOGIC"] = "1"
-        assert os.environ.get("TORCH_ONNX_USE_EXPERIMENTAL_LOGIC") == "1"
+        torch.onnx._flags.USE_EXPERIMENTAL_LOGIC = True
 
         class Nested(torch.nn.Module):
             def forward(self, x):
@@ -204,6 +206,92 @@ class TestExportAPIDynamo(common_utils.TestCase):
 
         input = torch.randn(2)
         self.assert_export(Model(), (input))
+
+
+class TestCustomTranslationTable(common_utils.TestCase):
+    def test_custom_translation_table_overrides_ops(self):
+        from onnxscript import opset18 as op
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        def custom_add(self, other):
+            # Replace add with sub
+            return op.Sub(self, other)
+
+        custom_translation_table = {torch.ops.aten.add.Tensor: custom_add}
+
+        onnx_program = torch.onnx.export(
+            Model(),
+            (torch.randn(2, 2), torch.randn(2, 2)),
+            custom_translation_table=custom_translation_table,
+            dynamo=True,
+        )
+        all_nodes = [n.op_type for n in onnx_program.model.graph]
+        self.assertIn("Sub", all_nodes)
+        self.assertNotIn("Add", all_nodes)
+
+    def test_custom_translation_table_supports_overloading_ops(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aten.logical_and.default(x, y)
+
+        def custom_add_bool(self: BOOL, other: BOOL) -> BOOL:
+            # Replace add with sub
+            return op.Sub(self, other)
+
+        def custom_add(self: FLOAT, other: FLOAT) -> FLOAT:
+            # Replace add with mul
+            return op.Mul(self, other)
+
+        custom_translation_table = {
+            torch.ops.aten.logical_and.default: [custom_add, custom_add_bool],
+        }
+
+        onnx_program = torch.onnx.export(
+            Model(),
+            (torch.tensor(1, dtype=torch.bool), torch.tensor(1, dtype=torch.bool)),
+            custom_translation_table=custom_translation_table,
+            dynamo=True,
+        )
+        all_nodes = [n.op_type for n in onnx_program.model.graph]
+        # The dispatcher should pick the correct overload based on the input types
+        self.assertIn("Sub", all_nodes)
+        self.assertNotIn("Add", all_nodes)
+        self.assertNotIn("Mul", all_nodes)
+
+    def test_custom_translation_table_supports_custom_op_as_target(self):
+        # Define the custom op and use it in the model
+        @torch.library.custom_op("custom::add", mutates_args=())
+        def custom_add(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        @custom_add.register_fake
+        def _(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(a) + torch.empty_like(b)
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                return custom_add(x, y)
+
+        def onnx_add(self: FLOAT, other: FLOAT) -> FLOAT:
+            # Replace add with Sub
+            return op.Sub(self, other)
+
+        custom_translation_table = {
+            torch.ops.custom.add.default: onnx_add,
+        }
+
+        onnx_program = torch.onnx.export(
+            Model(),
+            (torch.tensor(1, dtype=torch.bool), torch.tensor(1, dtype=torch.bool)),
+            custom_translation_table=custom_translation_table,
+            dynamo=True,
+        )
+        all_nodes = [n.op_type for n in onnx_program.model.graph]
+        self.assertIn("Sub", all_nodes)
+        self.assertNotIn("Add", all_nodes)
 
 
 if __name__ == "__main__":

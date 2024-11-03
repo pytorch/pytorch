@@ -28,6 +28,7 @@ from torch.testing._internal.common_distributed import (
     DynamoDistributedMultiProcTestCase,
     requires_nccl,
 )
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -158,7 +159,6 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs)
-            print(code)
             # Verify that the all_reduce_ has been raised above the 2nd matmul
             # but below the 1st matmul. Note that the all_reduce_ directly
             # writes to the output buffer of the 1st matmul, which is an input
@@ -272,7 +272,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
                 .check("extern_kernels.mm")
                 .check("extern_kernels.mm")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
-                .check("triton_poi_fused_mul")
+                .check("triton_poi_fused_all_reduce_mul")
                 .check("torch.ops._c10d_functional.all_reduce_.default")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
                 .check("triton_poi_fused_add")
@@ -329,7 +329,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
                 .check("extern_kernels.mm")
                 .check("extern_kernels.mm")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
-                .check("triton_poi_fused_mul")
+                .check("triton_poi_fused_all_reduce_mul")
                 .check("torch.ops._c10d_functional.all_reduce_.default")
                 .check("torch.ops._c10d_functional.wait_tensor.default")
                 .check("triton_poi_fused_add")
@@ -341,6 +341,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(out, correct))
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skipIfRocm
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
     @patch.object(
@@ -371,7 +372,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             #    still happens among nodes within a GroupedSchedulerNode.
             # 2. `mul = a * a` is not fused with `add` or `div`, because the latter two are within
             #    GroupedSchedulerNode and thus are prevented from being fused with any outside ops.
-            FileCheck().check("triton_poi_fused_add_div_0.").check(
+            FileCheck().check("triton_poi_fused_add_all_reduce_div_0.").check(
                 "_c10d_functional.all_reduce_."
             ).check("triton_poi_fused_mul_1.").run(code)
             out = compiled(inputs, **self.get_world_trs())
