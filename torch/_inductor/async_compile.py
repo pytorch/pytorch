@@ -227,10 +227,7 @@ class AsyncCompile:
                 ),
             )
         else:
-            with dynamo_timed(
-                "triton_compile", log_pt2_compile_event=False, fwd_only=False
-            ):
-                kernel.precompile()
+            kernel.precompile()
             return kernel
 
     def multi_kernel(self, *args, **kwargs) -> Any:
