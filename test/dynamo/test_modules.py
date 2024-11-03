@@ -3130,7 +3130,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
-    @patch.object(torch._dynamo.config, "skip_tensor_guards_with_matching_dict_tags", False)
+    @patch.object(
+        torch._dynamo.config, "skip_tensor_guards_with_matching_dict_tags", False
+    )
     def test_param_requires_grad(self):
         def adjust_model(model):
             to_freeze = model.num_iter % 2 == 0
