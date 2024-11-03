@@ -68,7 +68,7 @@ void softplus_backward_kernel(
 
 } // namespace
 
-REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
-REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
+REGISTER_DISPATCH(softplus_stub, &softplus_kernel)
+REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel)
 
 } // namespace at::native

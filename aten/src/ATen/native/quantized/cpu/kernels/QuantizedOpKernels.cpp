@@ -4279,8 +4279,8 @@ ALSO_REGISTER_AVX512_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub,
                   &dequantize_tensor_per_channel_float_qparams_cpu);
 ALSO_REGISTER_AVX512_DISPATCH(fake_quant_per_channel_cachemask_stub,
                   &fake_quant_per_channel_cachemask_cpu);
-ALSO_REGISTER_AVX512_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel)
 #endif // CPU_CAPABILITY_AVX512 && _WIN32
 
 // The kernels below are dispatched to AVX2 because they don't perform as well

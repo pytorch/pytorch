@@ -475,13 +475,13 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
 }
 
 
-REGISTER_DISPATCH(index_stub, &index_kernel);
-REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
-REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-REGISTER_DISPATCH(put_stub, &put_kernel);
-REGISTER_DISPATCH(take_stub, &take_kernel);
-REGISTER_DISPATCH(flip_stub, &flip_kernel);
+REGISTER_DISPATCH(index_stub, &index_kernel)
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel)
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel)
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel)
+REGISTER_DISPATCH(put_stub, &put_kernel)
+REGISTER_DISPATCH(take_stub, &take_kernel)
+REGISTER_DISPATCH(flip_stub, &flip_kernel)
 
 REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda);
 

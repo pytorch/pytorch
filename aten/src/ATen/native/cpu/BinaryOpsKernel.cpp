@@ -1430,17 +1430,17 @@ REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel)
 REGISTER_DISPATCH(hermite_polynomial_h_stub, &hermite_polynomial_h_kernel)
 REGISTER_DISPATCH(hermite_polynomial_he_stub, &hermite_polynomial_he_kernel)
 
-ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(huber_stub, &huber_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(logit_backward_stub, &logit_backward_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(tanh_backward_stub, &tanh_backward_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(mse_stub, &mse_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(logaddexp_stub, &logaddexp_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(hypot_stub, &hypot_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(igamma_stub, &igamma_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(igammac_stub, &igammac_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(atan2_stub, &atan2_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(smooth_l1_stub, &smooth_l1_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(huber_stub, &huber_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(logit_backward_stub, &logit_backward_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(tanh_backward_stub, &tanh_backward_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(mse_stub, &mse_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(logaddexp_stub, &logaddexp_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(logaddexp2_stub, &logaddexp2_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(hypot_stub, &hypot_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(igamma_stub, &igamma_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(igammac_stub, &igammac_kernel)
 
 } // namespace at::native
