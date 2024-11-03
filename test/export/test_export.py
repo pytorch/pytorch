@@ -1075,7 +1075,9 @@ graph():
         # as input, runtime assertion should fail. This is because we would create
         # guard on y.shape[0] > x.shape[0] but somehow in old export, we dce this
         # assertion.
-        if is_training_ir_test(self._testMethodName):
+        if is_training_ir_test(self._testMethodName) and is_non_strict_test(
+            self._testMethodName
+        ):
             with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed for"):
                 ep.module()(x, x)
         else:
