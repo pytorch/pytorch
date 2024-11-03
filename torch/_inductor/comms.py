@@ -345,7 +345,7 @@ def reorder_compute_and_comm_for_overlap(
     return order
 
 
-def raise_backward_all_gather_ops(graph):
+def raise_fsdp2_backward_all_gather_ops(graph):
     """
     AOTAutograd partitioner does not guarantee that pre-backward hooks are run before compute ops that depend on it.
     (e.g. in FSDP2 case, pre-backward hooks populate unsharded params, and compute ops read from unsharded params -> there is no explicit graph edge dependency from latter to former)
