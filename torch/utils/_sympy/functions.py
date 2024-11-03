@@ -286,7 +286,7 @@ class ModularIndexing(sympy.Function):
         cls, base: sympy.Integer, divisor: sympy.Integer, modulus: sympy.Integer
     ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
-            return sympy.S.Zero
+            return sympy.Integer(0)
 
         if (
             isinstance(base, sympy.Integer)
