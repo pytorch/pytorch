@@ -375,7 +375,6 @@ class AllocateLine(MemoryPlanningLine):
 
         # try to reuse a recently freed buffer
         key = buffer_reuse_key(self.node)
-        # breakpoint()
         if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
             free_line.is_reused = True

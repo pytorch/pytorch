@@ -40,6 +40,7 @@ import torch._library.utils as library_utils
 from torch import SymBool, SymFloat, SymInt, Tensor
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._logging import dtrace_structured
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
     assert_eq,
@@ -568,7 +569,7 @@ class SymNumberMemoDescriptor:
             return None
 
         # If backed, it's ok to preserve memo since we know it won't renumber.
-        if r.node.hint is not None:
+        if isinstance(r, torch.SymFloat) and r.node.hint is not None:
             return r
 
         # Version counter based tracking isn't 100% sound but it's close
@@ -2142,6 +2143,13 @@ class FakeTensorMode(TorchDispatchMode):
             # Automatically infer a Fake kernel if there isn't one.
             if not library_utils.has_fake_kernel(func):
                 result = inferred_fake_kernel_from_real_out(self, func, real_out)
+
+                dtrace_structured(
+                    "generated_fake_kernel",
+                    metadata_fn=lambda: {
+                        "op": str(func),
+                    },
+                )
                 return maybe_propagate_real_tensors(result)
 
         # Users can register FakeTensor rules for custom operators
