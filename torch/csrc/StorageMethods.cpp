@@ -47,13 +47,6 @@ static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage__useCount(PyObject* self, PyObject* noargs) {
-  HANDLE_TH_ERRORS
-  THPStorage_assertNotNull(self);
-  return py::cast(THPStorage_Unpack(self).use_count()).release().ptr();
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   // PyLong_FromVoidPtr should not need to mutate the pointer in order
@@ -627,7 +620,6 @@ static PyMethodDef THPStorage_methods[] = {
      METH_VARARGS | METH_STATIC,
      nullptr},
     {"_set_from_file", THPStorage_setFromFile, METH_VARARGS, nullptr},
-    {"_use_count", THPStorage__useCount, METH_NOARGS, nullptr},
     {"from_buffer",
      castPyCFunctionWithKeywords(THPStorage_fromBuffer),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
