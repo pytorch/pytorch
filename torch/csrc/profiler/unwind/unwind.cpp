@@ -66,6 +66,10 @@ struct UpgradeExclusive {
     rdlock_.unlock();
     rdlock_.mutex()->lock();
   }
+  UpgradeExclusive(const UpgradeExclusive&) = delete;
+  UpgradeExclusive(UpgradeExclusive&&) = delete;
+  UpgradeExclusive& operator=(const UpgradeExclusive&) = delete;
+  UpgradeExclusive& operator=(UpgradeExclusive&&) = delete;
   ~UpgradeExclusive() {
     rdlock_.mutex()->unlock();
     rdlock_.lock();

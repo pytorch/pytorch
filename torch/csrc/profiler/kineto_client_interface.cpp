@@ -2,6 +2,7 @@
 #include <ATen/Context.h>
 #include <libkineto.h>
 #include <torch/csrc/autograd/profiler_kineto.h>
+#include <torch/csrc/profiler/kineto_client_interface.h>
 #include <chrono>
 #include <thread>
 
@@ -71,45 +72,24 @@ class LibKinetoClient : public libkineto::ClientInterface {
 
 } // namespace profiler::impl
 
+void global_kineto_init() {
+#if ENABLE_GLOBAL_OBSERVER
+  if (c10::utils::get_env("KINETO_USE_DAEMON").has_value()) {
+    libkineto_init(
+        /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
+        /*logOnError=*/true);
+    libkineto::api().suppressLogMessages();
+  }
+#endif
+}
+
 #if ENABLE_GLOBAL_OBSERVER
 namespace {
-
-int get_init_delay() {
-  const auto delay_c = c10::utils::get_env("KINETO_DAEMON_INIT_DELAY_S");
-  if (!delay_c.has_value()) {
-    return -1;
-  }
-  try {
-    return std::stoi(delay_c.value());
-  } catch (const std::invalid_argument& _) {
-    return -1;
-  }
-}
 
 struct RegisterLibKinetoClient {
   RegisterLibKinetoClient() {
     static profiler::impl::LibKinetoClient client;
     libkineto::api().registerClient(&client);
-
-    auto kineto_init = []() {
-      libkineto_init(
-          /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
-          /*logOnError=*/true);
-      libkineto::api().suppressLogMessages();
-    };
-
-    if (c10::utils::has_env("KINETO_USE_DAEMON")) {
-      int init_delay_s = get_init_delay();
-      if (init_delay_s > 0) {
-        std::thread t([init_delay_s, kineto_init]() {
-          std::this_thread::sleep_for(std::chrono::seconds(init_delay_s));
-          kineto_init();
-        });
-        t.detach();
-      } else {
-        kineto_init();
-      }
-    }
   }
 } register_libkineto_client;
 
