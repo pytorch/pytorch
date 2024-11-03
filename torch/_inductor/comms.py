@@ -375,10 +375,10 @@ def raise_backward_all_gather_ops(graph):
             node.target == torch.ops.inductor.resize_storage_bytes_.default and
             node.args[1] == 0):
             resize0_ops.append(node)
-    
+
     # Create mapping from graph input group string to list of resize0 groups
     graph_input_group_to_resize0_groups = defaultdict(list)
-    
+
     # Group consecutive resize0 ops by checking if their indices are adjacent
     resize0_group = []
     cur_graph_inputs = set()
@@ -392,7 +392,7 @@ def raise_backward_all_gather_ops(graph):
             cur_graph_inputs = set()
         resize0_group.append(op)
         cur_graph_inputs.add(op.args[0])
-    
+
     # Handle the last group
     if cur_graph_inputs:
         key = tuple(sorted(cur_graph_inputs))
@@ -419,7 +419,7 @@ def raise_backward_all_gather_ops(graph):
                 region_start = list(graph.nodes)[current_group_idx + 1]
                 region_end = next_group[0]  # First node of next group
             assert region_start is not None
-            
+
             # Collect nodes between region boundaries
             nodes_between = []
             for node in graph.nodes:
@@ -427,14 +427,14 @@ def raise_backward_all_gather_ops(graph):
                     break
                 else:
                     nodes_between.append(node)
-            
+
             # Find nodes to move (fsdp.copy_ ops and their ancestors)
             nodes_to_move = set()
             for node in nodes_between:
                 if (node.op == "call_function" and 
                     node.target == torch.ops.fsdp.copy_.default and
                     node.args[0] in cur_graph_inputs):
-                    
+
                     # Find and add the resize-to-full op
                     for n in nodes_between:
                         if (n.op == "call_function" and 
@@ -443,7 +443,7 @@ def raise_backward_all_gather_ops(graph):
                             n.args[1] > 0):
                             nodes_to_move.add(n)
                             break
-                    
+
                     def collect_ancestors(n):
                         if n.op == "placeholder":
                             return
@@ -454,15 +454,15 @@ def raise_backward_all_gather_ops(graph):
                             elif isinstance(arg, list):
                                 for item in arg:
                                     process_arg(item)
-                        
+
                         for arg in n.args:
                             process_arg(arg)
                         for kwarg in n.kwargs.values():
                             process_arg(kwarg)
-                    
+
                     collect_ancestors(node.args[1])
                     nodes_to_move.add(node)
-            
+
             # Sort nodes to maintain original order
             nodes_to_move = sorted(nodes_to_move, key=lambda n: list(graph.nodes).index(n))
 
@@ -530,7 +530,7 @@ Resize can only operate on graph inputs, but got {node} which is resizing non-gr
                 f"""
 Unequal number of resize-to-full and resize-to-0 nodes for graph input {graph_input}:
 {len(resized_to_full_idxes)} vs. {len(resized_to_0_idxes)}.
-Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for this graph input.
+Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass.
 """  # noqa: G004
             )
             return False
@@ -544,7 +544,7 @@ Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for this
                     f"""
 For graph input {graph_input}: resize-to-full node {node_list[resize_to_full_idx]} at index {resize_to_full_idx}
 happens after resize-to-0 node {node_list[resize_to_0_idx]} at index {resize_to_0_idx}.
-Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for this graph input.
+Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for that unsharded param.
 """  # noqa: G004
                 )
                 return False
@@ -582,22 +582,10 @@ Offending node: {unsharded_param}. Graph: {graph}
             if isinstance(node.target, torch._ops.OpOverload)
             else []
         )
-        try:
-            mutated_node_arg_storages = set()
-            for i in mutated_arg_idxes:
-                if i < len(node.args):
-                    mutated_node_arg_storages.add(StorageWeakRef(node.args[i].meta["val"].untyped_storage()))
-                else:
-                    assert len(node.kwargs) == 1 and "out" in node.kwargs, f"Expected single 'out' kwarg but got {node.kwargs}"
-                    out = node.kwargs["out"]
-                    if isinstance(out, list):
-                        for o in out:
-                            mutated_node_arg_storages.add(StorageWeakRef(o.meta["val"].untyped_storage()))
-                    else:
-                        mutated_node_arg_storages.add(StorageWeakRef(out.meta["val"].untyped_storage()))
-        except:
-            print(f"node: {node}, node.args: {node.args}, node.target._schema: {node.target._schema}, mutated_arg_idxes: {mutated_arg_idxes}")
-            raise
+        mutated_node_arg_storages = {
+            StorageWeakRef(node.args[i].meta["val"].untyped_storage())
+            for i in mutated_arg_idxes
+        }
         storages_of_unsharded_params = {
             StorageWeakRef(unsharded_param.meta["val"].untyped_storage())
             for unsharded_param in unsharded_params

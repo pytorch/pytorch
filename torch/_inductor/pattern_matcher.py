@@ -1695,10 +1695,10 @@ def should_compute_mutation_region_ids(graph: torch.fx.GraphModule) -> bool:
     return "mutation_region_id" not in next(iter(graph.nodes)).meta
 
 
-def compute_mutation_region_ids(graph: torch.fx.GraphModule, allowed_mutation_op=None) -> None:
+def compute_mutation_region_ids(graph: torch.fx.GraphModule) -> None:
     mutation_region_id = 0
     for nd in graph.nodes:
-        if is_mutation_op(nd) and not (allowed_mutation_op is not None and allowed_mutation_op(nd)):
+        if is_mutation_op(nd):
             mutation_region_id += 1
         nd.meta["mutation_region_id"] = mutation_region_id
 
