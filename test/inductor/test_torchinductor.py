@@ -65,6 +65,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
     TEST_CUDNN,
+    tf32_on_and_off,
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -72,6 +73,9 @@ from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
 )
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
+from torch.testing._internal.common_quantization import (
+    _dynamically_quantize_per_channel,
+)
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     instantiate_parametrized_tests,
@@ -2153,6 +2157,28 @@ class CommonTemplate:
         data = torch.randint(0, 255, (M, N), dtype=torch.uint8)
         packed = torch.cat([data, scales, offsets], dim=-1)
         self.common(fn, [packed])
+
+    @skipCUDAIf(True, "No _weight_int8pack_mm implementation on CUDA")
+    def test_int8_weight_only_quant(self):
+        def convert_weight_to_int8pack(b):
+            b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
+                b, -128, 127, torch.int8
+            )
+            return b_int8pack, b_scales
+
+        def fn(a, b_int8pack, b_scales, c):
+            res = torch._weight_int8pack_mm(a, b_int8pack, b_scales)
+            res = res + c
+            return res
+
+        m = 32
+        k = 32
+        n = 48
+        a = torch.rand((m, k), dtype=torch.bfloat16)
+        b = torch.rand((n, k), dtype=torch.bfloat16)
+        c = torch.rand((m, n), dtype=torch.bfloat16)
+        b_int8pack, b_scales = convert_weight_to_int8pack(b)
+        self.common(fn, (a, b_int8pack, b_scales, c))
 
     def test_expanded_reduction(self):
         def fn(x, y):
@@ -9512,6 +9538,7 @@ class CommonTemplate:
 
     @requires_gpu()
     @torch._inductor.config.patch("layout_optimization", True)
+    @tf32_on_and_off(0.005)
     def test_inductor_layout_optimization_input_mutations(self):
         # channel dim must be > 64 for inductor to do layout optimization and use NHWC
         mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(GPU_TYPE)
@@ -10837,10 +10864,44 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_custom_op_unbacked_symints(self):
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @foo.register_fake
+        def _(x):
+            u0 = torch.library.get_ctx().new_dynamic_size()
+            u1 = torch.library.get_ctx().new_dynamic_size()
+            u2 = torch.library.get_ctx().new_dynamic_size()
+            return x.new_empty(u0, u1, u2)
+
+        @torch.library.custom_op("mylib::bar", mutates_args={})
+        def bar(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @bar.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.randn(2, 3, 4)
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            y = foo(x)
+            z = bar(y)
+            return z
+
+        # No error
+        f(x)
+
     @requires_gpu()
     @torch._inductor.config.patch("layout_optimization", True)
     @torch._inductor.config.patch("keep_output_stride", False)
     @config.patch(implicit_fallbacks=True)
+    @tf32_on_and_off(0.005)
     def test_custom_op_fixed_layout_sequential(self):
         import torch.library
 
@@ -10885,6 +10946,7 @@ class CommonTemplate:
     @requires_gpu()
     @config.patch(implicit_fallbacks=True)
     @skip_if_cpp_wrapper
+    @tf32_on_and_off(0.005)
     def test_mutable_custom_op_fixed_layout2(self):
         with torch.library._scoped_library("mylib", "DEF") as lib:
             mod = nn.Conv2d(3, 128, 1, stride=1, bias=False).to(device=GPU_TYPE)
@@ -11323,8 +11385,8 @@ class CommonTemplate:
             x_view = x.view(dtype=torch.int32)
             return x_view.mul(2)
 
-        a = torch.ones(4, dtype=torch.float32, device=self.device)
-        b = torch.ones(4, dtype=torch.float32, device=self.device)
+        a = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
+        b = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
         ref = fn(a, b)
         actual = torch.compile(fn)(a, b)
         self.assertEqual(ref, actual)
@@ -11785,30 +11847,34 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 return torch.sum(a)
 
             kernels = self.get_kernels(fn, [torch.randn([256, 256], device=GPU_TYPE)])
+            expected_divisible = {
+                # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
+                # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
+                # at slot 3 should be in the divisible by 16 descriptor
+                0: (0, 1, 3),
+                # kernel1 reduces from 8 elements to a single scalar.
+                # Since multi-kernel generate 2 variants for each kernel. The second
+                # persistent-reduction has index 2.
+                1: (0, 1),
+            }
             if config.triton.multi_kernel:
-                self.assertTrue(
-                    len(kernels) == 4,
-                    "SUM should result in four kernels when multi-kernel is enabled",
-                )
+                self.assertEqual(len(kernels), 4)
+                expected_divisible[2] = expected_divisible.pop(1)
+            elif config.triton.cooperative_reductions:
+                self.assertEqual(len(kernels), 1)
+                expected_divisible = {
+                    # one kernel, with extra workspace/semaphore args
+                    0: (0, 1, 2, 3, 5),
+                }
             else:
-                self.assertTrue(len(kernels) == 2, "SUM should result in two kernels")
+                self.assertEqual(len(kernels), 2)
 
-            # kernel0 reduces from 256 to (xnumel=8, rnumel=8192), which means it reduces 256 by 256 into an array of
-            # size 8 by accumulating 8192 elements at once note that rnumel is equal to 512 * 16, so rnumel which is
-            # at slot 3 should be in the divisible by 16 descriptor
-            arguments_that_are_divisible_by_16_in_kernel0 = (
-                kernels[0].triton_meta["configs"][0].divisible_by_16
-            )
-            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel0, (0, 1, 3))
+            for kernel_id, expected in expected_divisible.items():
+                divisible_by_16 = (
+                    kernels[kernel_id].triton_meta["configs"][0].divisible_by_16
+                )
+                self.assertEqual(divisible_by_16, expected)
 
-            # kernel1 reduces from 8 elements to a single scalar.
-            # Since multi-kernel generate 2 variants for each kernel. The second
-            # persistent-reduction has index 2.
-            kernel1_index = 2 if config.triton.multi_kernel else 1
-            arguments_that_are_divisible_by_16_in_kernel1 = (
-                kernels[kernel1_index].triton_meta["configs"][0].divisible_by_16
-            )
-            self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
 
         @config.patch(assume_aligned_inputs=False)
