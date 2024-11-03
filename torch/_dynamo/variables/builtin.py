@@ -762,7 +762,6 @@ class BuiltinVariable(VariableTracker):
         if (
             fn is builtins.__build_class__
             and issubclass(arg_types[0], BaseUserFunctionVariable)
-            and all(issubclass(a, ConstantVariable) for a in arg_types[1:])
             and not has_kwargs
         ):
 
