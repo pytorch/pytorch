@@ -470,6 +470,7 @@ class TestTryMerge(TestCase):
             skip_mandatory_checks=True,
             comment_id=mock.ANY,
             ignore_current=False,
+            skip_internal_checks=False,
         )
 
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
@@ -485,6 +486,7 @@ class TestTryMerge(TestCase):
             skip_mandatory_checks=False,
             comment_id=mock.ANY,
             ignore_current=False,
+            skip_internal_checks=False,
         )
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
