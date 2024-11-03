@@ -1846,8 +1846,6 @@ def _export_for_training(
 
     from torch._export.verifier import TrainingIRVerifier
 
-    print("GRAPH", gm.graph)
-
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,
