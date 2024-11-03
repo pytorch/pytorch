@@ -3399,6 +3399,19 @@ class Scheduler:
             _, last = max(origins, key=operator.itemgetter(0))
             V.graph.wrapper_code.enter_context(last)
 
+    def can_buffer_be_removed_through_fusion(
+        self, name: str, fused_node_names: OrderedSet[str]
+    ) -> bool:
+        try:
+            users = self.name_to_buf[name].users
+        except KeyError:
+            return False
+        return (
+            all(user.is_weak or user.get_name() in fused_node_names for user in users)
+            and name not in self.mutation_renames
+            and name not in self.mutation_real_name
+        )
+
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
             return self._codegen()
