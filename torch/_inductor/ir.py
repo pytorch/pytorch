@@ -587,7 +587,7 @@ class Loops(IRNode):
     @staticmethod
     def _index(ranges, prefix=SymT.INDEX):
         return [
-            sympy.Integer(0) if s == 1 else sympy_index_symbol_with_prefix(prefix, n)
+            sympy.S.Zero if s == 1 else sympy_index_symbol_with_prefix(prefix, n)
             for n, s in enumerate(ranges)
         ]
 
@@ -1199,7 +1199,7 @@ class Reduction(Loops):
             else:
 
                 def fn(index):
-                    reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
+                    reduction_index = [sympy.S.Zero for _ in reduction_ranges]
                     return inner_fn(index, reduction_index)
 
             return Pointwise.create(
@@ -1619,7 +1619,7 @@ class WelfordReduction(Reduction):
 
             def copy(loader):
                 def inner_fn(idx):
-                    reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
+                    reduction_index = [sympy.S.Zero for _ in reduction_ranges]
                     return loader(idx, reduction_index)
 
                 return Pointwise.create(
@@ -2345,14 +2345,14 @@ class ExpandView(BaseView):
             storage, old_layout = as_storage_and_layout(x)
             skip = len(new_size) - len(old_layout.size)
             assert skip >= 0
-            new_stride = [sympy.Integer(0)] * skip
+            new_stride = [sympy.S.Zero] * skip
             for stride, size in zip(old_layout.stride, old_layout.size):
                 new_stride.append(
                     stride
                     if not V.graph.sizevars.shape_env.evaluate_expr(
                         sympy.Eq(size, 1), size_oblivious=True
                     )
-                    else sympy.Integer(0)
+                    else sympy.S.Zero
                 )
             new_layout = FixedLayout(
                 old_layout.device,
@@ -2379,7 +2379,7 @@ class ExpandView(BaseView):
             for i in range(len(actual)):
                 if actual[i] == 1:
                     # zero out broadcast dimension
-                    index[i] = sympy.Integer(0)
+                    index[i] = sympy.S.Zero
             return index
 
         return reindex
@@ -2477,7 +2477,7 @@ class SqueezeView(BaseView):
 
         def reindex(index: List[sympy.Expr]) -> Tuple[sympy.Expr, ...]:
             assert len(index) == len(not_one), f"{index} {not_one}"
-            new_index = [sympy.Integer(0)] * length
+            new_index = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
                 new_index[idx] = s
             return tuple(new_index)
@@ -2579,7 +2579,7 @@ class View(GenericView):
         new_size = list(new_size)
         for i in range(len(new_size)):
             if new_size[i] == -1:
-                new_size[i] = sympy.Integer(1)
+                new_size[i] = sympy.S.One
                 new_size[i] = CleanDiv(sympy_product(old_size), sympy_product(new_size))
                 break
 
@@ -2618,7 +2618,7 @@ class View(GenericView):
             size_old = stack_old.pop()
             var, size_new = stack_new.pop()
             if size_old == 1:
-                view_expr.append(sympy.Integer(0))
+                view_expr.append(sympy.S.Zero)
                 stack_new.append((var, size_new))  # re-add
             elif size_new == 1:
                 stack_old.append(size_old)  # re-add
@@ -2633,7 +2633,7 @@ class View(GenericView):
                 view_expr.append(var)
                 V.graph.sizevars.guard_equals(size_new, size_old)
             elif size_hint(size_new) > size_hint(size_old):
-                divisor = sympy.Integer(1)
+                divisor = sympy.S.One
                 modulus = size_old
                 view_expr.append(ModularIndexing(var, divisor, modulus))
                 divisor = divisor * modulus
@@ -2649,7 +2649,7 @@ class View(GenericView):
         while stack_old:
             size_old = stack_old.pop()
             V.graph.sizevars.guard_equals(size_old, 1)  # type: ignore[arg-type]
-            view_expr.append(sympy.Integer(0))
+            view_expr.append(sympy.S.Zero)
 
         while stack_new:
             var, size_new = stack_new.pop()
@@ -3190,7 +3190,7 @@ class FlexibleLayout(Layout):
     def contiguous_strides(sizes):
         if len(sizes) == 0:
             return []
-        reversed_strides = [sympy.Integer(1)]
+        reversed_strides = [sympy.S.One]
         for size in reversed(sizes[1:]):
             reversed_strides.append(size * reversed_strides[-1])
         return list(reversed(reversed_strides))
@@ -3204,7 +3204,7 @@ class FlexibleLayout(Layout):
             [1, 3, 2, 0]
         """
         assert OrderedSet(range(len(sizes))) == OrderedSet(order), (sizes, order)
-        next_stride = sympy.Integer(1)
+        next_stride = sympy.S.One
         strides = [None] * len(order)
 
         for i in order:
@@ -3764,9 +3764,7 @@ class ComputedBuffer(OperationBuffer):
                 for r in reads
             )
             reads = [
-                sympy_subs(
-                    r.index, {v: sympy.Integer(0) for v in reduction_vars if v != 0}
-                )
+                sympy_subs(r.index, {v: sympy.S.Zero for v in reduction_vars if v != 0})
                 for r in reads
                 if isinstance(r, dependencies.MemoryDep)
             ]
