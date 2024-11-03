@@ -1750,7 +1750,6 @@ namespace {
     TYPED_TEST(VecConvertTestsReducedFloat, ConvertReduced) {
       using vec = TypeParam;
       using src_t = UholdType<TypeParam>;
-      constexpr auto N = vec::size();
       TEST_CONVERT_TO(int8_t);
       TEST_CONVERT_TO(uint8_t);
       TEST_CONVERT_TO(float);
