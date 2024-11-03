@@ -3130,6 +3130,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @patch.object(torch._dynamo.config, "skip_tensor_guards_with_matching_dict_tags", False)
     def test_param_requires_grad(self):
         def adjust_model(model):
             to_freeze = model.num_iter % 2 == 0
@@ -3172,8 +3173,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             res = opt_model(features)
             res.sum().backward()
 
-        # Check that we have recompiled twice
-        self.assertEqual(cnt.frame_count, 2)
+        # Check that we have recompiled twice, which leads to 3 frames
+        self.assertEqual(cnt.frame_count, 3)
 
 
 if __name__ == "__main__":
