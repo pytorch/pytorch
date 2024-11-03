@@ -354,16 +354,18 @@ public:
   id<MTLFunction> getMTLFunction(const std::string& fname, const std::initializer_list<std::string>& params) {
     return getLibraryPipelineState(getLibrary(params), fname).second;
   }
+  static MetalShaderLibrary& getBundledLibrary();
+protected:
+  virtual id<MTLLibrary> getLibrary();
+  virtual id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params);
+  id<MTLLibrary> library = nil;
 private:
   std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getLibraryPipelineState(id<MTLLibrary> lib, const std::string& fname);
-  id<MTLLibrary> getLibrary();
-  id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params);
 
   id<MTLLibrary> compileLibrary(const std::string& src);
   std::string shaderSource;
   unsigned nparams;
   MTLCompileOptions* compile_options;
-  id<MTLLibrary> library = nil;
   std::unordered_map<std::string, id<MTLLibrary>> libMap;
   std::unordered_map<std::string, std::pair<id<MTLComputePipelineState>, id<MTLFunction>>> cplMap;
 };
