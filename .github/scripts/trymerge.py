@@ -613,6 +613,7 @@ def parse_args() -> Any:
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--ignore-current", action="store_true")
     parser.add_argument("--check-mergeability", action="store_true")
+    parser.add_argument("--skip-internal-checks", action="store_true")
     parser.add_argument("--comment-id", type=int)
     parser.add_argument("--reason", type=str)
     parser.add_argument("pr_num", type=int)
@@ -1149,6 +1150,7 @@ class GitHubPR:
         repo: GitRepo,
         *,
         skip_mandatory_checks: bool = False,
+        skip_internal_checks: bool = False,
         dry_run: bool = False,
         comment_id: Optional[int] = None,
         ignore_current_checks: Optional[List[str]] = None,
@@ -1163,7 +1165,9 @@ class GitHubPR:
             self,
             repo,
             skip_mandatory_checks=skip_mandatory_checks,
-            skip_internal_checks=can_skip_internal_checks(self, comment_id),
+            skip_internal_checks=(
+                skip_internal_checks or can_skip_internal_checks(self, comment_id)
+            ),
             ignore_current_checks=ignore_current_checks,
         )
         additional_merged_prs = self.merge_changes(
@@ -2112,6 +2116,7 @@ def merge(
     timeout_minutes: int = 400,
     stale_pr_days: int = 3,
     ignore_current: bool = False,
+    skip_internal_checks: bool = False,
 ) -> None:
     initial_commit_sha = pr.last_commit()["oid"]
     pr_link = f"https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num}"
@@ -2151,6 +2156,7 @@ def merge(
             dry_run=dry_run,
             skip_mandatory_checks=skip_mandatory_checks,
             comment_id=comment_id,
+            skip_internal_checks=skip_internal_checks,
         )
 
     # Check for approvals
@@ -2378,6 +2384,7 @@ def main() -> None:
             skip_mandatory_checks=args.force,
             comment_id=args.comment_id,
             ignore_current=args.ignore_current,
+            skip_internal_checks=args.skip_internal_checks,
         )
     except Exception as e:
         handle_exception(e)
