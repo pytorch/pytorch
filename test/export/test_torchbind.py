@@ -727,7 +727,6 @@ def forward(self, token, p_linear_weight, p_linear_bias, tq, x):
         self.assertTrue(tq.pop() is a)
         self.assertTrue(tq.pop() is b)
 
-    @unittest.expectedFailure  # T205481814
     @skipIfCrossRef  # arg names change with torch function mode
     def test_safe_to_trace_with_real(self):
         x = torch.randn(3, 3)
