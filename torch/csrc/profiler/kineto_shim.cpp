@@ -220,10 +220,23 @@ bool collectivesProfilerExists() {
 #endif
 }
 
+#ifdef USE_KINETO
+static const std::string setTraceID(const std::string& trace_id) {
+  if (trace_id == "") {
+    return "";
+  }
+  std::stringstream configss;
+  configss << "REQUEST_TRACE_ID=" << trace_id << "\n";
+  configss << "REQUEST_GROUP_TRACE_ID=" << trace_id << "\n";
+  return configss.str();
+}
+#endif
+
 void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
-    const torch::profiler::impl::ExperimentalConfig& config) {
+    const torch::profiler::impl::ExperimentalConfig& config,
+    const std::string& trace_id) {
 #ifdef USE_KINETO
   libkineto::api().resetKinetoTLS();
   if (!libkineto::api().isProfilerRegistered()) {
@@ -270,7 +283,9 @@ void prepareTrace(
     return;
   }
 
-  libkineto::api().activityProfiler().prepareTrace(k_activities);
+  const std::string configStr = setTraceID(trace_id);
+
+  libkineto::api().activityProfiler().prepareTrace(k_activities, configStr);
 #endif // USE_KINETO
 }
 
