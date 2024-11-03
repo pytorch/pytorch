@@ -442,6 +442,7 @@ class CachingAutotuner(KernelInterface):
                 "num_warps": compile_meta["num_warps"],
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
+                "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
             }
             if self.device_props.type == "hip":
                 if "waves_per_eu" in compile_meta:
@@ -823,7 +824,9 @@ class CachingAutotuner(KernelInterface):
         return self.maybe_clone_args(set(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
-        with dynamo_timed("CachingAutotuner.benchmark_all_configs"):
+        with dynamo_timed(
+            "CachingAutotuner.benchmark_all_configs", log_pt2_compile_event=True
+        ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
                 for launcher in self.launchers
