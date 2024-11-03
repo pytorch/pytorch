@@ -2257,6 +2257,15 @@ class InstructionTranslatorBase(
     def LIST_TO_TUPLE(self, inst):
         self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
 
+    def STOPITERATION_ERROR(self, inst):
+        # Replaces StopIteration -> RuntimeError
+        # https://peps.python.org/pep-0479/
+        # https://github.com/python/cpython/pull/99006
+        # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
+        # exc.raise_observed_exception(RuntimeError, self)
+        # TODO: Figure out why RuntimeError crashes Dynamo
+        exc.raise_observed_exception(StopIteration, self)
+
     def DICT_MERGE(self, inst):
         v = self.pop()
         assert inst.argval > 0
@@ -2541,13 +2550,17 @@ class InstructionTranslatorBase(
             self._load_attr(inst)
 
     def CALL_INTRINSIC_1(self, inst):
-        if inst.argval == 5:
+        if inst.argval == 3:
+            # INTRINSIC_STOPITERATION_ERROR
+            self.STOPITERATION_ERROR(self.pop())
+        elif inst.argval == 5:
             # INTRINSIC_UNARY_POSITIVE
             self.UNARY_POSITIVE(inst)
         elif inst.argval == 6:
             # INTRINSIC_LIST_TO_TUPLE
             self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
         else:
+            breakpoint()
             unimplemented(f"missing CALL_INTRINSIC_1 operand {inst.argval}")
 
     def END_SEND(self, inst):
@@ -3510,6 +3523,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             return super().RETURN_VALUE(inst)
         # RETURN_VALUE in a generator raises StopIteration instead of actually
         # returning a value
+        exc.raise_observed_exception(StopIteration, self)
+
+    def RETURN_CONST(self, inst):
+        if self.consume_all_items:
+            return super().RETURN_CONST(inst)
         exc.raise_observed_exception(StopIteration, self)
 
     def YIELD_FROM(self, inst):
