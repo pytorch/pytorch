@@ -1360,7 +1360,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @dtypes(torch.bfloat16)
     @parametrize("batch_size", (32,))
-    @parametrize("in_features", (128,))
+    @parametrize("in_features", (128, 144))
     @parametrize("out_features", (64, 65))
     def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
         # x will be reshaped from 3d to 2d
