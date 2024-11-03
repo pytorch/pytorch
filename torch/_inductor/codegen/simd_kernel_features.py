@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import collections
+import dataclasses
+import functools
 import itertools
-from typing import Any, Dict, Iterable, List, Type, Union
+from typing import Any, Dict, Iterable, List, Sequence, Tuple, Type, Union
 
 import sympy
 
 import torch
-from torch._inductor.scheduler import SchedulerNode
+from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 
 from ...utils._ordered_set import OrderedSet
 from ..dependencies import Dep, MemoryDep
 from ..runtime.hints import ReductionHint
-from ..utils import cache_on_self
+from ..scheduler import SchedulerNode
+from ..utils import cache_on_self, sympy_subs
 from ..virtualized import V
+from .simd import SIMDKernel
 
 
 class NodeScheduleMarker:
@@ -75,6 +79,10 @@ class SIMDKernelFeatures:
         self.node_schedule = node_schedule
         self.numel = V.graph.sizevars.simplify(numel)  # numel excludes reduction_numel
         self.reduction_numel = V.graph.sizevars.simplify(reduction_numel)
+
+    @cache_on_self
+    def is_reduction(self) -> bool:
+        return self.reduction_numel != 1
 
     @cache_on_self
     def scheduler_nodes(self) -> Iterable[SchedulerNode]:
