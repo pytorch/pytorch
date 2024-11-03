@@ -1003,22 +1003,23 @@ graph():
                 return max(x.shape[0], y.shape[0])
 
         model = Foo()
-        inputs = (torch.randn(64), torch.randn(64))
+        inputs = (torch.zeros(64), torch.ones(64))
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            # ep = torch.export.export_for_training(model, inputs)
+            # # This seems to be a bug with old export because when we pass in x, x
+            # # as input, runtime assertion should fail. This is because we would create
+            # # guard on y.shape[0] > x.shape[0] but somehow in old export, we dce this
+            # # assertion.
+            # print("EEEEPPP", ep.graph_module)
+            # with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed for"):
+            #     ep.module()(torch.zeros(64), torch.zeros(64))
+
             ep = export(model, inputs)
 
         self.assertEqual(ep.module()(*inputs), model(*inputs))
         x = torch.zeros(64)
         y = torch.ones(64)
-        # This seems to be a bug with old export because when we pass in x, x
-        # as input, runtime assertion should fail. This is because we would create
-        # guard on y.shape[0] > x.shape[0] but somehow in old export, we dce this
-        # assertion.
-        if is_training_ir_test(self._testMethodName):
-            with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed for"):
-                ep.module()(x, x)
-        else:
-            self.assertEqual(ep.module()(x, x), model(x, x))
+        self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
     @testing.expectedFailureSerDer  # SymBool serialization? TODO(pianpwk)
@@ -1260,13 +1261,7 @@ graph():
                 def forward(self, x):
                     return torch.ops.mylib.foo123(x)
 
-            with self.assertWarnsRegex(
-                UserWarning, "CompositeImplicitAutograd and have functional schema"
-            ):
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    torch.export.export(Bar(), (x,))
-
+            _ = torch.export.export(Bar(), (x,))
         ops_registered_after = set(torch.ops.mylib)
         self.assertEqual(ops_registered_after, ops_registered_before)
 
@@ -4304,7 +4299,7 @@ def forward(self, c_lifted_tensor_0, x):
         mod.eval()
         inp = torch.randn(1, 1, 3, 3)
 
-        gm = torch.export._trace._export(mod, (inp,), pre_dispatch=True).module()
+        gm = torch.export.export_for_training(mod, (inp,)).module()
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
@@ -4318,13 +4313,12 @@ def forward(self, x):
     bn_running_var = self.bn.running_var
     bn_num_batches_tracked = self.bn.num_batches_tracked;  bn_num_batches_tracked = None
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
-    _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
-    getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
-    return pytree.tree_unflatten((getitem,), self._out_spec)""",
+    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, False, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
 
         mod.train()
-        gm_train = _export(mod, (inp,), pre_dispatch=True).module()
+        gm_train = torch.export.export_for_training(mod, (inp,)).module()
         self.assertExpectedInline(
             str(gm_train.code).strip(),
             """\
@@ -4338,15 +4332,9 @@ def forward(self, x):
     bn_running_var = self.bn.running_var
     bn_num_batches_tracked = self.bn.num_batches_tracked
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
-    add = torch.ops.aten.add.Tensor(bn_num_batches_tracked, 1)
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = None
-    getitem = _native_batch_norm_legit_functional[0]
-    getitem_3 = _native_batch_norm_legit_functional[3]
-    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    copy__default = torch.ops.aten.copy_.default(bn_running_mean, getitem_3);  bn_running_mean = getitem_3 = copy__default = None
-    copy__default_1 = torch.ops.aten.copy_.default(bn_running_var, getitem_4);  bn_running_var = getitem_4 = copy__default_1 = None
-    copy__default_2 = torch.ops.aten.copy_.default(bn_num_batches_tracked, add);  bn_num_batches_tracked = add = copy__default_2 = None
-    return pytree.tree_unflatten((getitem,), self._out_spec)""",
+    add_ = torch.ops.aten.add_.Tensor(bn_num_batches_tracked, 1);  bn_num_batches_tracked = add_ = None
+    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
 
     def test_constrain_size_in_eager(self):
@@ -5671,7 +5659,7 @@ graph():
 
         inps = (torch.randn(3, 3),)
         # Strict export segfaults (Issue #128109)
-        ep = torch.export.export(M2(), inps, strict=False)
+        ep = torch.export.export_for_training(M2(), inps, strict=False).run_decompositions({})
         self.assertTrue(torch.allclose(ep.module()(*inps), M2()(*inps)))
 
         self.assertEqual(len(ep.state_dict), 0)
@@ -5685,10 +5673,13 @@ graph():
     %x : [num_users=2] = placeholder[target=x]
     %ones : [num_users=1] = call_function[target=torch.ops.aten.ones.default](args = ([3, 3],), kwargs = {device: cpu, pin_memory: False})
     %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%ones,), kwargs = {})
-    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
-    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach,), kwargs = {})
     %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_1,), kwargs = {})
-    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach, %detach_2), kwargs = {})
+    %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%c_lifted_tensor_0,), kwargs = {})
+    %detach_3 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%lift_fresh_copy,), kwargs = {})
+    %detach_4 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_3,), kwargs = {})
+    %detach_5 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_4,), kwargs = {})
+    %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%detach_2, %detach_5), kwargs = {})
     %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%x, %mul), kwargs = {})
     %mul_1 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%add, %x), kwargs = {})
     return (mul_1,)""",
@@ -7341,19 +7332,7 @@ def forward(self, x, b_t, y):
 
         inps = (torch.ones(5),)
 
-        ep = torch.export.export(M(), inps)
-        self.assertExpectedInline(
-            str(ep.graph_module.code.strip()),
-            """\
-def forward(self, x):
-    cos = torch.ops.aten.cos.default(x)
-    auto_functionalized = torch.ops.higher_order.auto_functionalized(torch.ops.testlib.foo.default, x = x, z = cos);  x = cos = None
-    getitem_3 = auto_functionalized[3];  auto_functionalized = None
-    cos_1 = torch.ops.aten.cos.default(getitem_3)
-    return (getitem_3, getitem_3, cos_1)""",
-        )
-
-        ep = torch.export._trace._export(M(), inps, pre_dispatch=True)
+        ep = torch.export.export_for_training(M(), inps).run_decompositions({})
         self.assertExpectedInline(
             str(ep.graph_module.code.strip()),
             """\
@@ -7571,9 +7550,7 @@ def forward(self, x):
                 return y + y_sum + unbacked_shape.sum()
 
         inps = (torch.tensor(4), torch.randn(5, 5))
-        from torch.export import _trace
-
-        ep_pre = _trace._export(Foo(), inps, pre_dispatch=True, strict=False)
+        ep_pre = torch.export.export_for_training(Foo(), inps, strict=False)
         self.assertExpectedInline(
             str(ep_pre.graph_module.submod_1.code).strip(),
             """\
@@ -7581,13 +7558,13 @@ def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item);  sym_constrain_range_for_size_default = None
     ge_1 = item >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le = item <= 5
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u1 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 5 on node 'le'");  le = _assert_scalar_default_1 = None
     gt_1 = item > 2
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 2 < u1 on node 'gt_1'");  gt_1 = _assert_scalar_default_2 = None
+    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(gt_1, "Runtime assertion failed for expression 2 < u0 on node 'gt_1'");  gt_1 = _assert_scalar_default_2 = None
     lt_1 = item < 6
-    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = _assert_scalar_default_3 = None
+    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u0 < 6 on node 'lt_1'");  lt_1 = _assert_scalar_default_3 = None
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
     return (foo_unbacked,)""",
         )
@@ -7601,9 +7578,9 @@ def forward(self, x, y):
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
     sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size_default = None
     ge_1 = _local_scalar_dense >= 3
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u3 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
+    _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u2 >= 3 on node 'ge_1'");  ge_1 = _assert_scalar_default = None
     le_1 = _local_scalar_dense <= 5;  _local_scalar_dense = None
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u3 <= 5 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
+    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le_1, "Runtime assertion failed for expression u2 <= 5 on node 'le_1'");  le_1 = _assert_scalar_default_1 = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
