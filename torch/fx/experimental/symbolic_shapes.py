@@ -3054,7 +3054,7 @@ class ShapeEnv:
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, sympy.Symbol] = {}
         if specialize_zero_one:
-            self.val_to_var = {0: sympy.S.Zero, 1: sympy.S.One}
+            self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
         # Similar to guards, but these MUST evaluate to true and can
@@ -6597,7 +6597,7 @@ def _suggest_torch_checks(
         f"torch._check({printer.doprint(sympy.Not(cond))})",
     ]
     for i, fix in enumerate(suggested_fixes):
-        msg += f"\n  {i + 1}. {fix}"
+        msg += f"\n  {i+1}. {fix}"
     src_mapped = ", ".join(
         f"`{s}` with {' or '.join(src_map[s])}"
         for s in sorted(s.name for s in cond.free_symbols)
