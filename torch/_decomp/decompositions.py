@@ -4420,7 +4420,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
     for size in reversed(t1_shape[1:]):
         expected_stride.append(size * expected_stride[-1])
     return all(
-        (isinstance(size, utils.IntWithoutSymInt) and size == 1) or left == right
+        guard_size_oblivious(size == 1) or left == right
         for left, right, size in zip(
             t1_stride, list(reversed(expected_stride)), t1_shape
         )
