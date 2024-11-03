@@ -4281,10 +4281,15 @@ class ShapeEnv:
                 sympy_expr
             ) in config.extended_debug_create_symbol.split(",")
             maybe_more_info = ""
-            if not is_debug:
+            if not is_debug and os.getenv("TORCHDYNAMO_EXTENDED_ADVICE", "1") not in (
+                "0",
+                "",
+            ):
                 maybe_more_info = (
                     ", for more info run with "
-                    f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}"'
+                    f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}" '
+                    "or to suppress this message run with "
+                    'TORCHDYNAMO_EXTENDED_ADVICE="0"'
                 )
             sloc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(

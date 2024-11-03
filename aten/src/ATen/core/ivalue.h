@@ -691,6 +691,7 @@ struct TORCH_API IValue final {
   IValue(std::string v);
   IValue(const char* v) : IValue(std::string(v)) {}
   IValue(c10::string_view v) : IValue(std::string(v)){}
+  IValue(std::string_view v) : IValue(std::string(v)){}
   bool isString() const {
     return Tag::String == tag;
   }
