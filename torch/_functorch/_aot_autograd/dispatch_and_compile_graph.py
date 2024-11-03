@@ -184,10 +184,17 @@ def aot_dispatch_base_graph(
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
 
-    # TODO(yf225): is it better to do it here or Inductor post_grad pass?
-    if torch._functorch.partitioners.always_recompute_fsdp_allgather:
-        fw_module.graph = compile_utils.fx_graph_cse(fw_module.graph)
-        fw_module.recompile()
+    torch._logging.trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": "aot_inference_graph_before_fsdp2_raise_backward_all_gather_ops",
+            "encoding": "string",
+        },
+        payload_fn=lambda: fw_module.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        ),
+    )
+    fw_module.graph = torch._inductor.comms.raise_backward_all_gather_ops(fw_module.graph)
 
     copy_count2 = assert_functional_graph(fw_module.graph)
     propagate_input_mutation_stacktraces(fw_module.graph)

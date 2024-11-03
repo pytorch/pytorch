@@ -144,8 +144,6 @@ class AutogradCompilerInstance:
         self.stack.enter_context(self.fake_tensor_mode)
         self.stack.enter_context(self.proxy_mode)
         self.stack.enter_context(disable_autocast_cache())
-        from torch._dispatch.python import enable_python_dispatcher
-        self.stack.enter_context(enable_python_dispatcher())
         # Needed to make sure we don't accidentally specialize any symbols
         assert self.fake_tensor_mode.shape_env is not None
         env = self.fake_tensor_mode.shape_env

@@ -47,7 +47,7 @@ prims = torch.ops.prims
 # The all-gather comm op no longer duplicates, but the graph is still not 100% clean and there are some lingering duplication:
 # https://interncache-all.fbcdn.net/manifold/tlparse_reports/tree/logs/.tmpjU1OB1/rank_0/index.html (e.g. split_with_sizes_copy)
 # Also we use resize-to-0 ops as barrier - can only dedup in between two resize-to-0 ops.
-always_recompute_fsdp_allgather = True
+always_recompute_fsdp_allgather = False
 
 
 @dataclass

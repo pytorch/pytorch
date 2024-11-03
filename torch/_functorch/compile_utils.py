@@ -39,18 +39,18 @@ rand_ops = [
 
 
 # return a new copy of torch.fx.graph.Graph with CSE applied to the input graph
-def fx_graph_cse(fx_g: torch.fx.graph.Graph):
+def fx_graph_cse(fx_g: torch.fx.graph.Graph, allowed_mutation_op=None):
     new_graph = fx.Graph()
     env = {}  # map from node in the old graph to node in the new graph
     hash_env = {}  # map from hash to a node in the new graph
     token_map = {}  # map from hash to token
 
     from torch._inductor.pattern_matcher import (
-        compute_mutation_region_ids_fsdp_compatible,
+        compute_mutation_region_ids,
         same_mutation_regions,
     )
 
-    compute_mutation_region_ids_fsdp_compatible(fx_g)  # type: ignore[arg-type]
+    compute_mutation_region_ids(fx_g, allowed_mutation_op=allowed_mutation_op)  # type: ignore[arg-type]
 
     # Make a set of separate storages returned from the output, which will be preserved
     # when pruning.  This prevents us from deduplicating returned tensors which have

@@ -345,6 +345,293 @@ def reorder_compute_and_comm_for_overlap(
     return order
 
 
+def raise_backward_all_gather_ops(graph):
+    """
+    AOTAutograd partitioner does not guarantee that pre-backward hooks are run before compute ops that depend on it.
+    (e.g. in FSDP2 case, pre-backward hooks populate unsharded params, and compute ops read from unsharded params -> there is no explicit graph edge dependency from latter to former)
+    Here, we solve this problem by intentionally raising the pre-backward all-gather ops up in the graph to be before the first use op of any of the unsharded params that it writes to.
+    This is done per resize0 region (i.e. use resize-to-0 op to define region boundary), to allow for "layer-reuse" scenario as well.
+    Concretely, we have this pattern:
+    ```
+    torch.ops.inductor.resize_storage_bytes_.default(arg30_1, 0)
+    torch.ops.inductor.resize_storage_bytes_.default(arg31_1, 0)
+    ...
+    (recursive ancestors of as_strided_3 up to graph input (root inputs should be purely graph inputs))
+    resize_storage_bytes__2 = torch.ops.inductor.resize_storage_bytes_.default(arg30_1, 64)
+    copy__2 = torch.ops.fsdp.copy_.default(arg30_1, as_strided_3)
+    (recursive ancestors of as_strided_4 up to graph input (root inputs should be purely graph inputs))
+    resize_storage_bytes__3 = torch.ops.inductor.resize_storage_bytes_.default(arg31_1, 128)
+    copy__3 = torch.ops.fsdp.copy_.default(arg31_1, as_strided_4)
+    ...
+    torch.ops.inductor.resize_storage_bytes_.default(arg30_1, 0)
+    torch.ops.inductor.resize_storage_bytes_.default(arg31_1, 0)
+    ```
+    and we want to raise all the FSDP2 all-gather related ops (the ops in the middle of the example) to be immediately after the last resize-to-0 op in the previous resize0 op group.
+    """
+    # Step 1: Find all resize-to-0 ops on graph inputs
+    resize0_ops = []
+    for node in graph.nodes:
+        if (node.op == "call_function" and 
+            node.target == torch.ops.inductor.resize_storage_bytes_.default and
+            node.args[1] == 0):
+            resize0_ops.append(node)
+    
+    # Create mapping from graph input group string to list of resize0 groups
+    graph_input_group_to_resize0_groups = defaultdict(list)
+    
+    # Group consecutive resize0 ops by checking if their indices are adjacent
+    resize0_group = []
+    cur_graph_inputs = set()
+    for i, op in enumerate(resize0_ops):
+        if i == 0 or list(graph.nodes).index(op) != list(graph.nodes).index(resize0_ops[i-1]) + 1:
+            if cur_graph_inputs:
+                # Create key for previous group using sorted tuple
+                key = tuple(sorted(cur_graph_inputs))
+                graph_input_group_to_resize0_groups[key].append(resize0_group)
+            resize0_group = []
+            cur_graph_inputs = set()
+        resize0_group.append(op)
+        cur_graph_inputs.add(op.args[0])
+    
+    # Handle the last group
+    if cur_graph_inputs:
+        key = tuple(sorted(cur_graph_inputs))
+        graph_input_group_to_resize0_groups[key].append(resize0_group)
+
+    # Process each graph input group
+    for cur_graph_inputs, resize0_groups in graph_input_group_to_resize0_groups.items():
+        # Process each region, including the first region from graph start to first resize0_group
+        for i in range(-1, len(resize0_groups) - 1):
+            region_start = None
+            if i == -1:
+                # For first region (graph start to first resize0_group)
+                for node in graph.nodes:
+                    if node.op != "placeholder":
+                        region_start = node
+                        break
+                region_end = resize0_groups[0][0]
+            else:
+                # For subsequent regions between resize0_groups
+                current_group = resize0_groups[i]
+                next_group = resize0_groups[i + 1]
+                # Find the node after current_group[-1]
+                current_group_idx = graph.nodes.index(current_group[-1])
+                region_start = list(graph.nodes)[current_group_idx + 1]
+                region_end = next_group[0]  # First node of next group
+            assert region_start is not None
+            
+            # Collect nodes between region boundaries
+            nodes_between = []
+            for node in graph.nodes:
+                if node == region_end:
+                    break
+                else:
+                    nodes_between.append(node)
+            
+            # Find nodes to move (fsdp.copy_ ops and their ancestors)
+            nodes_to_move = set()
+            for node in nodes_between:
+                if (node.op == "call_function" and 
+                    node.target == torch.ops.fsdp.copy_.default and
+                    node.args[0] in cur_graph_inputs):
+                    
+                    # Find and add the resize-to-full op
+                    for n in nodes_between:
+                        if (n.op == "call_function" and 
+                            n.target == torch.ops.inductor.resize_storage_bytes_.default and
+                            n.args[0] == node.args[0] and 
+                            n.args[1] > 0):
+                            nodes_to_move.add(n)
+                            break
+                    
+                    def collect_ancestors(n):
+                        if n.op == "placeholder":
+                            return
+                        nodes_to_move.add(n)
+                        def process_arg(arg):
+                            if isinstance(arg, torch.fx.Node):
+                                collect_ancestors(arg)
+                            elif isinstance(arg, list):
+                                for item in arg:
+                                    process_arg(item)
+                        
+                        for arg in n.args:
+                            process_arg(arg)
+                        for kwarg in n.kwargs.values():
+                            process_arg(kwarg)
+                    
+                    collect_ancestors(node.args[1])
+                    nodes_to_move.add(node)
+            
+            # Sort nodes to maintain original order
+            nodes_to_move = sorted(nodes_to_move, key=lambda n: list(graph.nodes).index(n))
+
+            # Move nodes to right after region_start
+            for node in nodes_to_move:
+                with graph.inserting_before(region_start):
+                    new_node = graph.call_function(node.target, node.args, node.kwargs)
+                    node.replace_all_uses_with(new_node)
+                    new_node.meta.update(node.meta)
+                    node.users.clear()
+                    graph.erase_node(node)
+
+    return graph
+
+
+def dedup_fsdp2_forward_recomputed_and_pre_backward_hook_all_gather(graph: torch.fx.Graph):
+    """
+    We intentionally recompute FSDP2 forward all-gather ops to ensure program correctness wrt. op ordering.
+    Hence we run into two cases:
+    Case 1: for a set of unsharded params, there is FSDP2 forward recomputed all-gather ops, but no pre-backward hook induced all-gather ops
+    In this case, it means the FSDP2 forward recomputed all-gather ops are meaningless (i.e. the unsharded params were not resharded and thus don't need the AG).
+    Hence we want to just remove the AG ops.
+
+    Case 2: for a set of unsharded params, there are both FSDP2 forward recomputed all-gather ops and pre-backward hook induced all-gather ops
+    In this case, we need to deduplicate between FSDP2 forward recomputed all-gather ops and pre-backward hook induced all-gather ops.
+    We dedup by explicitly moving up the pre-backward hook induced all-gather ops in the graph to replace the forward recomputed all-gather ops.
+    """
+    def get_empty_node_in_ancestor(node):
+        # Traverse up through node's args to find the empty node that created it
+        def _find_empty_node(n):
+            if n.op == "call_function" and n.target == torch.ops.aten.empty.memory_format:
+                return n
+            for arg in n.args:
+                if isinstance(arg, torch.fx.Node):  # Check if arg is a node
+                    empty_node = _find_empty_node(arg)
+                    if empty_node is not None:
+                        return empty_node
+            return None
+            
+        empty_node = _find_empty_node(node)
+        assert empty_node is not None, f"Cannot find aten.empty node in ancestors of {node}"
+        return empty_node
+
+    # Step 1: identify unsharded params groups and their mutation op ordering (the ordering between their copy-out ops and resize-to-0 ops).
+    def find_unsharded_param_group_to_mutation_ops(graph):
+        # Track mapping from empty nodes to their unsharded params
+        empty_node_to_unsharded_param = {}
+        # Track mapping from node to its index in graph
+        node_to_idx = {}
+        # Track mutation ops (resize0 and copy-out) for each unsharded param group
+        unsharded_param_group_to_mutation_ops = defaultdict(list)
+        
+        # First pass: build empty_node_to_unsharded_param mapping and node indices
+        for i, node in enumerate(list(graph.nodes)):
+            node_to_idx[node] = i
+            if node.op == "call_function" and node.target == torch.ops.fsdp.copy_.default:
+                unsharded_param = node.args[0]
+                empty_node = get_empty_node_in_ancestor(node.args[1])
+                empty_node_to_unsharded_param[empty_node] = unsharded_param
+        
+        # Second pass: track mutation ops in order
+        for i, node in enumerate(list(graph.nodes)):
+            if node.op == "call_function":
+                if node.target == torch.ops.fsdp.split_with_sizes_copy.default:
+                    # Get unsharded params for this copy-out node
+                    unsharded_params = []
+                    for o in node.kwargs["out"]:
+                        empty_node = get_empty_node_in_ancestor(o)
+                        if empty_node in empty_node_to_unsharded_param:
+                            unsharded_params.append(empty_node_to_unsharded_param[empty_node])
+                    # Use sorted params as group key
+                    group_key = str("#".join([str(n) for n in sorted(unsharded_params)]))
+                    unsharded_param_group_to_mutation_ops[group_key].append(node)
+                elif node.target == torch.ops.inductor.resize_storage_bytes_.default and node.args[1] == 0:
+                    # For resize0 nodes, find which unsharded param group this param belongs to
+                    unsharded_param = node.args[0]
+                    # Look through all existing groups to find which one contains this param
+                    for group_key in unsharded_param_group_to_mutation_ops:
+                        # Parse the group key back into list of params
+                        group_params = group_key.split("#")
+                        if str(unsharded_param) in group_params:
+                            # Found the group this param belongs to, append resize node
+                            unsharded_param_group_to_mutation_ops[group_key].append(node)
+                            break
+                    
+        return unsharded_param_group_to_mutation_ops
+
+    unsharded_param_group_to_mutation_ops = find_unsharded_param_group_to_mutation_ops(graph)
+
+    # Step 2: for each mutation region with resize-to-0 op as boundary, determine whether it's Case 1 or Case 2, then handle differently.
+    def _remove_fsdp2_copy_out_op_group(graph, split_with_sizes_copy_node):
+        """
+        Remove this pattern because value of unsharded param (`arg2_1` in this example) is already populated:
+        ```
+        empty: "f32[128][1]cuda:0" = torch.ops.aten.empty.memory_format([128], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
+        empty_1: "f32[256][1]cuda:0" = torch.ops.aten.empty.memory_format([256], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
+        as_strided_default_76: "f32[2, 64][64, 1]cuda:0" = torch.ops.aten.as_strided.default(empty, [2, 64], [64, 1], 0)
+        split_with_sizes_copy_default_6 = torch.ops.fsdp.split_with_sizes_copy.default(view_2, [64, 128, 8, 8], 1, out = [as_strided_default_76]);
+        resize_storage_bytes_ = torch.ops.inductor.resize_storage_bytes_.default(arg2_1, 512);  resize_storage_bytes_ = None
+        as_strided: "f32[8, 16][16, 1]cuda:0" = torch.ops.aten.as_strided.default(empty, [8, 16], [16, 1], 0);  empty = None
+        copy_ = torch.ops.fsdp.copy_.default(arg2_1, as_strided);  as_strided = copy_ = None
+        ```
+        """
+        # Get all output nodes from split_with_sizes_copy
+        out_nodes = split_with_sizes_copy_node.kwargs["out"]
+
+        # Remove the split_with_sizes_copy node
+        graph.erase_node(split_with_sizes_copy_node)
+        
+        # For each output node, find and remove its dependencies
+        for o in out_nodes:
+            # Find empty node that created this output
+            empty_node = get_empty_node_in_ancestor(o)
+            
+            # Find and remove all nodes that recursively use this empty node
+            def remove_recursive_users(node):
+                users = list(node.users)
+                for user in users:
+                    # Recursively remove users of this user node first
+                    remove_recursive_users(user)
+                    # Then remove the user node itself
+                    if user != o:  # Don't remove the output node yet
+                        # If this is a copy_ node, check if its input (i.e. the unsharded param) has a resize node immediately before
+                        if user.op == "call_function" and user.target == torch.ops.fsdp.copy_.default:
+                            unsharded_param = user.args[0]
+                            # Get list of users and find if resize node is immediately before copy node
+                            users = list(unsharded_param.users)
+                            for i, n in enumerate(users):
+                                if (i + 1 < len(users) and users[i+1] == user and
+                                    n.op == "call_function" and
+                                    n.target == torch.ops.inductor.resize_storage_bytes_.default and
+                                    n.args[1] > 0):
+                                    graph.erase_node(n)
+                                    break
+                        graph.erase_node(user)
+            
+            remove_recursive_users(empty_node)
+            
+            # Remove the output node
+            graph.erase_node(o)
+
+            # Remove the empty node
+            graph.erase_node(empty_node)
+        
+        return graph
+        
+    for group_name, mutation_ops in unsharded_param_group_to_mutation_ops.items():
+        print(f"group_name: {group_name}, mutation_ops: {mutation_ops}")
+        cur_copy_out_node_group = []
+        for node in mutation_ops:
+            # Use resize-to-0 op to define mutation region boundary
+            if node.target == torch.ops.inductor.resize_storage_bytes_.default and node.args[1] == 0:
+                assert len(cur_copy_out_node_group) <= 2, f"Unexpected # of copy-out nodes in this mutation region: {len(cur_copy_out_node_group)}"
+                if len(cur_copy_out_node_group) == 1:
+                    # Case 1: for a set of unsharded params, there is FSDP2 forward recomputed all-gather ops, but no pre-backward hook induced all-gather ops
+                    # In this case, it means the FSDP2 forward recomputed all-gather ops are meaningless (i.e. the unsharded params were not resharded and thus don't need the AG).
+                    # Hence we want to just remove the AG ops.
+                    graph = _remove_fsdp2_copy_out_op_group(graph, cur_copy_out_node_group[0])
+                elif len(cur_copy_out_node_group) == 2:
+                    # Case 2: for a set of unsharded params, there are both FSDP2 forward recomputed all-gather ops and pre-backward hook induced all-gather ops
+                    # In this case, we need to deduplicate between FSDP2 forward recomputed all-gather ops and pre-backward hook induced all-gather ops.
+                    # Here, we just need to remove the 2nd set of AG ops.
+                    graph = _remove_fsdp2_copy_out_op_group(graph, cur_copy_out_node_group[1])
+                cur_copy_out_node_group = []
+            else:
+                cur_copy_out_node_group.append(node)
+    return graph
+
+
 def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):
     """
     This FX graph pass replaces uses of FSDP2 unsharded params with their corresponding
@@ -397,7 +684,7 @@ Resize can only operate on graph inputs, but got {node} which is resizing non-gr
                 f"""
 Unequal number of resize-to-full and resize-to-0 nodes for graph input {graph_input}:
 {len(resized_to_full_idxes)} vs. {len(resized_to_0_idxes)}.
-Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass.
+Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for this graph input.
 """  # noqa: G004
             )
             return False
@@ -411,7 +698,7 @@ Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass.
                     f"""
 For graph input {graph_input}: resize-to-full node {node_list[resize_to_full_idx]} at index {resize_to_full_idx}
 happens after resize-to-0 node {node_list[resize_to_0_idx]} at index {resize_to_0_idx}.
-Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for that unsharded param.
+Skipping `remove_fsdp2_unsharded_param_graph_input_usage` FX graph pass for this graph input.
 """  # noqa: G004
                 )
                 return False
@@ -449,10 +736,22 @@ Offending node: {unsharded_param}. Graph: {graph}
             if isinstance(node.target, torch._ops.OpOverload)
             else []
         )
-        mutated_node_arg_storages = {
-            StorageWeakRef(node.args[i].meta["val"].untyped_storage())
-            for i in mutated_arg_idxes
-        }
+        try:
+            mutated_node_arg_storages = set()
+            for i in mutated_arg_idxes:
+                if i < len(node.args):
+                    mutated_node_arg_storages.add(StorageWeakRef(node.args[i].meta["val"].untyped_storage()))
+                else:
+                    assert len(node.kwargs) == 1 and "out" in node.kwargs, f"Expected single 'out' kwarg but got {node.kwargs}"
+                    out = node.kwargs["out"]
+                    if isinstance(out, list):
+                        for o in out:
+                            mutated_node_arg_storages.add(StorageWeakRef(o.meta["val"].untyped_storage()))
+                    else:
+                        mutated_node_arg_storages.add(StorageWeakRef(out.meta["val"].untyped_storage()))
+        except:
+            print(f"node: {node}, node.args: {node.args}, node.target._schema: {node.target._schema}, mutated_arg_idxes: {mutated_arg_idxes}")
+            raise
         storages_of_unsharded_params = {
             StorageWeakRef(unsharded_param.meta["val"].untyped_storage())
             for unsharded_param in unsharded_params
