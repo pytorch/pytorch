@@ -1503,6 +1503,8 @@ def _make_user_magic(method, user_type):
         self = promote(self)
         if is_constant(self):
             return (method_to_operator(method))(get_constant(self))
+        if isinstance(self, torch.SymFloat):
+            return (method_to_operator(method))(float(self))
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
