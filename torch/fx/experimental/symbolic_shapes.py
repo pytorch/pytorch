@@ -5298,6 +5298,14 @@ class ShapeEnv:
         equiv: Dict[SympyBoolean, sympy.logic.boolalg.BooleanAtom] = {}
 
         def add_expr(expr: SympyBoolean) -> None:
+            if not expr.lhs.free_symbols or not expr.rhs.free_symbols:
+                # We don't want to set replacements when either side doesn't have
+                # any free symbols since this can be a cause of unsoundness
+                # when we do a replacement without a guard. eg. eq(u0, 3)
+                # would result in replacements[u0] = 3, which would end
+                # result in guards not being added during specialization.
+                return
+
             expr = canonicalize_bool_expr(expr)
             if isinstance(expr, (sympy.Eq, sympy.Ne)):
                 # No need to canonicalize
@@ -5631,6 +5639,16 @@ class ShapeEnv:
             return
 
         if a in tgt.free_symbols:
+            return
+
+        if not tgt.free_symbols:
+            # We don't want to set replacements when tgt doesn't have
+            # any free symbols since this can be a cause of unsoundness
+            # when we do a replacement without a guard. eg. eq(u0, 3)
+            # would result in replacements[u0] = 3, which would end
+            # result in guards not being added during specialization.
+            # See https://github.com/pytorch/pytorch/pull/138868#discussion_r1823076611
+            # for more information.
             return
 
         # Precondition: a == tgt

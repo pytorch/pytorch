@@ -8726,15 +8726,11 @@ def ___make_guard_fn():
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
-        @torch.compile(backend="inductor")
+        @torch.compile(backend="aot_eager")
         def fn(x, y):
             z = y.item()
             torch._check(z == 3)
             return x + z
-
-        print(fn(torch.randn(4), torch.tensor([3])))
-        print(fn(torch.randn(4), torch.tensor([4])))
-        import fbvscode; fbvscode.set_trace()
         fn(torch.randn(4), torch.tensor([3]))
         self.assertRaises(RuntimeError, lambda: fn(torch.randn(4), torch.tensor([4])))
 
