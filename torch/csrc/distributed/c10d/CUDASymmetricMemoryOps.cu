@@ -1,14 +1,17 @@
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
-
 #include <ATen/ATen.h>
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/empty_like.h>
+#endif
+
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#include <c10/cuda/driver_api.h>
 #endif
 
 #include <torch/library.h>
@@ -108,6 +111,7 @@ void init_elementwise_launch_config(
   }
 }
 
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
 template <typename T, int alignment>
 static __global__ void multimem_all_reduce_kernel(
     T* input_mc_ptr,
@@ -286,6 +290,7 @@ at::Tensor multimem_one_shot_all_reduce(
   auto out = at::empty_like(input);
   return multimem_one_shot_all_reduce_out(input, reduce_op, group_name, out);
 }
+#endif
 
 // One-shot all-reduce is register-intensive because it stages values loaded
 // from peers in registers before performing reduction. Setting the thread
@@ -491,7 +496,56 @@ at::Tensor two_shot_all_reduce_(
   return input;
 }
 
+at::Tensor memset32_(
+    at::Tensor& input,
+    int64_t offset,
+    int64_t val,
+    int64_t count) {
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+  TORCH_CHECK(
+      input.dim() == 1 && input.is_contiguous() &&
+          input.scalar_type() == c10::ScalarType::UInt32,
+      "CUDASymmetricMemoryUtils::memset32: input must be "
+      "a flat, contiguous uint32 tensor.");
+
+  TORCH_CHECK(
+      offset > 0 && count > 0,
+      "CUDASymmetricMemoryUtils::memset32: "
+      "offset and count must be a positive integers.")
+
+  TORCH_CHECK(
+      val >= 0 &&
+          static_cast<size_t>(val) <= std::numeric_limits<uint32_t>::max(),
+      "CUDASymmetricMemoryUtils::memset32: "
+      "val must be in the range of [0, 4294967295] (uint32_t).")
+
+  auto element_size = c10::elementSize(input.scalar_type());
+  TORCH_CHECK(
+      offset + count <= input.numel(),
+      "CUDASymmetricMemoryUtils::memset32: offset + count (",
+      offset + count,
+      ") exceeded the numel of the input (",
+      input.numel(),
+      ")");
+
+  auto addr = reinterpret_cast<uint32_t*>(input.data_ptr()) + offset;
+
+  c10::cuda::CUDAGuard guard(input.device());
+  auto driver_api = c10::cuda::DriverAPI::get();
+  C10_CUDA_DRIVER_CHECK(driver_api->cuMemsetD32Async_(
+      reinterpret_cast<CUdeviceptr>(addr),
+      val,
+      count,
+      at::cuda::getCurrentCUDAStream()));
+#else
+  TORCH_CHECK(
+      false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
+#endif
+  return input;
+}
+
 TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
   m.def(
       "multimem_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::multimem_all_reduce_),
@@ -531,8 +585,11 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::two_shot_all_reduce_),
       {at::Tag::pt2_compliant_tag});
+#endif
+  m.def(
+      "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)",
+      torch::dispatch(c10::DispatchKey::CUDA, ::memset32_),
+      {at::Tag::pt2_compliant_tag});
 }
 
 } // namespace
-
-#endif
