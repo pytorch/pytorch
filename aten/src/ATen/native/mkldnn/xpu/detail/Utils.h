@@ -1,8 +1,8 @@
 #pragma once
-#include <iostream>
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/Tensor.h>
+#include <iostream>
 
 #include <ATen/core/grad_mode.h>
 #include <c10/core/MemoryFormat.h>
@@ -12,7 +12,8 @@
 
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
-#define ONEDNN_SUPPORT_DETERMINISTIC (DNNL_VERSION_MAJOR >=3 && DNNL_VERSION_MINOR >=4)
+#define ONEDNN_SUPPORT_DETERMINISTIC \
+  (DNNL_VERSION_MAJOR >= 3 && DNNL_VERSION_MINOR >= 4)
 
 namespace at::native::onednn {
 
@@ -39,9 +40,7 @@ dnnl::memory::desc get_onednn_md(const at::Tensor& tensor);
 bool onednn_strides_check(const at::Tensor& src);
 bool is_broadcast(const at::Tensor& t);
 
-bool is_onednn_matmul_strides(
-    const at::Tensor& tensor,
-    bool is_dst = false);
+bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst = false);
 
 bool is_broadcast_from_other_to_self(
     const at::Tensor& self,
@@ -75,12 +74,12 @@ dnnl::memory::format_tag conv_weight_fmt(
     const bool is_channels_last = false);
 
 template <typename Vec>
-dnnl::memory::dims compatible_dilation(Vec&& dilation){
-    dnnl::memory::dims ret = dilation.vec();
-    for(auto it = ret.begin(); it != ret.end(); it++){
-        *it -=1;
-    }
-    return ret;
+dnnl::memory::dims compatible_dilation(Vec&& dilation) {
+  dnnl::memory::dims ret = dilation.vec();
+  for (auto it = ret.begin(); it != ret.end(); it++) {
+    *it -= 1;
+  }
+  return ret;
 }
 
 template <typename T>
