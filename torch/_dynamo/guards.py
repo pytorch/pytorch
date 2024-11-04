@@ -63,8 +63,8 @@ from torch._guards import (
     GuardBuilderBase,
     GuardEnvExpr,
     GuardSource,
-    StorageOverlap,
     Source,
+    StorageOverlap,
 )
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
@@ -313,7 +313,9 @@ def uninteresting_files():
 
 
 def check_overlapping(overlapping, non_overlapping):
-    from torch._functorch._aot_autograd.input_output_analysis import _tensors_definitely_do_not_overlap
+    from torch._functorch._aot_autograd.input_output_analysis import (
+        _tensors_definitely_do_not_overlap,
+    )
 
     tensors = overlapping + non_overlapping
     overlapping_indices = set()
@@ -2356,7 +2358,9 @@ class CheckFunctionManager:
                     f"""overlapping=[{", ".join(s.name() for s in guard.overlapping_sources)}], """
                     f"""non_overlapping=[{", ".join(s.name() for s in guard.non_overlapping_sources)}])"""
                 )
-                builder.add_python_lambda_leaf_guard_to_root([code_part], [code_part], closure_vars=_get_closure_vars())
+                builder.add_python_lambda_leaf_guard_to_root(
+                    [code_part], [code_part], closure_vars=_get_closure_vars()
+                )
                 add_code_part(code_part, None, True)
             else:
                 raise RuntimeError(f"Unknown GuardEnvExpr: {guard}")

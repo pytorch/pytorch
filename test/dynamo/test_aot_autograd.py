@@ -1433,7 +1433,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         input = torch.ones(20)
         opt_input = input.clone().detach()
 
-        opt_f = torch._dynamo.optimize("aot_eager", dynamic=True, guard_fail_fn=guard_fail_fn)(f)
+        opt_f = torch._dynamo.optimize(
+            "aot_eager", dynamic=True, guard_fail_fn=guard_fail_fn
+        )(f)
 
         out0 = f(*overlapping_args(input))
         opt_out0 = opt_f(*overlapping_args(opt_input))
@@ -1448,7 +1450,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(len(guard_failure), 1)
         self.assertExpectedInline(
             guard_failure[0],
-            """0/0: ___check_overlapping(overlapping=[L['args'][1], L['args'][2]], non_overlapping=[L['args'][0]])"""
+            """0/0: ___check_overlapping(overlapping=[L['args'][1], L['args'][2]], non_overlapping=[L['args'][0]])""",
         )
 
 

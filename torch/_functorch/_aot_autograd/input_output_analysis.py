@@ -18,9 +18,9 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._dynamo.exc import Unsupported
+from torch._guards import StorageOverlap
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
-from torch._guards import StorageOverlap
 
 from .. import config
 from .collect_metadata_analysis import coerce_tangent_and_suggest_memory_format
@@ -420,15 +420,32 @@ are aliased and mutated, and they should be dynamic, please file an issue.
             for i in range(j):
                 j_ = aliased_input_indices[j]
                 i_ = aliased_input_indices[i]
-                if not _tensors_definitely_do_not_overlap(fwd_inputs[i_], fwd_inputs[j_]):
+                if not _tensors_definitely_do_not_overlap(
+                    fwd_inputs[i_], fwd_inputs[j_]
+                ):
                     actual_aliased_indices.add(i_)
                     actual_aliased_indices.add(j_)
 
     no_overlap_indices = list(set(aliased_input_indices) - actual_aliased_indices)
-    if tracing_context is not None and (len(actual_aliased_indices) > 1 or len(no_overlap_indices) > 1):
-        overlapping_sources = [aot_config.aot_autograd_arg_pos_to_source[i] for i in actual_aliased_indices]
-        non_overlapping_sources = [aot_config.aot_autograd_arg_pos_to_source[i] for i in no_overlap_indices]
-        tracing_context.guards_context.aotautograd_guards.append(StorageOverlap(overlapping_sources, non_overlapping_sources))
+
+    # Add the StorageOverlap AOTAutograd guard only if we are actually keeping track of
+    # dynamo sources inside AOTAutograd.
+    if (
+        tracing_context is not None
+        # We check that we have more than 1 aliased tensor, which should be true at
+        # this point, anyway.
+        and num_aliases > 1
+        and aot_config.aot_autograd_arg_pos_to_source
+    ):
+        overlapping_sources = [
+            aot_config.aot_autograd_arg_pos_to_source[i] for i in actual_aliased_indices
+        ]
+        non_overlapping_sources = [
+            aot_config.aot_autograd_arg_pos_to_source[i] for i in no_overlap_indices
+        ]
+        tracing_context.guards_context.aotautograd_guards.append(
+            StorageOverlap(overlapping_sources, non_overlapping_sources)
+        )
 
     return actual_aliased_indices
 
