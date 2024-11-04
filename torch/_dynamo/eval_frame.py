@@ -149,7 +149,7 @@ _set_stance._dynamo_forbidden = True  # type: ignore[attr-defined]
 def _callback_from_stance(callback):
     if _stance.stance == "default":
         # force_backend
-        if _stance.backend is not None:
+        if _stance.backend is not None and callback not in (False, None):
             hooks = Hooks()
             callback = convert_frame.catch_errors_wrapper(
                 convert_frame.convert_frame(  # type: ignore[arg-type]
@@ -167,6 +167,8 @@ def _callback_from_stance(callback):
         # run mode
         return False
     elif _stance.stance == "fail_on_recompile":
+        if callback in (False, None):
+            return callback
 
         def fail_callback(*args, **kwargs):
             raise RuntimeError(
@@ -1071,6 +1073,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
                 "dynamo_flat_name_to_original_fqn"
             ]
+        if "dynamo_compile_id" in self.module.meta:
+            result_gm.meta["dynamo_compile_id"] = self.module.meta["dynamo_compile_id"]
         return result_gm
 
 
