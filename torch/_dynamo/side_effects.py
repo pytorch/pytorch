@@ -462,7 +462,7 @@ class SideEffects:
                 ]
             )
 
-    def register_hook(self, tensor, hook, handle, name):
+    def register_hook(self, tensor, hook, handle, name, *, prepend=False):
         assert isinstance(tensor, variables.TensorVariable)
         assert isinstance(hook, variables.VariableTracker)
         assert (
@@ -475,6 +475,8 @@ class SideEffects:
         while idx in self.tensor_hooks:
             idx += 1
         self.tensor_hooks[idx] = (tensor, hook, handle, name)
+        if prepend:
+            self.tensor_hooks.move_to_end(idx, last=False)  # type: ignore[attr-defined]
         assert not handle.idx
         handle.idx = idx
 

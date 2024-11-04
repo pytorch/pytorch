@@ -1007,7 +1007,7 @@ class TensorVariable(VariableTracker):
             "register_post_accumulate_grad_hook", *args, **kwargs
         )
 
-    def _method_register_hook(self, name: str, hook: VariableTracker):
+    def _method_register_hook(self, name: str, hook: VariableTracker, *, prepend=False):
         # Note - do not arbitrarily add hooks here - make sure they match the same contract
         # see [On tensor.register_hook]
         from ..symbolic_convert import InstructionTranslator
@@ -1045,7 +1045,8 @@ class TensorVariable(VariableTracker):
                         fn=call_hook_from_backward_state,
                         bw_state=bw_state,
                         hook_name=hook_name,
-                    )
+                    ),
+                    prepend=prepend,
                 )
                 # TODO(jansel): returning None here is wrong, it should be
                 # RemovableHandle, but we need some extra work to support
@@ -1070,7 +1071,7 @@ class TensorVariable(VariableTracker):
         handle_variable = variables.RemovableHandleVariable(
             mutable_local=variables.base.MutableLocal(),
         )
-        tx.output.side_effects.register_hook(self, hook, handle_variable, name)
+        tx.output.side_effects.register_hook(self, hook, handle_variable, name, prepend=prepend)
         return handle_variable
 
     def method_requires_grad_(self, requires_grad=True):
