@@ -373,7 +373,7 @@ Utility functions to clip parameter gradients.
     clip_grad_norm_
     clip_grad_norm
     clip_grad_value_
-    get_grad_norm_
+    get_grad_norm
     scale_grads_
 
 Utility functions to flatten and unflatten Module parameters to and from a single vector.
