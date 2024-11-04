@@ -13,7 +13,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import sympy
 
@@ -35,6 +35,7 @@ from torch.fx._lazy_graph_module import _make_graph_module  # type: ignore[attr-
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, ShapeEnv
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import config, exc, logging as torchdynamo_logging, variables
@@ -270,7 +271,7 @@ class OutputGraph:
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
         # Set of globals installed via install_global* APIs
-        self.installed_globals: Set[str] = set()
+        self.installed_globals: OrderedSet[str] = OrderedSet()
 
         # TODO: maybe should just pass the entire f_code in here?  Not
         # sure...
@@ -289,7 +290,7 @@ class OutputGraph:
 
         # List of symbols for which we have exact bindings in the arguments
         # already
-        self.bound_symbols: Set[sympy.Symbol] = set()
+        self.bound_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
 
         shape_env = ShapeEnv(
             # Reference Cycle!
@@ -387,11 +388,11 @@ class OutputGraph:
 
         # Tracks a list of called ops that were not tagged with "pt2_compliant_tag".
         # This information is useful for logging.
-        self.non_compliant_ops: Set[torch._ops.OpOverload] = set({})
+        self.non_compliant_ops: OrderedSet[torch._ops.OpOverload] = OrderedSet({})
 
         # Tracks a list of called custom ops that were tagged with "pt2_compliant_tag".
         # This information is useful for logging.
-        self.compliant_custom_ops: Set[torch._ops.OpOverload] = set({})
+        self.compliant_custom_ops: OrderedSet[torch._ops.OpOverload] = OrderedSet({})
 
         # We save the global torch state here to be restored in case of graph
         # breaks. The relevant issue is seen here
@@ -425,7 +426,7 @@ class OutputGraph:
             self.install_builtins_dict_in_fglobals()
         )
 
-        self.guard_on_key_order: Set[str] = set()
+        self.guard_on_key_order: OrderedSet[str] = OrderedSet()
 
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
@@ -707,10 +708,10 @@ class OutputGraph:
             elif t.layout is torch.sparse_coo:
                 handle_tensor(t._indices(), src)
                 handle_tensor(t._values(), src)
-            elif t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            elif t.layout in OrderedSet([torch.sparse_csr, torch.sparse_bsr]):
                 handle_tensor(t.crow_indices(), src)
                 handle_tensor(t.col_indices(), src)
-            elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            elif t.layout in OrderedSet([torch.sparse_csc, torch.sparse_bsc]):
                 handle_tensor(t.ccol_indices(), src)
                 handle_tensor(t.row_indices(), src)
             if is_traceable_wrapper_subclass(t):
@@ -738,7 +739,7 @@ class OutputGraph:
         return obj
 
     def new_var(self, name="tmp"):
-        existing = set(self.code_options["co_varnames"])
+        existing = OrderedSet(self.code_options["co_varnames"])
         # In common case, this will be O(1)
         while True:
             var = f"{name}_{next(self.unique_var_id)}"
@@ -1129,7 +1130,7 @@ class OutputGraph:
                 for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
-            and len(set(stack_values)) == len(stack_values)
+            and len(OrderedSet(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
             and not len(tx.debug_locals) != 0
             and not self.backward_state
@@ -1624,7 +1625,7 @@ class OutputGraph:
             self.remove_node(node)
             self.real_value_cache.pop(node, None)
 
-        used_symbols: Set[sympy.Symbol] = set()
+        used_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
 
         def update_used_symbols(used_symbols, fake: Union[torch.SymInt, torch.Tensor]):
             used_symbols |= free_symbols(fake)
@@ -1772,7 +1773,7 @@ def check_pt2_compliant_op(output_graph, kind, target, args, kwargs):
         return
 
     def encountered_compliant_op(target):
-        if target.namespace in {"prim", "prims", "aten"}:
+        if target.namespace in OrderedSet(["prim", "prims", "aten"]):
             return
         output_graph.compliant_custom_ops.add(target)
 
@@ -2027,7 +2028,7 @@ class SubgraphTracer(fx.Tracer):
         if nn_module_stack:
             rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
-        if kind in {"call_function", "call_method"}:
+        if kind in OrderedSet(["call_function", "call_method"]):
             rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
                 (rv.node.name, target)
             ]
@@ -2055,7 +2056,7 @@ class SubgraphTracer(fx.Tracer):
                     rv.node.meta["nn_module_stack"] = nn_module_stack.copy()
 
             if "source_fn_stack" not in rv.node.meta:
-                if kind in {"call_function", "call_method"}:
+                if kind in OrderedSet(["call_function", "call_method"]):
                     rv.node.meta["source_fn_stack"] = self.source_fn_stack + [
                         (rv.node.name, target)
                     ]

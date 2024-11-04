@@ -26,6 +26,7 @@ from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
+from torch.utils._ordered_set import OrderedSet
 
 from . import config
 from .utils import clone_inputs, get_debug_dir
@@ -152,7 +153,7 @@ class NNModuleToString:
 
     @staticmethod
     def can_convert_to_string(gm):
-        cant_convert = set()
+        cant_convert = OrderedSet()
         for _, module in gm.named_children():
             if type(module) not in NNModuleToString.safe_reprs:
                 cant_convert.add(module)

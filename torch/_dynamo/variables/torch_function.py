@@ -17,6 +17,7 @@ from torch.overrides import (
     TorchFunctionMode,
 )
 from torch.utils._device import DeviceContext
+from torch.utils._ordered_set import OrderedSet
 
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -171,7 +172,7 @@ def populate_builtin_to_tensor_fn_map():
             (lambda o: o(0, inp0_int), tensor_and_int_ops),
         ]
 
-        rskips = {operator.matmul, operator.imatmul, operator.getitem}
+        rskips = OrderedSet([operator.matmul, operator.imatmul, operator.getitem])
         for setup_fn, op_list in rsetups_and_oplists:
             for op in op_list:
                 if op in rskips:

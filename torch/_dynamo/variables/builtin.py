@@ -14,6 +14,7 @@ from typing import Dict, List, TYPE_CHECKING
 
 import torch
 from torch import sym_float, sym_int
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, variables
@@ -97,10 +98,12 @@ IN_PLACE_DESUGARING_MAP = {
 
 class BuiltinVariable(VariableTracker):
     _SENTINEL = object()
-    _nonvar_fields = {
-        "fn",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "fn",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     @classmethod
     def create_with_source(cls, value, source):
@@ -110,64 +113,66 @@ class BuiltinVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
     def _constant_fold_functions():
-        fns = {
-            abs,
-            all,
-            any,
-            bool,
-            callable,
-            chr,
-            divmod,
-            float,
-            getattr,
-            int,
-            len,
-            max,
-            min,
-            ord,
-            pow,
-            repr,
-            round,
-            str,
-            str.format,
-            sum,
-            type,
-            operator.abs,
-            operator.pos,
-            operator.neg,
-            operator.not_,
-            operator.truth,
-            operator.invert,
-            operator.pow,
-            operator.mul,
-            operator.matmul,
-            operator.floordiv,
-            operator.truediv,
-            operator.mod,
-            operator.add,
-            operator.sub,
-            operator.getitem,
-            operator.length_hint,
-            operator.lshift,
-            operator.rshift,
-            operator.and_,
-            operator.or_,
-            operator.xor,
-            operator.ipow,
-            operator.imul,
-            operator.imatmul,
-            operator.ifloordiv,
-            operator.itruediv,
-            operator.imod,
-            operator.iadd,
-            operator.isub,
-            operator.ilshift,
-            operator.irshift,
-            operator.iand,
-            operator.ixor,
-            operator.ior,
-            operator.index,
-        }
+        fns = OrderedSet(
+            [
+                abs,
+                all,
+                any,
+                bool,
+                callable,
+                chr,
+                divmod,
+                float,
+                getattr,
+                int,
+                len,
+                max,
+                min,
+                ord,
+                pow,
+                repr,
+                round,
+                str,
+                str.format,
+                sum,
+                type,
+                operator.abs,
+                operator.pos,
+                operator.neg,
+                operator.not_,
+                operator.truth,
+                operator.invert,
+                operator.pow,
+                operator.mul,
+                operator.matmul,
+                operator.floordiv,
+                operator.truediv,
+                operator.mod,
+                operator.add,
+                operator.sub,
+                operator.getitem,
+                operator.length_hint,
+                operator.lshift,
+                operator.rshift,
+                operator.and_,
+                operator.or_,
+                operator.xor,
+                operator.ipow,
+                operator.imul,
+                operator.imatmul,
+                operator.ifloordiv,
+                operator.itruediv,
+                operator.imod,
+                operator.iadd,
+                operator.isub,
+                operator.ilshift,
+                operator.irshift,
+                operator.iand,
+                operator.ixor,
+                operator.ior,
+                operator.index,
+            ]
+        )
         from .tensor import supported_comparison_ops
 
         fns.update(supported_comparison_ops.values())
@@ -180,47 +185,49 @@ class BuiltinVariable(VariableTracker):
     @staticmethod
     @functools.lru_cache(None)
     def _fx_graph_functions():
-        fns = {
-            operator.abs,
-            operator.pos,
-            operator.neg,
-            operator.not_,
-            operator.invert,
-            operator.pow,
-            operator.mul,
-            operator.matmul,
-            operator.floordiv,
-            operator.truediv,
-            operator.mod,
-            operator.add,
-            operator.lt,
-            operator.gt,
-            operator.ge,
-            operator.le,
-            operator.ne,
-            operator.eq,
-            operator.sub,
-            operator.length_hint,
-            operator.lshift,
-            operator.rshift,
-            operator.and_,
-            operator.or_,
-            operator.xor,
-            operator.ipow,
-            operator.imul,
-            operator.imatmul,
-            operator.ifloordiv,
-            operator.itruediv,
-            operator.getitem,
-            operator.imod,
-            operator.iadd,
-            operator.isub,
-            operator.ilshift,
-            operator.irshift,
-            operator.iand,
-            operator.ixor,
-            operator.ior,
-        }
+        fns = OrderedSet(
+            [
+                operator.abs,
+                operator.pos,
+                operator.neg,
+                operator.not_,
+                operator.invert,
+                operator.pow,
+                operator.mul,
+                operator.matmul,
+                operator.floordiv,
+                operator.truediv,
+                operator.mod,
+                operator.add,
+                operator.lt,
+                operator.gt,
+                operator.ge,
+                operator.le,
+                operator.ne,
+                operator.eq,
+                operator.sub,
+                operator.length_hint,
+                operator.lshift,
+                operator.rshift,
+                operator.and_,
+                operator.or_,
+                operator.xor,
+                operator.ipow,
+                operator.imul,
+                operator.imatmul,
+                operator.ifloordiv,
+                operator.itruediv,
+                operator.getitem,
+                operator.imod,
+                operator.iadd,
+                operator.isub,
+                operator.ilshift,
+                operator.irshift,
+                operator.iand,
+                operator.ixor,
+                operator.ior,
+            ]
+        )
         return fns
 
     @staticmethod
@@ -1414,7 +1421,7 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator", user_cls, *args, **kwargs
     ):
-        assert user_cls in {dict, OrderedDict, defaultdict}
+        assert user_cls in OrderedSet([dict, OrderedDict, defaultdict])
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
             assert user_cls is OrderedDict
@@ -1463,7 +1470,7 @@ class BuiltinVariable(VariableTracker):
                 out = tx.inline_user_function_return(iter_fn, args, kwargs)
                 if isinstance(out, SetVariable):
                     return out
-                return BuiltinVariable(set).call_set(tx, out)
+                return BuiltinVariable(OrderedSet).call_set(tx, out)
             else:
                 unimplemented(f"set(): {args} {kwargs}")
         else:
@@ -1661,7 +1668,7 @@ class BuiltinVariable(VariableTracker):
                 return default
 
         source = obj.source and AttrSource(obj.source, name)
-        if name in {"__bases__", "__base__", "__flags__"}:
+        if name in OrderedSet(["__bases__", "__base__", "__flags__"]):
             try:
                 value = obj.as_python_constant()
                 if isinstance(value, type):

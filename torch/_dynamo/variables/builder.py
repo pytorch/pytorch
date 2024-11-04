@@ -27,7 +27,6 @@ from typing import (
     MutableMapping,
     NamedTuple,
     Optional,
-    Set,
     TYPE_CHECKING,
     Union,
 )
@@ -51,6 +50,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymbolicContext,
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
@@ -347,7 +347,7 @@ ITERTOOLS_TYPE_IDS: FrozenSet[int] = frozenset(
     if not name.startswith("_") and inspect.isclass(member)
 )
 # Will be updated later in substitute_in_graph in torch/_dynamo/polyfills/itertools.py
-ITERTOOLS_POLYFILLED_TYPE_IDS: Set[int] = set()
+ITERTOOLS_POLYFILLED_TYPE_IDS: OrderedSet[int] = OrderedSet()
 
 
 class VariableBuilder:
@@ -392,26 +392,30 @@ class VariableBuilder:
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):
-        return type(vt) in {
-            TensorVariable,
-            TensorWithTFOverrideVariable,
-            UserDefinedObjectVariable,
-            NumpyNdarrayVariable,
-        }
+        return type(vt) in OrderedSet(
+            [
+                TensorVariable,
+                TensorWithTFOverrideVariable,
+                UserDefinedObjectVariable,
+                NumpyNdarrayVariable,
+            ]
+        )
 
     @staticmethod
     @functools.lru_cache(None)
     def _common_constants():
-        return {
-            # We zero-one specialize shapes, so specialize these constants
-            # too
-            0,
-            1,
-            # NB: There used to be more constants here, but honestly it was
-            # pretty confusing.  Note we specialize floats by default, and
-            # DON'T specialize ints by default.  This all only matters with
-            # dynamic_shapes
-        }
+        return OrderedSet(
+            [
+                # We zero-one specialize shapes, so specialize these constants
+                # too
+                0,
+                1,
+                # NB: There used to be more constants here, but honestly it was
+                # pretty confusing.  Note we specialize floats by default, and
+                # DON'T specialize ints by default.  This all only matters with
+                # dynamic_shapes
+            ]
+        )
 
     def get_source(self):
         return self.source
@@ -1483,7 +1487,7 @@ class VariableBuilder:
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             result = ConstantVariable.create(value=value, source=self.source)
-            if isinstance(value, (list, set)):
+            if isinstance(value, (list, OrderedSet)):
                 return self.set_source_and_track_mutable(value, result)
             return result
 
@@ -2572,10 +2576,12 @@ def _automatic_dynamic(
     constraint_strides = []
     for i in range(e.dim()):
         # NB: mark dynamic has precedence over static
-        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", set())
-        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", set())
-        marked_weak_dynamic = i in getattr(e, "_dynamo_weak_dynamic_indices", set())
-        marked_static = i in getattr(e, "_dynamo_static_indices", set())
+        marked_unbacked = i in getattr(e, "_dynamo_unbacked_indices", OrderedSet())
+        marked_dynamic = i in getattr(e, "_dynamo_dynamic_indices", OrderedSet())
+        marked_weak_dynamic = i in getattr(
+            e, "_dynamo_weak_dynamic_indices", OrderedSet()
+        )
+        marked_static = i in getattr(e, "_dynamo_static_indices", OrderedSet())
 
         # Reflect the user directive in the frame_state
         # For dynamic, apply None always
@@ -2853,7 +2859,7 @@ class SourcelessBuilder:
         handlers = {}
         for t in common_constant_types:
             handlers[t] = lambda tx, value: ConstantVariable(value)
-        handlers[set] = lambda tx, value: SetVariable(
+        handlers[OrderedSet] = lambda tx, value: SetVariable(
             [create(tx, x) for x in value], mutable_local=MutableLocal()
         )
         handlers[dict] = lambda tx, value: ConstDictVariable(

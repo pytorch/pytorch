@@ -12,6 +12,7 @@ from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.node import Node
+from torch.utils._ordered_set import OrderedSet
 
 
 # Regular log messages should go through 'log'.
@@ -48,7 +49,7 @@ class Bucket:
 
 
 def bucket_has_external_output(bucket: Bucket) -> bool:
-    nodes_in_bucket = set()
+    nodes_in_bucket = OrderedSet()
     # we want to iterate in reverse order, but clumsi-luckily the bucket.nodes list was already created backwards
     # so we don't reverse it here
     for node in bucket.nodes:
@@ -415,7 +416,7 @@ class DDPOptimizer:
         """
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)
-        processed_modules = set()
+        processed_modules = OrderedSet()
         for node in reversed(gm.graph.nodes):
             if node.op in ("output", "placeholder"):
                 continue

@@ -33,7 +33,6 @@ from typing import (
     List,
     NamedTuple,
     Optional,
-    Set,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -72,6 +71,7 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, convert_frame, external_utils, trace_rules, utils
 from .backends.registry import CompilerFn, lookup_backend
@@ -191,11 +191,13 @@ def _reset_guarded_backend_cache():
     cached_backends.clear()
 
 
-DONT_WRAP_FILES = {
-    # For tracing into fx modules
-    inspect.getsourcefile(GraphModule),
-    join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
-}
+DONT_WRAP_FILES = OrderedSet(
+    [
+        # For tracing into fx modules
+        inspect.getsourcefile(GraphModule),
+        join(dirname(dirname(__file__)), "onnx/_internal/fx/dynamo_graph_extractor.py"),
+    ]
+)
 
 
 def _debug_get_cache_entry_list(
@@ -219,16 +221,18 @@ class OptimizedModule(torch.nn.Module):
     _torchdynamo_orig_callable: Callable[..., Any]
     get_compiler_config: Callable[[], Any]
 
-    _opt_mod_attributes = {
-        "_orig_mod",
-        "dynamo_ctx",
-        "_torchdynamo_orig_callable",
-        "get_compiler_config",
-        "forward",
-        "_forward",
-        "__dict__",
-        "named_children_walk",
-    }
+    _opt_mod_attributes = OrderedSet(
+        [
+            "_orig_mod",
+            "dynamo_ctx",
+            "_torchdynamo_orig_callable",
+            "get_compiler_config",
+            "forward",
+            "_forward",
+            "__dict__",
+            "named_children_walk",
+        ]
+    )
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx) -> None:
         super().__init__()
@@ -804,9 +808,9 @@ def optimize(*args, **kwargs):
         if ca_kwargs_override:
             # NOTE: The process of translating other `torch.compile` kwargs to `torch._dynamo.optimize` kwargs
             # is more complicated, we will add it in the future when needed.
-            assert set(ca_kwargs_override.keys()) == {
-                "fullgraph"
-            }, f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
+            assert OrderedSet(ca_kwargs_override.keys()) == OrderedSet(
+                ["fullgraph"]
+            ), f"Only `fullgraph` kwarg override is supported for now, but got {ca_kwargs_override.keys()}"
             kwargs["nopython"] = ca_kwargs_override["fullgraph"]
         return optimize(*args, **kwargs)
 
@@ -977,7 +981,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         flat_results: List[Any],
         matched_output_elements_positions: List[int],
         example_fake_inputs: List[torch.Tensor],
-        flat_args_dynamic_dims: List[Set[int]],
+        flat_args_dynamic_dims: List[OrderedSet[int]],
         fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
     ) -> None:
         super().__init__(m)
@@ -1399,7 +1403,7 @@ def export(
     Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
     """
     if _log_export_usage:
-        log_export_usage(event="export.private_api", flags={"_dynamo"})
+        log_export_usage(event="export.private_api", flags=OrderedSet(["_dynamo"]))
 
     # Deal with "local variable referenced before assignment"
     _f = f
@@ -1669,15 +1673,18 @@ def export(
 
         if same_signature:
             flat_args_dynamic_dims = [
-                {
-                    c.dim
-                    for c in (constraints or ())
-                    if (
-                        c.t_id == id(x)
-                        and not isinstance(c, _RelaxedConstraint)
-                        and c.constraint_range.vr.lower != c.constraint_range.vr.upper
-                    )
-                }
+                OrderedSet(
+                    [
+                        c.dim
+                        for c in (constraints or ())
+                        if (
+                            c.t_id == id(x)
+                            and not isinstance(c, _RelaxedConstraint)
+                            and c.constraint_range.vr.lower
+                            != c.constraint_range.vr.upper
+                        )
+                    ]
+                )
                 for x in flat_args
             ]
             graph = rewrite_signature(
@@ -1769,21 +1776,23 @@ class TorchPatcher:
             sparse_adam,
         )
 
-        optimizer_modules = {
-            adadelta,
-            adagrad,
-            adam,
-            adamax,
-            adamw,
-            asgd,
-            lbfgs,
-            nadam,
-            radam,
-            rmsprop,
-            rprop,
-            sgd,
-            sparse_adam,
-        }
+        optimizer_modules = OrderedSet(
+            [
+                adadelta,
+                adagrad,
+                adam,
+                adamax,
+                adamw,
+                asgd,
+                lbfgs,
+                nadam,
+                radam,
+                rmsprop,
+                rprop,
+                sgd,
+                sparse_adam,
+            ]
+        )
 
         for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
@@ -1802,10 +1811,12 @@ class TorchPatcher:
         ]
 
         # Note: we don't support sparsity or tracing through backwards
-        excluded_optimizer_classes = {
-            torch.optim.SparseAdam,
-            torch.optim.LBFGS,
-        }
+        excluded_optimizer_classes = OrderedSet(
+            [
+                torch.optim.SparseAdam,
+                torch.optim.LBFGS,
+            ]
+        )
 
         for opt in optimizer_classes:
             if opt in excluded_optimizer_classes:

@@ -29,7 +29,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    Set,
     Tuple,
     Type,
     TYPE_CHECKING,
@@ -73,6 +72,7 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SYMPY_INTERP,
 )
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
 
@@ -309,7 +309,7 @@ def uninteresting_files():
     mods = [
         torch._dynamo.external_utils,
     ]
-    return {inspect.getfile(m) for m in mods}
+    return OrderedSet([inspect.getfile(m) for m in mods])
 
 
 _CLOSURE_VARS: Optional[Dict[str, object]] = None
@@ -567,7 +567,7 @@ class GuardBuilder(GuardBuilderBase):
         # not sufficient because for nn modules, we can have different sources
         # to access the same object - self._module["param"] is same as
         # self.param.
-        self.key_order_guarded_dict_ids = set()
+        self.key_order_guarded_dict_ids = OrderedSet()
         for source_name in self.check_fn_manager.output_graph.guard_on_key_order:
             self.key_order_guarded_dict_ids.add(id(self.get(source_name)))
 
@@ -580,7 +580,7 @@ class GuardBuilder(GuardBuilderBase):
         self._cached_guard_managers: Dict[
             str, torch._C._dynamo.guards.GuardManager
         ] = {}
-        self._cached_duplicate_input_guards: Set[Tuple[str, str]] = set()
+        self._cached_duplicate_input_guards: OrderedSet[Tuple[str, str]] = OrderedSet()
 
     def guard_on_dict_keys_and_ignore_order(self, example_value, guard):
         dict_mgr = self.get_guard_manager(guard)
@@ -715,7 +715,7 @@ class GuardBuilder(GuardBuilderBase):
         attr_name = source.member
         mod_dict = base_example_value.__dict__
 
-        all_class_attribute_names: Set[str] = set()
+        all_class_attribute_names: OrderedSet[str] = OrderedSet()
         for x in inspect.getmro(base_example_value.__class__):
             all_class_attribute_names.update(x.__dict__.keys())
 
@@ -1448,20 +1448,22 @@ class GuardBuilder(GuardBuilderBase):
         else:
             np_types = ()
 
-        ok_mutable_types = (list, set)
+        ok_mutable_types = (list, OrderedSet)
 
         ok_types = tuple(
             common_constant_types
-            | {
-                type,
-                tuple,
-                frozenset,
-                slice,
-                range,
-                torch.Size,
-                *np_types,
-                *ok_mutable_types,
-            }
+            | OrderedSet(
+                [
+                    type,
+                    tuple,
+                    frozenset,
+                    slice,
+                    range,
+                    torch.Size,
+                    *np_types,
+                    *ok_mutable_types,
+                ]
+            )
         )
 
         if torch.distributed.is_available():
@@ -1739,7 +1741,7 @@ class GuardBuilder(GuardBuilderBase):
                 Tuple[Source, Union[Source, Symbol], Callable]
             ] = []
             phantom_symbols: Dict[str, Symbol] = {}
-            relaxed_sources: Set[Source] = set()
+            relaxed_sources: OrderedSet[Source] = OrderedSet()
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
                     torch.export.dynamic_shapes._process_equalities(
@@ -2306,7 +2308,7 @@ class CheckFunctionManager:
                 code_parts.append(code_part)
                 verbose_code_parts.append(verbose_code_part)
 
-        seen = set()
+        seen = OrderedSet()
         for gcl in builder.code:
             for code in gcl.code_list:
                 if code not in seen:
@@ -2696,7 +2698,7 @@ set_guard_error_hook(guard_error_hook)
 
 
 def unique(seq):
-    seen = set()
+    seen = OrderedSet()
     for x in seq:
         if x not in seen:
             yield x

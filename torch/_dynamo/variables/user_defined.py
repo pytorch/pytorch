@@ -18,6 +18,7 @@ from typing_extensions import is_typeddict
 import torch._dynamo.config
 import torch.nn
 from torch._guards import TracingContext
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import polyfills, variables
@@ -122,30 +123,36 @@ class UserDefinedClassVariable(UserDefinedVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _constant_fold_classes():
-        return {
-            torch.device,
-            torch.finfo,
-            torch.iinfo,
-            torch.Size,
-        }
+        return OrderedSet(
+            [
+                torch.device,
+                torch.finfo,
+                torch.iinfo,
+                torch.Size,
+            ]
+        )
 
     @staticmethod
     @functools.lru_cache(None)
     def _in_graph_classes():
-        _in_graph_class_list = {
-            torch.Tensor,
-            torch.cuda.Stream,
-            torch.cuda.Event,
-        }
+        _in_graph_class_list = OrderedSet(
+            [
+                torch.Tensor,
+                torch.cuda.Stream,
+                torch.cuda.Event,
+            ]
+        )
         if hasattr(torch, "hpu"):
             _in_graph_class_list.update(
-                {
-                    torch.hpu.Stream,
-                    torch.hpu.Event,
-                }
+                OrderedSet(
+                    [
+                        torch.hpu.Stream,
+                        torch.hpu.Event,
+                    ]
+                )
             )
 
-        return set(tensortype_to_dtype.keys()) | _in_graph_class_list
+        return OrderedSet(tensortype_to_dtype.keys()) | _in_graph_class_list
 
     def can_constant_fold_through(self):
         return self.value in self._constant_fold_classes()
@@ -176,7 +183,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
         # and we need duplicate code to handle both cases.
         if (
-            self.value in {collections.OrderedDict, collections.defaultdict}
+            self.value in OrderedSet([collections.OrderedDict, collections.defaultdict])
             and name == "fromkeys"
         ):
             return super().var_getattr(tx, name)
@@ -313,7 +320,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return variables.ListVariable(subs_as_vars, **options)
         elif (
-            self.value in {collections.OrderedDict, collections.defaultdict}
+            self.value in OrderedSet([collections.OrderedDict, collections.defaultdict])
             and name == "fromkeys"
         ):
             from .builtin import BuiltinVariable
@@ -639,7 +646,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     Mostly objects of defined type.  Catch-all for something where we only know the type.
     """
 
-    _nonvar_fields = {"value", "value_type", *UserDefinedVariable._nonvar_fields}
+    _nonvar_fields = OrderedSet(
+        ["value", "value_type", *UserDefinedVariable._nonvar_fields]
+    )
 
     def __init__(self, value, value_type=None, cls_source=None, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -701,12 +710,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _supported_random_functions():
-        fns = {
-            random.random,
-            random.randint,
-            random.randrange,
-            random.uniform,
-        }
+        fns = OrderedSet(
+            [
+                random.random,
+                random.randint,
+                random.randrange,
+                random.uniform,
+            ]
+        )
         return fns
 
     def _maybe_get_baseclass_method(self, name):

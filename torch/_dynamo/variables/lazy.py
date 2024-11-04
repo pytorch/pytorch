@@ -3,6 +3,8 @@ import functools
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 from typing_extensions import Self
 
+from torch.utils._ordered_set import OrderedSet
+
 from .base import VariableTracker
 from .tensor import SymNodeVariable
 
@@ -47,7 +49,7 @@ class LazyVariableTracker(VariableTracker):
     VariableTrackers right away.
     """
 
-    _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
+    _nonvar_fields = OrderedSet(["_cache", *VariableTracker._nonvar_fields])
 
     @staticmethod
     def create(value: Any, source: Any, **options: Any) -> "LazyVariableTracker":

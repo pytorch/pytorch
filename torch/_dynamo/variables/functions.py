@@ -20,6 +20,7 @@ from typing import (
 from typing_extensions import Never
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n
@@ -144,11 +145,13 @@ class BaseUserFunctionVariable(VariableTracker):
 class UserFunctionVariable(BaseUserFunctionVariable):
     """Some unsupported user-defined global function"""
 
-    _nonvar_fields = {
-        "fn",
-        "is_constant",
-        *BaseUserFunctionVariable._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "fn",
+            "is_constant",
+            *BaseUserFunctionVariable._nonvar_fields,
+        ]
+    )
 
     @classmethod
     def create_with_source(cls, value, source):
@@ -470,11 +473,13 @@ def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kw
 
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
-    _nonvar_fields = {
-        "closure_scope",
-        "f_globals",
-        *BaseUserFunctionVariable._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "closure_scope",
+            "f_globals",
+            *BaseUserFunctionVariable._nonvar_fields,
+        ]
+    )
 
     def __init__(
         self,
@@ -633,11 +638,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
 
 class SkipFunctionVariable(VariableTracker):
-    _nonvar_fields = {
-        "value",
-        "reason",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "value",
+            "reason",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     def __init__(self, value, reason=None, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -708,7 +715,7 @@ class SkipFunctionVariable(VariableTracker):
                 path = inspect.getfile(self.value)
                 msg = f"'skip function {self.value.__qualname__} in file {path}'"
             except TypeError:
-                known_python_builtin_modules = {"_abc", "_warnings"}
+                known_python_builtin_modules = OrderedSet(["_abc", "_warnings"])
                 if self.value.__module__ in known_python_builtin_modules:
                     msg = (
                         f"Graph break due to unsupported Python builtin {self.value.__module__}.{self.value.__qualname__}. "
@@ -944,12 +951,14 @@ class FunctoolsPartialVariable(VariableTracker):
 
 
 class PolyfilledFunctionVariable(VariableTracker):
-    _nonvar_fields = {
-        "fn",
-        "wrapped_fn",
-        "traceable_fn",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "fn",
+            "wrapped_fn",
+            "traceable_fn",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     @classmethod
     @functools.lru_cache(None)

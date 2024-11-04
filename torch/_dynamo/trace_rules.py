@@ -33,13 +33,14 @@ import unittest
 import weakref
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Type, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Type, Union
 
 import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
 from torch.utils import _config_module
+from torch.utils._ordered_set import OrderedSet
 
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
@@ -2911,7 +2912,7 @@ Get all torch.Tensor methods which are allowed to be in graph functions.
 
 @functools.lru_cache(None)
 def get_tensor_method():
-    s = set()
+    s = OrderedSet()
     for name in dir(torch.Tensor):
         method = getattr(torch.Tensor, name)
         if isinstance(
@@ -2946,22 +2947,22 @@ class FunctionIdSet:
     added to the graph and what will cause a graph break.
     """
 
-    function_ids: Optional[Set[int]] = None
+    function_ids: Optional[OrderedSet[int]] = None
     function_names: Optional[Dict[int, str]] = None
 
     def __init__(
-        self, lazy_initializer: Callable[[], Union[Dict[int, str], Set[int]]]
+        self, lazy_initializer: Callable[[], Union[Dict[int, str], OrderedSet[int]]]
     ) -> None:
         self.lazy_initializer = lazy_initializer
 
-    def __call__(self) -> Set[int]:
+    def __call__(self) -> OrderedSet[int]:
         if self.function_ids is None:
             value = self.lazy_initializer()
             if isinstance(value, dict):
-                self.function_ids = set(value.keys())
+                self.function_ids = OrderedSet(value.keys())
                 self.function_names = value
             else:
-                assert isinstance(value, set)
+                assert isinstance(value, OrderedSet)
                 self.function_ids = value
         return self.function_ids
 
@@ -3020,9 +3021,9 @@ def _builtin_function_ids() -> Dict[int, str]:
 
 
 @FunctionIdSet
-def _polyfilled_function_ids() -> Set[int]:
+def _polyfilled_function_ids() -> OrderedSet[int]:
     # See also @torch._dynamo.decorators.substitute_in_graph(...), which adds items in _polyfilled_function_ids
-    return set()
+    return OrderedSet()
 
 
 @FunctionIdSet
@@ -3204,39 +3205,43 @@ def _module_dir(m: types.ModuleType):
 
 # These are legacy workarounds, don't add new modules to this list.
 # Please use the MOD_INLINELIST instead to force inline functions under particular modules.
-LEGACY_MOD_INLINELIST = {
-    "torch._dynamo.external_utils",
-    "torch._export.db.examples",
-    "torch._export.wrappers",
-    "torch._functorch.apis",
-    "torch._functorch.deprecated",
-    "torch._higher_order_ops.cond",
-    "torch._higher_order_ops.while_loop",
-    "torch._higher_order_ops.associative_scan",
-    "torch._higher_order_ops.scan",
-    "torch.nn.attention.flex_attention",
-    "torch.ao.quantization.pt2e.export_utils",
-    "torch.ao.quantization.pt2e.qat_utils",
-    "torch.ao.quantization.pt2e.representation.rewrite",
-    "torch.ao.quantization.pt2e.utils",
-    "torch.ao.quantization.quantizer.xnnpack_quantizer",
-    "torch.export.unflatten",
-    "torch.optim",
-}
+LEGACY_MOD_INLINELIST = OrderedSet(
+    [
+        "torch._dynamo.external_utils",
+        "torch._export.db.examples",
+        "torch._export.wrappers",
+        "torch._functorch.apis",
+        "torch._functorch.deprecated",
+        "torch._higher_order_ops.cond",
+        "torch._higher_order_ops.while_loop",
+        "torch._higher_order_ops.associative_scan",
+        "torch._higher_order_ops.scan",
+        "torch.nn.attention.flex_attention",
+        "torch.ao.quantization.pt2e.export_utils",
+        "torch.ao.quantization.pt2e.qat_utils",
+        "torch.ao.quantization.pt2e.representation.rewrite",
+        "torch.ao.quantization.pt2e.utils",
+        "torch.ao.quantization.quantizer.xnnpack_quantizer",
+        "torch.export.unflatten",
+        "torch.optim",
+    ]
+)
 
 if torch.distributed.is_available():
-    LEGACY_MOD_INLINELIST |= {
-        "torch.distributed.tensor._api",
-        "torch.distributed.tensor.device_mesh",
-        "torch.distributed.device_mesh",
-        "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
-        "torch.distributed.tensor.parallel._data_parallel_utils",
-        "torch.distributed.tensor.parallel._utils",
-        "torch.distributed.tensor.parallel.style",
-        # we have to add replicate to LEGACY_MOD_INLINELIST to ensure
-        # the forward_hook won't be ignored.
-        "torch.distributed._composable.replicate",
-    }
+    LEGACY_MOD_INLINELIST |= OrderedSet(
+        [
+            "torch.distributed.tensor._api",
+            "torch.distributed.tensor.device_mesh",
+            "torch.distributed.device_mesh",
+            "torch.distributed.algorithms._checkpoint.checkpoint_wrapper",
+            "torch.distributed.tensor.parallel._data_parallel_utils",
+            "torch.distributed.tensor.parallel._utils",
+            "torch.distributed.tensor.parallel.style",
+            # we have to add replicate to LEGACY_MOD_INLINELIST to ensure
+            # the forward_hook won't be ignored.
+            "torch.distributed._composable.replicate",
+        ]
+    )
     if not torch._dynamo.config.skip_fsdp_hooks:
         LEGACY_MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
@@ -3289,8 +3294,8 @@ MOD_INLINELIST = [
     "torch.utils._pytree",
     "torch.utils.hooks",
 ]
-assert sorted(set(MOD_INLINELIST)) == MOD_INLINELIST
-MOD_INLINELIST = set(MOD_INLINELIST)
+assert sorted(OrderedSet(MOD_INLINELIST)) == MOD_INLINELIST
+MOD_INLINELIST = OrderedSet(MOD_INLINELIST)
 
 
 if torch.distributed.is_available():
@@ -3301,19 +3306,23 @@ if torch.distributed.is_available():
 
 @functools.lru_cache(None)
 def get_legacy_mod_inlinelist():
-    inlinelist = {
-        _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
-        for m in LEGACY_MOD_INLINELIST
-    }
+    inlinelist = OrderedSet(
+        [
+            _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+            for m in LEGACY_MOD_INLINELIST
+        ]
+    )
     return inlinelist
 
 
 @functools.lru_cache(None)
 def get_mod_inlinelist():
-    inlinelist = {
-        _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
-        for m in MOD_INLINELIST
-    }
+    inlinelist = OrderedSet(
+        [
+            _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+            for m in MOD_INLINELIST
+        ]
+    )
     return inlinelist
 
 
@@ -3332,16 +3341,18 @@ SKIP_DIRS_RE = re.compile(r"match nothing^")
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
 # one of the following strings.
-FBCODE_SKIP_DIRS: Set[str] = set()
+FBCODE_SKIP_DIRS: OrderedSet[str] = OrderedSet()
 
 FBCODE_SKIP_DIRS_RE = re.compile(f".*({'|'.join(map(re.escape, FBCODE_SKIP_DIRS))})")
 
 # Remove this after fbcode is fully migrated to tracing through torchrec.
-FBCODE_SKIP_TORCHREC_DIRS = {
-    "torchrec/distributed",
-    "trochrec/fb/distributed",
-    "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
-}
+FBCODE_SKIP_TORCHREC_DIRS = OrderedSet(
+    [
+        "torchrec/distributed",
+        "trochrec/fb/distributed",
+        "caffe2/torch/fb/sparsenn/pooled_embeddings_modules.py",
+    ]
+)
 
 FBCODE_SKIP_TORCHREC_DIRS_RE = re.compile(
     f".*({'|'.join(re.escape(_as_posix_path(d)) for d in FBCODE_SKIP_TORCHREC_DIRS)})"
@@ -3354,9 +3365,11 @@ FBCODE_SKIP_TORCHREC_DIRS_RE = re.compile(
 # manual_torch_name_rule_map but this one is hard because FBCODE can add unusual
 # names like torch_package.
 # So, this is a stop gap solution till then.
-FBCODE_INLINE_FILES_IN_SKIPPED_DIRS = {
-    "torchrec/distributed/types.py",
-}
+FBCODE_INLINE_FILES_IN_SKIPPED_DIRS = OrderedSet(
+    [
+        "torchrec/distributed/types.py",
+    ]
+)
 FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
     f".*({'|'.join(re.escape(_as_posix_path(d)) for d in FBCODE_INLINE_FILES_IN_SKIPPED_DIRS)})"
 )
@@ -3366,7 +3379,7 @@ FBCODE_INLINE_FILES_IN_SKIPPED_DIRS_RE = re.compile(
 # structure does not match the module structure
 # and we want to skip the functions in optim/lr_scheduler.py
 # this has precedence over all other rules in check_file
-FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
+FORCE_SKIP_FILES = OrderedSet([f"{_module_dir(torch)}optim/lr_scheduler.py"])
 
 
 def _recompile_re():
@@ -3502,7 +3515,7 @@ def check_verbose(obj, is_inlined_call=False):
         fi = FunctionInfo(obj, None, getfile(obj), None)
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
-    reasons: Set[str] = set()
+    reasons: OrderedSet[str] = OrderedSet()
     rule = lookup_inner(fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons)
     if issubclass(rule, (UserFunctionVariable, PolyfilledFunctionVariable)):
         return SkipResult(
@@ -3580,7 +3593,7 @@ def lookup_inner(
     name=None,
     filename=None,
     is_direct_call=True,
-    reasons: Union[None, Set[str]] = None,
+    reasons: Union[None, OrderedSet[str]] = None,
 ):
     # Step 1: lookup obj's tracing rule in `torch_name_rule_map`.
     # The rules defined in `torch_name_rule_map` mainly includes two parts:

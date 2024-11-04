@@ -13,6 +13,7 @@ import torch.fx
 import torch.nn
 from torch._guards import TracingContext
 from torch._logging import warning_once
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import config, polyfills, variables
@@ -159,15 +160,17 @@ def get_overridable_functions():
 
     from torch.overrides import get_overridable_functions as get_overridable_functions_
 
-    funcs = set(chain(*get_overridable_functions_().values()))
-    more = {
-        torch.ones,
-        torch.ones_like,
-        torch.zeros,
-        torch.zeros_like,
-        torch.empty,
-        torch.full,
-    }
+    funcs = OrderedSet(chain(*get_overridable_functions_().values()))
+    more = OrderedSet(
+        [
+            torch.ones,
+            torch.ones_like,
+            torch.zeros,
+            torch.zeros_like,
+            torch.empty,
+            torch.full,
+        ]
+    )
     funcs.update(more)
     return funcs
 

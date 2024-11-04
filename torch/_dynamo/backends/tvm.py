@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import Optional
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from .common import device_from_inputs, fake_tensor_unsupported
 from .registry import register_backend
@@ -149,7 +150,7 @@ def tvm(
     def exec_tvm(*i_args):
         args = [a.contiguous() for a in i_args]
         shape_info, _ = m.get_input_info()
-        active_inputs = {name for name, _ in shape_info.items()}
+        active_inputs = OrderedSet([name for name, _ in shape_info.items()])
         for idx, arg in enumerate(args, 0):
             if arg.dim() != 0:
                 if arg.requires_grad:

@@ -24,6 +24,7 @@ from torch._inductor.utils import (
     output_node,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils._ordered_set import OrderedSet
 
 from .registry import register_backend
 
@@ -32,9 +33,9 @@ def find_input_mutations(g):
     def meta_fk(meta):
         return meta["val"] if "val" in meta else meta["fake_result"]
 
-    inputs = defaultdict(set)
+    inputs = defaultdict(OrderedSet)
     input_idx = 0
-    mutated_inputs = set()
+    mutated_inputs = OrderedSet()
     for n in g.nodes:
         if n.op == "placeholder":
             if isinstance(meta_fk(n.meta), torch.Tensor):
@@ -79,7 +80,9 @@ def get_device_node_mapping(gm: torch.fx.GraphModule):
 def check_for_mutation_ignore_cuda_graph_managed_tensor(
     aot_model: torch.fx.GraphModule, num_fixed
 ) -> Optional[str]:
-    mutation_indices = find_input_mutations(aot_model.graph) - set(range(num_fixed))
+    mutation_indices = find_input_mutations(aot_model.graph) - OrderedSet(
+        range(num_fixed)
+    )
     if not mutation_indices:
         return None
 

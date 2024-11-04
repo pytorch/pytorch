@@ -7,6 +7,7 @@ from typing import Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch._C
 from torch._guards import Guard
+from torch.utils._ordered_set import OrderedSet
 
 from .. import variables
 from ..bytecode_transformation import (
@@ -55,13 +56,15 @@ class ContextMangerState:
 
 
 class ContextWrappingVariable(VariableTracker):
-    _nonvar_fields = {
-        "cm_obj",
-        "target_values",
-        "initial_values",
-        "state",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "cm_obj",
+            "target_values",
+            "initial_values",
+            "state",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     def __init__(
         self, target_values, initial_values=None, *, state=None, **kwargs
@@ -1195,10 +1198,12 @@ class EventVariable(VariableTracker):
 
 
 class WithExitFunctionVariable(VariableTracker):
-    _nonvar_fields = {
-        "target",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "target",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     def __init__(
         self,

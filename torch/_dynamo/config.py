@@ -6,11 +6,12 @@ import re
 import sys
 import tempfile
 from os.path import abspath, dirname
-from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Type, TYPE_CHECKING, Union
 
 import torch
 from torch._environment import is_fbcode
 from torch.utils._config_module import get_tristate_env, install_config_module
+from torch.utils._ordered_set import OrderedSet
 
 
 # to configure logging for dynamo, aot, and inductor
@@ -138,7 +139,7 @@ guard_nn_modules_using_dict_tags = True
 # We do NOT currently support __torch_dispatch__.  The implementation is
 # currently buggy, the main show stopper for nontrivial use is
 # https://github.com/pytorch/torchdynamo/issues/1952
-traceable_tensor_subclasses: Set[Type[Any]] = set()
+traceable_tensor_subclasses: OrderedSet[Type[Any]] = OrderedSet()
 
 # Suppress errors in torch._dynamo.optimize, instead forcing a fallback to eager.
 # This is a good way to get your model to work one way or another, but you may
@@ -167,13 +168,15 @@ skipfiles_inline_module_allowlist: Dict[Any, Any] = {}
 # the `allowed_functions.is_allowed` function will not consider it
 # when creating a list of PyTorch functions that will appear in
 # FX IR.
-allowed_functions_module_string_ignorelist = {
-    "torch.distributions",
-    "torch.testing",
-    "torch._refs",
-    "torch._prims",
-    "torch._decomp",
-}
+allowed_functions_module_string_ignorelist = OrderedSet(
+    [
+        "torch.distributions",
+        "torch.testing",
+        "torch._refs",
+        "torch._prims",
+        "torch._decomp",
+    ]
+)
 
 # Debug Flag to try minifier at different stages. Possible values are {None, "aot", "dynamo"}
 # None - Minifier is switched off
@@ -408,14 +411,16 @@ def default_debug_dir_root():
 debug_dir_root = default_debug_dir_root()
 
 # [@compile_ignored: debug]
-_save_config_ignore = {
-    "repro_after",
-    "repro_level",
-    # workaround: "cannot pickle PyCapsule"
-    "constant_functions",
-    # workaround: "cannot pickle module"
-    "skipfiles_inline_module_allowlist",
-}
+_save_config_ignore = OrderedSet(
+    [
+        "repro_after",
+        "repro_level",
+        # workaround: "cannot pickle PyCapsule"
+        "constant_functions",
+        # workaround: "cannot pickle module"
+        "skipfiles_inline_module_allowlist",
+    ]
+)
 
 # for backend="cudagraphs", mutations on input be sent to the cudagraph backend
 # or replayed in aot_autograd epilogue. default is False because mutation on inputs
@@ -444,7 +449,7 @@ log_compilation_metrics = True
 # allowing dynamo to construct larget graph. Note that there are some
 # limitations to this, such as how it does not correctly print objects that were
 # mutated after the print statement.
-reorderable_logging_functions: Set[Callable[[Any], None]] = set()
+reorderable_logging_functions: OrderedSet[Callable[[Any], None]] = OrderedSet()
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing

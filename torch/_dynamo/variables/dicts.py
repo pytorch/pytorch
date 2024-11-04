@@ -8,6 +8,7 @@ import sys
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from torch._subclasses.fake_tensor import is_fake
+from torch.utils._ordered_set import OrderedSet
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -60,10 +61,12 @@ def is_hashable(x):
 
 
 class ConstDictVariable(VariableTracker):
-    _nonvar_fields = {
-        "user_cls",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "user_cls",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     class _HashableTracker:
         """
@@ -419,7 +422,7 @@ class DefaultDictVariable(ConstDictVariable):
     @staticmethod
     def is_supported_arg(arg):
         if isinstance(arg, variables.BuiltinVariable):
-            return arg.fn in (list, tuple, dict, set)
+            return arg.fn in (list, tuple, dict, OrderedSet)
         else:
             return isinstance(arg, variables.functions.BaseUserFunctionVariable)
 
@@ -470,7 +473,7 @@ class SetVariable(ConstDictVariable):
 
     @property
     def set_items(self):
-        return set(self.items.keys())
+        return OrderedSet(self.items.keys())
 
     @staticmethod
     def _default_value():
@@ -478,13 +481,13 @@ class SetVariable(ConstDictVariable):
         return ConstantVariable.create(None)
 
     def as_proxy(self):
-        return {k.vt.as_proxy() for k in self.set_items}
+        return OrderedSet([k.vt.as_proxy() for k in self.set_items])
 
     def python_type(self):
-        return set
+        return OrderedSet
 
     def as_python_constant(self):
-        return {k.vt.as_python_constant() for k in self.set_items}
+        return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
 
     def reconstruct(self, codegen):
         codegen.foreach([x.vt for x in self.set_items])
@@ -595,7 +598,7 @@ class FrozensetVariable(SetVariable):
         return frozenset
 
     def as_python_constant(self):
-        return {k.vt.as_python_constant() for k in self.set_items}
+        return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
 
     def reconstruct(self, codegen):
         codegen.foreach([x.vt for x in self.set_items])
@@ -673,7 +676,7 @@ class DictKeys(DictView):
 
     @property
     def set_items(self):
-        return set(self.view_items)
+        return OrderedSet(self.view_items)
 
     @property
     def view_items_vt(self):

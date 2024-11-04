@@ -8,6 +8,7 @@ from contextlib import contextmanager, nullcontext
 from typing import Dict, List, TYPE_CHECKING
 
 import torch.nn
+from torch.utils._ordered_set import OrderedSet
 
 from .. import trace_rules, variables
 from ..exc import (
@@ -68,7 +69,7 @@ def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
                 return type(x)(*(convert_to_fake(elem) for elem in x))
             elif isinstance(x, dict):
                 return {k: convert_to_fake(v) for k, v in x.items()}
-            elif isinstance(x, (list, tuple, set)):
+            elif isinstance(x, (list, tuple, OrderedSet)):
                 return type(x)(convert_to_fake(elem) for elem in x)
             elif isinstance(x, torch.fx.Proxy):
                 return get_fake_value(x.node, tx)
@@ -128,13 +129,15 @@ def guard_to_detect_forward_monkeypatching(source, mod):
 
 
 class NNModuleVariable(VariableTracker):
-    _nonvar_fields = {
-        "module_type",
-        "module_key",
-        "module",
-        "nn_module_stack_source",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "module_type",
+            "module_key",
+            "module",
+            "nn_module_stack_source",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     def __init__(
         self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
@@ -251,7 +254,7 @@ class NNModuleVariable(VariableTracker):
         base = tx.output.get_submodule(self.module_key)
         base_dict = object.__getattribute__(base, "__dict__")
         object_member = True
-        all_class_attribute_names = set()
+        all_class_attribute_names = OrderedSet()
         for x in inspect.getmro(base.__class__):
             all_class_attribute_names.update(x.__dict__.keys())
 
@@ -761,12 +764,14 @@ class NNModuleVariable(VariableTracker):
 
 
 class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
-    _nonvar_fields = {
-        "value_type",
-        "is_state_mutated",
-        "nn_module_stack_source",
-        *UserDefinedObjectVariable._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "value_type",
+            "is_state_mutated",
+            "nn_module_stack_source",
+            *UserDefinedObjectVariable._nonvar_fields,
+        ]
+    )
 
     """
     The above class will specialize on the id() of a module and place
@@ -816,12 +821,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     @functools.lru_cache(None)
     def _nn_module_method_ids():
         # Allow __setattr__ to fall through to base class handler
-        supported = {torch.nn.Module.__setattr__, torch.nn.Module.__init__}
-        return {
-            id(x.__code__)
-            for x in torch.nn.Module.__dict__.values()
-            if hasattr(x, "__code__") and x not in supported
-        }
+        supported = OrderedSet([torch.nn.Module.__setattr__, torch.nn.Module.__init__])
+        return OrderedSet(
+            [
+                id(x.__code__)
+                for x in torch.nn.Module.__dict__.values()
+                if hasattr(x, "__code__") and x not in supported
+            ]
+        )
 
     def unpack_var_sequence(self, tx):
         try:

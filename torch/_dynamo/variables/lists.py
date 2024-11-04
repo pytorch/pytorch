@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 import torch
 import torch.fx
 from torch._guards import Source
+from torch.utils._ordered_set import OrderedSet
 
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -604,10 +605,12 @@ class TupleVariable(BaseListVariable):
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
 
-    _nonvar_fields = {
-        "proxy",
-        *TupleVariable._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "proxy",
+            *TupleVariable._nonvar_fields,
+        ]
+    )
 
     def __init__(
         self,
@@ -746,10 +749,12 @@ class SizeVariable(TupleVariable):
 
 
 class NamedTupleVariable(TupleVariable):
-    _nonvar_fields = {
-        "tuple_cls",
-        *TupleVariable._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "tuple_cls",
+            *TupleVariable._nonvar_fields,
+        ]
+    )
 
     def __init__(self, items, tuple_cls, **kwargs) -> None:
         super().__init__(items, **kwargs)
@@ -878,10 +883,12 @@ class SliceVariable(BaseListVariable):
 
 
 class ListIteratorVariable(IteratorVariable):
-    _nonvar_fields = {
-        "index",
-        *IteratorVariable._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "index",
+            *IteratorVariable._nonvar_fields,
+        ]
+    )
 
     def __init__(self, items, index: int = 0, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -960,20 +967,26 @@ class RestrictedListSubclassVariable(ListVariable):
     a ListVariable.
     """
 
-    _nonvar_fields = {"user_cls", "user_cls_source", *ListVariable._nonvar_fields}
-    _allowed_names = {
-        "__call__",
-        "__module__",
-        "__dict__",
-        "__doc__",
-        "__name__",
-        "__qualname__",
-    }
-    _disallowed_names = {
-        "__getattribute__",
-        "__getattr__",
-        "__setattr__",
-    }
+    _nonvar_fields = OrderedSet(
+        ["user_cls", "user_cls_source", *ListVariable._nonvar_fields]
+    )
+    _allowed_names = OrderedSet(
+        [
+            "__call__",
+            "__module__",
+            "__dict__",
+            "__doc__",
+            "__name__",
+            "__qualname__",
+        ]
+    )
+    _disallowed_names = OrderedSet(
+        [
+            "__getattribute__",
+            "__getattr__",
+            "__setattr__",
+        ]
+    )
 
     @classmethod
     def _is_non_conflicting_subclass(
@@ -990,7 +1003,7 @@ class RestrictedListSubclassVariable(ListVariable):
             return False  # not subclass
         return not any(
             hasattr(python_cls, name) or name in cls._disallowed_names
-            for name in set(user_cls.__dict__.keys()) - cls._allowed_names
+            for name in OrderedSet(user_cls.__dict__.keys()) - cls._allowed_names
         )
 
     @classmethod

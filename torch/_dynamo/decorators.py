@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Type, TYPE_CHECKING, TypeVar
 
 import torch
 from torch.utils._contextlib import _DecoratorContextManager
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from . import trace_rules, variables
@@ -304,24 +305,29 @@ def substitute_in_graph(
                             for p in sig.parameters.values()
                             if (
                                 p.kind
-                                not in {
-                                    p.KEYWORD_ONLY,
-                                    # the name of *args and **kwargs is not important
-                                    p.VAR_POSITIONAL,
-                                    p.VAR_KEYWORD,
-                                }
+                                not in OrderedSet(
+                                    [
+                                        p.KEYWORD_ONLY,
+                                        # the name of *args and **kwargs is not important
+                                        p.VAR_POSITIONAL,
+                                        p.VAR_KEYWORD,
+                                    ]
+                                )
                             )
                         ),
-                        {
-                            p.name
-                            for p in sig.parameters.values()
-                            if p.kind == p.KEYWORD_ONLY
-                        },
+                        OrderedSet(
+                            [
+                                p.name
+                                for p in sig.parameters.values()
+                                if p.kind == p.KEYWORD_ONLY
+                            ]
+                        ),
                         {
                             p.name: p.default
                             for p in sig.parameters.values()
                             # the name of *args and **kwargs is not important
-                            if p.kind not in {p.VAR_POSITIONAL, p.VAR_KEYWORD}
+                            if p.kind
+                            not in OrderedSet([p.VAR_POSITIONAL, p.VAR_KEYWORD])
                         },
                     )
 
@@ -440,7 +446,7 @@ def mark_unbacked(t, index):
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_unbacked_indices"):
-            t._dynamo_unbacked_indices = set()
+            t._dynamo_unbacked_indices = OrderedSet()
         t._dynamo_unbacked_indices.add(index)
         return
 
@@ -483,8 +489,8 @@ def mark_dynamic(t, index, *, min=None, max=None):
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
-            t._dynamo_dynamic_indices = set()
-            t._dynamo_dynamic_range = set()
+            t._dynamo_dynamic_indices = OrderedSet()
+            t._dynamo_dynamic_range = OrderedSet()
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
         t._dynamo_dynamic_range.add(_DimRange(index, min, max))
@@ -508,7 +514,7 @@ def maybe_mark_dynamic(t, index):
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_weak_dynamic_indices"):
-            t._dynamo_weak_dynamic_indices = set()
+            t._dynamo_weak_dynamic_indices = OrderedSet()
         # TODO(voz): Should we bounds check?
         t._dynamo_weak_dynamic_indices.add(index)
         return
@@ -570,7 +576,7 @@ def mark_static(t, index=None):
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_static_indices"):
-            t._dynamo_static_indices = set()  # type: ignore[attr-defined]
+            t._dynamo_static_indices = OrderedSet()  # type: ignore[attr-defined]
         # TODO(voz): Should we bounds check?
         t._dynamo_static_indices.add(index)  # type: ignore[attr-defined]
     elif index is None:

@@ -8,6 +8,7 @@ from typing import Callable, Dict, List, Optional, Protocol, Sequence, Tuple
 
 import torch
 from torch import fx
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ def list_backends(exclude_tags=("debug", "experimental")) -> List[str]:
         torch.compile(..., backend="name")
     """
     _lazy_import()
-    exclude_tags = set(exclude_tags or ())
+    exclude_tags = OrderedSet(exclude_tags or ())
 
     backends = [
         name

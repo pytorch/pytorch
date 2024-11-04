@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 import torch._C
 import torch._numpy as tnp
 import torch.utils._pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -55,10 +56,12 @@ class NO_SUCH_SUBOBJ:
 
 
 class SuperVariable(VariableTracker):
-    _nonvar_fields = {
-        "specialized",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "specialized",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     def __init__(self, typevar, objvar=None, specialized=False, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -334,10 +337,12 @@ class ComptimeVariable(VariableTracker):
 
 
 class ClosureVariable(UnknownVariable):
-    _nonvar_fields = {
-        "name",
-        *UnknownVariable._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "name",
+            *UnknownVariable._nonvar_fields,
+        ]
+    )
 
     def __init__(self, name, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -360,11 +365,13 @@ class NewGlobalVariable(VariableTracker):
 class InspectSignatureVariable(VariableTracker):
     """represents inspect.signature(...)"""
 
-    _nonvar_fields = {
-        "signature",
-        "parameters",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "signature",
+            "parameters",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     @staticmethod
     def create(callable, **kwargs):
@@ -476,11 +483,13 @@ class InspectParameterVariable(VariableTracker):
 class InspectBoundArgumentsVariable(VariableTracker):
     """represents inspect.signature(...).bind(...)"""
 
-    _nonvar_fields = {
-        "bound_arguments",
-        "packed_vars",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "bound_arguments",
+            "packed_vars",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     # NOTE: we keep track of changes to arguments via bound_arguments_var,
     # but we still keep a copy of the inspect.BoundArguments object in order
@@ -496,7 +505,7 @@ class InspectBoundArgumentsVariable(VariableTracker):
         self.bound_arguments = bound_arguments
         self.defaults = defaults
         # used to convert from VT to tuple/dict when updating bound_arguments
-        self.packed_vars = set()
+        self.packed_vars = OrderedSet()
 
         arguments_dict = {}
         for key, val in bound_arguments.arguments.items():
@@ -616,10 +625,12 @@ def produce_trampoline_autograd_apply(fn_cls):
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass"""
 
-    _nonvar_fields = {
-        "fn_cls",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "fn_cls",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     def __init__(self, fn_cls, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -802,12 +813,14 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     Tracks an autograd.Function() context using mutation tracking in side_effects.py
     """
 
-    _nonvar_fields = {
-        "proxy",
-        "inference",
-        "saved_tensors",
-        *UserDefinedObjectVariable._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "proxy",
+            "inference",
+            "saved_tensors",
+            *UserDefinedObjectVariable._nonvar_fields,
+        ]
+    )
 
     def __init__(
         self,
@@ -964,10 +977,12 @@ class LambdaVariable(VariableTracker):
 
 
 class GetAttrVariable(VariableTracker):
-    _nonvar_fields = {
-        "name",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "name",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     def __init__(self, obj, name, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -1122,11 +1137,13 @@ class GetSetDescriptorVariable(VariableTracker):
 
 
 class PythonModuleVariable(VariableTracker):
-    _nonvar_fields = {
-        "value",
-        "is_torch",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "value",
+            "is_torch",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
     def __init__(self, value: types.ModuleType, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -1343,7 +1360,7 @@ class StringFormatVariable(VariableTracker):
     Represents a call to str.format(), we delay calling format until after the graph.
     """
 
-    _nonvar_fields = {"format_string", *VariableTracker._nonvar_fields}
+    _nonvar_fields = OrderedSet(["format_string", *VariableTracker._nonvar_fields])
 
     @classmethod
     def create(cls, format_string, sym_args, sym_kwargs):
@@ -1584,17 +1601,21 @@ class RandomVariable(VariableTracker):
     Assumes that random objects behave the same given a set seed or state.
     """
 
-    _nonvar_fields = {
-        "random",
-        *VariableTracker._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "random",
+            *VariableTracker._nonvar_fields,
+        ]
+    )
 
-    _supported_fn_names = {
-        "random",
-        "randint",
-        "randrange",
-        "uniform",
-    }
+    _supported_fn_names = OrderedSet(
+        [
+            "random",
+            "randint",
+            "randrange",
+            "uniform",
+        ]
+    )
 
     def __init__(
         self,

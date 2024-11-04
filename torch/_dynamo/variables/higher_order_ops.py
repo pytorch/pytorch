@@ -23,6 +23,7 @@ from torch._ops import HigherOrderOperator
 from torch.fx.node import map_arg
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 
 from .. import variables
 from ..exc import (
@@ -137,12 +138,12 @@ def _call_function_and_unflatten_output(
 
 
 def _assert_tensors_nonaliasing(inputs, outputs):
-    input_tensor_ids = {
-        id(t) for t in pytree.tree_leaves(inputs) if isinstance(t, torch.Tensor)
-    }
-    output_tensor_ids = {
-        id(t) for t in pytree.tree_leaves(outputs) if isinstance(t, torch.Tensor)
-    }
+    input_tensor_ids = OrderedSet(
+        [id(t) for t in pytree.tree_leaves(inputs) if isinstance(t, torch.Tensor)]
+    )
+    output_tensor_ids = OrderedSet(
+        [id(t) for t in pytree.tree_leaves(outputs) if isinstance(t, torch.Tensor)]
+    )
     assert input_tensor_ids.isdisjoint(
         output_tensor_ids
     ), "inputs to function body cannot alias outputs"
@@ -408,12 +409,14 @@ def speculate_subgraph(
     if sub_kwargs is None:
         sub_kwargs = {}
 
-    assert set_subgraph_inputs in {
-        "automatic",
-        "semi_automatic",
-        "flatten_manual",
-        "manual",
-    }, "Please use one of the supported set_subgraph_inputs options."
+    assert set_subgraph_inputs in OrderedSet(
+        [
+            "automatic",
+            "semi_automatic",
+            "flatten_manual",
+            "manual",
+        ]
+    ), "Please use one of the supported set_subgraph_inputs options."
 
     # See NOTE [Temporary argument `set_subgraph_inputs`]
     if sub_kwargs and set_subgraph_inputs != "automatic":
@@ -2382,7 +2385,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # at torch._functorch.autograd_function.AutogradFunctionApply for reconstruction.
         non_differentiable_idx = []
         if ctx.non_differentiable is not None:
-            non_differentiable_set = set(ctx.non_differentiable)
+            non_differentiable_set = OrderedSet(ctx.non_differentiable)
             assert isinstance(fwd_out, variables.BaseListVariable)
             for i, x in enumerate(fwd_out.items):
                 if (

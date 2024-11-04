@@ -58,14 +58,14 @@ def main() -> None:
     args = get_args()
 
     for f in args.files:
-        errors = list(lint_file(f, args))
-        if args.edit:
-            replacement = errors[-1]["replacement"]
-            Path(f).write_text(replacement)
-            print("Rewrote", f)
-        else:
-            for error in errors:
-                print(json.dumps(error.asdict()))
+        if errors := list(lint_file(f, args)):
+            if args.edit:
+                replacement = errors[-1].replacement
+                Path(f).write_text(replacement)
+                print("Rewrote", f)
+            else:
+                for error in errors:
+                    print(json.dumps(error.asdict()))
 
 
 @dc.dataclass(order=True)
@@ -293,7 +293,12 @@ def get_args(argv: list[str] | None = None) -> Namespace:
 
     add("files", nargs="*", help="Files or directories to include")
     add("-v", "--verbose", action="store_true", help="Print more info")
-    add("-e", "--edit", action="store_true", help="Edit the files without using lintrunner")
+    add(
+        "-e",
+        "--edit",
+        action="store_true",
+        help="Edit the files without using lintrunner",
+    )
 
     args = parser.parse_args(argv)
     args.files = list(expand_file_patterns(args.files))

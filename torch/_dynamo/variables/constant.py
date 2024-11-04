@@ -5,6 +5,7 @@ from typing import Dict, List, TYPE_CHECKING
 
 import torch
 from torch._dynamo.source import GetItemSource
+from torch.utils._ordered_set import OrderedSet
 
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
@@ -44,7 +45,7 @@ class ConstantVariable(VariableTracker):
                 assert not isinstance(value, disallowed_type), reason
 
         # Routing for list and tuple literals.
-        if is_literal and isinstance(value, (set, frozenset)):
+        if is_literal and isinstance(value, (OrderedSet, frozenset)):
             items = []
             for i, x in enumerate(value):
                 items.append(ConstantVariable.create(x))
@@ -109,7 +110,7 @@ class ConstantVariable(VariableTracker):
         if type(obj) in common_constant_types:
             return True
         # The structure within is_literal get routed to variables.BaseListVariable
-        if type(obj) in (list, tuple, set, frozenset, torch.Size):
+        if type(obj) in (list, tuple, OrderedSet, frozenset, torch.Size):
             return all(ConstantVariable.is_literal(x) for x in obj)
         return False
 

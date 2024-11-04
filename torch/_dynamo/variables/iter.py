@@ -5,6 +5,8 @@ import operator
 import sys
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
+from torch.utils._ordered_set import OrderedSet
+
 from .. import polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import (
@@ -321,11 +323,13 @@ class ZipVariable(IteratorVariable):
     Represents zip(*iterables)
     """
 
-    _nonvar_fields = {
-        "index",
-        "strict",
-        *IteratorVariable._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "index",
+            "strict",
+            *IteratorVariable._nonvar_fields,
+        ]
+    )
 
     def __init__(
         self,

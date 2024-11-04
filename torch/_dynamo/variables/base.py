@@ -4,6 +4,8 @@ import collections
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
+from torch.utils._ordered_set import OrderedSet
+
 from .. import variables
 from ..current_scope_id import current_scope_id
 from ..exc import unimplemented
@@ -126,14 +128,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     """
 
     # fields to leave unmodified in apply()
-    _nonvar_fields = {
-        "value",
-        "guards",
-        "source",
-        "mutable_local",
-        "parents_tracker",
-        "user_code_variable_name",
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "value",
+            "guards",
+            "source",
+            "mutable_local",
+            "parents_tracker",
+            "user_code_variable_name",
+        ]
+    )
 
     def clone(self, **kwargs):
         """Shallow copy with some (optional) changes"""

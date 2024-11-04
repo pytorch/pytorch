@@ -11,6 +11,7 @@ Python polyfills for common builtins.
 from typing import Any, Callable, Sequence, TYPE_CHECKING
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -91,7 +92,7 @@ def set_isdisjoint(set1, set2):
 
 
 def set_intersection(set1, set2):
-    intersection_set = set()
+    intersection_set = OrderedSet()
     for x in set1:
         if x in set2:
             intersection_set.add(x)
@@ -107,7 +108,7 @@ def set_union(set1, set2):
 
 
 def set_difference(set1, set2):
-    difference_set = set()
+    difference_set = OrderedSet()
     for x in set1:
         if x not in set2:
             difference_set.add(x)

@@ -19,12 +19,13 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Type, Union
 from unittest.mock import patch
 
 import torch
 import torch._logging
 from torch._guards import tracing, TracingContext
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, exc, logging as torchdynamo_logging, trace_rules, variables
 from .bytecode_analysis import (
@@ -846,12 +847,12 @@ class InstructionTranslatorBase(
         # implicit use by super()
         # reads = reads | {"__class__"}
         # output variables?
-        reads = reads | set(self.freevars())
+        reads = reads | OrderedSet(self.freevars())
 
         # First we prune the non-cell local vars, this allows us to prune more
         # cell local vars later on (e.g., if we manage to prune a
         # `NestedUserFunctionVariable` that makes use of some cell locals).
-        cellvars = set(self.cellvars())
+        cellvars = OrderedSet(self.cellvars())
         self.symbolic_locals = {
             k: v for k, v in self.symbolic_locals.items() if k in cellvars or k in reads
         }
@@ -885,8 +886,8 @@ class InstructionTranslatorBase(
         # could probably improve the variable tracing here to include the
         # relevant variables in `output.side_effects`.
         if self.output.side_effects.is_empty():
-            cellvars_that_must_live = set()
-            visited = set()
+            cellvars_that_must_live = OrderedSet()
+            visited = OrderedSet()
 
             def visit(var: VariableTracker):
                 if var in visited:
@@ -2208,7 +2209,7 @@ class InstructionTranslatorBase(
             elif isinstance(part, variables.StringFormatVariable):
                 format_string_parts.append(part.format_string)
                 args.extend(part.sym_args)
-                if set(kwargs.keys()) & set(part.sym_kwargs.keys()):
+                if OrderedSet(kwargs.keys()) & OrderedSet(part.sym_kwargs.keys()):
                     unimplemented(
                         f"BUILD_STRING key conflict {kwargs} & {part.sym_kwargs}"
                     )
@@ -2760,7 +2761,7 @@ class InstructionTranslatorBase(
 
 
 class InstructionTranslator(InstructionTranslatorBase):
-    mutated_closure_cell_ids: Set[int]
+    mutated_closure_cell_ids: OrderedSet[int]
     contents_var_to_mutated_cell: Dict[VariableTracker, Any]
 
     @staticmethod
@@ -2789,7 +2790,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         one_graph,
         export,
         export_constraints,
-        mutated_closure_cell_ids: Set[int],
+        mutated_closure_cell_ids: OrderedSet[int],
         frame_state,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
@@ -2844,7 +2845,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             vars = list(code_options["co_varnames"])
             cells_and_freevars = [x for x in self.cell_and_freevars() if x not in vars]
             vars.extend(cells_and_freevars)
-            cells_and_freevars_set = set(cells_and_freevars)
+            cells_and_freevars_set = OrderedSet(cells_and_freevars)
 
             self.symbolic_locals = {
                 k: variables.LazyVariableTracker.create(

@@ -3,15 +3,19 @@ import bisect
 import dataclasses
 import dis
 import sys
-from typing import Any, Set, Union
+from typing import Any, Union
+
+from torch.utils._ordered_set import OrderedSet
 
 
-TERMINAL_OPCODES = {
-    dis.opmap["RETURN_VALUE"],
-    dis.opmap["JUMP_FORWARD"],
-    dis.opmap["RAISE_VARARGS"],
-    # TODO(jansel): double check exception handling
-}
+TERMINAL_OPCODES = OrderedSet(
+    [
+        dis.opmap["RETURN_VALUE"],
+        dis.opmap["JUMP_FORWARD"],
+        dis.opmap["RAISE_VARARGS"],
+        # TODO(jansel): double check exception handling
+    ]
+)
 if sys.version_info >= (3, 9):
     TERMINAL_OPCODES.add(dis.opmap["RERAISE"])
 if sys.version_info >= (3, 11):
@@ -21,10 +25,10 @@ else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
 if sys.version_info >= (3, 12):
     TERMINAL_OPCODES.add(dis.opmap["RETURN_CONST"])
-JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
-JUMP_OPNAMES = {dis.opname[opcode] for opcode in JUMP_OPCODES}
-HASLOCAL = set(dis.haslocal)
-HASFREE = set(dis.hasfree)
+JUMP_OPCODES = OrderedSet(dis.hasjrel + dis.hasjabs)
+JUMP_OPNAMES = OrderedSet([dis.opname[opcode] for opcode in JUMP_OPCODES])
+HASLOCAL = OrderedSet(dis.haslocal)
+HASFREE = OrderedSet(dis.hasfree)
 
 stack_effect = dis.stack_effect
 
@@ -44,7 +48,7 @@ def get_indexof(insts):
 def remove_dead_code(instructions):
     """Dead code elimination"""
     indexof = get_indexof(instructions)
-    live_code = set()
+    live_code = OrderedSet()
 
     def find_live_code(start):
         for i in range(start, len(instructions)):
@@ -88,11 +92,13 @@ def remove_dead_code(instructions):
 
 def remove_pointless_jumps(instructions):
     """Eliminate jumps to the next instruction"""
-    pointless_jumps = {
-        id(a)
-        for a, b in zip(instructions, instructions[1:])
-        if a.opname == "JUMP_ABSOLUTE" and a.target is b
-    }
+    pointless_jumps = OrderedSet(
+        [
+            id(a)
+            for a, b in zip(instructions, instructions[1:])
+            if a.opname == "JUMP_ABSOLUTE" and a.target is b
+        ]
+    )
     return [inst for inst in instructions if id(inst) not in pointless_jumps]
 
 
@@ -131,15 +137,15 @@ def remove_extra_line_nums(instructions):
 
 @dataclasses.dataclass
 class ReadsWrites:
-    reads: Set[Any]
-    writes: Set[Any]
-    visited: Set[Any]
+    reads: OrderedSet[Any]
+    writes: OrderedSet[Any]
+    visited: OrderedSet[Any]
 
 
 def livevars_analysis(instructions, instruction):
     indexof = get_indexof(instructions)
-    must = ReadsWrites(set(), set(), set())
-    may = ReadsWrites(set(), set(), set())
+    must = ReadsWrites(OrderedSet(), OrderedSet(), OrderedSet())
+    may = ReadsWrites(OrderedSet(), OrderedSet(), OrderedSet())
 
     def walk(state, start):
         if start in state.visited:

@@ -6,6 +6,7 @@ from typing import Dict, List, TYPE_CHECKING
 
 import torch
 from torch._logging import getArtifactLogger
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
 from ..guards import GuardBuilder, install_guard
@@ -59,12 +60,14 @@ def _is_static_for_cudagraphs(x):
 
 
 class OptimizerVariable(UserDefinedObjectVariable):
-    _nonvar_fields = {
-        "grad_to_source",
-        "tensor_to_source",
-        "static_tensor_names",
-        *UserDefinedObjectVariable._nonvar_fields,
-    }
+    _nonvar_fields = OrderedSet(
+        [
+            "grad_to_source",
+            "tensor_to_source",
+            "static_tensor_names",
+            *UserDefinedObjectVariable._nonvar_fields,
+        ]
+    )
 
     def __init__(
         self,
@@ -77,7 +80,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
-        self.static_tensor_names = static_tensor_names or set()
+        self.static_tensor_names = static_tensor_names or OrderedSet()
 
     def call_method(
         self,

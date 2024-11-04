@@ -5,9 +5,10 @@ import inspect
 import warnings
 import weakref
 from collections.abc import MutableMapping
-from typing import Any, Dict, List, Optional, Set, Type
+from typing import Any, Dict, List, Optional, Type
 
 import torch.nn
+from torch.utils._ordered_set import OrderedSet
 
 from . import utils, variables
 from .bytecode_transformation import (
@@ -361,11 +362,11 @@ class SideEffects:
                 self.track_object_existing(other_item, other_variable)
 
     def prune_dead_object_new(self, tx):
-        live_new_objects: Set[VariableTracker] = set()
+        live_new_objects: OrderedSet[VariableTracker] = OrderedSet()
 
         # use this to avoid cycles in mutable_local (though I'm not sure if that
         # can actually happen).
-        visited: Set[VariableTracker] = set({})
+        visited: OrderedSet[VariableTracker] = OrderedSet({})
 
         def visit(var: VariableTracker):
             if var in visited:

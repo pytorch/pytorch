@@ -43,6 +43,7 @@ from torch.fx.experimental.symbolic_shapes import (
     has_free_symbols,
 )
 from torch.hub import tqdm
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 
@@ -609,7 +610,7 @@ def repro_analyze(options, mod, load_args):
         compiled = compile_fx_inner(mod, args)
     total = counters["inductor"]["intermediate_hooks"]
 
-    known_names = set()
+    known_names = OrderedSet()
 
     def save_hook(name, val):
         known_names.add(name)

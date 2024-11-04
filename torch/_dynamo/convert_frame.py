@@ -22,7 +22,7 @@ import warnings
 import weakref
 from pathlib import Path
 from types import CodeType, FrameType, FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -47,6 +47,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     _disable_current_modes,
     is_in_torch_dispatch_mode,
@@ -160,7 +161,7 @@ class TODO_UNKNOWN:
 class Tracker:
     def __init__(self) -> None:
         self.seen: List[ReferenceType[CodeType]] = []
-        self.seen_ids: Set[int] = set()
+        self.seen_ids: OrderedSet[int] = OrderedSet()
 
     def add(self, strong_obj: CodeType) -> None:
         idx = id(strong_obj)
@@ -866,9 +867,9 @@ def _compile(
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
         CompileContext(compile_id)
     ):
-        restart_reasons: set[str] = set()
+        restart_reasons: OrderedSet[str] = OrderedSet()
         # This is shared across restarts
-        mutated_closure_cell_ids: Set[int] = set()
+        mutated_closure_cell_ids: OrderedSet[int] = OrderedSet()
         speculation_log = SpeculationLog()
         if compile_pg := get_compile_pg():
             distributed_state = DistributedState(compile_pg, LocalState())
@@ -1050,10 +1051,12 @@ def _compile(
                     "inductor_compile", None
                 )
                 code_gen_time = frame_phase_timing[frame_key].get("code_gen", None)
-                non_compliant_ops = {op.__qualname__ for op in output.non_compliant_ops}
-                compliant_custom_ops = {
-                    op.__qualname__ for op in output.compliant_custom_ops
-                }
+                non_compliant_ops = OrderedSet(
+                    [op.__qualname__ for op in output.non_compliant_ops]
+                )
+                compliant_custom_ops = OrderedSet(
+                    [op.__qualname__ for op in output.compliant_custom_ops]
+                )
                 possibly_missed_reinplacing_opportunities = (
                     torch._dynamo.utils.counters["inductor"][
                         "possibly_missed_reinplacing_opportunities"
@@ -1091,9 +1094,9 @@ def _compile(
                 backend_compile_time = None
                 inductor_compile_time = None
                 code_gen_time = None
-                non_compliant_ops = set({})
-                compliant_custom_ops = set({})
-                restart_reasons = set()
+                non_compliant_ops = OrderedSet({})
+                compliant_custom_ops = OrderedSet({})
+                restart_reasons = OrderedSet()
                 # If compilation failed, the entire time is wasted
                 dynamo_time_before_restart = duration_ns / 1e9
                 possibly_missed_reinplacing_opportunities = None
@@ -1106,29 +1109,31 @@ def _compile(
             )
 
             def clean_for_json(d: Dict[str, Any]) -> Dict[str, Any]:
-                blocklist = {
-                    "TYPE_CHECKING",
-                    "log_file_name",
-                    "verbose",
-                    "repro_after",
-                    "repro_level",
-                    "repro_forward_only",
-                    "repro_tolerance",
-                    "repro_ignore_non_fp",
-                    "same_two_models_use_fp64",
-                    "base_dir",
-                    "debug_dir_root",
-                    "_save_config_ignore",
-                    "log_compilation_metrics",
-                    "inject_BUILD_SET_unimplemented_TESTING_ONLY",
-                    "_autograd_backward_strict_mode_banned_ops",
-                    "reorderable_logging_functions",
-                    "traceable_tensor_subclasses",
-                    "_custom_ops_profile",
-                }
+                blocklist = OrderedSet(
+                    [
+                        "TYPE_CHECKING",
+                        "log_file_name",
+                        "verbose",
+                        "repro_after",
+                        "repro_level",
+                        "repro_forward_only",
+                        "repro_tolerance",
+                        "repro_ignore_non_fp",
+                        "same_two_models_use_fp64",
+                        "base_dir",
+                        "debug_dir_root",
+                        "_save_config_ignore",
+                        "log_compilation_metrics",
+                        "inject_BUILD_SET_unimplemented_TESTING_ONLY",
+                        "_autograd_backward_strict_mode_banned_ops",
+                        "reorderable_logging_functions",
+                        "traceable_tensor_subclasses",
+                        "_custom_ops_profile",
+                    ]
+                )
 
                 return {
-                    key: list(value) if isinstance(value, set) else value
+                    key: list(value) if isinstance(value, OrderedSet) else value
                     for key, value in d.items()
                     if key not in blocklist
                 }
