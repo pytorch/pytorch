@@ -92,6 +92,7 @@ struct DescriptorDeleter {
 // initialized the first time you call set() or any other initializing
 // function.
 template <typename T, cudnnStatus_t (*ctor)(T**), cudnnStatus_t (*dtor)(T*)>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_CUDA_CPP_API Descriptor {
  public:
   // TODO: Figure out why const-correctness doesn't work here
@@ -224,6 +225,7 @@ struct TORCH_CUDA_CPP_API SpatialTransformerDescriptor
   }
 };
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_CUDA_CPP_API DropoutDescriptor
     : public Descriptor<
           cudnnDropoutStruct,
