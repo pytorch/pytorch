@@ -3117,7 +3117,7 @@ class TestReductions(TestCase):
             actual)
         self.assertEqual(actual.dtype, dtype)
 
-    @dtypes(torch.int8, torch.int, torch.long, torch.float, torch.double)
+    @dtypes(torch.uint8, torch.int8, torch.int, torch.long, torch.float, torch.double)
     def test_histc_min_max_errors(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, "max must be larger than min"):
             torch.histc(torch.tensor([1., 2., 3.], dtype=dtype, device=device), bins=4, min=5, max=1)
@@ -3132,7 +3132,7 @@ class TestReductions(TestCase):
             actual)
 
     @onlyCUDA
-    @dtypes(torch.int8, torch.int, torch.long)
+    @dtypes(torch.uint8, torch.int8, torch.int, torch.long)
     def test_histc_min_max_corner_cases_cuda(self, device, dtype):
         actual = torch.histc(
             torch.tensor([1., 2, 1], dtype=dtype, device=device),
