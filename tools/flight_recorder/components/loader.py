@@ -13,6 +13,11 @@ import typing
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+from tools.flight_recorder.components.utils import FlightRecorderLogger
+
+
+logger: FlightRecorderLogger = FlightRecorderLogger()
+
 
 def read_dump(prefix: str, filename: str) -> Dict[str, Union[str, int, List[Any]]]:
     basename = os.path.basename(filename)
@@ -52,7 +57,7 @@ def _determine_prefix(files: List[str]) -> str:
             possible_prefixes[p].add(int(r))
     if len(possible_prefixes) == 1:
         prefix = next(iter(possible_prefixes))
-        print(f"Inferred common prefix {prefix}")
+        logger.debug("Inferred common prefix %s", prefix)
         return prefix
     else:
         raise ValueError(
@@ -68,6 +73,7 @@ def read_dir(
     details = {}
     t0 = time.time()
     version = ""
+    filecount = 0
     assert os.path.isdir(folder), f"folder {folder} does not exist"
     for root, _, files in os.walk(folder):
         if prefix is None:
@@ -76,9 +82,10 @@ def read_dir(
             if f.find(prefix) != 0:
                 continue
             details[f] = read_dump(prefix, os.path.join(root, f))
+            filecount += 1
             if not version:
                 version = str(details[f]["version"])
     tb = time.time()
     assert len(details) > 0, f"no files loaded from {folder} with prefix {prefix}"
-    print(f"loaded {len(files)} files in {tb - t0}s")
+    logger.debug("loaded %s files in %ss", filecount, tb - t0)
     return details, version

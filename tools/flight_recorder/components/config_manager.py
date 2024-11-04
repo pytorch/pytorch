@@ -5,7 +5,13 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import logging
 from typing import Optional, Sequence
+
+from tools.flight_recorder.components.utils import FlightRecorderLogger
+
+
+logger = FlightRecorderLogger()
 
 
 class JobConfig:
@@ -64,4 +70,6 @@ class JobConfig:
             assert (
                 args.just_print_entries
             ), "Not support selecting pg filters without printing entries"
+        if args.verbose:
+            logger.set_log_level(logging.DEBUG)
         return args
