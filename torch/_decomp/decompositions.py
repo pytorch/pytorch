@@ -3926,7 +3926,9 @@ def _unsafe_masked_index(x, mask, indices, fill):
         lambda: "tensors used as masks must be bool tensors",
     )
 
-    if x.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(x.numel() == 0):
         meta_result = torch._meta_registrations.meta_index_Tensor(x, indices)
         return x.new_full(meta_result.shape, fill)
 
