@@ -26,6 +26,7 @@ std::string get_mkl_version() {
       // https://software.intel.com/en-us/mkl-developer-reference-c-mkl-get-version-string
       version.resize(198,'\0');
       mkl_get_version_string(version.data(), 198);
+      version.resize(strlen(version.c_str()));
     }
   #else
     version = "MKL not found";
