@@ -1338,7 +1338,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return wait_on_futures
 
         def autotune(choices):
-            with dynamo_timed("template_autotuning"):
+            with dynamo_timed(f"{name}_template_autotuning"):
                 return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
@@ -1349,7 +1349,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def do_autotuning(precompile_fn):
             precompile_start_ts = time.time()
-            precompile_fn()
+            with dynamo_timed(f"{name}_template_precompiling"):
+                precompile_fn()
             precompile_elapse = time.time() - precompile_start_ts
 
             autotune_start_ts = time.time()
