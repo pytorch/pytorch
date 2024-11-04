@@ -3,15 +3,16 @@
 #include <ATen/record_function.h>
 #include <c10/core/ScalarType.h>
 
-#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
 
 namespace at::native::onednn {
 
-static std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc> qconv_get_md(
+static std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc>
+qconv_get_md(
     const at::Tensor& src,
     const at::Tensor& wgh,
     const at::Tensor& dst,
@@ -20,13 +21,11 @@ static std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc> qc
   // create dnnl::memory desc from the src/wgh/dst tensors
   dnnl::memory::desc src_usr_md, wgh_usr_md, dst_usr_md;
   auto ndim = src.ndimension();
-  auto fmt_src =
-      conv_src_fmt(ndim, is_channels_last_suggested);
+  auto fmt_src = conv_src_fmt(ndim, is_channels_last_suggested);
 
   auto src_tz = src.sizes().vec();
   auto src_data_t = get_onednn_dtype(src);
   src_usr_md = dnnl::memory::desc(src_tz, src_data_t, fmt_src);
-
 
   auto dst_tz = dst.sizes().vec();
   auto dst_data_t = get_onednn_dtype(dst);
@@ -37,10 +36,7 @@ static std::tuple<dnnl::memory::desc, dnnl::memory::desc, dnnl::memory::desc> qc
   auto wei_data_t = dnnl::memory::data_type::s8;
   dnnl::memory::dims wgh_tz =
       compatible_weight_dims(ndim, groups, oc, ic, wgh.sizes());
-  auto fmt_wgh = conv_weight_fmt(
-      ndim,
-      groups != 1,
-      is_channels_last_suggested);
+  auto fmt_wgh = conv_weight_fmt(ndim, groups != 1, is_channels_last_suggested);
   wgh_usr_md = dnnl::memory::desc(wgh_tz, wei_data_t, fmt_wgh);
 
   return {src_usr_md, wgh_usr_md, dst_usr_md};
@@ -72,7 +68,8 @@ at::Tensor quantized_convolution_pt2(
     torch::List<c10::optional<at::Scalar>> unary_scalars,
     c10::optional<c10::string_view> unary_algorithm) {
   // TODO: use arg to create proper attr
-  Attr attr = Attr(/*q_scale=*/ 1.0/inv_output_scale, /*zp=*/output_zero_point);
+  Attr attr =
+      Attr(/*q_scale=*/1.0 / inv_output_scale, /*zp=*/output_zero_point);
 
   construct_attr_by_post_op(
     binary_attr.has_value() ? binary_attr.value() : "none",
@@ -87,8 +84,8 @@ at::Tensor quantized_convolution_pt2(
   );
 
   auto ndim = act.ndimension();
-  if(bias.has_value()){
-    attr.append_bias(bias.value(), ndim-2);
+  if (bias.has_value()) {
+    attr.append_bias(bias.value(), ndim - 2);
   }
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
@@ -96,8 +93,8 @@ at::Tensor quantized_convolution_pt2(
   TORCH_CHECK(
       output.defined(), "Quantized convlution should always define output");
 
-  auto engine =
-      GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
+  auto engine = GpuEngineManager::Instance().get_engine(
+      {c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
   // create usr_md for tensors, and md for conv primitive
@@ -113,7 +110,7 @@ at::Tensor quantized_convolution_pt2(
   dnnl::memory::dims _dilation = compatible_dilation(dilation);
   dnnl::post_ops po;
   // extract post ops
-  po = attr.extract_post_ops(output, /*is_quantized*/true);
+  po = attr.extract_post_ops(output, /*is_quantized*/ true);
   // set conv primitive scale and zero_point
   std::vector<float> conv_scale = {1};
   int mask_ac = 0, mask_weight;
@@ -201,7 +198,9 @@ at::Tensor quantized_convolution_pt2(
   // dst scale is no need for setting, since it is fused in postop via linear
   size_t scratchpad_size = conv_fwd_pd.scratchpad_desc().get_size();
   Tensor scratchpad_tensor = at::empty(
-      {static_cast<int64_t>(scratchpad_size)}, act.options().dtype(at::kByte), c10::nullopt);
+      {static_cast<int64_t>(scratchpad_size)},
+      act.options().dtype(at::kByte),
+      c10::nullopt);
   auto scratchpad_m = make_onednn_memory(
       conv_fwd_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_m});
