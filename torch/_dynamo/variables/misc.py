@@ -1467,7 +1467,7 @@ class LoggingLoggerVariable(VariableTracker):
             return
         if config.disable_logs:
             if name == "isEnabledFor":
-                return variables.ConstantVariable.create(False)
+                return variables.ConstantVariable.create(None)
             if name in ['info', 'debug', 'error', 'warning', 'critical', 'exception']:
                 return
         unimplemented("Logger not supported for non-export cases. "
