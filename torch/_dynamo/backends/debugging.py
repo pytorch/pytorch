@@ -118,21 +118,27 @@ def boxed_nop(fx_g, example_inputs):
     return run
 
 
-def fake_crossref_boxed_nop(fx_g, example_inputs):
+def fake_crossref_boxed_nop(fx_g, example_inputs, ignore_op_fn=None):
     def run(args):
-        with torch._subclasses.CrossRefFakeMode():
+        with torch._subclasses.CrossRefFakeMode(ignore_op_fn):
             return torch.fx.Interpreter(fx_g).boxed_run(args)
 
     run._boxed_call = True
     return run
 
 
+def ignore_builtins(op: torch._ops.OpOverload) -> bool:
+    return op.namespace in ("aten", "prims", "prim")
+
+
 def get_nop_func():
-    return (
-        boxed_nop
-        if not torch._functorch.config.fake_tensor_crossref
-        else fake_crossref_boxed_nop
-    )
+    if not torch._functorch.config.fake_tensor_crossref:
+        return boxed_nop
+    elif torch._functorch.config.fake_tensor_crossref == "all":
+        return fake_crossref_boxed_nop
+    else:
+        assert torch._functorch.config.fake_tensor_crossref == "custom_ops"
+        return functools.partial(fake_crossref_boxed_nop, ignore_op_fn=ignore_builtins)
 
 
 # Useful for debugging purpose
@@ -172,10 +178,10 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs):
             "aot_eager_decomp_partition backend ignoring extra kwargs %s", kwargs
         )
 
-    from torch._inductor.bisect_helper import BisectionManager
+    from torch._inductor.compiler_bisector import CompilerBisector
 
     config_patches = {"unlift_effect_tokens": True}
-    if bisect_changes := BisectionManager.get_config_change(
+    if bisect_changes := CompilerBisector.get_config_change(
         "aot_eager_decomp_partition"
     ):
         config_patches.update(bisect_changes)
@@ -201,7 +207,15 @@ register_backend(
 
 
 def aot_eager_decomp_partition_crossref(gm, fake_tensor_inputs, **kwargs):
-    with functorch_config.patch(fake_tensor_crossref=True):
+    # if the config is set, respect it, otherwise only test custom_ops.
+    # custom_op bad metas always manifest as an error whereas aten will only sometimes.
+    # by default, use the less noisy option
+    config_val = (
+        "custom_ops"
+        if not functorch_config.fake_tensor_crossref
+        else functorch_config.fake_tensor_crossref
+    )
+    with functorch_config.patch(fake_tensor_crossref=config_val):
         return aot_eager_decomp_partition(gm, fake_tensor_inputs, **kwargs)
 
 
