@@ -2832,7 +2832,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 return c
 
         has_bias_list = [True, False]
-        dype_list = [torch.float, torch.bfloat16]
+        dype_list = (
+            [torch.float, torch.bfloat16]
+            if torch.ops.mkldnn._is_mkldnn_bf16_supported()
+            else [torch.float]
+        )
         per_channel_list = [True, False]
         for has_bias, dtype, per_channel_quant in itertools.product(
             has_bias_list, dype_list, per_channel_list
@@ -2860,8 +2864,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 (a, a_scale_per_tensor, a_scale_per_channel),
                 matcher_check_fn=matcher_check_fn,
                 check_autocast=dtype,
-                atol=1.6e-2,
-                rtol=1e-2,
             )
 
 
