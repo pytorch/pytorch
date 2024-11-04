@@ -413,6 +413,7 @@ static inline void construct_attr_by_post_op(
         );
       }
     }
+  }
 }
 
 } // namespace at::native::onednn
