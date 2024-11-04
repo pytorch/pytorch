@@ -17,7 +17,7 @@ __all__ = [
     "clip_grad_norm_",
     "clip_grad_norm",
     "clip_grad_value_",
-    "clip_grads_",
+    "scale_grads_",
     "get_grad_norm",
 ]
 
@@ -111,15 +111,23 @@ def get_grad_norm(
 
 
 @_no_grad
-def clip_grads_(
+def scale_grads_(
     parameters: _tensor_or_tensors,
     max_norm: float,
     total_norm: torch.Tensor,
     foreach: Optional[bool] = None,
 ) -> None:
-    r"""Clip the gradients of an iterable of parameters given a pre-calculated total norm.
+    r"""Scale the gradients of an iterable of parameters given a pre-calculated total norm and desired max norm.
+
+    The gradients will be scaled by the following calculation
+
+    .. math::
+        grad = grad * \frac{max\_norm}{total\_norm + 1e-6}
 
     Gradients are modified in-place.
+
+    This function is equivalent to :func:`torch.nn.utils.clip_grad_norm_` with a pre-calculated
+    total norm.
 
     Args:
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
@@ -181,7 +189,7 @@ def clip_grad_norm_(
     Gradients are modified in-place.
 
     This function is equivalent to :func:`torch.nn.utils.get_grad_norm` followed by
-    :func:`torch.nn.utils.clip_grads_` with the ``total_norm`` returned by ``get_grad_norm``.
+    :func:`torch.nn.utils.scale_grads_` with the ``total_norm`` returned by ``get_grad_norm``.
 
     Args:
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
@@ -203,7 +211,7 @@ def clip_grad_norm_(
     total_norm = get_grad_norm(
         parameters, max_norm, norm_type, error_if_nonfinite, foreach
     )
-    clip_grads_(parameters, max_norm, total_norm, foreach)
+    scale_grads_(parameters, max_norm, total_norm, foreach)
     return total_norm
 
 
