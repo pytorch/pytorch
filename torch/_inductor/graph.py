@@ -1346,7 +1346,7 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
-        from torch._inductor.bisect_helper import BisectionManager
+        from torch._inductor.compiler_bisector import CompilerBisector
 
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
@@ -1366,7 +1366,7 @@ class GraphLowering(torch.fx.Interpreter):
                 and n.target is not operator.getitem
                 and (
                     fallback_node_due_to_unsupported_type(n)
-                    or BisectionManager.disable_subsystem(
+                    or CompilerBisector.disable_subsystem(
                         "inductor", "lowerings", lambda: repr(n)
                     )
                 )
@@ -1984,13 +1984,15 @@ class GraphLowering(torch.fx.Interpreter):
                 lambda: {"filename": path},
                 payload_fn=lambda: code,
             )
-
-        mod = PyCodeCache.load_by_key_path(
-            key,
-            path,
-            linemap=linemap,  # type: ignore[arg-type]
-            attrs={**self.constants, **self.torchbind_constants},
-        )
+        with dynamo_timed(
+            "PyCodeCache.load_by_key_path", log_pt2_compile_event=True, fwd_only=False
+        ):
+            mod = PyCodeCache.load_by_key_path(
+                key,
+                path,
+                linemap=linemap,  # type: ignore[arg-type]
+                attrs={**self.constants, **self.torchbind_constants},
+            )
         self.cache_key = key
         self.cache_path = path
         self.cache_linemap = linemap  # type: ignore[assignment]
