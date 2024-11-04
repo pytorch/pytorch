@@ -423,12 +423,14 @@ def split_const_gm(
 
 def is_tf32_warning_applicable(gm: GraphModule) -> bool:
     aten = torch.ops.aten
-    tf32_ops = {
-        aten.mm.default,
-        aten.addmm.default,
-        aten.bmm.default,
-        aten.baddbmm.default,
-    }
+    tf32_ops = OrderedSet(
+        [
+            aten.mm.default,
+            aten.addmm.default,
+            aten.bmm.default,
+            aten.baddbmm.default,
+        ]
+    )
     for target in tf32_ops:
         for node in gm.graph.find_nodes(op="call_function", target=target):
             if (
@@ -1314,7 +1316,7 @@ def fw_compiler_freezing(
         assert tracing_context.params_flat_unwrap_subclasses is not None
         params_flat_unwrap = tracing_context.params_flat_unwrap_subclasses
         max_offset_idx = max(0, len(params_flat_unwrap) - 1)
-        preserved_indices_params_flat = set()
+        preserved_indices_params_flat = OrderedSet[int]()
         unwrapped_idxs = tracing_context.params_unwrapped_to_flat_index
         assert unwrapped_idxs is not None
         current_offset = 0

@@ -18,6 +18,8 @@ from typing import (
 
 from sympy import Integer, Symbol
 
+from torch.utils._ordered_set import OrderedSet
+
 from .. import config, metrics
 from ..runtime.hints import DeviceProperties
 from ..runtime.runtime_utils import next_power_of_2
@@ -615,7 +617,7 @@ class ComboKernel(Kernel):
             return heuristics_list[0], size_hints_list[0], self.sub_kernels[0]
 
     def get_mutated_args_sub_kernels(self) -> List[str]:
-        mutated_args = set()
+        mutated_args = OrderedSet[str]()
         for sub_kernel in self.sub_kernels:
             for mutation in sub_kernel.mutations:
                 if mutation in sub_kernel.args.input_buffers:

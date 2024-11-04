@@ -4,7 +4,7 @@ import collections
 import dataclasses
 import heapq
 import logging
-from typing import Callable, Dict, List, Set, Tuple, TYPE_CHECKING, TypedDict, Union
+from typing import Callable, Dict, List, Tuple, TYPE_CHECKING, TypedDict, Union
 
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
@@ -62,7 +62,7 @@ class FreeableInputBuffer:
 
 def get_freeable_input_buf(
     nodes: List[BaseSchedulerNode],
-    graph_inputs: Set[str],
+    graph_inputs: OrderedSet[str],
 ) -> Dict[str, FreeableInputBuffer]:
     """
     Create and keep track of all input buffers that can be freed during the program
@@ -223,18 +223,22 @@ def assign_memory_planning_info_for_scheduler_nodes(
             elif dep.name in name_to_freeable_input_buf:
                 pred_buffers.add(name_to_freeable_input_buf[dep.name])
         pred_nodes = OrderedSet(
-            {
-                name_to_fused_node[pred_buffer.defining_op.get_name()]
-                for pred_buffer in pred_buffers
-                if (isinstance(pred_buffer, SchedulerBuffer))
-            }
+            OrderedSet(
+                [
+                    name_to_fused_node[pred_buffer.defining_op.get_name()]
+                    for pred_buffer in pred_buffers
+                    if (isinstance(pred_buffer, SchedulerBuffer))
+                ]
+            )
         )
         succ_nodes = OrderedSet(
-            {
-                succ_node
-                for buffer in node.get_outputs()
-                for succ_node in buffer.mpi_buffer.succ_nodes
-            }
+            OrderedSet(
+                [
+                    succ_node
+                    for buffer in node.get_outputs()
+                    for succ_node in buffer.mpi_buffer.succ_nodes
+                ]
+            )
         )
         node.mpi_node = MemoryPlanningInfoForNode(
             index=index,
@@ -248,7 +252,7 @@ def assign_memory_planning_info_for_scheduler_nodes(
 def estimate_peak_memory(
     nodes: List[BaseSchedulerNode],
     name_to_freeable_input_buf: Dict[str, FreeableInputBuffer],
-    graph_outputs: Set[str],
+    graph_outputs: OrderedSet[str],
 ) -> Tuple[int, List[int]]:
     """
     Given a list of nodes in their execution order, estimate the peak memory, by
@@ -346,7 +350,7 @@ def topological_sort_lpmf(
     nodes: List[BaseSchedulerNode],
     name_to_freeable_input_buf: Dict[str, FreeableInputBuffer],
     name_to_buf: Dict[str, SchedulerBuffer],
-    graph_outputs: Set[str],
+    graph_outputs: OrderedSet[str],
 ) -> List[BaseSchedulerNode]:
     """
     A bfs-based greedy topological order. LPMF stands for "Least Peak Memory First".
@@ -497,7 +501,12 @@ def topological_sort_bfs(nodes: List[BaseSchedulerNode]) -> List[BaseSchedulerNo
         # priority is the order in which predecessor nodes are executed
         assert node_info[node]["indegree"] == 0
         exec_orders = sorted(
-            {node_info[pred_node]["order"] for pred_node in node.mpi_node.pred_nodes}
+            OrderedSet(
+                [
+                    node_info[pred_node]["order"]
+                    for pred_node in node.mpi_node.pred_nodes
+                ]
+            )
         )
         return exec_orders
 
@@ -583,8 +592,8 @@ def reorder_for_peak_memory(
     nodes: List[BaseSchedulerNode],
     name_to_buf: Dict[str, SchedulerBuffer],
     name_to_fused_node: Dict[str, BaseSchedulerNode],
-    graph_inputs: Set[str],
-    graph_outputs: Set[str],
+    graph_inputs: OrderedSet[str],
+    graph_outputs: OrderedSet[str],
     methods: List[Callable[..., List[BaseSchedulerNode]]] = [  # noqa: B006
         topological_sort_lpmf,
         topological_sort_bfs,

@@ -5471,7 +5471,7 @@ class UserDefinedTritonKernel(ExternKernel):
         1. The arg is already tl.constexpr, so leave it in
         2. The arg is not tl.constexpr so we have to remove it
         """
-        constexpr_indices_set = set(constexpr_indices)
+        constexpr_indices_set = OrderedSet(constexpr_indices)
         REMOVED = object()
         raw_args = [
             (idx, arg)
@@ -5485,7 +5485,7 @@ class UserDefinedTritonKernel(ExternKernel):
         # We have to compute the constexpr indices for the new, filtered raw_args
         # We also have to adjust equal_to_1.
         if removed_none_args:
-            eq1_indices_set = set(triton_meta["configs"][0].equal_to_1)
+            eq1_indices_set = OrderedSet[int](triton_meta["configs"][0].equal_to_1)
             constexpr_indices = []
             equal_to_1 = []
             index_shift = 0

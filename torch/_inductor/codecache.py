@@ -42,7 +42,6 @@ from typing import (
     NoReturn,
     Optional,
     Sequence,
-    Set,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
@@ -67,6 +66,7 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._utils_internal import log_cache_bypass
+from torch.utils._ordered_set import OrderedSet
 
 from .remote_cache import create_cache
 from .runtime import autotune_cache
@@ -769,10 +769,10 @@ class FxGraphHashDetails:
         self.fx_kwargs: Dict[str, object] = {}
         for k, v in sorted(fx_kwargs.items()):
             if k not in self.EXCLUDED_KWARGS:
-                if type(v) is set:
+                if type(v) in (set, OrderedSet):  # noqa: set_linter
                     # Special case to handle set params. Python sets can't be
                     # ordered, so sort the elements and store them in a proxy.
-                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))
+                    self.fx_kwargs[k] = OrderedSetHolder(sorted(v))  # type: ignore[call-overload]
                 else:
                     self.fx_kwargs[k] = v
 
@@ -1594,10 +1594,10 @@ class CompiledFxGraph:
     cache_key: str
     source_code: str = dataclasses.field(repr=False)  # Do not display source_code
     cache_linemap: Optional[List[Tuple[int, str]]]
-    device_types: Set[str]
-    device_idxs: Set[int]
-    mutated_inputs: Set[str]
-    mutated_input_idxs: Set[int]
+    device_types: OrderedSet[str]
+    device_idxs: OrderedSet[int]
+    mutated_inputs: OrderedSet[str]
+    mutated_input_idxs: OrderedSet[int]
     # We populate exactly one of the next two fields. In the common case, we store the
     # constant attirbutes in the cache entry and re-attach them to the module created in
     # PyCodeCache.load_by_key_path. In the case that the graph has frozen parameters,
@@ -1645,11 +1645,10 @@ class CompiledFxGraph:
             with open(graph.cache_path) as f:
                 self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
-        # TODO - ordered set
-        self.device_types = set(graph.device_types)
-        self.device_idxs = set(graph.device_idxs)
-        self.mutated_inputs = set(graph.mutated_inputs)
-        self.mutated_input_idxs = set(graph.mutated_input_idxs)
+        self.device_types = OrderedSet[str](graph.device_types)
+        self.device_idxs = OrderedSet[int](graph.device_idxs)
+        self.mutated_inputs = OrderedSet[str](graph.mutated_inputs)
+        self.mutated_input_idxs = OrderedSet[int](graph.mutated_input_idxs)
         if has_frozen_params(gm):
             self.allocated_constant_name = graph.allocated_constant_name
             self.constants = None
@@ -1815,7 +1814,7 @@ class AotCodeCompiler:
 
         def _compile_consts(consts: bytes, platform: str) -> str:
             if platform == "linux":
-                if graph.mutated_buffers & set(graph.constants.keys()):
+                if graph.mutated_buffers & OrderedSet(graph.constants.keys()):
                     # .data section is between .text and .bss. When the size of .data is large,
                     # during the linking, the relocation of .text against .bss may overflow.
                     # Rename it to .ldata so that it won't be in between the .text and .bss section

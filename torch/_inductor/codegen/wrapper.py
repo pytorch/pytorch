@@ -20,7 +20,6 @@ from typing import (
     Iterator,
     List,
     Optional,
-    Set,
     Tuple,
     TYPE_CHECKING,
     Union,
@@ -38,6 +37,7 @@ from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 from torch.fx.node import _get_qualified_name
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
@@ -224,7 +224,7 @@ def user_defined_kernel_grid_fn_code(
         else:
             assert len(grids) > 1
             assert len(grids) == len(configs)
-            seen = set()
+            seen = OrderedSet[str]()
             for grid, c in zip(grids, configs):
                 guards = [f"meta['{name}'] == {val}" for name, val in c.kwargs.items()]
                 guards = " and ".join(guards)
@@ -541,11 +541,11 @@ class PythonWrapperCodegen(CodeGen):
         self.kernel_autotune_defs = IndentedBuffer()
         self.kernel_autotune_calls = IndentedBuffer()
         self.subgraph_definitions = IndentedBuffer()
-        self.kernel_autotune_names: Set[str] = set()
+        self.kernel_autotune_names: OrderedSet[str] = OrderedSet()
         # If the generated source code is exactly the same, reuse the
         # pre-existing kernel for it
         self.src_to_kernel: Dict[str, str] = {}
-        self.kernel_numel_expr: Set[Tuple[str, GraphLowering]] = set()
+        self.kernel_numel_expr: OrderedSet[Tuple[str, GraphLowering]] = OrderedSet()
         self.lines: List[Union[MemoryPlanningLine, LineContext]] = []
         self.declare = ""
         self.declare_maybe_reference = ""
@@ -561,8 +561,10 @@ class PythonWrapperCodegen(CodeGen):
         self.supports_intermediate_hooks = True
         self.expr_printer: Callable[[Any], str] = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
-        self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
-        self.computed_sizes: Set[sympy.Symbol] = set()
+        self.unbacked_symbol_decls: OrderedSet[
+            str
+        ] = OrderedSet()  # str of sympy.Symbol
+        self.computed_sizes: OrderedSet[sympy.Symbol] = OrderedSet()
         self.launcher_fn_name = None
         # This function can be overridden to change the launcher name
         self.set_launcher_fn_name()
@@ -583,8 +585,8 @@ class PythonWrapperCodegen(CodeGen):
                 # include a hash so our code cache puts different constants into different files
                 self.write_constant(name, hashed)
 
-        self.allocated: Set[BufferName] = set()
-        self.freed: Set[BufferName] = set()
+        self.allocated: OrderedSet[BufferName] = OrderedSet()
+        self.freed: OrderedSet[BufferName] = OrderedSet()
 
         # maps from reusing buffer to reused buffer
         self.reuses: Dict[BufferName, BufferName] = {}
@@ -601,9 +603,9 @@ class PythonWrapperCodegen(CodeGen):
 
         self.add_import_once = add_import_once
         self._metas: Dict[str, str] = {}
-        self._meta_vars: Set[str] = set()
+        self._meta_vars: OrderedSet[str] = OrderedSet()
         self.multi_kernel_state = MultiKernelState()
-        self.already_codegened_subgraphs: Set[str] = set()
+        self.already_codegened_subgraphs: OrderedSet[str] = OrderedSet()
         self.allocated_workspaces: Dict[str, Any] = {}
 
         # intermediate tensor value printing utility
@@ -1171,7 +1173,7 @@ class PythonWrapperCodegen(CodeGen):
             return f"{name}_stride"
 
         # Assign all symbolic shapes needed to local variables
-        bound_vars: Set[sympy.Symbol] = set()
+        bound_vars: OrderedSet[sympy.Symbol] = OrderedSet()
 
         def is_expr(x):
             return isinstance(x[1], sympy.Expr)
@@ -1551,18 +1553,20 @@ class PythonWrapperCodegen(CodeGen):
         from triton.language import constexpr  # type: ignore[name-defined]
 
         # global constexpr vars handled above
-        symbols_included = {original_name}
+        symbols_included = OrderedSet([original_name])
 
         def traverse(cur_kernel):
             # here we extract the unqualified names (i.e., not attributes and
             # without prepended module name) loaded in the kernel code, which
             # are matched with the co_names and __globals__ below to codegen
             # the respective imports necessary for the kernel compilation
-            unqualified_loads = {
-                inst.argval
-                for inst in dis.Bytecode(cur_kernel.fn)
-                if inst.opname == "LOAD_GLOBAL"
-            }
+            unqualified_loads = OrderedSet(
+                [
+                    inst.argval
+                    for inst in dis.Bytecode(cur_kernel.fn)
+                    if inst.opname == "LOAD_GLOBAL"
+                ]
+            )
             global_annotations = cur_kernel.fn.__globals__.get("__annotations__", {})
             for symbol_name in cur_kernel.fn.__code__.co_names:
                 if symbol_name in symbols_included:

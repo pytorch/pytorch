@@ -724,7 +724,7 @@ class TritonCSEVariable(CSEVariable):
                 # most of the time index vars don't need masks associated with them
                 # however, when index vars are used to compute indices for indirect reads
                 # those reads should subsequently be masked,
-                self.mask_vars.update({f"{arg.name[0]}mask"})
+                self.mask_vars.update([f"{arg.name[0]}mask"])
 
 
 class TritonOverrides(OpOverrides):
@@ -1774,7 +1774,7 @@ class TritonKernel(SIMDKernel):
                 range_trees = self.active_range_trees(reorder=True)
 
                 # Match each range tree separately.
-                range_symbols = {tree.symbol() for tree in range_trees}
+                range_symbols = OrderedSet(tree.symbol() for tree in range_trees)
                 index_terms = sympy.Add.make_args(index_relative_to_xyr_index)
                 block_params = BlockParameters()
                 for tree in range_trees:
@@ -2190,9 +2190,9 @@ class TritonKernel(SIMDKernel):
         root_op: str
 
         def final_reduction(value):
-            use_helper = reduction_type in {"any", "max", "min", "prod"}
+            use_helper = reduction_type in ("any", "max", "min", "prod")
             module = "triton_helpers" if use_helper else "tl"
-            if reduction_type in {"max", "min"}:
+            if reduction_type in ("max", "min"):
                 return self.reduction_resize(
                     f"{module}.{reduction_type}2({value}, {dim})"
                 )
@@ -2235,7 +2235,7 @@ class TritonKernel(SIMDKernel):
             else:
                 masked_value = _mask_value(value, default)
 
-            if reduction_type in {"argmax", "argmin"}:
+            if reduction_type in ("argmax", "argmin"):
                 accumulator_index = str(
                     self.cse.generate(
                         self.compute,
@@ -2283,7 +2283,7 @@ class TritonKernel(SIMDKernel):
                     f"{accumulator} = tl.full({self.dense_size_str()}, {default}, {acc_type})"
                 )
 
-            if reduction_type in {"argmax", "argmin"}:
+            if reduction_type in ("argmax", "argmin"):
                 accumulator_index = f"_{result_var}_index"
                 long_max = torch.iinfo(torch.int64).max
                 self.body.writeline(
@@ -2338,7 +2338,7 @@ class TritonKernel(SIMDKernel):
                 buf.writeline("if RSPLIT > 1:")
                 exit_stack.enter_context(buf.indent())
 
-            if reduction_type in {"argmax", "argmin"}:
+            if reduction_type in ("argmax", "argmin"):
                 self.post_loop_combine.writeline(
                     f"{result_var}_bval = {self.reduction_resize(f'{result_var}_val')}"
                 )
@@ -3077,7 +3077,8 @@ class TritonKernel(SIMDKernel):
         optimize_mem = V.graph.is_inference or V.graph.is_backward
 
         inductor_meta = {
-            "autotune_hints": set(self.autotune_hints),
+            # Triton will not accept an OrderedSet for autotune_hints
+            "autotune_hints": set(self.autotune_hints),  # noqa: set_linter
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "optimize_mem": optimize_mem,
@@ -3545,7 +3546,7 @@ class TritonScheduling(SIMDScheduling):
 
             log.debug(
                 "kernel src code for %s written to: %s",
-                {n.get_name() for n in nodes},
+                OrderedSet(n.get_name() for n in nodes),
                 mod.__file__,
             )
             ms = load_cache()
@@ -3563,7 +3564,7 @@ class TritonScheduling(SIMDScheduling):
                 log.debug(
                     "Exception (%s) in compiling fused nodes %s",
                     e,
-                    {n.get_name() for n in nodes},
+                    OrderedSet(n.get_name() for n in nodes),
                 )
                 ms = float("inf")
                 store_cache()
@@ -3592,7 +3593,7 @@ class TritonScheduling(SIMDScheduling):
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run",
-                {n.get_name() for n in nodes},
+                OrderedSet(n.get_name() for n in nodes),
                 ms,
             )
             store_cache()
@@ -3728,7 +3729,7 @@ class TritonScheduling(SIMDScheduling):
 
             log.debug(
                 "The fused kernel for %s took %.3f ms to run, %.3f ms to clone inputs",
-                {n.get_name() for n in node_group},
+                OrderedSet(n.get_name() for n in node_group),
                 ms,
                 ms_clone,
             )

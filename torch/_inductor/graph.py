@@ -133,21 +133,23 @@ else:
 
 
 def supported_dtype_of_cpp_wrapper(dtype: torch.device, device_type: str) -> bool:
-    supported_dtype = {
-        torch.float32,
-        torch.float64,
-        torch.int64,
-        torch.int32,
-        torch.int16,
-        torch.int8,
-        torch.uint8,
-        torch.bool,
-        torch.bfloat16,
-        torch.complex32,
-        torch.complex64,
-        torch.complex128,
-        torch.float16,
-    }
+    supported_dtype = OrderedSet(
+        [
+            torch.float32,
+            torch.float64,
+            torch.int64,
+            torch.int32,
+            torch.int16,
+            torch.int8,
+            torch.uint8,
+            torch.bool,
+            torch.bfloat16,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+            torch.float16,
+        ]
+    )
     if device_type == "cuda":
         supported_dtype.add(torch.float8_e4m3fn)
         supported_dtype.add(torch.float8_e5m2)
@@ -176,7 +178,7 @@ def may_get_constant_buffer_dtype(constant_buffer: sympy.Expr) -> Optional[torch
 
 
 def is_magic_method(op: Any) -> bool:
-    magic_ops = {method_to_operator(m) for m in magic_methods}
+    magic_ops = OrderedSet([method_to_operator(m) for m in magic_methods])
     return op in magic_ops
 
 
@@ -220,25 +222,29 @@ def mark_nodes_dislike_padding(
     """
     if not config.comprehensive_padding:
         return
-    ops_dislike_padding = {
-        aten.convolution,
-        aten.convolution_backward,
-    }
+    ops_dislike_padding = OrderedSet(
+        [
+            aten.convolution,
+            aten.convolution_backward,
+        ]
+    )
     # what's a better way to collect the reduction ops?
-    ops_like_padding = {
-        aten.var_mean,
-        aten.sum,
-        aten.mean,
-        aten.prod,
-        aten.any,
-        aten.amin,
-        aten.amax,
-        aten.min,
-        aten.max,
-        aten.argmin,
-        aten.argmax,
-        aten.scatter_reduce,
-    }
+    ops_like_padding = OrderedSet(
+        [
+            aten.var_mean,
+            aten.sum,
+            aten.mean,
+            aten.prod,
+            aten.any,
+            aten.amin,
+            aten.amax,
+            aten.min,
+            aten.max,
+            aten.argmin,
+            aten.argmax,
+            aten.scatter_reduce,
+        ]
+    )
 
     def _get_overload_packet(
         node: torch.fx.Node,
@@ -450,7 +456,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
-        self._warned_fallback = {"aten.convolution_backward"}
+        self._warned_fallback = OrderedSet(["aten.convolution_backward"])
         self.user_visible_output_strides = get_user_visible_output_strides(gm.graph)
         mark_nodes_dislike_padding(gm.graph, self.user_visible_output_strides)
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
@@ -1351,7 +1357,7 @@ class GraphLowering(torch.fx.Interpreter):
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
 
-        origins = {n}
+        origins = OrderedSet([n])
         is_call_function = n.op == "call_function"
         if is_call_function:
             args, kwargs = self.fetch_args_kwargs_from_env(n)

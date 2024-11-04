@@ -1518,7 +1518,7 @@ class SIMDScheduling(BaseScheduling):
             for dep in itertools.chain.from_iterable(dep_sources)
             if dep.name not in V.graph.removed_buffers and isinstance(dep, MemoryDep)
         ]
-        write_names = {dep.name for dep in rw.writes}
+        write_names = OrderedSet(dep.name for dep in rw.writes)
 
         tilings: List[CandidateTiling] = []
 

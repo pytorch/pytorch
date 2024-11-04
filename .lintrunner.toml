@@ -1628,3 +1628,20 @@ command = [
     '@{{PATHSFILE}}'
 ]
 is_formatter = true
+
+# `set_linter` detects occurrences of built-in `set` in areas of Python code like
+# _inductor where the instability of iteration in `set` has proven a problem.
+# TODO(rec): how do I cause the unit tests for this linter to be run in CI?
+
+[[linter]]
+code = 'SET_LINTER'
+include_patterns = [
+    "torch/_inductor/**/*.py",
+]
+command = [
+    'python3',
+    'tools/linter/adapters/set_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
+is_formatter = true
