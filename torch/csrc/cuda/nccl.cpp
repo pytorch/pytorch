@@ -273,6 +273,7 @@ struct NcclCommList {
         devices.data()));
   }
   NcclCommList(NcclCommList&& foo) = default;
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~NcclCommList() {
     if (comms) {
       for (const auto i : c10::irange(ndevices)) {
