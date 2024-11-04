@@ -1700,10 +1700,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(inp)
         opt_model(inp)
         self.assertEqual(cnt.frame_count, 1)
-
-        self.assertEqual(
-            15 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
-        )
+        self.assertEqual(12, cnt.op_count)
 
     def test_exec_import(self):
         def fn1():
@@ -4169,7 +4166,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
     def test_inductor_no_recursionerror_on_for_loops(self):
         def forward(x):
-            for _ in range(1000):
+            for _ in range(10000):
                 x = 1.0 * x
             return x
 
@@ -6197,6 +6194,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(cnt.frame_count, 1)
         # Ensure that the listcomp is fully compiled
         self.assertEqual(cnt.op_count, 8)
+
+    def test_tensor_split_within_device_cm(self):
+        @torch.compile(fullgraph=True)
+        def split(x):
+            return x.split(4, 0)
+
+        x = torch.zeros(12)
+        res = split(x)
+
+        with torch.device("cpu"):
+            self.assertEqual(res, split(x))
 
 
 instantiate_parametrized_tests(ReproTests)
