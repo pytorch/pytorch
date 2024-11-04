@@ -1071,8 +1071,36 @@ graph():
         self.assertEqual(ep.module()(*inputs), model(*inputs))
         x = torch.zeros(64)
         y = torch.ones(64)
-        self.assertEqual(ep.module()(x, x), model(x, x))
+        # This seems to be a bug with old export because when we pass in x, x
+        # as input, runtime assertion should fail. This is because we would create
+        # guard on y.shape[0] > x.shape[0] but somehow in old export, we dce this
+        # assertion.
+        if is_training_ir_test(self._testMethodName) and is_non_strict_test(
+            self._testMethodName
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed for"):
+                ep.module()(x, x)
+        else:
+            self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
+
+    def test_draft_export_checks_mutation_with_nan(self):
+        @torch.library.custom_op("export::foo", mutates_args={})
+        def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return x + y
+
+        @foo.register_fake
+        def _(x, y):
+            return x + y
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                return foo(x, y)
+
+        model = Foo()
+        inputs = (torch.full((64,), torch.nan), torch.full((64,), torch.nan))
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            ep = export(model, inputs)
 
     def test_draft_export_checks_mutation(self):
         @torch.library.custom_op("export::foo", mutates_args={})
@@ -7451,7 +7479,8 @@ def forward(self, x, b_t, y):
     def test_symint_tensor_return(self):
         class Module(torch.nn.Module):
             def forward(self, x):
-                return torch.ops.testlib.returns_tensor_symint(x)[0]
+                a, b = torch.ops.testlib.returns_tensor_symint(x)
+                return a, b
 
         self._test_export_same_as_eager(Module(), (torch.randn(4, 4),))
 
