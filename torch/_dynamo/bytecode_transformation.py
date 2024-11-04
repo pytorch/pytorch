@@ -918,7 +918,7 @@ def check_inst_exn_tab_entries_valid(instructions: List[Instruction]):
     Implicitly checks for no duplicate instructions.
     """
     indexof = get_indexof(instructions)
-    exn_tab_entry_set = OrderedSet()
+    exn_tab_entry_set = OrderedSet[int]()
     for i, inst in enumerate(instructions):
         if inst.exn_tab_entry:
             assert sys.version_info >= (3, 11)

@@ -48,7 +48,7 @@ def get_indexof(insts):
 def remove_dead_code(instructions):
     """Dead code elimination"""
     indexof = get_indexof(instructions)
-    live_code = OrderedSet()
+    live_code: OrderedSet[int] = OrderedSet[int]()
 
     def find_live_code(start):
         for i in range(start, len(instructions)):

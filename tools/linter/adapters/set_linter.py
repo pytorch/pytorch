@@ -61,6 +61,7 @@ def main() -> None:
         if errors := list(lint_file(f, args)):
             if args.edit:
                 replacement = errors[-1].replacement
+                assert replacement is not None
                 Path(f).write_text(replacement)
                 print("Rewrote", f)
             else:

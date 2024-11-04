@@ -91,8 +91,8 @@ def set_isdisjoint(set1, set2):
     return True
 
 
-def set_intersection(set1, set2):
-    intersection_set = OrderedSet()
+def set_intersection(set1, set2) -> OrderedSet[Any]:
+    intersection_set = OrderedSet[Any]()
     for x in set1:
         if x in set2:
             intersection_set.add(x)

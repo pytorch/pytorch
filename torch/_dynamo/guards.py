@@ -567,7 +567,7 @@ class GuardBuilder(GuardBuilderBase):
         # not sufficient because for nn modules, we can have different sources
         # to access the same object - self._module["param"] is same as
         # self.param.
-        self.key_order_guarded_dict_ids = OrderedSet()
+        self.key_order_guarded_dict_ids = OrderedSet[int]()
         for source_name in self.check_fn_manager.output_graph.guard_on_key_order:
             self.key_order_guarded_dict_ids.add(id(self.get(source_name)))
 

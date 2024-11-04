@@ -852,7 +852,7 @@ class InstructionTranslatorBase(
         # First we prune the non-cell local vars, this allows us to prune more
         # cell local vars later on (e.g., if we manage to prune a
         # `NestedUserFunctionVariable` that makes use of some cell locals).
-        cellvars = OrderedSet(self.cellvars())
+        cellvars = OrderedSet[Any](self.cellvars())
         self.symbolic_locals = {
             k: v for k, v in self.symbolic_locals.items() if k in cellvars or k in reads
         }
@@ -886,8 +886,8 @@ class InstructionTranslatorBase(
         # could probably improve the variable tracing here to include the
         # relevant variables in `output.side_effects`.
         if self.output.side_effects.is_empty():
-            cellvars_that_must_live = OrderedSet()
-            visited = OrderedSet()
+            cellvars_that_must_live = OrderedSet[Any]()
+            visited = OrderedSet[Any]()
 
             def visit(var: VariableTracker):
                 if var in visited:
