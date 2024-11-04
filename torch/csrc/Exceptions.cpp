@@ -208,7 +208,7 @@ static std::string formatMessage(const char* format, va_list fmt_args) {
   std::string error_buf(ERROR_BUF_SIZE, '\0');
   auto res = vsnprintf(error_buf.data(), ERROR_BUF_SIZE, format, fmt_args);
   if (res < 0) {
-    return "";
+    res = 0;
   }
   error_buf.resize(res);
   return error_buf;
