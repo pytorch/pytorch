@@ -56,11 +56,10 @@ class NO_SUCH_SUBOBJ:
 
 class SuperVariable(VariableTracker):
     _nonvar_fields = {
-        "specialized",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, typevar, objvar=None, specialized=False, **kwargs) -> None:
+    def __init__(self, typevar, objvar=None, **kwargs) -> None:
         super().__init__(**kwargs)
         # typevar is the fist argument to super(). In the case where no argument
         # is provided to super(), it is the __class__ object where
@@ -71,7 +70,6 @@ class SuperVariable(VariableTracker):
         # to the current function where super() is called from (self for regular method,
         # cls for a classmethod)
         self.objvar = objvar
-        self.specialized = specialized  # directly get attr from self.typevar if true
 
     def reconstruct(self, codegen):
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
@@ -84,8 +82,6 @@ class SuperVariable(VariableTracker):
 
     def _resolved_getattr_and_source(self, tx: "InstructionTranslator", name):
         assert self.objvar, "1-arg super not implemented"
-        if self.specialized:
-            return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
         # The rest of this function does two things:
