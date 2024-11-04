@@ -1051,12 +1051,8 @@ def _compile(
                     "inductor_compile", None
                 )
                 code_gen_time = frame_phase_timing[frame_key].get("code_gen", None)
-                non_compliant_ops = OrderedSet(
-                    [op.__qualname__ for op in output.non_compliant_ops]
-                )
-                compliant_custom_ops = OrderedSet(
-                    [op.__qualname__ for op in output.compliant_custom_ops]
-                )
+                non_compliant_ops = OrderedSet(op.__qualname__ for op in output.non_compliant_ops)
+                compliant_custom_ops = OrderedSet(op.__qualname__ for op in output.compliant_custom_ops)
                 possibly_missed_reinplacing_opportunities = (
                     torch._dynamo.utils.counters["inductor"][
                         "possibly_missed_reinplacing_opportunities"
@@ -1094,8 +1090,8 @@ def _compile(
                 backend_compile_time = None
                 inductor_compile_time = None
                 code_gen_time = None
-                non_compliant_ops = OrderedSet({})
-                compliant_custom_ops = OrderedSet({})
+                non_compliant_ops = OrderedSet()
+                compliant_custom_ops = OrderedSet()
                 restart_reasons = OrderedSet()
                 # If compilation failed, the entire time is wasted
                 dynamo_time_before_restart = duration_ns / 1e9

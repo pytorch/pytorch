@@ -1421,7 +1421,7 @@ class BuiltinVariable(VariableTracker):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslator", user_cls, *args, **kwargs
     ):
-        assert user_cls in OrderedSet([dict, OrderedDict, defaultdict])
+        assert user_cls in (dict, OrderedDict, defaultdict)
         if kwargs:
             # Only `OrderedDict.fromkeys` accepts `value` passed by keyword
             assert user_cls is OrderedDict
@@ -1668,7 +1668,7 @@ class BuiltinVariable(VariableTracker):
                 return default
 
         source = obj.source and AttrSource(obj.source, name)
-        if name in OrderedSet(["__bases__", "__base__", "__flags__"]):
+        if name in ("__bases__", "__base__", "__flags__"):
             try:
                 value = obj.as_python_constant()
                 if isinstance(value, type):

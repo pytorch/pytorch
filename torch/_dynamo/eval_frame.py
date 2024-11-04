@@ -1674,16 +1674,14 @@ def export(
         if same_signature:
             flat_args_dynamic_dims = [
                 OrderedSet(
-                    [
-                        c.dim
-                        for c in (constraints or ())
-                        if (
-                            c.t_id == id(x)
-                            and not isinstance(c, _RelaxedConstraint)
-                            and c.constraint_range.vr.lower
-                            != c.constraint_range.vr.upper
-                        )
-                    ]
+                    c.dim
+                    for c in (constraints or ())
+                    if (
+                        c.t_id == id(x)
+                        and not isinstance(c, _RelaxedConstraint)
+                        and c.constraint_range.vr.lower
+                        != c.constraint_range.vr.upper
+                    )
                 )
                 for x in flat_args
             ]

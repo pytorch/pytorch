@@ -309,7 +309,7 @@ def uninteresting_files():
     mods = [
         torch._dynamo.external_utils,
     ]
-    return OrderedSet([inspect.getfile(m) for m in mods])
+    return OrderedSet(inspect.getfile(m) for m in mods)
 
 
 _CLOSURE_VARS: Optional[Dict[str, object]] = None

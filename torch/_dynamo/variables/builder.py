@@ -392,13 +392,11 @@ class VariableBuilder:
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):
-        return type(vt) in OrderedSet(
-            [
-                TensorVariable,
-                TensorWithTFOverrideVariable,
-                UserDefinedObjectVariable,
-                NumpyNdarrayVariable,
-            ]
+        return type(vt) in (
+            TensorVariable,
+            TensorWithTFOverrideVariable,
+            UserDefinedObjectVariable,
+            NumpyNdarrayVariable,
         )
 
     @staticmethod

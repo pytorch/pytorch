@@ -305,22 +305,18 @@ def substitute_in_graph(
                             for p in sig.parameters.values()
                             if (
                                 p.kind
-                                not in OrderedSet(
-                                    [
-                                        p.KEYWORD_ONLY,
-                                        # the name of *args and **kwargs is not important
-                                        p.VAR_POSITIONAL,
-                                        p.VAR_KEYWORD,
-                                    ]
+                                not in (
+                                    p.KEYWORD_ONLY,
+                                    # the name of *args and **kwargs is not important
+                                    p.VAR_POSITIONAL,
+                                    p.VAR_KEYWORD,
                                 )
                             )
                         ),
                         OrderedSet(
-                            [
-                                p.name
-                                for p in sig.parameters.values()
-                                if p.kind == p.KEYWORD_ONLY
-                            ]
+                            p.name
+                            for p in sig.parameters.values()
+                            if p.kind == p.KEYWORD_ONLY
                         ),
                         {
                             p.name: p.default

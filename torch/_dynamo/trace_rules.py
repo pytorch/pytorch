@@ -3307,10 +3307,8 @@ if torch.distributed.is_available():
 @functools.lru_cache(None)
 def get_legacy_mod_inlinelist():
     inlinelist = OrderedSet(
-        [
-            _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
-            for m in LEGACY_MOD_INLINELIST
-        ]
+        _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+        for m in LEGACY_MOD_INLINELIST
     )
     return inlinelist
 
@@ -3318,10 +3316,8 @@ def get_legacy_mod_inlinelist():
 @functools.lru_cache(None)
 def get_mod_inlinelist():
     inlinelist = OrderedSet(
-        [
-            _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
-            for m in MOD_INLINELIST
-        ]
+        _as_posix_path(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+        for m in MOD_INLINELIST
     )
     return inlinelist
 

@@ -481,13 +481,13 @@ class SetVariable(ConstDictVariable):
         return ConstantVariable.create(None)
 
     def as_proxy(self):
-        return OrderedSet([k.vt.as_proxy() for k in self.set_items])
+        return OrderedSet(k.vt.as_proxy() for k in self.set_items)
 
     def python_type(self):
         return OrderedSet
 
     def as_python_constant(self):
-        return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
+        return OrderedSet(k.vt.as_python_constant() for k in self.set_items)
 
     def reconstruct(self, codegen):
         codegen.foreach([x.vt for x in self.set_items])
@@ -598,7 +598,7 @@ class FrozensetVariable(SetVariable):
         return frozenset
 
     def as_python_constant(self):
-        return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
+        return OrderedSet(k.vt.as_python_constant() for k in self.set_items)
 
     def reconstruct(self, codegen):
         codegen.foreach([x.vt for x in self.set_items])

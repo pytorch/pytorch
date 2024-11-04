@@ -183,7 +183,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # Otherwise, it would be wrapped as UserDefinedObjectVariable(collections.OrderedDict.fromkeys),
         # and we need duplicate code to handle both cases.
         if (
-            self.value in OrderedSet([collections.OrderedDict, collections.defaultdict])
+            self.value in (collections.OrderedDict, collections.defaultdict)
             and name == "fromkeys"
         ):
             return super().var_getattr(tx, name)
@@ -320,7 +320,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return variables.ListVariable(subs_as_vars, **options)
         elif (
-            self.value in OrderedSet([collections.OrderedDict, collections.defaultdict])
+            self.value in (collections.OrderedDict, collections.defaultdict)
             and name == "fromkeys"
         ):
             from .builtin import BuiltinVariable

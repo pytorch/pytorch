@@ -823,11 +823,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # Allow __setattr__ to fall through to base class handler
         supported = OrderedSet([torch.nn.Module.__setattr__, torch.nn.Module.__init__])
         return OrderedSet(
-            [
-                id(x.__code__)
-                for x in torch.nn.Module.__dict__.values()
-                if hasattr(x, "__code__") and x not in supported
-            ]
+            id(x.__code__)
+            for x in torch.nn.Module.__dict__.values()
+            if hasattr(x, "__code__") and x not in supported
         )
 
     def unpack_var_sequence(self, tx):
