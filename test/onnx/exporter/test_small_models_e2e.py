@@ -33,6 +33,35 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
+    def test_onnx_export_controlflow(self):
+        class Bad1Fixed(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    return torch.sin(x)
+
+                def false_fn(x):
+                    return torch.cos(x)
+
+                y = torch.cond(x.sum() > 0, true_fn, false_fn, [x])
+                return y
+
+        x = torch.rand(5, 3)
+        model = Bad1Fixed()
+        assert torch.export.export(model, (x,))
+        onnx_program = torch.onnx.export(
+            model,
+            (x,),
+            input_names=["x"],
+            opset_version=18,
+            dynamo=True,
+            fallback=False,
+        )
+        proto = onnx_program.model_proto
+        fct_names = {f.name for f in proto.functions}
+        self.assertIn("true_graph_0", fct_names)
+        self.assertIn("false_graph_0", fct_names)
+        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
+
     def test_constant_complex(self):
         class MulModule(torch.nn.Module):
             def forward(self, x):
