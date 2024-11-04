@@ -33,6 +33,31 @@ class DynamoExporterTest(common_utils.TestCase):
         )
         onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
 
+    def test_constant_complex(self):
+        class MulModule(torch.nn.Module):
+            def forward(self, x):
+                y = 2 + 3j
+                return torch.ops.aten.mul(x, y)
+
+        # Example usage with complex inputs
+        x = torch.tensor(
+            [[1.0 + 2.0j, 3.0 + 4.0j], [5.0 + 6.0j, 7.0 + 8.0j]], dtype=torch.complex64
+        )
+
+        onnx_program = torch.onnx.export(MulModule(), (x,), dynamo=True)
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_pow_does_not_trigger_type_promotion(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x**2.0
+
+        x = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float16)
+
+        onnx_program = torch.onnx.export(Model(), (x,), dynamo=True)
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertNotIn("Cast", [node.op_type for node in onnx_program.model.graph])
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
