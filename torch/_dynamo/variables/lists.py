@@ -82,10 +82,7 @@ class BaseListVariable(VariableTracker):
         return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
     def as_python_constant(self):
-        try:
-            return self.python_type()([x.as_python_constant() for x in self.items])
-        except RecursionError:
-            unimplemented(f"recursive containment {self}")
+        return self.python_type()([x.as_python_constant() for x in self.items])
 
     def as_proxy(self):
         assert self.python_type() is not SizeVariable
@@ -462,8 +459,9 @@ class DequeVariable(CommonListMethodsVariable):
             maxlen.is_python_constant()
         ), f"maxlen must be a constant, got: {maxlen.debug_repr()}"
         self.maxlen = maxlen
+        items = list(items)
         if self.maxlen.as_python_constant() is not None:
-            items = list(items)[-maxlen.as_python_constant() :]
+            items = items[-maxlen.as_python_constant() :]
         super().__init__(items, **kwargs)
 
     def python_type(self):
@@ -512,44 +510,55 @@ class DequeVariable(CommonListMethodsVariable):
             and args
             and args[0].is_python_constant()
         ):
+            assert len(args) == 2
             assert not kwargs
             key, value = args
-            assert key.is_python_constant() and isinstance(
-                key.as_python_constant(), int
-            )
+            assert key.is_python_constant()
+            assert isinstance(key.as_python_constant(), int)
             tx.output.side_effects.mutation(self)
             self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
 
+        maxlen = self.maxlen.as_python_constant()
+        if maxlen is not None:
+            slice_within_maxlen = slice(-maxlen, None)
+        else:
+            slice_within_maxlen = None
+
         if (
             name == "extendleft"
             and self.mutable_local
+            and len(args) > 0
             and args[0].has_force_unpack_var_sequence(tx)
         ):
+            assert len(args) == 1
             assert not kwargs
-            (arg,) = args
-            prefix = arg.force_unpack_var_sequence(tx)
-            prefix.reverse()
+            prefix = args[0].force_unpack_var_sequence(tx)
             tx.output.side_effects.mutation(self)
-            self.items = prefix + list(self.items)
+            self.items[:] = [*reversed(prefix), *self.items]
+            slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
         elif name == "popleft" and self.mutable_local:
             assert not args
             assert not kwargs
-            item = self.items[0]
             tx.output.side_effects.mutation(self)
-            self.items = self.items[1:]
-            result = item
-        elif name == "appendleft" and self.mutable_local:
+            result, *self.items[:] = self.items
+        elif name == "appendleft" and len(args) > 0 and self.mutable_local:
+            assert len(args) == 1
             assert not kwargs
             tx.output.side_effects.mutation(self)
-            self.items = [args[0]] + list(self.items)
+            self.items[:] = [args[0], *self.items]
+            slice_within_maxlen = slice(None, maxlen)
             result = ConstantVariable.create(None)
         else:
             result = super().call_method(tx, name, args, kwargs)
 
-        if self.maxlen.as_python_constant() is not None:
-            self.items = list(self.items)[-self.maxlen.as_python_constant() :]
+        if (
+            slice_within_maxlen is not None
+            and maxlen is not None
+            and len(self.items) > maxlen
+        ):
+            self.items[:] = self.items[slice_within_maxlen]
         return result
 
 
