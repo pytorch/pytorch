@@ -37,7 +37,7 @@ FROM base as python
 # build python
 COPY manywheel/build_scripts /build_scripts
 ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
-RUN bash build_scripts/build.sh && rm -r build_scripts
+RUN bash build_scripts/install_cpython.sh && rm -r build_scripts
 
 FROM base as cuda
 ARG BASE_CUDA_VERSION=11.8
@@ -156,6 +156,7 @@ ENV XPU_DRIVER_TYPE ROLLING
 # cmake-3.28.4 from pip
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
+
 # Install setuptools and wheel for python 3.13
 RUN /opt/python/cp313-cp313/bin/python -m pip install setuptools wheel
 ADD ./common/install_xpu.sh install_xpu.sh
