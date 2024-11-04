@@ -193,7 +193,7 @@ void initLazyBindings(PyObject* module) {
     torch::lazy::getLTCForceFallback() = std::move(newval);
   });
   lazy.def("_clear_ir_cache", []() { TrieCache::Get()->Clear(); });
-  lazy.def("_dump_ir_cache", [](const std::string& filename) {
+  lazy.def("_dump_ir_cache", [](std::string filename) {
     TrieCache::Get()->DumpToDotFile(filename);
   });
   lazy.def("_set_reuse_ir", [](bool val) { FLAGS_torch_lazy_reuse_ir = val; });

@@ -2,7 +2,8 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/custom_class.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 namespace {
 // Essentially ClassNamespaceValue from import_source.cpp without the
 // SourceImporterImpl reference. This helps resolve the
@@ -66,4 +67,5 @@ std::shared_ptr<Resolver> loweredModuleResolver() {
   return resolver;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

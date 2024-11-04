@@ -55,7 +55,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
       inputs.push_back(*argument.default_value());
       continue;
     }
-    TORCH_CHECK(false,
+    AT_ERROR(
         name(),
         "() is missing value for argument '",
         argument.name(),

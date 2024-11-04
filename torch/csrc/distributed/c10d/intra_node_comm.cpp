@@ -7,7 +7,6 @@
 
 namespace c10d::intra_node_comm {
 
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 bool isIntraNodeCommSupported();
 
 static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
@@ -87,7 +86,7 @@ bool IntraNodeComm::isEnabled() {
  * Use c10d::Store to perform allgather on a trivially copyable type.
  */
 template <typename T>
-static std::vector<T> storeAllGather(
+std::vector<T> storeAllGather(
     const c10::intrusive_ptr<c10d::Store>& store,
     const std::string& prefix,
     size_t rank,
@@ -135,12 +134,10 @@ bool IntraNodeComm::rendezvous() {
     return false;
   }
 
-  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   deviceIdx_ = at::cuda::current_device();
 
   // Exchange hostname and device bus ID
   struct DevInfo {
-    // NOLINTNEXTLINE
     char hostname[HOST_NAME_MAX + 1];
     int deviceIdx;
   };
@@ -173,8 +170,7 @@ bool IntraNodeComm::rendezvous() {
   }
 
   auto groupName = "IntraNodeComm" + std::to_string(intraNodeCommIdx++);
-  set_group_info(
-      groupName, static_cast<int>(rank_), static_cast<int>(worldSize_), store_);
+  set_group_info(groupName, rank_, worldSize_, store_);
   auto allocator = get_allocator(c10::DeviceType::CUDA);
   symmetricMemoryPtr_ = allocator->alloc(bufferSize_, deviceIdx_, groupName);
   symmetricMemory_ = allocator->rendezvous(symmetricMemoryPtr_);

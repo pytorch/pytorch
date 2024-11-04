@@ -241,7 +241,7 @@ T compute_fct(int64_t size, int64_t normalization) {
     case fft_norm_mode::by_n: return one / static_cast<T>(size);
     case fft_norm_mode::by_root_n: return one / std::sqrt(static_cast<T>(size));
   }
-  TORCH_CHECK(false, "Unsupported normalization type", normalization);
+  AT_ERROR("Unsupported normalization type", normalization);
 }
 
 template<typename T>
@@ -578,30 +578,30 @@ namespace at { namespace native {
 REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
 
 Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
-  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
+  AT_ERROR("fft: ATen not compiled with FFT support");
 }
 
 Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool onesided) {
-  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
+  AT_ERROR("fft: ATen not compiled with FFT support");
 }
 
 Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, bool forward) {
-  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
+  AT_ERROR("fft: ATen not compiled with FFT support");
 }
 
 Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
                          bool onesided, Tensor& out) {
-  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
+  AT_ERROR("fft: ATen not compiled with FFT support");
 }
 
 Tensor& _fft_c2r_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
                          int64_t last_dim_size, Tensor& out) {
-  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
+  AT_ERROR("fft: ATen not compiled with FFT support");
 }
 
 Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
                          bool forward, Tensor& out) {
-  TORCH_CHECK(false, "fft: ATen not compiled with FFT support");
+  AT_ERROR("fft: ATen not compiled with FFT support");
 }
 
 }} // namespace at::native

@@ -12,7 +12,6 @@ TRITON_MAX_BLOCK = {
     "Z": 1024,
     "R": 4096 * 16,  # * 16 is multi-kernel only
 }
-TRITON_MAX_RSPLIT = 64
 
 
 class ReductionHint(Enum):
@@ -52,9 +51,7 @@ if _is_triton_available():
             }
 
             # Instantiate AttrsDescriptor with the prepared arguments
-            res = AttrsDescriptor.from_dict(
-                {"arg_properties": kwargs, "cls": AttrsDescriptor.__name__}
-            )
+            res = AttrsDescriptor.from_dict(kwargs)
             assert res.property_values["tt.divisibility"] == 16
             assert res.property_values["tt.equal_to"] == 1
             return res

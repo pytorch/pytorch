@@ -1,18 +1,20 @@
 #pragma once
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 constexpr auto cpp_intrinsics_definition = R"(
 namespace std {
 
 template <typename T,
-          std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+          typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
 T rsqrt(T v) {
   return 1.0f / std::sqrt(v);
 }
 
 template <typename T,
-          std::enable_if_t<std::is_floating_point_v<T>, int> = 0>
+          typename std::enable_if<std::is_floating_point<T>::value, int>::type = 0>
 T frac(T v) {
   T intpart;
   return std::modf(v, &intpart);
@@ -29,4 +31,6 @@ To bitcast(const From& v) {
 } // namespace std
 )";
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

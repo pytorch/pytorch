@@ -223,10 +223,10 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
     return matmul_nested_with_broadcasted_dense(self, mat2);
   }
   if (self.is_nested() && !mat2.is_nested()) {
-    TORCH_CHECK(false,
+    AT_ERROR(
         "Expected both to be nested, but got a nested self and non-nested other");
   } else if (!self.is_nested() && mat2.is_nested()) {
-    TORCH_CHECK(false,
+    AT_ERROR(
         "Expected both to be nested, but got a non-nested self and nested other");
   }
   // to_padded_tensor only supports contiguous inputs

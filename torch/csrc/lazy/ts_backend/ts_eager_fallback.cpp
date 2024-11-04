@@ -106,7 +106,7 @@ c10::DispatchKey dispatch_key(c10::DeviceType device_type) {
       return c10::DispatchKey::CUDA;
     }
     default: {
-      TORCH_CHECK(false, "Unsupported device type: ", device_type);
+      AT_ERROR("Unsupported device type: ", device_type);
     }
   }
 }

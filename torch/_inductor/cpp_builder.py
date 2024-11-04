@@ -501,12 +501,7 @@ def _get_os_related_cpp_cflags(cpp_compiler: str) -> List[str]:
     else:
         cflags = ["Wno-unused-variable", "Wno-unknown-pragmas"]
         if _is_clang(cpp_compiler):
-            ignored_optimization_argument = (
-                "Werror=ignored-optimization-argument"
-                if config.aot_inductor.raise_error_on_ignored_optimization
-                else "Wno-ignored-optimization-argument"
-            )
-            cflags.append(ignored_optimization_argument)
+            cflags.append("Werror=ignored-optimization-argument")
     return cflags
 
 
@@ -712,7 +707,9 @@ def _setup_standard_sys_libs(
         cflags.append("nostdinc")
         # Note that the order of include paths do matter, as a result
         # we need to have several branches interleaved here
-        include_dirs.append(build_paths.sleef_include)
+        if torch.version.hip is None:
+            # TODO(T203136598): Is there any harm in including sleef_include in the hip path?
+            include_dirs.append(build_paths.sleef_include)
         include_dirs.append(build_paths.openmp_include)
         include_dirs.append(build_paths.python_include)
         include_dirs.append(build_paths.cc_include)
@@ -779,8 +776,13 @@ def _get_torch_related_args(
         if not aot_mode:
             libraries.append("torch_python")
 
-    if _IS_WINDOWS and platform.machine().lower() != "arm64":
+    if _IS_WINDOWS:
         libraries.append("sleef")
+
+    # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
+    if not config.abi_compatible:
+        libraries.append("c10")
+        libraries_dirs.append(TORCH_LIB_PATH)
 
     return include_dirs, libraries_dirs, libraries
 

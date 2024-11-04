@@ -1158,7 +1158,7 @@ REGISTER_CUDA_DISPATCH(ldl_solve_stub, &ldl_solve_kernel)
 template <typename scalar_t>
 static void apply_cholesky_solve(Tensor& b, Tensor& A, bool upper, int64_t& info) {
 #if !AT_MAGMA_ENABLED()
-TORCH_CHECK(false, "cholesky_solve: MAGMA library not found in "
+AT_ERROR("cholesky_solve: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
@@ -1476,7 +1476,7 @@ template <typename scalar_t>
 static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
 #if !AT_MAGMA_ENABLED()
   // This should never be thrown if the calling functions are correct.
-  TORCH_CHECK(false, "linalg.lu_factor: PyTorch was not compiled with MAGMA support.");
+  AT_ERROR("linalg.lu_factor: PyTorch was not compiled with MAGMA support.");
 #else
   // magmaLu and magmaLuNoPiv require infos and pivots tensor to be on CPU
   // the data is later copied back to the appropriate output tensor
@@ -1677,7 +1677,7 @@ REGISTER_CUDA_DISPATCH(lu_factor_stub, &lu_factor);
 template <typename scalar_t>
 static void apply_triangular_solve_batched_magma(const Tensor& A, const Tensor& b, bool left, bool upper, TransposeType transpose, bool unitriangular) {
 #if !AT_MAGMA_ENABLED()
-TORCH_CHECK(false, "triangular_solve: MAGMA library not found in "
+AT_ERROR("triangular_solve: MAGMA library not found in "
          "compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
@@ -2106,7 +2106,7 @@ static void apply_svd_magma(const Tensor& A,
                             const Tensor& Vh,
                             const Tensor& info) {
 #if !AT_MAGMA_ENABLED()
-TORCH_CHECK(false, "linalg.svd: MAGMA library not found in "
+AT_ERROR("linalg.svd: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;

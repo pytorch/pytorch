@@ -35,8 +35,7 @@ RegisterOperators reg({
         prim::profile,
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
-            TORCH_CHECK(
-                false,
+            AT_ERROR(
                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
           };
         },
@@ -45,8 +44,7 @@ RegisterOperators reg({
         prim::profile_ivalue,
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
-            TORCH_CHECK(
-                false,
+            AT_ERROR(
                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
           };
         },
@@ -190,7 +188,7 @@ RegisterOperators reg({
         prim::TypeCheck /* (...)  -> (..., bool) */,
         [](const Node* /* node */) -> Operation {
           return [](Stack& /* stack */) {
-            TORCH_CHECK(false, "prim::TypeCheck not yet implemented"); // NOLINT
+            AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
           };
         },
         aliasAnalysisSpecialCase()),
@@ -198,22 +196,19 @@ RegisterOperators reg({
         prim::FallbackGraph,
         [](const Node* node) -> Operation {
           return [](Stack& stack) {
-            TORCH_CHECK(
-                false,
+            AT_ERROR(
                 "Must be converted to prim::FunctionCall by replaceFallbackGraphWithFallbackFunction"); // NOLINT
           };
         },
         aliasAnalysisSpecialCase()),
     Operator(
         "prim::Guard(Tensor(a) t) -> Tensor(a)",
-        [](Stack& stack) {
-          TORCH_CHECK(false, "Should be replaced by prim::BailOut");
-        },
+        [](Stack& stack) { AT_ERROR("Should be replaced by prim::BailOut"); },
         aliasAnalysisFromSchema()),
     Operator(
         "prim::BailOut(...) -> Tensor(a)",
         [](Stack& /* stack */) {
-          TORCH_CHECK(false, "prim::BailOut not yet implemented"); // NOLINT
+          AT_ERROR("prim::BailOut not yet implemented"); // NOLINT
         },
         aliasAnalysisFromSchema()),
     Operator(
@@ -384,7 +379,7 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
-[[maybe_unused]] void hashValue(Stack& stack) {
+C10_UNUSED void hashValue(Stack& stack) {
   auto value = pop(stack);
   push(stack, value.hash());
 }
@@ -583,8 +578,7 @@ at::Tensor interpolate(
         scale_factors_2,
         scale_factors_3);
 
-  TORCH_CHECK(
-      false,
+  AT_ERROR(
       "Input Error: Only 3D, 4D and 5D input Tensors supported",
       " (got ",
       input_dim,

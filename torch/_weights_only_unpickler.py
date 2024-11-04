@@ -169,7 +169,6 @@ def _get_allowed_globals():
         "torch.device": torch.device,
         "_codecs.encode": encode,  # for bytes
         "builtins.bytearray": bytearray,  # for bytearray
-        "builtins.set": set,  # for set
     }
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():

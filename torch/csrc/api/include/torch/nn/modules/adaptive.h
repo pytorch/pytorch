@@ -8,9 +8,8 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/options/adaptive.h>
 
-#include <utility>
-
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// The output of a single invocation of an AdaptiveLogSoftmaxWithLoss
 /// module's `forward()` method.
@@ -52,7 +51,7 @@ class TORCH_API AdaptiveLogSoftmaxWithLossImpl
       : AdaptiveLogSoftmaxWithLossImpl(AdaptiveLogSoftmaxWithLossOptions(
             in_features,
             n_classes,
-            std::move(cutoffs))) {}
+            cutoffs)) {}
 
   explicit AdaptiveLogSoftmaxWithLossImpl(
       AdaptiveLogSoftmaxWithLossOptions options_);
@@ -106,4 +105,5 @@ class TORCH_API AdaptiveLogSoftmaxWithLossImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(AdaptiveLogSoftmaxWithLoss);
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

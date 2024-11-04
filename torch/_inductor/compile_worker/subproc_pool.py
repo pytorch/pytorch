@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -12,8 +13,7 @@ import traceback
 import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from typing import Any, BinaryIO, Callable, Dict, Tuple, TypeVar
-from typing_extensions import Never, ParamSpec
+from typing import Any, Callable, Dict
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
@@ -25,15 +25,12 @@ from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
 log = logging.getLogger(__name__)
 
-_P = ParamSpec("_P")
-_T = TypeVar("_T")
 
-
-def _pack_msg(job_id: int, length: int) -> bytes:
+def _pack_msg(job_id, length):
     return struct.pack("nn", job_id, length)
 
 
-def _unpack_msg(data: bytes) -> Tuple[int, int]:
+def _unpack_msg(data):
     if not data:
         return -1, -1
     return struct.unpack("nn", data)
@@ -42,7 +39,7 @@ def _unpack_msg(data: bytes) -> Tuple[int, int]:
 msg_bytes = len(_pack_msg(0, 0))
 
 
-def _send_msg(write_pipe: BinaryIO, job_id: int, job_data: bytes = b"") -> None:
+def _send_msg(write_pipe, job_id, job_data=b""):
     length = len(job_data)
     write_pipe.write(_pack_msg(job_id, length))
     if length > 0:
@@ -50,13 +47,13 @@ def _send_msg(write_pipe: BinaryIO, job_id: int, job_data: bytes = b"") -> None:
     write_pipe.flush()
 
 
-def _recv_msg(read_pipe: BinaryIO) -> Tuple[int, bytes]:
+def _recv_msg(read_pipe):
     job_id, length = _unpack_msg(read_pipe.read(msg_bytes))
     data = read_pipe.read(length) if length > 0 else b""
     return job_id, data
 
 
-def _get_ld_library_path() -> str:
+def _get_ld_library_path():
     path = os.environ.get("LD_LIBRARY_PATH", "")
     if config.is_fbcode():
         from libfb.py.parutil import get_runtime_path
@@ -76,7 +73,7 @@ class _SubprocExceptionInfo:
     use it for the message in the exception thrown in the main process.
     """
 
-    def __init__(self, details: str) -> None:
+    def __init__(self, details) -> None:
         self.details = details
 
 
@@ -85,7 +82,7 @@ class SubprocException(Exception):
     Thrown when a job in a subprocess raises an Exception.
     """
 
-    def __init__(self, details: str) -> None:
+    def __init__(self, details) -> None:
         super().__init__(f"An exception occurred in a subprocess:\n\n{details}")
 
 
@@ -139,13 +136,11 @@ class SubprocPool:
         # before any access.
         self.read_thread.start()
 
-    def submit(
-        self, job_fn: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
-    ) -> Future[_T]:
-        if args or kwargs:
-            job_fn = functools.partial(job_fn, *args, **kwargs)
+    def submit(self, job_fn: Callable[..., Any], *args):
+        if args:
+            job_fn = functools.partial(job_fn, *args)
         job_data = pickle.dumps(job_fn, pickle.HIGHEST_PROTOCOL)
-        future: Future[_T]
+        future: Future[Any]
         with self.futures_lock:
             job_id = next(self.job_id_count)
             self.pending_futures[job_id] = future = Future()
@@ -156,7 +151,7 @@ class SubprocPool:
             _send_msg(self.write_pipe, job_id, job_data)
         return future
 
-    def _read_thread(self) -> None:
+    def _read_thread(self):
         try:
             while True:
                 job_id, data = _recv_msg(self.read_pipe)
@@ -183,7 +178,7 @@ class SubprocPool:
         except Exception:
             log.exception("failure in SubprocPool._read_thread")
 
-    def shutdown(self) -> None:
+    def shutdown(self):
         try:
             with self.write_lock:
                 if not self.running:
@@ -205,7 +200,7 @@ class SubprocPool:
 class SubprocMain:
     """Communicates with a SubprocPool in the parent process, called by __main__.py"""
 
-    def __init__(self, nprocs: int, read_pipe: BinaryIO, write_pipe: BinaryIO) -> None:
+    def __init__(self, nprocs, read_pipe, write_pipe) -> None:
         self.read_pipe = read_pipe
         self.write_pipe = write_pipe
         self.write_lock = threading.Lock()
@@ -213,7 +208,7 @@ class SubprocMain:
         self.pool = self._new_pool(nprocs, True)
         self.running = True
 
-    def _new_pool(self, nprocs: int, warm: bool) -> ProcessPoolExecutor:
+    def _new_pool(self, nprocs, warm):
         pool = ProcessPoolExecutor(
             nprocs,
             mp_context=multiprocessing.get_context("fork"),
@@ -224,14 +219,14 @@ class SubprocMain:
             _warm_process_pool(pool, nprocs)
         return pool
 
-    def main(self) -> None:
+    def main(self):
         while True:
             job_id, data = _recv_msg(self.read_pipe)
             if job_id < 0:
                 return self._shutdown()
             self.submit(job_id, data)
 
-    def _shutdown(self) -> None:
+    def _shutdown(self):
         with self.write_lock:
             self.running = False
             try:
@@ -242,7 +237,7 @@ class SubprocMain:
             self.read_pipe.close()
         self.pool.shutdown()
 
-    def submit(self, job_id: int, data: bytes) -> None:
+    def submit(self, job_id, data):
         while self.running:
             try:
                 self._submit_inner(job_id, data)
@@ -253,10 +248,10 @@ class SubprocMain:
                 # recreating the pool and resubmitting.
                 self.pool = self._new_pool(self.nprocs, False)
 
-    def _submit_inner(self, job_id: int, data: bytes) -> None:
+    def _submit_inner(self, job_id, data):
         future = self.pool.submit(functools.partial(SubprocMain.do_job, data))
 
-        def callback(_: Future[Any]) -> None:
+        def callback(_):
             if not self.running:
                 return
             try:
@@ -268,12 +263,11 @@ class SubprocMain:
             with self.write_lock:
                 if self.running:
                     _send_msg(self.write_pipe, job_id, result)
-            return
 
         future.add_done_callback(callback)
 
     @staticmethod
-    def do_job(data: bytes) -> bytes:
+    def do_job(data):
         # do the pickle/unpickle in the sub-subproc
         job = pickle.loads(data)
         try:
@@ -286,7 +280,7 @@ class SubprocMain:
 AnyPool = typing.Union[ProcessPoolExecutor, SubprocPool]
 
 
-def _warm_process_pool(pool: AnyPool, n: int) -> None:
+def _warm_process_pool(pool: AnyPool, n: int):
     if isinstance(pool, SubprocPool):
         return  # no need
     assert isinstance(pool, ProcessPoolExecutor)
@@ -320,5 +314,5 @@ class TestException(RuntimeError):
     pass
 
 
-def raise_testexc() -> Never:
+def raise_testexc():
     raise TestException

@@ -75,7 +75,6 @@ inductor_decompositions = get_decompositions(
         aten.native_group_norm,
         aten.native_layer_norm,
         aten.nll_loss2d_backward,
-        aten.permute_copy,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -107,6 +106,7 @@ decomps_to_exclude = [
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
+    aten.baddbmm,  # upcasts to fp32, perf issue
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)

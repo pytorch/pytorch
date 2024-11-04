@@ -32,9 +32,7 @@
 #define DLPACK_DLL
 #endif
 
-// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdint.h>
-// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stddef.h>
 
 #ifdef __cplusplus

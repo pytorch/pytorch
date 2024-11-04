@@ -6,7 +6,8 @@
 #include <memory>
 #include <string>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 /// Compiles script code into an executable graph.
 ///
@@ -31,4 +32,5 @@ namespace torch::jit {
 /// \endrst
 TORCH_API std::shared_ptr<CompilationUnit> compile(const std::string& source);
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

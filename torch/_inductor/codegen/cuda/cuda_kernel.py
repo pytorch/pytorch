@@ -16,13 +16,7 @@ from ...ir import (
 )
 from ...utils import sympy_product
 from ...virtualized import V
-from ..common import (
-    IndentedBuffer,
-    Kernel,
-    OpOverrides,
-    WorkspaceArg,
-    WorkspaceZeroMode,
-)
+from ..common import IndentedBuffer, Kernel, OpOverrides
 from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
 
 
@@ -203,19 +197,14 @@ class CUDATemplateKernel(CUDAKernel):
             arg_types.append("size_t*")
 
         if node.get_workspace_size() > 0:
-            ws = WorkspaceArg(
-                count=node.get_workspace_size(),
-                device=V.graph.get_current_device_or_throw(),
-                zero_mode=WorkspaceZeroMode.UNINITIALIZED,
-                outer_name=WorkspaceArg.unique_name(),
+            wrapper.generate_workspace_allocation(
+                node.get_workspace_size(), V.graph.scheduler.current_device, False
             )
-            wrapper.generate_workspace_allocation(ws)
-            data_ptr = f"{ws.outer_name}.data_ptr()"
+            data_ptr = "workspace.data_ptr()"
             call_args.append(
                 data_ptr if V.graph.cpp_wrapper else f"c_void_p({data_ptr})"
             )
         else:
-            ws = None
             call_args.append("nullptr" if V.graph.cpp_wrapper else "None")
         if V.graph.cpp_wrapper:
             arg_types.append("uint8_t*")
@@ -227,8 +216,8 @@ class CUDATemplateKernel(CUDAKernel):
             triton=False,
             arg_types=arg_types,
         )
-        if ws:
-            wrapper.generate_workspace_deallocation(ws)
+        if node.get_workspace_size() > 0:
+            wrapper.writeline(wrapper.make_free_by_names(["workspace"]))
 
     def dtype(self, node: IRNode) -> Optional[str]:
         """

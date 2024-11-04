@@ -11,7 +11,8 @@
 #include <cmath>
 #include <functional>
 
-namespace torch::optim {
+namespace torch {
+namespace optim {
 
 AdamOptions::AdamOptions(double lr) : lr_(lr) {}
 
@@ -180,4 +181,5 @@ void Adam::load(serialize::InputArchive& archive) {
     }
   }
 }
-} // namespace torch::optim
+} // namespace optim
+} // namespace torch

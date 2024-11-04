@@ -9,15 +9,17 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
-namespace torch::serialize {
+namespace torch {
+namespace serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace torch::serialize
+} // namespace serialize
+} // namespace torch
 
-namespace torch::optim {
+namespace torch {
+namespace optim {
 
 struct TORCH_API RMSpropOptions
     : public OptimizerCloneableOptions<RMSpropOptions> {
@@ -57,9 +59,11 @@ struct TORCH_API RMSpropParamState
 class TORCH_API RMSprop : public Optimizer {
  public:
   explicit RMSprop(
-      const std::vector<OptimizerParamGroup>& param_groups,
+      std::vector<OptimizerParamGroup> param_groups,
       RMSpropOptions defaults = {})
-      : Optimizer(param_groups, std::make_unique<RMSpropOptions>(defaults)) {
+      : Optimizer(
+            std::move(param_groups),
+            std::make_unique<RMSpropOptions>(defaults)) {
     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
     TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
     TORCH_CHECK(
@@ -75,8 +79,7 @@ class TORCH_API RMSprop : public Optimizer {
   }
 
   explicit RMSprop(std::vector<Tensor> params, RMSpropOptions defaults = {})
-      : RMSprop({OptimizerParamGroup(std::move(params))}, std::move(defaults)) {
-  }
+      : RMSprop({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;
@@ -88,4 +91,5 @@ class TORCH_API RMSprop : public Optimizer {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(RMSprop);
   }
 };
-} // namespace torch::optim
+} // namespace optim
+} // namespace torch

@@ -9,7 +9,8 @@
 
 #include <functional>
 
-namespace torch::optim {
+namespace torch {
+namespace optim {
 
 RMSpropOptions::RMSpropOptions(double lr) : lr_(lr) {}
 
@@ -177,4 +178,5 @@ void RMSprop::load(serialize::InputArchive& archive) {
     }
   }
 }
-} // namespace torch::optim
+} // namespace optim
+} // namespace torch

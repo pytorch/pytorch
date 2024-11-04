@@ -257,7 +257,7 @@ namespace torch::gdb {
 // call free than delete[] from withing gdb.
 // Currently the code for computing the repr of a tensor is written in Python,
 // so we need to wrap the Tensor into a Python object first.
-char* tensor_repr(const at::Tensor& tensor) {
+char* tensor_repr(at::Tensor tensor) {
   PyGILState_STATE gil = PyGILState_Ensure();
   PyObject* pytensor = nullptr;
   PyObject* repr = nullptr;
@@ -272,7 +272,8 @@ char* tensor_repr(const at::Tensor& tensor) {
   // observed that sometimes gdb passes the outer Tensor address exactly as is
   // into this function.
   // See https://github.com/pytorch/pytorch/issues/134762
-  pytensor = THPVariable_Wrap(std::move(tensor));
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  pytensor = THPVariable_Wrap(tensor);
   if (!pytensor)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;

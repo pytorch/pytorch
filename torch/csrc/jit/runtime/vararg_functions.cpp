@@ -130,7 +130,7 @@ void format(Stack& stack, size_t num_inputs) {
     }
     ss << format.substr(begin, loc - begin);
     if (used_args >= args.size()) {
-      TORCH_CHECK(false, "Too few arguments for format string: ", format);
+      AT_ERROR("Too few arguments for format string: ", format);
     }
     ss << args[used_args];
     begin = loc + 2;

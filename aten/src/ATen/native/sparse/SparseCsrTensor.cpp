@@ -459,7 +459,7 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
      std::optional<Device> device,
      std::optional<bool> pin_memory) {
   if (!layout) {
-    TORCH_CHECK(false, "sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
+    AT_ERROR("sparse_compressed_tensor_unsafe expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
@@ -587,7 +587,7 @@ Tensor sparse_compressed_tensor(
     std::optional<bool> pin_memory) {
 
   if (!layout) {
-    TORCH_CHECK(false, "sparse_compressed_tensor expected sparse compressed tensor layout but got none");
+    AT_ERROR("sparse_compressed_tensor expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});
@@ -616,7 +616,7 @@ Tensor sparse_compressed_tensor(
     std::optional<bool> pin_memory) {
 
   if (!layout) {
-    TORCH_CHECK(false, "sparse_compressed_tensor expected sparse compressed tensor layout but got none");
+    AT_ERROR("sparse_compressed_tensor expected sparse compressed tensor layout but got none");
   }
   Layout layout_ = layout.value();
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor", [&]{});

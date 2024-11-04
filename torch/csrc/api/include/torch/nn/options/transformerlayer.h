@@ -5,7 +5,8 @@
 #include <torch/enum.h>
 #include <torch/types.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 using activation_t = std::variant<
     enumtype::kReLU,
@@ -67,4 +68,5 @@ struct TORCH_API TransformerDecoderLayerOptions {
   TORCH_ARG(activation_t, activation) = torch::kReLU;
 };
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

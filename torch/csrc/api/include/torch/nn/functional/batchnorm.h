@@ -4,7 +4,9 @@
 #include <torch/nn/options/batchnorm.h>
 #include <torch/types.h>
 
-namespace torch::nn::functional {
+namespace torch {
+namespace nn {
+namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -76,4 +78,6 @@ inline Tensor batch_norm(
       options.eps());
 }
 
-} // namespace torch::nn::functional
+} // namespace functional
+} // namespace nn
+} // namespace torch

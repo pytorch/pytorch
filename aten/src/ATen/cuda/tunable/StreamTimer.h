@@ -18,7 +18,7 @@ namespace at::cuda::tunable {
 class StreamTimer : public ITimer {
   public:
     StreamTimer();
-    ~StreamTimer() override;
+    virtual ~StreamTimer() override;
 
     void Start() override;
 

@@ -39,6 +39,8 @@ torch.fx.experimental.symbolic_shapes
     definitely_true
     definitely_false
     guard_size_oblivious
+    parallel_or
+    parallel_and
     sym_eq
     constrain_range
     constrain_unify

@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <memory>
+#include <string>
 #include <string_view>
 
 #include <c10/macros/Macros.h>
@@ -60,7 +61,7 @@ class C10_API WaitCounterHandle {
 
     void stop() {
       if (auto handle = std::exchange(handle_, nullptr)) {
-        handle->stop(ctxs_);
+        handle->stop(std::move(ctxs_));
       }
     }
 
@@ -80,9 +81,8 @@ class C10_API WaitCounterHandle {
  private:
   // Stops the waiter. Each start() call should be matched by exactly one stop()
   // call.
-  void stop(const SmallVector<intptr_t>& ctxs);
+  void stop(SmallVector<intptr_t>&& ctxs);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   detail::WaitCounterImpl& impl_;
 };
 } // namespace c10::monitor

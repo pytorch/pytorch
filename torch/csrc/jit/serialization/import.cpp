@@ -264,7 +264,7 @@ Module ScriptModuleDeserializer::deserialize(
     }
   }
   if (reader_->hasRecord("model.json") && code_prefix_ == "code/") {
-    TORCH_CHECK(false, "Legacy model format is not supported on mobile.");
+    AT_ERROR("Legacy model format is not supported on mobile.");
   }
   auto tuple = readArchive("constants").toTuple();
   for (auto constant : tuple->elements()) {

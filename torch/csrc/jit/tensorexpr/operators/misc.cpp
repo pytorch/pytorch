@@ -12,7 +12,7 @@ int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
   }
 
   if (idx < 0 || idx >= list_size) {
-    TORCH_CHECK(false, "Invalid index ", idx, " for list_size", list_size);
+    AT_ERROR("Invalid index ", idx, " for list_size", list_size);
   }
   return idx;
 }

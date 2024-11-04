@@ -10,12 +10,15 @@
 #include <utility>
 #include <vector>
 
-namespace torch::serialize {
+namespace torch {
+namespace serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace torch::serialize
+} // namespace serialize
+} // namespace torch
 
-namespace torch::optim {
+namespace torch {
+namespace optim {
 
 struct TORCH_API SGDOptions : public OptimizerCloneableOptions<SGDOptions> {
   SGDOptions(double lr);
@@ -50,9 +53,11 @@ struct TORCH_API SGDParamState
 class TORCH_API SGD : public Optimizer {
  public:
   explicit SGD(
-      const std::vector<OptimizerParamGroup>& param_groups,
+      std::vector<OptimizerParamGroup> param_groups,
       SGDOptions defaults)
-      : Optimizer(param_groups, std::make_unique<SGDOptions>(defaults)) {
+      : Optimizer(
+            std::move(param_groups),
+            std::make_unique<SGDOptions>(defaults)) {
     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
     TORCH_CHECK(
         defaults.momentum() >= 0,
@@ -69,7 +74,7 @@ class TORCH_API SGD : public Optimizer {
   }
 
   explicit SGD(std::vector<Tensor> params, SGDOptions defaults)
-      : SGD({OptimizerParamGroup(std::move(params))}, std::move(defaults)) {}
+      : SGD({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
 
@@ -82,4 +87,5 @@ class TORCH_API SGD : public Optimizer {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(SGD);
   }
 };
-} // namespace torch::optim
+} // namespace optim
+} // namespace torch

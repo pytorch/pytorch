@@ -34,8 +34,6 @@ class DeviceGuard {
       const impl::DeviceGuardImplInterface* impl)
       : guard_(device, impl) {}
 
-  ~DeviceGuard() = default;
-
   /// Copy is disallowed
   DeviceGuard(const DeviceGuard&) = delete;
   DeviceGuard& operator=(const DeviceGuard&) = delete;
@@ -145,7 +143,6 @@ class OptionalDeviceGuard {
       const impl::DeviceGuardImplInterface* impl)
       : guard_(device, impl) {}
 
-  ~OptionalDeviceGuard() = default;
   /// Copy is disallowed
   OptionalDeviceGuard(const OptionalDeviceGuard&) = delete;
   OptionalDeviceGuard& operator=(const OptionalDeviceGuard&) = delete;

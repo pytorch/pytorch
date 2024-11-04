@@ -6,7 +6,8 @@
 
 #include <torch/csrc/Export.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ PixelShuffle
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -83,4 +84,5 @@ struct TORCH_API PixelUnshuffleImpl
 /// to learn about PyTorch's module storage semantics.
 TORCH_MODULE(PixelUnshuffle);
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

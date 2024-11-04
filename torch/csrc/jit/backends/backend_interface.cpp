@@ -1,8 +1,10 @@
 #include <torch/csrc/jit/backends/backend_interface.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 PyTorchBackendInterface::PyTorchBackendInterface() noexcept = default;
 PyTorchBackendInterface::~PyTorchBackendInterface() = default;
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -21,18 +21,14 @@ namespace native {
 // See Note [ATen preprocessor philosophy]
 
 Tensor cudnn_grid_sampler_forward(const Tensor& input_t, const Tensor& grid_t) {
-  TORCH_CHECK(
-      false,
-      "cudnn_grid_sampler_forward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_grid_sampler_forward: ATen not compiled with cuDNN support");
 }
 
 std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
     const Tensor& input_t,
     const Tensor& grid_t,
     const Tensor& grad_output_t) {
-  TORCH_CHECK(
-      false,
-      "cudnn_grid_sampler_backward: ATen not compiled with cuDNN support");
+  AT_ERROR("cudnn_grid_sampler_backward: ATen not compiled with cuDNN support");
 }
 
 } // namespace native

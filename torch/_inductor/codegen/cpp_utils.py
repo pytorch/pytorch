@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-import dataclasses
+import copy
 import functools
 import math
 import sys
@@ -176,14 +176,10 @@ def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
 
 
 class CppCSEVariable(CSEVariable):
-    def __init__(
-        self,
-        name,
-        bounds: ValueRanges[Any],
-        dtype: Optional[torch.dtype] = None,
-    ) -> None:
-        super().__init__(name, bounds, dtype)
+    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
+        super().__init__(name, bounds)
         self.is_vec = False
+        self.dtype: Optional[torch.dtype] = None
         self.dependent_itervars: Set[sympy.Symbol] = set()
 
     def __repr__(self) -> str:
@@ -656,12 +652,7 @@ class LocalBufferContext:
         def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node
             assert isinstance(loops, ir.Loops)
-            new_inner_fn = self.localize_function(
-                loops.inner_fn,
-                rewrite_index,
-            )
-
-            new_loops = dataclasses.replace(loops, inner_fn=new_inner_fn)
+            new_loops = copy.copy(loops)
             if isinstance(node, ir.ComputedBuffer):
                 new_node = ir.ComputedBuffer(
                     name=node.get_name(), layout=node.get_layout(), data=new_loops
@@ -669,6 +660,10 @@ class LocalBufferContext:
             else:
                 new_node = new_loops  # type: ignore[assignment]
 
+            new_loops.inner_fn = self.localize_function(
+                new_loops.inner_fn,
+                rewrite_index,
+            )
             return new_node
 
         return [wrap_inner_fn_for_node(node) for node in nodes]

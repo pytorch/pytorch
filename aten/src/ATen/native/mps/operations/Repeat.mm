@@ -86,27 +86,20 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 }
 
 static mps::MetalShaderLibrary lib(R"METAL_REPEAT(
-template<typename T>
-kernel void repeat_interleave(
-    constant T     * repeat_ptr    [[buffer(0)]],
-    constant int64_t * cumsum_ptr  [[buffer(1)]],
-    device T       * result_ptr    [[buffer(2)]],
-    uint               tid         [[thread_position_in_grid]]) {
+kernel void repeat_interleave(constant {0}     * repeat_ptr                [[buffer(0)]],
+                              constant int64_t * cumsum_ptr                [[buffer(1)]],
+                              device {0}       * result_ptr                [[buffer(2)]],
+                              uint               threads_per_threadgroup   [[threads_per_threadgroup]],
+                              uint               tid                       [[thread_position_in_grid]]) {{
   int64_t end = cumsum_ptr[tid];
-  T repeat = repeat_ptr[tid];
+  {0} repeat = repeat_ptr[tid];
   int64_t start = end - repeat;
-  for (uint j = start; j < end; j++) {
+  for (uint j = start; j < end; j++) {{
     result_ptr[j] = tid;
-  }
-}
-
-template [[host_name("repeat_interleave_int32_t")]]
-kernel void repeat_interleave<int32_t>(constant int32_t*, constant int64_t*, device int32_t*, uint);
-
-template [[host_name("repeat_interleave_int64_t")]]
-kernel void repeat_interleave<int64_t>(constant int64_t*, constant int64_t*, device int64_t*, uint);
-
-)METAL_REPEAT");
+  }}
+}}
+)METAL_REPEAT",
+                                   1);
 
 template <typename index_t>
 void computeRepeatIndices(const index_t* repeat_ptr,
@@ -120,9 +113,9 @@ void computeRepeatIndices(const index_t* repeat_ptr,
   TORCH_CHECK(repeatBuffer && cumsumBuffer && resultBuffer);
 
   std::string scalar_type;
-  if constexpr (std::is_same_v<index_t, int32_t>) {
+  if (typeid(index_t) == typeid(int32_t)) {
     scalar_type = "int32_t";
-  } else if constexpr (std::is_same_v<index_t, int64_t>) {
+  } else if (typeid(index_t) == typeid(int64_t)) {
     scalar_type = "int64_t";
   } else {
     TORCH_CHECK(false, "repeat_interleave: unsupported indexing data type");
@@ -131,8 +124,8 @@ void computeRepeatIndices(const index_t* repeat_ptr,
   MPSStream* mpsStream = getCurrentMPSStream();
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
-      auto computeEncoder = mpsStream->commandEncoder();
-      auto pipelineState = lib.getPipelineStateForFunc(fmt::format("repeat_interleave_{}", scalar_type));
+      id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
+      id<MTLComputePipelineState> pipelineState = lib.getPipelineStateForFunc("repeat_interleave", {scalar_type});
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(pipelineState, "repeat_interleave:" + scalar_type, false);

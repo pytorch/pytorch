@@ -1,5 +1,6 @@
 #include <torch/nn/init.h>
 
+#include <torch/linalg.h>
 #include <torch/types.h>
 #include <torch/utils.h>
 
@@ -54,11 +55,11 @@ double calculate_kaiming_std(
 
 double calculate_gain(NonlinearityType nonlinearity, double param) {
   if (std::holds_alternative<enumtype::kTanh>(nonlinearity)) {
-    return 5.0 / 3.0;
+    return 5.0 / 3.0; // NOLINT
   } else if (std::holds_alternative<enumtype::kReLU>(nonlinearity)) {
-    return std::sqrt(2.0);
+    return std::sqrt(2.0); // NOLINT
   } else if (std::holds_alternative<enumtype::kLeakyReLU>(nonlinearity)) {
-    return std::sqrt(2.0 / (1 + pow(param, 2)));
+    return std::sqrt(2.0 / (1 + pow(param, 2))); // NOLINT
   }
 
   return 1.0;
@@ -82,7 +83,6 @@ Tensor dirac_(Tensor tensor) {
 
   tensor.zero_();
   for (const auto d : c10::irange(min_dim)) {
-    // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
     switch (tensor.ndimension()) {
       case 3: // Temporal convolution
         tensor[d][d][sizes[2] / 2] = 1;
@@ -134,7 +134,7 @@ Tensor orthogonal_(Tensor tensor, double gain) {
   }
 
   // Compute the qr factorization
-  auto [q, r] = torch::linalg_qr(flattened);
+  auto [q, r] = torch::linalg::qr(flattened);
   // Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
   auto d = torch::diag(r, 0);
   auto ph = d.sign();
@@ -158,7 +158,7 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
 
   const auto rows = tensor.size(0);
   const auto columns = tensor.size(1);
-  const int64_t num_zeros = std::ceil(sparsity * static_cast<double>(rows));
+  const int64_t num_zeros = std::ceil(sparsity * rows);
   tensor.normal_(0, std);
   for (const auto column : c10::irange(columns)) {
     auto row_indices = torch::randperm(rows, tensor.options().dtype(kLong));
@@ -207,16 +207,16 @@ Tensor xavier_normal_(Tensor tensor, double gain) {
   NoGradGuard guard;
 
   Fan fan(tensor);
-  const auto std =
-      gain * std::sqrt(2.0 / static_cast<double>(fan.in + fan.out));
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+  const auto std = gain * std::sqrt(2.0 / (fan.in + fan.out));
   return tensor.normal_(0, std);
 }
 
 Tensor xavier_uniform_(Tensor tensor, double gain) {
   NoGradGuard guard;
   Fan fan(tensor);
-  const auto std =
-      gain * std::sqrt(2.0 / static_cast<double>(fan.in + fan.out));
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+  const auto std = gain * std::sqrt(2.0 / (fan.in + fan.out));
   // Calculate uniform bounds from standard deviation with
   const auto a = std::sqrt(3.0) * std;
   return tensor.uniform_(-a, a);
@@ -243,7 +243,7 @@ std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(
   } else {
     const auto num_input_fmaps = tensor.size(1);
     const auto num_output_fmaps = tensor.size(0);
-    int64_t receptive_field_size = 1;
+    auto receptive_field_size = 1;
     if (tensor.dim() > 2) {
       receptive_field_size = tensor[0][0].numel();
     }

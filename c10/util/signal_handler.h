@@ -27,11 +27,6 @@ class C10_API SignalHandler {
 
   // Constructor. Specify what action to take when a signal is received.
   SignalHandler(Action SIGINT_action, Action SIGHUP_action);
-
-  SignalHandler(const SignalHandler&) = delete;
-  SignalHandler(SignalHandler&&) = delete;
-  SignalHandler& operator=(const SignalHandler&) = delete;
-  SignalHandler& operator=(SignalHandler&&) = delete;
   ~SignalHandler();
 
   Action CheckForSignals();
@@ -54,11 +49,7 @@ class C10_API FatalSignalHandler {
   C10_API void setPrintStackTracesOnFatalSignal(bool print);
   C10_API bool printStackTracesOnFatalSignal();
   static FatalSignalHandler& getInstance();
-  FatalSignalHandler(const FatalSignalHandler&) = delete;
-  FatalSignalHandler(FatalSignalHandler&&) = delete;
-  FatalSignalHandler& operator=(const FatalSignalHandler&) = delete;
-  FatalSignalHandler& operator=(FatalSignalHandler&&) = delete;
-  virtual ~FatalSignalHandler() = default;
+  virtual ~FatalSignalHandler();
 
  protected:
   explicit FatalSignalHandler();

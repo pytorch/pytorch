@@ -10,7 +10,6 @@
 #pragma once
 
 #include <c10/util/CallOnce.h>
-#include <c10/util/StringUtil.h>
 
 #include <fstream>
 #include <functional>
@@ -18,9 +17,11 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace at::cuda::tunable {
 
@@ -33,11 +34,11 @@ struct MaybeDelete {
 
 using OstreamPtr = std::unique_ptr<std::ostream, MaybeDelete>;
 
-inline OstreamPtr get_stream(const std::string& filename) {
-  if (filename == "out") {
+static OstreamPtr get_stream(std::string filename) {
+  if (filename.compare("out") == 0) {
     return OstreamPtr { &std::cout, MaybeDelete {false} };
   }
-  else if (filename == "err") {
+  else if (filename.compare("err") == 0) {
     return OstreamPtr { &std::cerr, MaybeDelete {false} };
   }
   else {
@@ -71,7 +72,7 @@ enum TORCH_CUDA_CPP_API TuningStatus {
 // Mapping from params signature to kernel id
 class TORCH_CUDA_CPP_API ResultEntry {
   public:
-    explicit ResultEntry(std::string  key, double time) : key_(std::move(key)), time_(time) {}
+    explicit ResultEntry(const std::string& key, double time) : key_(key), time_(time) {}
     bool operator==(const ResultEntry& other) { return key_ == other.key_; }
     bool operator!=(const ResultEntry& other) { return key_ != other.key_; }
     operator std::string () { return key_; }
@@ -107,7 +108,7 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     ResultEntry Lookup(const std::string& op_signature, const std::string& params_signature);
 
-    void AddImpl(const std::string& op_signature,
+    inline void AddImpl(const std::string& op_signature,
         const std::string& params_signature,
         ResultEntry best,
         KernelMap& kernel_map);
@@ -118,7 +119,7 @@ class TORCH_CUDA_CPP_API TuningResultsManager {
 
     void Delete(const std::string& op_signature, const std::string& params_signature);
 
-    void DisjointMergeImpl(
+    inline void DisjointMergeImpl(
         const std::string& op_signature,
         const KernelMap& kernel_map,
         /*out*/ ResultsMap& results);
@@ -153,7 +154,7 @@ class TORCH_CUDA_CPP_API TuningResultsValidator {
     void RegisterValidator(const std::string& key, const GetFunc& gf, const ValidateFunc& vf);
 
   protected:
-    static std::string GetPyTorchVersion() ;
+    std::string GetPyTorchVersion() const;
     TuningStatus ValidatePyTorchVersion(const std::string& value) const;
 
   public:

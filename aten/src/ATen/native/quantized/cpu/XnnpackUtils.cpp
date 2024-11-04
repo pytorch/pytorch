@@ -5,7 +5,9 @@
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
 #include <c10/util/irange.h>
 
-namespace at::native::xnnp_utils {
+namespace at {
+namespace native {
+namespace xnnp_utils {
 
 std::vector<size_t> get_mem_format_aware_shape(const at::Tensor& in) {
   const auto mem_format = in.suggest_memory_format();
@@ -31,7 +33,7 @@ std::vector<size_t> get_mem_format_aware_shape(const at::Tensor& in) {
 template <typename PT>
 void q8_copy_int8_weight_and_add_offset(const at::Tensor& in, at::Tensor& out) {
   using T = typename PT::underlying;
-  static constexpr auto offset = std::is_same_v<T, uint8_t> ? 128 : 0;
+  static constexpr auto offset = std::is_same<T, uint8_t>::value ? 128 : 0;
   TORCH_CHECK(
       in.scalar_type() == c10::kQInt8,
       "q8_copy_int8_weight_and_add_offset: Expected input weight data type ",
@@ -80,6 +82,8 @@ Tensor convert_conv_weights_to_channel_last_tensor<2>(
                    // 2d conv weight transform
                    : src.contiguous(c10::MemoryFormat::ChannelsLast);
 }
-} // namespace at::native::xnnp_utils
+} // namespace xnnp_utils
+} // namespace native
+} // namespace at
 
 #endif // USE_XNNPACK

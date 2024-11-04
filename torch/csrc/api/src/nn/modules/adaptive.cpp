@@ -42,7 +42,7 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
   cutoffs.push_back(options.n_classes());
 
   shortlist_size = cutoffs[0];
-  n_clusters = static_cast<int64_t>(cutoffs.size() - 1);
+  n_clusters = cutoffs.size() - 1;
   head_size = shortlist_size + n_clusters;
 
   head = this->register_module(
@@ -53,8 +53,7 @@ void AdaptiveLogSoftmaxWithLossImpl::reset() {
 
   for (const auto i : c10::irange(n_clusters)) {
     int64_t hsz = static_cast<int64_t>(std::floor(
-        static_cast<double>(options.in_features()) /
-        std::pow(options.div_value(), (i + 1))));
+        options.in_features() / std::pow(options.div_value(), (i + 1))));
     int64_t osz = cutoffs[i + 1] - cutoffs[i];
 
     Sequential projection(
@@ -129,7 +128,7 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(
 
       const Tensor cluster_output =
           tail[i - 1]->as<Sequential>()->forward(input_subset);
-      int64_t cluster_index = shortlist_size + static_cast<int64_t>(i) - 1;
+      int64_t cluster_index = shortlist_size + i - 1;
 
       gather_inds.index_fill_(0, row_indices, cluster_index);
 

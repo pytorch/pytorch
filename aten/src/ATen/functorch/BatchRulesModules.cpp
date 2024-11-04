@@ -224,7 +224,7 @@ static Tensor one_hot_decomposition_hack(const Tensor &self, int64_t num_classes
     // but shape inference is not possible.
     if (self.sym_numel() == 0) {
         if (num_classes <= 0) {
-            TORCH_CHECK(false, "Can not infer total number of classes from empty tensor.");
+            AT_ERROR("Can not infer total number of classes from empty tensor.");
         } else {
             shape.emplace_back(num_classes);
             return at::empty_symint(shape, self.options());

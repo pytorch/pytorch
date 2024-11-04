@@ -8,7 +8,10 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/ScalarType.h>
 
-namespace torch::jit::mobile::nnc {
+namespace torch {
+namespace jit {
+namespace mobile {
+namespace nnc {
 
 // Specify the requirements on an input tensor.
 // TODO: support input tensor with dynamic shape (PR #54982)
@@ -19,10 +22,10 @@ struct TORCH_API InputSpec {
   explicit InputSpec(const c10::IValue& value);
 
   // Serialize the spec into an IValue.
-  [[nodiscard]] c10::IValue serialize() const;
+  C10_NODISCARD c10::IValue serialize() const;
 
   // Check whether the input tensor adheres to the spec.
-  [[nodiscard]] bool validate(const at::Tensor& input) const;
+  C10_NODISCARD bool validate(const at::Tensor& input) const;
 
   std::vector<int64_t> sizes_;
   c10::ScalarType dtype_{c10::ScalarType::Undefined};
@@ -37,10 +40,10 @@ struct TORCH_API OutputSpec {
   explicit OutputSpec(const c10::IValue& value);
 
   // Serialize the spec into an IValue.
-  [[nodiscard]] c10::IValue serialize() const;
+  C10_NODISCARD c10::IValue serialize() const;
 
   // Allocate an output tensor in accordance with the spec.
-  [[nodiscard]] at::Tensor allocate() const;
+  C10_NODISCARD at::Tensor allocate() const;
 
   std::vector<int64_t> sizes_;
   c10::ScalarType dtype_{c10::ScalarType::Undefined};
@@ -81,7 +84,7 @@ struct TORCH_API MemoryPlan {
 
   explicit MemoryPlan(const c10::IValue& value);
 
-  [[nodiscard]] c10::IValue serialize() const;
+  C10_NODISCARD c10::IValue serialize() const;
 
   void allocate(ExecutionState* state) const;
 
@@ -204,10 +207,10 @@ class TORCH_API CompilationUnit {
   // Serialize all registered functions into an IValue. The IValue will be save
   // into the compiled TorchScript model file ahead-of-time on the host, and
   // will be deserialized at runtime on the target device.
-  [[nodiscard]] c10::IValue serialize() const;
+  C10_NODISCARD c10::IValue serialize() const;
 
   // Execute a registered function.
-  [[nodiscard]] c10::impl::GenericList run(
+  C10_NODISCARD c10::impl::GenericList run(
       const c10::QualifiedName& function_name,
       const c10::impl::GenericList& inputs) const;
 
@@ -215,9 +218,12 @@ class TORCH_API CompilationUnit {
   void register_function(std::unique_ptr<Function> fn);
 
  private:
-  [[nodiscard]] Function* find_function(const c10::QualifiedName& qn) const;
+  C10_NODISCARD Function* find_function(const c10::QualifiedName& qn) const;
 
   std::unordered_map<c10::QualifiedName, std::unique_ptr<Function>> functions_;
 };
 
-} // namespace torch::jit::mobile::nnc
+} // namespace nnc
+} // namespace mobile
+} // namespace jit
+} // namespace torch

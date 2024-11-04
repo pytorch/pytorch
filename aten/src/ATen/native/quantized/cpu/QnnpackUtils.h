@@ -428,7 +428,9 @@ inline std::pair<T, T> activationLimits(
   }
 }
 
-namespace at::native::qnnp_avgpool_helper {
+namespace at {
+namespace native {
+namespace qnnp_avgpool_helper {
 Tensor qnnpack_avg_pool2d(
     Tensor input,
     IntArrayRef kernel_size,
@@ -437,10 +439,12 @@ Tensor qnnpack_avg_pool2d(
     bool ceil_mode,
     bool count_include_pad,
     std::optional<int64_t> divisor_override);
-} // namespace at::native::qnnp_avgpool_helper
+} // qnnp_avgpool_helper
+} // namespace native
+} // namespace at
 
 namespace {
-[[maybe_unused]] std::vector<float> generate_requantization_scales(
+C10_UNUSED std::vector<float> generate_requantization_scales(
     const at::Tensor& weight_scales,
     const float input_scale,
     const float output_scale,
@@ -464,11 +468,11 @@ namespace {
   return requant_scales;
 }
 
-[[maybe_unused]] std::pair<std::vector<uint8_t>, at::Tensor>
-make_zero_points_and_scales_tensor(
+C10_UNUSED std::pair<std::vector<uint8_t>, at::Tensor> make_zero_points_and_scales_tensor(
     const at::Tensor& weight_contig,
     bool transpose = false,
-    uint32_t groups = 1) {
+    uint32_t groups = 1
+  ) {
   const int out_ch_idx = transpose ? 1 : 0;
   const auto num_output_channels = weight_contig.size(out_ch_idx) * (transpose ? groups : 1);
   // Add 8 to account for bufferring needed by QNNPACK.

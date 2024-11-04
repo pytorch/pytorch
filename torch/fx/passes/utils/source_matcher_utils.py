@@ -1,21 +1,19 @@
-import logging
-import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type
-
-from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.node import Node
+from torch.fx._compatibility import compatibility
+from typing import Dict, List, Any, Type, Optional, Callable
+import logging
+import os
 
 
-__all__ = ["get_source_partitions", "check_subgraphs_connected", "SourcePartition"]
-
+__all__ = ['get_source_partitions', 'check_subgraphs_connected', 'SourcePartition']
 
 # Set`PYTORCH_MATCHER_LOGLEVEL=INFO` to see debug logs
 def _init_logger() -> logging.Logger:
     logger = logging.getLogger(__name__)
 
-    level = os.environ.get("PYTORCH_MATCHER_LOGLEVEL", "WARNING").upper()
+    level = os.environ.get('PYTORCH_MATCHER_LOGLEVEL', 'WARNING').upper()
     logger.setLevel(level)
     console = logging.StreamHandler()
     formatter = logging.Formatter("%(filename)s > %(message)s")
@@ -25,7 +23,6 @@ def _init_logger() -> logging.Logger:
     logger.addHandler(console)
     logger.propagate = False
     return logger
-
 
 logger = _init_logger()
 
@@ -80,15 +77,15 @@ def get_source_partitions(
         # be different from "source_fn_stack", for example for the add_ node
         # decomposed from batch norm. We should remove the check on "source_fn_stack"
         # after we fix "torch_fn". T199561090
-        if (source_fn_st := node.meta.get("source_fn_stack", None)) is None and (
-            torch_fn := node.meta.get("torch_fn", None)
-        ) is not None:
+        if ((source_fn_st := node.meta.get("source_fn_stack", None)) is None and
+           (torch_fn := node.meta.get("torch_fn", None)) is not None):
             node_fqn, source_fn = torch_fn
             source_fn_name = source_fn.split(".")[1]
             if source_fn_name in wanted_sources:
                 diff_modules = modules.setdefault(source_fn_name, {})
                 partition = diff_modules.setdefault(node_fqn, [])
                 partition.append(node)
+
 
         if (source_fn_st := node.meta.get("source_fn_stack", None)) is not None:
             source_fn = source_fn_st[-1]
@@ -143,9 +140,7 @@ def get_source_partitions(
 
 
 @compatibility(is_backward_compatible=False)  # type: ignore[misc]
-def check_subgraphs_connected(
-    subgraph1: SourcePartition, subgraph2: SourcePartition
-) -> bool:
+def check_subgraphs_connected(subgraph1: SourcePartition, subgraph2: SourcePartition) -> bool:
     """
     Given two subgraphs A and B (in the form of a list of nodes), checks if
     A has nodes connecting to at least one node in B -- aka there exists a node

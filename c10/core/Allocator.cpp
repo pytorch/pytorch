@@ -1,5 +1,4 @@
 #include <c10/core/Allocator.h>
-#include <array>
 
 #include <c10/util/ThreadLocalDebugInfo.h>
 
@@ -37,10 +36,10 @@ at::DataPtr InefficientStdFunctionContext::makeDataPtr(
       device};
 }
 
-static std::array<at::Allocator*, at::COMPILE_TIME_MAX_DEVICE_TYPES>
-    allocator_array{};
-static std::array<uint8_t, at::COMPILE_TIME_MAX_DEVICE_TYPES>
-    allocator_priority{};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+C10_API at::Allocator* allocator_array[at::COMPILE_TIME_MAX_DEVICE_TYPES];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
+C10_API uint8_t allocator_priority[at::COMPILE_TIME_MAX_DEVICE_TYPES] = {0};
 
 void SetAllocator(at::DeviceType t, at::Allocator* alloc, uint8_t priority) {
   if (priority >= allocator_priority[static_cast<int>(t)]) {
@@ -87,6 +86,8 @@ void reportOutOfMemoryToProfiler(
         alloc_size, total_allocated, total_reserved, device);
   }
 }
+
+MemoryReportingInfoBase::MemoryReportingInfoBase() = default;
 
 void MemoryReportingInfoBase::reportOutOfMemory(
     int64_t /*alloc_size*/,

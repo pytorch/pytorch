@@ -3,12 +3,11 @@ import abc
 from collections import namedtuple
 from typing import Optional
 
-from torch.fx._compatibility import compatibility
 from torch.fx.graph_module import GraphModule
+from torch.fx._compatibility import compatibility
 
 
-__all__ = ["PassResult", "PassBase"]
-
+__all__ = ['PassResult', 'PassBase']
 
 @compatibility(is_backward_compatible=False)
 class PassResult(namedtuple("PassResult", ["graph_module", "modified"])):
@@ -17,10 +16,8 @@ class PassResult(namedtuple("PassResult", ["graph_module", "modified"])):
         graph_module: The modified graph module
         modified: A flag for if the pass has modified the graph module
     """
-
     def __new__(cls, graph_module, modified):
         return super().__new__(cls, graph_module, modified)
-
 
 @compatibility(is_backward_compatible=False)
 class PassBase(abc.ABC):

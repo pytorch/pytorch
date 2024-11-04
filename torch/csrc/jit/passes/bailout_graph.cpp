@@ -102,7 +102,7 @@ struct BailOutGraphBuilderForNode {
       } else if (outer_node->kind() == prim::If) {
         buildBailOutIf(b->outputs(), outer_node);
       } else {
-        TORCH_CHECK(false, "Unexpected outer node");
+        AT_ERROR("Unexpected outer node");
       }
     }
   }

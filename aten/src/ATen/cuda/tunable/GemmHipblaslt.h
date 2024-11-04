@@ -310,7 +310,7 @@ static hipblasOperation_t _hipblasOpFromChar(char op) {
     case 'C':
       return HIPBLAS_OP_C;
   }
-  TORCH_CHECK(false,
+  AT_ERROR(
       "_hipblasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
@@ -323,7 +323,7 @@ static char _charFromhipblasOp(hipblasOperation_t op) {
     case HIPBLAS_OP_C:
       return 'C';
   }
-  TORCH_CHECK(false,
+  AT_ERROR(
       "_charFromhipblasOp input should be HIPBLAS_OP_N/T/C but got `", op, "`");
 }
 
@@ -339,9 +339,7 @@ static size_t GetHipblasltWorkspaceSize() {
   // 256MB is max workspace size allowed for hipblaslt
   // hipblaslt-bench uses 32MB
   // recommendation from hipblaslt author was 76MB
-  // TunableOp hipBLASLt workspace size is aligned with
-  // PyTorch's default in CUDABlas.cpp (_parseChosenWorkspaceSize)
-  size_t workspace_size = 76*1024;
+  size_t workspace_size = 32*1024;  // going with 32MB
   if (env) {
     try {
       workspace_size = std::stoi(env);

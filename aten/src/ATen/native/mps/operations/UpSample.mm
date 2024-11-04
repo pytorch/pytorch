@@ -76,7 +76,7 @@ static void upsample_out_template(const Tensor& input,
     centerResults = true;
     nearestRoundingMode = MPSGraphResizeNearestRoundingModeRoundPreferCeil;
   } else {
-    TORCH_CHECK(false, "Unsupported resize mode ", resize_mode_str);
+    AT_ERROR("Unsupported resize mode ", resize_mode_str);
   }
 
   const int64_t output_width = output_size.size() > 1 ? output_size[1] : output_size[0];

@@ -1,11 +1,9 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <torch/types.h>
 
-#include <utility>
-
-namespace torch::fft {
+namespace torch {
+namespace fft {
 
 /// Computes the 1 dimensional fast Fourier transform over a given dimension.
 /// See https://pytorch.org/docs/main/fft.html#torch.fft.fft.
@@ -20,7 +18,7 @@ inline Tensor fft(
     std::optional<SymInt> n = std::nullopt,
     int64_t dim = -1,
     std::optional<c10::string_view> norm = std::nullopt) {
-  return torch::fft_fft_symint(self, std::move(n), dim, norm);
+  return torch::fft_fft_symint(self, n, dim, norm);
 }
 
 /// Computes the 1 dimensional inverse Fourier transform over a given dimension.
@@ -36,7 +34,7 @@ inline Tensor ifft(
     std::optional<SymInt> n = std::nullopt,
     int64_t dim = -1,
     std::optional<c10::string_view> norm = std::nullopt) {
-  return torch::fft_ifft_symint(self, std::move(n), dim, norm);
+  return torch::fft_ifft_symint(self, n, dim, norm);
 }
 
 /// Computes the 2-dimensional fast Fourier transform over the given dimensions.
@@ -117,7 +115,7 @@ inline Tensor rfft(
     std::optional<SymInt> n = std::nullopt,
     int64_t dim = -1,
     std::optional<c10::string_view> norm = std::nullopt) {
-  return torch::fft_rfft_symint(self, std::move(n), dim, norm);
+  return torch::fft_rfft_symint(self, n, dim, norm);
 }
 
 /// Computes the inverse of torch.fft.rfft
@@ -136,7 +134,7 @@ inline Tensor irfft(
     std::optional<SymInt> n = std::nullopt,
     int64_t dim = -1,
     std::optional<c10::string_view> norm = std::nullopt) {
-  return torch::fft_irfft_symint(self, std::move(n), dim, norm);
+  return torch::fft_irfft_symint(self, n, dim, norm);
 }
 
 /// Computes the 2-dimensional FFT of real input. Returns a onesided Hermitian
@@ -220,7 +218,7 @@ inline Tensor hfft(
     std::optional<SymInt> n = std::nullopt,
     int64_t dim = -1,
     std::optional<c10::string_view> norm = std::nullopt) {
-  return torch::fft_hfft_symint(self, std::move(n), dim, norm);
+  return torch::fft_hfft_symint(self, n, dim, norm);
 }
 
 /// Computes the inverse FFT of a real-valued Fourier domain signal.
@@ -239,7 +237,7 @@ inline Tensor ihfft(
     std::optional<SymInt> n = std::nullopt,
     int64_t dim = -1,
     std::optional<c10::string_view> norm = std::nullopt) {
-  return torch::fft_ihfft_symint(self, std::move(n), dim, norm);
+  return torch::fft_ihfft_symint(self, n, dim, norm);
 }
 
 /// Computes the 2-dimensional FFT of a Hermitian symmetric input signal.
@@ -387,4 +385,5 @@ inline Tensor ifftshift(
   return torch::fft_ifftshift(x, dim);
 }
 
-} // namespace torch::fft
+} // namespace fft
+} // namespace torch

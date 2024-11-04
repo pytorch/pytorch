@@ -8,7 +8,8 @@
 
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Options for the `Upsample` module.
 ///
@@ -105,4 +106,5 @@ struct TORCH_API InterpolateFuncOptions {
 
 } // namespace functional
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

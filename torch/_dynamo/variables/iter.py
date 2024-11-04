@@ -172,8 +172,10 @@ class ItertoolsVariable(VariableTracker):
                     *args, mutable_local=MutableLocal()
                 )
 
+            from .builder import SourcelessBuilder
+
             return tx.inline_user_function_return(
-                VariableTracker.build(tx, polyfills.repeat), args, kwargs
+                SourcelessBuilder.create(tx, polyfills.repeat), args, kwargs
             )
         elif self.value is itertools.count:
             return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
@@ -275,7 +277,7 @@ class CycleIteratorVariable(IteratorVariable):
     def __init__(
         self,
         iterator: IteratorVariable,
-        saved: Optional[List[VariableTracker]] = None,
+        saved: List[VariableTracker] = None,
         saved_index: int = 0,
         item: Optional[VariableTracker] = None,
         **kwargs,

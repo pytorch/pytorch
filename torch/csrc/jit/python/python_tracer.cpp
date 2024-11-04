@@ -115,8 +115,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
         // method.
         auto out = func(**inputs_dict);
         if (out.ptr() == Py_None) {
-          TORCH_CHECK(
-              false,
+          AT_ERROR(
               "The traced function didn't return any values! Side-effects are not "
               "captured in traces, so it would be a no-op.");
         }
@@ -156,8 +155,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
         }
         auto out = func(*py_inputs);
         if (out.ptr() == Py_None) {
-          TORCH_CHECK(
-              false,
+          AT_ERROR(
               "The traced function didn't return any values! Side-effects are not "
               "captured in traces, so it would be a no-op.");
         }

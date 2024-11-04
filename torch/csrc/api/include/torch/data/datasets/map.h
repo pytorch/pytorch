@@ -9,10 +9,12 @@
 #include <type_traits>
 #include <utility>
 
-namespace torch::data::datasets {
+namespace torch {
+namespace data {
+namespace datasets {
 namespace detail {
 template <bool C, typename T>
-using optional_if_t = std::conditional_t<C, std::optional<T>, T>;
+using optional_if_t = typename std::conditional<C, torch::optional<T>, T>::type;
 } // namespace detail
 
 /// A `MapDataset` is a dataset that applies a transform to a source dataset.
@@ -101,14 +103,16 @@ MapDataset<DatasetType, TransformType> map(
     DatasetType dataset,
     TransformType transform) {
   static_assert(
-      std::is_same_v<
-          std::conditional_t<
+      std::is_same<
+          typename std::conditional<
               DatasetType::is_stateful,
               typename DatasetType::BatchType::value_type,
-              typename DatasetType::BatchType>,
-          typename TransformType::InputBatchType>,
+              typename DatasetType::BatchType>::type,
+          typename TransformType::InputBatchType>::value,
       "BatchType type of dataset does not match input type of transform");
   return {std::move(dataset), std::move(transform)};
 }
 
-} // namespace torch::data::datasets
+} // namespace datasets
+} // namespace data
+} // namespace torch

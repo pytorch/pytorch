@@ -2573,22 +2573,6 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
-    def test_cond_with_empty_operands(self):
-        @torch.compile(fullgraph=True)
-        def fn(x, y, z):
-            def true_fn():
-                return y + 2
-
-            def false_fn():
-                return z + 1
-
-            return torch.cond(x, true_fn, false_fn)
-
-        zeros = torch.zeros(1)
-        ones = torch.ones(1)
-        self.assertEqual(fn(zeros, ones, ones), torch.tensor([2.0]))
-        self.assertEqual(fn(ones, ones, ones), torch.tensor([3.0]))
-
     def test_hints_wrapper(self):
         def ref_fn(x, y):
             x = x + y
@@ -3818,10 +3802,10 @@ class GraphModule(torch.nn.Module):
         if torch._dynamo.config.inline_inbuilt_nn_modules:
             expected = """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_buffers_buffer_: "f32[1]", L_params_l1_bias_: "f32[1]", L_inputs_: "f32[1, 1]"):
+    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
         l_params_l1_weight_ = L_params_l1_weight_
-        l_buffers_buffer_ = L_buffers_buffer_
         l_params_l1_bias_ = L_params_l1_bias_
+        l_buffers_buffer_ = L_buffers_buffer_
         l_inputs_ = L_inputs_
 
         linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
@@ -6005,7 +5989,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.vmap(f)(x, y)
 
         actual = wrapper_fn(x, y)
-        expected = torch.compile(wrapper_fn, backend="aot_eager")(x, y)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
         self.assertEqual(some_list, [1, 1])

@@ -735,13 +735,9 @@ class FreeUnbackedSymbolsOpsHandler:
         return (None,) * num_values if num_values > 1 else None
 
     def masked(self, mask, body, other) -> None:
-        if callable(body):
-            # The body is typically a lambda which can make
-            # additional calls like ops.indirect_indexing.
-            try:
-                body()
-            except TypeError:
-                pass
+        assert callable(body), "masked body must always be callable."
+        # The body can make additional calls, for e.g. ops.indirect_indexing
+        body()
 
 
 def _typecheck_FreeUnbackedSymbolsOpsHandler(

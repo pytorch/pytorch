@@ -5,7 +5,8 @@
 #include <torch/csrc/api/include/torch/detail/TensorDataContainer.h>
 #include <algorithm>
 
-namespace torch::nested {
+namespace torch {
+namespace nested {
 
 /// Nested tensor
 ///
@@ -90,4 +91,5 @@ inline at::Tensor to_padded_tensor(
   return at::nested_to_padded_tensor(self, padding, output_size);
 }
 
-} // namespace torch::nested
+} // namespace nested
+} // namespace torch

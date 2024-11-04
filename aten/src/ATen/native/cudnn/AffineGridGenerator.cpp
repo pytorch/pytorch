@@ -25,8 +25,7 @@ Tensor cudnn_affine_grid_generator_forward(
     int64_t C,
     int64_t H,
     int64_t W) {
-  TORCH_CHECK(
-      false,
+  AT_ERROR(
       "cudnn_affine_grid_generator_forward: ATen not compiled with cuDNN support");
 }
 
@@ -36,8 +35,7 @@ Tensor cudnn_affine_grid_generator_backward(
     int64_t C,
     int64_t H,
     int64_t W) {
-  TORCH_CHECK(
-      false,
+  AT_ERROR(
       "cudnn_affine_grid_generator_backward: ATen not compiled with cuDNN support");
 }
 

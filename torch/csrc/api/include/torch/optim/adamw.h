@@ -7,12 +7,15 @@
 #include <utility>
 #include <vector>
 
-namespace torch::serialize {
+namespace torch {
+namespace serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace torch::serialize
+} // namespace serialize
+} // namespace torch
 
-namespace torch::optim {
+namespace torch {
+namespace optim {
 
 struct TORCH_API AdamWOptions : public OptimizerCloneableOptions<AdamWOptions> {
   AdamWOptions(double lr = 1e-3);
@@ -51,9 +54,11 @@ struct TORCH_API AdamWParamState
 class TORCH_API AdamW : public Optimizer {
  public:
   explicit AdamW(
-      const std::vector<OptimizerParamGroup>& param_groups,
+      std::vector<OptimizerParamGroup> param_groups,
       AdamWOptions defaults = {})
-      : Optimizer(param_groups, std::make_unique<AdamWOptions>(defaults)) {
+      : Optimizer(
+            std::move(param_groups),
+            std::make_unique<AdamWOptions>(defaults)) {
     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
     TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
     auto betas = defaults.betas();
@@ -71,7 +76,7 @@ class TORCH_API AdamW : public Optimizer {
         defaults.weight_decay());
   }
   explicit AdamW(std::vector<Tensor> params, AdamWOptions defaults = {})
-      : AdamW({OptimizerParamGroup(std::move(params))}, std::move(defaults)) {}
+      : AdamW({OptimizerParamGroup(std::move(params))}, defaults) {}
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;
@@ -83,4 +88,5 @@ class TORCH_API AdamW : public Optimizer {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(AdamW);
   }
 };
-} // namespace torch::optim
+} // namespace optim
+} // namespace torch

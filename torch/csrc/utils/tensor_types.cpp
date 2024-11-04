@@ -60,7 +60,7 @@ const char* backend_to_string(const at::Backend& backend) {
     case at::Backend::Meta:
       return "torch.meta";
     default:
-      TORCH_CHECK(false, "Unimplemented backend ", backend);
+      AT_ERROR("Unimplemented backend ", backend);
   }
 }
 

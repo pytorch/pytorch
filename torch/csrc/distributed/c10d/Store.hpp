@@ -75,7 +75,6 @@ class TORCH_API Store : public torch::CustomClassHolder {
   // watchKey() is deprecated and no longer supported.
   virtual void watchKey(
       const std::string& /* unused */,
-      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       WatchKeyCallback /* unused */) {
     TORCH_CHECK(false, "watchKey is deprecated, no implementation support it.");
   }

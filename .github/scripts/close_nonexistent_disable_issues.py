@@ -3,37 +3,26 @@ import json
 import multiprocessing as mp
 import os
 import re
-import sys
 import tempfile
-from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+import rockset  # type: ignore[import]
 from gitutils import retries_decorator
-
-
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(REPO_ROOT))
-from tools.testing.clickhouse import query_clickhouse
-
-
-sys.path.pop(0)
 
 
 LOGS_QUERY = """
 with
     shas as (
         SELECT
-            distinct
-            push.head_commit.id as sha
+            push.head_commit.id as sha,
         FROM
-            -- Not bothering with final here
-            default.push
+            commons.push
         WHERE
             push.ref = 'refs/heads/viable/strict'
-            AND push.repository.'full_name' = 'pytorch/pytorch'
+            AND push.repository.full_name = 'pytorch/pytorch'
         ORDER BY
-            push.head_commit.'timestamp' desc
+            push._event_time DESC
         LIMIT
             5
     )
@@ -41,29 +30,27 @@ select
     id,
     name
 from
-    default.workflow_job j final
+    workflow_job j
     join shas on shas.sha = j.head_sha
 where
-    j.id in (select id from materialized_views.workflow_job_by_head_sha where head_sha in (select sha from shas))
-    and j.name like '% / test%'
+    j.name like '% / test%'
     and j.name not like '%rerun_disabled_tests%'
     and j.name not like '%mem_leak_check%'
 """
 
 TEST_EXISTS_QUERY = """
 select
-    name
+    count(*) as c
 from
-    default.test_run_s3
+    test_run_s3
 where
-    name::String like {name: String}
-    and classname like {classname: String}
-    and time_inserted > CURRENT_TIMESTAMP() - INTERVAL 7 DAY
-limit 1
+    cast(name as string) like :name
+    and classname like :classname
+    and _event_time > CURRENT_TIMESTAMP() - DAYS(7)
 """
 
 CLOSING_COMMENT = (
-    "I cannot find any mention of this test in the database for the past 7 days "
+    "I cannot find any mention of this test in rockset for the past 7 days "
     "or in the logs for the past 5 commits on viable/strict.  Closing this "
     "issue as it is highly likely that this test has either been renamed or "
     "removed.  If you think this is a false positive, please feel free to "
@@ -75,11 +62,6 @@ DISABLED_TESTS_JSON = (
 )
 
 
-@retries_decorator()
-def query_db(query: str, params: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return query_clickhouse(query, params)
-
-
 def parse_args() -> Any:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -88,6 +70,17 @@ def parse_args() -> Any:
         help="Only list the tests.",
     )
     return parser.parse_args()
+
+
+@retries_decorator()
+def query_rockset(
+    query: str, params: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    res = rockset.RocksetClient(
+        host="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+    ).sql(query, params)
+    results: List[Dict[str, Any]] = res.results
+    return results
 
 
 def download_log_worker(temp_dir: str, id: int, name: str) -> None:
@@ -144,13 +137,13 @@ def check_if_exists(
     if present:
         return True, "found in logs"
 
-    # Query DB to see if the test is there
-    count = query_db(
+    # Query rockset to see if the test is there
+    count = query_rockset(
         TEST_EXISTS_QUERY, {"name": f"{name}%", "classname": f"{classname}%"}
     )
-    if len(count) == 0:
+    if count[0]["c"] == 0:
         return False, "not found"
-    return True, "found in DB"
+    return True, "found in rockset"
 
 
 if __name__ == "__main__":
@@ -158,7 +151,7 @@ if __name__ == "__main__":
     disabled_tests_json = json.loads(requests.get(DISABLED_TESTS_JSON).text)
 
     all_logs = []
-    jobs = query_db(LOGS_QUERY, {})
+    jobs = query_rockset(LOGS_QUERY)
     with tempfile.TemporaryDirectory() as temp_dir:
         pool = mp.Pool(20)
         for job in jobs:

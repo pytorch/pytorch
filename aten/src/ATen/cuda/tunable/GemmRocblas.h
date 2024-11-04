@@ -130,7 +130,7 @@ static rocblas_operation _rocblasOpFromChar(char op) {
     case 'C':
       return rocblas_operation_conjugate_transpose;
   }
-  TORCH_CHECK(false,
+  AT_ERROR(
       "_rocblasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 

@@ -31,7 +31,6 @@ permissions: read-all
 
 jobs:
   get-label-type:
-    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -124,7 +123,7 @@ jobs:
           IMAGE_NAME: ${{ matrix.docker-image-name }}
         with:
           shell: bash
-          timeout_minutes: 30
+          timeout_minutes: 15
           max_attempts: 5
           retry_wait_seconds: 90
           command: |

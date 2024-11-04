@@ -30,7 +30,7 @@ class TORCH_API Shape {
   }
 
   int64_t dim() const {
-    return static_cast<int64_t>(sizes_.size());
+    return sizes_.size();
   }
   c10::ArrayRef<int64_t> sizes() const {
     return sizes_;

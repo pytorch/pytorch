@@ -2,7 +2,8 @@
 
 #include <torch/types.h>
 
-namespace torch::data {
+namespace torch {
+namespace data {
 
 /// An `Example` from a dataset.
 ///
@@ -50,4 +51,5 @@ struct Example<Data, example::NoTarget> {
 };
 
 using TensorExample = Example<at::Tensor, example::NoTarget>;
-} // namespace torch::data
+} // namespace data
+} // namespace torch

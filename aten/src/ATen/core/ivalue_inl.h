@@ -3,7 +3,6 @@
 #include <condition_variable>
 #include <memory>
 #include <optional>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -501,7 +500,7 @@ struct TORCH_API TupleElements {
     return *this;
   }
 
-  [[nodiscard]] c10::ArrayRef<IValue> asArrayRef() const {
+  C10_NODISCARD c10::ArrayRef<IValue> asArrayRef() const {
     if (inlineSize_) {
       return c10::ArrayRef<IValue>(elementsInline_, inlineSize_);
     } else {
@@ -528,15 +527,15 @@ struct TORCH_API TupleElements {
     }
   }
 
-  [[nodiscard]] bool empty() const {
+  C10_NODISCARD bool empty() const {
     return inlineSize_ ? false : elementsVector_.empty();
   }
 
-  [[nodiscard]] size_t size() const {
+  C10_NODISCARD size_t size() const {
     return inlineSize_ ? inlineSize_ : elementsVector_.size();
   }
 
-  [[nodiscard]] IValue& operator[](size_t idx) {
+  C10_NODISCARD IValue& operator[](size_t idx) {
     if (inlineSize_) {
       return elementsInline_[idx];
     } else {
@@ -544,7 +543,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  [[nodiscard]] const IValue& operator[](size_t idx) const {
+  C10_NODISCARD const IValue& operator[](size_t idx) const {
     if (inlineSize_) {
       return elementsInline_[idx];
     } else {
@@ -552,7 +551,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  [[nodiscard]] IValue& at(size_t idx) {
+  C10_NODISCARD IValue& at(size_t idx) {
     if (inlineSize_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
@@ -562,7 +561,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  [[nodiscard]] const IValue& at(size_t idx) const {
+  C10_NODISCARD const IValue& at(size_t idx) const {
     if (inlineSize_) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inlineSize_ <= 3);
       TORCH_CHECK(idx < inlineSize_, "TupleElements: invalid index Index = ", idx, "; Length = ", inlineSize_);
@@ -573,7 +572,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  [[nodiscard]] iterator begin() {
+  C10_NODISCARD iterator begin() {
     if (inlineSize_) {
       return elementsInline_;
     } else {
@@ -581,7 +580,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  [[nodiscard]] iterator end() {
+  C10_NODISCARD iterator end() {
     if (inlineSize_) {
       return elementsInline_ + inlineSize_;
     } else {
@@ -589,7 +588,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  [[nodiscard]] const_iterator begin() const {
+  C10_NODISCARD const_iterator begin() const {
     if (inlineSize_) {
       return elementsInline_;
     } else {
@@ -597,7 +596,7 @@ struct TORCH_API TupleElements {
     }
   }
 
-  [[nodiscard]] const_iterator end() const {
+  C10_NODISCARD const_iterator end() const {
     if (inlineSize_) {
       return elementsInline_ + inlineSize_;
     } else {
@@ -605,27 +604,27 @@ struct TORCH_API TupleElements {
     }
   }
 
-  [[nodiscard]] const_iterator cbegin() const {
+  C10_NODISCARD const_iterator cbegin() const {
     return begin();
   }
 
-  [[nodiscard]] const_iterator cend() const {
+  C10_NODISCARD const_iterator cend() const {
     return end();
   }
 
-  [[nodiscard]] std::vector<IValue> vec() const& {
+  C10_NODISCARD std::vector<IValue> vec() const & {
     return asArrayRef().vec();
   }
 
-  [[nodiscard]] IValue& back() {
+  C10_NODISCARD IValue& back() {
     return *(end() - 1);
   }
 
-  [[nodiscard]] const IValue& back() const {
+  C10_NODISCARD const IValue& back() const {
     return *(end() - 1);
   }
 
-  [[nodiscard]] std::vector<IValue> vec() && {
+  C10_NODISCARD std::vector<IValue> vec() && {
     std::vector<IValue> result;
     result.reserve(size());
     for (auto&& iv : *this) {
@@ -863,19 +862,6 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   Future(Future&&) = delete;
   Future& operator=(const Future&) = delete;
   Future& operator=(Future&&) = delete;
-
-  // Destructor
-  // Explicitly destroy events under device guard, otherwise it can lead to
-  // extra context being created on device 0.  Reason: python garbage collector
-  // calls this destructor, but python GC does not have a device context, so a
-  // "default" one (usually on device 0) could be created when we go down the
-  // line of event destroy.
-  ~Future() override {
-    while (!events_.empty()) {
-      c10::OptionalDeviceGuard deviceGuard(events_.back().device());
-      events_.pop_back();
-    }
-  }
 
   struct TORCH_API FutureError final : public std::exception {
     explicit FutureError(std::string&& error_msg_)
@@ -1681,7 +1667,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
 namespace detail {
 
 struct _guarded_unsigned_long_unique_dummy final {
-  _guarded_unsigned_long_unique_dummy(int64_t){}
+  _guarded_unsigned_long_unique_dummy(int64_t){};
 };
 using _guarded_unsigned_long = std::conditional_t<
     std::is_same_v<unsigned long, uint32_t> ||
@@ -1728,7 +1714,7 @@ DEFINE_TO(uint64_t, toInt)
 DEFINE_TO(detail::_guarded_unsigned_long, toInt)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(bool, toBool)
-DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob)
+DEFINE_TO(c10::intrusive_ptr<caffe2::Blob>, toBlob);
 DEFINE_TO(c10::intrusive_ptr<ivalue::ConstantString>, toString)
 DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)

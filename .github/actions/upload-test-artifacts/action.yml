@@ -28,7 +28,7 @@ runs:
       run: |
         # Remove any previous test jsons if they exist
         rm -f test-jsons-*.zip
-        zip -r "test-jsons-${FILE_SUFFIX}.zip" test/test-reports -i '*.json'
+        zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
 
     - name: Zip test reports for upload
       if: runner.os != 'Windows' && !inputs.use-gha
@@ -38,7 +38,7 @@ runs:
       run: |
         # Remove any previous test reports if they exist
         rm -f test-reports-*.zip
-        zip -r "test-reports-${FILE_SUFFIX}.zip" test/test-reports -i '*.xml' -i '*.csv'
+        zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml' -i '*.csv'
 
     - name: Zip usage log for upload
       if: runner.os != 'Windows' && !inputs.use-gha
@@ -53,8 +53,8 @@ runs:
         if [ -f 'usage_log.txt' ]; then
             zip "logs-${FILE_SUFFIX}.zip" 'usage_log.txt'
         fi
-        if find "test/test-reports" -name "*.log" 2>/dev/null | grep -q .; then
-            zip -r "logs-${FILE_SUFFIX}.zip" test/test-reports -i '*.log'
+        if ls test/**/*.log 1> /dev/null 2>&1; then
+            zip -r "logs-${FILE_SUFFIX}.zip" test -i '*.log'
         fi
 
     - name: Zip debugging artifacts for upload
@@ -77,7 +77,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "test-jsons-$Env:FILE_SUFFIX.zip" -ir'!test\test-reports\*.json'
+        7z a "test-jsons-$Env:FILE_SUFFIX.zip" -ir'!test\*.json'
 
     - name: Zip test reports for upload
       if: runner.os == 'Windows' && !inputs.use-gha
@@ -86,7 +86,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\test-reports\*.xml' -ir'!test\test-reports\*.csv'
+        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml' -ir'!test\*.csv'
 
     - name: Zip usage log for upload
       if: runner.os == 'Windows' && !inputs.use-gha
@@ -96,7 +96,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "logs-$Env:FILE_SUFFIX.zip" 'usage_log.txt' -ir'!test\test-reports\*.log'
+        7z a "logs-$Env:FILE_SUFFIX.zip" 'usage_log.txt' -ir'!test\*.log'
 
     # S3 upload
     - name: Store Test Downloaded JSONs on S3

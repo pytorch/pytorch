@@ -93,8 +93,7 @@ inline void check_inplace(at::ITensorListRef tensors, bool requires_grad) {
 }
 
 inline void throw_error_out_requires_grad(const char* name) {
-  TORCH_CHECK(
-      false,
+  AT_ERROR(
       name,
       "(): functions with out=... arguments don't support automatic differentiation, "
       "but one of the arguments requires grad.");
@@ -398,7 +397,7 @@ namespace {
 // call in this functor so it can be passed to c10::BoxedKernel::makeFromFunctor
 class WrapperFunctor final : public c10::OperatorKernel {
  public:
-  WrapperFunctor(JitDecompInterface* impl) : impl_(impl) {}
+  WrapperFunctor(JitDecompInterface* impl) : impl_(impl){};
 
   void operator()(
       const c10::OperatorHandle& op,

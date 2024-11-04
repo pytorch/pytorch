@@ -9,7 +9,9 @@
 #include <cstddef>
 #include <string>
 
-namespace torch::data::datasets {
+namespace torch {
+namespace data {
+namespace datasets {
 /// The MNIST dataset.
 class TORCH_API MNIST : public Dataset<MNIST> {
  public:
@@ -41,4 +43,6 @@ class TORCH_API MNIST : public Dataset<MNIST> {
  private:
   Tensor images_, targets_;
 };
-} // namespace torch::data::datasets
+} // namespace datasets
+} // namespace data
+} // namespace torch

@@ -212,16 +212,13 @@ MetricTable.register_table(
 MetricTable.register_table(
     "persistent_red_perf",
     [
-        "kernel0_path",
-        "kernel1_path",
-        "kernel2_path",
-        "kernel3_path",
-        "kernel0_latency",
+        "kernel1_name",
+        "kernel2_name",
         "kernel1_latency",
         "kernel2_latency",
-        "kernel3_latency",
         "size_hints",
         "reduction_hint",
+        "speedup",
     ],
 )
 
@@ -414,12 +411,10 @@ def purge_old_log_files():
             table.write_header()
 
 
-def enabled_metric_tables() -> Set[str]:
-    return enabled_metric_tables_impl(config.enabled_metric_tables)
-
-
 @lru_cache
-def enabled_metric_tables_impl(config_str: str) -> Set[str]:
+def enabled_metric_tables() -> Set[str]:
+    config_str = config.enabled_metric_tables
+
     enabled = set()
     for name in config_str.split(","):
         name = name.strip()

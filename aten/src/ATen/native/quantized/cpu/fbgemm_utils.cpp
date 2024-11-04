@@ -32,7 +32,9 @@ int register_embedding_params();
 
 #ifdef USE_FBGEMM
 
-namespace at::native::fbgemm_utils {
+namespace at {
+namespace native {
+namespace fbgemm_utils {
 
 namespace {
 
@@ -366,7 +368,9 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
   }
 }
 
-} // namespace at::native::fbgemm_utils
+} // namespace fbgemm_utils
+} // namespace native
+} // namespace at
 
 
 #endif // USE_FBGEMM
@@ -550,9 +554,9 @@ int register_embedding_params() {
 
 namespace {
 
-[[maybe_unused]] static auto conv2d_params = register_conv_params<2>();
-[[maybe_unused]] static auto conv3d_params = register_conv_params<3>();
-[[maybe_unused]] static auto linear_params = register_linear_params();
-[[maybe_unused]] static auto embedding_params = register_embedding_params();
+static C10_UNUSED auto conv2d_params = register_conv_params<2>();
+static C10_UNUSED auto conv3d_params = register_conv_params<3>();
+static C10_UNUSED auto linear_params = register_linear_params();
+static C10_UNUSED auto embedding_params = register_embedding_params();
 
 } // namespace

@@ -26,7 +26,6 @@ concurrency:
 
 jobs:
   android-build-test:
-    if: github.repository_owner == 'pytorch'
     name: android-build-test
     uses: ./.github/workflows/_run_android_tests.yml
     with:

@@ -7,12 +7,7 @@ from torch.fx.node import map_arg
 from torch.fx.passes.split_module import split_module
 
 
-__all__ = [
-    "FoldedGraphModule",
-    "get_unique_attr_name_in_module",
-    "split_const_subgraphs",
-]
-
+__all__ = ['FoldedGraphModule', 'get_unique_attr_name_in_module', 'split_const_subgraphs']
 
 class FoldedGraphModule(torch.fx.GraphModule):
     """

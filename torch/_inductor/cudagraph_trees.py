@@ -853,7 +853,7 @@ class CUDAGraphNode:
 
         def maybe_get_static_data_ptr(
             idx: int,
-            inputs: List[InputType],
+            inputs: List[Union[torch.Tensor, int]],
             static_input_idxs: List[int],
         ) -> Optional[int]:
             inp = inputs[idx]
@@ -1576,7 +1576,7 @@ class CUDAGraphNode:
 
     def _allocate_and_copy_recording_inputs(
         self, inputs: List[InputType]
-    ) -> List[InputType]:
+    ) -> List[Union[torch.Tensor, int]]:
         """
         Allocate inputs for non static, non cudagraph managed tensors in the memory pool
         and copy over the tensor values.

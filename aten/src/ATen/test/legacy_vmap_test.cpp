@@ -170,7 +170,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // ActualDim on kVmapMaxTensorDims sized underlying tensor
     auto tensor = ones({});
-    for ([[maybe_unused]] const auto i : c10::irange(kVmapMaxTensorDims)) {
+    for (C10_UNUSED const auto i : c10::irange(kVmapMaxTensorDims)) {
       tensor = tensor.unsqueeze(0);
     }
     ASSERT_EQ(tensor.dim(), kVmapMaxTensorDims);

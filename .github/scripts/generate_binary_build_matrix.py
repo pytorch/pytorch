@@ -459,7 +459,7 @@ def generate_wheels_matrix(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.4"]
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]
                             if os != "linux" and gpu_arch_type != "xpu"
                             else ""
                         ),

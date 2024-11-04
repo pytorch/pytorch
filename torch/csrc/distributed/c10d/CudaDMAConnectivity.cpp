@@ -12,7 +12,6 @@ namespace {
 constexpr int max_nvlinks = 64;
 
 std::string get_bus_id(int device_idx) {
-  // NOLINTNEXTLINE(*array*)
   char bus_id[80];
   cudaDeviceProp prop{};
   C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_idx));
@@ -28,7 +27,7 @@ std::string get_bus_id(int device_idx) {
 
 struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
   c10::intrusive_ptr<c10d::DMAConnectivity> detect() override {
-    int num_devices = 0;
+    int num_devices;
     C10_CUDA_CHECK(cudaGetDeviceCount(&num_devices));
 
     std::vector<std::vector<int>> matrix;
@@ -75,8 +74,9 @@ struct C10_EXPORT NVLinkDetector : public c10d::DMAConnectivityDetector {
     std::vector<int> switch_link_count(num_devices, 0);
     for (int i = 0; i < num_devices; ++i) {
       for (int link = 0; link < max_nvlinks; ++link) {
-        nvmlIntNvLinkDeviceType_t deviceType{};
-        auto ret = driver_api->nvmlDeviceGetNvLinkRemoteDeviceType_(
+        nvmlReturn_t ret;
+        nvmlIntNvLinkDeviceType_t deviceType;
+        ret = driver_api->nvmlDeviceGetNvLinkRemoteDeviceType_(
             nvml_devices[i], link, &deviceType);
         if (ret != NVML_SUCCESS) {
           // We've exhausted the NVLinks connected to this device. This error

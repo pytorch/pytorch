@@ -50,8 +50,7 @@ const Tensor& value){
       }
     }
   }
-  for ([[maybe_unused]] const auto i :
-       c10::irange(num_ind, self.ndimension())) {
+  for (C10_UNUSED const auto i : c10::irange(num_ind, self.ndimension())) {
     mask = mask.unsqueeze(-1);
   }
   return std::make_tuple(true, mask);

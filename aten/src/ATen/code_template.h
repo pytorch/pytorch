@@ -19,10 +19,7 @@ namespace at::jit {
 struct TemplateEnv {
   TemplateEnv() = default;
   TemplateEnv(TemplateEnv& parent) : parent(&parent) {}
-  TemplateEnv(TemplateEnv&&) = delete;
   TemplateEnv& operator=(const TemplateEnv& parent) = delete;
-  TemplateEnv& operator=(TemplateEnv&& parent) = delete;
-  ~TemplateEnv() = default;
 
   using string_list = std::vector<std::string>;
 
@@ -208,7 +205,7 @@ struct CodeTemplate {
   // or trailing newlines. It's the responsibility of the calling function
   // to indent correctly in the context.
   void emitIndent(std::ostream& out, size_t indent) const {
-    for ([[maybe_unused]] const auto i : c10::irange(indent)) {
+    for (C10_UNUSED const auto i : c10::irange(indent)) {
       out << " ";
     }
   }

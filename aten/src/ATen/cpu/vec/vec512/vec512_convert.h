@@ -281,9 +281,9 @@ struct VecConvert<
     1,
     int64_t,
     2,
-    std::enable_if_t<
+    typename std::enable_if<
         std::is_same_v<dst_t, int8_t> ||
-        std::is_same_v<dst_t, uint8_t>>> {
+        std::is_same_v<dst_t, uint8_t>>::type> {
   static inline VectorizedN<dst_t, 1> apply(
       const VectorizedN<int64_t, 2>& src) {
     return VecConvert<dst_t, 1, int32_t, 1>::apply(

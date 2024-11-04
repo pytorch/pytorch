@@ -83,7 +83,7 @@ Tensor repeat_interleave_symint(
         repeats.sym_size(0), " and input.size(", dim.value(), ") = ", input.sym_size(dim.value())
     );
   } else {
-    TORCH_CHECK(false, "repeats must be 0-dim or 1-dim tensor");
+    AT_ERROR("repeats must be 0-dim or 1-dim tensor");
   }
 
   auto ret = input.index_select(
