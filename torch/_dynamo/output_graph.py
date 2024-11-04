@@ -315,9 +315,9 @@ class OutputGraph:
                 export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        self.dynamo_compile_id: Optional[
-            CompileId
-        ] = CompileContext.current_compile_id()
+        self.dynamo_compile_id: Optional[CompileId] = (
+            CompileContext.current_compile_id()
+        )
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -325,9 +325,9 @@ class OutputGraph:
         # We use this map to interpret (i.e., check for violations of) constraints,
         # specifically equality constraints, which have shared tensor ids in them.
         # This map should also be generally useful, e.g., for (de)serialization.
-        self.tracked_fakes_id_to_source: Dict[
-            int, List[Source]
-        ] = collections.defaultdict(list)
+        self.tracked_fakes_id_to_source: Dict[int, List[Source]] = (
+            collections.defaultdict(list)
+        )
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = {}
         self.side_effects = SideEffects(self)
@@ -1315,9 +1315,9 @@ class OutputGraph:
                 register_finalizer(gm)
 
             gm.compile_subgraph_reason = self.compile_subgraph_reason
-            gm.meta[
-                "dynamo_flat_name_to_original_fqn"
-            ] = self.dynamo_flat_name_to_original_fqn.copy()
+            gm.meta["dynamo_flat_name_to_original_fqn"] = (
+                self.dynamo_flat_name_to_original_fqn.copy()
+            )
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
 
             graph_code_log.debug(
@@ -2269,26 +2269,51 @@ class SubgraphTracer(fx.Tracer):
                 assert isinstance(s, torch.SymInt)  # to make linter happy
                 tracer.bound_symbols[s.node.expr] = lazy_proxy
 
-        for i, s in enumerate(t.stride()):
-            if need_bind(s):
-                log.debug(
-                    "_lazy_bind_unbacked_symbols_in_tensors %s for %s.stride()[%s] at debug_level %s",
-                    s,
-                    t_proxy,
-                    i,
-                    tracer.debug_level,
+        if t.layout is torch.strided:
+            for i, s in enumerate(t.stride()):
+                if need_bind(s):
+                    log.debug(
+                        "_lazy_bind_unbacked_symbols_in_tensors %s for %s.stride()[%s] at debug_level %s",
+                        s,
+                        t_proxy,
+                        i,
+                        tracer.debug_level,
+                    )
+                    lazy_proxy = SubgraphTracer.LazyProxy(
+                        _proxy_with_example_value,
+                        s,
+                        "call_function",
+                        torch.ops.aten.sym_stride.int,
+                        (t_proxy, i),
+                        {},
+                        type_expr=type(s),
+                    )
+                    assert isinstance(s, torch.SymInt)  # to make linter happy
+                    tracer.bound_symbols[s.node.expr] = lazy_proxy
+        elif t.layout is torch.sparse_coo:
+            self._lazy_bind_unbacked_symbols_in_tensors(tracer, t._indices(), t_proxy)
+            self._lazy_bind_unbacked_symbols_in_tensors(tracer, t._values(), t_proxy)
+        elif t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+            self._lazy_bind_unbacked_symbols_in_tensors(
+                tracer, t.crow_indices(), t_proxy
+            )
+            self._lazy_bind_unbacked_symbols_in_tensors(
+                tracer, t.col_indices(), t_proxy
+            )
+        elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
+            self._lazy_bind_unbacked_symbols_in_tensors(
+                tracer, t.ccol_indices(), t_proxy
+            )
+            self._lazy_bind_unbacked_symbols_in_tensors(
+                tracer, t.row_indices(), t_proxy
+            )
+        if is_traceable_wrapper_subclass(t):
+            attrs, ctx = t.__tensor_flatten__()
+            for attr in attrs:
+                inner_t = getattr(t, attr)
+                self._lazy_bind_unbacked_symbols_in_tensors(
+                    tracer, inner_t, getattr(t_proxy, attr)
                 )
-                lazy_proxy = SubgraphTracer.LazyProxy(
-                    _proxy_with_example_value,
-                    s,
-                    "call_function",
-                    torch.ops.aten.sym_stride.int,
-                    (t_proxy, i),
-                    {},
-                    type_expr=type(s),
-                )
-                assert isinstance(s, torch.SymInt)  # to make linter happy
-                tracer.bound_symbols[s.node.expr] = lazy_proxy
 
     # NOTE: [Auto lift basic free symbols when create_graph_input]
     # Whenever we call create_graph_input, we try to also lift the basic symbols in example values
@@ -2331,6 +2356,7 @@ class SubgraphTracer(fx.Tracer):
                     if src is not None
                     else None
                 ),
+                before=True,
             )
         if t.layout is torch.strided:
             for i, s in enumerate(t.stride()):
@@ -2341,6 +2367,7 @@ class SubgraphTracer(fx.Tracer):
                         if src is not None
                         else None
                     ),
+                    before=True,
                 )
             self._lift_symbols_in_symint(
                 t.storage_offset(),
@@ -2349,6 +2376,7 @@ class SubgraphTracer(fx.Tracer):
                     if src is not None
                     else None
                 ),
+                before=True,
             )
         elif t.layout is torch.sparse_coo:
             self._lift_symbols_in_tensor(t._indices(), src)
@@ -2394,7 +2422,7 @@ class SubgraphTracer(fx.Tracer):
 
     # See NOTE: [Auto lift basic free symbols when create_graph_input]
     def _lift_symbols_in_symint(
-        self, s: Union[int, torch.SymInt], source: Optional[Source]
+        self, s: Union[int, torch.SymInt], source: Optional[Source], before: bool = False
     ):
         if not is_symbolic(s):
             return
@@ -2416,7 +2444,7 @@ class SubgraphTracer(fx.Tracer):
                     str(s0),
                     type(example_val),
                     example_val,
-                    before=True,
+                    before=before,
                     source=source,
                 )
                 log.debug(

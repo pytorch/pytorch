@@ -587,9 +587,21 @@ def speculate_subgraph(
                             x1.prepend(cand_x)
                             cand_x = nxt
 
+                    # Step 3: assert that all placeholders are in the correct order as .
+                    # in lifted_freevars
+                    after_phs = [
+                        node for node in graph.nodes if node.op == "placeholder"
+                    ][-len(lifted_freevars) :]
+                    assert len(after_phs) == len(lifted_freevars)
+                    for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
+                        assert (
+                            child_proxy.node is ph
+                        ), "The order of placeholders is different from the order of lifted_freevars"
+
                     graph.lint()
 
-                move_lifted_freevars_phs_to_end(graph, lifted_freevars)
+                if len(lifted_freevars) > 0:
+                    move_lifted_freevars_phs_to_end(graph, lifted_freevars)
 
                 return (
                     (output, treespec),
