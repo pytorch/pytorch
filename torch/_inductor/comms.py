@@ -368,11 +368,11 @@ def raise_fsdp2_backward_all_gather_ops(graph):
     ```
     and we want to raise all the FSDP2 all-gather related ops (the ops in the middle of the example) to be immediately after the last resize-to-0 op in the previous resize0 op group.
     """
-    nodes = list(graph.nodes)
-
+    orig_nodes = list(graph.nodes)
+    
     # Step 1: Find all resize-to-0 ops on graph inputs
     resize0_ops = []
-    for node in nodes:
+    for node in orig_nodes:
         if (node.op == "call_function" and 
             node.target == torch.ops.inductor.resize_storage_bytes_.default and
             node.args[1] == 0):
@@ -385,7 +385,7 @@ def raise_fsdp2_backward_all_gather_ops(graph):
     resize0_group = []
     cur_graph_inputs = set()
     for i, op in enumerate(resize0_ops):
-        if i == 0 or nodes.index(op) != nodes.index(resize0_ops[i-1]) + 1:
+        if i == 0 or orig_nodes.index(op) != orig_nodes.index(resize0_ops[i-1]) + 1:
             if cur_graph_inputs:
                 # Create key for previous group using sorted tuple
                 key = tuple(sorted(cur_graph_inputs))
@@ -400,15 +400,17 @@ def raise_fsdp2_backward_all_gather_ops(graph):
         key = tuple(sorted(cur_graph_inputs))
         graph_input_group_to_resize0_groups[key].append(resize0_group)
 
+    nodes_to_insert_after_node = defaultdict(set)
+
     # Process each graph input group
     for cur_graph_inputs, resize0_groups in graph_input_group_to_resize0_groups.items():
         # Process each region, including the first region from graph start to first resize0_group
         for i in range(-1, len(resize0_groups) - 1):
             region_start = None
             if i == -1:
-                # For first region (graph start to first resize0_group)
-                for node in nodes:
-                    if node.op != "placeholder":
+                # For first region (last placeholder node to first node of the first resize0 group)
+                for i, node in enumerate(orig_nodes):
+                    if i + 1 < len(orig_nodes) and orig_nodes[i + 1].op != "placeholder":
                         region_start = node
                         break
                 region_end = resize0_groups[0][0]
@@ -416,18 +418,20 @@ def raise_fsdp2_backward_all_gather_ops(graph):
                 # For subsequent regions between resize0_groups
                 current_group = resize0_groups[i]
                 next_group = resize0_groups[i + 1]
-                # Find the node after current_group[-1]
-                current_group_idx = nodes.index(current_group[-1])
-                region_start = nodes[current_group_idx + 1]
-                region_end = next_group[0]  # First node of next group
+                region_start = current_group[-1]  # Start of region is the last node of the current resize0 group
+                region_end = next_group[0]  # End of region is the first node of next resize0 group
             assert region_start is not None
 
             # Collect nodes between region boundaries
             nodes_between = []
-            for node in nodes:
-                if node == region_end:
+            in_region = False
+            for node in orig_nodes:
+                if node == region_start:
+                    in_region = True
+                elif node == region_end:
+                    in_region = False
                     break
-                else:
+                elif in_region:
                     nodes_between.append(node)
 
             # Find nodes to move (fsdp.copy_ ops and their ancestors)
@@ -465,19 +469,26 @@ def raise_fsdp2_backward_all_gather_ops(graph):
                     collect_ancestors(node.args[1])
                     nodes_to_move.add(node)
 
-            # Sort nodes to maintain original order
-            nodes_to_move = sorted(nodes_to_move, key=lambda n: nodes.index(n))
+            nodes_to_insert_after_node[region_start] |= nodes_to_move
 
-            # Move nodes to right after region_start
-            for node in nodes_to_move:
-                with graph.inserting_before(region_start):
-                    new_node = graph.call_function(node.target, node.args, node.kwargs)
-                    node.replace_all_uses_with(new_node)
-                    new_node.meta.update(node.meta)
-                    node.users.clear()
-                    graph.erase_node(node)
+    new_graph = torch.fx.Graph()
+    env: Dict[torch.fx.Node, torch.fx.Node] = {}
+    nodes_processed = set()
 
-    return graph
+    def insert_node(node):
+        if node not in nodes_processed:
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
+            nodes_processed.add(node)
+
+    for node in orig_nodes:
+        insert_node(node)
+        sorted_succ_nodes = sorted(nodes_to_insert_after_node[node], key=lambda n: orig_nodes.index(n))
+        print(f"sorted_succ_nodes: {sorted_succ_nodes}")
+        for succ_node in sorted_succ_nodes:
+            insert_node(succ_node)
+
+    return new_graph
+
 
 
 def remove_fsdp2_unsharded_param_graph_input_usage(graph: torch.fx.Graph):

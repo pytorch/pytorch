@@ -208,7 +208,7 @@ def aot_dispatch_base_graph(
             saved_updated_flat_args_subclasses_desugared[num_tokens:]
         )
 
-    assert copy_count == copy_count2
+    assert copy_count == copy_count2, f"{copy_count} vs. {copy_count2}"
 
     if aot_config.enable_log:
         aot_graphs_log.info(

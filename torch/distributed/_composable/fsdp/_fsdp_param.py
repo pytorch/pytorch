@@ -518,7 +518,8 @@ class FSDPParam:
                 # resize_(full) -> copy_ -> resize_(0) pattern, we will remove those
                 # resize_ and copy_ ops in a compiler graph pass
                 # `remove_fsdp2_unsharded_param_graph_input_usage` to recover performance.
-                alloc_storage(self._unsharded_param)
+                self._unsharded_param.untyped_storage().resize_(self._unsharded_param.numel() * self._unsharded_param.itemsize)
+                # alloc_storage(self._unsharded_param)
                 torch.ops.fsdp.copy_(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
@@ -662,6 +663,7 @@ class FSDPParam:
             by the end of the graph. They don't leak outside of the graph.
             """
             self._unsharded_param.untyped_storage().resize_(0)
+            # free_storage(self._unsharded_param)
             self.all_gather_outputs = []
             self._unsharded_inner_tensors = []
         else:
