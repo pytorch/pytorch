@@ -246,7 +246,7 @@ def stride_at(index: sympy.Expr, var: sympy.Symbol):
         # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
         # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool) and fails below calculation.
         # in this case, there is no dependencies between index and var.
-        return sympy.Integer(0)
+        return sympy.S.Zero
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
     return sympy.simplify(new_index - index)
@@ -4711,8 +4711,8 @@ class WorkSharing:
 class LoopLevel:
     var: Optional[sympy.Expr] = None
     size: Optional[sympy.Expr] = None
-    offset: sympy.Expr = sympy.Integer(0)
-    steps: sympy.Expr = sympy.Integer(1)
+    offset: sympy.Expr = sympy.S.Zero
+    steps: sympy.Expr = sympy.S.One
     parallel: int = 0
     simd_omp: bool = False
     simd_vec: bool = False

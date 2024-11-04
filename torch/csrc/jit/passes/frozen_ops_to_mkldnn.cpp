@@ -85,7 +85,7 @@ void merge_sets(
 }
 
 // no uses of tensors in container types
-void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
+void assertNonTensorTypeDoesNotContainTensors(const TypePtr& type) {
   if (type->cast<TensorType>()) {
     return;
   }
@@ -94,7 +94,7 @@ void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
   }
 }
 
-void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
+void InplaceMKLDNNSubgraph(const std::shared_ptr<Graph>& graph) {
   // This function first calculates aliasing sets,
   // then calculates the last node each aliasing set is alive for.
   // Then we go through each node, if it's a node which has an equivalent
@@ -234,7 +234,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
 // innermost dimension is padded with 0s. The precondition, `aten_op(0) == 0`
 // allows us to avoid any special casing of padded elements.
 Operation createUnaryOp(
-    std::function<void(at::Tensor output, at::Tensor input)> aten_op,
+    const std::function<void(at::Tensor output, at::Tensor input)>& aten_op,
     bool inplace = false) {
   return [aten_op, inplace](Stack& stack) {
     auto a = pop(stack).toTensor();
@@ -395,7 +395,7 @@ static std::function<void(at::Tensor output, at::Tensor input)> hardtanh_helper(
     const Node* n) {
   auto min_val = n->f(attr::min_val);
   auto max_val = n->f(attr::max_val);
-  return [min_val, max_val](at::Tensor output, at::Tensor input) {
+  return [min_val, max_val](at::Tensor output, const at::Tensor& input) {
     at::cpu::hardtanh_out(output, input, min_val, max_val);
   };
 }
@@ -404,7 +404,7 @@ static std::function<void(at::Tensor output, at::Tensor input)> clamp_helper(
     const Node* n) {
   auto min_val = n->f(attr::min_val);
   auto max_val = n->f(attr::max_val);
-  return [min_val, max_val](at::Tensor output, at::Tensor input) {
+  return [min_val, max_val](at::Tensor output, const at::Tensor& input) {
     at::cpu::clamp_out(output, input, min_val, max_val);
   };
 }
@@ -415,7 +415,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSwish_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, const at::Tensor& input) {
               at::cpu::hardswish_out(output, input);
             },
             true),
@@ -423,7 +423,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSigmoid_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, const at::Tensor& input) {
               at::cpu::hardsigmoid_out(output, input);
             },
             true),
@@ -443,7 +443,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSwish(Tensor a) -> Tensor",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, const at::Tensor& input) {
               at::cpu::hardswish_out(output, input);
             },
             false),
@@ -451,7 +451,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSigmoid(Tensor a) -> Tensor",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, const at::Tensor& input) {
               at::cpu::hardsigmoid_out(output, input);
             },
             false),

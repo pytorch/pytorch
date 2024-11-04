@@ -21,6 +21,7 @@ permissions: read-all
 
 jobs:
   llm-td:
+    if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/llm_td_retrieval.yml
     permissions:
@@ -38,7 +39,7 @@ jobs:
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: github.event_name != 'schedule' || github.repository == 'pytorch/pytorch'
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -194,9 +195,9 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
   linux-focal-py3_9-clang10-test:
     name: linux-focal-py3.9-clang10
@@ -227,9 +228,9 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "crossref", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "crossref", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
     secrets: inherit
 
@@ -260,9 +261,9 @@ jobs:
           { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
-          { config: "dynamo", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "dynamo", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
     secrets: inherit
 
@@ -367,21 +368,6 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-py3-clang9-mobile-custom-build-static:
-    name: linux-focal-py3-clang9-mobile-custom-build-static
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-py3-clang9-mobile-custom-build-static
-      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
-      build-generates-artifacts: false
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
-    secrets: inherit
-
   linux-focal-py3_9-clang9-xla-build:
     name: linux-focal-py3_9-clang9-xla
     uses: ./.github/workflows/_linux-build.yml
@@ -467,30 +453,6 @@ jobs:
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
-        ]}
-    secrets: inherit
-
-  linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single:
-    name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
-    uses: ./.github/workflows/_android-build-test.yml
-    with:
-      build-environment: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
-      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-        ]}
-    secrets: inherit
-
-  linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit:
-    name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
-    uses: ./.github/workflows/_android-build-test.yml
-    with:
-      build-environment: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
-      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
     secrets: inherit
 
@@ -598,9 +560,9 @@ jobs:
           { config: "default", shard: 1, num_shards: 3, runner: "linux.4xlarge" },
           { config: "default", shard: 2, num_shards: 3, runner: "linux.4xlarge" },
           { config: "default", shard: 3, num_shards: 3, runner: "linux.4xlarge" },
-          { config: "dynamo", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
-          { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
         ]}
     secrets: inherit
 
