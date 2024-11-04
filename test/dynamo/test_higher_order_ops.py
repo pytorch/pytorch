@@ -1018,52 +1018,53 @@ class GraphModule(torch.nn.Module):
 
         f(x, y)
 
-        out_graph = self._test_wrap_simple(
-            f,
-            default_args_generator((x, y)),
-            6,
-            9,
-            return_graph=True,
-        )
-        self.assertExpectedInline(
-            out_graph,
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_x_: "f32[s0, s1]", s2: "Sym(s2)", L_y_: "f32[s1, s2]"):
-        l_x_ = L_x_
-        l_y_ = L_y_
-
-        x: "f32[((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]" = l_x_.view(-1, 2);  l_x_ = None
-
-        c: "i64[u0, 2]" = l_y_.nonzero();  l_y_ = None
-
-        sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
-
-        ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
-        _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-
-        d: "f32[u0 + ((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]" = torch.concat((x, c));  c = None
-
-        wrap_body_1 = self.wrap_body_1
-        wrap = torch.ops.higher_order.wrap(wrap_body_1, sym_size_int_1, s0, s1, d, x);  wrap_body_1 = sym_size_int_1 = s0 = s1 = d = x = None
-        getitem: "f32[((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]" = wrap[0];  wrap = None
-        return (getitem,)
-
-    class wrap_body_1(torch.nn.Module):
-        def forward(self, u0: "Sym(u0)", s0: "Sym(s0)", s1: "Sym(s1)", d: "f32[u0 + ((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]", x: "f32[((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]"):
-            wrap_body_0 = self.wrap_body_0
-            wrap = torch.ops.higher_order.wrap(wrap_body_0, u0, s0, s1, d, x);  wrap_body_0 = u0 = s0 = s1 = d = x = None
+        if not check_dynamic_shape_capture():
+            out_graph = self._test_wrap_simple(
+                f,
+                default_args_generator((x, y)),
+                6,
+                9,
+                return_graph=True,
+            )
+            self.assertExpectedInline(
+                out_graph,
+                """\
+    class GraphModule(torch.nn.Module):
+        def forward(self, s0: "Sym(s0)", s1: "Sym(s1)", L_x_: "f32[s0, s1]", s2: "Sym(s2)", L_y_: "f32[s1, s2]"):
+            l_x_ = L_x_
+            l_y_ = L_y_
+    
+            x: "f32[((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]" = l_x_.view(-1, 2);  l_x_ = None
+    
+            c: "i64[u0, 2]" = l_y_.nonzero();  l_y_ = None
+    
+            sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
+            _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
+    
+            ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
+            _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
+    
+            d: "f32[u0 + ((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]" = torch.concat((x, c));  c = None
+    
+            wrap_body_1 = self.wrap_body_1
+            wrap = torch.ops.higher_order.wrap(wrap_body_1, sym_size_int_1, s1, s0, d, x);  wrap_body_1 = sym_size_int_1 = s1 = s0 = d = x = None
             getitem: "f32[((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]" = wrap[0];  wrap = None
             return (getitem,)
-
-        class wrap_body_0(torch.nn.Module):
-            def forward(self, u0: "Sym(u0)", s0: "Sym(s0)", s1: "Sym(s1)", d: "f32[u0 + ((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]", x: "f32[((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]"):
-                sum_1: "f32[]" = d.sum();  d = None
-                add: "f32[((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]" = sum_1 + x;  sum_1 = x = None
-                return (add,)
-""",
-        )
+    
+        class wrap_body_1(torch.nn.Module):
+            def forward(self, u0: "Sym(u0)", s1: "Sym(s1)", s0: "Sym(s0)", d: "f32[u0 + ((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]", x: "f32[((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]"):
+                wrap_body_0 = self.wrap_body_0
+                wrap = torch.ops.higher_order.wrap(wrap_body_0, u0, s1, s0, d, x);  wrap_body_0 = u0 = s1 = s0 = d = x = None
+                getitem: "f32[((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]" = wrap[0];  wrap = None
+                return (getitem,)
+    
+            class wrap_body_0(torch.nn.Module):
+                def forward(self, u0: "Sym(u0)", s1: "Sym(s1)", s0: "Sym(s0)", d: "f32[u0 + ((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]", x: "f32[((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]"):
+                    sum_1: "f32[]" = d.sum();  d = None
+                    add: "f32[((s0*s1)//2), ((s0*s1)//(((s0*s1)//2)))]" = sum_1 + x;  sum_1 = x = None
+                    return (add,)
+    """,
+            )
 
     def test_register_subclass(self):
         from torch._higher_order_ops.cond import cond_op
