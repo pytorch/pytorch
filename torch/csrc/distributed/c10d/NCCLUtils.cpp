@@ -16,7 +16,7 @@
 namespace c10d {
 
 ncclComm_t NCCLComm::getNcclComm() {
-  std::unique_lock<std::mutex> lock(mutex_);
+  LockType lock(mutex_);
   if (aborted_) {
     auto commFailureMsg = commFailureReason_ != std::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)
@@ -30,25 +30,20 @@ ncclComm_t NCCLComm::getNcclComm() {
             ". ",
             commFailureMsg));
   }
-  if (!initialized_) {
-    waitUntilInitialized();
-  }
-
-  return ncclComm_;
-}
-
-void NCCLComm::waitUntilInitialized() {
-  // Wait for initialization to complete if in nonblocking mode.
-  // If timeout is reached, throw an exception.
-  if (nccl_use_nonblocking()) {
+  // In non-blocking mode, ensure comm is ready.
+  if (nonBlocking_) {
+    // If timeout is reached, throw an exception.
     C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
     // ncclComm_ should be initialized by now
   }
-  // In blocking mode, this function is nothing but setting initialized_ to
-  // true.
-  initialized_ = true;
-  LOG(INFO) << "Rank " << rank_ << ": NCCL communicator " << repr()
-            << " is initialized.";
+  if (!initialized_) {
+    // TODO: see if we can consolidate other `initialized_` flipping here.
+    // Maintaining it elsewhere is some work.
+    initialized_ = true;
+    LOG(INFO) << "Rank " << rank_ << ": NCCL communicator " << repr()
+              << " is initialized.";
+  }
+  return ncclComm_;
 }
 
 // TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
@@ -102,11 +97,11 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     }
   }
   // comm->ncclComm_ should have valid ptr by now, but not necessarily
-  // initialized. Rely on getNcclComm() -> waitUntilInitialized() to wait for
-  // its initialization.
+  // initialized. Rely on getNcclComm() to wait for its initialization.
 #endif
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
+  comm->nonBlocking_ = config.blocking == 0;
   LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
             << comm->repr() << " with color_id " << color_id;
   return comm;
@@ -169,22 +164,13 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
 }
 #endif
 
-bool nccl_use_nonblocking() {
-  static bool nccl_use_nonblocking_ =
-      c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
-  if (nccl_use_nonblocking_) {
-    TORCH_WARN_ONCE("Using experimental non-blocking NCCL communicator.");
-  }
-  return nccl_use_nonblocking_;
-}
-
 // Default value: 30 minutes
 int nccl_nonblocking_timeout() {
   static int timeout = -2; // -2 means not initialized
   if (timeout == -2) {
-    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-    if (val && strlen(val) > 0) {
-      timeout = strtol(val, nullptr, 0);
+    const auto val = c10::utils::get_env("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val.has_value() && !val.value().empty()) {
+      timeout = stoi(val.value());
     } else {
       // Default value consistent with kBackendDefaultTimeout
       timeout = 30 * 60;
@@ -359,7 +345,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
     return;
   }
 
-  file.write(ncclTrace.data(), ncclTrace.size());
+  file.write(ncclTrace.data(), static_cast<std::streamsize>(ncclTrace.size()));
   if (!file) {
     LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
                << filename_;
@@ -553,7 +539,7 @@ void NCCLTraceBuffer::retire_id(
       return;
     }
     if (duration.has_value()) {
-      entry->duration_ = duration.value();
+      entry->duration_ = duration;
     }
   }
 }

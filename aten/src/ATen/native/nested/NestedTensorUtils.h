@@ -22,6 +22,7 @@
 #include <ATen/ops/tensor.h>
 #endif
 
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -65,8 +66,8 @@ inline at::Tensor get_buffer(const at::Tensor& tensor) {
 /**
  * Create a new nested tensor that is a view of a base nested tensor
  *
- * create_view_tensor calls a specialized constructor that copys the
- * the keys from base onto the new view tensor being created.
+ * create_view_tensor calls a specialized constructor that copies the
+ * keys from base onto the new view tensor being created.
  * The storage is shared between the base and the returned view tensor
  *
  * All callers of this helper must:
@@ -229,6 +230,7 @@ struct NestedNode {
   NestedNode& operator=(const NestedNode&) = delete;
   NestedNode(NestedNode&&) noexcept = default;
   NestedNode& operator=(NestedNode&&) noexcept = default;
+  ~NestedNode() = default;
   inline bool is_leaf() const {
     return _is_leaf;
   }

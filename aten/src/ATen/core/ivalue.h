@@ -690,7 +690,8 @@ struct TORCH_API IValue final {
   IValue(c10::intrusive_ptr<ivalue::ConstantString> v);
   IValue(std::string v);
   IValue(const char* v) : IValue(std::string(v)) {}
-  IValue(c10::string_view v) : IValue(std::string(v)){};
+  IValue(c10::string_view v) : IValue(std::string(v)){}
+  IValue(std::string_view v) : IValue(std::string(v)){}
   bool isString() const {
     return Tag::String == tag;
   }
@@ -809,9 +810,12 @@ struct TORCH_API IValue final {
   IValue(c10::Dict<Key, Value> v);
 
   template <class Key, class Value>
-  [[deprecated(
-    "IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")]]
-  IValue(std::unordered_map<Key, Value> v);
+  /// \cond
+  /// DOXYGEN_CANNOT_HANDLE_CONSTRUCTORS_WITH_MACROS_SO_EXCLUDE_THIS_LINE_FROM_DOXYGEN
+  C10_DEPRECATED_MESSAGE(
+      "IValues based on std::unordered_map<K, V> are slow and deprecated. Please use c10::Dict<K, V> instead.")
+      /// \endcond
+      IValue(std::unordered_map<Key, Value> v);
 
   template <class T, enable_if_ivalue_constructible<T> = nullptr>
   IValue(std::optional<T> v);
@@ -1349,8 +1353,14 @@ struct TORCH_API IValue final {
         DeviceIndex index;
       } as_device;
     } u;
+    static_assert(std::is_trivially_copyable_v<TriviallyCopyablePayload>);
     at::Tensor as_tensor;
     Payload() : u() {}
+    Payload(const Payload&) = delete;
+    Payload(Payload&&) = delete;
+    Payload& operator=(const Payload&) = delete;
+    Payload& operator=(Payload&&) = delete;
+    // NOLINTNEXTLINE(modernize-use-equals-default)
     ~Payload() {}
   };
 
