@@ -264,7 +264,7 @@ def tensorify_python_scalars(
                 (val := node.meta.get("val")),
                 (torch.SymFloat, torch.SymInt, torch.SymBool),
             ):
-                if len(val.node.expr.free_symbols) > 0 and all(
+                if all(
                     symbol_is_type(s, SymT.FLOAT) for s in val.node.expr.free_symbols
                 ):
                     # If all symbols are backed symfloats, we can just specialize the whole node
