@@ -120,6 +120,7 @@ import concurrent.futures
 import multiprocessing as mp
 import glob
 import os
+import shutil
 
 __all__ = [
     "enable",
