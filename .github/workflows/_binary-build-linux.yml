@@ -209,9 +209,9 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: 126-windows-change
           submodules: recursive
-          repository: pytorch/builder
+          repository: tinglvv/builder
           path: builder
           quiet-checkout: true
 
