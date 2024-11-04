@@ -17,8 +17,8 @@ __all__ = [
     "clip_grad_norm_",
     "clip_grad_norm",
     "clip_grad_value_",
-    "scale_grads_",
     "get_grad_norm",
+    "scale_grads_",
 ]
 
 
