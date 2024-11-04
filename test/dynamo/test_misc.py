@@ -8731,6 +8731,7 @@ def ___make_guard_fn():
             z = y.item()
             torch._check(z == 3)
             return x + z
+
         fn(torch.randn(4), torch.tensor([3]))
         self.assertRaises(RuntimeError, lambda: fn(torch.randn(4), torch.tensor([4])))
 
