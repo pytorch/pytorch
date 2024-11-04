@@ -95,9 +95,9 @@ inline at::Tensor create_nested_view_tensor(
   return at::detail::make_tensor<NestedTensorImpl>(
       c10::TensorImpl::VIEW,
       base,
-      nested_sizes,
-      nested_strides,
-      storage_offsets);
+      std::move(nested_sizes),
+      std::move(nested_strides),
+      std::move(storage_offsets));
 }
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
