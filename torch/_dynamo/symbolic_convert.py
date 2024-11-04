@@ -2258,7 +2258,7 @@ class InstructionTranslatorBase(
         self.push(BuiltinVariable(tuple).call_function(self, [self.pop()], {}))  # type: ignore[arg-type]
 
     def STOPITERATION_ERROR(self, inst):
-        # Replaces StopIteration -> RuntimeError
+        # Replaces StopIteration -> RuntimeError if the generator raises the former
         # https://peps.python.org/pep-0479/
         # https://github.com/python/cpython/pull/99006
         # https://github.com/python/cpython/commit/28187141cc34063ef857976ddbca87ba09a882c2
