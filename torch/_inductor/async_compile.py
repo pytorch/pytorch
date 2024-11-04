@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
+from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config
 from torch._inductor.codecache import (
     CodeCacheFuture,
@@ -48,6 +49,8 @@ _cumulative_compile_time = 0.0
 _t0: Optional[float] = None
 
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
+
+log = logging.getLogger(__name__)
 
 
 def pre_fork_setup():
@@ -160,10 +163,14 @@ class AsyncCompile:
         pool: AnyPool
         if get_worker_start_method() == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
+            log.info("Creating subprocess pool with %d workers", get_compile_threads())
             pool = SubprocPool(get_compile_threads())
         else:
             pre_fork_setup()
             ctx = multiprocessing.get_context(get_worker_start_method())
+            log.info(
+                "Creating forked subprocess pool with %d workers", get_compile_threads()
+            )
             pool = ProcessPoolExecutor(
                 get_compile_threads(),
                 mp_context=ctx,
@@ -280,36 +287,39 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def wait(self, scope: Dict[str, Any]) -> None:
-        num_kernels = len(
-            [
-                value
-                for key, value in scope.items()
-                if isinstance(value, (Future, CodeCacheFuture))
-            ]
-        )
-        pbar = tqdm(
-            total=num_kernels,
-            desc="Inductor Compilation",
-            disable=config.disable_progress,
-            delay=0,
-        )
-        if get_compile_threads() > 1:
-            for key, result in scope.items():
-                if config.verbose_progress and not isinstance(pbar, _Faketqdm):
-                    pbar.set_postfix_str(key)
-                if isinstance(result, (Future, CodeCacheFuture)):
-                    try:
-                        scope[key] = result.result()
-                    except BrokenProcessPool as e:
-                        raise RuntimeError(
-                            "A compilation subprocess exited unexpectedly. This "
-                            "is likely due to a crash. To facilitate debugging, "
-                            "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
-                            "to cause compilation to occur in the main process."
-                        ) from e
-                    pbar.update(1)
+        with dynamo_timed(
+            "async_compile.wait", log_pt2_compile_event=True, fwd_only=False
+        ):
+            num_kernels = len(
+                [
+                    value
+                    for key, value in scope.items()
+                    if isinstance(value, (Future, CodeCacheFuture))
+                ]
+            )
+            pbar = tqdm(
+                total=num_kernels,
+                desc="Inductor Compilation",
+                disable=config.disable_progress,
+                delay=0,
+            )
+            if get_compile_threads() > 1:
+                for key, result in scope.items():
+                    if config.verbose_progress and not isinstance(pbar, _Faketqdm):
+                        pbar.set_postfix_str(key)
+                    if isinstance(result, (Future, CodeCacheFuture)):
+                        try:
+                            scope[key] = result.result()
+                        except BrokenProcessPool as e:
+                            raise RuntimeError(
+                                "A compilation subprocess exited unexpectedly. This "
+                                "is likely due to a crash. To facilitate debugging, "
+                                "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
+                                "to cause compilation to occur in the main process."
+                            ) from e
+                        pbar.update(1)
 
-        _compile_end()
+            _compile_end()
 
 
 if (
