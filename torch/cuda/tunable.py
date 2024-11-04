@@ -393,7 +393,7 @@ def process_single_offline_gemm(untuned_gemm_line:str, gpu_id:int) -> None:
         warnings.warn(f"error: unknown op {op_sig}")
 
 def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus:int) -> None:
-    r"""Process one or more files and distribute work over multiple GPUs."""
+    r"""Process one or more files and distribute work over one or more GPUs."""
     unique_gemm_entries = gather_unique_untuned_gemm_from_files(filename_pattern)
 
     assert is_enabled()
@@ -401,7 +401,7 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus:int) -> None:
 
     total_gpus = torch.cuda.device_count()
 
-    assert(num_gpus <= total_gpus)
+    assert(1 <= num_gpus <= total_gpus)
 
     mp_context = mp.get_context("spawn")
 
