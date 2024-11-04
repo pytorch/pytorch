@@ -651,6 +651,8 @@ static PyObject* _custom_eval_frame(
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
+    // Re-enable custom behavior
+    eval_frame_callback_set(callback);
     *should_clear_frame = 1;
     return eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, 0);
   }
