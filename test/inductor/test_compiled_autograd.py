@@ -608,7 +608,7 @@ main()
                 yield model[0].bias.grad
                 model.zero_grad()
 
-        self.check_output_and_recompiles(fn, compiler_fn=make_compiler_fn(backend="aot_eager"))
+        self.check_output_and_recompiles(fn)
 
     def test_torch_compile_api_inductor(self):
         def fn():

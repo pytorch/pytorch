@@ -1515,10 +1515,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
 
-            # @staticmethod
-            # def create_fake_ctx(ctx, saved_tensors):
-            #     return torch._dynamo.external_utils.FakeBackwardCFunction(ctx, saved_tensors)
-
             @staticmethod
             def _compiled_autograd_key(ctx):
                 return (ctx._autograd_function_id, *ctx.symints)

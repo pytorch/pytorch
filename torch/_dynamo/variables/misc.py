@@ -761,7 +761,12 @@ class AutogradFunctionVariable(VariableTracker):
             else:
                 return self.call_apply(tx, args, kwargs)
 
-        elif name in ["backward", "_backward_prologue", "_backward_impl", "_backward_epilogue"]:
+        elif name in [
+            "backward",
+            "_backward_prologue",
+            "_backward_impl",
+            "_backward_epilogue",
+        ]:
             return self.call_backward(tx, name, args, kwargs)
         else:
             from .. import trace_rules
@@ -856,7 +861,6 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
     def as_proxy(self):
         if self.proxy is None:
-            breakpoint()
             unimplemented("proxy not set")
         return self.proxy
 
@@ -874,6 +878,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             self.non_differentiable = proxy_args_kwargs(args, {})[0]
             return variables.ConstantVariable.create(None)
 
+        # TODO: can we just remove this filter?
         if name not in ["save_for_backward", "_get_compiled_autograd_symints"]:
             unimplemented(f"autograd.Function context method: {name}")
         if self.saved_tensors is None:

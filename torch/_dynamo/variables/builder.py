@@ -764,50 +764,18 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
-        # elif isinstance(value, torch._dynamo.external_utils.FakeBackwardCFunction) and torch._dynamo.compiled_autograd.in_compiled_autograd_region:
-        #     breakpoint()
-        #     new_name = re.sub(r"[^a-zA-Z0-9]+", "_", self.name)
-        #     new_source = LocalSource(local_name=new_name)
-        #     pctx = self.tx.output.root_tracer.create_graph_input(
-        #         new_name,
-        #         type(value),
-        #         source=new_source,
-        #     )
-        #     set_example_value(pctx.node, value)
-        #     # res = self.tx.output.side_effects.track_object_existing(
-        #     #     value,
-        #     return AutogradFunctionContextVariable(
-        #         value,
-        #         # source=self.source,
-        #         source=new_source,
-        #         saved_tensors=SavedTensorBox([]),
-        #         proxy=pctx,
-        #     )
-        elif torch._dynamo.compiled_autograd.in_compiled_autograd_region and (isinstance(value, torch.autograd.function.FunctionCtx) or isinstance(value, torch._dynamo.external_utils.FakeBackwardCFunction)):
-            # breakpoint()
+        elif torch._dynamo.compiled_autograd.in_compiled_autograd_region and isinstance(
+            value, torch.autograd.function.BackwardCFunction
+        ):
             new_name = re.sub(r"[^a-zA-Z0-9]+", "_", self.name)
-            # new_source = LocalSource(local_name=new_name)
+            # Let type be inferred by handle_traced_output, TODO: verify this claim
             pctx = self.tx.output.root_tracer.create_graph_input(
                 new_name,
-                # type(value),
                 source=self.source,
             )
-            # fakify the stuffs
-            # for user defined autograd.Function
-            # we inlined into it, had fake inputs to the bwd
-            # some of the ops should of ran in mixed real/fake too (?)
-            # anything that used ctx.saved_tensors should of had a real example_value
-            # value.saved_tensors
-            # value.aot_symints
-            breakpoint()
-            print("ensure everything is Fake!")
             set_example_value(pctx.node, value)
-            # res = self.tx.output.side_effects.track_object_existing(
-            #     value,
-            # grapharg = GraphArg(source, value, False, fake_tensor_value)
             pctx.node.meta["grapharg"] = GraphArg(
                 source=self.source,
-                # source=new_source,
                 _example=value,
                 pass_arg_as_tensor=False,
                 fake_tensor=None,
@@ -816,33 +784,20 @@ class VariableBuilder:
             return AutogradFunctionContextVariable(
                 value,
                 source=self.source,
-                # source=new_source,
-                saved_tensors=SavedTensorBox([]),
+                saved_tensors=SavedTensorBox([]),  # never used
                 proxy=pctx,
             )
-            # )
-            # return res
         elif isinstance(value, torch.autograd.function.FunctionCtx):
-            actual_saved_tensors = None
-            try:
-                actual_saved_tensors = value.saved_tensors
-            except RuntimeError:
-                pass
-
-            saved_tensors = []
-            guards = [self.source.make_guard(GuardBuilder.TYPE_MATCH)]
-            if isinstance(actual_saved_tensors, tuple):
-                saved_tensors_source = AttrSource(self.source, "saved_tensors")
-                guards.append(
-                    saved_tensors_source.make_guard(GuardBuilder.SEQUENCE_LENGTH)
-                )
-                for i, v in enumerate(actual_saved_tensors):
-                    saved_tensors.append(
-                        VariableBuilder(
-                            self.tx, GetItemSource(saved_tensors_source, i)
-                        )(v)
-                    )
-            install_guard(*guards)
+            assert not torch._dynamo.compiled_autograd.in_compiled_autograd_region
+            saved_tensors_source = AttrSource(self.source, "saved_tensors")
+            install_guard(
+                self.source.make_guard(GuardBuilder.TYPE_MATCH),
+                saved_tensors_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
+            )
+            saved_tensors = [
+                VariableBuilder(self.tx, GetItemSource(saved_tensors_source, n))(v)
+                for n, v in enumerate(value.saved_tensors)
+            ]
 
             return self.tx.output.side_effects.track_object_existing(
                 value,
@@ -1322,7 +1277,6 @@ class VariableBuilder:
             )
             tensor_list_proxy.node.meta["steal_arg"] = True
 
-            # breakpoint()
             list_variable = wrap_fx_proxy_cls(
                 target_cls=TensorVariable,
                 tx=self.tx,
@@ -2173,7 +2127,6 @@ def wrap_fx_proxy_cls(
             target_cls, tx, proxy, example_value, subclass_type, **options
         )
     elif isinstance(example_value, torch.Tensor):
-        # this will always fakify
         return _wrap_fx_preexisting_tensor(
             target_cls, tx, proxy, example_value, subclass_type, **options
         )
@@ -2224,11 +2177,8 @@ def _wrap_fx_preexisting_tensor(
                 "is_tensor": target_cls
                 in (TensorVariable, TensorWithTFOverrideVariable),
             }
-            if "source" not in options or options["source"] is None:
-                breakpoint()
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
-            # THIS WILL ALWAYS FAKIFY THE TENSOR
             tensor = wrap_to_fake_tensor_and_record(tensor, tx=tx, **kwargs)
 
         if tensor.device.type != "meta" and (
@@ -2260,9 +2210,6 @@ def _wrap_fx_proxy(
         # only allow_non_graph_fake in this instance because we handle the non-fake
         # cases properly below.
         example_value = get_fake_value(proxy.node, tx, allow_non_graph_fake=True)
-        # print(proxy)
-        # print(example_value)
-        # breakpoint()
 
     return handle_traced_output(
         example_value, tx, proxy, options, subclass_type, target_cls
@@ -2319,7 +2266,6 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         sizes = [ConstantVariable.create(x) for x in example_value]
         return SizeVariable(sizes, **options)
     elif isinstance(example_value, (tuple, list)):
-        # this will set the real values on the node... fakify?
         set_example_value(proxy.node, example_value)
         unpacked = []
         for i, val in enumerate(example_value):
@@ -2345,19 +2291,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
 
                 # WARNING: this assumes the same target_cls as this tuple/list call
                 if "source" not in options_i:
-                    # traced output list has new tensors
-                    # unpacked.append(
-                    #     handle_traced_output(
-                    #         example_value=val,
-                    #         tx=tx,
-                    #         proxy=proxy_i,
-                    #         options=options_i,
-                    #         subclass_type=subclass_type,
-                    #         target_cls=target_cls,
-                    #     )
-                    # )
-
-                    # breakpoint()
+                    # an intermediate graph node outputs a tuple/list containing untracked tensors
                     unpacked.append(
                         wrap_fx_proxy_cls(
                             target_cls=target_cls,
@@ -2377,7 +2311,6 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
                             **options_i,
                         )
                     )
-        # breakpoint()
         if isinstance(example_value, torch.Size):
             # NB: Keep the old proxy around.  See SizeVariable for an
             # explanation why
@@ -2473,14 +2406,15 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
-    elif (isinstance(example_value, torch._dynamo.external_utils.FakeBackwardCFunction)):
+    elif isinstance(example_value, torch._dynamo.external_utils.FakeBackwardCFunction):
+        # Used in Compiled Autograd to handle fakifying the autograd.Function ctx
+        # fake_ctx = create_fake_ctx(ctx, saved_tensors)
         set_example_value(proxy.node, example_value)
         var = AutogradFunctionContextVariable(
             example_value,
             proxy=proxy,
             **options,
         )
-        # breakpoint()
         return var
     else:
         unimplemented(
@@ -2929,9 +2863,9 @@ class SourcelessBuilder:
             return RegexPatternVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             return ConstantVariable.create(str(value))
+        # TODO: split?
         elif isinstance(value, torch.autograd.function.FunctionCtx):
             return AutogradFunctionContextVariable(value)
-        breakpoint()
         unimplemented(
             f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
         )

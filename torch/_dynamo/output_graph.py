@@ -1485,7 +1485,6 @@ class OutputGraph:
             compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
-            breakpoint()
             compiled_fn = compiler_fn(gm, self.example_inputs())
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
@@ -1665,9 +1664,11 @@ class OutputGraph:
 
                     if arg.fake_tensor is not None:
                         fake = arg.fake_tensor
-                    elif isinstance(arg.example, torch.SymInt) or isinstance(arg.example, torch.Tensor):
+                    elif isinstance(arg.example, (torch.SymInt, torch.Tensor)):
                         fake = arg.example
                     else:
+                        # TODO: split this out
+                        # GraphArgs may not have fakes, but the tensors they hold will be fake
                         fake = None
                     update_used_symbols(used_symbols, fake)
 

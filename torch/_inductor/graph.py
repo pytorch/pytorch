@@ -38,9 +38,9 @@ from torch._dynamo.utils import defake, dynamo_timed
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import make_channels_last_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.autograd.function import BackwardCFunction
 from torch.fx import GraphModule
 from torch.fx.experimental._backward_state import BackwardState
-from torch.autograd.function import BackwardCFunction
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     free_unbacked_symbols,

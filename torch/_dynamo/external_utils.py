@@ -2,7 +2,7 @@
 
 import functools
 import warnings
-from typing import Any, Callable, List, Optional, Union
+from typing import Any, Callable, List, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -73,8 +73,8 @@ class FakeBackwardCFunction:
     ) -> None:
         self.real = real
         self.saved_tensors = saved_tensors
-        self.aot_symints = real._get_compiled_autograd_symints()
-        self.bw_module = real._forward_cls._lazy_backward_info.bw_module
+        self.aot_symints = real._get_compiled_autograd_symints()  # type: ignore[attr-defined]
+        self.bw_module = real._forward_cls._lazy_backward_info.bw_module  # type: ignore[attr-defined]
 
     def __getattr__(self, name: str) -> Any:
         if name == "saved_variables":
@@ -87,72 +87,24 @@ class FakeBackwardCFunction:
         return getattr(self.real, name)
 
 
-def create_fake_ctx(
-    ctx: torch.autograd.function.BackwardCFunction, saved_tensors: List[torch.Tensor]
-) -> FakeBackwardCFunction:
-    return FakeBackwardCFunction(ctx, saved_tensors)
-
-
-# def call_backward_prologue(
-#     ctx: torch.autograd.function.BackwardCFunction, saved_tensors: List[torch.Tensor],
-#     # fakectx: FakeBackwardCFunction,
-#     *args: Any,
-# ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
-#     fakectx = FakeBackwardCFunction(ctx, saved_tensors)
-#     return fakectx._forward_cls._backward_prologue(fakectx, *args)  # type: ignore[attr-defined]
-
-
-# def call_backward_impl(
-#     ctx: torch.autograd.function.BackwardCFunction, saved_tensors: List[torch.Tensor],
-#     # fakectx: FakeBackwardCFunction,
-#     *args: Any,
-# ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
-#     fakectx = FakeBackwardCFunction(ctx, saved_tensors)
-#     return fakectx._forward_cls._backward_impl(fakectx, *args)  # type: ignore[attr-defined]
-
-# def call_backward_impl(
-#     # ctx: torch.autograd.function.BackwardCFunction, saved_tensors: List[torch.Tensor],
-#     fakectx: FakeBackwardCFunction,
-#     *args: Any,
-# ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
-#     torch._dynamo.comptime.comptime.breakpoint()
-
-#     # fakectx = FakeBackwardCFunction(ctx, saved_tensors)
-#     return fakectx._forward_cls._backward_impl(fakectx, *args)  # type: ignore[attr-defined]
-
-
-def normalize_as_list(x):
+def normalize_as_list(x: Any) -> List[Any]:
     if isinstance(x, tuple):
         return list(x)
     elif isinstance(x, list):
         return x
     return [x]
 
+
 def call_backward_impl(
-    # ctx: torch.autograd.function.BackwardCFunction, saved_tensors: List[torch.Tensor],
-    ctx: FakeBackwardCFunction,
+    fakectx: FakeBackwardCFunction,
     *args: Any,
-) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
-    # fakectx = FakeBackwardCFunction(ctx, saved_tensors)
-    # assert len(args) == 1  # data-dependent jump? 
+) -> List[torch.Tensor]:
+    # TODO: this is split on aot autograd main path,
+    # doesn't work with backward state
     all_args = args[0]
-    # return fakectx._forward_cls._backward_impl(fakectx, *args)  # type: ignore[attr-defined]
-    # bw_module = ctx._forward_cls._lazy_backward_info.bw_module
-    bw_module = ctx.bw_module
-    symints = ctx.aot_symints
-    # assert len(symints) == ctx.symints  # data-dependent jump?
-    # backward_state_indices
-    # context = torch._C._DisableAutocast if disable_amp else nullcontext
-    return normalize_as_list(bw_module(*all_args))
-
-
-# def call_backward_epilogue(
-#     ctx: torch.autograd.function.BackwardCFunction, saved_tensors: List[torch.Tensor],
-#     # fakectx: FakeBackwardCFunction,
-#     *args: Any,
-# ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
-#     fakectx = FakeBackwardCFunction(ctx, saved_tensors)
-#     return fakectx._forward_cls._backward_epilogue(fakectx, *args)  # type: ignore[attr-defined]
+    bw_module = fakectx.bw_module
+    symints = fakectx.aot_symints
+    return normalize_as_list(bw_module(*all_args, *symints))
 
 
 def untyped_storage_size(x: torch.Tensor) -> int:
@@ -196,6 +148,3 @@ def call_module_hooks_from_backward_state(
         if new_result is not None:
             result = new_result
     return result
-
-class CustomObj:
-    pass
