@@ -1038,9 +1038,6 @@ class TritonHOPifier:
             # We only support configs and keys arguments of triton.autotune
             # Make sure other arguments are defaulted
             defaults = inspect.signature(Autotuner.__init__).parameters
-            #print (any([cfg.pre_hook is not None for cfg in kernel.configs]))
-            #print (defaults)
-            print ("pre_hook" in defaults)
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
             if (
@@ -1074,14 +1071,16 @@ class TritonHOPifier:
                     # https://github.com/pytorch/pytorch/issues/139059
                     or (
                         # Check Config passed to autotuner in configs
-                        any([cfg.pre_hook is not None for cfg in kernel.configs])
+                        any(cfg.pre_hook is not None for cfg in kernel.configs)
                     )
                     # we also cannot support pre/post hook in the autotuner config
                     or (
-                        "pre_hook" in defaults and defaults["pre_hook"] != kernel.pre_hook
+                        "pre_hook" in defaults
+                        and defaults["pre_hook"] != kernel.pre_hook
                     )
                     or (
-                        "post_hook" in defaults and defaults["post_hook"] != kernel.post_hook
+                        "post_hook" in defaults
+                        and defaults["post_hook"] != kernel.post_hook
                     )
                 )
             ):
