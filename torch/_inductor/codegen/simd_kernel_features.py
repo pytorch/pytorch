@@ -70,7 +70,7 @@ class SIMDKernelFeatures:
         self,
         node_schedule: List[NodeScheduleEntry],
         numel: sympy.Expr,
-        reduction_numel: sympy.Expr = sympy.Integer(1),
+        reduction_numel: sympy.Expr = sympy.S.One,
     ):
         self.node_schedule = node_schedule
         self.numel = V.graph.sizevars.simplify(numel)  # numel excludes reduction_numel
