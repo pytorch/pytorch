@@ -3427,7 +3427,7 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         assert add(x, y).mean() == 2, "Problem with add kernel"
 
         # this should cause an exception, since pre_hook is not allowed
-        msg = "Only configs and keys are supported for triton.autotune"
+        msg = "pre_hook is not supported in triton.Autotune Configs"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             add_compiled = torch.compile(add, mode="reduce-overhead", fullgraph=True)
             add_compiled(x, y).mean()

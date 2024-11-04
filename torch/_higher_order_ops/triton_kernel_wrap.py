@@ -1067,16 +1067,20 @@ class TritonHOPifier:
                         "use_cuda_graph" in defaults
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
                     )
-                    # pre_hook requires running arbitrary code at runtime, which we cannot handle at this time
-                    # https://github.com/pytorch/pytorch/issues/139059
-                    or (
-                        # Check Config passed to autotuner in configs
-                        any(cfg.pre_hook is not None for cfg in kernel.configs)
-                    )
                 )
             ):
                 self.raise_unsupported(
                     "Only configs and keys are supported for triton.autotune"
+                )
+            if not (
+                torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
+                # pre_hook requires running arbitrary code at runtime, which we cannot handle at this time
+                # https://github.com/pytorch/pytorch/issues/139059
+                # Check Config passed to autotuner in configs
+                and (any(cfg.pre_hook is not None for cfg in kernel.configs))
+            ):
+                self.raise_unsupported(
+                    "pre_hook is not supported in triton.Autotune Configs"
                 )
 
     def call_getitem(
