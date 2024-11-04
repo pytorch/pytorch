@@ -1991,7 +1991,7 @@ SYMPY_INTERP = {
     "OpaqueUnaryFn_tan": math.tan,
     "OpaqueUnaryFn_tanh": math.tanh,
     "OpaqueUnaryFn_atan": math.atan,
-    "OpaqueUnaryFn_sqrt": math.sqrt
+    "OpaqueUnaryFn_sqrt": math.sqrt,
 }
 
 
