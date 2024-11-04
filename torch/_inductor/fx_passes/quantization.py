@@ -668,12 +668,10 @@ def _register_quantized_conv_binary_lowering(
             x,
             x_scale,
             x_zp,
-            accum,
-            accum_scale,
-            accum_zp,
             packed_weight,
             w_scale,
             w_zp,
+            accum,
             b,
             stride,
             padding,
@@ -682,6 +680,8 @@ def _register_quantized_conv_binary_lowering(
             o_inv_scale,
             o_zero_point,
             output_dtype,
+            accum_scale,
+            accum_zp,
             binary_unary_attr.binary_op_name,
             binary_unary_attr.alpha,
             binary_unary_attr.unary_op_name,
@@ -2532,50 +2532,58 @@ def _register_qlinear_weight_prepack():
 def _register_smooth_quant_int_mm_pattern():
     """
     The pattern is:
-      (no bias) _int_mm -> convert_element_type -> (expand -> mul) -> mul
+      (no bias) reshape -> _int_mm -> convert_element_type -> (expand -> mul) -> mul -> reshape
     or
-      (with bias) _int_mm -> convert_element_type -> (expand -> mul) -> mul -> reshape -> add
-
-    Onednn qlinear does not support per-channel quantization of x, so we have to apply x scale and bias ourselves.
-    Because of that, we don't take in the reshape nodes at the beginning and at the end otherwise x scale may not
-    apply due to shape mismatch.
+      (with bias) pattern_no_bias -> add -> reshape -> reshape
     """
     pattern_no_bias = CallFunction(
-        aten.mul.Tensor,
+        aten.reshape.default,
         CallFunction(
             aten.mul.Tensor,
             CallFunction(
-                prims.convert_element_type.default,
+                aten.mul.Tensor,
                 CallFunction(
-                    aten._int_mm.default,
-                    KeywordArg("a"),
-                    KeywordArg("b"),
+                    prims.convert_element_type.default,
+                    CallFunction(
+                        aten._int_mm.default,
+                        CallFunction(
+                            aten.reshape.default,
+                            KeywordArg("a"),
+                            KeywordArg("in_shape"),
+                        ),
+                        KeywordArg("b"),
+                    ),
+                    KeywordArg("dtype"),
                 ),
-                KeywordArg("dtype"),
+                CallFunction(
+                    aten.expand.default,
+                    KeywordArg("x_scale"),
+                    Arg(),
+                ),
             ),
-            CallFunction(
-                aten.expand.default,
-                KeywordArg("x_scale"),
-                Arg(),
-            ),
+            KeywordArg("w_scale"),
         ),
-        KeywordArg("w_scale"),
+        KeywordArg("out_shape_no_bias"),
     )
     pattern_with_bias = CallFunction(
-        aten.add.Tensor,
+        aten.reshape.default,
         CallFunction(
             aten.reshape.default,
-            pattern_no_bias,
+            CallFunction(
+                aten.add.Tensor,
+                pattern_no_bias,
+                KeywordArg("bias"),
+            ),
             Arg(),
         ),
-        KeywordArg("bias"),
+        KeywordArg("out_shape_with_bias"),
     )
 
     def _validate_pattern(match: Match):
         for n in match.nodes:
             if len(n.users) != 1 and n != match.output_node():
                 return False
-        return len(match.nodes) in [5, 7]
+        return len(match.nodes) in [7, 10]
 
     for pattern in [pattern_with_bias, pattern_no_bias]:
 
@@ -2586,6 +2594,10 @@ def _register_smooth_quant_int_mm_pattern():
         )
         def _int_mm_weight_prepack(match: Match, *args, **kwargs):
             bias = kwargs.get("bias", None)
+            if bias is not None:
+                if len(bias.meta.get("tensor_meta").shape) != 1:
+                    # we expect bias is a vector
+                    return
             x = kwargs["a"]
             weight = kwargs["b"]
             dtype = kwargs["dtype"]
@@ -2650,9 +2662,13 @@ def _register_smooth_quant_int_mm_pattern():
                     out_node.replace_all_uses_with(new_linear_node)
                     new_linear_node.meta.update(out_node.meta)
                 else:
-                    # in this case, we have to apply x scale and add bias ourselves after qlinear
+                    # onednn.qlinear does not support per-channel quantization of x
+                    # so in this case, we have to apply x scale and add bias ourselves after qlinear
+                    x_reshaped = match.graph.call_function(
+                        aten.reshape.default, args=(x, kwargs["in_shape"])
+                    )
                     new_args = (
-                        x,
+                        x_reshaped,
                         1.0,  # x_scale
                         0,  # x_zp
                         prepack_weight_node,
@@ -2669,12 +2685,23 @@ def _register_smooth_quant_int_mm_pattern():
                     new_linear_node = match.graph.call_function(
                         torch.ops.onednn.qlinear_pointwise, args=new_args
                     )
+                    # apply x scale
                     new_out_node = match.graph.call_function(
                         aten.mul.Tensor, args=(new_linear_node, x_scale)
                     )
+                    # Add bias and reshape
                     if bias is not None:
                         new_out_node = match.graph.call_function(
                             aten.add.Tensor, args=(new_out_node, bias)
+                        )
+                        new_out_node = match.graph.call_function(
+                            aten.reshape.default,
+                            args=(new_out_node, kwargs["out_shape_with_bias"]),
+                        )
+                    else:
+                        new_out_node = match.graph.call_function(
+                            aten.reshape.default,
+                            args=(new_out_node, kwargs["out_shape_no_bias"]),
                         )
                     out_node.replace_all_uses_with(new_out_node)
                     new_out_node.meta.update(out_node.meta)

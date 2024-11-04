@@ -326,6 +326,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             pairs.append(torch.ones(size))
         return pairs
 
+    def test_itertools_compress(self):
+        def fn():
+            return itertools.compress("ABCDEF", [1, 0, 1, 0, 1, 1])
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertListEqual(list(opt_fn()), list(fn()))
+
+    def test_itertools_compress_tensors(self):
+        def fn():
+            return itertools.compress(
+                [torch.tensor([0]), torch.tensor([1]), torch.tensor([2])], [1, 0, 1]
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertListEqual(list(opt_fn()), list(fn()))
+
     @make_test
     def test_np_iinfo(a):
         max_dim = np.iinfo(np.int16).max

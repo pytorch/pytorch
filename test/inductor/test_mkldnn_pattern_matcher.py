@@ -1091,6 +1091,59 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
+    def test_qconv2d_with_concat_cpu(self):
+        channel_1 = 32
+        channel_2 = 16
+        channel_3 = 8
+        channel_4 = int(channel_2 * 2 + channel_3)
+
+        class Model(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(
+                    channel_1, channel_2, 1, stride=1, dilation=1, padding=0
+                )
+                self.conv2 = torch.nn.Conv2d(
+                    channel_1, channel_2, 1, stride=1, dilation=1, padding=0
+                )
+                self.conv3 = torch.nn.Conv2d(
+                    channel_2, channel_3, 3, stride=1, dilation=1, padding=1
+                )
+
+                self.conv = torch.nn.Conv2d(
+                    channel_4, channel_2, 1, stride=1, dilation=1, padding=0
+                )
+
+            def forward(self, x: torch.Tensor):
+                x1 = self.conv1(x)
+                x2 = self.conv2(x)
+                x3 = self.conv3(x2)
+                res = torch.cat([x1, x2, x3], dim=1)
+                res = self.conv(res)
+                return res
+
+        mod = Model().eval()
+        v = torch.randn(
+            (8, channel_1, 40, 40), dtype=torch.float32, requires_grad=False
+        )
+
+        def matcher_check_fn():
+            self.assertEqual(
+                counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 4
+            )
+            self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 3)
+
+        self._test_common(
+            mod,
+            (v,),
+            check_quantization=True,
+            matcher_check_fn=matcher_check_fn,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
     def test_qconv2d_add_2(self):
         r"""
         This testcase prevents this pattern be matched as a conv_binary fusion by mistake.
@@ -2756,7 +2809,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
 
             def forward(self, a, a_scale_per_tensor, a_scale_per_channel):
-                c = torch._int_mm(a, self.b)
+                out_shape = a.shape[:-1] + (self.b.size(-1),)
+                a_reshaped = a.reshape(-1, a.size(-1))
+                c = torch._int_mm(a_reshaped, self.b)
                 c = c.to(self.dtype)
                 c_shape = c.shape
                 a_scale = (
@@ -2771,7 +2826,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     c = c.reshape([1, *list(c_shape)])
                     c = c + self.bias
                     c = c.reshape(c_shape)
-                c = c.reshape([1, *list(c_shape)])
+                c = c.reshape(out_shape)
                 return c
 
         has_bias_list = [True, False]
@@ -2781,7 +2836,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             has_bias_list, dype_list, per_channel_list
         ):
             mod = Mod(dtype, has_bias, per_channel_quant).eval()
-            a = torch.randint(q_min, q_max, [M, in_feature], dtype=torch.int8)
+            a = torch.randint(q_min, q_max, [1, M, in_feature], dtype=torch.int8)
             a_scale_per_tensor = torch.rand([1], dtype=dtype) * 0.01 + 0.01
             a_scale_per_channel = torch.rand([M, 1], dtype=dtype) * 0.01 + 0.01
             a_scale_per_tensor, a_scale_per_channel = (
@@ -2795,7 +2850,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
                 self.assertEqual(
                     counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
-                    7 if has_bias else 5,
+                    10 if has_bias else 7,
                 )
 
             self._test_common(
