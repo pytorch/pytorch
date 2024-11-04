@@ -372,7 +372,7 @@ Tensor mkldnn_convolution_pointwise_binary(
   auto output_sizes = conv_output_size(
       input_t.sizes(), weight_t.sizes(), padding_expanded, stride_expanded, dilation_expanded);
   TORCH_CHECK(
-      output_sizes.size() == other_t.dim(),
+      input_t.dim() == other_t.dim(),
       "Binary Fusion's inputs should have same dimensions");
   // Only calling fusion path for channels_last path.
   // TODO: OneDNN doesn't optimize well for groups > 1 case, it will be enabled
