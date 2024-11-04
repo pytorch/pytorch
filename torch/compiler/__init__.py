@@ -18,6 +18,7 @@ __all__ = [
     "wrap_numpy",
     "is_compiling",
     "is_dynamo_compiling",
+    "skip_guard_eval_unsafe",
 ]
 
 
