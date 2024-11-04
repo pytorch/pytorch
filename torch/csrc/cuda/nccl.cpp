@@ -109,7 +109,7 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclInt;
     case at::kChar:
       return ncclDataType_t::ncclChar;
-    // NOLINTNEXTLINE(*-narrowing-conversions)
+    // NOLINTNEXTLINE(*-narrowing-conversions, bugprone-branch-clone)
     case at::kByte:
       return ncclDataType_t::ncclUint8;
     case at::kBool:
@@ -175,6 +175,7 @@ static int nccl_nonblocking_timeout() {
   if (timeout == -2) {
     const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
     if (val && strlen(val) > 0) {
+      // NOLINTNEXTLINE(*-narrowing-conversions)
       timeout = strtol(val, nullptr, 0);
     } else {
       // Default value consistent with kBackendDefaultTimeout
