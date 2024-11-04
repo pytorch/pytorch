@@ -4437,6 +4437,26 @@ else:
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             ind.index_add_(0, ind.clone(), ind)
 
+    @onlyCUDA
+    def test_index_add_large_inputs(self, device):
+        D = 6144
+        x = torch.zeros([16384, D], device=device, dtype=torch.bfloat16)
+        index = torch.randint(0, 16384, (1, 32, 16384), device=device, dtype=torch.int64)
+        output = torch.randn([1, 32, 16384, D], device=device, dtype=torch.bfloat16)  # Use random values for test
+
+        x_before = x.clone()
+        #Manually update x_before to generate expected values
+        for batch in range(output.shape[1]): #Loop over batch size (32 in this case)
+            for idx in range(output.shape[2]): #Loop over index
+                idx_val = index[0, batch, idx].item()
+                x_before[idx_val] += output[0, batch, idx]
+
+        #Run index_add to get actual values
+        x.index_add_(0, index.view(-1), output.view(-1, D))
+
+        self.assertEqual(x_before, x)
+
+
     # FIXME: convert to ErrorInputs
     # (but have to extend ErrorInputs to handle inplace-only errors!)
     @onlyNativeDeviceTypes
