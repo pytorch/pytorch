@@ -1020,7 +1020,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           int64_t a = 0, b = 0;
           pop(stack, a, b);
-          push(stack, powWrapper(a, b));
+          push(stack, static_cast<int64_t>(powWrapper(a, b)));
         },
         aliasAnalysisFromSchema()),
     // min and max are in prim:: because there is a difference between
