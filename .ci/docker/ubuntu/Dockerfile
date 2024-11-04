@@ -87,19 +87,6 @@ RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
 RUN rm install_vision.sh cache_vision_models.sh common_utils.sh
 ENV INSTALLED_VISION ${VISION}
 
-# (optional) Install Android NDK
-ARG ANDROID
-ARG ANDROID_NDK
-ARG GRADLE_VERSION
-COPY ./common/install_android.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
-COPY ./android/AndroidManifest.xml AndroidManifest.xml
-COPY ./android/build.gradle build.gradle
-RUN if [ -n "${ANDROID}" ]; then bash ./install_android.sh; fi
-RUN rm install_android.sh cache_vision_models.sh common_utils.sh
-RUN rm AndroidManifest.xml
-RUN rm build.gradle
-ENV INSTALLED_ANDROID ${ANDROID}
-
 # (optional) Install Vulkan SDK
 ARG VULKAN_SDK_VERSION
 COPY ./common/install_vulkan_sdk.sh install_vulkan_sdk.sh
@@ -182,6 +169,13 @@ COPY ./common/install_acl.sh install_acl.sh
 RUN if [ -n "${ACL}" ]; then bash ./install_acl.sh; fi
 RUN rm install_acl.sh
 ENV INSTALLED_ACL ${ACL}
+
+# (optional) install graphviz
+ARG GRAPHVIZ
+COPY ./common/install_graphviz.sh install_graphviz.sh
+RUN if [ -n "${GRAPHVIZ}" ]; then bash ./install_graphviz.sh; fi
+RUN rm install_graphviz.sh
+ENV INSTALLED_GRAPHVIZ ${GRAPHVIZ}
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ARG SKIP_SCCACHE_INSTALL
