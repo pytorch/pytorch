@@ -42,7 +42,6 @@ def _no_grad(func):
 @_no_grad
 def get_grad_norm(
     parameters: _tensor_or_tensors,
-    max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
     foreach: Optional[bool] = None,
@@ -55,7 +54,6 @@ def get_grad_norm(
     Args:
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
             single Tensor that will have gradients normalized
-        max_norm (float): max norm of the gradients
         norm_type (float): type of the used p-norm. Can be ``'inf'`` for
             infinity norm.
         error_if_nonfinite (bool): if True, an error is thrown if the total
@@ -72,7 +70,6 @@ def get_grad_norm(
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     grads = [p.grad for p in parameters if p.grad is not None]
-    max_norm = float(max_norm)
     norm_type = float(norm_type)
     if len(grads) == 0:
         return torch.tensor(0.0)
@@ -209,7 +206,7 @@ def clip_grad_norm_(
         Total norm of the parameter gradients (viewed as a single vector).
     """
     total_norm = get_grad_norm(
-        parameters, max_norm, norm_type, error_if_nonfinite, foreach
+        parameters, norm_type, error_if_nonfinite, foreach
     )
     scale_grads_(parameters, max_norm, total_norm, foreach)
     return total_norm
