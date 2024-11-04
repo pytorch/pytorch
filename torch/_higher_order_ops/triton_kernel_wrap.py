@@ -1073,15 +1073,6 @@ class TritonHOPifier:
                         # Check Config passed to autotuner in configs
                         any(cfg.pre_hook is not None for cfg in kernel.configs)
                     )
-                    # we also cannot support pre/post hook in the autotuner config
-                    or (
-                        "pre_hook" in defaults
-                        and defaults["pre_hook"] != kernel.pre_hook
-                    )
-                    or (
-                        "post_hook" in defaults
-                        and defaults["post_hook"] != kernel.post_hook
-                    )
                 )
             ):
                 self.raise_unsupported(
