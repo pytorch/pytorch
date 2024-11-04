@@ -6444,6 +6444,12 @@ class ShapeEnv:
     #   2. Compute the value range of the right-hand side
     #   3. Update the value range of the variable, if better
     def _refine_ranges(self, expr: SympyBoolean) -> None:
+        if isinstance(expr, sympy.core.relational.Equality):
+            # If the expression is eq, this will refine the range
+            # down to the equality and unsoundly set a replacement without
+            # a guard.
+            return None
+
         expr = self.simplify(expr)
 
         for symbol in expr.free_symbols:
