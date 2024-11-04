@@ -1238,6 +1238,7 @@ def _check_sparse_tensor_invariants() -> _bool: ...  # THPModule_checkSparseTens
 def _set_check_sparse_tensor_invariants(
     arg: _bool,
 ) -> None: ...  # THPModule_setCheckSparseTensorInvariants
+def _is_default_mobile_cpu_allocator_set() -> _bool: ...  # THPModule_isDefaultMobileCPUAllocatorSet
 def _set_default_mobile_cpu_allocator() -> None: ...  # THPModule_setDefaultMobileCPUAllocator
 def _unset_default_mobile_cpu_allocator() -> None: ...  # THPModule_unsetDefaultMobileCPUAllocator
 def _is_torch_function_enabled() -> _bool: ...  # THPModule_isEnabledTorchFunction

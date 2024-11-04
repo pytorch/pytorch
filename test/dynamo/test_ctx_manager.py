@@ -14,7 +14,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     TEST_WITH_ROCM,
-    TestCase,
 )
 
 
@@ -1717,7 +1716,9 @@ class GraphModule(torch.nn.Module):
         opt_f = torch.compile(f, backend="eager")
         opt_f(torch.randn(2, 2))
 
-    def test_contextlib_contextmanager(self):
+
+class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
+    def test_ctx_basic0(self):
         @contextlib.contextmanager
         def set_default_dtype(dtype):
             old_dtype = torch.get_default_dtype()
@@ -1754,7 +1755,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    def test_contextlib_contextmanager_basic(self):
+    def test_ctx_basic1(self):
         @contextlib.contextmanager
         def compute_sin(x):
             try:
@@ -1771,7 +1772,7 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
-    def test_contextlib_contextmanager_change_parent_nonlocal_0(self):
+    def test_change_parent_nonlocal_0(self):
         # test if a nonlocal actually gets propagated
         z = 0
         k = 0
@@ -1806,7 +1807,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z, 100)
         self.assertEqual(k, 100)
 
-    def test_contextlib_contextmanager_change_parent_nonlocal_1(self):
+    def test_change_parent_nonlocal_1(self):
         # test if finally is executed and it is reading the correct variable
         z = 1
         k = 2
@@ -1841,7 +1842,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(k, 100)
 
     @unittest.expectedFailure
-    def test_contextlib_contextmanager_change_parent_global_0(self):
+    def test_change_parent_global_0(self):
         # test if a global actually gets propagated
         global z_glb, k_glb
         z_glb, k_glb = 0, 0
@@ -1875,7 +1876,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z_glb, 100)
         self.assertEqual(k_glb, 100)
 
-    def test_contextlib_contextmanager_change_parent_global_1(self):
+    def test_change_parent_global_1(self):
         # test if finally is executed and it is reading the correct variable
         global z_glb, k_glb
         z_glb, k_glb = 0, 0
@@ -1908,7 +1909,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(z_glb, 100)
         self.assertEqual(k_glb, 100)
 
-    def test_contextlib_contextmanager_change_parent_0(self):
+    def test_change_parent_0(self):
         def create_ctx():
             @_contextmanager
             def ctx(x):
@@ -1932,7 +1933,7 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
-    def test_contextlib_contextmanager_change_parent_1(self):
+    def test_change_parent_1(self):
         def create_ctx(x):
             @_contextmanager
             def ctx():
@@ -1956,8 +1957,121 @@ class GraphModule(torch.nn.Module):
         y = fn(x)
         self.assertEqual(y, x.sin().cos())
 
+    def test_graph_break_inside_ctx(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            y = x.tan()
+            try:
+                torch._dynamo.graph_break()
+                yield y
+            finally:
+                pass
 
-class CPythonContextManagerTestCase(TestCase):
+        def f(x):
+            y = x.sin()
+            with whoo(x) as z:
+                y += z.neg()
+            y += x.cos()
+
+        x = torch.randn(2)
+        expected = f(x)
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(f)(x)
+        self.assertEqual(expected, out)
+        # no graph will be generated as we will skip all frames due to the graph break
+        self.assertEqual(len(eager.graphs), 0)
+
+    def test_graph_break_inside_ctx_1(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            y = x.tan()
+            try:
+                torch._dynamo.graph_break()
+                yield y
+            finally:
+                pass
+
+        def bar(x):
+            with whoo(x) as z:
+                return z.neg()
+
+        def f(x):
+            return x.sin() + bar(x) + x.cos()
+
+        x = torch.randn(2)
+        expected = f(x)
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(f)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 2)
+        self.assertExpectedInline(
+            normalize_gm(eager.graphs[0].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2]"):
+        l_x_ = L_x_
+
+        sin: "f32[2]" = l_x_.sin();  l_x_ = None
+        return (sin,)
+""",
+        )
+        self.assertExpectedInline(
+            normalize_gm(eager.graphs[1].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_stack0_: "f32[2]", L_stack1_: "f32[2]", L_x_: "f32[2]"):
+        l_stack0_ = L_stack0_
+        l_stack1_ = L_stack1_
+        l_x_ = L_x_
+
+        add: "f32[2]" = l_stack0_ + l_stack1_;  l_stack0_ = l_stack1_ = None
+        cos: "f32[2]" = l_x_.cos();  l_x_ = None
+        add_1: "f32[2]" = add + cos;  add = cos = None
+        return (add_1,)
+""",
+        )
+
+    def test_graph_break_inside_ctx_2(self):
+        @contextlib.contextmanager
+        def whoo(x):
+            try:
+                torch._dynamo.graph_break()
+                yield x.cos()
+            finally:
+                pass
+
+        def g(x):
+            return x.neg() + x.acos()
+
+        def f(x):
+            y = x.sin()
+            with whoo(x) as z:
+                y += g(z)
+            y += y.tan()
+            return y
+
+        x = torch.randn(2)
+        expected = f(x)
+        eager = EagerAndRecordGraphs()
+        out = torch.compile(backend=eager, fullgraph=False)(f)(x)
+        self.assertEqual(expected, out)
+        self.assertEqual(len(eager.graphs), 1)
+        self.assertExpectedInline(
+            normalize_gm(eager.graphs[0].print_readable(False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[2]"):
+        l_x_ = L_x_
+
+        neg: "f32[2]" = l_x_.neg()
+        acos: "f32[2]" = l_x_.acos();  l_x_ = None
+        add: "f32[2]" = neg + acos;  neg = acos = None
+        return (add,)
+""",
+        )
+
+
+class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
     # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
     # https://github.com/python/cpython/blob/d48cc82ed25e26b02eb97c6263d95dcaa1e9111b/Lib/test/test_contextlib.py#L70
 

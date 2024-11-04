@@ -524,7 +524,7 @@ class ConvertFrameAssert:
             unimplemented("generator")
 
         if (
-            frame.f_code.co_name == "__enter__"
+            frame.f_code.co_name in ("__enter__", "__exit__")
             and len(frame.f_locals) == 1
             and any(
                 type(a) is contextlib._GeneratorContextManager
@@ -532,9 +532,10 @@ class ConvertFrameAssert:
             )
         ):
             # ctx = next(a for a in frame.f_locals.values() if is_ctx_manager(a))
-            # skip_code(frame.f_code)
-            # skip_code(ctx.gen.gi_frame.f_code)
-            return torch._C._dynamo.eval_frame.skip_code_recursive_flag
+            skip_code(frame.f_code)
+            ctx = frame.f_locals["self"]
+            skip_code(ctx.gen.gi_frame.f_code)
+            # return torch._C._dynamo.eval_frame.skip_code_recursive_flag
 
         if not has_tensor_in_frame(frame):
             return None
