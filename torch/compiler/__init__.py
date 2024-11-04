@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
-from typing import Any, Callable, List, TypeVar
+from typing import Any, Callable, Generator, List, TypeVar
 
 import torch
 
@@ -385,7 +385,7 @@ def is_dynamo_compiling() -> bool:
 
 
 @contextlib.contextmanager
-def skip_guard_eval_unsafe() -> None:
+def skip_guard_eval_unsafe() -> Generator[None, None, None]:
     """
     CAUTION - This API is unsafe and should only be used if your setup meets the
     following conditions.
@@ -403,7 +403,7 @@ def skip_guard_eval_unsafe() -> None:
     If this assumption fails, there is a risk of silently producing incorrect
     results (hence the term "unsafe" in the API name).
     """
-    old_value = torch._C._dynamo.eval_frame.run_diff_guard_set
+    old_value = torch._C._dynamo.eval_frame.get_run_diff_guard_set_flag()
     try:
         torch._C._dynamo.eval_frame.set_run_diff_guard_set_flag(True)
         yield

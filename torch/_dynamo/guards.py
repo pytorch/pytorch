@@ -303,7 +303,9 @@ class GuardManagerWrapper:
             in_diff_guard_set = mgr.is_in_diff_guard_set()
 
             if isinstance(mgr, DictGuardManager):
-                for key_mgr, val_mgr in mgr.get_key_value_managers().items():
+                for _, (key_mgr, val_mgr) in sorted(
+                    mgr.get_key_value_managers().items()
+                ):
                     if key_mgr:
                         in_diff_guard_set |= visit(key_mgr)
                     if val_mgr:

@@ -539,6 +539,10 @@ static PyObject* set_run_diff_guard_set_flag_py(PyObject* dummy, PyObject* value
   Py_RETURN_NONE;
 }
 
+static PyObject* get_run_diff_guard_set_flag_py(PyObject* dummy, PyObject* args) {
+  return run_diff_guard_set;
+}
+
 // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for clearing/popping
 // the frame, meaning that unless we default evaluate the original frame,
 // we are responsible for clearing it - via clear_old_frame_if_python_312_plus.
@@ -915,6 +919,7 @@ static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
 
 static PyMethodDef _methods[] = {
     {"set_run_diff_guard_set_flag", set_run_diff_guard_set_flag_py, METH_O, NULL},
+    {"get_run_diff_guard_set_flag", get_run_diff_guard_set_flag_py, METH_NOARGS, NULL},
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_O, NULL},

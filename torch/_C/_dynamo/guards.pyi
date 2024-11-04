@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any
+from typing import Any, Dict, Tuple
 
 import torch
 
@@ -93,6 +93,9 @@ class DictGuardManager(GuardManager):
         example_value,
         guard_manager_enum,
     ) -> GuardManager: ...
+    def get_key_value_managers(
+        self,
+    ) -> Dict[str, Tuple[GuardManager, GuardManager]]: ...
 
 def install_object_aliasing_guard(
     guard_managers: list[GuardManager],
