@@ -66,8 +66,8 @@ inline at::Tensor get_buffer(const at::Tensor& tensor) {
 /**
  * Create a new nested tensor that is a view of a base nested tensor
  *
- * create_view_tensor calls a specialized constructor that copys the
- * the keys from base onto the new view tensor being created.
+ * create_view_tensor calls a specialized constructor that copies the
+ * keys from base onto the new view tensor being created.
  * The storage is shared between the base and the returned view tensor
  *
  * All callers of this helper must:

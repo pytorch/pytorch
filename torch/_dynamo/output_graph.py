@@ -1453,7 +1453,9 @@ class OutputGraph:
 
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         with dynamo_timed(
-            "OutputGraph.call_user_compiler", phase_name="backend_compile"
+            "OutputGraph.call_user_compiler",
+            phase_name="backend_compile",
+            log_pt2_compile_event=True,
         ):
             return self._call_user_compiler(gm)
 
@@ -1739,6 +1741,9 @@ class OutputGraph:
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
+        self.input_source_to_var.clear()
+        self.unspec_variable_map.clear()
+        self.backward_state.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled

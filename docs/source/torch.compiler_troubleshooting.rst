@@ -66,13 +66,12 @@ Below is an example of a graph break due to the function ``copy.deepcopy`` from 
 
 .. code-block:: py
 
-    import copy
     import torch
 
     @torch.compile
     def fn(x):
         x = x + 1
-        y = copy.deepcopy(x)
+        y = eval("x + 1")
         return y + 1
 
     fn(torch.ones(3, 3))
@@ -80,34 +79,31 @@ Below is an example of a graph break due to the function ``copy.deepcopy`` from 
 ::
 
     $TORCH_LOGS="graph_breaks" python playground.py
-    Graph break: from user code at:
-    File "/data/users/williamwen/pytorch/playground.py", line 7, in fn
-        y = copy.deepcopy(x)
+    Graph break in user code at /data/users/williamwen/pytorch/playground.py:6
+    Reason: Unsupported: builtin: eval [<class 'torch._dynamo.variables.constant.ConstantVariable'>] False
+    User code traceback:
+    File "/data/users/williamwen/pytorch/playground.py", line 6, in fn
+        y = eval("x + 1")
     Traceback (most recent call last):
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 570, in wrapper
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 635, in wrapper
         return inner_fn(self, inst)
             ^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2269, in CALL
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2414, in CALL
         self._call(inst)
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2263, in _call
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 2408, in _call
         self.call_function(fn, args, kwargs)
-    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 820, in call_function
+    File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 962, in call_function
         self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 967, in call_function
+    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 997, in call_function
         return handler(tx, args, kwargs)
             ^^^^^^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 839, in builtin_dispatch
-        rv = handler(tx, args, kwargs)
-            ^^^^^^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 766, in call_self_handler
-        result = self_handler(tx, *args, **kwargs)
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 1931, in call_deepcopy
-        unimplemented(f"copy.deepcopy {repr(x)}")
-    File "/data/users/williamwen/pytorch/torch/_dynamo/exc.py", line 297, in unimplemented
+    File "/data/users/williamwen/pytorch/torch/_dynamo/variables/builtin.py", line 831, in <lambda>
+        return lambda *args: unimplemented(error_msg)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/data/users/williamwen/pytorch/torch/_dynamo/exc.py", line 313, in unimplemented
         raise Unsupported(msg, case_name=case_name)
-    torch._dynamo.exc.Unsupported: copy.deepcopy TensorVariable()
+    torch._dynamo.exc.Unsupported: builtin: eval [<class 'torch._dynamo.variables.constant.ConstantVariable'>] False
 
 Guards
 ------
@@ -784,7 +780,7 @@ Here's a list of useful reproducers, ranked from most to least preferred:
 1. **Self-contained, small reproducer:** A script with no external dependencies, under 100 lines of code, that reproduces the problem when run.
 2. **Self-contained, large reproducer:** Even if it's large, being self-contained is a huge advantage!
 3. **Non-self-contained reproducer with manageable dependencies:**
-    For example, if you can reproduce the problem by running a script after ``pip install transformers``,
+   For example, if you can reproduce the problem by running a script after ``pip install transformers``,
    that's manageable. We can likely run it and investigate.
 4. **Non-self-contained reproducer requiring substantial setup:**  This might involve downloading datasets,
    multiple environment setup steps, or specific system library versions requiring a Docker image.
