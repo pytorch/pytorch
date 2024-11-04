@@ -87,6 +87,10 @@ namespace at::native {
 #if !defined(C10_MOBILE)
 DEFINE_DISPATCH(fp16_dot_with_fp32_arith_stub);
 DEFINE_DISPATCH(fp16_gemv_trans_stub);
+#ifdef __aarch64__
+DEFINE_DISPATCH(bf16_dot_with_fp32_arith_stub);
+DEFINE_DISPATCH(bf16_gemv_trans_stub);
+#endif // __aarch64__
 #endif // !defined(C10_MOBILE)
 
 namespace blas_impl {
@@ -159,6 +163,13 @@ float bf16_dot_with_fp32_arith(
     const at::BFloat16* vec1,
     const at::BFloat16* vec2,
     int64_t len);
+
+float bf16_dot_with_fp32_arith(
+    const at::BFloat16* vec1,
+    const at::BFloat16* vec2,
+    int64_t len) {
+  return bf16_dot_with_fp32_arith_stub(kCPU, vec1, vec2, len);
+}
 #endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
 template <typename scalar_t>
@@ -368,283 +379,6 @@ bool gemv_use_fast_path<at::BFloat16>(
       beta == 0.0;
 }
 
-// We need the shift for reduce(), hence the extra constants.
-static constexpr auto kF16ElementsPerIterationShift = 7;
-static constexpr auto kF16ElementsPerIteration = 1 << kF16ElementsPerIterationShift;
-static_assert(kF16ElementsPerIteration == 128);
-
-static constexpr auto kF16ElementsPerRegisterShift = 3;
-static constexpr auto kF16ElementsPerRegister = 1 << kF16ElementsPerRegisterShift;
-static_assert(kF16ElementsPerRegister == 8);
-
-static constexpr auto kF16RegistersPerIterationShift = kF16ElementsPerIterationShift - kF16ElementsPerRegisterShift;
-static constexpr auto kF16RegistersPerIteration = 1 << kF16RegistersPerIterationShift;
-static_assert(kF16RegistersPerIteration == kF16ElementsPerIteration / kF16ElementsPerRegister);
-
-// We need the shift for reduce(), hence the extra constants.
-static constexpr auto kF32ElementsPerIterationShift = 5;
-static constexpr auto kF32ElementsPerIteration = 1 << kF32ElementsPerIterationShift;
-static_assert(kF32ElementsPerIteration == 32);
-
-static constexpr auto kF32ElementsPerRegisterShift = 2;
-static constexpr auto kF32ElementsPerRegister = 1 << kF32ElementsPerRegisterShift;
-static_assert(kF32ElementsPerRegister == 4);
-
-static constexpr auto kF32RegisterPairsPerIteration = 4;
-static constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration * 2;
-static constexpr auto kF32RegistersPerIterationShift = 3;
-static_assert(kF32RegistersPerIteration == kF32ElementsPerIteration / kF32ElementsPerRegister);
-static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
-
-static float32x4_t to_bfloat16(uint16x4_t u16) {
-  int32x4_t shift = vdupq_n_s32(16);
-  return vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16), shift));
-}
-
-static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
-#ifdef __ARM_FEATURE_FMA
-  return vfmaq_f32(a, b, c);
-#else
-  return vaddq_f32(a, vmulq_f32(b, c));
-#endif
-}
-
-static float32x4_t f32_fma_bf16(float32x4_t a, uint16x4_t b, uint16x4_t c) {
-  return f32_fma(a, to_bfloat16(b), to_bfloat16(c));
-}
-
-#if defined(__clang__) && __clang_major__ > 15
-// https://godbolt.org/z/z8P4Yncra
-#define COMPILER_SUPPORTS_BF16_TARGET 1
-#elif !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
-// https://gcc.gnu.org/gcc-10/changes.html
-// https://godbolt.org/z/cdGG7vn8o
-#define COMPILER_SUPPORTS_BF16_TARGET 1
-#else
-#define COMPILER_SUPPORTS_BF16_TARGET 0
-#endif
-
-#if COMPILER_SUPPORTS_BF16_TARGET
-#define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("arch=armv8.2-a+bf16")))
-
-TARGET_ARM_BF16_ATTRIBUTE static C10_ALWAYS_INLINE float32x4_t
-f32_dot_bf16(float32x4_t a, bfloat16x8_t b, bfloat16x8_t c) {
-  return vbfdotq_f32(a, b, c);
-}
-
-TARGET_ARM_BF16_ATTRIBUTE static C10_ALWAYS_INLINE void
-dot_with_fp32_arith_main_inner_loop_bfdot(
-    const BFloat16* vec1,
-    const BFloat16* vec2,
-    vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
-    int registerPairIndex) {
-  const bfloat16x8_t temp_vec1 = vld1q_bf16(reinterpret_cast<const __bf16*>(
-                                                &vec1[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-  const bfloat16x8_t temp_vec2 = vld1q_bf16(reinterpret_cast<const __bf16*>(
-                                                &vec2[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-  sum[registerPairIndex] =
-    f32_dot_bf16(sum[registerPairIndex], temp_vec1, temp_vec2);
-}
-
-// See NOTE [GCC code duplication] below for why we have _bfdot and
-// _no_bfdot versions of
-// dot_with_fp32_arith_vectorized_tail_inner_loop.
-TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE
-static void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
-    const at::BFloat16* vec1,
-    const at::BFloat16* vec2,
-    vec::Vectorized<float>* tail_sum,
-    int idx) {
-  const auto temp_vec1 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
-  const auto temp_vec2 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
-  *tail_sum = f32_fma_bf16(*tail_sum, temp_vec1, temp_vec2);
-}
-
-#else
-#define TARGET_ARM_BF16_ATTRIBUTE
-#endif // COMPILER_SUPPORTS_BF16_TARGET
-
-static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
-    const BFloat16* vec1,
-    const BFloat16* vec2,
-    vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
-    int registerPairIndex) {
-  const uint16x8_t temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(
-                                             &vec1[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-  const uint16x8_t temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(
-                                             &vec2[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
-
-  sum[2 * registerPairIndex] = f32_fma_bf16(
-      sum[2 * registerPairIndex],
-      vget_low_u16(temp_vec1),
-      vget_low_u16(temp_vec2));
-  sum[2 * registerPairIndex + 1] = f32_fma_bf16(
-      sum[2 * registerPairIndex + 1],
-      vget_high_u16(temp_vec1),
-      vget_high_u16(temp_vec2));
-}
-
-static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
-    const at::BFloat16* vec1,
-    const at::BFloat16* vec2,
-    vec::Vectorized<float>* tail_sum,
-    int idx) {
-  const auto temp_vec1 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
-  const auto temp_vec2 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
-  *tail_sum = f32_fma_bf16(*tail_sum, temp_vec1, temp_vec2);
-}
-
-namespace {
-static inline float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
-  int offset = kF32RegistersPerIteration;
-  c10::ForcedUnroll<kF32RegistersPerIterationShift>{}([&offset, &x](auto idx) {
-    offset /= 2;
-    for (int i = 0; i < offset; ++i) {
-      x[i] = vaddq_f32(x[i], x[offset + i]);
-    }
-  });
-  return vaddvq_f32(x[0]);
-}
-
-#if COMPILER_SUPPORTS_BF16_TARGET
-template <int n>
-struct ForcedUnrollTargetBFloat16 {
-  template <typename Func>
-  TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE void operator()(const Func& f) const {
-    ForcedUnrollTargetBFloat16<n - 1>{}(f);
-    f(n - 1);
-  }
-};
-
-template <>
-struct ForcedUnrollTargetBFloat16<1> {
-  template <typename Func>
-  TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE void operator()(const Func& f) const {
-    f(0);
-  }
-};
-
-C10_ALWAYS_INLINE TARGET_ARM_BF16_ATTRIBUTE auto
-dot_with_fp32_arith_main_loop_bfdot(
-    const BFloat16* vec1,
-    const BFloat16* vec2,
-    int64_t len) {
-  vec::VectorizedN<float, kF32RegistersPerIteration> sum(0);
-  const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);
-  for (int j = 0; j < len_aligned ; j += kF32ElementsPerIteration) {
-    const auto* vec1_ = vec1 + j;
-    const auto* vec2_ = vec2 + j;
-    ForcedUnrollTargetBFloat16<kF32RegisterPairsPerIteration>{}([vec1_, vec2_, &sum](auto k)
-                                                                C10_ALWAYS_INLINE_ATTRIBUTE TARGET_ARM_BF16_ATTRIBUTE {
-      dot_with_fp32_arith_main_inner_loop_bfdot(vec1_, vec2_, sum, k);
-    });
-  }
-  return reduce(sum);
-}
-#endif // COMPILER_SUPPORTS_BF16_TARGET
-
-template <typename T>
-C10_ALWAYS_INLINE auto
-dot_with_fp32_arith_main_loop_no_bfdot(
-    const T* vec1,
-    const T* vec2,
-    int64_t len) {
-  vec::VectorizedN<float, kF32RegistersPerIteration> sum(0);
-
-  const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);
-  for (int j = 0; j < len_aligned ; j += kF32ElementsPerIteration) {
-    const auto* vec1_ = vec1 + j;
-    const auto* vec2_ = vec2 + j;
-    c10::ForcedUnroll<kF32RegisterPairsPerIteration>{}([vec1_, vec2_, &sum](auto k) C10_ALWAYS_INLINE_ATTRIBUTE {
-      dot_with_fp32_arith_main_inner_loop_no_bfdot(vec1_, vec2_, sum, k);
-    });
-  }
-  return reduce(sum);
-}
-
-template <typename T>
-struct half_to_float16 {
-  using type = T;
-};
-
-#ifdef __aarch64__
-template <>
-struct half_to_float16<Half> {
-  using type = float16_t;
-};
-#endif
-
-template <typename T>
-using half_to_float16_t = typename half_to_float16<T>::type;
-
-// NOTE [GCC code duplication]: The first attempt at landing BFDOT support with
-// TARGET_ARM_BF16_ATTRIBUTE failed because unlike clang, GCC will not
-// allow inlining a non-bf16-specific function into a bf16-specific
-// function. We can work around this by duplicating the code into the
-// bfdot and non-bfdot callsites. The code is in this macro to avoid
-// actual copy/paste.
-#define DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY(bfdot_suffix)     \
-  /* First-tier tail fixup: make sure we handle workloads that can */   \
-  /* benefit from vectorization, but don't fit into our fully unrolled */ \
-  /* loop above. */                                                     \
-  vec::Vectorized<float> tail_sum(0);                                   \
-  const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);       \
-  const auto len_aligned_4 = len & ~3;                                  \
-  for (int j = len_aligned; j < len_aligned_4; j += 4) {                \
-    dot_with_fp32_arith_vectorized_tail_inner_loop##bfdot_suffix(vec1, vec2, &tail_sum, j); \
-  }                                                                     \
-  auto reduced_tail = vpaddq_f32(tail_sum, tail_sum);                   \
-  reduced_sum += vgetq_lane_f32(vpaddq_f32(reduced_tail, reduced_tail), 0); \
-                                                                        \
-  /* Second-tier tail fixup: handle all workloads. */                   \
-  for (int j = len_aligned_4; j < len; ++j) {                           \
-    /* We use half_to_float16_t here because changing to Half was */    \
-    /* causing arithmetic to at fp16 precision, but the necessary */    \
-    /* necessary behavior to pass python test/test_mps.py -k */         \
-    /* test_output_grad_match_nn_functional_linear_cpu_float16 is */    \
-    /* fp32. (I'm not sure exactly why this fixes it.) */               \
-    half_to_float16_t<std::decay_t<decltype(vec1[j])>> x1 = vec1[j];    \
-    half_to_float16_t<std::decay_t<decltype(vec2[j])>> x2 = vec2[j];    \
-    reduced_sum += x1 * x2;                                             \
-  }                                                                     \
-  return reduced_sum
-
-#if COMPILER_SUPPORTS_BF16_TARGET
-TARGET_ARM_BF16_ATTRIBUTE float
-dot_with_fp32_arith_bfdot(const BFloat16* vec1, const BFloat16* vec2, int64_t len) {
-  auto reduced_sum = dot_with_fp32_arith_main_loop_bfdot(vec1, vec2, len);
-  DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY(_bfdot);
-}
-#endif // COMPILER_SUPPORTS_BF16_TARGET
-
-template <typename T>
-C10_ALWAYS_INLINE float
-dot_with_fp32_arith_no_bfdot(const T* vec1, const T* vec2, int64_t len) {
-  auto reduced_sum = dot_with_fp32_arith_main_loop_no_bfdot(vec1, vec2, len);
-  DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY(_no_bfdot);
-}
-#undef DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY
-} // namespace
-
-float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec2, int64_t len) {
-#if COMPILER_SUPPORTS_BF16_TARGET
-  if (cpuinfo_has_arm_bf16()) {
-    return dot_with_fp32_arith_bfdot(vec1, vec2, len);
-  } else
-#endif
-  {
-    return dot_with_fp32_arith_no_bfdot(vec1, vec2, len);
-  }
-}
-
-static void bf16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const at::BFloat16* a, const int lda, const at::BFloat16 *x, at::BFloat16* y, int incy) {
-  parallel_for(0, n, 1, [&](int begin, int end) {
-    for (int i = begin; i < end; ++i) {
-      y[i * incy] = bf16_dot_with_fp32_arith(x, a + lda * i, m);
-    }
-  });
-}
-
 void bf16_gemv_trans(
   const int m,
   const int n,
@@ -656,8 +390,7 @@ void bf16_gemv_trans(
   const at::BFloat16 beta,
   at::BFloat16* y,
   const int incy) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
-  return bf16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
+  return bf16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
 }
 
 
