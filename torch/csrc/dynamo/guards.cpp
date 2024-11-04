@@ -17,6 +17,8 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
 
+#include <torch/csrc/dynamo/debug_macros.h>
+
 #ifdef USE_CUDA
 #include <ATen/cuda/EmptyTensor.h>
 #endif
@@ -655,7 +657,7 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
 
 static std::unordered_map<PyObject*, uint64_t> dict_version_map;
 static int dict_version_watcher_id;
-static uint64_t global_dict_version_id = 0;
+static uint64_t global_dict_version_id = 1;
 static int dict_version_watch_callback(
     PyDict_WatchEvent event,
     PyObject* dict,
@@ -884,6 +886,11 @@ std::string get_exception_message() {
 }
 
 bool is_immutable_object(py::handle example_value) {
+  static py::object config_module = py::module_::import("torch._dynamo.config");
+  bool is_tensor_immutable =
+      config_module.attr("skip_tensor_guards_with_matching_dict_tags")
+          .cast<bool>();
+
   if (PyTuple_Check(example_value.ptr())) {
     // Check that each element is immutable
     for (Py_ssize_t i = 0; i < PyTuple_Size(example_value.ptr()); ++i) {
@@ -894,10 +901,11 @@ bool is_immutable_object(py::handle example_value) {
     }
     return true;
   }
+
   return PyLong_Check(example_value.ptr()) ||
       PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
-      THPVariable_Check(example_value.ptr());
+      (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
 }
 
 bool is_parameter(py::handle tensor) {
@@ -958,7 +966,7 @@ class GuardDebugInfo {
 class GuardManager;
 class RootGuardManager;
 class DictGuardManager;
-bool is_root_guard_manager_set_to_run_diff_guards_mode(RootGuardManager* root);
+bool run_diff_guard_set(RootGuardManager* root);
 
 /**
  * Base class for the leaf guard in the GuardManager hierarchy.
@@ -1694,8 +1702,7 @@ class GuardManager {
   // guards and does not change the fail count. For simplicity, we duplicate
   // the code here.
   virtual bool check_nopybind(PyObject* value) { // borrowed ref
-    if (is_root_guard_manager_set_to_run_diff_guards_mode(_root) &&
-        _fail_count == 0) {
+    if (run_diff_guard_set(_root) && !_in_diff_guard_set) {
       // For run diff only guards, if the fail_count is 0, return right away;
       return true;
     }
@@ -1711,7 +1718,7 @@ class GuardManager {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       if (!guard->check_nopybind(value)) { // early exit
-        _fail_count += 1;
+        this->_inc_fail_count();
         // no need of sorting, just return.
         return false;
       }
@@ -1736,7 +1743,7 @@ class GuardManager {
     bool failed_on_first = true;
     for (const auto& accessor : _accessors) {
       if (!accessor->check_nopybind(value, matches_dict_tag)) { // early exit
-        _fail_count += 1;
+        this->_inc_fail_count();
         result = false;
         // need to sort, so break the loop.
         break;
@@ -1877,10 +1884,27 @@ class GuardManager {
     GuardManager::add_leaf_guard(std::move(leaf_guard));
   }
 
+  void include_in_diff_guard_set() {
+    _in_diff_guard_set = true;
+  }
+
+  bool is_in_diff_guard_set() {
+    return _in_diff_guard_set;
+  }
+
  protected:
   // Keeps a count of how many times this guard manager check function returns
   // False. This is used for sorting optimization.
   int64_t _fail_count{0};
+
+  // Used by `torch.compiler.skip_guard_eval_unsafe` to run diff only guards to
+  // speedup cache lookup.
+  bool _in_diff_guard_set{false};
+
+  void _inc_fail_count() {
+    _fail_count += 1;
+    include_in_diff_guard_set();
+  }
 
  private:
   // Root of the guard manager, this is the used to install the relational
@@ -2063,12 +2087,12 @@ class RootGuardManager : public GuardManager {
     _init_local_state = true;
   }
 
-  void set_run_diff_guards() {
-    _run_diff_guards = true;
+  void set_run_diff_guard_set() {
+    _run_diff_guard_set = true;
   }
 
-  void unset_run_diff_guards() {
-    _run_diff_guards = false;
+  void unset_run_diff_guard_set() {
+    _run_diff_guard_set = false;
   }
 
   // DEBUG function - Returning raw pointers because we can't return unique_ptr
@@ -2098,7 +2122,7 @@ class RootGuardManager : public GuardManager {
   // runs. Essentially, this runs a minimal set of guard that differentiates
   // different guards for a cache entry. If use can guarantee no more
   // recompilations, this can drastically cut down the guard overhead.
-  bool _run_diff_guards = false;
+  bool _run_diff_guard_set = false;
 
  private:
   // All the relational guards under this guard mananger. We only use these
@@ -2140,8 +2164,8 @@ class RootGuardManager : public GuardManager {
   bool _init_local_state = false;
 };
 
-bool is_root_guard_manager_set_to_run_diff_guards_mode(RootGuardManager* root) {
-  return root->_run_diff_guards;
+bool run_diff_guard_set(RootGuardManager* root) {
+  return root->_run_diff_guard_set;
 };
 
 /*
@@ -2203,12 +2227,12 @@ class DictGuardManager : public GuardManager {
     // TODO(janimesh) - Implement a fast-path using dict versions.
 
     if (Py_TYPE(obj) != _expected_type) {
-      _fail_count += 1;
+      this->_inc_fail_count();
       return false;
     }
 
     if (PyDict_Size(obj) != _size) {
-      _fail_count += 1;
+      this->_inc_fail_count();
       return false;
     }
 
@@ -2226,7 +2250,7 @@ class DictGuardManager : public GuardManager {
     // DICT_CONTAINS and DICT_VERSION as leaf guards offers a simpler solution
     // than embedding these functionalities within the DictGuardManager itself.
     if (!GuardManager::check_nopybind(obj)) {
-      _fail_count += 1;
+      this->_inc_fail_count();
       // No need to shuffle the child guards, just return.
       return false;
     }
@@ -2422,12 +2446,12 @@ class DictSubclassGuardManager : public DictGuardManager {
     // TODO(janimesh) - Implement a fast-path using dict versions.
 
     if (Py_TYPE(obj) != _expected_type) {
-      _fail_count += 1;
+      this->_inc_fail_count();
       return false;
     }
 
     if (PyDict_Size(obj) != _size) {
-      _fail_count += 1;
+      this->_inc_fail_count();
       return false;
     }
 
@@ -2437,7 +2461,7 @@ class DictSubclassGuardManager : public DictGuardManager {
     }
 
     if (!GuardManager::check_nopybind(obj)) { // NOLINT
-      _fail_count += 1;
+      this->_inc_fail_count();
       // No need to shuffle the child guards, just return.
       return false;
     }
@@ -3718,12 +3742,12 @@ bool run_root_guard_manager(void* root, PyObject* f_locals) {
   return ((RootGuardManager*)root)->check_nopybind(f_locals);
 }
 
-void set_run_diff_guards(void* root) {
-  ((RootGuardManager*)root)->set_run_diff_guards();
+void set_run_diff_guard_set(void* root) {
+  ((RootGuardManager*)root)->set_run_diff_guard_set();
 }
 
-void unset_run_diff_guards(void* root) {
-  ((RootGuardManager*)root)->unset_run_diff_guards();
+void unset_run_diff_guard_set(void* root) {
+  ((RootGuardManager*)root)->unset_run_diff_guard_set();
 }
 
 PyObject* torch_c_dynamo_guards_init() {
@@ -3981,6 +4005,9 @@ PyObject* torch_c_dynamo_guards_init() {
       // return by reference because GuardManager has the ownership of accessors
       .def("get_source", &GuardManager::get_source)
       .def("fail_count", &GuardManager::fail_count)
+      .def(
+          "include_in_diff_guard_set", &GuardManager::include_in_diff_guard_set)
+      .def("is_in_diff_guard_set", &GuardManager::is_in_diff_guard_set)
       .def(
           "get_accessors",
           &GuardManager::get_accessors,

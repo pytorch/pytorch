@@ -8,6 +8,7 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <opcode.h>
+#include <signal.h>
 #include <stdbool.h>
 
 PyObject* guard_error_hook = NULL;
@@ -520,9 +521,23 @@ static PyObject* _custom_eval_frame_shim(
   return result;
 }
 
-static PyObject* skip_guard_eval_callback_flag;
 static PyObject* skip_code_recursive_flag;
 static PyObject* cache_limit_hit_flag;
+
+
+// When this flag is turned on, cache lookup runs diff guard set to find the
+// compiled graph.
+static PyObject* run_diff_guard_set;
+
+static PyObject* set_run_diff_guard_set_flag_py(PyObject* dummy, PyObject* value) {
+  if (value != Py_True && value != Py_False) {
+    DEBUG_TRACE0("arg error");
+    PyErr_SetString(PyExc_TypeError, "expected True/False");
+    return NULL;
+  }
+  run_diff_guard_set = value;
+  Py_RETURN_NONE;
+}
 
 // NOTE: In 3.12+, the frame evaluation function (callee) is responsible for clearing/popping
 // the frame, meaning that unless we default evaluate the original frame,
@@ -658,45 +673,10 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
-  if (callback == skip_guard_eval_callback_flag) {
-
-    _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
-    PyObject* maybe_cached_code = NULL;
-    const char* trace_annotation = "";
-    lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation, true);
-    _pytorch_record_function_exit(rf);
-    if (maybe_cached_code == NULL) {
-      // Python error
-      *should_clear_frame = 1;
-      Py_DECREF(locals);
-      return NULL;
-    } else if (maybe_cached_code != Py_None) {
-      PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
-      // used cached version
-      *should_clear_frame = 1;
-      Py_DECREF(locals);
-      // Re-enable custom behavior
-      eval_frame_callback_set(callback);
-      return eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, free_vars_copied);
-    } else if (maybe_cached_code == Py_None) {
-      // TODO(anijain2305) - DONT MERGED BEFORE FIXING THIS - For some reason, torch._dynamo.disable called from
-      // a child functino of the bytecode is reaching here.
-      // printf("could not find a code for %p, %s\n", maybe_cached_code, get_frame_name(frame));
-      PyObject *ret = eval_frame_default(tstate, frame, throw_flag);
-      // Re-enable custom behavior
-      eval_frame_callback_set(callback);
-      return ret;
-    }
-
-    PyErr_SetString(PyExc_RuntimeError, "Could not find compiled code with set stance as skip_guard_eval");
-    return NULL;
-  }
-
-
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = NULL;
   const char* trace_annotation = "";
-  lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation, false);
+  lookup(extra, locals, backend, &maybe_cached_code, &trace_annotation, PyObject_IsTrue(run_diff_guard_set));
   _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
@@ -713,6 +693,16 @@ static PyObject* _custom_eval_frame(
     Py_DECREF(locals);
     return eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, free_vars_copied);
   }
+  if (PyObject_IsTrue(run_diff_guard_set)) {
+    PyErr_SetString(
+      PyExc_RuntimeError,
+      "Could not find a compiled graph for skip_guard_eval_unsafe. "
+      "This usually means that the function is called with new inputs "
+      "(different from the warmup) such that it will force a recompilation."
+    );
+    return NULL;
+  }
+
   // cache miss
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
@@ -820,7 +810,6 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
   // Change the eval frame callback and return the old one
   //  - None: disables TorchDynamo
   //  - False: run-only mode (reuse existing compiles)
-  //  - skip_guard_eval_callback_flag: skip guard and reuse existing single compile
   //  - Python callable(): enables TorchDynamo
   PyObject* old_callback = eval_frame_callback_get();
 
@@ -844,7 +833,7 @@ static PyObject* set_eval_frame(PyObject* new_callback, PyThreadState* tstate) {
 }
 
 static PyObject* set_eval_frame_py(PyObject* dummy, PyObject* callback) {
-  if (callback != Py_None && callback != Py_False && callback != skip_guard_eval_callback_flag &&
+  if (callback != Py_None && callback != Py_False &&
       !PyCallable_Check(callback)) {
     DEBUG_TRACE0("arg error");
     PyErr_SetString(PyExc_TypeError, "expected a callable");
@@ -903,13 +892,36 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+// Debugging function for GNU C only.
+// Used to set gdb breakpoints in hot CPython sites from Python.
+// Code example:
+//
+// def foo(x):
+//     x = x + 1
+//     torch._dynamo.eval_frame.raise_sigtrap()
+//     # (gdb) b bytecodes.c:1234 (whatever line CALL is handled)
+//     x = torch.sin(x)  # gdb breakpoint hit when sin is called
+//
+// In this example, we want to breakpoint on CALL in bytecodes.c only when
+// running foo. Otherwise, we would need to breakpoint before running the program,
+// and that breakpoint would be hit every time Python makes a function call,
+// leading to a spammy debugging experience.
+static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
+#ifdef __GNUC__
+  raise(SIGTRAP);
+#endif
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
+    {"set_run_diff_guard_set_flag", set_run_diff_guard_set_flag_py, METH_O, NULL},
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_O, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
+    {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
@@ -957,11 +969,9 @@ PyObject* torch_c_dynamo_eval_frame_init(void) {
 #endif
 
 
-  skip_guard_eval_callback_flag = PyObject_New(PyObject, &PyBaseObject_Type);
-  if (skip_guard_eval_callback_flag == NULL) {
-    return NULL;
-  }
-  if (PyModule_AddObject(module, "skip_guard_eval_callback_flag", skip_guard_eval_callback_flag) != 0) {
+  run_diff_guard_set = Py_False;
+  Py_INCREF(run_diff_guard_set);  // Increment the reference count to hold a reference
+  if (PyModule_AddObject(module, "run_diff_guard_set", run_diff_guard_set) != 0) {
     return NULL;
   }
 

@@ -18,6 +18,7 @@ import sys
 import textwrap
 import time
 import types
+import warnings
 import weakref
 from contextlib import contextmanager
 from copy import deepcopy
@@ -144,7 +145,6 @@ recompiles_verbose_log = torch._logging.getArtifactLogger(
     __name__, "recompiles_verbose"
 )
 verbose_guards_log = torch._logging.getArtifactLogger(__name__, "verbose_guards")
-diff_guards_log = torch._logging.getArtifactLogger(__name__, "diff_guards")
 
 
 class GuardManagerWrapper:
@@ -193,23 +193,19 @@ class GuardManagerWrapper:
             s += ", " + accessor_str
         return s
 
-    def construct_dict_manager_string(self, mgr, body, diff_only):
-        if diff_only and mgr.fail_count() == 0:
-            return
+    def construct_dict_manager_string(self, mgr, body):
         for idx, (key_mgr, val_mgr) in sorted(mgr.get_key_value_managers().items()):
             body.writeline(f"KeyValueManager pair at index={idx}")
             with body.indent():
                 if key_mgr:
                     body.writeline(f"KeyManager: {self.get_manager_line(key_mgr)}")
-                    self.construct_manager_string(key_mgr, body, diff_only)
+                    self.construct_manager_string(key_mgr, body)
 
                 if val_mgr:
                     body.writeline(f"ValueManager: {self.get_manager_line(val_mgr)}")
-                    self.construct_manager_string(val_mgr, body, diff_only)
+                    self.construct_manager_string(val_mgr, body)
 
-    def construct_manager_string(self, mgr, body, diff_only):
-        if diff_only and mgr.fail_count() == 0:
-            return
+    def construct_manager_string(self, mgr, body):
         with body.indent():
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, torch._C._dynamo.guards.NO_TENSOR_ALIASING):  # type: ignore[attr-defined]
@@ -227,21 +223,18 @@ class GuardManagerWrapper:
 
             # This works for both DictGuardManager and SubclassedDictGuardManager
             if isinstance(mgr, DictGuardManager):
-                self.construct_dict_manager_string(mgr, body, diff_only)
+                self.construct_dict_manager_string(mgr, body)
 
             # General case of GuardManager/RootGuardManager
             for accessor, child_mgr in zip(
                 mgr.get_accessors(), mgr.get_child_managers()
             ):
-                if child_mgr.fail_count() != 0:
-                    body.writeline(
-                        self.get_manager_line(
-                            child_mgr, f"accessed_by={accessor.repr()}"
-                        )
-                    )
-                self.construct_manager_string(child_mgr, body, diff_only)
+                body.writeline(
+                    self.get_manager_line(child_mgr, f"accessed_by={accessor.repr()}")
+                )
+                self.construct_manager_string(child_mgr, body)
 
-    def str_helper(self, diff_only):
+    def __str__(self):
         from torch._inductor.utils import IndentedBuffer
 
         class IndentedBufferWithPrefix(IndentedBuffer):
@@ -260,17 +253,10 @@ class GuardManagerWrapper:
             body.writeline("", skip_prefix=True)
             body.writeline("TREE_GUARD_MANAGER:", skip_prefix=True)
             body.writeline("RootGuardManager")
-            self.construct_manager_string(self.root, body, diff_only)
-            if self.root.fail_count() != 0:
-                for guard in self.root.get_epilogue_lambda_guards():
-                    body.writelines(self.get_guard_lines(guard))
+            self.construct_manager_string(self.root, body)
+            for guard in self.root.get_epilogue_lambda_guards():
+                body.writelines(self.get_guard_lines(guard))
             return body.getvalue()
-
-    def print_diff_guard_set(self):
-        return self.str_helper(diff_only=True)
-
-    def __str__(self):
-        return self.str_helper(diff_only=False)
 
     def check(self, x):
         # Only needed for debugging purposes.
@@ -305,6 +291,36 @@ class GuardManagerWrapper:
                 visit(child_mgr)
 
         visit(self.root)
+
+    def propagate_diff_guard_set(self):
+        """
+        At this point, some TENSOR_MATCH guards have been marked to include in
+        the diff guard set. This pass traverses the tree and recursively include
+        the parents of the TENSOR_MATCH guard manager in diff guard set.
+        """
+
+        def visit(mgr):
+            in_diff_guard_set = mgr.is_in_diff_guard_set()
+
+            if isinstance(mgr, DictGuardManager):
+                for key_mgr, val_mgr in mgr.get_key_value_managers().items():
+                    if key_mgr:
+                        in_diff_guard_set |= visit(key_mgr)
+                    if val_mgr:
+                        in_diff_guard_set |= visit(val_mgr)
+            else:
+                for child_mgr in mgr.get_child_managers():
+                    in_diff_guard_set |= visit(child_mgr)
+
+            if in_diff_guard_set:
+                mgr.include_in_diff_guard_set()
+
+            return in_diff_guard_set
+
+        visit(self.root)
+
+    def finalize(self):
+        self.propagate_diff_guard_set()
 
 
 def from_numpy(a):
@@ -653,6 +669,20 @@ class GuardBuilder(GuardBuilderBase):
                     key, get_verbose_code_parts(f"{key_source} == {key!r}", guard)
                 )
 
+    @staticmethod
+    def _get_generic_dict_manager_example_value(example_value):
+        # due to a bug in 3.13.0 (introduced by https://github.com/python/cpython/pull/116115,
+        # reported in https://github.com/python/cpython/issues/125608,
+        # fixed by https://github.com/python/cpython/pull/125611), we cannot take
+        # advantage of __dict__ versions to speed up guard checks.
+        if sys.version_info >= (3, 13) and sys.version_info < (3, 13, 1):
+            warnings.warn(
+                "Guards may run slower on Python 3.13.0. Consider upgrading to Python 3.13.1+.",
+                RuntimeWarning,
+            )
+            return None
+        return example_value
+
     def getattr_on_nn_module(
         self,
         source,
@@ -778,7 +808,7 @@ class GuardBuilder(GuardBuilderBase):
             # Guard Manager
             mod_generic_dict_manager = base_guard_manager.get_generic_dict_manager(
                 source=mod_dict_source,
-                example_value=mod_dict,
+                example_value=self._get_generic_dict_manager_example_value(mod_dict),
                 guard_manager_enum=GuardManagerType.GUARD_MANAGER,
             )
 
@@ -1273,7 +1303,7 @@ class GuardBuilder(GuardBuilderBase):
         mod_dict_source = f"{guard.name}.__dict__"
         mod_generic_dict_manager = base_manager.get_generic_dict_manager(
             source=mod_dict_source,
-            example_value=val.__dict__,
+            example_value=self._get_generic_dict_manager_example_value(val.__dict__),
             guard_manager_enum=GuardManagerType.GUARD_MANAGER,
         )
 
@@ -1889,6 +1919,13 @@ class GuardBuilder(GuardBuilderBase):
                     verbose_code_parts,
                 )
 
+                if not istype(value, torch.nn.Parameter):
+                    # Include the guard manager with the TENSOR_MATCH leaf guard
+                    # in the diff guard set. This is used by
+                    # torch.compiler.skip_guard_eval_unsafe to run only diff
+                    # guard set + TENSOR_MATCH guards.
+                    guard_manager.include_in_diff_guard_set()
+
             # A frame is valid for reuse with dynamic dimensions if the new
             # (user-requested) dynamic dimensions are a subset of the old
             # (already compiled) dynamic dimensions.
@@ -2272,12 +2309,16 @@ class CheckFunctionManager:
             structured_guard_fns.append(
                 lambda: {
                     "code": code_part,
-                    "stack": structured.from_traceback(guard.stack.summary())
-                    if guard.stack
-                    else None,
-                    "user_stack": structured.from_traceback(guard.user_stack)
-                    if guard.user_stack
-                    else None,
+                    "stack": (
+                        structured.from_traceback(guard.stack.summary())
+                        if guard.stack
+                        else None
+                    ),
+                    "user_stack": (
+                        structured.from_traceback(guard.user_stack)
+                        if guard.user_stack
+                        else None
+                    ),
                 }
             )
 
@@ -2374,9 +2415,10 @@ class CheckFunctionManager:
             **_get_closure_vars(),
         }
 
-        globals_for_guard_fn = {"G": builder.scope["G"]}
+        self.guard_manager.finalize()
         # Guard manager construction is complete. Ensure we did not miss to
         # insert a guard in cpp guard manager.
+        globals_for_guard_fn = {"G": builder.scope["G"]}
         assert len(code_parts) == 0
 
         self.guard_manager.closure_vars = closure_vars
@@ -2623,9 +2665,6 @@ def get_and_maybe_log_recompilation_reason(
         )
         if reason:
             reasons.append(reason)
-
-        # TODO(anijain2305) - Fix some silly issue with printing
-        # diff_guards_log.debug("%s", cache_entry.guard_manager.print_diff_guard_set())
         cache_entry = cache_entry.next
 
     code = frame.f_code

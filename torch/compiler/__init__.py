@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 from typing import Any, Callable, List, TypeVar
 
 import torch
@@ -381,3 +382,16 @@ def is_dynamo_compiling() -> bool:
         >>>     # ...rest of the function...
     """
     return False
+
+
+@contextlib.contextmanager
+def skip_guard_eval_unsafe() -> None:
+    """
+    FILL UP
+    """
+    old_value = torch._C._dynamo.eval_frame.run_diff_guard_set
+    try:
+        torch._C._dynamo.eval_frame.set_run_diff_guard_set_flag(True)
+        yield
+    finally:
+        torch._C._dynamo.eval_frame.set_run_diff_guard_set_flag(old_value)

@@ -17,14 +17,14 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
             else:
                 return x + y
 
-        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn = torch.compile(fn, backend="inductor")
         x = 2 * torch.ones(4)
         y = 3 * torch.ones(4)
 
         ref1 = opt_fn(x, y, True)
         ref2 = opt_fn(x, y, False)
 
-        with torch.compiler.set_stance("skip_guard_eval"):
+        with torch.compiler.skip_guard_eval_unsafe():
             res2 = opt_fn(x, y, False)
             res1 = opt_fn(x, y, True)
 
@@ -41,23 +41,18 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
 
         ref1 = opt_fn(x, y)
 
-        x = torch.randn(4, dtype=torch.int64)
-        y = torch.randn(4, dtype=torch.int64)
-        ref2 = opt_fn(x, y)
+        x64 = torch.randn(4, dtype=torch.float64)
+        y64 = torch.randn(4, dtype=torch.float64)
+        ref2 = opt_fn(x64, y64)
 
-        with torch.compiler.set_stance("skip_guard_eval"):
-            x = torch.randn(4, dtype=torch.float32)
-            y = torch.randn(4, dtype=torch.float32)
+        with torch.compiler.skip_guard_eval_unsafe():
             res1 = opt_fn(x, y)
-
-            x = torch.randn(4, dtype=torch.int64)
-            y = torch.randn(4, dtype=torch.int64)
-            res2 = opt_fn(x, y)
+            res2 = opt_fn(x64, y64)
 
         self.assertEqual(ref1, res1)
         self.assertEqual(ref2, res2)
 
-    def test_post_stance_recompile(self):
+    def test_post_recompile(self):
         class Foo:
             a = 4
             b = 5
@@ -82,7 +77,7 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 2)
 
-        with torch.compiler.set_stance("skip_guard_eval"):
+        with torch.compiler.skip_guard_eval_unsafe():
             # Set it back to original value
             foo.a = 4
             ref = fn(x)
@@ -100,6 +95,24 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 3)
+
+    def test_fail_on_tensor_shape_change(self):
+        def fn(dt):
+            return dt["x"] + 1
+
+        x = torch.randn(4)
+        dt = {}
+        dt["x"] = x
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(dt)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Could not find a compiled graph for skip_guard_eval_unsafe"
+        ):
+            with torch.compiler.skip_guard_eval_unsafe():
+                x = torch.randn(4, 4)
+                dt["x"] = x
+                opt_fn(dt)
 
 
 if __name__ == "__main__":

@@ -330,6 +330,10 @@ skip_nnmodule_hook_guards = True
 # notice and lead to incorrect result.
 skip_no_tensor_aliasing_guards_on_parameters = True
 
+# Considers a tensor immutable if it is one of the values of a dictionary, and
+# the dictionary tag is same across invocation calls.
+skip_tensor_guards_with_matching_dict_tags = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -473,11 +477,6 @@ compiled_autograd = False
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: Dict[str, Any] = {}
-
-# Compiled Autograd will attempt to automatically wrap C++ autograd functions found in the autograd graph,
-# and make them opaque to the compiler. This does not work when the C++ backward implementation involves
-# other dispatcher subsystems e.g. custom subclasses, autocast, vmap.
-compiled_autograd_opaque_cpp_node = False
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
