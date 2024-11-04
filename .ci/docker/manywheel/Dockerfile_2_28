@@ -33,12 +33,6 @@ RUN rm -rf /opt/python/cp26-cp26mu /opt/_internal/cpython-2.6.9-ucs4
 RUN rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6
 RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
 
-FROM base as python
-# build python
-COPY manywheel/build_scripts /build_scripts
-ADD ./common/install_cpython.sh /build_scripts/install_cpython.sh
-RUN bash build_scripts/install_cpython.sh && rm -r build_scripts
-
 FROM base as cuda
 ARG BASE_CUDA_VERSION=11.8
 # Install CUDA
@@ -107,9 +101,9 @@ RUN git config --global --add safe.directory "*"
 ENV SSL_CERT_FILE=/opt/_internal/certs.pem
 # Install LLVM version
 COPY --from=openssl            /opt/openssl                          /opt/openssl
-COPY --from=python             /opt/python                           /opt/python
-COPY --from=python             /opt/_internal                        /opt/_internal
-COPY --from=python             /opt/python/cp39-cp39/bin/auditwheel /usr/local/bin/auditwheel
+COPY --from=base               /opt/python                           /opt/python
+COPY --from=base               /opt/_internal                        /opt/_internal
+COPY --from=base               /usr/local/bin/auditwheel             /usr/local/bin/auditwheel
 COPY --from=intel              /opt/intel                            /opt/intel
 COPY --from=base               /usr/local/bin/patchelf               /usr/local/bin/patchelf
 COPY --from=libpng             /usr/local/bin/png*                   /usr/local/bin/
@@ -126,6 +120,13 @@ ARG DEVTOOLSET_VERSION=11
 # Ensure the expected devtoolset is used
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
+# cmake-3.28.4 from pip
+RUN python3 -m pip install --upgrade pip && \
+    python3 -mpip install cmake==3.28.4
+# Install setuptools and wheel for python 3.12 and 3.13
+RUN /opt/python/cp312-cp312/bin/python -m pip install setuptools wheel
+RUN /opt/python/cp313-cp313/bin/python -m pip install setuptools wheel
+RUN /opt/python/cp313-cp313t/bin/python -m pip install setuptools wheel
 
 # cmake-3.18.4 from pip
 RUN yum install -y python3-pip && \
@@ -153,12 +154,6 @@ RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 FROM cpu_final as xpu_final
 # XPU CD use rolling driver
 ENV XPU_DRIVER_TYPE ROLLING
-# cmake-3.28.4 from pip
-RUN python3 -m pip install --upgrade pip && \
-    python3 -mpip install cmake==3.28.4
-
-# Install setuptools and wheel for python 3.13
-RUN /opt/python/cp313-cp313/bin/python -m pip install setuptools wheel
 ADD ./common/install_xpu.sh install_xpu.sh
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd
