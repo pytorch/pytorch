@@ -3993,7 +3993,8 @@ class CppScheduling(BaseScheduling):
                 else:
                     assert isinstance(ref_node, FusedSchedulerNode)
                     for snode in ref_node.snodes:
-                        snode.recompute_size_and_body(  # type: ignore[attr-defined]
+                        assert isinstance(snode, SchedulerNode)
+                        snode.recompute_size_and_body(
                             extra_indexing_constraints=node_to_recomp_indexing_constraints
                         )
                     ref_node = FusedSchedulerNode(ref_node.scheduler, ref_node.snodes)
