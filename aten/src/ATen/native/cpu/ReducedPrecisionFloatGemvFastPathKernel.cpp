@@ -22,7 +22,7 @@ inline namespace CPU_CAPABILITY {
 constexpr auto kF32RegisterPairsPerIteration = 4;
 constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration * 2;
 constexpr auto kF32ElementsPerRegister = vec::Vectorized<float>::size();
-constexpr auto kF32ElementsPerIteration = kF32RegistersPerIteration * kF32ElementsPerRegister;;
+constexpr auto kF32ElementsPerIteration = kF32RegistersPerIteration * kF32ElementsPerRegister;
 
 namespace {
 template <typename T>
@@ -177,10 +177,18 @@ dot_with_fp32_arith_main_inner_loop_bfdot(
     const BFloat16* vec2,
     vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
     int registerPairIndex) {
-  const auto temp_vec1 = vec::Vectorized<BFloat16>::loadu(
-      &vec1[registerPairIndex * vec::Vectorized<BFloat16>::size()]);
-  const auto temp_vec2 = vec::Vectorized<BFloat16>::loadu(
-      &vec2[registerPairIndex * vec::Vectorized<BFloat16>::size()]);
+  // NOTE[Intrinsics in bfdot variant]: We can't use
+  // vec::Vectorized<BFloat16>::loadu here because linux-aarch64 GCC
+  // inexplicably can't convert Vectorized<BFloat16> to
+  // bfloat16x8_t. I suspect a bug or incomplete
+  // __attribute__((target)) implementation. Intrinsics should be fine
+  // because we're using vbfdotq_f32 below anyway.
+  const auto temp_vec1 = vld1q_bf16(
+      reinterpret_cast<const bfloat16_t*>(
+          &vec1[registerPairIndex * vec::Vectorized<BFloat16>::size()]));
+  const auto temp_vec2 = vld1q_bf16(
+      reinterpret_cast<const bfloat16_t*>(
+          &vec2[registerPairIndex * vec::Vectorized<BFloat16>::size()]));
   sum[registerPairIndex] =
     vbfdotq_f32(sum[registerPairIndex], temp_vec1, temp_vec2);
 }
@@ -191,11 +199,7 @@ void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
     const at::BFloat16* vec2,
     vec::Vectorized<float>* tail_sum,
     int idx) {
-  // NOTE: We can't use vec::Vectorized<BFloat16>::loadu here because
-  // linux-aarch64 GCC inexplicably can't convert Vectorized<BFloat16>
-  // to bfloat16x8_t. I suspect a bug or incomplete
-  // __attribute__((target)) implementation. Intrinsics should be fine
-  // because we're using vbfdotq_f32 below anyway.
+  // See NOTE[Intrinsics in bfdot variant] above.
   const auto temp_vec1 = vld1q_bf16(reinterpret_cast<const bfloat16_t*>(&vec1[idx]));
   const auto temp_vec2 = vld1q_bf16(reinterpret_cast<const bfloat16_t*>(&vec2[idx]));
   *tail_sum = vbfdotq_f32(*tail_sum, temp_vec1, temp_vec2);
@@ -478,8 +482,8 @@ void bf16_gemv_trans(
 } // namespace CPU_CAPABILITY
 
 #if !defined(C10_MOBILE)
-REGISTER_DISPATCH(fp16_dot_with_fp32_arith_stub, &fp16_dot_with_fp32_arith);
-REGISTER_DISPATCH(fp16_gemv_trans_stub, &fp16_gemv_trans);
+REGISTER_DISPATCH(fp16_dot_with_fp32_arith_stub, &fp16_dot_with_fp32_arith)
+REGISTER_DISPATCH(fp16_gemv_trans_stub, &fp16_gemv_trans)
 #ifdef __aarch64__
 REGISTER_DISPATCH(bf16_dot_with_fp32_arith_stub, &bf16_dot_with_fp32_arith);
 REGISTER_DISPATCH(bf16_gemv_trans_stub, &bf16_gemv_trans);
