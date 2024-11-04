@@ -190,8 +190,13 @@ void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
     const at::BFloat16* vec2,
     vec::Vectorized<float>* tail_sum,
     int idx) {
-  const auto temp_vec1 = vec::Vectorized<BFloat16>::loadu(&vec1[idx]);
-  const auto temp_vec2 = vec::Vectorized<BFloat16>::loadu(&vec2[idx]);
+  // NOTE: We can't use vec::Vectorized<BFloat16>::loadu here because
+  // linux-aarch64 GCC inexplicably can't convert Vectorized<BFloat16>
+  // to bfloat16x8_t. I suspect a bug or incomplete
+  // __attribute__((target)) implementation. Intrinsics should be fine
+  // because we're using vbfdotq_f32 below anyway.
+  const auto temp_vec1 = vld1q_bf16(reinterpret_cast<const bfloat16_t*>(&vec1[idx]));
+  const auto temp_vec2 = vld1q_bf16(reinterpret_cast<const bfloat16_t*>(&vec2[idx]));
   *tail_sum = vbfdotq_f32(*tail_sum, temp_vec1, temp_vec2);
 }
 
@@ -215,7 +220,7 @@ std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
 #endif
 }
 
-std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
+[[maybe_unused]] std::pair<vec::Vectorized<float>, vec::Vectorized<float>> fmadd(
     const vec::Vectorized<c10::BFloat16>& a,
     const vec::Vectorized<c10::BFloat16>& b,
     const vec::Vectorized<float>& acc_low,
@@ -242,7 +247,7 @@ vec::Vectorized<float> fmadd(vec::Vectorized<float> a, vec::Vectorized<Half> b, 
 #endif
 }
 
-vec::Vectorized<float> fmadd(
+[[maybe_unused]] vec::Vectorized<float> fmadd(
     const vec::Vectorized<float>& acc,
     const vec::Vectorized<c10::BFloat16>& a,
     const vec::Vectorized<c10::BFloat16>& b) {
