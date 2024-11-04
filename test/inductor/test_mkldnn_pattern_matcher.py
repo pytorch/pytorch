@@ -2782,11 +2782,13 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    def test_int_mm_convert_mul_mul(self):
+    def test_smooth_quant_with_int_mm(self):
         r"""
-        This testcase check if we can match the following patterns:
-        (1) _int_mm -> convert_element_type -> (expand -> mul) -> mul
-        (2) _int_mm -> convert_element_type -> (expand -> mul) -> mul -> reshape -> add
+        This testcase check if we can match the SmoothQuant int8 linear pattern from Torchao.
+        The pattern is:
+            (no bias) reshape -> _int_mm -> convert_element_type -> (expand -> mul) -> mul -> reshape
+        or
+            (with bias) pattern_no_bias -> add -> reshape -> reshape
         """
         M = 16
         in_feature = 64
