@@ -5,31 +5,23 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 import torch
 import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
-
-
-def _get_tristate_env(name: str) -> Optional[bool]:
-    value = os.environ.get(name)
-    if value == "1":
-        return True
-    if value == "0":
-        return False
-    return None
+from torch.utils._config_module import get_tristate_env, install_config_module
 
 
 def fx_graph_remote_cache_default() -> Optional[bool]:
-    return _get_tristate_env("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE")
+    return get_tristate_env("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE")
 
 
 def autotune_remote_cache_default() -> Optional[bool]:
-    return _get_tristate_env("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE")
+    return get_tristate_env("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE")
 
 
 def bundled_autotune_remote_cache_default() -> Optional[bool]:
-    return _get_tristate_env("TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE")
+    return get_tristate_env("TORCHINDUCTOR_BUNDLED_AUTOTUNE_REMOTE_CACHE")
 
 
 def bundle_triton_into_fx_graph_cache_default() -> Optional[bool]:
-    return _get_tristate_env("TORCHINDUCTOR_BUNDLE_TRITON_INTO_FX_GRAPH_CACHE")
+    return get_tristate_env("TORCHINDUCTOR_BUNDLE_TRITON_INTO_FX_GRAPH_CACHE")
 
 
 # Enable auto_functionalized_v2 (enabled by default)
@@ -107,7 +99,7 @@ custom_op_default_layout_constraint = "needs_fixed_stride_order"
 
 # The default layout constraint for user-defined triton kernels.
 # See "The default layout constraint for custom operators" for options.
-triton_kernel_default_layout_constraint = "flexible_layout"
+triton_kernel_default_layout_constraint = "needs_fixed_stride_order"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
@@ -1048,10 +1040,6 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
-    debug_dump_consts_bin: bool = (
-        os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
-    )
-
     # option for debug printing/saving for intermediate tensor values for aot inductor
     # 0: disable debug dumping
     # 1: enable saving intermediate tensor values
@@ -1282,16 +1270,6 @@ class trace:
     # SVG figure showing fx with fusion
     draw_orig_fx_graph = os.environ.get("INDUCTOR_ORIG_FX_SVG", "0") == "1"
 
-    # We draw our fx graphs with the "record" shape attribute by default.
-    # Sometimes, when the graph is very complex, we may hit dot errors like below:
-    #   "flat edge between adjacent nodes one of which has a record shape -
-    #    replace records with HTML-like labels"
-    # and thus fail to generate a graph. So, let's give the user an option
-    # to specify the shape attribute for the dot graph. For example, passing
-    # INDUCTOR_DOT_GRAPH_SHAPE_SVG = "none" would let us generate HTML-like lables
-    # to workaround the above failure.
-    dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
-
     # If not None, this is the URL that saves the SVG files of the input/output
     # graph of each pass that changed the graph
     # The nodes that are being transformed in each pass will be colored in yellow
@@ -1339,8 +1317,6 @@ class test_configs:
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
-
-from torch.utils._config_module import install_config_module
 
 
 # adds patch, save_config, etc
