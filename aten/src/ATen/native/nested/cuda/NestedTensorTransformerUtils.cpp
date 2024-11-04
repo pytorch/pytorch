@@ -120,7 +120,7 @@ int64_t get_nnz(const Tensor& nestedtensor) {
         }
       }
       // Check that each tensor i in the nested tensor has the same strides
-      for (int i{1}; i < n_tensors; i++) {
+      for (int64_t i{1}; i < n_tensors; i++) {
         for (const int64_t j : c10::irange(n_dims)) {
           if (previous_tensor_stride[j] !=
               previous_tensor_stride[i * tensor_stride_0 + j]) {

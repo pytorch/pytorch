@@ -192,6 +192,7 @@ manual_torch_name_rule_map = {
     "torch.sym_sum": TorchInGraphFunctionVariable,
     "torch.Tensor#_make_wrapper_subclass": SkipFunctionVariable,
     "torch.Tensor#__init__": SkipFunctionVariable,
+    "torch.Tensor#split": TorchInGraphFunctionVariable,
     "torch.cuda.set_device": SkipFunctionVariable,
     "torch.cuda.current_device": TorchInGraphFunctionVariable,
     "torch._C.autocast_decrement_nesting": SkipFunctionVariable,
@@ -3026,22 +3027,16 @@ def _polyfilled_function_ids() -> Set[int]:
 
 @FunctionIdSet
 def _numpy_function_ids() -> Dict[int, str]:
-    def is_supported(k, v, mod):
-        if not callable(v):
-            return False
-        if not getattr(v, "__module__", None):
-            return True
-        if v.__module__ == mod.__name__:
-            return True
-        if v.__module__ == "numpy.random.mtrand" and mod.__name__ == "numpy.random":
-            return True
-        return False
-
     rv = {}
     for mod in NP_SUPPORTED_MODULES:
-        for k, v in mod.__dict__.items():
-            if is_supported(k, v, mod):
-                rv[id(v)] = f"{mod.__name__}.{k}"
+        rv.update(
+            {
+                id(v): f"{mod.__name__}.{k}"
+                for k, v in mod.__dict__.items()
+                if callable(v)
+                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
+            }
+        )
     return rv
 
 
