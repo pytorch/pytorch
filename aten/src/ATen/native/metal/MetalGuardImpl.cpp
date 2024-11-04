@@ -58,7 +58,7 @@ struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       noexcept override {}
 };
 
-C10_REGISTER_GUARD_IMPL(Metal, MetalGuardImpl);
+C10_REGISTER_GUARD_IMPL(Metal, MetalGuardImpl)
 
 } // namespace detail
 } // namespace at
