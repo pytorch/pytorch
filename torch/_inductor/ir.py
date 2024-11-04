@@ -9,6 +9,7 @@ import logging
 import textwrap
 import traceback
 from contextlib import nullcontext
+from enum import Enum
 from functools import partial
 from typing import (
     Any,
@@ -77,6 +78,7 @@ from .runtime.benchmarking import benchmarker
 from .runtime.hints import ReductionHint
 from .utils import (
     argsort,
+    argsort_sym,
     cache_on_self,
     ceildiv,
     convert_shape_to_inductor,
@@ -234,6 +236,20 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
+def get_fill_order(
+    seq: Sequence[Union[int, torch.SymInt, Expr]], shape_env=None
+) -> Sequence[int]:
+    """
+    Convert strides to fill order (argsort)
+    """
+    if shape_env is None:
+        sorted_idx: Sequence[int] = argsort(seq)
+    else:
+        # argsort_sym handles unbacked symints (with the help of the shape_env)
+        sorted_idx = argsort_sym(shape_env, seq)
+    return sorted_idx
+
+
 def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[int]:
     """
     Convert stride order to fill order
@@ -246,11 +262,13 @@ def stride_order2fill_order(order: Sequence[Union[int, Integer]]) -> Sequence[in
     return fill_order
 
 
-def get_stride_order(seq: Sequence[Union[int, torch.SymInt, Expr]]) -> Sequence[int]:
+def get_stride_order(
+    seq: Sequence[Union[int, torch.SymInt, Expr]], shape_env=None
+) -> Sequence[int]:
     """
     Convert strides to stride order
     """
-    sorted_idx: List[int] = argsort(seq)
+    sorted_idx: Sequence[int] = get_fill_order(seq, shape_env)
     out = [0 for _ in range(len(seq))]
     for i, elem in enumerate(sorted_idx):
         out[elem] = i
@@ -569,7 +587,7 @@ class Loops(IRNode):
     @staticmethod
     def _index(ranges, prefix=SymT.INDEX):
         return [
-            sympy.Integer(0) if s == 1 else sympy_index_symbol_with_prefix(prefix, n)
+            sympy.S.Zero if s == 1 else sympy_index_symbol_with_prefix(prefix, n)
             for n, s in enumerate(ranges)
         ]
 
@@ -591,8 +609,11 @@ class Loops(IRNode):
             self.inner_fn, *self.inner_fn_args()
         )
 
-    def has_large_inner_fn(self):
-        return self.inner_fn_opcount().num_ops > config.realize_opcount_threshold
+    def has_large_inner_fn(self, threshold=None):
+        if threshold is None:
+            threshold = 0
+        threshold = max(threshold, config.realize_opcount_threshold)
+        return self.inner_fn_opcount().num_ops > threshold
 
     def inner_fn_free_unbacked_symbols(self):
         index = self._index(self.ranges)
@@ -868,7 +889,7 @@ class Reduction(Loops):
         reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
-        should_split = (
+        should_split = reduction_type == "scan" or (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
             and reduction_type
             not in (
@@ -876,11 +897,9 @@ class Reduction(Loops):
                 "argmin",
             )
             and config.split_reductions
-            # We don't support unbacked symints
-            and _is_static(reduction_numel_hint)
-            and _is_static(numel_hint)
         )
-        if not should_split:
+        if not (_is_static(reduction_numel_hint) and _is_static(numel_hint)):
+            # We don't support unbacked symints
             return ReductionHint.DEFAULT, 1
 
         device_interface = get_interface_for_device(get_device_type(device))  # type: ignore[arg-type] # next PR
@@ -898,6 +917,8 @@ class Reduction(Loops):
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
 
         def inner_reduction_splits(reduction_numel_hint, numel_hint):
+            if not should_split:
+                return 1
             # do heuristics that's close to eager mode for split inner reduction
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             num_warps = 8
@@ -934,6 +955,8 @@ class Reduction(Loops):
             )
 
         def outer_reduction_splits(reduction_numel_hint, numel_hint):
+            if not should_split:
+                return 1
             # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
             # extend to even smaller number of outputs
             num_warps = 8
@@ -1176,7 +1199,7 @@ class Reduction(Loops):
             else:
 
                 def fn(index):
-                    reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
+                    reduction_index = [sympy.S.Zero for _ in reduction_ranges]
                     return inner_fn(index, reduction_index)
 
             return Pointwise.create(
@@ -1596,7 +1619,7 @@ class WelfordReduction(Reduction):
 
             def copy(loader):
                 def inner_fn(idx):
-                    reduction_index = [sympy.Integer(0) for _ in reduction_ranges]
+                    reduction_index = [sympy.S.Zero for _ in reduction_ranges]
                     return loader(idx, reduction_index)
 
                 return Pointwise.create(
@@ -1950,7 +1973,7 @@ class Scan(Loops):
             inner_fn=wrapper_fn,
             ranges=pointwise_ranges,
             reduction_ranges=scan_ranges,
-            reduction_type="sum",
+            reduction_type="scan",
             reduction_numel=scan_numel,
         )
 
@@ -2322,14 +2345,14 @@ class ExpandView(BaseView):
             storage, old_layout = as_storage_and_layout(x)
             skip = len(new_size) - len(old_layout.size)
             assert skip >= 0
-            new_stride = [sympy.Integer(0)] * skip
+            new_stride = [sympy.S.Zero] * skip
             for stride, size in zip(old_layout.stride, old_layout.size):
                 new_stride.append(
                     stride
                     if not V.graph.sizevars.shape_env.evaluate_expr(
                         sympy.Eq(size, 1), size_oblivious=True
                     )
-                    else sympy.Integer(0)
+                    else sympy.S.Zero
                 )
             new_layout = FixedLayout(
                 old_layout.device,
@@ -2356,7 +2379,7 @@ class ExpandView(BaseView):
             for i in range(len(actual)):
                 if actual[i] == 1:
                     # zero out broadcast dimension
-                    index[i] = sympy.Integer(0)
+                    index[i] = sympy.S.Zero
             return index
 
         return reindex
@@ -2454,7 +2477,7 @@ class SqueezeView(BaseView):
 
         def reindex(index: List[sympy.Expr]) -> Tuple[sympy.Expr, ...]:
             assert len(index) == len(not_one), f"{index} {not_one}"
-            new_index = [sympy.Integer(0)] * length
+            new_index = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
                 new_index[idx] = s
             return tuple(new_index)
@@ -2556,7 +2579,7 @@ class View(GenericView):
         new_size = list(new_size)
         for i in range(len(new_size)):
             if new_size[i] == -1:
-                new_size[i] = sympy.Integer(1)
+                new_size[i] = sympy.S.One
                 new_size[i] = CleanDiv(sympy_product(old_size), sympy_product(new_size))
                 break
 
@@ -2595,7 +2618,7 @@ class View(GenericView):
             size_old = stack_old.pop()
             var, size_new = stack_new.pop()
             if size_old == 1:
-                view_expr.append(sympy.Integer(0))
+                view_expr.append(sympy.S.Zero)
                 stack_new.append((var, size_new))  # re-add
             elif size_new == 1:
                 stack_old.append(size_old)  # re-add
@@ -2610,7 +2633,7 @@ class View(GenericView):
                 view_expr.append(var)
                 V.graph.sizevars.guard_equals(size_new, size_old)
             elif size_hint(size_new) > size_hint(size_old):
-                divisor = sympy.Integer(1)
+                divisor = sympy.S.One
                 modulus = size_old
                 view_expr.append(ModularIndexing(var, divisor, modulus))
                 divisor = divisor * modulus
@@ -2626,7 +2649,7 @@ class View(GenericView):
         while stack_old:
             size_old = stack_old.pop()
             V.graph.sizevars.guard_equals(size_old, 1)  # type: ignore[arg-type]
-            view_expr.append(sympy.Integer(0))
+            view_expr.append(sympy.S.Zero)
 
         while stack_new:
             var, size_new = stack_new.pop()
@@ -3003,10 +3026,15 @@ class Layout(IRNode):
         # reorder the stride given order
         stride_ordered = [-1] * len(order)
         for i in range(len(order)):
-            stride_ordered[order[i]] = V.graph.sizevars.size_hint(stride[i])
+            stride_ordered[order[i]] = stride[i]
         # check if it is in ascending order
         for i in range(len(order) - 1):
-            if stride_ordered[i] > stride_ordered[i + 1]:
+            expr = stride_ordered[i] > stride_ordered[i + 1]
+            if not isinstance(expr, bool):
+                expr = V.graph._shape_env.evaluate_expr(
+                    stride_ordered[i] > stride_ordered[i + 1], size_oblivious=True
+                )
+            if expr:
                 return False
         return True
 
@@ -3162,7 +3190,7 @@ class FlexibleLayout(Layout):
     def contiguous_strides(sizes):
         if len(sizes) == 0:
             return []
-        reversed_strides = [sympy.Integer(1)]
+        reversed_strides = [sympy.S.One]
         for size in reversed(sizes[1:]):
             reversed_strides.append(size * reversed_strides[-1])
         return list(reversed(reversed_strides))
@@ -3176,7 +3204,7 @@ class FlexibleLayout(Layout):
             [1, 3, 2, 0]
         """
         assert OrderedSet(range(len(sizes))) == OrderedSet(order), (sizes, order)
-        next_stride = sympy.Integer(1)
+        next_stride = sympy.S.One
         strides = [None] * len(order)
 
         for i in order:
@@ -3315,6 +3343,49 @@ class NonOwningLayout(Layout):
         from .utils import ALIGNMENT
 
         return V.graph.sizevars.statically_known_multiple_of(offset, ALIGNMENT)  # type: ignore[arg-type]
+
+
+class CommBufferType(Enum):
+    SYMM_MEM = "symm_mem"
+
+
+class CommBufferLayout(FixedLayout):
+    """
+    A layout that signifies the buffer is a comm buffer.
+    In terms of striding, the layout is identical to `FixedLayout`.
+
+    Buffers with this layout do not participate in in-place reuse - it can be
+    neither the source nor the target for in-place reuse.
+
+    For detailed motivation and usage of this layout, see
+    NOTE [lowering-time collective optimization].
+    """
+
+    comm_buffer_type: CommBufferType
+    group_name: str
+
+    def __init__(
+        self,
+        layout: FlexibleLayout,
+        comm_buffer_type: CommBufferType,
+        group_name: str,
+    ):
+        if not isinstance(layout, FlexibleLayout):
+            raise AssertionError(
+                "A `CommBufferLayout` can only be initialized with "
+                f"a `FlexibleLayout` (got {layout})."
+            )
+
+        fixed = layout.as_fixed()
+        super().__init__(
+            device=fixed.device,
+            dtype=fixed.dtype,
+            size=fixed.size,
+            stride=fixed.stride,
+            offset=fixed.offset,
+        )
+        self.comm_buffer_type = comm_buffer_type
+        self.group_name = group_name
 
 
 @ir_dataclass
@@ -3693,9 +3764,7 @@ class ComputedBuffer(OperationBuffer):
                 for r in reads
             )
             reads = [
-                sympy_subs(
-                    r.index, {v: sympy.Integer(0) for v in reduction_vars if v != 0}
-                )
+                sympy_subs(r.index, {v: sympy.S.Zero for v in reduction_vars if v != 0})
                 for r in reads
                 if isinstance(r, dependencies.MemoryDep)
             ]
@@ -5344,7 +5413,12 @@ class TMADescriptor(ExternKernel):
             # link back to the underlying tensor in terms of ownership
             # to avoid getting the underlying tensor deleted *before*
             # the TMADescriptor node can be deleted.
-            NonOwningLayout(ReinterpretView(tensor, tensor.get_layout())),
+            NonOwningLayout(
+                ReinterpretView(
+                    data=tensor,
+                    layout=tensor.get_layout(),
+                )
+            ),
             inputs,
             tuple(constant_args),
             None,
@@ -5398,17 +5472,50 @@ class UserDefinedTritonKernel(ExternKernel):
         2. The arg is not tl.constexpr so we have to remove it
         """
         constexpr_indices_set = set(constexpr_indices)
+        REMOVED = object()
         raw_args = [
-            arg
-            for idx, arg in enumerate(raw_args)
+            (idx, arg)
             if (arg is not None) or (arg is None and idx in constexpr_indices_set)
+            else (idx, REMOVED)
+            for idx, arg in enumerate(raw_args)
         ]
+        removed_none_args = [idx for idx, val in raw_args if val == REMOVED]
+        raw_args = [val for idx, val in raw_args if val != REMOVED]
+
+        # We have to compute the constexpr indices for the new, filtered raw_args
+        # We also have to adjust equal_to_1.
+        if removed_none_args:
+            eq1_indices_set = set(triton_meta["configs"][0].equal_to_1)
+            constexpr_indices = []
+            equal_to_1 = []
+            index_shift = 0
+            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
+                # every time we encounter an idx we removed, adjust by one to account for it
+                # So for example if we had [None, const X]
+                # iter 1:
+                #   None was removed, adjust=1
+                # iter 2:
+                #  X is const at idx=1, but the adjusted idx is 0 now, because None was removed
+                if idx in removed_none_args:
+                    index_shift += 1
+                    continue
+                arg_index = kernel.arg_names.index(kwarg)
+                if arg_index in kernel.constexprs:
+                    constexpr_indices.append(idx - index_shift)
+                if arg_index in eq1_indices_set:
+                    equal_to_1.append(idx - index_shift)
+
+            triton_meta["configs"][0].equal_to_1 = equal_to_1
 
         # Call to kernel
         self.codegen_comment(wrapper)
-
         wrapper.generate_user_defined_triton_kernel(
-            new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
+            new_name,
+            raw_args,
+            self.grid,
+            configs,
+            triton_meta,
+            constexpr_indices,
         )
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -6591,6 +6698,85 @@ def _has_aliased_buffers(buffers: Sequence[IRNode]) -> bool:
     ]
     # assuming the same buffer is represented by the same IRNode object
     return len(OrderedSet(id(buffer) for buffer in buffers)) < len(buffers)
+
+
+@ir_dataclass(frozen=False)
+class InvokeSubgraph(ExternKernel):
+    subgraph: Optional[Subgraph] = None
+    operands: Optional[List[TensorBox]] = None
+    outputs: Optional[List[MultiOutput]] = None
+
+    def __init__(
+        self, subgraph: Subgraph, operands: List[TensorBox], layout: MultiOutputLayout
+    ):
+        super().__init__(
+            name=None,
+            layout=layout,
+            inputs=operands,
+        )
+        self.subgraph = subgraph
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    @classmethod
+    def create(cls, subgraph: Subgraph, operands):
+        # TODO(anijain2305) - Support sym expr as operands in future.
+        fx_operands = V.graph.current_node.args[-1]
+        fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+
+        # Realize the inputs. Also intermediates can have different strides than
+        # the inputs of the subgraph. So, force the intermediates to have same
+        # strides as that of subgraph inputs.
+        operands = [cls.realize_input(x) for x in operands]
+
+        def handle_sym_expr(stride):
+            return [s.node.expr if isinstance(s, torch.SymInt) else s for s in stride]
+
+        fake_strides = [fake_operand.stride() for fake_operand in fake_operands]
+        fake_strides = [handle_sym_expr(stride) for stride in fake_strides]
+        operands = [
+            cls.require_exact_strides(x, fake_strides[idx])
+            for idx, x in enumerate(operands)
+        ]
+
+        if subgraph.graph is None:
+            # create and lower subgraphs
+            subgraph.graph = V.graph.make_subgraph(
+                gm=subgraph.graph_module,
+                example_inputs=fake_operands,
+                subgraph_name=subgraph.name,
+            )
+            with V.set_graph_handler(subgraph.graph):
+                subgraph.graph.run(*fake_operands)
+
+        outputs = subgraph.graph.graph_outputs  # type: ignore[union-attr]
+        device = operands[0].get_device()
+        invoke_subgraph = InvokeSubgraph(
+            subgraph=subgraph,
+            operands=operands,
+            layout=MultiOutputLayout(device=device),
+        )
+
+        outputs = [
+            MultiOutput(
+                FixedLayout(
+                    device=output.get_device(),
+                    dtype=output.get_dtype(),
+                    size=output.get_size(),
+                    stride=output.get_stride(),
+                    offset=output.get_layout().offset,
+                ),
+                invoke_subgraph,
+                [(list, i)],
+            )
+            for i, output in enumerate(outputs)
+        ]
+
+        invoke_subgraph.outputs = outputs
+        return outputs
+
+    def codegen(self, wrapper):
+        wrapper.codegen_invoke_subgraph(self)
 
 
 @ir_dataclass(frozen=False)
