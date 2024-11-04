@@ -181,7 +181,6 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = contextlib.nullcontext()
         if check_quantization:
             if is_xpu:
-                quantizer = None
                 quantizer = XPUInductorQuantizer()
                 quantizer.set_global(
                     xiq.get_default_x86_inductor_quantization_config(
