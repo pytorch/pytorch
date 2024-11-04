@@ -1,6 +1,6 @@
-#include <c10/core/MemoryFormat.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <c10/core/MemoryFormat.h>
 #include <torch/library.h>
 
 #include <iostream>
@@ -17,12 +17,10 @@ at::Tensor qconv_prepack_xpu(
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
     int64_t groups,
-    std::optional<torch::List<int64_t>> input_shape
-){
-    // XPU has no prepack at present
-    return weight;
+    std::optional<torch::List<int64_t>> input_shape) {
+  // XPU has no prepack at present
+  return weight;
 }
-
 
 class QConvoneDNNXPU final {
  public:
@@ -55,14 +53,16 @@ class QConvoneDNNXPU final {
     } else {
       TORCH_CHECK(
           attr == "none" || attr == "relu" || attr == "hardtanh" ||
-              attr == "hardswish" || attr=="swish",
+              attr == "hardswish" || attr == "swish",
           "none post_op or post_op relu/hardtanh/hardswish is supported for quantized pointwise conv2d. Got unary_post_op: ",
           attr,
           ".");
     }
 
-    bool is_channels_last_suggested= use_channels_last_for_conv(act, weight);
-    auto mfmt = is_channels_last_suggested ? get_cl_tag_by_ndim(act.ndimension()) : at::MemoryFormat::Contiguous;
+    bool is_channels_last_suggested = use_channels_last_for_conv(act, weight);
+    auto mfmt = is_channels_last_suggested
+        ? get_cl_tag_by_ndim(act.ndimension())
+        : at::MemoryFormat::Contiguous;
     Tensor input_ = act.contiguous(mfmt);
     Tensor weight_ = weight.contiguous(mfmt);
 
@@ -106,11 +106,19 @@ class QConvoneDNNXPU final {
   }
 };
 
-TORCH_LIBRARY_IMPL(onednn, XPU, m){
-    m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_prepack"), TORCH_FN(xpu::qconv_prepack_xpu));
-    m.impl(TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise"), QConvoneDNNXPU::run_pointwise);
-    m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise"), QConvoneDNNXPU::run_pointwise);
-    m.impl(TORCH_SELECTIVE_NAME("onednn::qconv3d_pointwise"), QConvoneDNNXPU::run_pointwise);
+TORCH_LIBRARY_IMPL(onednn, XPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv_prepack"),
+      TORCH_FN(xpu::qconv_prepack_xpu));
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise"),
+      QConvoneDNNXPU::run_pointwise);
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise"),
+      QConvoneDNNXPU::run_pointwise);
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv3d_pointwise"),
+      QConvoneDNNXPU::run_pointwise);
 }
 
 } // namespace at::native::xpu
