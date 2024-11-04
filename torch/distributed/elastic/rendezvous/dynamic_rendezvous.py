@@ -1198,11 +1198,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
             # To avoid race in get_free_port because we release the port after the call,
             # we want to create a TCPStore server soon afterwards.
             server_port = 0
-            addr = (
-                self._store.host
-                if isinstance(self._store, dist.TCPStore)
-                else self._this_node.addr
-            )
+            addr = self._this_node.addr
             if rank == 0:
                 self._shared_tcp_store_server = self._create_tcp_store_server(
                     addr, server_port
