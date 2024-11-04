@@ -412,7 +412,6 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus:int) -> None:
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_gpus,
             mp_context=mp_context) as executor:
             for line in unique_gemm_entries:
-                print(h)
                 future = executor.submit(process_single_offline_gemm, line, h)
                 futures.append(future)
                 h = (h + 1) % num_gpus
