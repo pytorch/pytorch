@@ -16,6 +16,7 @@ import warnings
 import zipfile
 from collections import namedtuple, OrderedDict
 from copy import deepcopy
+from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
 
@@ -844,6 +845,17 @@ class ClassThatUsesBuildInstruction:
         # Third item, state here will cause pickle to push a BUILD instruction
         return ClassThatUsesBuildInstruction, (self.num,), {'foo': 'bar'}
 
+@dataclass
+class ClassThatUsesBuildInstructionAllSlots:
+    __slots__ = ["x", "y"]
+    x: int
+    y: int
+
+@dataclass
+class ClassThatUsesBuildInstructionSomeSlots(ClassThatUsesBuildInstructionAllSlots):
+    x: int
+    y: int
+    c: str
 
 @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
 class TestBothSerialization(TestCase):
@@ -1141,6 +1153,25 @@ class TestSerialization(TestCase, SerializationMixin):
             finally:
                 torch.serialization.clear_safe_globals()
                 ClassThatUsesBuildInstruction.__setstate__ = None
+
+    @parametrize("slots", ['some', 'all'])
+    def test_weights_only_safe_globals_build_with_slots(self, slots):
+        obj_cls = (
+            ClassThatUsesBuildInstructionAllSlots if slots == 'all' else ClassThatUsesBuildInstructionSomeSlots
+        )
+        args = (2, 3) if slots == 'all' else (2, 3, 'foo')
+        obj = obj_cls(*args)
+        with BytesIOContext() as f:
+            torch.save(obj, f)
+            f.seek(0)
+            with self.assertRaisesRegex(pickle.UnpicklingError,
+                                        f"GLOBAL __main__.{obj_cls.__name__} was not an allowed global by default"):
+                torch.load(f, weights_only=True)
+
+            f.seek(0)
+            with torch.serialization.safe_globals([obj_cls]):
+                loaded_obj = torch.load(f, weights_only=True)
+                self.assertEqual(loaded_obj, obj)
 
     def test_weights_only_safe_globals_blocklist(self):
         module = 'nt' if IS_WINDOWS else 'posix'
@@ -4362,6 +4393,33 @@ class TestSerialization(TestCase, SerializationMixin):
             with ctx(*args), tempfile.TemporaryDirectory() as temp_dir:
                 with zipfile.ZipFile(f) as zip_file:
                     zip_file.extractall(path=temp_dir)
+
+    def test_get_unsafe_globals_in_checkpoint(self):
+        t = torch.randn(2, 3)
+        tt = TwoTensor(t, t)
+        expected_unsafe_global_strs = {"torch.testing._internal.two_tensor.TwoTensor"}
+        expected_all_global_strs = {"torch.testing._internal.two_tensor.TwoTensor",
+                                    "torch._utils._rebuild_wrapper_subclass",
+                                    "torch._tensor._rebuild_from_type_v2",
+                                    "torch.serialization._get_layout",
+                                    "torch.float32",
+                                    "torch.device",
+                                    "torch._utils._rebuild_tensor_v2",
+                                    "torch.FloatStorage",
+                                    "collections.OrderedDict"}
+        with BytesIOContext() as f:
+            torch.save(tt, f)
+            f.seek(0)
+            unsafe_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
+            self.assertEqual(set(unsafe_globals), expected_unsafe_global_strs)
+            f.seek(0)
+            try:
+                old_get_allowed_globals = torch._weights_only_unpickler._get_allowed_globals
+                torch._weights_only_unpickler._get_allowed_globals = lambda: dict()  # noqa: PIE807
+                unsafe_all_globals = torch.serialization.get_unsafe_globals_in_checkpoint(f)
+                self.assertEqual(set(unsafe_all_globals), expected_all_global_strs)
+            finally:
+                torch._weights_only_unpickler._get_allowed_globals = old_get_allowed_globals
 
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
