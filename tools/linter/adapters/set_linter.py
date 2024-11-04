@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import dataclasses as dc
 import json
+import logging
 import sys
 import token
 from argparse import ArgumentParser, Namespace
+from enum import Enum
 from functools import cached_property
 from pathlib import Path
 from tokenize import generate_tokens, TokenInfo
@@ -17,7 +19,6 @@ BRACKETS = {
     "[": "]",
 }
 BRACKETS_INV = {j: i for i, j in BRACKETS.items()}
-CFG_FILE = ".set_linter.json"
 EMPTY_TOKENS = {
     token.COMMENT,
     token.DEDENT,
@@ -31,90 +32,84 @@ IMPORT_LINE = "from torch.utils._ordered_set import OrderedSet\n"
 OMIT = "# noqa: set_linter"
 
 
+class LintSeverity(str, Enum):
+    ERROR = "error"
+    WARNING = "warning"
+    ADVICE = "advice"
+    DISABLED = "disabled"
+
+
+@dc.dataclass
+class LintMessage:
+    path: str | None = None
+    line: int | None = None
+    char: int | None = None
+    code: str = "SET_LINTER"
+    severity: LintSeverity = LintSeverity.ERROR
+    name: str = ""
+    original: str | None = None
+    replacement: str | None = None
+    description: str | None = None
+
+    asdict = dc.asdict
+
+
 def main() -> None:
-    args = get_args(cfg_file=CFG_FILE)
-    if not (python_files := resolve_python_files(args.files, args.exclude)):
-        sys.exit("No files selected")
+    args = get_args()
 
-    errors = 0
-    for f in python_files:
-        errors += lint_file(f, args)
-    sys.exit(errors)
+    for f in args.files:
+        for error in lint_file(f, args):
+            print(json.dumps(error.asdict()))
 
 
-def lint_file(path: Path, args: Namespace) -> int:
-    """Lint a file, perhaps rewrite it if one of the fix args is turned on,
-    return the number of lint errors remaining in the file."""
+@dc.dataclass(order=True)
+class LintReplacement:
+    line: int
+    char: int
+    length: int
+    replacement: str
+    name: str = ERROR
 
-    def source_line(lineno: Any, text: Any = None) -> None:
-        if text is None:
-            lineno = text = ""
-        print(f"{lineno:5} | {text.rstrip()}")
 
+def lint_file(path: str, args: Namespace) -> Iterator[LintMessage]:
     if args.verbose:
         print(path, "Reading")
 
-    pl = PythonLines(path.read_text())
-    errors: tuple[int, ...] = len(pl.braced_sets), len(pl.sets)
-    if not any(errors):
-        if args.verbose:
-            print(path, "OK")
-        return 0
+    try:
+        pl = PythonLines(Path(path))
+    except IndentationError as e:
+        msg, (name, lineno, column, _line) = e.args
+        yield LintMessage(path, lineno, column, name="Indentation Error")
+        return
 
-    if any(fix_counts := pl.fix_all_tokens(args)):
-        with path.open("w") as fp:
-            fp.writelines(pl.lines)
+    replacements = sorted(lint_replacements(pl), reverse=True)
+    lines = pl.lines[:]
+    for r in replacements:
+        yield LintMessage(path, r.line, r.char, name=r.name)
 
-        errors = tuple(e - f for e, f in zip(errors, fix_counts))
-        count = sum(fix_counts)
-        print(f"{path}: Fixed {count} error{'s' * (count != 1)}")
-    else:
-        count = 0
+        line = lines[r.line - 1]
+        before, after = line[: r.char], line[r.char + r.length :]
+        lines[r.line - 1] = f"{before}{r.replacement}{after}"
 
-    if not (any(errors) or args.verbose):
-        return 0
-
-    # Now print any tokens that are sets in context of the original file.
-    if args.verbose:
-        error_tokens = [b[0] for b in pl.braced_sets] + pl.sets
-    elif errors[0]:
-        error_tokens = [b[0] for b in pl.braced_sets]
-    else:
-        assert errors[1]
-        error_tokens = pl.sets
-
-    error_tokens.sort(key=lambda t: t.start)
-
-    padded = [None] * ErrorLines.BEFORE + pl.lines + [None] * ErrorLines.AFTER
-    padded_line = list(enumerate(padded))
-
-    for t in error_tokens:
-        print()
-        (line, start), (line2, end) = t.start, t.end
-
-        window = padded_line[line - 1 : line - 1 + ErrorLines.WINDOW]
-        before, after = window[: ErrorLines.BEFORE + 1], window[ErrorLines.BEFORE + 1 :]
-
-        print(f"{path}:{line}:{start}: {ERROR}")
-
-        for j, text in before:
-            source_line(j + line - ErrorLines.BEFORE, text)
-
-        source_line("", " " * start + "^" * len(t.string) + "\n")
-
-        for j, text in after:
-            source_line(j + line - ErrorLines.BEFORE, text)
-        return len(pl.braced_sets)
-
-    return count
+    if replacements:
+        yield LintMessage(
+            path,
+            original="".join(pl.lines),
+            replacement="".join(lines),
+            name="Suggested fixes for set_linter",
+        )
 
 
-class ErrorLines:
-    """How many lines to display before and after an error"""
+def lint_replacements(pl: PythonLines) -> Iterator[LintReplacement]:
+    for b in pl.braced_sets:
+        yield LintReplacement(*b[0].start, 1, "OrderedSet([")
+        yield LintReplacement(*b[-1].start, 1, "])")
 
-    WINDOW = 5
-    BEFORE = 2
-    AFTER = WINDOW - BEFORE - 1
+    for b in pl.sets:
+        yield LintReplacement(*b.start, 3, "OrderedSet")
+
+    if (pl.sets or pl.braced_sets) and (ins := pl.insert_import_line()) is not None:
+        yield LintReplacement(ins, 0, 0, IMPORT_LINE, "Add import for OrderedSet")
 
 
 class ParseError(ValueError):
@@ -204,17 +199,19 @@ class PythonLines:
 
     braced_sets: list[Sequence[TokenInfo]]
     lines: list[str]
+    path: Path | None
     sets: list[TokenInfo]
     token_lines: list[TokenLine]
     tokens: list[TokenInfo]
 
     def __init__(self, contents: Path | str) -> None:
-        text = contents if isinstance(contents, str) else contents.read_text()
+        if isinstance(contents, Path):
+            text = contents.read_text()
+            self.path = contents
+        else:
+            text = contents
+            self.path = None
         self.lines = text.splitlines(keepends=True)
-        self.reparse()
-
-    def reparse(self) -> None:
-        # Call this after self.lines has changed
         self.tokens = list(generate_tokens(iter(self.lines).__next__))
         self.token_lines = list(self._split_into_token_lines())
         self.omitted = OmittedLines(self.lines)
@@ -238,73 +235,31 @@ class PythonLines:
         if token_line.tokens:
             yield token_line
 
-    def fix_all_tokens(self, args: Namespace) -> tuple[int, int]:
-        ordered_set = "OrderedSet[Any]" if args.add_any else "OrderedSet"
-        brace_count = set_count = 0
-
-        if args.brace_fix:
-            self.fix_braced_sets(ordered_set)
-            brace_count = len(self.braced_sets)
-
-        if args.set_fix:
-            if brace_count:
-                self.reparse()  # The tokens will have moved
-            self.fix_set_tokens(ordered_set)
-            set_count = len(self.sets)
-
-        count = brace_count, set_count
-        if any(count):
-            self.add_import()
-        return count
-
-    def replace_token(self, t: TokenInfo, rep: str, length: int) -> None:
-        assert isinstance(rep, str), str(rep)
-        (lineno, start), (line2, end) = t.start, t.end
-        assert lineno == line2
-        assert end - start == length
-
-        line = self.lines[lineno - 1]
-        a, _, c = line[:start], line[start:end], line[end:]
-        self.lines[lineno - 1] = f"{a}{rep}{c}"
-
-    def fix_set_tokens(self, ordered_set: str) -> None:
-        for t in sorted(self.sets, reverse=True, key=lambda t: t.start):
-            self.replace_token(t, ordered_set, 3)
-
-    def fix_braced_sets(self, ordered_set: str) -> None:
-        # NOTE: This will not work right for sets inside other sets on one line!
-        # But this is rare...
-        for t in sorted(self.braced_sets, reverse=True, key=lambda t: t[0].start):
-            first, last = t[0], t[-1]
-            rep = f"{ordered_set}(["
-            self.replace_token(last, "])", 1)
-            self.replace_token(first, rep, 1)
-
-    def add_import(self) -> None:
+    def insert_import_line(self) -> int | None:
         froms, comments, imports = [], [], []
 
         for token_line in self.token_lines:
-            tokens = token_line.tokens
+            tokens = [
+                t for t in token_line.tokens if t.type not in (token.COMMENT, token.NL)
+            ]
             t = tokens[0]
             if t.type == token.INDENT:
                 break
-            elif t.type == token.COMMENT:
+            if t.type == token.COMMENT:
                 comments.append(tokens)
-            elif t.type == token.NAME and t.string in ("from", "import"):
-                if any(
-                    i.type == token.NAME and i.string == "OrderedSet" for i in tokens
-                ):
-                    return
-                elif t.string == "from":
-                    froms.append(tokens)
-                else:
-                    imports.append(tokens)
+                continue
+            if not (t.type == token.NAME and t.string in ("from", "import")):
+                continue
+            if any(i.type == token.NAME and i.string == "OrderedSet" for i in tokens):
+                return None
+            if t.string == "from":
+                froms.append(tokens)
+            else:
+                imports.append(tokens)
 
         if section := froms or imports or comments:
-            insert_before = section[-1][-1].start[0] + 1
-        else:
-            insert_before = 0
-        self.lines.insert(insert_before, IMPORT_LINE)
+            return section[-1][-1].start[0] + 1
+        return 0
 
 
 class OmittedLines:
@@ -319,89 +274,37 @@ class OmittedLines:
         return bool(self.omitted.intersection(lines_covered))
 
 
-def get_args(argv: list[str] | None = None, cfg_file: str | None = None) -> Namespace:
-    args = make_parser().parse_args(argv)
-    if cfg_file:
-        add_configs(args, cfg_file)
-    if args.fix:
-        args.brace_fix = args.set_fix = True
-    return args
+def expand_file_patterns(file_paths: list[str]) -> Iterator[str]:
+    for fp in file_paths:
+        for f in fp.split(":"):
+            if f == "--":
+                pass
+            elif f.startswith("@"):
+                yield from Path(f[1:]).read_text().splitlines()
+            else:
+                yield f
 
 
-def make_parser() -> ArgumentParser:
+def get_args(argv: list[str] | None = None) -> Namespace:
     parser = ArgumentParser()
     add = parser.add_argument
 
     add("files", nargs="*", help="Files or directories to include")
-    add("-a", "--add-any", action="store_true", help="Insert OrderedSet[Any]")
-    add("-b", "--brace-fix", action="store_true", help="Fix braced sets")
-    add("-e", "--exclude", action="append", help="Files to exclude from the check")
-    add("-f", "--fix", action="store_true", help="Fix all issues")
-    add("-s", "--set-fix", action="store_true", help="Fix set-sets")
     add("-v", "--verbose", action="store_true", help="Print more info")
 
-    return parser
+    args = parser.parse_args(argv)
+    args.files = list(expand_file_patterns(args.files))
 
-
-def add_configs(args: Namespace, filename: str) -> Namespace:
-    try:
-        with open(filename) as fp:
-            config = json.load(fp)
-    except FileNotFoundError:
-        config = {}
-
-    if bad := set(config) - set(vars(args)):
-        s = "" if len(bad) == 1 else "s"
-        bad_name = ", ".join(sorted(bad))
-        raise ValueError(f"Unknown arg{s}: {bad_name}")
-
-    for k, v in config.items():
-        if k == "fix" and args.fix is None:
-            args.fix = v
-        else:
-            setattr(args, k, getattr(args, k) or v)
+    if args.verbose:
+        level = logging.NOTSET
+    elif len(args.files) < 1000:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
+    fmt = "<%(threadName)s:%(levelname)s> %(message)s"
+    logging.basicConfig(format=fmt, level=level, stream=sys.stderr)
 
     return args
-
-
-def resolve_python_files(include: list[str], exclude: list[str]) -> list[Path]:
-    include = [j for i in include for j in i.split(":")]
-    exclude = [j for i in exclude or () for j in i.split(":")]
-
-    iglobs = python_glob(include, check_errors=True)
-    eglobs = python_glob(exclude, check_errors=False)
-
-    return sorted(iglobs - eglobs)
-
-
-def python_glob(strings: Sequence[str], *, check_errors: bool) -> set[Path]:
-    result: set[Path] = set()
-
-    nonexistent: list[str] = []
-    not_python: list[str] = []
-
-    for s in strings:
-        p = Path(s).expanduser()
-        if p.is_dir():
-            result.update(p.glob("**/*.py"))
-        elif p.suffix != ".py":
-            not_python.append(str(p))
-        elif p.exists():
-            result.add(p)
-        else:
-            nonexistent.append(str(p))
-
-    if check_errors and (nonexistent or not_python):
-        raise ValueError(
-            "\n".join(
-                [
-                    (nonexistent and f'Nonexistent: {" ".join(nonexistent)}') or "",
-                    (not_python and f'Not Python: {" ".join(not_python)}') or "",
-                ]
-            )
-        )
-
-    return result
 
 
 if __name__ == "__main__":

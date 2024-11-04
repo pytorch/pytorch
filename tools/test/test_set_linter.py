@@ -1,16 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from token import NAME
 from tokenize import TokenInfo
-from typing import TYPE_CHECKING
 from unittest import TestCase
 
-from tools.linter.adapters.set_linter import get_args, PythonLines
-
-
-if TYPE_CHECKING:
-    from argparse import Namespace
+from tools.linter.adapters.set_linter import get_args, lint_file, PythonLines
 
 
 TESTDATA = Path(__file__).parent / "set_linter_testdata"
@@ -18,16 +14,9 @@ TESTDATA = Path(__file__).parent / "set_linter_testdata"
 TESTFILE = TESTDATA / "python_code.py.txt"
 INCLUDES_FILE = TESTDATA / "includes.py.txt"
 INCLUDES_FILE2 = TESTDATA / "includes_doesnt_change.py.txt"
-INCLUDES = INCLUDES_FILE, INCLUDES_FILE2
+FILES = TESTFILE, INCLUDES_FILE, INCLUDES_FILE2
 
-ARGS_FIX_ALL = get_args(["--fix"])
-ARGS_FIX_ANY = get_args(["--add-any", "--set-fix"])
-ARGS_FIX_BRACE = get_args(["--brace-fix"])
-ARGS_FIX_SET = get_args(["--set-fix"])
-
-ARGS = ARGS_FIX_ALL, ARGS_FIX_ANY, ARGS_FIX_BRACE, ARGS_FIX_SET
-
-FIX_TESTS = [(TESTFILE, a) for a in ARGS] + [(f, ARGS_FIX_ALL) for f in INCLUDES]
+ARGS = get_args([])
 
 
 class TestSetLinter(TestCase):
@@ -38,16 +27,32 @@ class TestSetLinter(TestCase):
 
     def test_omitted_lines(self) -> None:
         actual = sorted(PythonLines(TESTFILE).omitted.omitted)
-        expected = [1, 5, 12]
+        expected = [3, 13]
         self.assertEqual(expected, actual)
 
     # TODO(rec): how to get parametrize to work with unittest?
-    def test_fix_set_token(self) -> None:
-        for path, args in FIX_TESTS:
-            expected, actual = _fix_set_tokens(path, args)
-            if expected != actual:
-                print("FAILING", path)
-            self.assertEqual(expected, actual)
+    def test_linting(self) -> None:
+        for path in FILES:
+            all_messages = [m.asdict() for m in lint_file(str(path), ARGS)]
+            edit = all_messages[-1]
+            original, replacement = edit["original"], edit["replacement"]
+            assert original == path.read_text()
+
+            # Test the output file
+            expected_python_file = Path(f"{path}.python")
+            if expected_python_file.exists():
+                expected = expected_python_file.read_text()
+                self.assertEqual(expected, replacement)
+            else:
+                expected_python_file.write_text(replacement)
+
+            # Test the full lint message
+            expected_json_file = Path(f"{path}.json")
+            if expected_json_file.exists():
+                expected = json.loads(expected_json_file.read_text())
+                self.assertEqual(expected, all_messages)
+            else:
+                expected_json_file.write_text(json.dumps(all_messages, indent=2))
 
     def test_bracket_pairs(self) -> None:
         TESTS: tuple[tuple[str, dict[int, int]], ...] = (
@@ -88,25 +93,8 @@ class TestSetLinter(TestCase):
             self.assertEqual(len(actual), expected)
 
 
-def _fix_set_tokens(path: Path, args: Namespace) -> tuple[list[str], list[str]]:
-    pl = PythonLines(path)
-    pl.fix_all_tokens(args)
-    assert args.brace_fix or args.set_fix, "No fix requested"
-    flags = "add_any", "brace_fix", "set_fix"
-    flags_suffix = "".join(f".{f}" for f in flags if getattr(args, f))
-    expected_file = Path(f"{path}{flags_suffix}")
-    if expected_file.exists():
-        with expected_file.open() as fp:
-            expected = fp.readlines()
-    else:
-        expected_file.write_text("".join(pl.lines))
-        expected = pl.lines
-
-    return expected, pl.lines
-
-
 EXPECTED_SETS = [
-    TokenInfo(NAME, "set", (2, 4), (2, 7), "a = set()\n"),
-    TokenInfo(NAME, "set", (4, 4), (4, 7), "c = set\n"),
-    TokenInfo(NAME, "set", (8, 3), (8, 6), "   set(\n"),
+    TokenInfo(NAME, "set", (4, 4), (4, 7), "a = set()\n"),
+    TokenInfo(NAME, "set", (6, 4), (6, 7), "c = set\n"),
+    TokenInfo(NAME, "set", (9, 3), (9, 6), "   set(\n"),
 ]

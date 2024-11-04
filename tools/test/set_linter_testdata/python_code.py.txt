@@ -1,8 +1,9 @@
+# Basic tests
+
 ignored = set()  # noqa: set_linter
 a = set()
-b = 'set()'
+b = "set()"
 c = set
-ignored = set()  # noqa: set_linter
 d = c.set
 f = (
    set(
@@ -12,19 +13,29 @@ ignored = (
    set(  # noqa: set_linter
    )
 )
-e = """ set()
+
+# Non-sets
+
+d = {}
+long_string = """ set()
 set() set x.set set()
 \""""
-
-# From here, every mention of set is ignored
 
 class A:
     def set(self, x):
         self.x = x
 
-set = A().set  # Also gets ignored!
+set = A().set
 
-good = {}
-replace1 = {1}
-replace2 = {1, 2}
-replace3 = {'a': {2, 3}, 'b': {i for i in range(3)}}
+# Braced sets
+
+set1 = {1}
+set2 = {1, 2}
+
+iterator_set = {i for i in range(10)}
+
+# A dict with two sets.
+dict_set = {"a": {2, 3}, "b": {i for i in range(3)}}
+
+# A set containing an object constructed with a dict and a set
+sos_set = {Something({i: i + 1 for i in range(3)}, {i + 1 for i in range(3)})}
