@@ -695,7 +695,7 @@ std::tuple<Tensor, Tensor, Tensor> conv_depthwise3d_backward_cuda(
 
 }
 
-REGISTER_CUDA_DISPATCH(conv_depthwise3d_backward_stub, &conv_depthwise3d_backward_cuda);
+REGISTER_CUDA_DISPATCH(conv_depthwise3d_backward_stub, &conv_depthwise3d_backward_cuda)
 
 #undef DWCONV3D_BACKWARD_INPUT_DISPATCH_SPECIALIZATION
 #undef DWCONV3D_BACKWARD_INPUT_DISPATCH_OTHERS
