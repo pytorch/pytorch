@@ -172,7 +172,6 @@ class CKGemmTemplate(CKTemplate):
         {% if has_bias %}
         d_m_n_device_buf.ToDevice(d_m_n.mData.data());
         {% endif %}
-        const auto stream_config = StreamConfig{nullptr};
 
         {{kernel_name}}(
             static_cast<const AArgType*>(a_m_k_device_buf.GetDeviceBuffer()),
@@ -190,7 +189,7 @@ class CKGemmTemplate(CKTemplate):
             LDD,
             nullptr, // workspace_size
             nullptr, // workspace
-            stream_config.stream_id_);
+            nullptr); // stream
 
         hip_check_error(hipDeviceSynchronize());
 
