@@ -306,6 +306,10 @@ class RemoteAOTAutogradCache(RedisRemoteCache):
     pass
 
 
+class RemoteDynamoPGOCache(RedisRemoteCache):
+    pass
+
+
 def create_cache(
     key: str,
     is_fbcode: bool,
