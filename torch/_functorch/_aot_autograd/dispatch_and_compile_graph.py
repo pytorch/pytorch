@@ -61,12 +61,14 @@ def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
 
     return fx_g
 
+
 # TODO: Refactor the following code so detach() persists item_memo
 def _detach_and_copy_item_memo(t):
     detached_t = t.detach()
     if hasattr(t, "item_memo"):
         detached_t.item_memo = t.item_memo
     return detached_t
+
 
 def aot_dispatch_base_graph(
     flat_fn,
