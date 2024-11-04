@@ -59,6 +59,8 @@
 #include <thrust/transform.h>
 #include <thrust/unique.h>
 
+#include <c10/cuda/CUDAMathCompat.h>
+
 namespace at::native {
 namespace {
 

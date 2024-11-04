@@ -150,12 +150,22 @@ visualize_memory_budget_pareto = (
 # cost of some performance
 aggressive_recomputation = False
 
+# If FakeTensor.data_ptr() should error.
+# This option is independent of AOTAutograd and torch.compile, but our policy
+# is to turn it off during torch.compile.
+fake_tensor_allow_unsafe_data_ptr_access = True
+
 # Unlifts effect tokens from the inputs/outputs in the traced graph and instead
 # inserts make_token/sink_token calls in the graph to create tokens and then
 # sink them at the end. Note that this means the graph is no longer functional
 # which may lead to silent errors unless the backend knows how to handle the
 # tokens.
 unlift_effect_tokens = False
+
+
+# Run aot eager decomp partition with CrossRefFakeMode
+# options = False, "all", "custom_ops"
+fake_tensor_crossref = False
 
 # This mode specifies that we should also keep track of the real
 # tensor along with the fake tensor, and do real compute.  While

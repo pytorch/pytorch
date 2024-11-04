@@ -179,7 +179,7 @@ struct CellParams : public CellParamsBase {
       const Tensor& _b_ih,
       const Tensor& _b_hh,
       const Tensor& _w_hr)
-      : w_ih(_w_ih), w_hh(_w_hh), b_ih_(_b_ih), b_hh_(_b_hh), w_hr(_w_hr) {};
+      : w_ih(_w_ih), w_hh(_w_hh), b_ih_(_b_ih), b_hh_(_b_hh), w_hr(_w_hr) {}
 
   const Tensor& w_ih;
   const Tensor& w_hh;
@@ -825,7 +825,7 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
   using unstacked_output_type = LayerOutput<std::vector<Tensor>, hidden_type>;
 
   FullLayer(Cell<hidden_type, cell_params>& cell)
-    : cell_(cell) {};
+    : cell_(cell) {}
 
   unstacked_output_type operator()(
       const std::vector<Tensor>& step_inputs,
@@ -870,7 +870,7 @@ struct FullBidirectionalLayer
   using output_type = typename Layer<Tensor, hidden_type, param_type>::output_type;
 
   FullBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
-    : layer_(cell) {};
+    : layer_(cell) {}
 
   output_type operator()(
       const Tensor& input,
@@ -922,7 +922,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
       typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
 
   PackedLayer(Cell<hidden_type, cell_params>& cell)
-    : cell_(cell) {};
+    : cell_(cell) {}
 
   output_type operator()(
       const PackedSequence& input,
@@ -983,7 +983,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
       typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
 
   ReversedPackedLayer(Cell<hidden_type, cell_params>& cell)
-    : cell_(cell) {};
+    : cell_(cell) {}
 
   output_type operator()(
       const PackedSequence& input,
@@ -1040,7 +1040,7 @@ struct PackedBidirectionalLayer
       typename Layer<PackedSequence, hidden_type, param_type>::output_type;
 
   PackedBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
-    : layer_(cell), rev_layer_(cell) {};
+    : layer_(cell), rev_layer_(cell) {}
 
   output_type operator()(
       const PackedSequence& input,
@@ -1529,7 +1529,7 @@ std::tuple<Tensor, Tensor> lstm_cell(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;
-  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+  const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
   check_rnn_cell_forward_input(input, w_ih.sym_size(1));
@@ -1549,9 +1549,9 @@ _thnn_differentiable_lstm_cell_backward( const std::optional<Tensor>& grad_hy_op
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> grad_hy_maybe_owned = at::borrow_from_optional_tensor(grad_hy_opt);
   const Tensor& grad_hy = *grad_hy_maybe_owned;
-  const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
-  const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
-  const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
+  const Tensor& grad_cy = grad_cy_opt.value_or(Tensor());
+  const Tensor& input_bias = input_bias_opt.value_or(Tensor());
+  const Tensor& hidden_bias = hidden_bias_opt.value_or(Tensor());
 
   if (!grad_hy.defined() && !grad_cy.defined()) {
     return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
@@ -1603,7 +1603,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> input_bias_maybe_owned = at::borrow_from_optional_tensor(input_bias_opt);
   const Tensor& input_bias = *input_bias_maybe_owned;
-  const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
+  const Tensor& hidden_bias = hidden_bias_opt.value_or(Tensor());
 
   Tensor in_g = input_gates;
   Tensor h_g = hidden_gates;
@@ -1643,7 +1643,7 @@ Tensor gru_cell(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;
-  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+  const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
@@ -1657,7 +1657,7 @@ Tensor rnn_tanh_cell(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;
-  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+  const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   static at::Tensor undefined;
   check_rnn_cell_forward_input(input, w_ih.size(1));
@@ -1671,7 +1671,7 @@ Tensor rnn_relu_cell(
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;
-  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+  const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   static at::Tensor undefined;
   check_rnn_cell_forward_input(input, w_ih.size(1));
@@ -1889,7 +1889,8 @@ static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple
 
 namespace {
 
-static C10_UNUSED auto ensure_linear_params_registered = register_linear_params();
+[[maybe_unused]] static auto ensure_linear_params_registered =
+    register_linear_params();
 
 static auto cell_params_base_registry =
     torch::selective_class_<CellParamsBase>("rnn", TORCH_SELECTIVE_CLASS("CellParamsBase"))

@@ -1374,7 +1374,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
   for (const auto idx: c10::irange(axis)) {
     stat_shape.push_back(input_shape[idx]);
   }
-  for (const auto C10_UNUSED idx: c10::irange(axis, input.dim())) {
+  for ([[maybe_unused]] const auto idx : c10::irange(axis, input.dim())) {
     stat_shape.push_back(1);
   }
 
@@ -1459,7 +1459,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
   return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
-REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl);
-REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl);
+REGISTER_DISPATCH(LayerNormKernel, &LayerNormKernelImpl)
+REGISTER_DISPATCH(LayerNormBackwardKernel, &LayerNormBackwardKernelImpl)
 
 } // namespace at::native

@@ -392,13 +392,13 @@ static void _set_dynamic_layer_keys_included(bool value) {
 }
 
 static void dump_dls() {
-  std::cout << getDynamicLayerStack() << std::endl;
+  std::cout << getDynamicLayerStack() << '\n';
 }
 
 static void dump_local_tls() {
   auto tls = c10::impl::tls_local_dispatch_key_set();
-  std::cout << "[Local Include] " << tls.included_ << std::endl;
-  std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
+  std::cout << "[Local Include] " << tls.included_ << '\n';
+  std::cout << "[Local Exclude] " << tls.excluded_ << '\n';
 }
 
 namespace {
