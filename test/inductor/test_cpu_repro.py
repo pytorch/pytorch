@@ -553,10 +553,50 @@ class CPUReproTests(TestCase):
                     self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
 
     @parametrize(
-        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+        "input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
         itertools.product(
             *[
+                [1, 2],
+                [2],
+                [1, 2],
+                [False, True],
+                [False, True],
+                [False, True],
                 [True, False],
+                [1, 2],
+                [1, 2],
+            ]
+        ),
+    )
+    def test_lstm_packed_unbatched(
+        self,
+        input_size,
+        hidden_size,
+        num_layers,
+        bidirectional,
+        bias,
+        empty_state,
+        batch_first,
+        batch_size,
+        seq_len,
+    ):
+        self._test_lstm_packed(
+            True,
+            input_size,
+            hidden_size,
+            num_layers,
+            bidirectional,
+            bias,
+            empty_state,
+            batch_first,
+            batch_size,
+            seq_len,
+        )
+
+    @parametrize(
+        "input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+        itertools.product(
+            *[
                 [1, 2],
                 [2],
                 [1, 2],
@@ -571,7 +611,6 @@ class CPUReproTests(TestCase):
     )
     def test_lstm_packed(
         self,
-        unbatched,
         input_size,
         hidden_size,
         num_layers,
@@ -583,7 +622,7 @@ class CPUReproTests(TestCase):
         seq_len,
     ):
         self._test_lstm_packed(
-            unbatched,
+            False,
             input_size,
             hidden_size,
             num_layers,
