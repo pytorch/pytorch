@@ -641,8 +641,8 @@ def x_grid_barrier(sem):
     bar_flipped = False
     while not bar_flipped:
         # want a `ld.acquire.gpu.u32 $0,[$1];` but Triton doesn't have it
-        # current_arrive = tl.atomic_add(sem, 0, sem="acquire")
-        current_arrive = tl.load(sem, volatile=True)  # is missing .acquire
+        current_arrive = tl.atomic_add(sem, 0, sem="acquire")
+        # current_arrive = tl.load(sem, volatile=True)
         bar_flipped = ((old_arrive ^ current_arrive) & 0x80000000) != 0
 
     # TODO(jansel): is this needed?
