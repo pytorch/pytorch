@@ -61,8 +61,10 @@ static Tensor& hardswish_impl(Tensor& input, Tensor& output) {
       status == xnn_status_success,
       "defining xnn output failed(", status,")!");
   
-  status = xnn_define_hardswish(
+  status = xnn_define_unary(
     subgraph_ptr,
+    xnn_unary_hardswish,
+    nullptr,
     input_id,
     output_id,
     0

@@ -51,7 +51,7 @@ Tensor global_average_pool(const Tensor& input) {
       input_padded_contig_nhwc.options().dtype(),
       MemoryFormat::ChannelsLast,
       input_padded_contig_nhwc.opt_names());
-    
+
   // Create XNNPACK Subgraph
   xnn_subgraph_t subgraph_ptr = nullptr;
   xnn_status status = xnn_create_subgraph(
@@ -96,14 +96,19 @@ Tensor global_average_pool(const Tensor& input) {
       status == xnn_status_success,
       "defining xnn output failed(", status,")!");
 
-  xnn_define_global_average_pooling_2d(
+  std::vector<size_t> reduce_dims{1, 2};
+  status = xnn_define_static_reduce(
     subgraph_ptr,
-    -std::numeric_limits<float>::infinity(),
-    std::numeric_limits<float>::infinity(),
+    xnn_reduce_mean,
+    reduce_dims.size(),
+    reduce_dims.data(),
     input_id,
     output_id,
-    XNN_FLAG_KEEP_DIMS
+    0
   );
+  TORCH_CHECK(
+      status == xnn_status_success,
+      "defining xnn static reduce failed(", status,")!");
 
   // create runtime
   xnn_runtime_t runtime_ptr = nullptr;

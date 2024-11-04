@@ -167,10 +167,11 @@ Tensor _mul_out_xnnpack(
       status == xnn_status_success && output_id != XNN_INVALID_VALUE_ID,
       func_name, ": xnn define output failed(", status,")!");
   
-  status = xnn_define_multiply2(
+  const struct xnn_binary_params binary_params = {output_min, output_max};
+  status = xnn_define_binary(
     subgraph_ptr, 
-    output_min,
-    output_max,
+    xnn_binary_multiply, 
+    &binary_params, 
     input0_id, 
     input1_id, 
     output_id, 
