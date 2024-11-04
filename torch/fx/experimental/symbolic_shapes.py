@@ -457,6 +457,11 @@ def rebind_unbacked(
                     u1,
                 )
                 continue
+
+            # We only care about rebinding unbacked things
+            if u1.node.hint is not None:
+                continue
+
             raw_u1 = u1.node.expr
             # Simplify SymBool binding
             if (
@@ -4067,6 +4072,7 @@ class ShapeEnv:
         source: Source,
         dynamic_dim: DimDynamic = DimDynamic.DUCK,
         constraint_dim: DimConstraint = None,  # NB: includes None
+        symbolic_context: Optional[StatelessSymbolicContext] = None,
     ) -> sympy.Expr:
         """
         Create a symbol with an unspecified value
@@ -4086,7 +4092,7 @@ class ShapeEnv:
             constraint_dim,
             positive=None,
             do_not_specialize_zero_one=True,
-            symbolic_context=None,
+            symbolic_context=symbolic_context,
         )
 
     @record_shapeenv_event()
@@ -4275,10 +4281,15 @@ class ShapeEnv:
                 sympy_expr
             ) in config.extended_debug_create_symbol.split(",")
             maybe_more_info = ""
-            if not is_debug:
+            if not is_debug and os.getenv("TORCHDYNAMO_EXTENDED_ADVICE", "1") not in (
+                "0",
+                "",
+            ):
                 maybe_more_info = (
                     ", for more info run with "
-                    f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}"'
+                    f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}" '
+                    "or to suppress this message run with "
+                    'TORCHDYNAMO_EXTENDED_ADVICE="0"'
                 )
             sloc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
@@ -5822,9 +5833,11 @@ class ShapeEnv:
             hint_size = self.size_hint(x, allow_none=True)
             if hint_size is None:
                 size = sys.maxsize
-            else:
+            elif symbol_is_type(x, SymT.SIZE):
                 assert isinstance(hint_size, sympy.Expr)
                 size = int(hint_size)
+            else:
+                size = sys.maxsize
             name = x.name
             # 1 puts ephemeral sourced symbols first when sorting in reverse
             return (1 if has_only_ephemeral_sources else 0, size, name)
@@ -6102,6 +6115,12 @@ class ShapeEnv:
         """
 
         # TODO: split conjunctions and evaluate them separately
+
+        if isinstance(
+            orig_expr,
+            (sympy.logic.boolalg.BooleanTrue, sympy.logic.boolalg.BooleanFalse),
+        ):
+            return orig_expr
 
         # Don't track this one
         @functools.lru_cache(None)
