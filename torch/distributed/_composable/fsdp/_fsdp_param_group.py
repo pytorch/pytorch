@@ -346,7 +346,7 @@ class FSDPParamGroup:
         self._post_forward_indices.append(post_forward_index)
 
     def pre_backward(self, default_prefetch: bool, *unused: Any):
-        if compiled_autograd_enabled() and self._training_state != TrainingState.IDLE:
+        if compiled_autograd_enabled() and self._training_state == TrainingState.PRE_BACKWARD:
             # Traceable FSDP2 cannot trigger the param group's post-backward immediately after param usage;
             # instead it relies on this to trigger the previously pending post-backward.
             self.post_backward()
