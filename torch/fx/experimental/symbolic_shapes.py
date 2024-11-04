@@ -5298,16 +5298,16 @@ class ShapeEnv:
         equiv: Dict[SympyBoolean, sympy.logic.boolalg.BooleanAtom] = {}
 
         def add_expr(expr: SympyBoolean) -> None:
-            if not expr.lhs.free_symbols or not expr.rhs.free_symbols:
-                # We don't want to set replacements when either side doesn't have
-                # any free symbols since this can be a cause of unsoundness
-                # when we do a replacement without a guard. eg. eq(u0, 3)
-                # would result in replacements[u0] = 3, which would end
-                # result in guards not being added during specialization.
-                return
-
             expr = canonicalize_bool_expr(expr)
             if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                if not expr.lhs.free_symbols or not expr.rhs.free_symbols:
+                    # We don't want to set replacements when either side doesn't have
+                    # any free symbols since this can be a cause of unsoundness
+                    # when we do a replacement without a guard. eg. eq(u0, 3)
+                    # would result in replacements[u0] = 3, which would end
+                    # result in guards not being added during specialization.
+                    return
+
                 # No need to canonicalize
                 # TODO We could further canonicalize Eq ordering the lhs and rhs somehow
                 # With this, we could remove the need for the commutativity part
