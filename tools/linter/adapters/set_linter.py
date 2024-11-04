@@ -58,8 +58,14 @@ def main() -> None:
     args = get_args()
 
     for f in args.files:
-        for error in lint_file(f, args):
-            print(json.dumps(error.asdict()))
+        errors = list(lint_file(f, args))
+        if args.edit:
+            replacement = errors[-1]["replacement"]
+            Path(f).write_text(replacement)
+            print("Rewrote", f)
+        else:
+            for error in errors:
+                print(json.dumps(error.asdict()))
 
 
 @dc.dataclass(order=True)
@@ -69,6 +75,18 @@ class LintReplacement:
     length: int
     replacement: str
     name: str = ERROR
+
+
+def lint_replacements(pl: PythonLines) -> Iterator[LintReplacement]:
+    for b in pl.braced_sets:
+        yield LintReplacement(*b[0].start, 1, "OrderedSet([")
+        yield LintReplacement(*b[-1].start, 1, "])")
+
+    for b in pl.sets:
+        yield LintReplacement(*b.start, 3, "OrderedSet")
+
+    if (pl.sets or pl.braced_sets) and (ins := pl.insert_import_line()) is not None:
+        yield LintReplacement(ins, 0, 0, IMPORT_LINE, "Add import for OrderedSet")
 
 
 def lint_file(path: str, args: Namespace) -> Iterator[LintMessage]:
@@ -98,18 +116,6 @@ def lint_file(path: str, args: Namespace) -> Iterator[LintMessage]:
             replacement="".join(lines),
             name="Suggested fixes for set_linter",
         )
-
-
-def lint_replacements(pl: PythonLines) -> Iterator[LintReplacement]:
-    for b in pl.braced_sets:
-        yield LintReplacement(*b[0].start, 1, "OrderedSet([")
-        yield LintReplacement(*b[-1].start, 1, "])")
-
-    for b in pl.sets:
-        yield LintReplacement(*b.start, 3, "OrderedSet")
-
-    if (pl.sets or pl.braced_sets) and (ins := pl.insert_import_line()) is not None:
-        yield LintReplacement(ins, 0, 0, IMPORT_LINE, "Add import for OrderedSet")
 
 
 class ParseError(ValueError):
@@ -236,18 +242,14 @@ class PythonLines:
             yield token_line
 
     def insert_import_line(self) -> int | None:
-        froms, comments, imports = [], [], []
+        froms, imports = [], []
 
         for token_line in self.token_lines:
-            tokens = [
-                t for t in token_line.tokens if t.type not in (token.COMMENT, token.NL)
-            ]
+            tokens = token_line.tokens
+            tokens = [t for t in tokens if t.type not in (token.COMMENT, token.NL)]
             t = tokens[0]
             if t.type == token.INDENT:
                 break
-            if t.type == token.COMMENT:
-                comments.append(tokens)
-                continue
             if not (t.type == token.NAME and t.string in ("from", "import")):
                 continue
             if any(i.type == token.NAME and i.string == "OrderedSet" for i in tokens):
@@ -257,7 +259,7 @@ class PythonLines:
             else:
                 imports.append(tokens)
 
-        if section := froms or imports or comments:
+        if section := froms or imports:
             return section[-1][-1].start[0] + 1
         return 0
 
@@ -291,6 +293,7 @@ def get_args(argv: list[str] | None = None) -> Namespace:
 
     add("files", nargs="*", help="Files or directories to include")
     add("-v", "--verbose", action="store_true", help="Print more info")
+    add("-e", "--edit", action="store_true", help="Edit the files without using lintrunner")
 
     args = parser.parse_args(argv)
     args.files = list(expand_file_patterns(args.files))

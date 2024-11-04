@@ -1,6 +1,6 @@
 [
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 41,
     "char": 77,
     "code": "SET_LINTER",
@@ -11,7 +11,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 41,
     "char": 75,
     "code": "SET_LINTER",
@@ -22,7 +22,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 41,
     "char": 51,
     "code": "SET_LINTER",
@@ -33,7 +33,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 41,
     "char": 10,
     "code": "SET_LINTER",
@@ -44,7 +44,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 38,
     "char": 50,
     "code": "SET_LINTER",
@@ -55,7 +55,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 38,
     "char": 30,
     "code": "SET_LINTER",
@@ -66,7 +66,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 38,
     "char": 22,
     "code": "SET_LINTER",
@@ -77,7 +77,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 38,
     "char": 17,
     "code": "SET_LINTER",
@@ -88,7 +88,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 35,
     "char": 36,
     "code": "SET_LINTER",
@@ -99,7 +99,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 35,
     "char": 15,
     "code": "SET_LINTER",
@@ -110,7 +110,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 33,
     "char": 12,
     "code": "SET_LINTER",
@@ -121,7 +121,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 33,
     "char": 7,
     "code": "SET_LINTER",
@@ -132,7 +132,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 32,
     "char": 9,
     "code": "SET_LINTER",
@@ -143,7 +143,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 32,
     "char": 7,
     "code": "SET_LINTER",
@@ -154,7 +154,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 9,
     "char": 3,
     "code": "SET_LINTER",
@@ -165,7 +165,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 6,
     "char": 4,
     "code": "SET_LINTER",
@@ -176,7 +176,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 4,
     "char": 4,
     "code": "SET_LINTER",
@@ -187,7 +187,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": 0,
     "char": 0,
     "code": "SET_LINTER",
@@ -198,7 +198,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/python_code.py.txt",
+    "path": "tools/test/set_linter_testdata/python_code.py.txt",
     "line": null,
     "char": null,
     "code": "SET_LINTER",
