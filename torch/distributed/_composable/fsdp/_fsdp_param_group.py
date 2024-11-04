@@ -682,8 +682,8 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
         if compiled_autograd_enabled():
             # TODO: Find a way to print the offending FSDP2 module.
             msg = """\
-When Traceable FSDP2 is enabled, we rely on the param group's next pre_backward hook to trigger the previous
-post_backward hook, and we should not be calling into `RegisterPostBackwardFunction`.
+When Traceable FSDP2 is enabled, we rely on the param group's next `pre_backward` hook or `root_post_backward_callback`
+to trigger the previous `post_backward` hook, and we should not be calling into `RegisterPostBackwardFunction`.
 If you are here, it means the forward part of this FSDP2 instance is not compiled, and you must also
 compile the forward part if you want to use Traceable FSDP2."""
             torch._dynamo.comptime.comptime.print(msg)
