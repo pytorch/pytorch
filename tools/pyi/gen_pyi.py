@@ -177,18 +177,14 @@ blocklist = [
     "copy_",
 ]
 
-shift_ops = (
-    "lshift",
-    "rshift",
-    "ilshift",
-    "irshift",  # inplace ops
-)
-arithmetic_ops = (
+binary_ops = (
     "add",
     "sub",
     "mul",
     "div",
     "pow",
+    "lshift",
+    "rshift",
     "mod",
     "truediv",
     "matmul",
@@ -199,26 +195,24 @@ arithmetic_ops = (
     "rtruediv",
     "rfloordiv",
     "rpow",  # reverse arithmetic
-    "iadd",
-    "idiv",
-    "imul",
-    "isub",
-    "ifloordiv",
-    "imod",  # inplace ops
-)
-logic_ops = (
     "and",
     "or",
     "xor",
     "rand",
     "ror",
-    "rxor",  # reverse logic
+    "rxor",  # logic
+    "iadd",
     "iand",
+    "idiv",
+    "ilshift",
+    "imul",
     "ior",
-    "ixor",  # inplace ops
+    "irshift",
+    "isub",
+    "ixor",
+    "ifloordiv",
+    "imod",  # inplace ops
 )
-binary_ops = shift_ops + arithmetic_ops + logic_ops
-
 symmetric_comparison_ops = ("eq", "ne")
 asymmetric_comparison_ops = ("ge", "gt", "lt", "le")
 comparison_ops = symmetric_comparison_ops + asymmetric_comparison_ops
@@ -238,24 +232,14 @@ def sig_for_ops(opname: str) -> list[str]:
     assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
-    if name in arithmetic_ops:
-        return [
-            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
-        ]
-    elif name in logic_ops:
-        return [f"def {opname}(self, other: Union[Tensor, _bool]) -> Tensor: ..."]
-    elif name in shift_ops:
-        return [f"def {opname}(self, other: Union[Tensor, _int]) -> Tensor: ..."]
-    elif name in symmetric_comparison_ops:
-        return [
+    if name in binary_ops:
+        return [f"def {opname}(self, other: Any) -> Tensor: ..."]
+    elif name in comparison_ops:
+        sig = f"def {opname}(self, other: Any) -> Tensor: ..."
+        if name in symmetric_comparison_ops:
             # unsafe override https://github.com/python/mypy/issues/5704
-            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ...  # type: ignore[override]",
-            f"def {opname}(self, other: Any) -> _bool: ...",
-        ]
-    elif name in asymmetric_comparison_ops:
-        return [
-            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
-        ]
+            sig += "  # type: ignore[override]"
+        return [sig]
     elif name in unary_ops:
         return [f"def {opname}(self) -> Tensor: ..."]
     elif name in to_py_type_ops:
