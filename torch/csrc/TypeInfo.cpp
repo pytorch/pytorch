@@ -337,11 +337,6 @@ static const std::initializer_list<PyGetSetDef> THPIInfo_properties = {
     {"dtype", (getter)THPIInfo_dtype, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
-static PyMethodDef THPIInfo_methods[] = {
-    {nullptr} /* Sentinel */
-};
-
 PyTypeObject THPIInfoType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch.iinfo", /* tp_name */
@@ -370,7 +365,7 @@ PyTypeObject THPIInfoType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPIInfo_methods, /* tp_methods */
+    nullptr, /* tp_methods */
     nullptr, /* tp_members */
     // NOLINTNEXTLINE(*const-cast)
     const_cast<PyGetSetDef*>(std::data(THPIInfo_properties)), /* tp_getset */
