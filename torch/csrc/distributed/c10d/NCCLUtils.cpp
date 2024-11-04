@@ -376,6 +376,20 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
   writer_ = std::move(writer);
 }
 
+std::string NCCLTraceBuffer::Entry::getTraceback() {
+  torch::CapturedTraceback* traceback = traceback_.get();
+  torch::SymbolizedTracebacks s_tbs = torch::symbolize({traceback});
+  const auto& s_tb = s_tbs.tracebacks.at(0);
+  std::stringstream oss;
+  for (auto idx : c10::irange(s_tb.size())) {
+    auto frame_id = s_tb[idx];
+    const auto& frame = s_tbs.all_frames.at(frame_id);
+    oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
+        << ":" << frame.lineno << '\n';
+  }
+  return oss.str();
+}
+
 std::optional<size_t> NCCLTraceBuffer::record(
     size_t pg_id,
     const std::tuple<std::string, std::string>& pg_name,
@@ -493,6 +507,21 @@ std::vector<NCCLTraceBuffer::Entry> NCCLTraceBuffer::dump_entries() {
     r.start_ = r.end_ = nullptr;
   }
   return result;
+}
+
+std::optional<NCCLTraceBuffer::Entry> NCCLTraceBuffer::getEntry(
+    std::optional<size_t> id) {
+  if (!enabled_ || !id) {
+    return std::nullopt;
+  }
+
+  std::unique_lock<std::mutex> guard(mutex_);
+  Entry entry = entries_.at(*id % max_entries_);
+  if (entry.id_ == *id) {
+    return entry;
+  } else {
+    return std::nullopt;
+  }
 }
 
 void NCCLTraceBuffer::retire_id(

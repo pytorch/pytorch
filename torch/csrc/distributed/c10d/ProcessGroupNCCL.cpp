@@ -686,6 +686,21 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
       " milliseconds before timing out.");
 
   LOG(ERROR) << exceptionMsg;
+
+  // Get the stack trace of the work
+  auto entry = NCCLTraceBuffer::get()->getEntry(trace_id_);
+  if (entry.has_value()) {
+    auto entryVal = entry.value();
+    std::string tracebackStr = entryVal.getTraceback();
+    LOG(ERROR) << "Stack trace of the timedout collective operation: \n"
+               << tracebackStr;
+  } else {
+    LOG(ERROR)
+        << "Stack trace of the timedout collective not found, "
+        << "potentially because FlightRecorder is disabled. "
+        << "You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.";
+  }
+
   std::exception_ptr exception_ptr =
       std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exceptionMsg));
   setException(exception_ptr);
