@@ -130,6 +130,8 @@ FROM cpu_final as cuda_final
 RUN rm -rf /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=cuda     /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=magma    /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
+RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
+ENV PATH=/usr/local/cuda/bin:$PATH
 
 FROM common as rocm_final
 ARG ROCM_VERSION=3.7
