@@ -2719,6 +2719,18 @@ class AOTInductorTestsTemplate:
         inputs = (torch.rand(4, 4, 4, 4, device=self.device),)
         self.check_model(Model(4), inputs)
 
+    def test_zero_size_buffer(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.foo = torch.nn.Buffer(torch.zeros((0, 0), device=device))
+
+            def forward(self, x):
+                return x + 1, self.foo
+
+        example_inputs = (torch.rand(4, 4, device=self.device),)
+        self.check_model(Model(self.device), example_inputs)
+
     def test_no_args(self):
         class Model(torch.nn.Module):
             def __init__(self, m, n):
@@ -3845,7 +3857,7 @@ class AOTInductorTestsTemplate:
 
         expected_scalar_args = [
             "triton_poi_fused_zeros_like_0_xnumel",
-            "triton_poi_fused_ones_1_xnumel",
+            "triton_poi_fused_1_xnumel",
             "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
         ]
 
