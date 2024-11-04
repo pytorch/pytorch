@@ -786,11 +786,11 @@ class VariableBuilder:
         elif torch._dynamo.compiled_autograd.in_compiled_autograd_region and (isinstance(value, torch.autograd.function.FunctionCtx) or isinstance(value, torch._dynamo.external_utils.FakeBackwardCFunction)):
             # breakpoint()
             new_name = re.sub(r"[^a-zA-Z0-9]+", "_", self.name)
-            new_source = LocalSource(local_name=new_name)
+            # new_source = LocalSource(local_name=new_name)
             pctx = self.tx.output.root_tracer.create_graph_input(
                 new_name,
                 # type(value),
-                source=new_source,
+                source=self.source,
             )
             # fakify the stuffs
             # for user defined autograd.Function
@@ -806,7 +806,8 @@ class VariableBuilder:
             #     value,
             # grapharg = GraphArg(source, value, False, fake_tensor_value)
             pctx.node.meta["grapharg"] = GraphArg(
-                source=new_source,
+                source=self.source,
+                # source=new_source,
                 _example=value,
                 pass_arg_as_tensor=False,
                 fake_tensor=None,
@@ -814,8 +815,8 @@ class VariableBuilder:
             )
             return AutogradFunctionContextVariable(
                 value,
-                # source=self.source,
-                source=new_source,
+                source=self.source,
+                # source=new_source,
                 saved_tensors=SavedTensorBox([]),
                 proxy=pctx,
             )

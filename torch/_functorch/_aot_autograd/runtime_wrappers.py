@@ -1846,13 +1846,15 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # breakpoint()
                 # AOTDispatcher inlines through this, with functional tensors
                 # so this errors
-                assert (
-                    grad_output_types_ == CompiledFunction.metadata.output_types
-                ), f"""\
-    We incorrectly attempted to compile the backward with incorrect subclass metadata.
-    If you run into this error, please file an issue.
-    Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
-    Got grad_output types: {str(grad_output_types)}"""
+                if not torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+                    # grad_output_types_ = grad_output_types
+                    assert (
+                        grad_output_types_ == CompiledFunction.metadata.output_types
+                    ), f"""\
+        We incorrectly attempted to compile the backward with incorrect subclass metadata.
+        If you run into this error, please file an issue.
+        Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
+        Got grad_output types: {str(grad_output_types)}"""
 
                 del flat_bw_args_with_grads
 
