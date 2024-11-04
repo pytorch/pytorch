@@ -5,7 +5,7 @@ namespace at::native::onednn {
 dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
-    void* ptr){
+    void* ptr) {
   return dnnl::sycl_interop::make_memory(
       md,
       engine,
@@ -124,9 +124,8 @@ bool onednn_strides_check(const Tensor& src) {
   auto adims = get_onednn_dims(src);
   int ndims = (int)adims.size();
   auto dims = adims.data();
-
-  auto data_type = static_cast<dnnl_data_type_t>(get_onednn_dtype_include_double(
-          src, /*allow_undef*/ false));
+  auto data_type = static_cast<dnnl_data_type_t>(
+      get_onednn_dtype_include_double(src, /*allow_undef*/ false));
   auto strides_info = get_onednn_strides(src);
   auto strides = strides_info.empty() ? nullptr : &strides_info[0];
 
@@ -211,9 +210,7 @@ bool is_broadcast(const at::Tensor& t) {
   return false;
 }
 
-bool is_onednn_matmul_strides(
-    const at::Tensor& tensor,
-    bool is_dst) {
+bool is_onednn_matmul_strides(const at::Tensor& tensor, bool is_dst) {
   // https://oneapi-src.github.io/oneDNN/dev_guide_matmul.html
   // oneDNN matmul only support 2-dim and 3-dim
   // 2D src(Mxk), wei(KxN), dst(MxN)
@@ -295,14 +292,14 @@ bool binary_valid(
      * 5. self and other should be in the same datatype.
      * 6. self and other should be contiguous or channel-last contiguous.*/
 
-
   // 1. self and other should be xpu tensor and be defined.
   if ((!self.defined()) || (!other.defined()) || (!self.is_xpu()) ||
       (!other.is_xpu()))
     return false;
 
   // 2. self or other should not be scalar (wrapped tensor).
-  if (self.unsafeGetTensorImpl()->is_wrapped_number() || other.unsafeGetTensorImpl()->is_wrapped_number())
+  if (self.unsafeGetTensorImpl()->is_wrapped_number() ||
+      other.unsafeGetTensorImpl()->is_wrapped_number())
     return false;
 
   // 3. dim of self and other should be equal and must be larger than 0 and
@@ -354,19 +351,18 @@ bool binary_valid(
   return false;
 }
 
-static inline bool is_channels_last(at::MemoryFormat fmt){
-  return (at::MemoryFormat::ChannelsLast == fmt) || (at::MemoryFormat::ChannelsLast3d == fmt);
+static inline bool is_channels_last(at::MemoryFormat fmt) {
+  return (at::MemoryFormat::ChannelsLast == fmt) ||
+      (at::MemoryFormat::ChannelsLast3d == fmt);
 }
 
-static inline bool is_smf_channels_last(const Tensor& t){
+static inline bool is_smf_channels_last(const Tensor& t) {
   return is_channels_last(t.suggest_memory_format());
 }
 
 bool use_channels_last_for_conv(
     const at::Tensor& src,
-    const at::Tensor& weight
-){
-
+    const at::Tensor& weight) {
   if (!src.defined() || src.is_sparse()) {
     // suggest channels_first
     return false;
@@ -408,8 +404,9 @@ dnnl::memory::dims compatible_weight_dims(
     const IntArrayRef wsizes) {
   if (ndim == 3) {
     auto kw = wsizes[2];
-    return (groups != 1) ? dnnl::memory::dims({groups, oc / groups, ic / groups, kw})
-                         : dnnl::memory::dims({oc, ic, kw});
+    return (groups != 1)
+        ? dnnl::memory::dims({groups, oc / groups, ic / groups, kw})
+        : dnnl::memory::dims({oc, ic, kw});
   } else if (ndim == 4) {
     auto kh = wsizes[2];
     auto kw = wsizes[3];
@@ -433,22 +430,24 @@ dnnl::memory::format_tag conv_weight_fmt(
     const bool grouped,
     const bool is_channels_last) {
   if (!is_channels_last) {
-    return (ndim == 3)
-        ? (grouped ? dnnl::memory::format_tag::goiw : dnnl::memory::format_tag::oiw)
+    return (ndim == 3) ? (grouped ? dnnl::memory::format_tag::goiw
+                                  : dnnl::memory::format_tag::oiw)
         : (ndim == 4)
-        ? (grouped ? dnnl::memory::format_tag::goihw : dnnl::memory::format_tag::oihw)
+        ? (grouped ? dnnl::memory::format_tag::goihw
+                   : dnnl::memory::format_tag::oihw)
         : ((ndim == 5) ? (grouped ? dnnl::memory::format_tag::goidhw
                                   : dnnl::memory::format_tag::oidhw)
                        : dnnl::memory::format_tag::undef);
   } else {
-    return (ndim == 3)
-        ? (grouped ? dnnl::memory::format_tag::gowi : dnnl::memory::format_tag::owi)
+    return (ndim == 3) ? (grouped ? dnnl::memory::format_tag::gowi
+                                  : dnnl::memory::format_tag::owi)
         : (ndim == 4)
-        ? (grouped ? dnnl::memory::format_tag::gohwi : dnnl::memory::format_tag::ohwi)
+        ? (grouped ? dnnl::memory::format_tag::gohwi
+                   : dnnl::memory::format_tag::ohwi)
         : ((ndim == 5) ? (grouped ? dnnl::memory::format_tag::godhwi
                                   : dnnl::memory::format_tag::odhwi)
                        : dnnl::memory::format_tag::undef);
   }
 }
 
-}
+} // namespace at::native::onednn
