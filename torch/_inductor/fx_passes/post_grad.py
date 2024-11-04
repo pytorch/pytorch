@@ -739,7 +739,13 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
 
 def decompose_triton_kernel_wrapper_functional(graph):
-    """ """
+    """Decomposes triton_kernel_wrapper_functional nodes into clones and the underlying
+    mutation node.
+
+    We assume that the reinplacing pass runs before this; the reinplacing pass
+    tells us (via rewriting the arguments or .meta to those nodes) which
+    Tensors we should clone and which Tensors are safe to reinplace.
+    """
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
@@ -772,8 +778,8 @@ def decompose_triton_kernel_wrapper_functional(graph):
 
 
 def decompose_auto_functionalized(graph):
-    """Decomposes auto_functionalized and triton_kernel_wrapper_functional
-    nodes into clones and the underlying mutation node.
+    """Decomposes auto_functionalized nodes into clones and the underlying
+    mutation node.
 
     We assume that the reinplacing pass runs before this; the reinplacing pass
     tells us (via rewriting the arguments or .meta to those nodes) which
