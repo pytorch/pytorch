@@ -1,10 +1,11 @@
 #include <torch/csrc/distributed/c10d/DMAConnectivity.hpp>
+#include <utility>
 
 namespace {
 
 std::string get_detector_key(
     c10::DeviceType device_type,
-    std::string connection_type) {
+    const std::string& connection_type) {
   std::ostringstream oss;
   oss << device_type << "/" << connection_type;
   return oss.str();
@@ -12,6 +13,8 @@ std::string get_detector_key(
 
 class DetectorMap {
  public:
+  DetectorMap(const DetectorMap&) = delete;
+  DetectorMap& operator=(const DetectorMap&) = delete;
   static DetectorMap& get() {
     static DetectorMap instance;
     return instance;
@@ -52,8 +55,6 @@ class DetectorMap {
 
  private:
   DetectorMap() = default;
-  DetectorMap(const DetectorMap&) = delete;
-  DetectorMap& operator=(const DetectorMap&) = delete;
 
   std::unordered_map<
       std::string,
@@ -73,7 +74,7 @@ DMAConnectivity::DMAConnectivity(
     std::string connection_type,
     std::vector<std::vector<int>> matrix)
     : device_type(device_type),
-      connection_type(connection_type),
+      connection_type(std::move(connection_type)),
       matrix(std::move(matrix)) {}
 
 void register_dma_connectivity_detector(

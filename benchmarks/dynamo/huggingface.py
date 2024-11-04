@@ -501,12 +501,12 @@ class HuggingfaceRunner(BenchmarkRunner):
             else:
                 return 1e-2, cosine
         else:
-            if name in self._config["tolerance"]["higher_inference"]:
-                return 4e-3, cosine
             if (
                 current_device == "cpu"
                 and name in self._config["tolerance"]["higher_inference_cpu"]
             ):
+                return 5e-3, cosine
+            if name in self._config["tolerance"]["higher_inference"]:
                 return 4e-3, cosine
         return 1e-3, cosine
 

@@ -417,7 +417,7 @@ class CudaReproTests(TestCase):
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-        from torch._inductor.runtime.hints import HeuristicType, instance_descriptor
+        from torch._inductor.runtime.hints import AttrsDescriptorWrapper, HeuristicType
         from torch._inductor.runtime.triton_heuristics import CachingAutotuner, grid
 
         def autotune(configs, meta):
@@ -447,7 +447,9 @@ class CudaReproTests(TestCase):
                     "xnumel": "i32",
                 },
                 "device": DeviceProperties.create(torch.device("cuda")),
-                "configs": [instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())],
+                "configs": [
+                    AttrsDescriptorWrapper(divisible_by_16=(0, 1), equal_to_1=())
+                ],
                 "constants": {},
             },
         )
