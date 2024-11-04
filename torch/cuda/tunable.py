@@ -296,13 +296,22 @@ def gather_tunableop_results() -> None:
 
     tunable_filename_env = os.getenv("PYTORCH_TUNABLEOP_FILENAME")
 
+    # There are three possible filename scenarios to handle:
+    # - No filename was specified through the environment variable
+    # - A regular filename was specified
+    # - A filename that contains '%d' in the string which represents
+    #   the GPU ordinal
     if tunable_filename_env is None:
         filename_pattern = "tunableop_results?.csv"
-    else:
+    elif ('%d' in tunable_filename_env):
         filename_pattern = tunable_filename_env.replace('%d', '?')
+    else:
+        filename_pattern = tunable_filename_env.replace('.', '?.')
 
     FirstFile = False
-    for file_path in glob.glob(filename_pattern):
+    matching_files = glob.glob(filename_pattern)
+    num_matching_files = len(matching_files)
+    for file_path in matching_files:
         with open(file_path, 'r') as file:
             for line in file:
                 if line.startswith("Validator"):
@@ -314,13 +323,18 @@ def gather_tunableop_results() -> None:
 
         FirstFile = True
 
-    output_file = filename_pattern.replace('?','full')
+    output_file = filename_pattern.replace('?','_full0')
 
     with open(output_file, 'w') as out_file:
         for line in validator_lines:
             out_file.write(line)
         for line in gemm_lines:
             out_file.write(line)
+
+    # Create num_matching_copies of the results file
+    for i in range(1, num_matching_files):
+        duplicate_file = output_file.replace('0',str(i))
+        shutil.copy(output_file, duplicate_file)
 
 def process_single_offline_gemm(untuned_gemm_line:str, gpu_id:int) -> None:
     r"""Process a single untuned GEMM."""
