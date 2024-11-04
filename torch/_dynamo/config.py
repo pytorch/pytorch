@@ -252,10 +252,6 @@ allow_complex_guards_as_runtime_asserts = False
 # compile this code; however, this can be useful for export.
 force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 
-# Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
-# false_fn produces code with identical guards.
-enforce_cond_guards_match = True
-
 # Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 4 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
@@ -328,6 +324,12 @@ skip_fsdp_hooks = True
 # dynamo will not notice and will execute whichever version you first compiled.
 skip_nnmodule_hook_guards = True
 
+# Make dynamo skip no tensor aliasing guard on parameters
+# Note: unsafe: if you compile a function with different parameters as inputs,
+# and then later pass on the same parameter as two inputs, dynamo will not
+# notice and lead to incorrect result.
+skip_no_tensor_aliasing_guards_on_parameters = True
+
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -373,8 +375,8 @@ numpy_default_int = "int64"
 # use numpy's PRNG if True, pytorch otherwise
 use_numpy_random_stream = False
 
-# Use C++ guard manager
-enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") == "1"
+# Use C++ guard manager (deprecated: always true)
+enable_cpp_guard_manager = True
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()

@@ -442,8 +442,16 @@ class CppPackedGemmTemplate(CppTemplate):
             def get_num_byte(dtype):
                 return torch.tensor([], dtype=dtype).element_size()
 
-            num_byte_A = get_num_byte(self.input_nodes[0].get_dtype())
-            num_byte_B = get_num_byte(self.input_nodes[1].get_dtype())
+            dtype_A = self.input_nodes[0].get_dtype()
+            dtype_B = self.input_nodes[1].get_dtype()
+            num_byte_A = get_num_byte(dtype_A)
+            num_byte_B = get_num_byte(dtype_B)
+            if dtype_A is torch.bfloat16 and dtype_B is torch.int8 and Kr != 1:
+                # We will cache dequantized weights (BF16) in L1D for AMX micro-kernel.
+                # In this case, the choice of the micro-kernel being used can't be decoupled from
+                # the cache blocking.
+                # TODO: Decouple the choice of micro-kernel from cache blocking
+                num_byte_B *= num_byte_A
 
             # NOTE [CPP GEMM Cache Blocking Algorithm]
             # Our overall strategy is to
@@ -455,6 +463,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
             # Step 1: Decide Kc assuming B block is L1-reside.
             size_cache_B = Kr * Kt_blocks * Nr * num_byte_B
+
             Kc_blocks = Kt_blocks
             if size_cache_B > L1:
                 Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
@@ -647,8 +656,8 @@ class CppPackedGemmTemplate(CppTemplate):
             if isinstance(W, ir.IRNode):
                 new_size = [padded_n // block_n, k, block_n]
                 blocked_w = ir.Buffer(
-                    W.get_name(),  # Borrow the registered buffer name
-                    ir.FixedLayout(
+                    name=W.get_name(),  # Borrow the registered buffer name
+                    layout=ir.FixedLayout(
                         W.get_device(),
                         W.get_dtype(),
                         new_size,
@@ -952,7 +961,9 @@ class CppPackedGemmTemplate(CppTemplate):
         #   Y
         if epilogue_creators:
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
-            gemm_output_buffer = ir.Buffer(gemm_output_name, template_buffer.layout)
+            gemm_output_buffer = ir.Buffer(
+                name=gemm_output_name, layout=template_buffer.layout
+            )
             current_input_buffer = gemm_output_buffer
             for i, creator in enumerate(epilogue_creators):
                 if i == len(epilogue_creators) - 1:
@@ -971,7 +982,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 reindexers.append(None)
                 if i < len(epilogue_creators) - 1:
                     current_input_buffer = ir.Buffer(
-                        buffer_name, template_buffer.layout
+                        name=buffer_name, layout=template_buffer.layout
                     )
 
         Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
@@ -1035,7 +1046,9 @@ class CppPackedGemmTemplate(CppTemplate):
                 else:
                     assert isinstance(Y, ir.Buffer)
                     storage = ir.StorageBox(Y)
-                Y_2d = ir.ReinterpretView(storage, template_buffer.get_layout())
+                Y_2d = ir.ReinterpretView(
+                    data=storage, layout=template_buffer.get_layout()
+                )
 
         output_dtype, compute_dtype = get_gemm_template_output_and_compute_dtype(
             X.get_dtype()
