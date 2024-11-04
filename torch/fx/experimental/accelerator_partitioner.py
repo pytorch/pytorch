@@ -1,22 +1,22 @@
 # mypy: allow-untyped-defs
 import operator
 from collections import deque
-from typing import Dict, List, Set, NamedTuple, Tuple, Deque
+from typing import Deque, Dict, List, NamedTuple, Set, Tuple
 
 import torch
-from torch.fx.passes.graph_manipulation import get_size_of_all_nodes
 from torch.fx.experimental.partitioner_utils import (
-    Partition,
     Device,
-    PartitionerConfig,
-    get_partition_to_latency_mapping,
-    get_latency_of_partitioned_graph,
-    NodeLatency,
     get_extra_size_of,
+    get_latency_of_partitioned_graph,
+    get_partition_to_latency_mapping,
+    NodeLatency,
+    Partition,
+    PartitionerConfig,
     PartitionMode,
 )
 from torch.fx.graph_module import GraphModule
-from torch.fx.node import Node, map_arg
+from torch.fx.node import map_arg, Node
+from torch.fx.passes.graph_manipulation import get_size_of_all_nodes
 from torch.fx.passes.split_module import split_module
 
 
@@ -260,7 +260,9 @@ def get_device_to_partitions_mapping(
     # Find devices for all the partitions without a device
     found_device = True
     for partition in no_device_partitions:
-        device_to_left_mem_bytes = dict(sorted(device_to_left_mem_bytes.items(), key=operator.itemgetter(1)))
+        device_to_left_mem_bytes = dict(
+            sorted(device_to_left_mem_bytes.items(), key=operator.itemgetter(1))
+        )
         found_device = find_device_for(partition)
         if not found_device:
             break

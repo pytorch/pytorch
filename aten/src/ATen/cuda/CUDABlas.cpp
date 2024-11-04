@@ -34,7 +34,7 @@ static rocblas_operation hipOperationToRocOperation(hipblasOperation_t op)
     case HIPBLAS_OP_C:
         return rocblas_operation_conjugate_transpose;
     }
-    AT_ERROR("HIPBLAS_STATUS_INVALID_ENUM");
+    TORCH_CHECK(false, "HIPBLAS_STATUS_INVALID_ENUM");
 }
 static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
 {
@@ -57,7 +57,7 @@ static hipblasStatus_t rocBLASStatusToHIPStatus(rocblas_status error)
     case rocblas_status_internal_error:
         return HIPBLAS_STATUS_INTERNAL_ERROR;
     }
-    AT_ERROR("HIPBLAS_STATUS_INVALID_ENUM");
+    TORCH_CHECK(false, "HIPBLAS_STATUS_INVALID_ENUM");
 }
 // hipblas does not have hipblasSetMathMode
 #define hipblasSetMathMode(handle, flags) HIPBLAS_STATUS_SUCCESS
@@ -116,7 +116,7 @@ static cublasOperation_t _cublasOpFromChar(char op) {
     case 'C':
       return CUBLAS_OP_C;
   }
-  AT_ERROR(
+  TORCH_CHECK(false,
       "_cublasOpFromChar input should be 't', 'n' or 'c' but got `", op, "`");
 }
 
@@ -188,8 +188,11 @@ static size_t _parseChosenWorkspaceSize() {
     // accept either env var
     val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
   }
-#endif
+  size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
+#else
   size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+#endif
+
   if (val.has_value()) {
     try {
       workspace_size = std::stoi(val.value());
@@ -279,6 +282,7 @@ class CuBlasLtMatmulDescriptor : public CuBlasLtDescriptor<
   }
   template <typename T>
   inline void setAttribute(cublasLtMatmulDescAttributes_t attr, const T value) {
+    // NOLINTNEXTLINE(bugprone-sizeof-expression)
     TORCH_CUDABLAS_CHECK(::cublasLtMatmulDescSetAttribute(descriptor(), attr, &value, sizeof(T)));
   }
 };
@@ -1747,6 +1751,7 @@ void trsm<c10::complex<double>>(CUDABLAS_TRSM_ARGTYPES(c10::complex<double>)) {
 }
 
 template <>
+// NOLINTNEXTLINE(*array*)
 void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float)) {
   TORCH_CUDABLAS_CHECK(cublasStrsmBatched(
       handle,
@@ -1765,6 +1770,7 @@ void trsmBatched<float>(CUDABLAS_TRSM_BATCHED_ARGTYPES(float)) {
 }
 
 template <>
+// NOLINTNEXTLINE(*array*)
 void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double)) {
   TORCH_CUDABLAS_CHECK(cublasDtrsmBatched(
       handle,
@@ -1784,6 +1790,7 @@ void trsmBatched<double>(CUDABLAS_TRSM_BATCHED_ARGTYPES(double)) {
 
 template <>
 void trsmBatched<c10::complex<float>>(
+// NOLINTNEXTLINE(*array*)
     CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<float>)) {
   TORCH_CUDABLAS_CHECK(cublasCtrsmBatched(
       handle,
@@ -1803,6 +1810,7 @@ void trsmBatched<c10::complex<float>>(
 
 template <>
 void trsmBatched<c10::complex<double>>(
+// NOLINTNEXTLINE(*array*)
     CUDABLAS_TRSM_BATCHED_ARGTYPES(c10::complex<double>)) {
   TORCH_CUDABLAS_CHECK(cublasZtrsmBatched(
       handle,

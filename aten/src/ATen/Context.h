@@ -11,6 +11,7 @@
 #include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/HPUHooksInterface.h>
 #include <ATen/detail/IPUHooksInterface.h>
 #include <ATen/detail/MAIAHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
@@ -51,6 +52,8 @@ class TORCH_API Context {
       return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
     } else if (device_type == at::kIPU) {
       return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
+    } else if (device_type == at::kHPU) {
+      return at::detail::getHPUHooks().getDefaultHPUGenerator(device.index());
     } else if (device_type == at::kPrivateUse1) {
       return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
           device.index());
@@ -76,9 +79,13 @@ class TORCH_API Context {
       return at::detail::getMTIAHooks();
     } else if (device_type == at::kHIP) {
       return at::detail::getHIPHooks();
+    } else if (device_type == at::kHPU) {
+      return at::detail::getHPUHooks();
     } else {
-      AT_ERROR(
-          c10::DeviceTypeName(device_type), " device type not an accelerator.");
+      TORCH_CHECK(
+          false,
+          c10::DeviceTypeName(device_type),
+          " device type not an accelerator.");
     }
   }
 
@@ -173,6 +180,10 @@ class TORCH_API Context {
   static bool hasMAIA() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
   }
+  static bool hasHPU() {
+    return detail::getHPUHooks().hasHPU();
+  }
+
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
   }
@@ -349,18 +360,28 @@ class TORCH_API Context {
 
   // Preserved for BC
   void lazyInitCUDA() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitCUDA is deprecated. Please use lazyInitDevice(at::kCUDA) instead.")
     lazyInitDevice(at::kCUDA);
   }
   void lazyInitHIP() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitHIP is deprecated. Please use lazyInitDevice(at::kHIP) instead.")
     lazyInitDevice(at::kHIP);
   }
   void lazyInitXPU() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitXPU is deprecated. Please use lazyInitDevice(at::kXPU) instead.")
     lazyInitDevice(at::kXPU);
   }
   void lazyInitMTIA() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitMTIA is deprecated. Please use lazyInitDevice(at::kMTIA) instead.")
     lazyInitDevice(at::kMTIA);
   }
   void lazyInitPrivateUse1() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitPrivateUse1 is deprecated. Please use lazyInitDevice(at::kPrivateUse1) instead.")
     lazyInitDevice(at::kPrivateUse1);
   }
 
@@ -484,6 +505,10 @@ inline bool hasMAIA() {
 
 inline bool hasXPU() {
   return globalContext().hasXPU();
+}
+
+inline bool hasHPU() {
+  return globalContext().hasHPU();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.
