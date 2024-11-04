@@ -346,7 +346,7 @@ class FSDPParamGroup:
         self._post_forward_indices.append(post_forward_index)
 
     def pre_backward(self, default_prefetch: bool, *unused: Any):
-        if (not torch._dynamo.config.skip_fsdp_hooks) and compiled_autograd_enabled() and torch._dynamo.eval_frame._stance.stance == "default":
+        if compiled_autograd_enabled():
             # Traceable FSDP2 doesn't have per-param-group post-backward hook, and rely on this to issue the previous reshard.
             if self._training_state != TrainingState.IDLE:
                 self.post_backward()
