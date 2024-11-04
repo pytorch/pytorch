@@ -447,6 +447,20 @@ def _register_quantized_linear_lowering(
     return qlinear
 
 
+def _reselect_binary_op(ori_binary_op_name, other, computation_node):
+    from .mkldnn_fusion import _can_be_inplace
+
+    if ori_binary_op_name == "sum" and (
+        not _can_be_inplace(other)
+        or other.data.shape != list(computation_node.meta["val"].size())
+    ):
+        # Change the post op from sum to binary add for the following two cases:
+        # 1. when outplace add is required.
+        # 2. broadcast add.
+        return "add"
+    return ori_binary_op_name
+
+
 def _register_quantized_linear_binary_lowering(
     pattern,
     pass_number,
@@ -487,24 +501,10 @@ def _register_quantized_linear_binary_lowering(
         o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
 
         x2.realize()
-        from .mkldnn_fusion import _can_be_inplace
 
-        binary_op_name = binary_unary_attr.binary_op_name
-
-        if binary_op_name == "sum" and (
-            not _can_be_inplace(x2)
-            or x2.data.shape != list(match.nodes[0].meta["val"].size())
-        ):
-            # Change the post op from sum to binary add for two cases:
-            # 1. When we enable the GEMM Template, the output of QLinear
-            # will be reshaped from 2D back to 3D if the input is 3D.
-            # This causes _can_be_inplace(x2) to return False if x2 happens
-            # to be the output of QLinear in this scenario.
-            # Use post op binary_add for this case.
-            # Refer to test case:
-            #   test_mkldnn_pattern_matcher.py::test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2
-            # 2. Use post op binary_add for broadcast add.
-            binary_op_name = "add"
+        binary_op_name = _reselect_binary_op(
+            binary_unary_attr.binary_op_name, x2, match.nodes[0]
+        )
 
         computation_args = (
             x,
@@ -554,6 +554,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
     # * qop_pointwise should only has one users
     # * If extra_input_from_dequant is True, extra input of binary node should come from dequant pattern
     # * the two inputs of binary node should have attribute "meta" and should be tensors
+    # * the two inputs of binary node should have the same dimensions
     # * All users of the extra input in this pattern should be
     #   ancestor nodes of the compute node, except for the binary node
     #   connected to the compute node.
@@ -589,6 +590,12 @@ def _is_valid_quantized_op_binary_optimization_pattern(
         ) or not (
             hasattr(binary_node_inputs[1], "meta")
             and isinstance(binary_node_inputs[1].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
+        ):
+            return False
+        # the two inputs of binary node should have the same dimensions
+        if (
+            binary_node_inputs[0].meta["val"].dim()  # type: ignore[union-attr]
+            != binary_node_inputs[1].meta["val"].dim()  # type: ignore[union-attr]
         ):
             return False
 
@@ -656,29 +663,19 @@ def _register_quantized_conv_binary_lowering(
         o_zero_point = kwargs["o_zp"] if output_dtype == torch.uint8 else 0
 
         accum.realize()
-        from .mkldnn_fusion import _can_be_inplace
 
-        binary_op_name = binary_unary_attr.binary_op_name
-
-        if binary_op_name == "sum" and (
-            not _can_be_inplace(accum)
-            or accum.data.shape != list(match.nodes[0].meta["val"].size())
-        ):
-            # Change the post op from sum to binary add for two cases:
-            # 1. when outplace add is required.
-            # 2. broadcast add.
-            binary_op_name = "add"
+        binary_op_name = _reselect_binary_op(
+            binary_unary_attr.binary_op_name, accum, match.nodes[0]
+        )
 
         computation_args = (
             x,
             x_scale,
             x_zp,
-            accum,
-            accum_scale,
-            accum_zp,
             packed_weight,
             w_scale,
             w_zp,
+            accum,
             b,
             stride,
             padding,
@@ -687,6 +684,8 @@ def _register_quantized_conv_binary_lowering(
             o_inv_scale,
             o_zero_point,
             output_dtype,
+            accum_scale,
+            accum_zp,
             binary_op_name,
             binary_unary_attr.alpha,
             binary_unary_attr.unary_op_name,
