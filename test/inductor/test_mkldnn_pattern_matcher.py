@@ -150,6 +150,9 @@ class TestPatternMatcherBase(TestCase):
     ):
         counters.clear()
         torch._dynamo.reset()
+        is_xpu = False
+        for input in inputs:
+            is_xpu = is_xpu or (input.device.type == "xpu")
         assert matcher_check_fn is not None or (
             matcher_count is not None and matcher_nodes is not None
         )
@@ -171,7 +174,6 @@ class TestPatternMatcherBase(TestCase):
 
         if check_quantization:
             if is_xpu:
-                quantizer = None
                 quantizer = XPUInductorQuantizer()
                 quantizer.set_global(
                     xiq.get_default_x86_inductor_quantization_config(
