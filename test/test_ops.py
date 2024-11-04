@@ -67,7 +67,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchInductor,
     slowTest,
     suppress_warnings,
-    TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
     TEST_WITH_TORCHINDUCTOR,
@@ -364,8 +363,8 @@ class TestCommon(TestCase):
 
                         self.assertTrue(torch.Tag.pointwise in overload.tags)
 
-    # Tests that the function and its (ndarray-accepting) reference produce the same
-    #   values on the tensors from sample_inputs func for the corresponding op.
+    # Tests that the function and its (ndarray-accepting) reference produce the
+    # same values on the tensors from sample_inputs func for the corresponding op.
     # This test runs in double and complex double precision because
     # NumPy does computation internally using double precision for many functions
     # resulting in possible equality check failures.
@@ -648,7 +647,6 @@ class TestCommon(TestCase):
             self.skipTest("Skipped on ROCm")
         self._ref_test_helper(contextlib.nullcontext, device, dtype, op)
 
-    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @onlyCUDA
     @ops(python_ref_db)
     @parametrize("executor", ["aten"])
