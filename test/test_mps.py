@@ -11539,6 +11539,17 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual((60, 20, 5), z.stride())
         self.assertTrue(z.is_contiguous())
 
+    def test_empty_reduce(self, device="mps"):
+        x = torch.rand(0, 3, device=device)
+        self.assertTrue(x.mean().isnan())
+        self.assertEqual(x.count_nonzero(), 0)
+        self.assertEqual(x.sum(), 0)
+        self.assertEqual(x.nansum(), 0)
+        self.assertRaises(RuntimeError, lambda: x.amax())
+        self.assertRaises(IndexError, lambda: x.amax(dim=0))
+        self.assertRaises(RuntimeError, lambda: x.amin())
+        self.assertRaises(IndexError, lambda: x.amin(dim=0))
+
     def test_index_getitem_copy_bools_slices(self, device="mps"):
         true = torch.tensor(1, dtype=torch.uint8, device=device)
         false = torch.tensor(0, dtype=torch.uint8, device=device)
