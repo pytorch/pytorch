@@ -2529,6 +2529,163 @@ def _register_qlinear_weight_prepack():
         )
 
 
+def _register_smooth_quant_int_mm_pattern():
+    """
+    The pattern is:
+      (no bias) _int_mm -> convert_element_type -> (expand -> mul) -> mul
+    or
+      (with bias) _int_mm -> convert_element_type -> (expand -> mul) -> mul -> reshape -> add
+
+    Onednn qlinear does not support per-channel quantization of x, so we have to apply x scale and bias ourselves.
+    Because of that, we don't take in the reshape nodes at the beginning and at the end otherwise x scale may not
+    apply due to shape mismatch.
+    """
+    pattern_no_bias = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(
+            aten.mul.Tensor,
+            CallFunction(
+                prims.convert_element_type.default,
+                CallFunction(
+                    aten._int_mm.default,
+                    KeywordArg("a"),
+                    KeywordArg("b"),
+                ),
+                KeywordArg("dtype"),
+            ),
+            CallFunction(
+                aten.expand.default,
+                KeywordArg("x_scale"),
+                Arg(),
+            ),
+        ),
+        KeywordArg("w_scale"),
+    )
+    pattern_with_bias = CallFunction(
+        aten.add.Tensor,
+        CallFunction(
+            aten.reshape.default,
+            pattern_no_bias,
+            Arg(),
+        ),
+        KeywordArg("bias"),
+    )
+
+    def _validate_pattern(match: Match):
+        for n in match.nodes:
+            if len(n.users) != 1 and n != match.output_node():
+                return False
+        return len(match.nodes) in [5, 7]
+
+    for pattern in [pattern_with_bias, pattern_no_bias]:
+
+        @register_freezing_graph_pattern(
+            pattern,
+            extra_check=_validate_pattern,
+            pass_number=0,
+        )
+        def _int_mm_weight_prepack(match: Match, *args, **kwargs):
+            bias = kwargs.get("bias", None)
+            x = kwargs["a"]
+            weight = kwargs["b"]
+            dtype = kwargs["dtype"]
+            x_scale = kwargs["x_scale"]
+            w_scale = kwargs["w_scale"]
+            x_shape = x.meta.get("tensor_meta").shape
+            if has_free_symbols(x_shape):
+                # For dynamic shape case, we can't get activation shape ahead of runtime.
+                x_shape = None
+
+            out_node = match.output_node()
+            with match.graph.inserting_before(out_node):
+                transpose_node = match.graph.call_function(
+                    aten.permute.default, args=(weight, [1, 0])
+                )
+                contig_node = match.graph.call_function(
+                    aten.contiguous.default, args=(transpose_node,)
+                )
+                packed_weight_inputs = (
+                    contig_node,
+                    x_shape,
+                )
+                packed_weight_op = torch.ops.onednn.qlinear_prepack
+                prepack_weight_node = match.graph.call_function(
+                    packed_weight_op, args=packed_weight_inputs
+                )
+
+                dummy_zp = match.graph.call_function(aten.empty, args=([0],))
+                w_scale = match.graph.call_function(
+                    prims.convert_element_type.default, args=(w_scale, torch.float32)
+                )
+
+                x_scale_shape = x_scale.meta.get("tensor_meta").shape
+                x_scale_is_scalar = False
+                if not has_free_symbols(x_scale_shape):
+                    prod = 1
+                    for d in x_scale_shape:
+                        prod *= d
+                    x_scale_is_scalar = prod == 1
+
+                new_args: Tuple[Any, ...]
+                if x_scale_is_scalar:
+                    # in this case, we can call onednn.qlinear directly
+                    new_args = (
+                        x,
+                        x_scale,
+                        dummy_zp,  # x_zp
+                        prepack_weight_node,
+                        w_scale,
+                        dummy_zp,  # w_zp
+                        bias,
+                        1.0,  # output_scale
+                        0,  # output_zero_point
+                        dtype,  # output_dtype
+                        "none",  # post op name
+                        [],  # post op args
+                        "",  # post op algorithm
+                    )
+                    new_linear_node = match.graph.call_function(
+                        torch.ops.onednn.qlinear_pointwise.tensor, args=new_args
+                    )
+                    out_node.replace_all_uses_with(new_linear_node)
+                    new_linear_node.meta.update(out_node.meta)
+                else:
+                    # in this case, we have to apply x scale and add bias ourselves after qlinear
+                    new_args = (
+                        x,
+                        1.0,  # x_scale
+                        0,  # x_zp
+                        prepack_weight_node,
+                        w_scale,
+                        dummy_zp,  # w_zp
+                        None,  # bias
+                        1.0,  # output_scale
+                        0,  # output_zero_point
+                        dtype,  # output_dtype
+                        "none",  # post op name
+                        [],  # post op args
+                        "",  # post op algorithm
+                    )
+                    new_linear_node = match.graph.call_function(
+                        torch.ops.onednn.qlinear_pointwise, args=new_args
+                    )
+                    new_out_node = match.graph.call_function(
+                        aten.mul.Tensor, args=(new_linear_node, x_scale)
+                    )
+                    if bias is not None:
+                        new_out_node = match.graph.call_function(
+                            aten.add.Tensor, args=(new_out_node, bias)
+                        )
+                    out_node.replace_all_uses_with(new_out_node)
+                    new_out_node.meta.update(out_node.meta)
+                for node in reversed(match.nodes):
+                    match.graph.erase_node(node)
+                counters["inductor"]["qlinear_weight_prepack_matcher_count"] += 1
+                counters["inductor"]["qlinear_weight_prepack_matcher_nodes"] += len(
+                    match.nodes
+                )
+
+
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
     # Step 1: Dequant promotion for int8-mixed-fp32/bf16
@@ -2539,6 +2696,9 @@ def _register_quantization_weight_pack_pass():
 
     # Step 3: QLinear weight prepack
     _register_qlinear_weight_prepack()
+
+    # Step 4: weight prepack for SmoothQuant from Torchao
+    _register_smooth_quant_int_mm_pattern()
 
 
 def quant_lift_up(graph_module: torch.fx.GraphModule):

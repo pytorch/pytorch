@@ -2727,6 +2727,86 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 rtol=0.07,
             )
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_int_mm_convert_mul_mul(self):
+        r"""
+        This testcase check if we can match the following patterns:
+        (1) _int_mm -> convert_element_type -> (expand -> mul) -> mul
+        (2) _int_mm -> convert_element_type -> (expand -> mul) -> mul -> reshape -> add
+        """
+        M = 16
+        in_feature = 64
+        out_feature = 128
+        q_min, q_max = -32, 31
+
+        class Mod(torch.nn.Module):
+            def __init__(
+                self, dtype: torch.dtype, has_bias: bool, per_channel_quant: bool
+            ):
+                super().__init__()
+                self.dtype = dtype
+                self.has_bias = has_bias
+                self.b = torch.randint(
+                    q_min, q_max, [in_feature, out_feature], dtype=torch.int8
+                )
+                self.per_channel_quant = per_channel_quant
+                self.b_scale = torch.rand([out_feature]) * 0.01 + 0.01
+                self.b_scale = self.b_scale.to(dtype)
+                self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
+
+            def forward(self, a, a_scale_per_tensor, a_scale_per_channel):
+                c = torch._int_mm(a, self.b)
+                c = c.to(self.dtype)
+                c_shape = c.shape
+                a_scale = (
+                    a_scale_per_channel
+                    if self.per_channel_quant
+                    else a_scale_per_tensor
+                )
+                a_scale = a_scale.expand(c.shape)
+                c = c * a_scale
+                c = c * self.b_scale
+                if self.has_bias:
+                    c = c.reshape([1, *list(c_shape)])
+                    c = c + self.bias
+                    c = c.reshape(c_shape)
+                c = c.reshape([1, *list(c_shape)])
+                return c
+
+        has_bias_list = [True, False]
+        dype_list = [torch.float, torch.bfloat16]
+        per_channel_list = [True, False]
+        for has_bias, dtype, per_channel_quant in itertools.product(
+            has_bias_list, dype_list, per_channel_list
+        ):
+            mod = Mod(dtype, has_bias, per_channel_quant).eval()
+            a = torch.randint(q_min, q_max, [M, in_feature], dtype=torch.int8)
+            a_scale_per_tensor = torch.rand([1], dtype=dtype) * 0.01 + 0.01
+            a_scale_per_channel = torch.rand([M, 1], dtype=dtype) * 0.01 + 0.01
+            a_scale_per_tensor, a_scale_per_channel = (
+                a_scale_per_tensor.to(dtype),
+                a_scale_per_channel.to(dtype),
+            )
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
+                )
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    7 if has_bias else 5,
+                )
+
+            self._test_common(
+                mod,
+                (a, a_scale_per_tensor, a_scale_per_channel),
+                matcher_check_fn=matcher_check_fn,
+                check_autocast=dtype,
+                atol=1.6e-2,
+                rtol=1e-2,
+            )
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
