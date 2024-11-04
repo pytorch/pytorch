@@ -71,7 +71,6 @@ template_rule(
         "@DNNL_VERSION_MAJOR@": "3",
         "@DNNL_VERSION_MINOR@": "6",
         "@DNNL_VERSION_PATCH@": "0",
-        "@DNNL_VERSION_HASH@": "1794c3452f1bf814339fcffe521d5984e6e64b94",
     },
 )
 
@@ -86,9 +85,7 @@ template_rule(
     name = "include_dnnl_version_hash",
     src = "include/oneapi/dnnl/dnnl_version_hash.h.in",
     out = "include/oneapi/dnnl/dnnl_version_hash.h",
-    substitutions = {
-        "@DNNL_VERSION_HASH@": "1794c3452f1bf814339fcffe521d5984e6e64b94",
-    },
+    substitutions = {"@DNNL_VERSION_HASH@": "1794c3452f1bf814339fcffe521d5984e6e64b94",}
 )
 
 cc_library(
@@ -100,6 +97,7 @@ cc_library(
     ], exclude=[
         "src/cpu/aarch64/**/*.cpp",
         "src/cpu/rv64/**/*.cpp",
+        "src/cpu/sycl/**/*.cpp",
     ]),
     hdrs = glob([
         "include/oneapi/dnnl/*.h",
@@ -117,9 +115,11 @@ cc_library(
         "src/cpu/aarch64/**/*.h",
         "src/cpu/rv64/**/*.hpp",
         "src/cpu/rv64/**/*.h",
+        "src/cpu/sycl/**/*.hpp",
     ]) + [
         "include/oneapi/dnnl/dnnl_config.h",
         "include/oneapi/dnnl/dnnl_version.h",
+        "include/oneapi/dnnl/dnnl_version_hash.h",
     ],
     copts = [
         "-DDNNL_DLL",
