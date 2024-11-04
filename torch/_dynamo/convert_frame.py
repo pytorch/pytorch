@@ -58,6 +58,7 @@ from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import (
     check_inst_exn_tab_entries_valid,
     Instruction,
+    is_generator,
     propagate_inst_exn_table_entries,
     transform_code_object,
 )
@@ -213,7 +214,9 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             prior_inference_mode = torch.is_inference_mode_enabled()
             prior_deterministic = torch.are_deterministic_algorithms_enabled()
             prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-            prior_mobile_allocator_state = torch._C._is_default_mobile_cpu_allocator_set()
+            prior_mobile_allocator_state = (
+                torch._C._is_default_mobile_cpu_allocator_set()
+            )
             py_rng_state = random.getstate()
             prior_dtype = torch.get_default_dtype()
             torch_rng_state = torch.random.get_rng_state()
@@ -243,9 +246,11 @@ def preserve_global_state(fn: Callable[_P, _T]) -> Callable[_P, _T]:
                     prior_deterministic, warn_only=prior_warn_only
                 )
                 random.setstate(py_rng_state)
-                torch.set_default_dtype(prior_dtype)
                 torch.random.set_rng_state(torch_rng_state)
-                curr_mobile_allocator_state = torch._C._is_default_mobile_cpu_allocator_set()
+                torch.set_default_dtype(prior_dtype)
+                curr_mobile_allocator_state = (
+                    torch._C._is_default_mobile_cpu_allocator_set()
+                )
                 if prior_mobile_allocator_state != curr_mobile_allocator_state:
                     torch._C._unset_default_mobile_cpu_allocator()
                 if cuda_rng_state is not None:
@@ -460,7 +465,12 @@ class ConvertFrameAssert:
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
-    ) -> Optional[GuardedCode]:
+    ) -> Optional[
+        Union[
+            GuardedCode,
+            torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag,
+        ]
+    ]:
         increment_frame()
 
         code = frame.f_code
@@ -509,13 +519,13 @@ class ConvertFrameAssert:
             # len keyword in LIST_LEN guard.
             return None
 
-        is_ctx_manager = lambda x: (
-            type(x) is contextlib._GeneratorContextManager or
-            '_GeneratorContextManager' in str(type(x))
-        )
+        if is_generator(code):
+            unimplemented("generator")
 
-        if frame.f_code.co_name == '__enter__' and \
-            any(is_ctx_manager(a) for a in frame.f_locals.values()):
+        if frame.f_code.co_name == "__enter__" and any(
+            type(a) is contextlib._GeneratorContextManager
+            for a in frame.f_locals.values()
+        ):
             # ctx = next(a for a in frame.f_locals.values() if is_ctx_manager(a))
             # skip_code(frame.f_code)
             # skip_code(ctx.gen.gi_frame.f_code)
@@ -1376,12 +1386,6 @@ class CatchErrorsWrapper:
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
     ) -> Optional[GuardedCode]:
         assert frame_state is not None
-
-        # print(f'tracing frame {frame.f_code.co_name=}', flush=True)
-        # _next = next
-
-        # if frame.f_code.co_name == '__exit__':
-        #     breakpoint()
 
         is_skipfile = trace_rules.check(frame.f_code)
         if sys.version_info >= (3, 13):
