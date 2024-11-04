@@ -58,6 +58,33 @@ class DynamoExporterTest(common_utils.TestCase):
         onnx_testing.assert_onnx_program(onnx_program)
         self.assertNotIn("Cast", [node.op_type for node in onnx_program.model.graph])
 
+    def test_submodule_local_functions_simple(self):
+        import torch
+
+        class SubModel2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 3)
+
+            def forward(self, x):
+                z = self.linear(x)
+                return torch.sigmoid(z)
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.neuron = SubModel2()
+
+            def forward(self, x):
+                z = self.neuron(x)
+                return torch.relu(z)
+
+        x = torch.randn(1, 5)
+        onnx_program = torch.onnx.export(Model(), (x,), dynamo=True, export_modules_as_functions=True)
+        node_types = [node.op_type for node in onnx_program.model.graph]
+        self.assertEqual(["SubModel2", "Relu"], node_types)
+        onnx_testing.assert_onnx_program(onnx_program)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
