@@ -495,8 +495,8 @@ at::Tensor two_shot_all_reduce_(
   return input;
 }
 
-}
-#endif  // #if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
+} // namespace
+#endif // #if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
 
 namespace {
 
@@ -509,24 +509,22 @@ at::Tensor memset32_(
   TORCH_CHECK(
       input.dim() == 1 && input.is_contiguous() &&
           input.scalar_type() == c10::ScalarType::UInt32,
-      "CUDASymmetricMemoryUtils::memset32: input must be "
-      "a flat, contiguous uint32 tensor.");
+      "symm_mem::memset32_: input must be a flat, contiguous uint32 tensor.");
 
   TORCH_CHECK(
       offset > 0 && count > 0,
-      "CUDASymmetricMemoryUtils::memset32: "
-      "offset and count must be a positive integers.")
+      "symm_mem::memset32_: offset and count must be positive integers.");
 
   TORCH_CHECK(
       val >= 0 &&
           static_cast<size_t>(val) <= std::numeric_limits<uint32_t>::max(),
-      "CUDASymmetricMemoryUtils::memset32: "
-      "val must be in the range of [0, 4294967295] (uint32_t).")
+      "symm_mem::memset32_: val must be in the range of "
+      "[0, 4294967295] (uint32_t).")
 
   auto element_size = c10::elementSize(input.scalar_type());
   TORCH_CHECK(
-      offset + count <= input.numel(),
-      "CUDASymmetricMemoryUtils::memset32: offset + count (",
+      offset + count < input.numel(),
+      "symm_mem::memset32_: offset + count (",
       offset + count,
       ") exceeded the numel of the input (",
       input.numel(),
@@ -548,7 +546,7 @@ at::Tensor memset32_(
   return input;
 }
 
-}
+} // namespace
 
 TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
@@ -579,8 +577,12 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor",
       {at::Tag::pt2_compliant_tag});
 
-  m.impl("one_shot_all_reduce", torch::dispatch(c10::DispatchKey::Meta, ::one_shot_all_reduce_meta));
-  m.impl("one_shot_all_reduce", torch::dispatch(c10::DispatchKey::CUDA, ::one_shot_all_reduce));
+  m.impl(
+      "one_shot_all_reduce",
+      torch::dispatch(c10::DispatchKey::Meta, ::one_shot_all_reduce_meta));
+  m.impl(
+      "one_shot_all_reduce",
+      torch::dispatch(c10::DispatchKey::CUDA, ::one_shot_all_reduce));
 
   m.def(
       "one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)",
