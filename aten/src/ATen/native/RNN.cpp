@@ -1187,10 +1187,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
   DEFINE_DISPATCH(NAME##_miopen_stub);                                      \
   DEFINE_DISPATCH(NAME##_packed_cudnn_stub);                                \
   DEFINE_DISPATCH(NAME##_packed_miopen_stub);                               \
-  REGISTER_NO_CPU_DISPATCH(NAME##_cudnn_stub);                              \
-  REGISTER_NO_CPU_DISPATCH(NAME##_miopen_stub);                             \
-  REGISTER_NO_CPU_DISPATCH(NAME##_packed_cudnn_stub);                       \
-  REGISTER_NO_CPU_DISPATCH(NAME##_packed_miopen_stub);                      \
+  REGISTER_NO_CPU_DISPATCH(NAME##_cudnn_stub)                              \
+  REGISTER_NO_CPU_DISPATCH(NAME##_miopen_stub)                             \
+  REGISTER_NO_CPU_DISPATCH(NAME##_packed_cudnn_stub)                       \
+  REGISTER_NO_CPU_DISPATCH(NAME##_packed_miopen_stub)                      \
                                                                             \
   std::tuple<Tensor, Tensor> NAME(                                          \
       const Tensor& _input,                                                 \
@@ -1415,17 +1415,17 @@ static std::tuple<Tensor, Tensor> quantized_gru_data_legacy(
 using tanf_cell_type = SimpleCell<tanh_f, CellParams>;
 ONE_HIDDEN_RNN(rnn_tanh, tanf_cell_type)
 using relu_cell_type = SimpleCell<relu_f, CellParams>;
-ONE_HIDDEN_RNN(rnn_relu, relu_cell_type);
+ONE_HIDDEN_RNN(rnn_relu, relu_cell_type)
 
 DEFINE_DISPATCH(lstm_cudnn_stub);
 DEFINE_DISPATCH(lstm_packed_cudnn_stub);
 DEFINE_DISPATCH(lstm_miopen_stub);
 DEFINE_DISPATCH(lstm_packed_miopen_stub);
 DEFINE_DISPATCH(lstm_mkldnn_stub);
-REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub);
-REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub);
-REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub);
-REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub);
+REGISTER_NO_CPU_DISPATCH(lstm_cudnn_stub)
+REGISTER_NO_CPU_DISPATCH(lstm_packed_cudnn_stub)
+REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub)
+REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub)
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
       const Tensor& _input, TensorList hx,
@@ -1857,9 +1857,9 @@ static std::tuple<Tensor, Tensor> prepare_quantized_lstm_hx(TensorList hx) {
 // Quantized LSTM cell
 using quantized_lstm_cell_dynamic_type = LSTMCell<QuantizedCellParamsDynamic>;
 
-DEFINE_QUANTIZED_RNN_CELL(quantized_lstm_cell, TensorList, quantized_lstm_cell_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
+DEFINE_QUANTIZED_RNN_CELL(quantized_lstm_cell, TensorList, quantized_lstm_cell_type, quantized_lstm_return_type, prepare_quantized_lstm_hx)
 
-static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_lstm_cell_dynamic, TensorList, quantized_lstm_cell_dynamic_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
+static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_lstm_cell_dynamic, TensorList, quantized_lstm_cell_dynamic_type, quantized_lstm_return_type, prepare_quantized_lstm_hx)
 
 // Helpers for simpler cells
 using simple_hx_type = const Tensor&;
@@ -1871,21 +1871,21 @@ static simple_hx_type prepare_quantized_hx(simple_hx_type hx) {
 using quantized_gru_cell_type = GRUCell<QuantizedCellParams>;
 using quantized_gru_cell_dynamic_type = GRUCell<QuantizedCellParamsDynamic>;
 
-DEFINE_QUANTIZED_RNN_CELL(quantized_gru_cell, simple_hx_type, quantized_gru_cell_type, Tensor, prepare_quantized_hx);
+DEFINE_QUANTIZED_RNN_CELL(quantized_gru_cell, simple_hx_type, quantized_gru_cell_type, Tensor, prepare_quantized_hx)
 
-static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_gru_cell_dynamic, simple_hx_type, quantized_gru_cell_dynamic_type, Tensor, prepare_quantized_hx);
+static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_gru_cell_dynamic, simple_hx_type, quantized_gru_cell_dynamic_type, Tensor, prepare_quantized_hx)
 
 // Quantized RNN w/ ReLU cell
 using quantized_rnn_relu_cell_type = SimpleCell<relu_f, QuantizedCellParams>;
-DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_relu_cell, simple_hx_type, quantized_rnn_relu_cell_type, Tensor, prepare_quantized_hx);
+DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_relu_cell, simple_hx_type, quantized_rnn_relu_cell_type, Tensor, prepare_quantized_hx)
 using quantized_rnn_relu_cell_dynamic_type = SimpleCell<relu_f, QuantizedCellParamsDynamic>;
-static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_relu_cell_dynamic, simple_hx_type, quantized_rnn_relu_cell_dynamic_type, Tensor, prepare_quantized_hx);
+static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_relu_cell_dynamic, simple_hx_type, quantized_rnn_relu_cell_dynamic_type, Tensor, prepare_quantized_hx)
 
 // Quantized RNN w/ tanh cell
 using quantized_rnn_tanh_cell_type = SimpleCell<tanh_f, QuantizedCellParams>;
-DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_tanh_cell, simple_hx_type, quantized_rnn_tanh_cell_type, Tensor, prepare_quantized_hx);
+DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_tanh_cell, simple_hx_type, quantized_rnn_tanh_cell_type, Tensor, prepare_quantized_hx)
 using quantized_rnn_tanh_cell_dynamic_type = SimpleCell<tanh_f, QuantizedCellParamsDynamic>;
-static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_type, quantized_rnn_tanh_cell_dynamic_type, Tensor, prepare_quantized_hx);
+static DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_type, quantized_rnn_tanh_cell_dynamic_type, Tensor, prepare_quantized_hx)
 
 namespace {
 

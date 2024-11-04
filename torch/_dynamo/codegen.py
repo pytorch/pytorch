@@ -137,8 +137,34 @@ class PyCodegen:
                 self.top_of_stack = value
                 return
 
-        if value.source is not None and allow_cache and self.value_from_source:
-            # If the source needs to be overridden, use the new one.
+        from .side_effects import MutableSideEffects
+
+        # Dynamo normally prefers codegen from source to account for aliasing,
+        # but there's a corner case for export: for instance, if the computation
+        # graph is just identity on an input tensor, Dynamo would just emit a
+        # `LOAD_FAST` from the input source, rather than generating an identity
+        # FX graph.
+        #
+        # However, export wants to maximize graph capture; in the case
+        # above, export _wants to_ obtain an identity FX graph (despite it
+        # appears unnecessarily expensive for `torch.compile`), so we have
+        # the following option to override Dynamo's preference for codegen
+        # from source. Morever, this option applies recursively, for cases
+        # like input tensor being returned in a new dictionary.
+        #
+        # And why the `MutableSideEffects` check? Not sure, so leaving it to
+        # keep the old behavior, as when `value_from_source` was introduced.
+        # TODO sort out the invariants among side effect, codegen and
+        # export.
+        if (
+            value.source is not None
+            and allow_cache
+            # Below is the special check for export.
+            and (
+                isinstance(value.mutable_local, MutableSideEffects)
+                or self.value_from_source
+            )
+        ):
             source = self.overridden_sources.get(value.source, value.source)
             self.call_reconstruct(source)
         elif value.is_python_constant() and is_safe_constant(

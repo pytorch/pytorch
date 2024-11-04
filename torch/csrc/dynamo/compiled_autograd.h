@@ -224,29 +224,11 @@ struct LiftedIValueArgs {
   const std::optional<size_t>& active_node_call_idx;
 };
 
-// Hold GIL while using
-struct PyTLSWrapper {
-  PyTLSWrapper(PyObject* state) : state(state) {}
-  PyTLSWrapper(const PyTLSWrapper&) = delete;
-  PyTLSWrapper& operator=(const PyTLSWrapper&) = delete;
-  PyTLSWrapper(PyTLSWrapper&&) = default;
-  PyTLSWrapper& operator=(PyTLSWrapper&&) = default;
-
-  static PyTLSWrapper create();
-
-  PyObject* get(std::string_view key) const;
-
- private:
-  PyObject* state;
-};
-
 struct AutogradCompilerCall {
-  AutogradCompilerCall() = delete;
-  AutogradCompilerCall(PyTLSWrapper&& state)
+  AutogradCompilerCall()
       : active_node_call_idx(std::nullopt),
         tensor_args(active_node_call_idx),
-        lifted_ivalue_args(active_node_call_idx),
-        state(std::move(state)) {}
+        lifted_ivalue_args(active_node_call_idx) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
@@ -272,11 +254,8 @@ struct AutogradCompilerCall {
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
-
   // NodeCall id of each size, only when verbose logging is enabled
   std::vector<uint32_t> size_input_origins;
-
-  const PyTLSWrapper state;
 };
 
 class CompiledNodeArgs {
@@ -827,18 +806,18 @@ class SwapSavedVariables {
 #define NO_OP_VISIT(T)     \
   void before(const T&) {} \
   void after(const T&) {}
-  NO_OP_VISIT(caffe2::TypeMeta);
-  NO_OP_VISIT(c10::Device);
-  NO_OP_VISIT(c10::DeviceType);
-  NO_OP_VISIT(c10::Layout);
-  NO_OP_VISIT(c10::MemoryFormat);
-  NO_OP_VISIT(c10::ScalarType);
-  NO_OP_VISIT(c10::Scalar);
-  NO_OP_VISIT(c10::TensorOptions);
-  NO_OP_VISIT(std::string);
-  NO_OP_VISIT(int64_t);
-  NO_OP_VISIT(bool);
-  NO_OP_VISIT(double);
+  NO_OP_VISIT(caffe2::TypeMeta)
+  NO_OP_VISIT(c10::Device)
+  NO_OP_VISIT(c10::DeviceType)
+  NO_OP_VISIT(c10::Layout)
+  NO_OP_VISIT(c10::MemoryFormat)
+  NO_OP_VISIT(c10::ScalarType)
+  NO_OP_VISIT(c10::Scalar)
+  NO_OP_VISIT(c10::TensorOptions)
+  NO_OP_VISIT(std::string)
+  NO_OP_VISIT(int64_t)
+  NO_OP_VISIT(bool)
+  NO_OP_VISIT(double)
 #undef NO_OP_VISIT
 
   SwapSavedVariables(

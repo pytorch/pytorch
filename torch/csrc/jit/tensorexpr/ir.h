@@ -322,7 +322,7 @@ class Min : public BinaryOpNode<Min> {
    private:                                                   \
     Type value_;                                              \
   };
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_DECLARE);
+AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_DECLARE)
 #undef IMM_DECLARE
 
 // Get immediate by ScalarType.
@@ -332,7 +332,7 @@ ExprPtr getImmediateByType(ScalarType immType, T initialVal) {
 #define TYPE_CASE(Type, Name) \
   case ScalarType::Name:      \
     return alloc<Name##Imm>(Type(initialVal));
-    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
     default:
       throw unsupported_dtype();
@@ -375,7 +375,7 @@ T immediateAs(const ExprPtr& e) {
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value();                     \
   }
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
   throw unsupported_dtype();
   return 0;
@@ -392,7 +392,7 @@ bool immediateEquals(const ExprPtr& e, T val) {
   if (Name##ImmPtr imm = to<Name##Imm>(e)) { \
     return imm->value() == val;              \
   }
-  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
+  AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE)
 #undef TYPE_CASE
   throw unsupported_dtype();
   return false;
@@ -859,12 +859,9 @@ class TORCH_API Intrinsics : public ExprNode<Intrinsics> {
     }
   }
 
-  Intrinsics(
-      IntrinsicsOp op_type,
-      Dtype dtype,
-      const std::vector<ExprPtr>& params)
+  Intrinsics(IntrinsicsOp op_type, Dtype dtype, std::vector<ExprPtr> params)
       : ExprNodeBase(IntrinsicsDtype(op_type, dtype)),
-        params_(params),
+        params_(std::move(params)),
         op_type_(op_type) {
     if (OpArgCount(op_type) != nparams()) {
       throw malformed_input("bad arg count in Intrinsics");
