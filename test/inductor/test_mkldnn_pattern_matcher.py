@@ -680,7 +680,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             match_nodes = 19
             self._test_common(mod, (v,), match_count, match_nodes, rtol=1e-2, atol=1e-2)
 
-    def _qconv2d_cpu_test_helper(self, device="cpu", int8_mixed_bf16=False):
+    def test_qconv2d_test_helper(self, device="cpu", int8_mixed_bf16=False):
         class M(torch.nn.Module):
             def __init__(
                 self,
@@ -728,7 +728,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a single Conv2d module.
         """
-        self._qconv2d_cpu_test_helper("cpu")
+        self.test_qconv2d_test_helper("cpu")
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -738,7 +738,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a single Conv2d module.
         """
-        self._qconv2d_cpu_test_helper("xpu")
+        self.test_qconv2d_test_helper("xpu")
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
@@ -747,7 +747,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
         """
-        self._qconv2d_cpu_test_helper(int8_mixed_bf16=True)
+        self.test_qconv2d_test_helper(int8_mixed_bf16=True)
 
     def _qconv2d_unary_cpu_test_helper(
         self,
