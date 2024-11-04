@@ -876,8 +876,8 @@ void NAME##_packed_miopen(Tensor& output, Tensor& hy,                          \
       has_biases, MODE, num_layers, dropout_p, train, bidirectional);          \
 }                                                                              \
                                                                                \
-REGISTER_CUDA_DISPATCH(NAME##_miopen_stub, &NAME##_miopen);                    \
-REGISTER_CUDA_DISPATCH(NAME##_packed_miopen_stub, &NAME##_packed_miopen);
+REGISTER_CUDA_DISPATCH(NAME##_miopen_stub, &NAME##_miopen)                    \
+REGISTER_CUDA_DISPATCH(NAME##_packed_miopen_stub, &NAME##_packed_miopen)
 
 ONE_HIDDEN_RNN(gru, miopenGRU)
 ONE_HIDDEN_RNN(rnn_tanh, miopenRNNTANH)
@@ -905,8 +905,8 @@ void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
     cy = std::get<1>(result.second);
 }
 
-REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen);
-REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen);
+REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen)
+REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen)
 
 } // anonymous namespace
 }} //namespace native.
