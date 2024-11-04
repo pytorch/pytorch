@@ -58,6 +58,7 @@ include_patterns = [
     'aten/src/ATen/mps/**/*.mm',
     'aten/src/ATen/xpu/**/*.h',
     'aten/src/ATen/xpu/**/*.cpp',
+    'aten/src/ATen/native/mps/**/*.metal',
     'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
@@ -69,8 +70,6 @@ include_patterns = [
     'aten/src/ATen/native/cudnn/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
-    'distributed/c10d/*DMAConnectivity.*',
-    'distributed/c10d/*SymmetricMemory.*',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.hpp',
     'torch/csrc/**/*.cpp',
@@ -79,6 +78,7 @@ include_patterns = [
 ]
 exclude_patterns = [
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
+    'aten/src/ATen/native/mps/kernels/Quantized.metal',
     'c10/util/strong_type.h',
     '**/fb/**',
     'torch/csrc/inductor/aoti_torch/generated/**',
