@@ -554,6 +554,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
     # * qop_pointwise should only has one users
     # * If extra_input_from_dequant is True, extra input of binary node should come from dequant pattern
     # * the two inputs of binary node should have attribute "meta" and should be tensors
+    # * the two inputs of binary node should have the same dimensions
     # * All users of the extra input in this pattern should be
     #   ancestor nodes of the compute node, except for the binary node
     #   connected to the compute node.
@@ -589,6 +590,12 @@ def _is_valid_quantized_op_binary_optimization_pattern(
         ) or not (
             hasattr(binary_node_inputs[1], "meta")
             and isinstance(binary_node_inputs[1].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
+        ):
+            return False
+        # the two inputs of binary node should have the same dimensions
+        if (
+            binary_node_inputs[0].meta["val"].dim()  # type: ignore[union-attr]
+            != binary_node_inputs[1].meta["val"].dim()  # type: ignore[union-attr]
         ):
             return False
 
