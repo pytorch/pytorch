@@ -569,7 +569,7 @@ class SymNumberMemoDescriptor:
             return None
 
         # If backed, it's ok to preserve memo since we know it won't renumber.
-        if r.node.hint is not None:
+        if isinstance(r, torch.SymFloat) and r.node.hint is not None:
             return r
 
         # Version counter based tracking isn't 100% sound but it's close
