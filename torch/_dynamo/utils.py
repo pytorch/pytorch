@@ -2185,6 +2185,15 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
+    if node.name in ["interpolate", "is_integer"]:
+        # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
+        args = tuple(
+            float(arg)
+            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+            else arg
+            for arg in args
+        )
+
     try:
         with tx.fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
