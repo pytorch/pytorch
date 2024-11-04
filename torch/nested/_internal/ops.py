@@ -923,20 +923,50 @@ def unbind_int(func, *args, **kwargs):
     lengths = inp.lengths()
     ragged_idx = inp._ragged_idx
 
+    offsets_scalars = offsets.tolist()
+
+    def _torch_check(_offsets, _lengths):
+        lengths_sum = 0
+        ragged_dim_size = values.shape[ragged_idx - 1]
+        for i in range(len(_lengths)):
+            torch._check_is_size(_lengths[i])
+            torch._check(_lengths[i] <= ragged_dim_size)
+
+            lengths_sum += _lengths[i]
+            torch._check(
+                _offsets[i] + _lengths[i] <= ragged_dim_size,
+                lambda: "unbind(): nested tensor offsets and lengths do not match ragged_idx dimension",
+            )
+
+        for i in range(len(_offsets)):
+            torch._check_is_size(_offsets[i])
+            torch._check(_offsets[i] <= ragged_dim_size)
+
+        # ??? torch._check(lengths_sum == ragged_dim_size)
+
     if lengths is None:
-        return torch.split(values, offsets.diff().tolist(), dim=(ragged_idx - 1))
+        lengths_scalars = offsets.diff().tolist()
+
+        _torch_check(offsets_scalars, lengths_scalars)
+
+        return torch.split(values, lengths_scalars, dim=(ragged_idx - 1))
 
     if ragged_idx <= 0:
         raise RuntimeError(
             "unbind(): nested tensor ragged_idx out of bounds (should be >= 1)"
         )
-    for i in range(lengths.shape[0]):
-        if offsets[i] + lengths[i] > values.shape[ragged_idx - 1]:
-            raise RuntimeError(
-                "unbind(): nested tensor offsets and lengths do not match ragged_idx dimension"
-            )
+
+    lengths_scalars = lengths.tolist()
+
+    _torch_check(offsets_scalars, lengths_scalars)
+
     return [
-        torch.narrow(values, dim=(ragged_idx - 1), start=offsets[i], length=lengths[i])
+        torch.narrow(
+            values,
+            dim=(ragged_idx - 1),
+            start=offsets_scalars[i],
+            length=lengths_scalars[i],
+        )
         for i in range(lengths.shape[0])
     ]
 
