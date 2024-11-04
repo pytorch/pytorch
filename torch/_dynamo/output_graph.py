@@ -315,9 +315,9 @@ class OutputGraph:
                 export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
-        self.dynamo_compile_id: Optional[CompileId] = (
-            CompileContext.current_compile_id()
-        )
+        self.dynamo_compile_id: Optional[
+            CompileId
+        ] = CompileContext.current_compile_id()
         self.init_ambient_guards()
 
         # Map each tensor id to a list of sources. This is necessary because
@@ -325,9 +325,9 @@ class OutputGraph:
         # We use this map to interpret (i.e., check for violations of) constraints,
         # specifically equality constraints, which have shared tensor ids in them.
         # This map should also be generally useful, e.g., for (de)serialization.
-        self.tracked_fakes_id_to_source: Dict[int, List[Source]] = (
-            collections.defaultdict(list)
-        )
+        self.tracked_fakes_id_to_source: Dict[
+            int, List[Source]
+        ] = collections.defaultdict(list)
         # Stores the full fqn of a param or buffer to the relevant source.
         self.param_name_to_source: Optional[Dict[str, Source]] = {}
         self.side_effects = SideEffects(self)
@@ -1315,9 +1315,9 @@ class OutputGraph:
                 register_finalizer(gm)
 
             gm.compile_subgraph_reason = self.compile_subgraph_reason
-            gm.meta["dynamo_flat_name_to_original_fqn"] = (
-                self.dynamo_flat_name_to_original_fqn.copy()
-            )
+            gm.meta[
+                "dynamo_flat_name_to_original_fqn"
+            ] = self.dynamo_flat_name_to_original_fqn.copy()
             gm.meta["dynamo_compile_id"] = self.dynamo_compile_id
 
             graph_code_log.debug(
@@ -2154,7 +2154,7 @@ class SubgraphTracer(fx.Tracer):
         example_value = proxy.node.meta["example_value"]
 
         # For SymInt with basic symbols, it's possible that the basic symbols are lifted twice.
-        # For example, the basica symbols may have already been lifted for current subgraph when
+        # For example, the basic symbols may have already been lifted for current subgraph when
         # we automatically lift basic symbols in the sizes/strides of a tensor t.
         # Suppose parent graph calls sz = t.size()[0], it creates
         # a proxy in parent and the subgraph accesses sz via closure. sz's proxy is not tracked
@@ -2165,7 +2165,8 @@ class SubgraphTracer(fx.Tracer):
         if isinstance(example_value, torch.SymInt):
             expr = example_value.node.expr
             if isinstance(expr, sympy.Symbol):
-                return self._lift_symbols_in_symint(example_value, None)[expr]
+                self._lift_symbols_in_symint(example_value, None)
+                return self.bound_symbols[expr]
 
         # Proxys are associated with VariableTracker.
         # It is possible that we've already lifted the Proxy to be an input.
@@ -2397,14 +2398,11 @@ class SubgraphTracer(fx.Tracer):
 
     # Lookup the proxy in current tracer for each symbol in expressions of s,
     # See Note [Auto lift basic free symbols when create_graph_input]
-    def lookup_bounded_symbols(
-        self, s: torch.SymInt
-    ) -> Tuple[Dict[sympy.Symbol, torch.fx.Proxy], Set[sympy.Symbol]]:
+    def lookup_unbounded_symbols(self, s: torch.SymInt) -> Set[sympy.Symbol]:
         free_symbols = s.node.expr.free_symbols
         if len(free_symbols) == 0:
-            return {}, set()
+            return set()
 
-        bounded = {}
         to_be_bound = set()
         for s0 in free_symbols:
             if s0 not in self.bound_symbols:
@@ -2417,27 +2415,29 @@ class SubgraphTracer(fx.Tracer):
                 proxy.tracer is self
             ), f"The proxy of symbol {s0} doesn't belong to current tracer."
             self.bound_symbols[s0] = proxy
-            bounded[s0] = proxy
-        return bounded, to_be_bound
+        return to_be_bound
 
     # See NOTE: [Auto lift basic free symbols when create_graph_input]
     def _lift_symbols_in_symint(
-        self, s: Union[int, torch.SymInt], source: Optional[Source], before: bool = False
-    ):
+        self,
+        s: Union[int, torch.SymInt],
+        source: Optional[Source],
+        before: bool = False,
+    ) -> None:
         if not is_symbolic(s):
             return
 
         assert isinstance(s, torch.SymInt)
-        self_bounded, self_to_be_bound = self.lookup_bounded_symbols(s)
+        self_to_be_bound = self.lookup_unbounded_symbols(s)
         if len(self_to_be_bound) == 0:
-            return self_bounded
+            return
 
         # For subgraph
         if self.parent is not None:
             # Recursively lift symbols in symint until top-level.
-            parent_bounded = self.parent._lift_symbols_in_symint(s, source)
+            self.parent._lift_symbols_in_symint(s, source)
             for s0 in self_to_be_bound:
-                parent_proxy = parent_bounded[s0]
+                parent_proxy = self.parent.bound_symbols[s0]
                 example_val = parent_proxy.node.meta["example_value"]
                 assert isinstance(example_val, torch.SymInt)
                 ph = self.create_graph_input(
@@ -2488,11 +2488,6 @@ class SubgraphTracer(fx.Tracer):
                 is_tensor=False,
             )
             self.bound_symbols[s0] = ph
-        after_bound, after_unbound = self.lookup_bounded_symbols(s)
-        assert (
-            len(after_unbound) == 0
-        ), f"All symbols must be lifted but {after_unbound} are not lifted."
-        return after_bound
 
 
 # NOTE: [HigherOrderOperator tracing design]
