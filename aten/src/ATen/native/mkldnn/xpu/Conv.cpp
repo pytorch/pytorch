@@ -618,7 +618,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
       "so far only support float, bfloat16, half and double convolution backward in XPU backend, your data type is ",
       grad_output.scalar_type());
 
-  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight, transposed);
+  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight);
 
   Tensor grad_output_, input_, weight_;
   IntArrayRef stride_, padding_, dilation_, output_padding_;
