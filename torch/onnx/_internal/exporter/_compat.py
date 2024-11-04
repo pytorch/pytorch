@@ -140,6 +140,7 @@ def export_compat(
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
     fallback: bool = False,
+    export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     **_,
 ) -> _onnx_program.ONNXProgram:
     if opset_version is None:
@@ -170,6 +171,7 @@ def export_compat(
                 # register_op places the op in the front of all onnx variants,
                 # so we reverse the list to maintain the order of the custom ops provided
                 registry.register_op(torch_op, op, is_complex=False)
+    assert export_modules_as_functions
     try:
         onnx_program = _core.export(
             model,
@@ -185,6 +187,7 @@ def export_compat(
             dump_exported_program=dump_exported_program,
             artifacts_dir=artifacts_dir,
             verbose=verbose,
+            export_modules_as_functions=export_modules_as_functions,
         )
 
     except Exception as e:

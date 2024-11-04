@@ -1333,7 +1333,7 @@ def _export(
     custom_opsets=None,
     add_node_names=True,
     onnx_shape_inference=True,
-    export_modules_as_functions: Any = False,
+    export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     autograd_inlining=True,
 ):
     assert GLOBALS.in_onnx_export is False

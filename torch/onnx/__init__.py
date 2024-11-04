@@ -313,7 +313,7 @@ def export(
             If a custom opset is referenced by ``model`` but not mentioned in this dictionary,
             the opset version is set to 1. Only custom opset domain name and version should be
             indicated through this argument.
-        export_modules_as_functions: Deprecated option.
+        export_modules_as_functions:
 
             Flag to enable
             exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
@@ -369,6 +369,7 @@ def export(
             dump_exported_program=dump_exported_program,
             artifacts_dir=artifacts_dir,
             fallback=fallback,
+            export_modules_as_functions=export_modules_as_functions,
         )
     else:
         from torch.onnx.utils import export

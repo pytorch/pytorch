@@ -954,6 +954,7 @@ def export(
     profile: bool = False,
     dump_exported_program: bool = False,
     artifacts_dir: str | os.PathLike = ".",
+    export_modules_as_functions: bool | Collection[type[torch.nn.Module]] = False,
     verbose: bool | None = None,
 ) -> _onnx_program.ONNXProgram:
     """Export a PyTorch model to ONNXProgram.
@@ -973,6 +974,9 @@ def export(
             result will be printed.
         dump_exported_program: Whether to save the exported program to a file.
         artifacts_dir: The directory to save the exported program and error reports.
+        export_modules_as_functions: Flag to enable exporting all ``nn.Module``
+            forward calls as local functions in ONNX. Or a set to indicate the
+            particular types of modules to export as local functions in ONNX.
         verbose: Whether to print verbose messages. If None (default), some messages will be printed.
 
     Returns:
@@ -1135,6 +1139,9 @@ def export(
     else:
         pre_decomp_unique_ops = None
         post_decomp_unique_ops = None
+
+    if export_modules_as_functions:
+        decomposed_program = torch.export.unflatten(decomposed_program)
 
     try:
         # Convert the exported program to an ONNX model
