@@ -364,7 +364,8 @@ static inline bool is_smf_channels_last(const Tensor& t){
 
 bool use_channels_last_for_conv(
     const at::Tensor& src,
-    const at::Tensor& weight){
+    const at::Tensor& weight
+){
 
   if (!src.defined() || src.is_sparse()) {
     // suggest channels_first
