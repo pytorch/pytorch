@@ -65,11 +65,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   if [[ $(uname -m) == "aarch64" ]]; then
-    CONDA_COMMON_DEPS="astunparse pyyaml setuptools openblas==0.3.25=*openmp* ninja==1.11.1 scons==4.5.2"
+    conda_install "openblas==0.3.25=*openmp*"
   else
-    CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
+    conda_install "mkl=2021.4.0 mkl-include=2021.4.0"
   fi
-  conda_install ${CONDA_COMMON_DEPS}
 
   # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
   # and libpython-static for torch deploy

@@ -198,7 +198,7 @@ static bool needsGradientInProfilingMode(Block* b) {
 // differentiable graph. Autodiff will inspect these properties and prune
 // off gradients that aren't required
 // `requires_grad` properties from `dnode->outputs()` will also be transferred
-static C10_UNUSED void setRequiresGradOnDiffGraph(Node* dnode) {
+[[maybe_unused]] static void setRequiresGradOnDiffGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   for (size_t i = 0; i < dnode->inputs().size(); i++) {
     if (auto ty = dnode->input(i)->type()->cast<TensorType>()) {
