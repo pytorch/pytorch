@@ -676,8 +676,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
-        # TODO: add test to show that bwd all-gathers are indeed raise to top of mutation region
-        # TODO: see if we can trace post-backward hook, to be able to add a stronger version of this test
         self.skipTestForOldSm()
         for fwd_fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
@@ -892,7 +890,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor_fullgraph_True(self):
-        # TODO: add test to show that bwd all-gathers are indeed raise to top of mutation region
         self.skipTestForOldSm()
         for (
             fwd_fullgraph,
