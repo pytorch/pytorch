@@ -40,25 +40,6 @@ struct Vectorized16 {
   Vectorized16() = default;
   Vectorized16(VecT v) : values(v) {}
 
-  Vectorized16(
-      value_type val0,
-      value_type val1,
-      value_type val2,
-      value_type val3,
-      value_type val4,
-      value_type val5,
-      value_type val6,
-      value_type val7)
-      : values{
-            val0,
-            val1,
-            val2,
-            val3,
-            val4,
-            val5,
-            val6,
-            val7} {}
-
   operator VecT() const {
     return values;
   }
