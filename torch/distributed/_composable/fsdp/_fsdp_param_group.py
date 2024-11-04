@@ -517,13 +517,6 @@ class FSDPParamGroup:
         finally:
             self._training_state = old_training_state
 
-    def _traceable_post_backward_multi_grad_hook(self, idx_grad_ready_table, idx, grad):
-        assert idx in idx_grad_ready_table
-        idx_grad_ready_table[idx] = True
-        if all(idx_grad_ready_table.values()):
-            self.post_backward()
-        return grad
-
     # Hook Registration #
     def _register_post_backward_hook(
         self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
@@ -545,14 +538,6 @@ class FSDPParamGroup:
                 inp_tensors.append(obj)
         if len(inp_tensors) == 0:
             return args, kwargs  # no tensors that require gradients
-        # if (not torch._dynamo.config.skip_fsdp_hooks) and compiled_autograd_enabled() and torch._dynamo.eval_frame._stance.stance == "default":
-        #     idx_grad_ready_table = {}
-        #     for idx in range(len(inp_tensors)):
-        #         idx_grad_ready_table[idx] = False
-        #     for idx, inp in enumerate(inp_tensors):
-        #         inp.register_hook(functools.partial(self._traceable_post_backward_multi_grad_hook, idx_grad_ready_table, idx), prepend=True)
-        #     # torch.autograd.graph.register_multi_grad_hook(inp_tensors, self._post_backward_hook_fn)
-        # else:
         inp_tensors = RegisterPostBackwardFunction.apply(self, *inp_tensors)
         for inp_tensor_idx, inp_tensor in zip(inp_tensor_indices, inp_tensors):
             args_kwargs_list[inp_tensor_idx] = inp_tensor
@@ -694,12 +679,11 @@ def _get_param_module_infos(
 class RegisterPostBackwardFunction(torch.autograd.Function):
     @staticmethod
     def _assert_not_tracing_fsdp():
-        if compiled_autograd_enabled() and torch._dynamo.eval_frame._stance.stance == "default":
+        if compiled_autograd_enabled():
             # TODO: Find a way to print the offending FSDP2 module.
             msg = """\
-TODO: fix this error msg
-When Traceable FSDP2 is enabled, we rely on `root_post_backward_callback` to call
-each `FSDPParamGroup.post_backward`, and we should not be calling into `RegisterPostBackwardFunction`.
+When Traceable FSDP2 is enabled, we rely on the param group's next pre_backward hook to trigger the previous
+post_backward hook, and we should not be calling into `RegisterPostBackwardFunction`.
 If you are here, it means the forward part of this FSDP2 instance is not compiled, and you must also
 compile the forward part if you want to use Traceable FSDP2."""
             torch._dynamo.comptime.comptime.print(msg)

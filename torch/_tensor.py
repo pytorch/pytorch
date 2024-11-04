@@ -625,7 +625,7 @@ class Tensor(torch._C.TensorBase):
             self, gradient, retain_graph, create_graph, inputs=inputs
         )
 
-    def register_hook(self, hook, *, prepend=False):
+    def register_hook(self, hook):
         r"""Registers a backward hook.
 
         The hook will be called every time a gradient with respect to the
@@ -673,8 +673,6 @@ class Tensor(torch._C.TensorBase):
 
         handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
-        if prepend:
-            self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
         return handle
 
     def register_post_accumulate_grad_hook(self, hook):
