@@ -19,7 +19,6 @@ import torch.compiler.config
 import torch.distributed as dist
 from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once
 from torch._environment import is_fbcode
-from torch._inductor.remote_cache import create_cache
 from torch._logging._internal import trace_structured_artifact
 
 
@@ -462,6 +461,8 @@ def should_use_remote_dynamo_pgo_cache() -> bool:
 
 
 def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
+    from torch._inductor.remote_cache import create_cache
+
     if not should_use_remote_dynamo_pgo_cache():
         return None
 

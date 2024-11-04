@@ -241,7 +241,7 @@ class BlockPtrOptions:
 
         # Reshape to add singletons.
         pre_broadcast_shape = [
-            sympy.Integer(1) if is_broadcasting else dim
+            sympy.S.One if is_broadcasting else dim
             for dim, is_broadcasting in zip(
                 self.broadcast_shape, self.broadcasting_dims
             )
@@ -342,7 +342,7 @@ class BlockPtrOptions:
             and V.kernel.numels[-1] != 1
         ):
             # Need to expand rank by 1 to match rank when self.inside_reduction=True
-            final_shape.append(sympy.Integer(1))
+            final_shape.append(sympy.S.One)
 
         return BlockPtrOptions(
             params=params,
@@ -375,9 +375,7 @@ class BlockPtrOptions:
         f = V.kernel.index_to_str
         offsets = [*self.offsets]
         if not roffset:
-            offsets = [
-                self.replace_roffset(offset, sympy.Integer(0)) for offset in offsets
-            ]
+            offsets = [self.replace_roffset(offset, sympy.S.Zero) for offset in offsets]
         args = [
             (
                 f"{name} + ({f(self.constant_offset)})"
@@ -408,9 +406,7 @@ class BlockPtrOptions:
             idx
             for idx in range(len(self.shape))
             if (
-                not sizevars.statically_known_equals(
-                    self.strides[idx], sympy.Integer(0)
-                )
+                not sizevars.statically_known_equals(self.strides[idx], sympy.S.Zero)
                 and not sizevars.statically_known_multiple_of(
                     self.shape[idx], self.block_shape[idx]
                 )
@@ -437,7 +433,7 @@ class BlockPtrOptions:
         advance = [
             (
                 self.replace_roffset(offset, rblock)
-                - self.replace_roffset(offset, sympy.Integer(0))
+                - self.replace_roffset(offset, sympy.S.Zero)
             )
             for offset in self.offsets
         ]
@@ -1655,7 +1651,7 @@ class TritonKernel(SIMDKernel):
                     Compute the cumulative size of each dimension's slice.
                     This proceeds from the last dim up to the second.
                     """
-                    numels = [sympy.Integer(1)]
+                    numels = [sympy.S.One]
                     for dim in dims[:0:-1]:
                         numel = dim * numels[0]
                         numels.insert(0, numel)
@@ -1680,10 +1676,10 @@ class TritonKernel(SIMDKernel):
                 # Provide default values for unmatched dims and strides.
                 for dim in dims[1:]:
                     if dim not in match:
-                        match[dim] = sympy.Integer(1)
+                        match[dim] = sympy.S.One
                 for stride in strides[1:]:
                     if stride not in match:
-                        match[stride] = sympy.Integer(0)
+                        match[stride] = sympy.S.Zero
 
                 sizevars = V.graph.sizevars
 
@@ -1786,7 +1782,7 @@ class TritonKernel(SIMDKernel):
                     # For example xindex * 5 + rindex * 3 is partitioned to
                     # (xindex * 5, rindex * 3).
                     symbol = tree.symbol()
-                    subexpr = sympy.Integer(0) + sum(
+                    subexpr = sympy.S.Zero + sum(
                         expr for expr in index_terms if symbol in expr.free_symbols
                     )
 

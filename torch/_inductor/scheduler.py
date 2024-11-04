@@ -406,13 +406,10 @@ class BaseSchedulerNode:
             and hasattr(V.kernel, "args")
         ):
             return
-
-        # NOTE remove V.graph.removed_operations once deps issue is fixed
-        inconsequential_nodes = (
-            (self.ancestors - {self.get_name()})
-            | V.graph.removed_operations
-            | self.scheduler.completed_operations
-        )
+        fused_nodes = {
+            node.get_name()
+            for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
+        }
 
         for buf in self.get_outputs():
             buf_node = buf.node
@@ -434,11 +431,16 @@ class BaseSchedulerNode:
                     and V.graph.wrapper_code.can_reuse(input_buf, self)
                     and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
                 ):
+                    # If the writers of input_buf are in the same FusedSchedulerNode as the current op, then there is
+                    # no need to inplace.
+                    if input_buf.defining_op.get_name() in fused_nodes:
+                        continue
+
                     assert input_buf.users is not None
                     remaining_uses = [
                         x
                         for x in input_buf.users
-                        if x.node.get_name() not in inconsequential_nodes
+                        if x.node.get_name() not in self.scheduler.completed_operations
                     ]
                     if (
                         len(remaining_uses) == 1
@@ -1028,7 +1030,7 @@ class SchedulerNode(BaseSchedulerNode):
         """
         sizes, reduction_sizes = self._sizes
         return dependencies.extract_read_writes(
-            self._body, sizes, hidden_args=[[sympy.Integer(0)] * len(reduction_sizes)]
+            self._body, sizes, hidden_args=[[sympy.S.Zero] * len(reduction_sizes)]
         )
 
     def can_inplace(self, read_dep: dependencies.Dep) -> bool:
