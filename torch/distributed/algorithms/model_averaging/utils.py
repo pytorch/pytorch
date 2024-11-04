@@ -40,8 +40,7 @@ def average_parameters(
     flat_params = torch.cat([p.data.reshape(-1) for p in params_it1])
     flat_params /= dist.get_world_size(group_to_use)
     # Make sure the allreduce will not conflict with any other ongoing process group.
-    params_device_type = flat_params.device.type
-    if params_device_type in ["cuda", "xpu"]:
+    if torch.acc.is_available():
         torch.acc.synchronize()
     dist.all_reduce(flat_params, group=group_to_use)
 
