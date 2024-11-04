@@ -289,11 +289,6 @@ static struct PyGetSetDef THPFInfo_properties[] = {
     {"dtype", (getter)THPFInfo_dtype, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays)
-static PyMethodDef THPFInfo_methods[] = {
-    {nullptr} /* Sentinel */
-};
-
 PyTypeObject THPFInfoType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch.finfo", /* tp_name */
@@ -322,7 +317,7 @@ PyTypeObject THPFInfoType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPFInfo_methods, /* tp_methods */
+    nullptr, /* tp_methods */
     nullptr, /* tp_members */
     THPFInfo_properties, /* tp_getset */
     nullptr, /* tp_base */
