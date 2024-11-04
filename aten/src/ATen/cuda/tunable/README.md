@@ -80,7 +80,12 @@ fastest available implementation across both rocblas and hipblaslt.
 ## Offline Tuning
 
 ### Motivation
-Basically it is used for workload with high-memory utilization where one might run out of memory with regular tuning.
+There are a couple of uses cases for offline tuning.
+
+One use case, is a workload with a high-memory utilization where one might run out of memory with regular tuning.
+
+Another use case would be a workload that is compute intensive to run and it would be more resource efficient to collect
+the GEMMs for the workload once, and then tune repeatedly with different tuning parameters or libraries.
 
 ### Workflow
 There are basically two steps:
@@ -101,6 +106,22 @@ os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
 os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '0')
 tunable.tune_gemm_in_file("tunableop_untuned0.csv")
 ```
+
+It is also possible to take multiple untuned files and distribute the GEMMs for tuning to multiple-GPUs.
+In the first step, the GEMMs are first gathered and duplicate GEMMs are eliminated. Next, the GEMMs are
+distributed to different GPUs for tuning. After all GEMMs are tuned, the results from all the GPUs are then
+gathered into a single file whose base filename has `_full0` appended to it (e.g. `tunableop_results_full0.csv`).
+Finally, this new file, containing the gathered results, will be duplicated N times, once for each GPU as
+convenience to the user will run the workload with the tuned configuration on N GPUs.
+
+```
+num_gpus = 8 # number of GPUs that will be used during the tuning process
+tunable.mgpu_tune_gemm_in_file("tunableop_untuned?.csv", num_gpus)
+```
+
+The argument to `mgpu_tune_gemm_in_file` must contain a wild card expression (? or *) to generate the list of
+untuned files containing the GEMMs to be processed. The `num_gpus` must between 1 and the total number of GPUs
+available.
 
 ## Tuning Context
 The behavior of TunableOp is currently manipulated through environment variables, the C++ interface of
