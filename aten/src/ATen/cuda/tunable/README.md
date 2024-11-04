@@ -84,14 +84,14 @@ Basically it is used for workload with high-memory utilization where one might r
 
 ### Workflow
 There are basically two steps:
-1) Set the environment variables to collect the untuned GEMM and this will generate `tunableop_untuned?.csv` ("?" is placeholder for the GPU ID), like:
+1) Set the environment variables to collect the untuned GEMM and this will generate `tunableop_untuned0.csv`
 ```
 PYTORCH_TUNABLEOP_ENABLED=1
 PYTORCH_TUNABLEOP_TUNING=0
 PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
 ...
 ```
-2) Run a Python script that reads the `tunableop_untuned?.csv` and generates the `tunableop_results?.csv`, like:
+2) Run a Python script that reads the `tunableop_untuned0.csv` and generates the `tunableop_results0.csv`, like:
 ```
 import torch.cuda.tunable as tunable
 import os
@@ -99,7 +99,7 @@ import os
 os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
 os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
 os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '0')
-tunable.tune_gemm_in_file("tunableop_results?.csv")
+tunable.tune_gemm_in_file("tunableop_untuned0.csv")
 ```
 
 ## Tuning Context
