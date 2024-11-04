@@ -598,7 +598,7 @@ def fuse_all_gather_matmul(all_gather: _AllGatherMatch) -> None:
     # ag_res_node and the matmul above fused_node.
     order = {node: idx for idx, node in enumerate(graph.nodes)}
     nodes_to_raise = sorted(
-        {x for matmul in matmuls for x in matmul.arg_ancestor_nodes},
+        OrderedSet([x for matmul in matmuls for x in matmul.arg_ancestor_nodes]),
         key=lambda x: order[x],
     )
     for node in nodes_to_raise:

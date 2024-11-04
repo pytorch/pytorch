@@ -164,10 +164,12 @@ def _decompose_scatter_mutating(
 
 # View ops whose view_scatter op is lowered into mutations anyway,
 # so is never a pessimisation to decompose.
-_ALWAYS_MUTATING_SCATTER_OPS = {
-    aten.as_strided.default,
-    aten.diagonal.default,
-}
+_ALWAYS_MUTATING_SCATTER_OPS = OrderedSet(
+    [
+        aten.as_strided.default,
+        aten.diagonal.default,
+    ]
+)
 
 
 def scatter_always_uses_mutation(node: torch.fx.Node) -> bool:
@@ -358,16 +360,18 @@ for outplace_op, inplace_op in inplaceable_foreach_ops_lowerings.items():
     inplaceable_foreach_ops[outplace_op] = InplaceableOp(inplace_op, 0)
 
 
-inplaceable_triton_ops = {triton_kernel_wrapper_functional}
+inplaceable_triton_ops = OrderedSet([triton_kernel_wrapper_functional])
 
 
 # Operators that don't depend on the tensor data
-META_ONLY_OPS = {
-    aten.sym_size.int,
-    aten.sym_stride.int,
-    aten.sym_numel.default,
-    aten.sym_storage_offset.default,
-}
+META_ONLY_OPS = OrderedSet(
+    [
+        aten.sym_size.int,
+        aten.sym_stride.int,
+        aten.sym_numel.default,
+        aten.sym_storage_offset.default,
+    ]
+)
 
 
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:

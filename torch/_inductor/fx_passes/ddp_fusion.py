@@ -16,7 +16,6 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
-from .. import config
 from ..fx_utils import get_fake_args_kwargs
 from ..virtualized import V
 
@@ -573,17 +572,15 @@ def fuse_ddp_communication(
 ) -> None:
     for i, pa in enumerate(passes):
         with GraphTransformObserver(
-            graph.owning_module,
-            f"fuse_ddp_communication_pass_{i}",
-            config.trace.log_url_for_graph_xform,
+            graph.owning_module, f"fuse_ddp_communication_pass_{i}"
         ):
             if isinstance(pa, str):
                 func = globals()[pa]
             else:
                 func = pa
-            if "bucket_size_mb" in {
-                v.name for v in inspect.signature(func).parameters.values()
-            }:
+            if "bucket_size_mb" in OrderedSet(
+                [v.name for v in inspect.signature(func).parameters.values()]
+            ):
                 func(graph, bucket_size_mb=bucket_size_mb)
             else:
                 func(graph)

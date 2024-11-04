@@ -234,7 +234,7 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
 
 
 def sympy_product(it):
-    return functools.reduce(operator.mul, it, sympy.Integer(1))
+    return functools.reduce(operator.mul, it, sympy.S.One)
 
 
 def sympy_dot(seq1, seq2):
@@ -557,7 +557,7 @@ def get_kernel_metadata(node_schedule, wrapper):
     # is not supported. An example of this is conditional statements.
     single_graph = None
     if len(inductor_nodes):
-        unique_graphs = {n.graph for n in inductor_nodes}
+        unique_graphs = OrderedSet([n.graph for n in inductor_nodes])
         if len(unique_graphs) == 1:
             single_graph = inductor_nodes[0].graph
             # create a map of idx -> node and cache it
@@ -736,37 +736,41 @@ def get_first_incompatible_cudagraph_node(
 ) -> Optional[torch.fx.Node]:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
-    forbidden_set = {
-        "aten._fused_moving_avg_obs_fq_helper.default",
-        "aten._fused_moving_avg_obs_fq_helper_functional.default",
-        "aten.multinomial.default",
-        "fbgemm.dense_to_jagged.default",
-        "fbgemm.jagged_to_padded_dense.default",
-        "run_and_save_rng_state",
-        "run_with_rng_state",
-        "aten._local_scalar_dense",
-        # Technically, it's not necessary to ban this, because an
-        # assert_scalar with constant arguments can be validly run
-        # with CUDA graphs, but the operator is also pointless with
-        # constant arguments, so might as well ban
-        "aten._assert_scalar",
-    }
+    forbidden_set = OrderedSet(
+        [
+            "aten._fused_moving_avg_obs_fq_helper.default",
+            "aten._fused_moving_avg_obs_fq_helper_functional.default",
+            "aten.multinomial.default",
+            "fbgemm.dense_to_jagged.default",
+            "fbgemm.jagged_to_padded_dense.default",
+            "run_and_save_rng_state",
+            "run_with_rng_state",
+            "aten._local_scalar_dense",
+            # Technically, it's not necessary to ban this, because an
+            # assert_scalar with constant arguments can be validly run
+            # with CUDA graphs, but the operator is also pointless with
+            # constant arguments, so might as well ban
+            "aten._assert_scalar",
+        ]
+    )
     if torch.are_deterministic_algorithms_enabled():
         forbidden_set.update(
-            {
-                "aten._unsafe_index_put.default",
-                "aten._unsafe_masked_index_put_accumulate.default",
-                "aten.index_put.default",
-                "aten.index_put_.default",
-                "aten.scatter.src",
-                "aten.scatter.reduce",
-                "aten.scatter.value_reduce",
-                "aten.scatter_add_",
-                "aten.scatter_add.default",
-                "aten.scatter_reduce.two",
-                "aten.scatter_reduce_.two",
-                "aten.scatter_reduce.two_out",
-            }
+            OrderedSet(
+                [
+                    "aten._unsafe_index_put.default",
+                    "aten._unsafe_masked_index_put_accumulate.default",
+                    "aten.index_put.default",
+                    "aten.index_put_.default",
+                    "aten.scatter.src",
+                    "aten.scatter.reduce",
+                    "aten.scatter.value_reduce",
+                    "aten.scatter_add_",
+                    "aten.scatter_add.default",
+                    "aten.scatter_reduce.two",
+                    "aten.scatter_reduce_.two",
+                    "aten.scatter_reduce.two_out",
+                ]
+            )
         )
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
@@ -855,6 +859,42 @@ def argsort(seq) -> List[int]:
     getter = seq.__getitem__
     a_r = range(len(seq))
     return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
+
+
+def argsort_sym(
+    shape_env, seq: Sequence[Union[int, torch.SymInt, sympy.Expr]]
+) -> List[int]:
+    def cmp(a, b):
+        a_idx, a_val = a
+        b_idx, b_val = b
+
+        def evaluate(expr):
+            if isinstance(expr, bool):
+                return expr
+            return shape_env.evaluate_expr(expr, size_oblivious=True)
+
+        if evaluate(a_val < b_val):
+            return -1
+        if evaluate(a_val > b_val):
+            return 1
+        # If strides are the same, prefer the original order.
+        # (this matches argsort's algorithm).
+        # For strides = [2048, 2048, 16, 1], this is
+        # [3, 2, 1, 0].
+        if a_idx < b_idx:
+            return 1
+        if a_idx > b_idx:
+            return -1
+        return 0
+
+    # Strategy: convert all symints to sympy.Expr, then use a custom comparator
+    exprs = [
+        (idx, s.node.expr if isinstance(s, torch.SymInt) else s)
+        for idx, s in enumerate(seq)
+    ]
+    exprs = sorted(exprs, key=functools.cmp_to_key(cmp))
+    result = [idx for idx, _ in exprs]
+    return result
 
 
 @functools.lru_cache(8)
@@ -1049,6 +1089,21 @@ class DeferredLineBase:
 
     def __len__(self):
         return len(self.line)
+
+
+class DelayReplaceLine(DeferredLineBase):
+    """At end of codegen call `line.replace(key, value_fn())`"""
+
+    def __init__(self, key: str, value_fn: Callable[[], str], line: str):
+        super().__init__(line)
+        self.key = key
+        self.value_fn = value_fn
+
+    def __call__(self) -> str:
+        return self.line.replace(self.key, self.value_fn())
+
+    def _new_line(self, line: str) -> DelayReplaceLine:
+        return DelayReplaceLine(self.key, self.value_fn, line)
 
 
 @functools.lru_cache(None)
@@ -1638,7 +1693,7 @@ def pass_execution_and_save(func, gm, inp, msg):
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
-        with GraphTransformObserver(gm, msg, config.trace.log_url_for_graph_xform):
+        with GraphTransformObserver(gm, msg):
             func(gm.graph)
         time_elapsed = datetime.now() - start_time
         # recompile graph
@@ -1694,7 +1749,7 @@ def is_fallback_op(node, op):
     from . import ir
 
     if isinstance(op, torch._ops.OpOverload):
-        op = {op}
+        op = OrderedSet([op])
     return isinstance(node, ir.FallbackKernel) and node.op_overload in op
 
 
@@ -1837,7 +1892,7 @@ def device_need_guard(device: str):
 
 def needs_fallback_due_to_atomic_add_limitations(dtype):
     # tl.atomic_add does NOT support the following types
-    return dtype in {torch.int64, torch.bool, torch.bfloat16}
+    return dtype in OrderedSet([torch.int64, torch.bool, torch.bfloat16])
 
 
 def use_scatter_fallback(
@@ -1860,7 +1915,7 @@ def use_scatter_fallback(
     )
 
     return (
-        reduction_type not in {None, reduce_ty}
+        reduction_type not in OrderedSet([None, reduce_ty])
         or (
             src_is_tensor
             and is_gpu(src_device_type)
@@ -1874,7 +1929,10 @@ def use_scatter_fallback(
             and config.cpp.fallback_scatter_reduce_sum
             and (config.cpp.dynamic_threads or parallel_num_threads() != 1)
         )
-        or (reduction_type == reduce_ty and self_dtype in {torch.bool, torch.int64})
+        or (
+            reduction_type == reduce_ty
+            and self_dtype in OrderedSet([torch.bool, torch.int64])
+        )
         or torch.are_deterministic_algorithms_enabled()
     )
 
@@ -2009,9 +2067,13 @@ def align_inputs_from_check_idxs(
 
 
 def clone_preserve_strides(x: torch.Tensor):
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-    )
+    if 0 in x.size():
+        # Short-circuits if the shape has no elements
+        needed_size = 0
+    else:
+        needed_size = (
+            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        )
     buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
     return torch.as_strided(buffer, x.size(), x.stride())
 

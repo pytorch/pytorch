@@ -21,6 +21,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
@@ -91,9 +92,7 @@ def draw_buffers(
     gm = GraphModule({}, graph)
     legalize_graph(gm)
     gm.graph.lint()
-    draw_graph(
-        gm, fname, clear_meta=False, dot_graph_shape=config.trace.dot_graph_shape
-    )
+    draw_graph(gm, fname, clear_meta=False)
 
 
 def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
@@ -235,7 +234,7 @@ def get_node_name_to_buf_meta(
     buf_name_to_n_node = {}
     for node_name, buf_name in node_name_to_buf_name.items():
         if buf_name not in buf_name_to_n_node:
-            buf_name_to_n_node[buf_name] = {node_name}
+            buf_name_to_n_node[buf_name] = OrderedSet([node_name])
         else:
             buf_name_to_n_node[buf_name].add(node_name)
 
@@ -473,7 +472,26 @@ class DebugFormatter:
         inputs: List[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_runnable.py") as fd:
-            save_graph_repro(fd, gm, inputs, "inductor")
+            save_dir = None
+            if torch._inductor.config.trace.save_real_tensors:
+                inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
+                save_dir = os.path.dirname(fd.name)
+
+            # dont try to use stable hash torchinductor compilation if saving real tensors
+            # and avoid recursively trying to save real tensors inside of the inductor compilation
+            # regardless
+            stable_hash = torch._inductor.config.trace.save_real_tensors
+            with torch._inductor.config.patch(
+                {"trace.enabled": False, "trace.save_real_tensors": False}
+            ):
+                save_graph_repro(
+                    fd,
+                    gm,
+                    inputs,
+                    "inductor",
+                    save_dir=save_dir,
+                    stable_hash=stable_hash,
+                )
 
         with self.fopen("fx_graph_readable.py") as fd:
             fd.write(gm.print_readable(print_output=False))
@@ -518,7 +536,6 @@ class DebugFormatter:
             clear_meta=False,
             prog=GRAPHVIZ_COMMAND_SCALABLE,
             parse_stack_trace=True,
-            dot_graph_shape=config.trace.dot_graph_shape,
         )
 
     def output_code(self, filename: str) -> None:

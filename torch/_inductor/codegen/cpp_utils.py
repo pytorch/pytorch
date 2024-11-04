@@ -176,10 +176,14 @@ def deduce_dtype_for_cpp_cse_variable(name, *args, **kwargs):
 
 
 class CppCSEVariable(CSEVariable):
-    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
-        super().__init__(name, bounds)
+    def __init__(
+        self,
+        name,
+        bounds: ValueRanges[Any],
+        dtype: Optional[torch.dtype] = None,
+    ) -> None:
+        super().__init__(name, bounds, dtype)
         self.is_vec = False
-        self.dtype: Optional[torch.dtype] = None
         self.dependent_itervars: OrderedSet[sympy.Symbol] = OrderedSet()
 
     def __repr__(self) -> str:
@@ -488,7 +492,9 @@ def rewrite_index_for_nodes(
     index: sympy.Expr,
     global_buf_name: str,
 ):
-    used_vars = {s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)}
+    used_vars = OrderedSet(
+        [s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)]
+    )
     index_vars = []
     local_buf = localize_buffer_handler.global_to_local[global_buf_name]
     for i in range(len(local_buf.get_size())):

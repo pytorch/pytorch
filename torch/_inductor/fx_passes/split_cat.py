@@ -470,6 +470,10 @@ def normalize_reshape_default(match: Match, *args, **kwargs):
     CallMethodVarArgs("clamp", users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
 )
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.clamp, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_pass"),
+)
 def normalize_clamp_default(match: Match, *args, **kwargs):
     clamp_node = match.nodes[0]
     if not is_node_meta_valid(clamp_node):
@@ -479,12 +483,20 @@ def normalize_clamp_default(match: Match, *args, **kwargs):
     if free_symbols(clamp_node.meta["example_value"].shape):
         log.debug("dynamic shape not supported: %s", clamp_node)
         return
-
+    if len(clamp_node.args) > 1:
+        args = (get_arg_value(clamp_node, 0),)
+        kwargs = {
+            "min": get_arg_value(clamp_node, 1, kwarg_name="min"),
+            "max": get_arg_value(clamp_node, 2, kwarg_name="max"),
+        }
+    else:
+        args = clamp_node.args
+        kwargs = clamp_node.kwargs
     with match.graph.inserting_after(clamp_node):
         new_clamp_node = match.graph.call_function(
             torch.clamp,
-            args=clamp_node.args,
-            kwargs=clamp_node.kwargs,
+            args=args,
+            kwargs=kwargs,
         )
     clamp_node.replace_all_uses_with(new_clamp_node)
     new_clamp_node.meta.update(clamp_node.meta)
@@ -706,7 +718,7 @@ class SplitCatSimplifier:
         """
         user_inputs_list: List[List[Union[torch.fx.Node, _Range]]] = []
         for user in next_users:
-            if user.target in {torch.cat, torch.stack}:
+            if user.target in OrderedSet([torch.cat, torch.stack]):
                 user_inputs_list.append(self.get_merged_user_inputs(split_node, user))
             else:
                 user_inputs_list.append(self.get_non_cat_node_input(split_node, user))  # type: ignore[arg-type]
@@ -777,11 +789,13 @@ class SplitCatSimplifier:
     ) -> Optional[List[_Range]]:
         ranges = OrderedSet[Any]()
         for user_node, user_inputs in zip(next_users, user_inputs_list):
-            ranges |= {
-                user_input
-                for user_input in user_inputs
-                if isinstance(user_input, tuple)
-            }
+            ranges |= OrderedSet(
+                [
+                    user_input
+                    for user_input in user_inputs
+                    if isinstance(user_input, tuple)
+                ]
+            )
         cumulative_sizes = [0] + torch.cumsum(torch.tensor(split_sections), 0).tolist()
         split_ranges = sorted(
             [(cumulative_sizes[r[0]], cumulative_sizes[r[1] + 1]) for r in ranges]
@@ -834,7 +848,7 @@ class SplitCatSimplifier:
         transform_params_list: List[List[_TransformParam]] = []
 
         for user_node, user_inputs in zip(next_users, user_inputs_list):
-            if user_node.target not in {torch.cat, torch.stack}:
+            if user_node.target not in OrderedSet([torch.cat, torch.stack]):
                 transform_params_list.append([])
                 continue
 
@@ -949,7 +963,7 @@ class SplitCatSimplifier:
         for user_node, user_inputs_new, transform_params in zip(
             next_users, user_inputs_list_new, transform_params_list
         ):
-            if user_node.target not in {torch.cat, torch.stack}:
+            if user_node.target not in OrderedSet([torch.cat, torch.stack]):
                 # Change the args and kwargs of non-cat/stack nodes. Replace old getitems (belonging to
                 # the original split node) with the newer getitems
                 next_cat_input = 0
@@ -1078,7 +1092,7 @@ class SplitCatSimplifier:
         counters["inductor"]["scmerge_split_removed"] += 1
         to_remove.extend(split_node.users.keys())
         for next_user in next_users:
-            if next_user.target not in {torch.cat, torch.stack}:
+            if next_user.target not in OrderedSet([torch.cat, torch.stack]):
                 continue
             counters["inductor"]["scmerge_cat_removed"] += 1
             to_remove.append(next_user)

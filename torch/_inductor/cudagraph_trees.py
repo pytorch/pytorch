@@ -616,9 +616,9 @@ class CUDAWarmupNode:
 
         # See: output_is_alias_of_persistent_static_inputs below. We should only be returning freshly created
         # storages in path_live_weakrefs.
-        existing_path_data_ptrs = {
-            t.data_ptr() for t in self.path_live_weakrefs() if t()
-        }
+        existing_path_data_ptrs = OrderedSet(
+            [t.data_ptr() for t in self.path_live_weakrefs() if t()]
+        )
 
         def get_non_cudagraph_inps() -> List[weakref.ReferenceType[UntypedStorage]]:
             non_cudagraph_inps = []
@@ -1728,7 +1728,9 @@ def check_memory_pool(
     assert all(
         isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs
     )  # noqa: C419
-    unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}
+    unique_storages = {
+        stor.data_ptr() for stor in live_storages_ptrs if stor()
+    }  # noqa: set_linter
 
     # check if there is a divergence first, then do the expensive snapshot call after
     # we know it will error
@@ -2344,11 +2346,13 @@ class CUDAGraphTreeManager:
             return
 
         # repeated same pattern
-        parents = {
-            n.parent.wrapped_function.id
-            for n in itertools.chain(existing_nodes, (self.current_node,))
-            if n.parent is not None
-        }
+        parents = OrderedSet(
+            [
+                n.parent.wrapped_function.id
+                for n in itertools.chain(existing_nodes, (self.current_node,))
+                if n.parent is not None
+            ]
+        )
         if len(parents) == len(existing_nodes):
             return
 

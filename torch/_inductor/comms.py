@@ -237,10 +237,12 @@ def decide_global_ordering_of_comms(
     if any(
         is_fallback_op(
             x.node,
-            {
-                torch.ops.fsdp.all_gather_copy_in.default,
-                torch.ops.fsdp.chunk_cat.default,
-            },
+            OrderedSet(
+                [
+                    torch.ops.fsdp.all_gather_copy_in.default,
+                    torch.ops.fsdp.chunk_cat.default,
+                ]
+            ),
         )
         for x in nodes
     ):
@@ -451,14 +453,18 @@ Offending node: {unsharded_param}. Graph: {graph}
             if isinstance(node.target, torch._ops.OpOverload)
             else []
         )
-        mutated_node_arg_storages = {
-            StorageWeakRef(node.args[i].meta["val"].untyped_storage())
-            for i in mutated_arg_idxes
-        }
-        storages_of_unsharded_params = {
-            StorageWeakRef(unsharded_param.meta["val"].untyped_storage())
-            for unsharded_param in unsharded_params
-        }
+        mutated_node_arg_storages = OrderedSet(
+            [
+                StorageWeakRef(node.args[i].meta["val"].untyped_storage())
+                for i in mutated_arg_idxes
+            ]
+        )
+        storages_of_unsharded_params = OrderedSet(
+            [
+                StorageWeakRef(unsharded_param.meta["val"].untyped_storage())
+                for unsharded_param in unsharded_params
+            ]
+        )
         return len(mutated_node_arg_storages & storages_of_unsharded_params) > 0
 
     # Check no user mutation on any unsharded_param
@@ -711,11 +717,13 @@ def enforce_comm_ordering_for_fsdp(
             )
 
             # Find the "all_gather + all_gather_wait_tensor + copy_out" code block
-            allowed_ops = {
-                torch.ops._c10d_functional.all_gather_into_tensor_out.default,
-                torch.ops._c10d_functional.wait_tensor.default,
-                torch.ops.fsdp.split_with_sizes_copy.default,
-            }
+            allowed_ops = OrderedSet(
+                [
+                    torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    torch.ops._c10d_functional.wait_tensor.default,
+                    torch.ops.fsdp.split_with_sizes_copy.default,
+                ]
+            )
             find_recursive_users_of_node(
                 ag_snode,
                 ag_related_snode_set,

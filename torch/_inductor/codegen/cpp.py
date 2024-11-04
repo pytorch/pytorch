@@ -87,7 +87,7 @@ def get_export_declaration():
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
-NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}
+NATIVE_OMP_RTYPES = OrderedSet(["+", "*", "^", "||", "min", "max"])
 RTYPE_TO_CPP = {
     "sum": "+",
     "prod": "*",
@@ -100,18 +100,20 @@ RTYPE_TO_CPP = {
     "welford_reduce": "welford",
     "welford_combine": "welford",
 }
-VECTORIZABLE_RTYPES = {
-    "max",
-    "min",
-    "sum",
-    "prod",
-    "xor_sum",
-    "welford_reduce",
-    "welford_combine",
-    "argmin",
-    "argmax",
-    "any",
-}
+VECTORIZABLE_RTYPES = OrderedSet(
+    [
+        "max",
+        "min",
+        "sum",
+        "prod",
+        "xor_sum",
+        "welford_reduce",
+        "welford_combine",
+        "argmin",
+        "argmax",
+        "any",
+    ]
+)
 
 PYTHON_TO_CPP = {
     "Tensor": "at::Tensor",
@@ -193,7 +195,7 @@ def reduction_acc_type(reduction_type, dtype):
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     if is_welford_reduction(reduction_type):
         return f"Welford<{scalar_type}>"
-    if reduction_type in {"argmin", "argmax"}:
+    if reduction_type in ("argmin", "argmax"):
         return f"IndexValue<{scalar_type}>"
     return scalar_type
 
@@ -236,7 +238,7 @@ def reduction_combine(
 def reduction_project(reduction_type, acc):
     if is_welford_reduction(reduction_type):
         return f"{acc}.mean", f"{acc}.m2", f"{acc}.weight"
-    elif reduction_type in {"argmin", "argmax"}:
+    elif reduction_type in ("argmin", "argmax"):
         return f"{acc}.index"
     return acc
 
@@ -247,7 +249,7 @@ def stride_at(index: sympy.Expr, var: sympy.Symbol):
         # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
         # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool) and fails below calculation.
         # in this case, there is no dependencies between index and var.
-        return sympy.Integer(0)
+        return sympy.S.Zero
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
     return sympy.simplify(new_index - index)
@@ -1488,18 +1490,21 @@ class CppVecOverrides(CppOverrides):
 
         dtype = result.dtype
         body_code = f"{var}()"
-        body_code_vec = (
-            body_code
-            if result.is_vec
-            else f"{V.kernel._get_vec_type(dtype)}({body_code})"
-        )
+
+        def maskify_or_vecify(code):
+            return (
+                f"{V.kernel._get_mask_type()}::from({code})"
+                if dtype == torch.bool
+                else f"{V.kernel._get_vec_type(dtype)}({code})"
+            )
+
+        if result.is_vec:
+            body_code_vec = body_code
+        else:
+            body_code_vec = maskify_or_vecify(body_code)
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
         # loading bool as VecMask<float, N>
-        other_code_vec = (
-            f"{V.kernel._get_mask_type()}::from({other_code})"
-            if dtype == torch.bool
-            else f"{V.kernel._get_vec_type(dtype)}({other_code})"
-        )
+        other_code_vec = maskify_or_vecify(other_code)
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec:
             code = BracesBuffer()
@@ -1920,7 +1925,7 @@ class CppKernel(Kernel):
         self.stores.writeline(DeferredLine(name, line))
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        argmax_or_argmin = reduction_type in {"argmax", "argmin"}
+        argmax_or_argmin = reduction_type in ("argmax", "argmin")
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
@@ -2535,7 +2540,7 @@ class CppVecKernel(CppKernel):
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         assert reduction_type in VECTORIZABLE_RTYPES
-        argmax_or_argmin = reduction_type in {"argmax", "argmin"}
+        argmax_or_argmin = reduction_type in ("argmax", "argmin")
         horizontal_reduction = self.tiling_idx >= self.reduction_depth
         init_dtype = src_dtype if argmax_or_argmin else dtype
         assert isinstance(value, CppCSEVariable), value
@@ -2773,7 +2778,7 @@ class CppVecKernel(CppKernel):
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>()"
 
-        if reduction_type in {"argmin", "argmax"}:
+        if reduction_type in ("argmin", "argmax"):
             cdtype = DTYPE_TO_CPP[scalar_type]
             acc_type = self.reduction_acc_type_vec(reduction_type, dtype)
             if reduction_type == "argmin":
@@ -2805,7 +2810,7 @@ class CppVecKernel(CppKernel):
         vec_type = self._get_vec_type(scalar_type)
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>"
-        if reduction_type in {"argmin", "argmax"}:
+        if reduction_type in ("argmin", "argmax"):
             n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
             return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
@@ -3089,7 +3094,12 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}];"
+            cpp_dtype = DTYPE_TO_CPP[dtype]
+            # tiling_factor might be smaller than the alignment of cpp_dtype, such as
+            # with a vector that only holds 4 elements due to NEON 128-bit vectors and
+            # cpp_dtype being a 64-bit integer.
+            alignas = f"alignas(std::max(std::size_t({factor}), alignof({cpp_dtype})))"
+            define_line = f"{alignas} {cpp_dtype} {tile_var}[{factor}*{factor}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -4704,8 +4714,8 @@ class WorkSharing:
 class LoopLevel:
     var: Optional[sympy.Expr] = None
     size: Optional[sympy.Expr] = None
-    offset: sympy.Expr = sympy.Integer(0)
-    steps: sympy.Expr = sympy.Integer(1)
+    offset: sympy.Expr = sympy.S.Zero
+    steps: sympy.Expr = sympy.S.One
     parallel: int = 0
     simd_omp: bool = False
     simd_vec: bool = False
