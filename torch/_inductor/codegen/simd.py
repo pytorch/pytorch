@@ -348,6 +348,7 @@ class SIMDKernel(Kernel):
         self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
+        self.last_usage: OrderedSet[str] = OrderedSet()
         self.cooperative_reduction: bool = (
             override_cooperative_reduction
             if override_cooperative_reduction is not None
@@ -510,6 +511,15 @@ class SIMDKernel(Kernel):
         new_index_vars = tree.construct(new_sizes)
         new_index = sympy_subs(index, dict(zip(index_vars, reindex(new_index_vars))))
         return new_index
+
+    def set_last_usage(self, nodes):
+        if not self.inside_reduction or self.persistent_reduction:
+            return
+        self.last_usage = OrderedSet(
+            itertools.chain.from_iterable(
+                n.last_usage for n in nodes if n is not EnableReduction
+            )
+        )
 
     def disable_reduction(self):
         should_flush = self.range_trees[-1].is_loop or self.cooperative_reduction
@@ -1319,8 +1329,12 @@ class SIMDScheduling(BaseScheduling):
         return [kernel]
 
     def codegen_node_schedule_with_kernel(self, node_schedule, kernel):
+        def current_reduction_nodes(nodes):
+            return itertools.takewhile(lambda n: n is not DisableReduction, nodes)
+
         with kernel:
             stack = contextlib.ExitStack()
+            kernel.set_last_usage(current_reduction_nodes(node_schedule))
             all_indexing = {}
 
             # First pass to collect indexing and decide inplace updates
@@ -1346,6 +1360,7 @@ class SIMDScheduling(BaseScheduling):
                     stack.enter_context(kernel.disable_reduction())
                 elif node is EnableReduction:
                     stack.close()
+                    kernel.set_last_usage(current_reduction_nodes(node_schedule[i:]))
                 else:
                     # TODO - use split ranges ?
                     indexing_dtype_strength_reduction(node._body)
@@ -1457,6 +1472,10 @@ class SIMDScheduling(BaseScheduling):
             )
 
             for pn, nodes in zip(node_group, fused_node_lists):
+                if only_gen_src_code:
+                    # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
+                    for n in nodes:
+                        n.last_usage = OrderedSet()
                 self.codegen_node_schedule_with_kernel(
                     node_schedule_map[pn][0],
                     kernel.create_sub_kernel(subkernel_map[pn]),
@@ -1660,6 +1679,18 @@ class SIMDScheduling(BaseScheduling):
         return False
 
     def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
+        @dataclasses.dataclass
+        class LastUsageHolder:
+            n: Any
+            last_usage: Any
+
+            def __del__(self) -> None:
+                self.n.last_usage = self.last_usage
+
+        # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
+        for n in nodes:
+            n.last_usage = OrderedSet()
+
         if not nodes[0].is_template():
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
