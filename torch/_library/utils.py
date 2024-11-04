@@ -387,6 +387,7 @@ class MutationChecker:
         ]
         was_mutated = [
             not torch.equal(pre, post)
+            and not (pre.isnan().all() and post.isnan().all())
             if isinstance(pre, torch.Tensor) and isinstance(post, torch.Tensor)
             else None
             for pre, post in zip(self.real_pre_hashes, real_post_hashes)
