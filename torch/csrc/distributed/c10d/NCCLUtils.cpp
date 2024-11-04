@@ -376,9 +376,13 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
   writer_ = std::move(writer);
 }
 
+// Returns the traceback of current entry, in string form.
+// Note: `getTraceback` call below invokes `torch::symbolize`.
+// According to @fduwjj, `torch::symbolize` may need to acquire the GIL.
 std::string NCCLTraceBuffer::Entry::getTraceback() {
   torch::CapturedTraceback* traceback = traceback_.get();
   torch::SymbolizedTracebacks s_tbs = torch::symbolize({traceback});
+  // We use 0 because we only have one traceback here.
   const auto& s_tb = s_tbs.tracebacks.at(0);
   std::stringstream oss;
   for (auto idx : c10::irange(s_tb.size())) {
@@ -387,6 +391,14 @@ std::string NCCLTraceBuffer::Entry::getTraceback() {
     oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
         << ":" << frame.lineno << '\n';
   }
+  /* Resulted format is like:
+    #0 all_reduce from pytorch/torch/distributed/distributed_c10d.py:2696
+    #1 wrapper from pytorch/torch/distributed/c10d_logger.py:83
+    #2 bar from /home/user/repro.py:15
+    #3 foo from /home/user/repro.py:24
+    #4 main from /home/user/repro.py:34
+    #5 <module> from /home/user/repro.py:40
+  */
   return oss.str();
 }
 
@@ -509,6 +521,8 @@ std::vector<NCCLTraceBuffer::Entry> NCCLTraceBuffer::dump_entries() {
   return result;
 }
 
+// Returns the entry with the given id, if it exists. Otherwise, returns
+// std::nullopt.
 std::optional<NCCLTraceBuffer::Entry> NCCLTraceBuffer::getEntry(
     std::optional<size_t> id) {
   if (!enabled_ || !id) {
