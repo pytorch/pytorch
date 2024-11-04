@@ -1,6 +1,6 @@
 [
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/includes.py.txt",
+    "path": "tools/test/set_linter_testdata/includes.py.txt",
     "line": 24,
     "char": 20,
     "code": "SET_LINTER",
@@ -11,7 +11,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/includes.py.txt",
+    "path": "tools/test/set_linter_testdata/includes.py.txt",
     "line": 18,
     "char": 0,
     "code": "SET_LINTER",
@@ -22,7 +22,7 @@
     "description": null
   },
   {
-    "path": "/home/rec/git-constant/pytorch/tools/test/set_linter_testdata/includes.py.txt",
+    "path": "tools/test/set_linter_testdata/includes.py.txt",
     "line": null,
     "char": null,
     "code": "SET_LINTER",

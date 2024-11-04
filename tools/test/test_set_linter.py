@@ -4,12 +4,11 @@ import json
 from pathlib import Path
 from token import NAME
 from tokenize import TokenInfo
-from unittest import TestCase
 
 from tools.linter.adapters.set_linter import get_args, lint_file, PythonLines
+from torch.testing._internal.common_utils import TestCase
 
-
-TESTDATA = Path(__file__).parent / "set_linter_testdata"
+TESTDATA = Path("tools/test/set_linter_testdata")
 
 TESTFILE = TESTDATA / "python_code.py.txt"
 INCLUDES_FILE = TESTDATA / "includes.py.txt"
@@ -31,28 +30,23 @@ class TestSetLinter(TestCase):
         self.assertEqual(expected, actual)
 
     # TODO(rec): how to get parametrize to work with unittest?
-    def test_linting(self) -> None:
-        for path in FILES:
-            all_messages = [m.asdict() for m in lint_file(str(path), ARGS)]
-            edit = all_messages[-1]
-            original, replacement = edit["original"], edit["replacement"]
-            assert original == path.read_text()
+    def test_python(self):
+        self._test_linting(TESTFILE)
 
-            # Test the output file
-            expected_python_file = Path(f"{path}.python")
-            if expected_python_file.exists():
-                expected = expected_python_file.read_text()
-                self.assertEqual(expected, replacement)
-            else:
-                expected_python_file.write_text(replacement)
+    def test_includes(self):
+        self._test_linting(INCLUDES_FILE)
 
-            # Test the full lint message
-            expected_json_file = Path(f"{path}.json")
-            if expected_json_file.exists():
-                expected = json.loads(expected_json_file.read_text())
-                self.assertEqual(expected, all_messages)
-            else:
-                expected_json_file.write_text(json.dumps(all_messages, indent=2))
+    def test_includes2(self):
+        self._test_linting(INCLUDES_FILE2)
+
+    def _test_linting(self, path: Path) -> None:
+        all_messages = [m.asdict() for m in lint_file(str(path), ARGS)]
+        edit = all_messages[-1]
+        self.assertEqual(edit["original"], path.read_text())
+        self.assertExpected(edit["replacement"], ".python")
+
+        msgs = json.dumps(all_messages, indent=2)
+        self.assertExpected(msgs, ".json")
 
     def test_bracket_pairs(self) -> None:
         TESTS: tuple[tuple[str, dict[int, int]], ...] = (
