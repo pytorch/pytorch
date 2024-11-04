@@ -225,6 +225,7 @@ exclude_patterns = [
     '**/generated/**',
     '**/*pb.h',
     '**/*inl.h',
+    'aten/src/ATen/cpu/FlushDenormal.cpp',
     'aten/src/ATen/cpu/Utils.cpp',
     'aten/src/ATen/cpu/vml.h',
     'aten/src/ATen/CPUFixedAllocator.h',
