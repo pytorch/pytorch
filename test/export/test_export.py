@@ -6688,7 +6688,6 @@ graph():
 
         test(export(M(), inp))
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_unflatten_multiple_graphs_state(self):
         class N(torch.nn.Module):
             def __init__(self):
@@ -6736,17 +6735,6 @@ graph():
             # running decompositions again should work for all IRs
             ep = export(M(), inp, preserve_module_call_signature=("n",))
             test(ep.run_decompositions({}))
-            if is_training_ir_test(self._testMethodName):
-                # since we run decompositions by default when testing training IR,
-                # also test training IR without running decompositions
-                strict = not is_non_strict_test(self._testMethodName)
-                ept = torch.export.export_for_training(
-                    M(),
-                    inp,
-                    strict=strict,
-                    preserve_module_call_signature=("n",),
-                )
-                test(ept)
 
         test(export(M(), inp))
 
@@ -8134,7 +8122,6 @@ def forward(self, x, y):
         for param in ["alpha", "beta", "gamma"]:
             self.assertTrue(param in unep.state_dict())
 
-    @testing.expectedFailureRetraceabilityNonStrict
     def test_intermediate_shape_comp(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -8172,13 +8159,7 @@ def forward(self, x, y):
             for node in ep.graph.nodes
             if node.target == torch.ops.aten.repeat.default
         ]
-        self.assertEqual(
-            len(repeat_nodes),
-            1
-            if is_non_strict_test(self._testMethodName)
-            and not is_training_ir_test(self._testMethodName)
-            else 0,
-        )
+        self.assertEqual(len(repeat_nodes), 0)
 
     def test_checks_to_constrain_range(self):
         class Foo(torch.nn.Module):
