@@ -56,7 +56,7 @@ class TORCH_API LoweringContext {
 
   const BackendDevice& device() const {
     return device_;
-  };
+  }
 
   // Retrieves the vector holding all the tensors associated with the parameter
   // instructions which have been created.
