@@ -63,6 +63,7 @@ __all__ = [
     "get_safe_globals",
     "add_safe_globals",
     "safe_globals",
+    "get_unsafe_globals_in_checkpoint",
     "skip_data",
 ]
 
@@ -314,6 +315,42 @@ class safe_globals(_weights_only_unpickler._safe_globals):
         #          [-0.8234,  2.0500, -0.3657]])
         >>> assert torch.serialization.get_safe_globals() == []
     """
+
+
+def get_unsafe_globals_in_checkpoint(f: FILE_LIKE) -> List[str]:
+    """Returns a list of strings of functions/classes in a ``torch.save`` object that are not safe for ``weights_only``.
+
+    For a given function or class ``f``, the corresponding string will be of the form
+    ``{f.__module__}.{f.__name__}``.
+
+    This function will return any GLOBALs in the checkpoint that are not in the set marked safe
+    for ``weights_only`` (either via :func:`add_safe_globals` or :class:`safe_globals` context or
+    allowlisted by ``torch`` by default).
+
+    .. note::
+        This function will statically disassemble the pickle file in the checkpoint.
+        The implication is any classes dynamically pushed onto the stack during unpickling
+        will not be included in the output.
+
+    Args:
+        f: File-like object or string containing the checkpoint object saved via ``torch.save``
+
+    Returns:
+        A list of strings of pickle GLOBALs in the checkpoint that are not allowlisted for ``weights_only``.
+    """
+    safe_global_strings = set(_weights_only_unpickler._get_allowed_globals().keys())
+
+    with _open_file_like(f, "rb") as opened_file:
+        if not _is_zipfile(opened_file):
+            raise ValueError("Expected input to be a checkpoint returned by torch.save")
+        with _open_zipfile_reader(opened_file) as zip_file:
+            if _is_torchscript_zip(zip_file):
+                raise ValueError(
+                    "Expected input to be a checkpoint returned by torch.save but got a torchscript checkpoint"
+                )
+            data_file = io.BytesIO(zip_file.get_record("data.pkl"))
+            all_globals = _weights_only_unpickler.get_globals_in_pkl(data_file)
+            return list(all_globals.difference(safe_global_strings))
 
 
 class skip_data:
@@ -1211,6 +1248,7 @@ def load(
         weights_only: Indicates whether unpickler should be restricted to
             loading only tensors, primitive types, dictionaries
             and any types added via :func:`torch.serialization.add_safe_globals`.
+            See :ref:`weights-only` for more details.
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
