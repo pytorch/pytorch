@@ -387,7 +387,21 @@ def is_dynamo_compiling() -> bool:
 @contextlib.contextmanager
 def skip_guard_eval_unsafe() -> None:
     """
-    FILL UP
+    CAUTION - This API is unsafe and should only be used if your setup meets the
+    following conditions.
+
+    torch.compile uses a guard system to support recompilations and choose which
+    compiled artifact to run at runtime.  These guards, though efficient, add
+    some overhead, which may impact performance in scenarios where you need to
+    optimize for minimal guard processing time.
+
+    This API enables you to disable guard evaluation, assuming that you have
+    warmed up the compiled model with a sufficient variety of inputs. This
+    assumption means that, after the warmup phase, no further recompilations
+    will be necessary.
+
+    If this assumption fails, there is a risk of silently producing incorrect
+    results (hence the term "unsafe" in the API name).
     """
     old_value = torch._C._dynamo.eval_frame.run_diff_guard_set
     try:
