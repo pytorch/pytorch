@@ -664,11 +664,13 @@ struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
     toDestroy.release();
   }
 
-  static const owned_type& referenceFromBorrow(const borrow_type& borrow) noexcept {
+  static const owned_type& referenceFromBorrow(
+      const borrow_type& borrow) noexcept {
     return borrow;
   }
 
-  static const owned_type* pointerFromBorrow(const borrow_type& borrow) noexcept {
+  static const owned_type* pointerFromBorrow(
+      const borrow_type& borrow) noexcept {
     return &borrow;
   }
 
