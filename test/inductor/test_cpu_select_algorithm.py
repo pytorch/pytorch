@@ -1360,7 +1360,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @dtypes(torch.bfloat16)
     @parametrize("batch_size", (32,))
-    @parametrize("in_features", (128,))
+    @parametrize("in_features", (128, 144))
     @parametrize("out_features", (64, 65))
     def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
         # x will be reshaped from 3d to 2d
@@ -1726,6 +1726,29 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 (v,),
             )
             self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"coordinate_descent_tuning": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_cpp_coordinate_descent_tuning(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(512, 1024, bias=False)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        v = torch.randn(1, 512)
+        mod = M().eval()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        with verify(torch.bfloat16) as (atol, rtol), torch.autocast(device_type="cpu"):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
 
