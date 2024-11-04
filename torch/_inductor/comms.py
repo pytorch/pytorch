@@ -368,9 +368,11 @@ def raise_fsdp2_backward_all_gather_ops(graph):
     ```
     and we want to raise all the FSDP2 all-gather related ops (the ops in the middle of the example) to be immediately after the last resize-to-0 op in the previous resize0 op group.
     """
+    nodes = list(graph.nodes)
+
     # Step 1: Find all resize-to-0 ops on graph inputs
     resize0_ops = []
-    for node in graph.nodes:
+    for node in nodes:
         if (node.op == "call_function" and 
             node.target == torch.ops.inductor.resize_storage_bytes_.default and
             node.args[1] == 0):
@@ -383,7 +385,7 @@ def raise_fsdp2_backward_all_gather_ops(graph):
     resize0_group = []
     cur_graph_inputs = set()
     for i, op in enumerate(resize0_ops):
-        if i == 0 or list(graph.nodes).index(op) != list(graph.nodes).index(resize0_ops[i-1]) + 1:
+        if i == 0 or nodes.index(op) != nodes.index(resize0_ops[i-1]) + 1:
             if cur_graph_inputs:
                 # Create key for previous group using sorted tuple
                 key = tuple(sorted(cur_graph_inputs))
@@ -405,7 +407,7 @@ def raise_fsdp2_backward_all_gather_ops(graph):
             region_start = None
             if i == -1:
                 # For first region (graph start to first resize0_group)
-                for node in graph.nodes:
+                for node in nodes:
                     if node.op != "placeholder":
                         region_start = node
                         break
@@ -415,14 +417,14 @@ def raise_fsdp2_backward_all_gather_ops(graph):
                 current_group = resize0_groups[i]
                 next_group = resize0_groups[i + 1]
                 # Find the node after current_group[-1]
-                current_group_idx = graph.nodes.index(current_group[-1])
-                region_start = list(graph.nodes)[current_group_idx + 1]
+                current_group_idx = nodes.index(current_group[-1])
+                region_start = nodes[current_group_idx + 1]
                 region_end = next_group[0]  # First node of next group
             assert region_start is not None
 
             # Collect nodes between region boundaries
             nodes_between = []
-            for node in graph.nodes:
+            for node in nodes:
                 if node == region_end:
                     break
                 else:
@@ -464,7 +466,7 @@ def raise_fsdp2_backward_all_gather_ops(graph):
                     nodes_to_move.add(node)
 
             # Sort nodes to maintain original order
-            nodes_to_move = sorted(nodes_to_move, key=lambda n: list(graph.nodes).index(n))
+            nodes_to_move = sorted(nodes_to_move, key=lambda n: nodes.index(n))
 
             # Move nodes to right after region_start
             for node in nodes_to_move:
