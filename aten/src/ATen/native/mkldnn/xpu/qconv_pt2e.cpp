@@ -1,10 +1,10 @@
-#include <c10/core/MemoryFormat.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <c10/core/MemoryFormat.h>
 #include <torch/library.h>
 
-#include <iostream>
 #include <c10/core/ScalarType.h>
+#include <iostream>
 
 using namespace at::native::onednn;
 namespace at::native::xpu {
@@ -18,12 +18,10 @@ at::Tensor qconv_prepack_xpu(
     torch::List<int64_t> padding,
     torch::List<int64_t> dilation,
     int64_t groups,
-    std::optional<torch::List<int64_t>> input_shape
-){
-    // XPU has no prepack at present
-    return weight;
+    std::optional<torch::List<int64_t>> input_shape) {
+  // XPU has no prepack at present
+  return weight;
 }
-
 
 class QConvoneDNNXPU final {
  public:
@@ -56,14 +54,16 @@ class QConvoneDNNXPU final {
     } else {
       TORCH_CHECK(
           attr == "none" || attr == "relu" || attr == "hardtanh" ||
-              attr == "hardswish" || attr=="swish",
+              attr == "hardswish" || attr == "swish",
           "none post_op or post_op relu/hardtanh/hardswish is supported for quantized pointwise conv2d. Got unary_post_op: ",
           attr,
           ".");
     }
 
-    bool is_channels_last_suggested= use_channels_last_for_conv(act, weight);
-    auto mfmt = is_channels_last_suggested ? get_cl_tag_by_ndim(act.ndimension()) : at::MemoryFormat::Contiguous;
+    bool is_channels_last_suggested = use_channels_last_for_conv(act, weight);
+    auto mfmt = is_channels_last_suggested
+        ? get_cl_tag_by_ndim(act.ndimension())
+        : at::MemoryFormat::Contiguous;
     Tensor input_ = act.contiguous(mfmt);
     Tensor weight_ = weight.contiguous(mfmt);
 
@@ -106,7 +106,6 @@ class QConvoneDNNXPU final {
         /*unary_algorithm*/ algorithm);
   }
 
-
   static at::Tensor run_pointwise_binary(
       at::Tensor act,
       double act_scale,
@@ -130,24 +129,21 @@ class QConvoneDNNXPU final {
       std::optional<c10::string_view> unary_attr,
       torch::List<c10::optional<at::Scalar>> unary_scalars,
       c10::optional<c10::string_view> unary_algorithm) {
-
     TORCH_CHECK(
-      act.dim() == 4 && binary_attr == "sum" && (
-        !unary_attr.has_value() ||
-        (unary_attr.has_value() &&
-          (
-            unary_attr.value() == "none" || unary_attr.value() == "relu"
-          )
-        )
-      ),
-      "post_op sum or post_op sum_relu is supported for quantized pointwise conv2d. Got binary_post_op: ",
-      binary_attr,
-      " unary_post_op: ",
-      unary_attr.has_value() ? unary_attr.value() : "none",
-      ".")
+        act.dim() == 4 && binary_attr == "sum" &&
+            (!unary_attr.has_value() ||
+             (unary_attr.has_value() &&
+              (unary_attr.value() == "none" || unary_attr.value() == "relu"))),
+        "post_op sum or post_op sum_relu is supported for quantized pointwise conv2d. Got binary_post_op: ",
+        binary_attr,
+        " unary_post_op: ",
+        unary_attr.has_value() ? unary_attr.value() : "none",
+        ".")
 
-    bool is_channels_last_suggested= use_channels_last_for_conv(act, weight);
-    auto mfmt = is_channels_last_suggested ? get_cl_tag_by_ndim(act.ndimension()) : at::MemoryFormat::Contiguous;
+    bool is_channels_last_suggested = use_channels_last_for_conv(act, weight);
+    auto mfmt = is_channels_last_suggested
+        ? get_cl_tag_by_ndim(act.ndimension())
+        : at::MemoryFormat::Contiguous;
     Tensor input_ = act.contiguous(mfmt);
     Tensor weight_ = weight.contiguous(mfmt);
 
@@ -160,9 +156,13 @@ class QConvoneDNNXPU final {
         stride.vec(),
         dilation.vec());
 
-    bool fp32_output = output_dtype.has_value() && (output_dtype == c10::kFloat);
-    bool bfloat16_output = output_dtype.has_value() && (output_dtype == c10::kBFloat16);
-    auto dst_dtype = fp32_output ? c10::kFloat : (bfloat16_output ? c10::kBFloat16 : c10::kByte);
+    bool fp32_output =
+        output_dtype.has_value() && (output_dtype == c10::kFloat);
+    bool bfloat16_output =
+        output_dtype.has_value() && (output_dtype == c10::kBFloat16);
+    auto dst_dtype = fp32_output
+        ? c10::kFloat
+        : (bfloat16_output ? c10::kBFloat16 : c10::kByte);
     Tensor output = at::empty(
         dst_tz, device(c10::kXPU).dtype(dst_dtype).memory_format(mfmt));
 
@@ -192,15 +192,24 @@ class QConvoneDNNXPU final {
         /*unary_scalars*/ unary_scalars,
         /*unary_algorithm*/ unary_algorithm);
   }
-
 };
 
-TORCH_LIBRARY_IMPL(onednn, XPU, m){
-    m.impl(TORCH_SELECTIVE_NAME("onednn::qconv_prepack"), TORCH_FN(xpu::qconv_prepack_xpu));
-    m.impl(TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise"), QConvoneDNNXPU::run_pointwise);
-    m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise"), QConvoneDNNXPU::run_pointwise);
-    m.impl(TORCH_SELECTIVE_NAME("onednn::qconv3d_pointwise"), QConvoneDNNXPU::run_pointwise);
-    m.impl(TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"), QConvoneDNNXPU::run_pointwise_binary);
+TORCH_LIBRARY_IMPL(onednn, XPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv_prepack"),
+      TORCH_FN(xpu::qconv_prepack_xpu));
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv1d_pointwise"),
+      QConvoneDNNXPU::run_pointwise);
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise"),
+      QConvoneDNNXPU::run_pointwise);
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv3d_pointwise"),
+      QConvoneDNNXPU::run_pointwise);
+  m.impl(
+      TORCH_SELECTIVE_NAME("onednn::qconv2d_pointwise.binary"),
+      QConvoneDNNXPU::run_pointwise_binary);
 }
 
 } // namespace at::native::xpu
