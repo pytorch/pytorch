@@ -886,12 +886,6 @@ _GENERATED_ATEN_TYPE_PROMOTION_RULE_SET = {
         ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     ),
     ElementwiseTypePromotionRule(
-        "aten", "pow", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
-    ),
-    ElementwiseTypePromotionRule(
-        "aten", "pow_", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG
-    ),
-    ElementwiseTypePromotionRule(
         "aten", "prelu", [0, 1], [], ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     ),
     ElementwiseTypePromotionRule(
