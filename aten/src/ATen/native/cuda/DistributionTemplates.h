@@ -35,7 +35,7 @@ const uint32_t grid_size_bound = 4;
 // number of randoms given by distributions like curand_uniform4, curand_uniform2_double
 // used in calculating philox offset.
 #if defined(USE_ROCM)
-const uint32_t curand4_engine_calls = 16;
+const uint32_t curand4_engine_calls = 8;
 #else
 const uint32_t curand4_engine_calls = 4;
 #endif

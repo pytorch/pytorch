@@ -19,7 +19,7 @@ constexpr uint32_t num_threads() {
 #endif
 
 #if defined(USE_ROCM)
-constexpr int thread_work_size() { return 16; }
+constexpr int thread_work_size() { return 8; }
 #else
 constexpr int thread_work_size() { return 4; }
 #endif
