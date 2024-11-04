@@ -7,12 +7,16 @@
 
 #include <cstddef>
 
-namespace torch::serialize {
+namespace torch {
+namespace serialize {
 class InputArchive;
 class OutputArchive;
-} // namespace torch::serialize
+} // namespace serialize
+} // namespace torch
 
-namespace torch::data::samplers {
+namespace torch {
+namespace data {
+namespace samplers {
 
 /// A wrapper around a batch size value, which implements the
 /// `CustomBatchRequest` interface.
@@ -54,4 +58,6 @@ class TORCH_API StreamSampler : public Sampler<BatchSize> {
   size_t epoch_size_;
 };
 
-} // namespace torch::data::samplers
+} // namespace samplers
+} // namespace data
+} // namespace torch

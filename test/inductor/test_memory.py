@@ -39,11 +39,6 @@ class Foo(torch.nn.Module):
         return t3.sum() + t4.sum()
 
 
-# The tests in this class uses very small tensors. The default
-# score_fusion_memory threshold will cause different fusion decisions and
-# generate a different wrapper. Override the threshold to make these tests
-# happy.
-@config.patch("score_fusion_memory_threshold", 1)
 class TestOperatorReorderForPeakMemory(TestCase):
     def setUp(self):
         super().setUp()
@@ -147,10 +142,10 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 FileCheck()
                 .check("def call(args):")
                 .check("buf0 = ")
-                .check("buf1 = ")
                 .check("buf2 = ")
-                .check("buf3 = ")
+                .check("buf1 = ")
                 .check("buf4 = ")
+                .check("buf3 = ")
                 .check("buf5 = ")
                 .check("buf7 = ")
                 .run(code)

@@ -46,7 +46,7 @@ miopen_rnn(const Tensor & input_r,
                 fn_dropout_state_opt);
 
 #else
-    TORCH_CHECK(false, "autocast::miopen_rnn: ATen not compiled with ROCm enabled");
+    AT_ERROR("autocast::miopen_rnn: ATen not compiled with ROCm enabled");
     return {Tensor{}, Tensor{}, Tensor{}, Tensor{}, Tensor{}}; // placate the compiler
 #endif
 

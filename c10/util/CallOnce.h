@@ -1,12 +1,11 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
-
 #include <atomic>
-#include <functional>
 #include <mutex>
 #include <utility>
+
+#include <c10/macros/Macros.h>
+#include <c10/util/C++17.h>
 
 namespace c10 {
 
@@ -37,9 +36,6 @@ class once_flag {
       once_flag() noexcept = default;
   once_flag(const once_flag&) = delete;
   once_flag& operator=(const once_flag&) = delete;
-  once_flag(once_flag&&) = delete;
-  once_flag& operator=(once_flag&&) = delete;
-  ~once_flag() = default;
 
  private:
   template <typename Flag, typename F, typename... Args>
@@ -51,7 +47,7 @@ class once_flag {
     if (init_.load(std::memory_order_relaxed)) {
       return;
     }
-    std::invoke(std::forward<F>(f), std::forward<Args>(args)...);
+    c10::guts::invoke(std::forward<F>(f), std::forward<Args>(args)...);
     init_.store(true, std::memory_order_release);
   }
 

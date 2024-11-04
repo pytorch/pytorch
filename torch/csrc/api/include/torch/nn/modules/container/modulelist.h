@@ -7,7 +7,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// A list of `Module`s that registers its elements.
 ///
@@ -98,7 +99,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   /// and letting the container deal with the boxing.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void push_back(M&& module) {
-    using Type = std::remove_reference_t<M>;
+    using Type = typename std::remove_reference<M>::type;
     push_back(std::make_shared<Type>(std::forward<M>(module)));
   }
 
@@ -241,7 +242,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
   /// and letting the container deal with the boxing.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void insert(size_t index, M&& module) {
-    using Type = std::remove_reference_t<M>;
+    using Type = typename std::remove_reference<M>::type;
     insert(index, std::make_shared<Type>(std::forward<M>(module)));
   }
 
@@ -269,4 +270,5 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
 /// module storage semantics.
 TORCH_MODULE(ModuleList);
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

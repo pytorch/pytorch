@@ -5,7 +5,8 @@
 #include <torch/ordered_dict.h>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// An OrderedDict of `Module`s that registers its elements by their `key`s.
 ///
@@ -257,4 +258,5 @@ class ModuleDictImpl : public Cloneable<ModuleDictImpl> {
 /// module storage semantics.
 TORCH_MODULE(ModuleDict);
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

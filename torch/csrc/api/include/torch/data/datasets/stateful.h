@@ -6,12 +6,16 @@
 #include <cstddef>
 #include <vector>
 
-namespace torch::serialize {
+namespace torch {
+namespace serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace torch::serialize
+} // namespace serialize
+} // namespace torch
 
-namespace torch::data::datasets {
+namespace torch {
+namespace data {
+namespace datasets {
 
 /// A stateful dataset is a dataset that maintains some internal state, which
 /// will be `reset()` at the beginning of each epoch. Subclasses can override
@@ -61,4 +65,6 @@ serialize::InputArchive& operator>>(
   return archive;
 }
 
-} // namespace torch::data::datasets
+} // namespace datasets
+} // namespace data
+} // namespace torch

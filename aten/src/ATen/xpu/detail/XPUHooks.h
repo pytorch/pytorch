@@ -7,7 +7,7 @@ namespace at::xpu::detail {
 // The real implementation of XPUHooksInterface
 struct XPUHooks : public at::XPUHooksInterface {
   XPUHooks(at::XPUHooksArgs) {}
-  void init() const override;
+  void initXPU() const override;
   bool hasXPU() const override;
   std::string showConfig() const override;
   int32_t getGlobalIdxFromDevice(const at::Device& device) const override;

@@ -11,12 +11,11 @@ import sympy
 
 import torch
 
-from .. import config
+from .. import config, ir
 from ..utils import _align, align, cache_on_self, CachedMethod, IndentedBuffer
 from ..virtualized import V
 from .wrapper import (
     AllocateLine,
-    BufferLike,
     FreeIfNotReusedLine,
     MemoryPlanningLine,
     NullLine,
@@ -130,7 +129,7 @@ class Allocation(AllocationTreeNode):
     Represents memory allocated to a given node in the allocation pool.
     """
 
-    node: BufferLike
+    node: ir.Buffer
     live_range: LiveRange
     size_hint: int
     symbolic_size: sympy.Expr
@@ -507,7 +506,7 @@ class BufferGroup:
     This tracks these collections of buffers sharing underlying memory.
     """
 
-    def __init__(self, node: BufferLike):
+    def __init__(self, node: ir.Buffer):
         self.node = node
         self.names = [node.get_name()]
         self.is_output = False

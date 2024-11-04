@@ -362,7 +362,7 @@ bool InterpreterState::run(Stack& stack) {
           frame.step();
         } break;
         default:
-          TORCH_CHECK(false, toString(inst.op), " is invalid.");
+          AT_ERROR(toString(inst.op), " is invalid.");
       }
 
       if (!prev_value) {

@@ -7,9 +7,8 @@ import pickle
 import tokenize
 import unittest
 import warnings
-from dataclasses import dataclass
 from types import FunctionType, ModuleType
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Union
+from typing import Any, Callable, Dict, NoReturn, Optional, Set, Union
 from typing_extensions import deprecated
 from unittest import mock
 
@@ -44,7 +43,8 @@ def install_config_module(module: ModuleType) -> None:
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
-                config[name] = _ConfigEntry(default=value)
+                config[name] = value
+                default[name] = value
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -59,12 +59,15 @@ def install_config_module(module: ModuleType) -> None:
             else:
                 raise AssertionError(f"Unhandled config {key}={value} ({type(value)})")
 
-    config: Dict[str, _ConfigEntry] = {}
+    config: Dict[str, Any] = {}
+    default: Dict[str, Any] = {}
 
     compile_ignored_keys = get_assignments_with_compile_ignored_comments(module)
 
     visit(module, module, "")
     module._config = config  # type: ignore[attr-defined]
+    module._default = default  # type: ignore[attr-defined]
+    module._allowed_keys = set(config.keys())  # type: ignore[attr-defined]
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
     module.__class__ = ConfigModuleInstance
     module._is_dirty = True  # type: ignore[attr-defined]
@@ -113,25 +116,17 @@ def get_assignments_with_compile_ignored_comments(module: ModuleType) -> Set[str
     return assignments
 
 
-_UNSET_SENTINEL = object()
-
-
-@dataclass
-class _ConfigEntry:
-    # The default value specified in the configuration
-    default: Any
-    # The value specified by the user when they overrode the configuration
-    # _UNSET_SENTINEL indicates the value is not set.
-    user_override: Any = _UNSET_SENTINEL
-
-
 class ConfigModule(ModuleType):
     # NOTE: This should be kept in sync with _config_typing.pyi.
 
+    # The default values of the configuration settings.  This can be used to
+    # determine if the config has been changed or not.
+    _default: Dict[str, Any]
     # The actual configuration settings.  E.g., torch._dynamo.config.debug
     # would live as "debug" in the key, and torch._inductor.config.triton.cudagraphs
-    # maps as "triton.cudagraphs". See discussion on the class for meaning of various sub items
-    _config: Dict[str, _ConfigEntry]
+    # maps as "triton.cudagraphs"
+    _config: Dict[str, Any]
+    _allowed_keys: Set[str]
     _bypass_keys: Set[str]
     _compile_ignored_keys: Set[str]
     _is_dirty: bool
@@ -145,89 +140,42 @@ class ConfigModule(ModuleType):
     def __setattr__(self, name: str, value: object) -> None:
         if name in self._bypass_keys:
             super().__setattr__(name, value)
-        elif name not in self._config:
+        elif name not in self._allowed_keys:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
         else:
-            self._config[name].user_override = value
-            self._is_dirty = True
+            self._config[name] = value
 
     def __getattr__(self, name: str) -> Any:
         try:
-            config = self._config[name]
-            if config.user_override is not _UNSET_SENTINEL:
-                return config.user_override
-
-            # Note that reference types can still be modified, so we
-            # copy them to user_overrides in case the user overrides
-            # them
-            if isinstance(config.default, (list, set, dict)):
-                config.user_override = copy.deepcopy(config.default)
-                return config.user_override
-            return config.default
+            return self._config[name]
         except KeyError as e:
             # make hasattr() work properly
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
 
     def __delattr__(self, name: str) -> None:
-        self._is_dirty = True
         # must support delete because unittest.mock.patch deletes
         # then recreate things
-        self._config[name].user_override = _UNSET_SENTINEL
-
-    def _is_default(self, name: str) -> bool:
-        return self._config[name].user_override is _UNSET_SENTINEL
-
-    def _get_dict(
-        self,
-        ignored_keys: Optional[List[str]] = None,
-        ignored_prefixes: Optional[List[str]] = None,
-        skip_default: bool = False,
-    ) -> Dict[str, Any]:
-        """Export a dictionary of current configuration keys and values.
-
-        This function is design to provide a single point which handles
-        accessing config options and exporting them into a dictionary.
-        This is used by a number of different user facing export methods
-        which all have slightly different semantics re: how and what to
-        skip.
-
-        Arguments:
-            ignored_keys are keys that should not be exported.
-            ignored_prefixes are prefixes that if a key matches should
-                not be exported
-            skip_default does two things. One if a key has not been modified
-                it skips it. The other is it modified the logging behaviour
-                to match what codegen already did for modified skipped keys
-        """
-        config: Dict[str, Any] = {}
-        for key in self._config:
-            if ignored_keys and key in ignored_keys:
-                if skip_default and not self._is_default(key):
-                    warnings.warn(
-                        f"Skipping serialization of {key} value {self._config[key]}"
-                    )
-                continue
-            if ignored_prefixes:
-                if any(key.startswith(prefix) for prefix in ignored_prefixes):
-                    continue
-            if skip_default and self._is_default(key):
-                continue
-            config[key] = copy.deepcopy(getattr(self, key))
-        return config
+        del self._config[name]
 
     def save_config(self) -> bytes:
         """Convert config to a pickled blob"""
-        ignored_keys = getattr(self, "_save_config_ignore", [])
-        return pickle.dumps(
-            self._get_dict(ignored_keys=ignored_keys),
-            protocol=2,
-        )
+        config = dict(self._config)
+        for key in config.get("_save_config_ignore", ()):
+            config.pop(key)
+        return pickle.dumps(config, protocol=2)
 
     def save_config_portable(self) -> Dict[str, Any]:
         """Convert config to portable format"""
-        prefixes = ["_"]
-        prefixes.extend(getattr(self, "_cache_config_ignore_prefix", []))
-        return self._get_dict(ignored_prefixes=prefixes)
+        config: Dict[str, Any] = {}
+        for key in sorted(self._config):
+            if key.startswith("_"):
+                continue
+            if any(
+                key.startswith(e) for e in self._config["_cache_config_ignore_prefix"]
+            ):
+                continue
+            config[key] = self._config[key]
+        return config
 
     def codegen_config(self) -> str:
         """Convert config to Python statements that replicate current config.
@@ -235,38 +183,39 @@ class ConfigModule(ModuleType):
         """
         lines = []
         mod = self.__name__
-        for k, v in self._get_dict(
-            ignored_keys=getattr(self, "_save_config_ignore", []), skip_default=True
-        ).items():
+        for k, v in self._config.items():
+            if k in self._config.get("_save_config_ignore", ()):
+                if v != self._default[k]:
+                    warnings.warn(f"Skipping serialization of {k} value {v}")
+                continue
+            if v == self._default[k]:
+                continue
             lines.append(f"{mod}.{k} = {v!r}")
         return "\n".join(lines)
 
     def get_hash(self) -> bytes:
         """Hashes the configs that are not compile_ignored"""
         if self._is_dirty or self._hash_digest is None:
-            dict_to_hash = self._get_dict(ignored_keys=list(self._compile_ignored_keys))
+            dict_to_hash = {
+                k: v
+                for k, v in self._config.items()
+                if k not in self._compile_ignored_keys
+            }
             string_to_hash = repr(sorted(dict_to_hash.items()))
             self._hash_digest = hashlib.md5(string_to_hash.encode("utf-8")).digest()
             self._is_dirty = False
         return self._hash_digest
 
     @deprecated(
-        "`config.to_dict()` has been deprecated. It no longer changes the underlying config."
-        " use `config.get_config_copy()` instead if you just want a copy of the config, or "
-        "config.load_config if you need mutable access",
+        "`config.to_dict()` has been deprecated. It may no longer change the underlying config."
+        " use `config.shallow_copy_dict()` or `config.get_config_copy()` instead",
         category=FutureWarning,
     )
     def to_dict(self) -> Dict[str, Any]:
-        return self.get_config_copy()
+        return self.shallow_copy_dict()
 
-    @deprecated(
-        "`config.shallow_copy_dict()` has been deprecated. It no longer changes the underlying config."
-        " use `config.get_config_copy()` instead if you just want a copy of the config, or "
-        "config.load_config if you need mutable access",
-        category=FutureWarning,
-    )
     def shallow_copy_dict(self) -> Dict[str, Any]:
-        return self.get_config_copy()
+        return {**self._config}
 
     def load_config(self, maybe_pickled_config: Union[bytes, Dict[str, Any]]) -> None:
         """Restore from a prior call to save_config() or shallow_copy_dict()"""
@@ -274,16 +223,10 @@ class ConfigModule(ModuleType):
             config = pickle.loads(maybe_pickled_config)
         else:
             config = maybe_pickled_config
-        for k, v in config.items():
-            if k in self._config:
-                setattr(self, k, v)
-            else:
-                warnings.warn(
-                    f"key {k} with value {v} is not understood by this config"
-                )
+        self._config.update(config)
 
     def get_config_copy(self) -> Dict[str, Any]:
-        return self._get_dict()
+        return copy.deepcopy(self._config)
 
     def patch(
         self,
@@ -325,19 +268,23 @@ class ConfigModule(ModuleType):
         assert isinstance(changes, dict), f"expected `dict` got {type(changes)}"
         prior: Dict[str, Any] = {}
         config = self
+        dirty = False
 
         class ConfigPatch(ContextDecorator):
             def __enter__(self) -> None:
                 assert not prior
+                nonlocal dirty
                 for key in changes.keys():
                     # KeyError on invalid entry
-                    prior[key] = config.__getattr__(key)
-                for k, v in changes.items():
-                    config.__setattr__(k, v)
+                    prior[key] = config._config[key]
+                    dirty = key not in config._compile_ignored_keys
+                config._config.update(changes)
+                config._is_dirty = dirty
 
             def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
-                for k, v in prior.items():
-                    config.__setattr__(k, v)
+                nonlocal dirty
+                config._config.update(prior)
+                config._is_dirty = dirty
                 prior.clear()
 
         return ConfigPatch()
@@ -363,13 +310,11 @@ class ConfigModule(ModuleType):
         config = self._config
 
         def change() -> Callable[[], None]:
-            prior = {k: config[k].user_override for k in changes}
-            for k, v in changes.items():
-                self._config[k].user_override = v
+            prior = {k: config[k] for k in changes}
+            config.update(changes)
 
             def revert() -> None:
-                for k, v in prior.items():
-                    self._config[k].user_override = v
+                config.update(prior)
 
             return revert
 

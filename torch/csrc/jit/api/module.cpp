@@ -451,8 +451,7 @@ IValue Module::create_class(const c10::QualifiedName& name, Stack stack) const {
   const auto classType =
       _ivalue()->compilation_unit()->get_class(c10::QualifiedName(name));
   if (!classType) {
-    TORCH_CHECK(
-        false,
+    AT_ERROR(
         "Could not find class with name: '",
         name.qualifiedName(),
         "' in module.");

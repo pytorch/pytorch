@@ -84,7 +84,6 @@ TORCH_API std::optional<BackendDevice> GetBackendDevice(
 // For variadic template.
 TORCH_API std::optional<BackendDevice> GetBackendDevice();
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Winfinite-recursion")
 template <typename T, typename... Args>
 std::optional<BackendDevice> GetBackendDevice(
     const T& tensor,
@@ -95,6 +94,5 @@ std::optional<BackendDevice> GetBackendDevice(
   }
   return GetBackendDevice(forward_tensors...);
 }
-C10_DIAGNOSTIC_POP()
 
 } // namespace torch::lazy

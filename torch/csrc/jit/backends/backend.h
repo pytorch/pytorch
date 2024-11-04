@@ -5,7 +5,8 @@
 #include <torch/csrc/jit/backends/backend_interface.h>
 #include <torch/custom_class.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 namespace {
 // NOLINTNEXTLINE(clang-diagnostic-unneeded-internal-declaration)
 inline c10::FunctionSchema getIsAvailableSchema() {
@@ -89,7 +90,7 @@ std::function<void(Stack&)> getExecuteFunc() {
 template <class TBackendInterface>
 class backend {
   static_assert(
-      std::is_base_of_v<PyTorchBackendInterface, TBackendInterface>,
+      std::is_base_of<PyTorchBackendInterface, TBackendInterface>::value,
       "torch::jit::backend<T> requires T to inherit from PyTorchBackendInterface");
   std::string backend_name_;
 
@@ -114,4 +115,5 @@ class backend {
   }
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

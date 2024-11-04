@@ -8,7 +8,6 @@ from typing import Tuple
 import torch
 from torch import nn, Tensor
 from torch._dynamo.convert_frame import maybe_cprofile
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import rand_strided, reduce_to_scalar_loss
 from torch._inductor import config, ir, metrics
@@ -18,9 +17,10 @@ from torch._inductor.utils import ceildiv, run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda,
     serialTest,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -91,19 +91,19 @@ def forward_and_backward_pass(m, inputs):
         "triton.cudagraphs": USE_CUDA_GRAPHS,
     }
 )
-@requires_gpu()
+@requires_cuda
 class TestCaseBase(TestCase):
     @classmethod
     def setUpClass(cls):
-        if HAS_GPU:
+        if HAS_CUDA:
             cls.prior_float32_matmul_precision = torch.get_float32_matmul_precision()
             cls.prior_default_device = torch.get_default_device()
             torch.set_float32_matmul_precision("high")
-            torch.set_default_device(GPU_TYPE)
+            torch.set_default_device("cuda")
 
     @classmethod
     def tearDownClass(cls):
-        if HAS_GPU:
+        if HAS_CUDA:
             torch.set_float32_matmul_precision(cls.prior_float32_matmul_precision)
             torch.set_default_device(cls.prior_default_device)
 
@@ -141,8 +141,7 @@ class TestCaseBase(TestCase):
     ):
         if kwargs is None:
             kwargs = {}
-        device_interface = get_interface_for_device(GPU_TYPE)
-        device_interface.synchronize()
+        torch.cuda.synchronize()
         with torch.profiler.profile(with_stack=WITH_STACK) as p:
             niter = 3
             for _ in range(niter):
@@ -151,7 +150,7 @@ class TestCaseBase(TestCase):
 
                 with torch.profiler.record_function(tag_rhs):
                     f_rhs(*args, **kwargs)
-            device_interface.synchronize()
+            torch.cuda.synchronize()
 
         profile_path = "/tmp/chrome.json"
         p.export_chrome_trace(profile_path)
@@ -208,7 +207,7 @@ class PerfTestBetweenGoodAndBadShape(TestCaseBase):
 
             def f(**inputs):
                 optim.zero_grad(True)
-                with torch.autocast(GPU_TYPE):
+                with torch.cuda.amp.autocast():
                     pred = model(**inputs)
                     loss = pred[0]
                 loss.backward()
@@ -280,7 +279,7 @@ class PerfTestWithAndWithoutPadding(TestCaseBase):
             def get_f(m, optim):
                 def f(*args, **kwargs):
                     optim.zero_grad(True)
-                    with torch.autocast(GPU_TYPE):
+                    with torch.cuda.amp.autocast():
                         pred = m(*args, **kwargs)
                         loss = reduce_to_scalar_loss(pred)
                     loss.backward()
@@ -444,7 +443,7 @@ class PaddingTest(TestCaseBase):
 
         # Using stride (30522, 1) does not make a difference here.
         x_bad_shape = rand_strided(
-            (8192, 30522), (30528, 1), device=GPU_TYPE, dtype=torch.float16
+            (8192, 30522), (30528, 1), device="cuda", dtype=torch.float16
         )
         weight_bad_shape = torch.randn(30522, 768, dtype=torch.float16)
         out_bad_shape = torch.randn(8192, 768, dtype=torch.float16)
@@ -593,7 +592,7 @@ class PaddingTest(TestCaseBase):
         x1 = torch.randn(*x_shape)
 
         padded_stride = ir.Layout._pad_strides(x1.stride(), x1.shape, torch.float32)
-        x2 = rand_strided(x_shape, padded_stride, device=GPU_TYPE)
+        x2 = rand_strided(x_shape, padded_stride, device="cuda")
         x2.copy_(x1)
 
         weight = torch.randn(64, 128, 3, 3)
@@ -711,5 +710,5 @@ class PaddingTest(TestCaseBase):
 
 
 if __name__ == "__main__":
-    if HAS_GPU:
+    if HAS_CUDA:
         run_tests()

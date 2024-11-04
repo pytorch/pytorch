@@ -140,7 +140,8 @@ TORCH_ENUM_DECLARE(GRU)
 TORCH_ENUM_DECLARE(Valid)
 TORCH_ENUM_DECLARE(Same)
 
-namespace torch::enumtype {
+namespace torch {
+namespace enumtype {
 
 struct _compute_enum_name {
   TORCH_ENUM_PRETTY_PRINT(Linear)
@@ -207,4 +208,5 @@ at::Reduction::Reduction reduction_get_enum(V variant_enum) {
   }
 }
 
-} // namespace torch::enumtype
+} // namespace enumtype
+} // namespace torch

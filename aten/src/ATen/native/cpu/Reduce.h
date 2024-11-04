@@ -6,9 +6,10 @@
 #include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
 
+#include <sstream>
 #include <type_traits>
 
-namespace at::native { inline namespace CPU_CAPABILITY {
+namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -69,7 +70,7 @@ inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
 
 template <typename F>
 inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
-  for ([[maybe_unused]] const auto j : c10::irange(n)) {
+  for (C10_UNUSED const auto j : c10::irange(n)) {
     f();
     data[0] += strides[0];
     data[1] += strides[1];
@@ -80,7 +81,7 @@ inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n,
 template <typename func_t, typename vec_func_t>
 inline void vectorized_inner_reduction(char** data, int64_t n, func_t op, vec_func_t vop) {
   VEC_LOOP_HEADER(func_t, data)
-  constexpr int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
+  int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
   int64_t count = n / (4 * Vec::size());
   if (count > 0) {
     vectorized_reduction(data, count, vector_stride, op, vop, /*reduce=*/true);
@@ -95,9 +96,12 @@ template <typename func_t, typename vec_func_t>
 inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_t size0, int64_t size1, func_t op, vec_func_t vop) {
   VEC_LOOP_HEADER(func_t, data)
 
-  // reduce down each column of 4 * Vec::size() elements.
-  constexpr int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
-  int64_t outer_stride[2] = { vector_stride, vector_stride };
+  // reduce down each column of 4 * Vec::size() elements (128 or 256 bytes)
+#if defined(CPU_CAPABILITY_AVX512)
+  int64_t outer_stride[2] = { 256, 256 };
+#else
+  int64_t outer_stride[2] = { 128, 128 };
+#endif
   UNARY_OUTER_LOOP(data, outer_stride, size1 / (4 * Vec::size()), [&] {
     vectorized_reduction(data, size0, inner_stride, op, vop, /*reduce=*/false);
   });
@@ -114,7 +118,7 @@ inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_
 
 template<typename traits, typename res_t>
 static void set_result(const int index, const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
-  // static_assert(std::is_same_v<res_t, typename traits::arg2_t>, "data types must match");
+  // static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
   if (index < num_outputs) {
     char *out = (char *) iter.data_ptr(index);
     *(res_t *) out = result;
@@ -128,13 +132,13 @@ static void set_results(const res_t result, const TensorIteratorBase &iter, cons
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
-inline std::enable_if_t<i == sizeof...(tuple_t), std::size_t>
+inline typename std::enable_if<i == sizeof...(tuple_t), std::size_t>::type
 for_each_in_tuple(const std::tuple<tuple_t...>& /*t*/, const TensorIteratorBase& /*iter*/, const int /*num_outputs*/) {
   return i;
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
-inline std::enable_if_t<i < sizeof...(tuple_t), std::size_t>
+inline typename std::enable_if<i < sizeof...(tuple_t), std::size_t>::type
 for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIteratorBase &iter, const int num_outputs) {
   if (i < (size_t)num_outputs) {
     set_result<traits>(i, std::get<i>(t), iter, num_outputs);
@@ -202,7 +206,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
       typename c_traits::result_type>::value,
     "all accumulate types must match");
   static_assert(
-    std::is_default_constructible_v<acc_t>,
+    std::is_default_constructible<acc_t>::value,
     "the accumulate type must be default-constructible"
   );
   const int num_outputs = iter.noutputs();
@@ -229,7 +233,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
       int max_threads = at::get_num_threads();
       AT_ASSERT(max_threads > 0);
       static_assert(
-        !std::is_same_v<acc_t, bool>,
+        !std::is_same<acc_t, bool>::value,
         "Concurrently modifying different references into std::vector<bool> is UB."
       );
       std::vector<acc_t> buffer((unsigned)max_threads, init);
@@ -307,4 +311,4 @@ void binary_kernel_reduce_lastdim(TensorIteratorBase& iter, reduce_func_t reduce
   sub_iter.for_each(loop, grain_size);
 }
 
-}} // namespace at::native::<anonymous>
+}}}  // namespace at::native::<anonymous>

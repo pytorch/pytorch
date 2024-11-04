@@ -66,7 +66,7 @@ static inline void CUFFT_CHECK(cufftResult error)
   if (error != CUFFT_SUCCESS) {
     std::ostringstream ss;
     ss << "cuFFT error: " << _cudaGetErrorEnum(error);
-    TORCH_CHECK(false, ss.str());
+    AT_ERROR(ss.str());
   }
 }
 

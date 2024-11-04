@@ -38,7 +38,6 @@ struct UsageStream {
   UsageStream(UsageStream&& us) noexcept = default;
   UsageStream& operator=(const UsageStream& other) = default;
   UsageStream& operator=(UsageStream&& other) noexcept = default;
-  ~UsageStream() = default;
 };
 
 bool operator==(const UsageStream& lhs, const UsageStream& rhs) {
@@ -401,7 +400,7 @@ void mallocAsync(
 
 } // anonymous namespace
 
-static void local_raw_delete(void* ptr);
+void local_raw_delete(void* ptr);
 
 // Same pattern as CUDACachingAllocator.cpp.
 struct CudaMallocAsyncAllocator : public CUDAAllocator {
@@ -901,7 +900,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   }
 };
 
-static CudaMallocAsyncAllocator device_allocator;
+CudaMallocAsyncAllocator device_allocator;
 
 void local_raw_delete(void* ptr) {
   freeAsync(ptr);
@@ -912,7 +911,7 @@ CUDAAllocator* allocator() {
 
 #else
 CUDAAllocator* allocator() {
-  TORCH_CHECK(false, "Cannot use CudaMallocAsyncAllocator with cuda < 11.4.");
+  TORCH_CHECK(false, "Cannot use cudaMallocAsyncAllocator with cuda < 11.4.");
   return nullptr;
 }
 

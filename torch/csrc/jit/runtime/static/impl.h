@@ -456,7 +456,7 @@ class TORCH_API StaticModule {
     return num_inputs() + num_constants() + num_intermediate_values();
   }
 
-  [[nodiscard]] const std::vector<uint16_t>& output_indices() const {
+  C10_NODISCARD const std::vector<uint16_t>& output_indices() const {
     return output_indices_;
   }
 
@@ -488,7 +488,7 @@ class TORCH_API StaticModule {
         });
   }
 
-  [[nodiscard]] Node* findNodeWithKindForTesting(const std::string& kind) const;
+  C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
 
   const std::optional<c10::FunctionSchema>& schema() const {
     return schema_;
@@ -644,7 +644,7 @@ class TORCH_API BlockRunner {
   }
 
   // Output is readonly. The writing process happens inside ProcessedNodes
-  [[nodiscard]] const IValue& Output(uint32_t i) const {
+  C10_NODISCARD const IValue& Output(uint32_t i) const {
     DCHECK(i < outputs_.size());
     return *outputs_[i];
   }
@@ -923,7 +923,7 @@ class TORCH_API ProcessedNode {
   }
 
   // Input is readonly
-  [[nodiscard]] const IValue& Input(uint32_t i) const {
+  C10_NODISCARD const IValue& Input(uint32_t i) const {
     return values_[inputs_[i]];
   }
 
@@ -933,7 +933,7 @@ class TORCH_API ProcessedNode {
     return values_[outputs_offset_ + i];
   }
 
-  [[nodiscard]] const IValue& Output(uint32_t i) const {
+  C10_NODISCARD const IValue& Output(uint32_t i) const {
     DCHECK(i < num_outputs());
     return values_[outputs_offset_ + i];
   }
@@ -943,12 +943,12 @@ class TORCH_API ProcessedNode {
     return static_cast<uint32_t>(fn_->num_outputs());
   }
 
-  [[nodiscard]] c10::ArrayRef<const IValue> outputs() const {
+  C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {
     return c10::ArrayRef<const IValue>(
         values_ + outputs_offset_, num_outputs());
   }
 
-  [[nodiscard]] uint16_t num_inputs() const {
+  C10_NODISCARD uint16_t num_inputs() const {
     return inputs_.size();
   }
 
@@ -990,7 +990,7 @@ class TORCH_API ProcessedNode {
     values_ = values;
   }
 
-  [[nodiscard]] uint16_t output_ivalue_index(uint16_t i) const {
+  C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
     DCHECK(i < num_outputs());
     return outputs_offset_ + i;
   }
@@ -1019,9 +1019,9 @@ class TORCH_API ProcessedNode {
   }
 
  private:
-  [[nodiscard]] bool verify_outputs_dont_overlap_each_other() const;
+  C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
 
-  [[nodiscard]] bool verify_inputs_dont_overlap_outputs(bool force_check) const;
+  C10_NODISCARD bool verify_inputs_dont_overlap_outputs(bool force_check) const;
 
   Node* node_;
   const ProcessedFunction* fn_;

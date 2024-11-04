@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <forward_list>
+#include <new>
 #include <utility>
 
 #include <c10/macros/Macros.h>
@@ -51,10 +52,7 @@ class AppendOnlyList {
 
   AppendOnlyList() : buffer_last_{buffer_.before_begin()} {}
   AppendOnlyList(const AppendOnlyList&) = delete;
-  AppendOnlyList(AppendOnlyList&&) = delete;
   AppendOnlyList& operator=(const AppendOnlyList&) = delete;
-  AppendOnlyList& operator=(AppendOnlyList&&) = delete;
-  ~AppendOnlyList() = default;
 
   size_t size() const {
     return n_blocks_ * ChunkSize - (size_t)(end_ - next_);

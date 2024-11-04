@@ -8,12 +8,12 @@
     CUresult __err = EXPR;                                                 \
     if (__err != CUDA_SUCCESS) {                                           \
       const char* err_str;                                                 \
-      CUresult get_error_str_err [[maybe_unused]] =                        \
+      CUresult get_error_str_err C10_UNUSED =                              \
           c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str); \
       if (get_error_str_err != CUDA_SUCCESS) {                             \
-        TORCH_CHECK(false, "CUDA driver error: unknown error");            \
+        AT_ERROR("CUDA driver error: unknown error");                      \
       } else {                                                             \
-        TORCH_CHECK(false, "CUDA driver error: ", err_str);                \
+        AT_ERROR("CUDA driver error: ", err_str);                          \
       }                                                                    \
     }                                                                      \
   } while (0)

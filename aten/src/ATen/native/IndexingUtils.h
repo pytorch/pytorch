@@ -13,11 +13,9 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
   " does not match the shape of the indexed tensor ", self.sizes(), " at index ", idx);
 }
 
-[[maybe_unused]] static std::vector<Tensor> expandTensors(
-    const Tensor& self,
-    IOptTensorListRef indices) {
-  // If indices come in as ByteTensor or BoolTensor (masks), expand them into
-  // the equivalent indexing by LongTensors
+
+static C10_UNUSED std::vector<Tensor> expandTensors(const Tensor & self, IOptTensorListRef indices) {
+  // If indices come in as ByteTensor or BoolTensor (masks), expand them into the equivalent indexing by LongTensors
   std::vector<Tensor> result;
   for (const auto& index_opt : indices) {
     if (!index_opt.has_value()) {
@@ -50,9 +48,7 @@ static void invalid_mask(const Tensor & self, int64_t idx, const Tensor & mask, 
   return result;
 }
 
-[[maybe_unused]] static void checkIndexTensorTypes(
-    IOptTensorListRef indices,
-    bool allow_int = false) {
+static C10_UNUSED void checkIndexTensorTypes(IOptTensorListRef indices, bool allow_int=false) {
   for (const auto& tensor : indices) {
     if (tensor.has_value() && tensor->defined()) {
       auto scalarType = tensor->scalar_type();
@@ -87,7 +83,7 @@ inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValu
   return result;
 }
 
-[[maybe_unused]] static bool hasContiguousSubspace(TensorList tl) {
+static C10_UNUSED bool hasContiguousSubspace(TensorList tl) {
   // true if all the non-null tensors are adjacent
   auto isDefined = [](const Tensor & tensor){ return tensor.defined(); };
   auto isNull = [](const Tensor & tensor){ return !tensor.defined(); };
@@ -97,15 +93,15 @@ inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValu
   return it == stop.base();
 }
 
+
 // Transposes the tensor and indices together so that all the non-null indices
 // index the first k dimensions of the tensor. Returns the transposed tensor
 // and the reordered indices. For example:
 // transposeToFront(tensor, {nullptr, a, nullptr, b})
 // returns
 // tensor.permute([1, 3, 0, 2]), {a, b, nullptr, nullptr}
-[[maybe_unused]] static std::tuple<Tensor, std::vector<Tensor>> transposeToFront(
-    const Tensor& self,
-    TensorList indices) {
+static C10_UNUSED std::tuple<Tensor, std::vector<Tensor>>
+transposeToFront(const Tensor& self, TensorList indices) {
   std::vector<int64_t> dims;
   std::vector<Tensor> transposedIndices;
   dims.reserve(self.dim());

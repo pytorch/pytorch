@@ -19,9 +19,9 @@ Tensor& _sparse_mm_mkl_(
     const Scalar& alpha,
     const Scalar& beta) {
 #if __APPLE__ || __MACH__
-  TORCH_CHECK(false, "sparse_mm_mkl: MKL support is disabled on macos/iOS.");
+  AT_ERROR("sparse_mm_mkl: MKL support is disabled on macos/iOS.");
 #else
-  TORCH_CHECK(false, "sparse_mm_mkl: ATen not compiled with MKL support");
+  AT_ERROR("sparse_mm_mkl: ATen not compiled with MKL support");
 #endif
   return self; // for stopping compiler warnings.
 }

@@ -36,7 +36,6 @@ class C10_API GaugeHandle {
   void record(int64_t value);
 
  private:
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   detail::GaugeImpl& impl_;
 };
 

@@ -2,7 +2,9 @@
 
 #include <torch/nn/options/distance.h>
 
-namespace torch::nn::functional {
+namespace torch {
+namespace nn {
+namespace functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -81,4 +83,6 @@ inline Tensor pdist(const Tensor& input, double p = 2.0) {
   return torch::pdist(input, p);
 }
 
-} // namespace torch::nn::functional
+} // namespace functional
+} // namespace nn
+} // namespace torch

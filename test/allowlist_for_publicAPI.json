@@ -262,9 +262,7 @@
     "Future"
   ],
   "torch.fx": [
-    "PH",
     "ProxyableClassMeta",
-    "CodeGen",
     "Tracer",
     "symbolic_trace",
     "wrap"

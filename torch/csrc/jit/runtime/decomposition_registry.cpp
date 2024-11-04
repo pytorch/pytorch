@@ -10,7 +10,9 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/jit_decomp_interface.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <memory>
 #include <unordered_map>
@@ -77,7 +79,8 @@ static void DecomposeOp(Node* n) {
     return;
   }
   WithInsertPoint guard(n);
-  auto outputs = insertGraph(*n->owningGraph(), **decomposition, n->inputs());
+  auto outputs =
+      insertGraph(*n->owningGraph(), *decomposition->get(), n->inputs());
   TORCH_INTERNAL_ASSERT(outputs.size() == n->outputs().size());
   for (size_t i : c10::irange(outputs.size())) {
     n->outputs().at(i)->replaceAllUsesWith(outputs[i]);
@@ -98,7 +101,7 @@ static void RunDecompositions(Block* block) {
 
 void RunDecompositions(std::shared_ptr<Graph> g) {
   RunDecompositions(g->block());
-  for ([[maybe_unused]] const auto _ : c10::irange(2)) {
+  for (C10_UNUSED const auto _ : c10::irange(2)) {
     PeepholeOptimize(g, /*disable_shape_peephole*/ true);
     ConstantPropagation(g);
   }

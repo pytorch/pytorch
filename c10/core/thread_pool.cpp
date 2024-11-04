@@ -62,7 +62,6 @@ ThreadPool::~ThreadPool() {
   for (auto& t : threads_) {
     try {
       t.join();
-      // NOLINTNEXTLINE(bugprone-empty-catch)
     } catch (const std::exception&) {
     }
   }

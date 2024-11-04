@@ -172,15 +172,15 @@ class MemoryPlanner {
     return managed_output_tensors_.size();
   }
 
-  [[nodiscard]] size_t total_num_unmanaged() const {
+  C10_NODISCARD size_t total_num_unmanaged() const {
     return num_unmanaged_non_scalars() + num_unmanaged_scalars();
   }
 
-  [[nodiscard]] size_t num_unmanaged_non_scalars() const {
+  C10_NODISCARD size_t num_unmanaged_non_scalars() const {
     return unmanaged_ivalues_.size() + unmanaged_borrowed_ivalues_.size();
   }
 
-  [[nodiscard]] size_t num_unmanaged_scalars() const {
+  C10_NODISCARD size_t num_unmanaged_scalars() const {
     return num_unmanaged_scalar_ivalues_;
   }
 

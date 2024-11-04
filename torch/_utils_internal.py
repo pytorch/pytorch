@@ -4,15 +4,11 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, TypeVar
-from typing_extensions import ParamSpec
+from typing import Any, Dict, Optional
 
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
-
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 
@@ -80,16 +76,12 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
 
 
 # NB!  This treats "skip" kwarg specially!!
-def compile_time_strobelight_meta(
-    phase_name: str,
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    def compile_time_strobelight_meta_inner(
-        function: Callable[_P, _T],
-    ) -> Callable[_P, _T]:
+def compile_time_strobelight_meta(phase_name):
+    def compile_time_strobelight_meta_inner(function):
         @functools.wraps(function)
-        def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-            if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
-                kwargs["skip"] = skip + 1
+        def wrapper_function(*args, **kwargs):
+            if "skip" in kwargs:
+                kwargs["skip"] = kwargs["skip"] + 1
 
             if not StrobelightCompileTimeProfiler.enabled:
                 return function(*args, **kwargs)
@@ -365,9 +357,6 @@ def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
 
 
 def log_chromium_event_internal(
-    event: Dict[str, Any],
-    stack: List[str],
-    logger_uuid: str,
-    start_time_ns: int,
+    event, stack, compile_id, logger_uuid, start_timestamp=None
 ):
     return None

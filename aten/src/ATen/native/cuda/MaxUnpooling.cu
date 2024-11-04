@@ -267,7 +267,7 @@ static void max_unpooling3d_shape_check(
   if (gradOutput.defined()) {
     if (oT != gradOutput.size(dimt) || oH != gradOutput.size(dimh) ||
         oW != gradOutput.size(dimw)) {
-      TORCH_CHECK(false,
+      AT_ERROR(
           "Inconsistent gradOutput size. oT= ",
           oT,
           ", oH= ",
@@ -447,7 +447,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
   nInputRows = self.size(dimh);
 
   if (oheight != grad_output.size(dimh) || owidth != grad_output.size(dimw)) {
-    TORCH_CHECK(false,
+    AT_ERROR(
         "Inconsistent gradOutput size. output height: ",
         oheight,
         ", output width= ",

@@ -336,7 +336,7 @@ void TypeParser::advance() {
   lex();
 }
 
-[[nodiscard]] c10::string_view TypeParser::cur() const {
+C10_NODISCARD c10::string_view TypeParser::cur() const {
   return next_token_;
 }
 

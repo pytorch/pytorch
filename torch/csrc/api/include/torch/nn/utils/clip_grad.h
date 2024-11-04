@@ -2,11 +2,11 @@
 
 #include <torch/csrc/Export.h>
 
-#include <torch/types.h>
 #include <utility>
-#include <vector>
 
-namespace torch::nn::utils {
+namespace torch {
+namespace nn {
+namespace utils {
 
 // Clips gradient norm of a vector of Tensors.
 // See
@@ -109,7 +109,8 @@ inline double clip_grad_norm_(
     double norm_type = 2.0,
     bool error_if_nonfinite = false) {
   std::vector<Tensor> params = {std::move(parameter)};
-  return clip_grad_norm_(params, max_norm, norm_type, error_if_nonfinite);
+  return clip_grad_norm_(
+      std::move(params), max_norm, norm_type, error_if_nonfinite);
 }
 
 // Clips gradient of an iterable of parameters at specified value.
@@ -138,7 +139,9 @@ inline void clip_grad_value_(
 // single Tensor.
 inline void clip_grad_value_(Tensor parameter, double clip_value) {
   std::vector<Tensor> params = {std::move(parameter)};
-  clip_grad_value_(params, clip_value);
+  clip_grad_value_(std::move(params), clip_value);
 }
 
-} // namespace torch::nn::utils
+} // namespace utils
+} // namespace nn
+} // namespace torch

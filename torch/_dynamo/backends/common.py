@@ -77,7 +77,7 @@ class AotAutograd:
             raise
 
 
-def aot_autograd(**kwargs) -> AotAutograd:
+def aot_autograd(**kwargs):
     return AotAutograd(**kwargs)
 
 

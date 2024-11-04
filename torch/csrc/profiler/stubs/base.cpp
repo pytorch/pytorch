@@ -1,31 +1,28 @@
-#include <c10/core/Device.h>
-#include <c10/util/Exception.h>
 #include <torch/csrc/profiler/stubs/base.h>
-#include <cstdint>
-#include <functional>
+
+#include <c10/util/Exception.h>
 
 namespace torch::profiler::impl {
 
+ProfilerStubs::~ProfilerStubs() = default;
+
 namespace {
 struct DefaultStubs : public ProfilerStubs {
-  explicit DefaultStubs(const char* name) : name_{name} {}
+  DefaultStubs(const char* name) : name_{name} {}
 
-  void record(
-      c10::DeviceIndex* /*device*/,
-      ProfilerVoidEventStub* /*event*/,
-      int64_t* /*cpu_ns*/) const override {
+  void record(c10::DeviceIndex*, ProfilerVoidEventStub*, int64_t*)
+      const override {
     fail();
   }
-  float elapsed(
-      const ProfilerVoidEventStub* /*event*/,
-      const ProfilerVoidEventStub* /*event2*/) const override {
+  float elapsed(const ProfilerVoidEventStub*, const ProfilerVoidEventStub*)
+      const override {
     fail();
-    return 0.F;
+    return 0.f;
   }
-  void mark(const char* /*name*/) const override {
+  void mark(const char*) const override {
     fail();
   }
-  void rangePush(const char* /*name*/) const override {
+  void rangePush(const char*) const override {
     fail();
   }
   void rangePop() const override {
@@ -34,7 +31,7 @@ struct DefaultStubs : public ProfilerStubs {
   bool enabled() const override {
     return false;
   }
-  void onEachDevice(std::function<void(int)> /*op*/) const override {
+  void onEachDevice(std::function<void(int)>) const override {
     fail();
   }
   void synchronize() const override {
@@ -44,7 +41,7 @@ struct DefaultStubs : public ProfilerStubs {
 
  private:
   void fail() const {
-    TORCH_CHECK(false, name_, " used in profiler but not enabled.");
+    AT_ERROR(name_, " used in profiler but not enabled.");
   }
 
   const char* const name_;

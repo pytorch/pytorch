@@ -82,7 +82,6 @@ struct TORCH_API Argument {
     }
     return *this;
   }
-  ~Argument() = default;
 
   const std::string& name() const {
     return name_;
@@ -109,7 +108,7 @@ struct TORCH_API Argument {
     return is_out_;
   }
 
-  [[nodiscard]] const AliasInfo* alias_info() const {
+  C10_NODISCARD const AliasInfo* alias_info() const {
     return alias_info_.get();
   }
 

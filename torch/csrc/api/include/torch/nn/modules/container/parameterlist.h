@@ -5,7 +5,8 @@
 
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 class ParameterListImpl : public Cloneable<ParameterListImpl> {
  public:
   using Iterator = typename std::vector<
@@ -34,13 +35,13 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
 
   /// Pretty prints the `ParameterList` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override {
-    stream << "torch::nn::ParameterList(" << '\n';
+    stream << "torch::nn::ParameterList(" << std::endl;
     for (const auto& pair : parameters_) {
       stream << "(" << pair.key() << ")"
              << ": Parameter containing: [" << pair.value().scalar_type()
              << " of size " << pair.value().sizes() << "]";
       ;
-      stream << '\n';
+      stream << std::endl;
     }
     stream << ")";
   }
@@ -164,4 +165,5 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
   void push_back_var() {}
 };
 TORCH_MODULE(ParameterList);
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

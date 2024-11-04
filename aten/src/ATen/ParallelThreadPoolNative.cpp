@@ -56,7 +56,7 @@ void set_num_interop_threads(int nthreads) {
       "has started or set_num_interop_threads called");
 }
 
-size_t get_num_interop_threads() {
+int get_num_interop_threads() {
   at::internal::lazy_init_num_threads();
   int nthreads = num_interop_threads.load();
   if (nthreads > 0) {
@@ -82,7 +82,7 @@ void launch_no_thread_state(std::function<void()> fn) {
 void launch(std::function<void()> func) {
   // NOLINTNEXTLINE(modernize-avoid-bind)
   internal::launch_no_thread_state(std::bind([](
-    const std::function<void()>& f, const ThreadLocalState& thread_locals) {
+    std::function<void()> f, ThreadLocalState thread_locals) {
       ThreadLocalStateGuard guard(thread_locals);
       f();
     },

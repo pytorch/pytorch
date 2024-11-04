@@ -7,7 +7,8 @@
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Base class for all (dimension-specialized) batchnorm and instancenorm
 /// modules.
@@ -240,4 +241,5 @@ class TORCH_API BatchNorm3dImpl : public BatchNormImplBase<3, BatchNorm3dImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(BatchNorm3d);
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

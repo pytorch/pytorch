@@ -2,15 +2,13 @@
 from typing import Optional
 
 import torch.fx
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx import Node
-from torch.fx._compatibility import compatibility
-from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
 from torch.fx.node import map_aggregate
+from torch.fx._compatibility import compatibility
+from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
+from torch.fx.experimental.proxy_tensor import snapshot_fake, py_sym_types
 
-
-__all__ = ["FakeTensorProp"]
-
+__all__ = ['FakeTensorProp']
 
 @compatibility(is_backward_compatible=False)
 class FakeTensorProp(torch.fx.Interpreter):
@@ -26,10 +24,7 @@ class FakeTensorProp(torch.fx.Interpreter):
          module (GraphModule): The module to be executed
          mode (Optional[FakeTensorMode]): The dispatch mode used to execute computation indicated by each FX Node.
     """
-
-    def __init__(
-        self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None
-    ):
+    def __init__(self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None):
         super().__init__(module)
         if mode is None:
             mode = FakeTensorMode()
@@ -38,10 +33,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         mode.reset_nt_tensor_id_counter()
 
     def run_node(self, n: Node):
-        from torch.fx.experimental.symbolic_shapes import (
-            compute_unbacked_bindings,
-            rebind_unbacked,
-        )
+        from torch.fx.experimental.symbolic_shapes import rebind_unbacked, compute_unbacked_bindings
 
         result = super().run_node(n)
         rebind_unbacked(self._mode.shape_env, n, result)
@@ -60,10 +52,8 @@ class FakeTensorProp(torch.fx.Interpreter):
 
         meta = map_aggregate(result, extract_val)
         if meta is not None:
-            n.meta["val"] = meta
-            if (shape_env := self._mode.shape_env) and (
-                symbol_to_path := compute_unbacked_bindings(shape_env, result)
-            ):
+            n.meta['val'] = meta
+            if (shape_env := self._mode.shape_env) and (symbol_to_path := compute_unbacked_bindings(shape_env, result)):
                 n.meta["unbacked_bindings"] = symbol_to_path
 
         return result

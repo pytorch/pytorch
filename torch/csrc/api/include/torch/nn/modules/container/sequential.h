@@ -18,7 +18,8 @@
 #include <utility>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// A list of `Module`s that acts as a `Module` itself.
 ///
@@ -184,8 +185,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     if (auto* return_value = input.template try_get<ReturnType>()) {
       return std::move(*return_value);
     }
-    TORCH_CHECK(
-        false,
+    AT_ERROR(
         "The type of the return value is ",
         c10::demangle(input.type_info().name()),
         ", but you asked for type ",
@@ -384,4 +384,5 @@ class Sequential : public torch::nn::ModuleHolder<SequentialImpl> {
   Sequential(std::initializer_list<NamedAnyModule> named_modules)
       : ModuleHolder(std::make_shared<SequentialImpl>(named_modules)) {}
 };
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

@@ -36,8 +36,7 @@ inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(
   for (const auto i : c10::irange(tensors.size())) {
     const auto& expr = tensors[i];
     if (expr.layout() != Layout::Strided) {
-      TORCH_CHECK(
-          false,
+      AT_ERROR(
           "Expected dense tensor but got ",
           expr.layout(),
           " for sequence element ",
@@ -49,8 +48,7 @@ inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(
           "'");
     }
     if (expr.device().type() != device_type) {
-      TORCH_CHECK(
-          false,
+      AT_ERROR(
           "Expected object of device type ",
           device_type,
           " but got device type ",
@@ -64,8 +62,7 @@ inline std::vector<TensorImpl*> checked_dense_tensor_list_unwrap(
           "'");
     }
     if (expr.scalar_type() != scalar_type) {
-      TORCH_CHECK(
-          false,
+      AT_ERROR(
           "Expected object of scalar type ",
           scalar_type,
           " but got scalar type ",
@@ -99,8 +96,7 @@ std::array<int64_t, N> check_intlist(
     return res;
   }
   if (list.size() != N) {
-    TORCH_CHECK(
-        false,
+    AT_ERROR(
         "Expected a list of ",
         N,
         " ints but got ",

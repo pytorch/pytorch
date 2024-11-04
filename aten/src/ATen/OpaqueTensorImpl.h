@@ -45,15 +45,15 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
   }
 
   void set_size(int64_t dim, int64_t new_size) override {
-    TORCH_CHECK(false, "opaque tensors do not have set_size");
+    AT_ERROR("opaque tensors do not have set_size");
   }
 
   void set_stride(int64_t dim, int64_t new_stride) override {
-    TORCH_CHECK(false, "opaque tensors do not have set_stride");
+    AT_ERROR("opaque tensors do not have set_stride");
   }
 
   void set_storage_offset(int64_t storage_offset) override {
-    TORCH_CHECK(false, "opaque tensors do not have set_storage_offset");
+    AT_ERROR("opaque tensors do not have set_storage_offset");
   }
 
 #ifdef DEBUG

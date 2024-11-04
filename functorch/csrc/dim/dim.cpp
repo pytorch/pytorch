@@ -867,7 +867,7 @@ mpy::object Tensor::from_positional(Arena & A, at::Tensor tensor, Slice<DimEntry
     }
     AT_ASSERT(last == 0 || last == -1);
     if (!seen_dims) {
-        return mpy::object::steal(THPVariable_Wrap(tensor));
+        return mpy::object::steal(THPVariable_Wrap(std::move(tensor)));
     }
 
     mpy::obj<Tensor> self = Tensor::create();

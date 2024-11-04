@@ -20,15 +20,14 @@ class LazyCache:
     def realize(self) -> None:
         assert self.vt is None
         from ..symbolic_convert import InstructionTranslator
+        from .builder import SourcelessBuilder, VariableBuilder
 
         tx = InstructionTranslator.current_tx()
-
         if isinstance(self.value, LazySymNodeFormatString):
-            source = None
+            self.vt = SourcelessBuilder.create(tx, self.value)
         else:
-            source = self.source
+            self.vt = VariableBuilder(tx, self.source)(self.value)
 
-        self.vt = VariableTracker.build(tx, self.value, source)
         del self.value
         del self.source
 
@@ -38,7 +37,7 @@ class LazyVariableTracker(VariableTracker):
     A structure that defers the creation of the actual VariableTracker
     for a given underlying value until it is accessed.
 
-    The `realize` function invokes VariableTracker.build() to produce the real object.
+    The `realize` function invokes VariableBuilder to produce the real object.
     Once a LazyVariableTracker has been realized, internal bookkeeping will
     prevent double realization.
 
@@ -91,15 +90,15 @@ class LazyVariableTracker(VariableTracker):
 
     def __str__(self) -> str:
         if self.is_realized():
-            return repr(self.unwrap())
-        return super().__repr__()
+            return self.unwrap().__str__()
+        return VariableTracker.__str__(self.unwrap())
 
     def __getattr__(self, item: str) -> Any:
         return getattr(self.realize(), item)
 
     # most methods are auto-generated below, these are the ones we want to exclude
     visit = VariableTracker.visit  # type: ignore[assignment]
-    __repr__ = __str__
+    __repr__ = VariableTracker.__repr__
 
     @classmethod
     def realize_all(
@@ -153,7 +152,7 @@ class LazySymNodeFormatString:
             "{:" + fmt_spec_var.as_python_constant() + "}"
         )
 
-    def __repr__(self) -> str:
+    def __str__(self) -> str:
         return str.format(
             self.fmt_var.as_python_constant(),
             str(self.sym_node_var.evaluate_expr()),

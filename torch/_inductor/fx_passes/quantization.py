@@ -668,10 +668,12 @@ def _register_quantized_conv_binary_lowering(
             x,
             x_scale,
             x_zp,
+            accum,
+            accum_scale,
+            accum_zp,
             packed_weight,
             w_scale,
             w_zp,
-            accum,
             b,
             stride,
             padding,
@@ -680,8 +682,6 @@ def _register_quantized_conv_binary_lowering(
             o_inv_scale,
             o_zero_point,
             output_dtype,
-            accum_scale,
-            accum_zp,
             binary_unary_attr.binary_op_name,
             binary_unary_attr.alpha,
             binary_unary_attr.unary_op_name,
@@ -912,38 +912,31 @@ def _register_quantization_binary_fusion():
 
     for int8_mixed_bf16_with_inplace_add in [False, True]:
         # Priority 1 to match: QConv2d Binary or Binary-Unary pattern with int8 output
-        swap_binary_inputs_list = [False, True]
-        binary_replace_patterns = {}
-        for swap_inputs in swap_binary_inputs_list:
-            binary_replace_patterns.update(
-                {
-                    BinaryUnaryAttr(
-                        "sum", 1.0, "none", [], ""
-                    ): generate_pattern_with_output_quant(
-                        generate_pattern_with_binary(
-                            aten.add.Tensor,
-                            get_dequantize_qconv_pt2e_pattern(1),
-                            dequantize_accum_pattern,
-                            int8_mixed_bf16_with_inplace_add,
-                            swap_inputs=swap_inputs,
-                        ),
+        binary_replace_patterns = {
+            BinaryUnaryAttr(
+                "sum", 1.0, "none", [], ""
+            ): generate_pattern_with_output_quant(
+                generate_pattern_with_binary(
+                    aten.add.Tensor,
+                    get_dequantize_qconv_pt2e_pattern(1),
+                    dequantize_accum_pattern,
+                    int8_mixed_bf16_with_inplace_add,
+                ),
+            ),
+            BinaryUnaryAttr(
+                "sum", 1.0, "relu", [], ""
+            ): generate_pattern_with_output_quant(
+                generate_pattern_with_unary(
+                    generate_pattern_with_binary(
+                        aten.add.Tensor,
+                        get_dequantize_qconv_pt2e_pattern(1),
+                        dequantize_accum_pattern,
+                        int8_mixed_bf16_with_inplace_add,
                     ),
-                    BinaryUnaryAttr(
-                        "sum", 1.0, "relu", [], ""
-                    ): generate_pattern_with_output_quant(
-                        generate_pattern_with_unary(
-                            generate_pattern_with_binary(
-                                aten.add.Tensor,
-                                get_dequantize_qconv_pt2e_pattern(1),
-                                dequantize_accum_pattern,
-                                int8_mixed_bf16_with_inplace_add,
-                                swap_inputs=swap_inputs,
-                            ),
-                            aten.relu.default,
-                        ),
-                    ),
-                }
-            )
+                    aten.relu.default,
+                ),
+            ),
+        }
 
         for binary_unary_attr, patterns in binary_replace_patterns.items():
             _register_quantized_conv_binary_lowering(
@@ -954,24 +947,17 @@ def _register_quantization_binary_fusion():
             )
 
         # Priority 2 to match: QConv2d Binary-Unary pattern with fp32/bfloat16 output
-        binary_replace_float_out_patterns = {}
-        for swap_inputs in swap_binary_inputs_list:
-            binary_replace_float_out_patterns.update(
-                {
-                    BinaryUnaryAttr(
-                        "sum", 1.0, "relu", [], ""
-                    ): generate_pattern_with_unary(
-                        generate_pattern_with_binary(
-                            aten.add.Tensor,
-                            get_dequantize_qconv_pt2e_pattern(1),
-                            KeywordArg("accum_after_dequant"),
-                            int8_mixed_bf16_with_inplace_add,
-                            swap_inputs=swap_inputs,
-                        ),
-                        aten.relu.default,
-                    )
-                }
-            )
+        binary_replace_float_out_patterns = {
+            BinaryUnaryAttr("sum", 1.0, "relu", [], ""): generate_pattern_with_unary(
+                generate_pattern_with_binary(
+                    aten.add.Tensor,
+                    get_dequantize_qconv_pt2e_pattern(1),
+                    KeywordArg("accum_after_dequant"),
+                    int8_mixed_bf16_with_inplace_add,
+                ),
+                aten.relu.default,
+            ),
+        }
 
         for (
             binary_unary_attr,
@@ -993,21 +979,14 @@ def _register_quantization_binary_fusion():
                 )
 
         # Priority 3: QConv2d Binary pattern with fp32/bfloat16 output
-        binary_replace_float_out_patterns = {}
-        for swap_inputs in swap_binary_inputs_list:
-            binary_replace_float_out_patterns.update(
-                {
-                    BinaryUnaryAttr(
-                        "sum", 1.0, "none", [], ""
-                    ): generate_pattern_with_binary(
-                        aten.add.Tensor,
-                        get_dequantize_qconv_pt2e_pattern(1),
-                        KeywordArg("accum_after_dequant"),
-                        int8_mixed_bf16_with_inplace_add,
-                        swap_inputs=swap_inputs,
-                    ),
-                }
-            )
+        binary_replace_float_out_patterns = {
+            BinaryUnaryAttr("sum", 1.0, "none", [], ""): generate_pattern_with_binary(
+                aten.add.Tensor,
+                get_dequantize_qconv_pt2e_pattern(1),
+                KeywordArg("accum_after_dequant"),
+                int8_mixed_bf16_with_inplace_add,
+            ),
+        }
 
         for (
             binary_unary_attr,

@@ -76,7 +76,7 @@ static void pool2d_template(const Tensor& input,
   } else if (suggested_memory_format == at::MemoryFormat::Contiguous) {
     TORCH_CHECK((ndims == 3 || ndims == 4), "non-empty 3D or 4D (batch mode) tensor expected for input");
   } else {
-    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+    AT_ERROR("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 
   int padH = safe_downcast<int, int64_t>(padding[0]);

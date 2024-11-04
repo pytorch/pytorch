@@ -618,7 +618,8 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_relu(
 
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at::native {
+namespace at {
+namespace native {
 namespace {
 
 template <bool ReluFused>
@@ -835,4 +836,5 @@ TORCH_LIBRARY_IMPL(_quantized, Meta, m) {
 }
 
 } // namespace
-} // namespace at::native
+} // namespace native
+} // namespace at

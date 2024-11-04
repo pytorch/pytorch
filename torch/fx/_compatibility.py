@@ -1,19 +1,16 @@
+from typing import Any, Dict, Callable, TypeVar
 import textwrap
-from typing import Any, Callable, Dict, TypeVar
 
-
-_BACK_COMPAT_OBJECTS: Dict[Any, None] = {}
-_MARKED_WITH_COMPATIBILITY: Dict[Any, None] = {}
-
+_BACK_COMPAT_OBJECTS : Dict[Any, None] = {}
+_MARKED_WITH_COMPATIBILITY : Dict[Any, None] = {}
 
 _T = TypeVar("_T")
-
 
 def compatibility(is_backward_compatible: bool) -> Callable[[_T], _T]:
     if is_backward_compatible:
 
         def mark_back_compat(fn: _T) -> _T:
-            docstring = textwrap.dedent(getattr(fn, "__doc__", None) or "")
+            docstring = textwrap.dedent(getattr(fn, '__doc__', None) or '')
             docstring += """
 .. note::
     Backwards-compatibility for this API is guaranteed.
@@ -27,7 +24,7 @@ def compatibility(is_backward_compatible: bool) -> Callable[[_T], _T]:
     else:
 
         def mark_not_back_compat(fn: _T) -> _T:
-            docstring = textwrap.dedent(getattr(fn, "__doc__", None) or "")
+            docstring = textwrap.dedent(getattr(fn, '__doc__', None) or '')
             docstring += """
 .. warning::
     This API is experimental and is *NOT* backward-compatible.

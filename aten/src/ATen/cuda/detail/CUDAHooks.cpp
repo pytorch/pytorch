@@ -39,6 +39,7 @@
 
 #include <sstream>
 #include <cstddef>
+#include <functional>
 #include <memory>
 
 namespace c10::cuda::_internal {
@@ -60,7 +61,7 @@ namespace {
 bool _hasPrimaryContext(DeviceIndex device_index) {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
               "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
-  unsigned int ctx_flags = 0;
+  unsigned int ctx_flags;
   // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
   // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
   int ctx_is_active = 0;
@@ -83,7 +84,7 @@ struct _Initializer {
 // NB: deleter is dynamic, because we need it to live in a separate
 // compilation unit (alt is to have another method in hooks, but
 // let's not if we don't need to!)
-void CUDAHooks::init() const {
+void CUDAHooks::initCUDA() const {
   C10_LOG_API_USAGE_ONCE("aten.init.cuda");
   // Force the update to enable unit testing. This code get executed before unit tests
   // have a chance to enable vitals.
@@ -123,7 +124,7 @@ bool CUDAHooks::isPinnedPtr(const void* data) const {
   if (primary_ctx_device_index.has_value()) {
     device_guard.reset_device(at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
   }
-  cudaPointerAttributes attr{};
+  cudaPointerAttributes attr;
   // We do not believe that CUDA needs mutable access to the data
   // here.
   cudaError_t err = cudaPointerGetAttributes(&attr, data);
@@ -299,7 +300,7 @@ long CUDAHooks::versionCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_VERSION;
 #else
-  TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+  AT_ERROR("Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
 #endif
 }
 
@@ -324,10 +325,10 @@ bool CUDAHooks::hasCUDART() const {
 std::string CUDAHooks::showConfig() const {
   std::ostringstream oss;
 
-  int runtimeVersion = 0;
+  int runtimeVersion;
   cudaRuntimeGetVersion(&runtimeVersion);
 
-  auto printCudaStyleVersion = [&](size_t v) {
+  auto printCudaStyleVersion = [&](int v) {
 #ifdef USE_ROCM
     // HIP_VERSION value format was changed after ROCm v4.2 to include the patch number
     if(v < 500) {
@@ -368,7 +369,7 @@ std::string CUDAHooks::showConfig() const {
 #if AT_CUDNN_ENABLED()
 
 
-  auto printCudnnStyleVersion = [&](size_t v) {
+  auto printCudnnStyleVersion = [&](int v) {
     oss << (v / 1000) << "." << (v / 100 % 10);
     if (v % 100 != 0) {
       oss << "." << (v % 100);
@@ -407,7 +408,7 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_BN_MIN_EPSILON;
 #else
-  TORCH_CHECK(false,
+  AT_ERROR(
       "Cannot query CUDNN_BN_MIN_EPSILON if ATen_cuda is not built with CuDNN");
 #endif
 }

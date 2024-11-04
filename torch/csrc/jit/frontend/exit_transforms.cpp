@@ -74,7 +74,7 @@ struct ExitTransformer {
     // this value will never be used, since we will always throw before it is
     // accessed
     throws_val_ = getUnitValue(BoolType::get());
-  }
+  };
 
   void transformReturnStmts() {
     current_exit_kind_ = prim::ReturnStmt;

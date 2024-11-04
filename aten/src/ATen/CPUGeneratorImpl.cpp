@@ -189,7 +189,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
       double_normal_sample = std::optional<double>(legacy_pod->normal_y);
     }
   } else {
-    TORCH_CHECK(false, "Expected either a CPUGeneratorImplStateLegacy of size ", size_legacy,
+    AT_ERROR("Expected either a CPUGeneratorImplStateLegacy of size ", size_legacy,
              " or a CPUGeneratorImplState of size ", size_current,
              " but found the input RNG state size to be ", new_state_size);
   }

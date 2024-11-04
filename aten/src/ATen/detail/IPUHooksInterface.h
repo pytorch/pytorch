@@ -1,25 +1,14 @@
 #pragma once
 
 #include <ATen/core/Generator.h>
-#include <ATen/detail/AcceleratorHooksInterface.h>
-
 #include <c10/core/Allocator.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
 namespace at {
 
-struct TORCH_API IPUHooksInterface: AcceleratorHooksInterface {
-  ~IPUHooksInterface() override = default;
-
-  void init() const override {
-    TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
-  }
-
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
-    TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
-    return false;
-  }
+struct TORCH_API IPUHooksInterface {
+  virtual ~IPUHooksInterface() = default;
 
   virtual const Generator& getDefaultIPUGenerator(
       DeviceIndex device_index [[maybe_unused]] = -1) const {

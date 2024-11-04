@@ -6,7 +6,8 @@
 
 #include <c10/util/CallOnce.h>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 void initQNNPACK() {
   static c10::once_flag once;
@@ -18,6 +19,7 @@ void initQNNPACK() {
       "failed to initialize QNNPACK");
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at
 
 #endif

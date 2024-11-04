@@ -46,7 +46,7 @@ std::chrono::milliseconds ExponentialBackoffWithJitter::nextBackoff() {
   std::chrono::milliseconds maxSampleInterval =
       currentInterval_ + randomization;
 
-  std::uniform_int_distribution<int64_t> dist(
+  std::uniform_int_distribution<> dist(
       minSampleInterval.count(), maxSampleInterval.count());
   std::chrono::milliseconds backoffInterval{dist(gen_)};
 

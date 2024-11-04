@@ -5,7 +5,8 @@
 #include <torch/types.h>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Options for the `LayerNorm` module.
 ///
@@ -187,4 +188,5 @@ struct TORCH_API GroupNormFuncOptions {
 
 } // namespace functional
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

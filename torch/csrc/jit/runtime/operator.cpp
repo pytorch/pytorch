@@ -355,8 +355,7 @@ void registerOperator(Operator&& op) {
   if (op.schema().is_varret()) {
     Symbol s = Symbol::fromQualString(op.schema().name());
     if (!printerHasSpecialCaseFor(s)) {
-      TORCH_CHECK(
-          false,
+      AT_ERROR(
           "Missing special case in python printer for non-schematized"
           " operator ",
           op.schema().name(),
@@ -364,8 +363,7 @@ void registerOperator(Operator&& op) {
     }
     if (aliasAnalysisHasSpecialCaseFor(s) &&
         op.aliasAnalysisKind() == AliasAnalysisKind::CONSERVATIVE) {
-      TORCH_CHECK(
-          false,
+      AT_ERROR(
           "Conflict in special casing in alias analysis for non-schematized"
           " operator ",
           op.schema().name(),
@@ -373,8 +371,7 @@ void registerOperator(Operator&& op) {
     }
     if (aliasAnalysisHasSpecialCaseFor(s) &&
         op.aliasAnalysisKind() == AliasAnalysisKind::FROM_SCHEMA) {
-      TORCH_CHECK(
-          false,
+      AT_ERROR(
           "The operator ",
           op.schema().name(),
           " is special cased and cannot use explicit alias analysis.");

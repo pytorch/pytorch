@@ -36,7 +36,7 @@ def define_targets(rules):
             "caffe2/serialize/istream_adapter.cc",
             "caffe2/serialize/read_adapter_interface.cc",
         ],
-        copts = ["-fexceptions", "-DFBCODE_CAFFE2"],
+        copts = ["-fexceptions"],
         tags = [
             "-fbcode",
             "supermodule:android/default/pytorch",

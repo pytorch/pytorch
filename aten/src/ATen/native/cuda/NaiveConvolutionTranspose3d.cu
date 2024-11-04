@@ -106,7 +106,7 @@ static inline void slow_conv_transpose3d_shape_check(
       check_dim_size(bias, 1, 0, weight.size(1));
     }
   } else if (!weight_nullable) {
-    TORCH_CHECK(false, "weight tensor is expected to be non-nullable");
+    AT_ERROR("weight tensor is expected to be non-nullable");
   }
 
   int ndim = input.dim();
@@ -140,7 +140,7 @@ static inline void slow_conv_transpose3d_shape_check(
       (dilation_width * (kernel_width - 1) + 1) + output_padding_width;
 
   if (output_depth < 1 || output_width < 1 || output_height < 1) {
-    TORCH_CHECK(false,
+    AT_ERROR(
         "Given input size per channel: (",
         input_depth,
         " x ",

@@ -6,8 +6,6 @@
 #include <c10/util/TypeTraits.h>
 #include <c10/util/irange.h>
 
-#include <functional>
-
 namespace torch {
 
 namespace detail {
@@ -82,7 +80,7 @@ struct WrapMethod<R (CurrClass::*)(Args...)> {
   WrapMethod(R (CurrClass::*m)(Args...)) : m(std::move(m)) {}
 
   R operator()(c10::intrusive_ptr<CurrClass> cur, Args... args) {
-    return std::invoke(m, *cur, args...);
+    return c10::guts::invoke(m, *cur, args...);
   }
 
   R (CurrClass::*m)(Args...);
@@ -93,7 +91,7 @@ struct WrapMethod<R (CurrClass::*)(Args...) const> {
   WrapMethod(R (CurrClass::*m)(Args...) const) : m(std::move(m)) {}
 
   R operator()(c10::intrusive_ptr<CurrClass> cur, Args... args) {
-    return std::invoke(m, *cur, args...);
+    return c10::guts::invoke(m, *cur, args...);
   }
 
   R (CurrClass::*m)(Args...) const;

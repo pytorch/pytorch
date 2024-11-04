@@ -8,6 +8,6 @@ namespace at {
 
 // Launches intra-op parallel task, returns a future
 TORCH_API c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
-    const std::function<void()>& func);
+    std::function<void()> func);
 
 } // namespace at

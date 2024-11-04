@@ -114,12 +114,6 @@ if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_B
     fi
 fi
 
-USE_GLOO_WITH_OPENSSL="ON"
-if [[ "$GPU_ARCH_TYPE" =~ .*aarch64.* ]]; then
-  USE_GLOO_WITH_OPENSSL="OFF"
-  USE_GOLD_LINKER="OFF"
-fi
-
 cat >"$envfile" <<EOL
 # =================== The following code will be executed inside Docker container ===================
 export TZ=UTC
@@ -159,7 +153,7 @@ export DOCKER_IMAGE="$DOCKER_IMAGE"
 
 
 export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
-export USE_GLOO_WITH_OPENSSL="${USE_GLOO_WITH_OPENSSL}"
+export USE_GLOO_WITH_OPENSSL="ON"
 # =================== The above code will be executed inside Docker container ===================
 EOL
 

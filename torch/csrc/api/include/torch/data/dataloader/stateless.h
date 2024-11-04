@@ -10,7 +10,8 @@
 #include <thread>
 #include <utility>
 
-namespace torch::data {
+namespace torch {
+namespace data {
 
 /// A dataloader for stateless datasets.
 ///
@@ -37,7 +38,7 @@ class StatelessDataLoader : public DataLoaderBase<
       Dataset dataset,
       Sampler sampler,
       DataLoaderOptions options)
-      : super(options), sampler_(std::move(sampler)) {
+      : super(std::move(options)), sampler_(std::move(sampler)) {
     for (const auto w : c10::irange(this->options_.workers)) {
       // Here we copy the dataset into the worker thread closure. Each worker
       // has its own copy of the dataset. This means the dataset must be
@@ -77,4 +78,5 @@ class StatelessDataLoader : public DataLoaderBase<
   /// The `Sampler` used to produce batch requests.
   Sampler sampler_;
 };
-} // namespace torch::data
+} // namespace data
+} // namespace torch

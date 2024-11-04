@@ -1487,21 +1487,18 @@ class CppVecOverrides(CppOverrides):
 
         dtype = result.dtype
         body_code = f"{var}()"
-
-        def maskify_or_vecify(code):
-            return (
-                f"{V.kernel._get_mask_type()}::from({code})"
-                if dtype == torch.bool
-                else f"{V.kernel._get_vec_type(dtype)}({code})"
-            )
-
-        if result.is_vec:
-            body_code_vec = body_code
-        else:
-            body_code_vec = maskify_or_vecify(body_code)
+        body_code_vec = (
+            body_code
+            if result.is_vec
+            else f"{V.kernel._get_vec_type(dtype)}({body_code})"
+        )
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
         # loading bool as VecMask<float, N>
-        other_code_vec = maskify_or_vecify(other_code)
+        other_code_vec = (
+            f"{V.kernel._get_mask_type()}::from({other_code})"
+            if dtype == torch.bool
+            else f"{V.kernel._get_vec_type(dtype)}({other_code})"
+        )
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec:
             code = BracesBuffer()
@@ -3091,12 +3088,7 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            cpp_dtype = DTYPE_TO_CPP[dtype]
-            # tiling_factor might be smaller than the alignment of cpp_dtype, such as
-            # with a vector that only holds 4 elements due to NEON 128-bit vectors and
-            # cpp_dtype being a 64-bit integer.
-            alignas = f"alignas(std::max(std::size_t({factor}), alignof({cpp_dtype})))"
-            define_line = f"{alignas} {cpp_dtype} {tile_var}[{factor}*{factor}];"
+            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))

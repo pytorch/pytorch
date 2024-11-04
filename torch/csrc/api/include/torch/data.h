@@ -6,8 +6,9 @@
 #include <torch/data/transforms.h>
 
 // Some "exports".
-
-namespace torch::data {
-using datasets::BatchDataset; // NOLINT
-using datasets::Dataset; // NOLINT
-} // namespace torch::data
+namespace torch {
+namespace data {
+using datasets::BatchDataset;
+using datasets::Dataset;
+} // namespace data
+} // namespace torch

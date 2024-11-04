@@ -22,7 +22,7 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   ~MPSHooksInterface() override = default;
 
   // Initialize the MPS library state
-  void init() const override {
+  virtual void initMPS() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   virtual bool hasMPS() const {

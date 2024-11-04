@@ -115,10 +115,7 @@ def _try_isolate_lhs(
 
         # If we can't tell whether 'other' is negative or positive, we do nothing.
         # That is because we don't know whether we have mirror the operation or not.
-        # We also divide only when we know 'rhs' is not zero.
-        if not (isinstance(e, INEQUALITY_TYPES) and other.is_negative is None) and not (
-            not isinstance(e, INEQUALITY_TYPES) and rhs.is_zero
-        ):
+        if not (isinstance(e, INEQUALITY_TYPES) and other.is_negative is None):
             # Divide both sides by 'other'.
             lhs = lhs / other
             rhs = rhs / other

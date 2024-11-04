@@ -64,7 +64,7 @@ Tensor adaptive_avg_pool2d_quantized_cuda(
     auto result_fp32 = at::adaptive_avg_pool2d(input_fp32, output_size);
     return at::quantize_per_tensor(result_fp32, input.q_scale(), input.q_zero_point(), input.scalar_type());
 #else // USE_CUDA
-  TORCH_CHECK(false, "at::native::adaptive_avg_pool2d_quantized_cuda: ATen not compiled with USE_CUDA support");
+  AT_ERROR("at::native::adaptive_avg_pool2d_quantized_cuda: ATen not compiled with USE_CUDA support");
   return Tensor{}; // never reached, placates the compiler
 #endif
 }
@@ -209,11 +209,11 @@ Tensor quantized_max_pool2d_cudnn(
   // recall we casted our input and output to 4D if qx was 3D, so we recast it back to 3D prior to returning
   return (ndim == 3 ? qy.view(std::vector<int64_t>(output_shape.begin() + 1, output_shape.end())) : qy);
 #else // AT_CUDNN_ENABLED()
-  TORCH_CHECK(false, "at::native::quantized_max_pool2d_cudnn: ATen not compiled with cuDNN support");
+  AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with cuDNN support");
   return Tensor{}; // never reached, placates the compiler
 #endif // AT_CUDNN_ENABLED()
 #else // USE_CUDA
-  TORCH_CHECK(false, "at::native::quantized_max_pool2d_cudnn: ATen not compiled with USE_CUDA support");
+  AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with USE_CUDA support");
   return Tensor{}; // never reached, placates the compiler
 #endif
 }

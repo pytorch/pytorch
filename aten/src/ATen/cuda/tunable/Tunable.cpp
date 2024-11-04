@@ -19,10 +19,16 @@
 #include <cxxabi.h>
 #endif
 
+#include <chrono>
 #include <fstream>
+#include <functional>
+#include <limits>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -77,7 +83,7 @@ ResultEntry TuningResultsManager::Lookup(const std::string& op_signature, const 
   return it->second;
 }
 
-void TuningResultsManager::AddImpl(const std::string& op_signature,
+inline void TuningResultsManager::AddImpl(const std::string& op_signature,
     const std::string& params_signature,
     ResultEntry best,
     KernelMap& kernel_map) {
@@ -92,7 +98,7 @@ void TuningResultsManager::AddImpl(const std::string& op_signature,
   }
 
   TUNABLE_LOG2(op_signature, "(", params_signature, ") -> ", best);
-  kernel_map.emplace(params_signature, std::move(best));
+  kernel_map.emplace(params_signature, best);
 }
 
 void TuningResultsManager::Add(const std::string& op_signature, const std::string& params_signature, ResultEntry best) {
@@ -103,7 +109,7 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
     it = results_.insert({op_signature, {}}).first;
   }
 
-  AddImpl(op_signature, params_signature, std::move(best), it->second);
+  AddImpl(op_signature, params_signature, best, it->second);
 }
 
 void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature, const std::string& params_signature) {
@@ -149,7 +155,7 @@ void TuningResultsManager::Delete(const std::string& op_signature, const std::st
   it->second.erase(it2);
 }
 
-void TuningResultsManager::DisjointMergeImpl(
+inline void TuningResultsManager::DisjointMergeImpl(
     const std::string& op_signature,
     const KernelMap& kernel_map,
     /*out*/ std::unordered_map<std::string, KernelMap>& results) {
@@ -199,7 +205,7 @@ size_t TuningResultsManager::GetSize() {
 TuningResultsValidator::TuningResultsValidator() {
   RegisterValidator(
       "PT_VERSION",
-      []() { return GetPyTorchVersion(); },
+      [this]() { return GetPyTorchVersion(); },
       [this](auto&& k) { return ValidatePyTorchVersion(std::forward<decltype(k)>(k)); });
 #ifdef USE_ROCM
   // rocm
@@ -362,7 +368,7 @@ void TuningResultsValidator::RegisterValidator(const std::string& key, const Get
   }
 }
 
-std::string TuningResultsValidator::GetPyTorchVersion() {
+std::string TuningResultsValidator::GetPyTorchVersion() const {
   return TORCH_VERSION;
 }
 
@@ -481,7 +487,7 @@ std::ofstream& TuningContext::GetUntunedFile(){
     std::string filename = (env == nullptr) ? "tunableop_untuned.csv" : env;
 
     std::string device = c10::str(int(c10::cuda::current_device()));
-    std::size_t found = filename.rfind('.');
+    std::size_t found = filename.rfind(".");
     if (found != std::string::npos) {
       filename.insert(found, device);
     } else {

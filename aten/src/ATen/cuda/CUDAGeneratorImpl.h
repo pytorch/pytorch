@@ -5,6 +5,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/cuda/PhiloxCudaState.h>
 #include <atomic>
+#include <limits>
 #include <memory>
 #include <unordered_set>
 namespace at {
@@ -167,7 +168,7 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   CUDAGeneratorImpl* clone_impl() const override;
 
   c10::intrusive_ptr<CUDAGeneratorState> state_;
-  std::atomic_flag no_reset_rnn_state_{};
+  std::atomic_flag no_reset_rnn_state_;
 };
 
 namespace cuda::detail {

@@ -81,9 +81,7 @@ struct MemFile {
   }
 
   MemFile(const MemFile&) = delete;
-  MemFile(MemFile&&) = delete;
   MemFile& operator=(const MemFile&) = delete;
-  MemFile& operator=(MemFile&&) = delete;
   [[nodiscard]] const char* data() const {
     return (const char*)mem_;
   }

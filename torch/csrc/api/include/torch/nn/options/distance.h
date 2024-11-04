@@ -4,7 +4,8 @@
 #include <torch/csrc/Export.h>
 #include <torch/types.h>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Options for the `CosineSimilarity` module.
 ///
@@ -66,4 +67,5 @@ namespace functional {
 using PairwiseDistanceFuncOptions = PairwiseDistanceOptions;
 } // namespace functional
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

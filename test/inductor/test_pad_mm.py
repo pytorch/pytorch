@@ -4,7 +4,6 @@ import unittest
 import torch
 import torch._inductor.config as inductor_config
 from torch._dynamo.testing import rand_strided
-from torch._dynamo.utils import counters
 from torch._inductor.fx_passes.pad_mm import (
     get_alignment_size,
     get_pad_cache,
@@ -489,36 +488,6 @@ class PadMMTest(TestCase):
         ).check("empty_strided_cuda((8, 16)").run(code)
 
         assert torch.allclose(res2, mm_expected_result), "MM results are not identical"
-
-    @fresh_inductor_cache()
-    @inductor_config.patch(
-        {
-            "triton.unique_kernel_names": "original_aten",
-            "max_autotune_gemm_backends": "TRITON",
-            "shape_padding": True,
-        }
-    )
-    def test_original_aten_preserved_pad_mm(self):
-        def fn(x, y):
-            return x @ y
-
-        args = [
-            torch.randn(2**4, 2**14 - 1, device="cuda", dtype=torch.float16),
-            torch.randn(2**14 - 1, 2**4, device="cuda", dtype=torch.float16),
-        ]
-
-        counters.clear()
-
-        with unittest.mock.patch(
-            "torch._inductor.fx_passes.pad_mm._skip_do_bench_times", True
-        ):
-            opt_fn = torch.compile(fn, mode="max-autotune")
-            ret, code = run_and_get_code(opt_fn, *args)
-        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
-
-        # The mm kernel should use a template (because we set max_autotune_gemm_backends = TRITON).
-        # Its name should contain `mm` because `mm` was the original aten op where the mm came from.
-        FileCheck().check("def triton_tem_fused_mm").run(code[0])
 
 
 if __name__ == "__main__":

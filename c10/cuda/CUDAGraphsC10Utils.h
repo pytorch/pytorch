@@ -22,11 +22,6 @@ struct C10_CUDA_API CUDAStreamCaptureModeGuard {
       : strictness_(desired) {
     C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&strictness_));
   }
-  CUDAStreamCaptureModeGuard(const CUDAStreamCaptureModeGuard&) = delete;
-  CUDAStreamCaptureModeGuard(CUDAStreamCaptureModeGuard&&) = delete;
-  CUDAStreamCaptureModeGuard& operator=(const CUDAStreamCaptureModeGuard&) =
-      delete;
-  CUDAStreamCaptureModeGuard& operator=(CUDAStreamCaptureModeGuard&&) = delete;
   ~CUDAStreamCaptureModeGuard() {
     C10_CUDA_CHECK_WARN(cudaThreadExchangeStreamCaptureMode(&strictness_));
   }

@@ -8,10 +8,10 @@
 #include <torch/types.h>
 
 #include <cstddef>
-#include <utility>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LayerNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -31,7 +31,7 @@ namespace torch::nn {
 class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
  public:
   LayerNormImpl(std::vector<int64_t> normalized_shape)
-      : LayerNormImpl(LayerNormOptions(std::move(normalized_shape))) {}
+      : LayerNormImpl(LayerNormOptions(normalized_shape)) {}
   explicit LayerNormImpl(LayerNormOptions options_);
 
   void reset() override;
@@ -194,4 +194,5 @@ class TORCH_API GroupNormImpl : public torch::nn::Cloneable<GroupNormImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(GroupNorm);
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

@@ -1,6 +1,7 @@
 #include <torch/optim/schedulers/step_lr.h>
 
-namespace torch::optim {
+namespace torch {
+namespace optim {
 
 StepLR::StepLR(
     torch::optim::Optimizer& optimizer,
@@ -21,4 +22,5 @@ std::vector<double> StepLR::get_lrs() {
   }
 }
 
-} // namespace torch::optim
+} // namespace optim
+} // namespace torch

@@ -41,16 +41,13 @@ function install_ubuntu() {
         libegl-mesa0 libegl1-mesa libegl1-mesa-dev libgbm1 libgl1-mesa-dev libgl1-mesa-dri \
         libglapi-mesa libgles2-mesa-dev libglx-mesa0 libigdgmm12 libxatracker2 mesa-va-drivers \
         mesa-vdpau-drivers mesa-vulkan-drivers va-driver-all vainfo hwinfo clinfo
-    if [[ "${XPU_DRIVER_TYPE,,}" == "rolling" ]]; then
-        apt-get install -y intel-ocloc
-    fi
     # Development Packages
     apt-get install -y libigc-dev intel-igc-cm libigdfcl-dev libigfxcmrt-dev level-zero-dev
     # Install Intel Support Packages
     if [ -n "$XPU_VERSION" ]; then
-        apt-get install -y intel-for-pytorch-gpu-dev-${XPU_VERSION} intel-pti-dev-0.9
+        apt-get install -y intel-for-pytorch-gpu-dev-${XPU_VERSION} intel-pti-dev
     else
-        apt-get install -y intel-for-pytorch-gpu-dev-0.5 intel-pti-dev-0.9
+        apt-get install -y intel-for-pytorch-gpu-dev intel-pti-dev
     fi
 
     # Cleanup
@@ -100,7 +97,7 @@ EOF
         intel-igc-opencl-devel level-zero-devel intel-gsc-devel libmetee-devel \
         level-zero-devel
     # Install Intel Support Packages
-    yum install -y intel-for-pytorch-gpu-dev-0.5 intel-pti-dev-0.9
+    yum install -y intel-for-pytorch-gpu-dev intel-pti-dev
 
     # Cleanup
     dnf clean all
@@ -134,7 +131,7 @@ function install_sles() {
     zypper install -y libigdfcl-devel intel-igc-cm libigfxcmrt-devel level-zero-devel
 
     # Install Intel Support Packages
-    zypper install -y intel-for-pytorch-gpu-dev-0.5 intel-pti-dev-0.9
+    zypper install -y intel-for-pytorch-gpu-dev intel-pti-dev
 
 }
 

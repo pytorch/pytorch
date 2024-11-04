@@ -1,15 +1,25 @@
 #pragma once
 
+#include <torch/detail/static.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/container/any_module_holder.h>
+#include <torch/nn/modules/container/any_value.h>
+#include <torch/nn/pimpl.h>
 #include <torch/types.h>
+
+#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/utils/variadic.h>
+
+#include <ATen/Device.h>
 
 #include <memory>
 #include <type_traits>
+#include <typeinfo>
 #include <utility>
 #include <vector>
 
-namespace torch::nn {
+namespace torch {
+namespace nn {
 
 /// Stores a type erased `Module`.
 ///
@@ -205,7 +215,7 @@ template <typename ModuleType>
 AnyModule::AnyModule(std::shared_ptr<ModuleType> module)
     : content_(make_holder(
           std::move(module),
-          &std::remove_reference_t<ModuleType>::forward)) {
+          &std::remove_reference<ModuleType>::type::forward)) {
   // `AnyModule` can only store an `nn::Module` subclass object that provides
   // a `forward()` method that has a non-templatized return type.
   // (e.g. `AnyModule` cannot store `nn::Sequential`, because `nn::Sequential`'s
@@ -251,8 +261,8 @@ inline AnyModule AnyModule::clone(std::optional<Device> device) const {
 
 template <typename ModuleType>
 AnyModule& AnyModule::operator=(std::shared_ptr<ModuleType> module) {
-  *this = AnyModule(std::move(module));
-  return *this;
+  // NOLINTNEXTLINE(cppcoreguidelines-c-copy-assignment-signature)
+  return (*this = AnyModule(std::move(module)));
 }
 
 template <typename... ArgumentTypes>
@@ -326,7 +336,7 @@ std::unique_ptr<AnyModulePlaceholder> AnyModule::make_holder(
       "Modules stored inside AnyModule must not take references. "
       "Use pointers instead.");
   static_assert(
-      !std::is_void_v<ReturnType>,
+      !std::is_void<ReturnType>::value,
       "AnyModule cannot store modules that return void "
       "(you can return a dummy value).");
   return std::make_unique<
@@ -336,7 +346,7 @@ std::unique_ptr<AnyModulePlaceholder> AnyModule::make_holder(
 
 template <typename ModuleType>
 ModuleType& AnyModule::get_() const {
-  using M = std::remove_reference_t<ModuleType>;
+  using M = typename std::remove_reference<ModuleType>::type;
   static_assert(
       torch::detail::has_forward<M>::value,
       "Can only call AnyModule::get<T> with a type T that has a forward method");
@@ -351,12 +361,12 @@ ModuleType& AnyModule::get_(
                 *content_)
                 .module;
   }
-  TORCH_CHECK(
-      false,
+  AT_ERROR(
       "Attempted to cast module of type ",
       c10::demangle(type_info().name()),
       " to type ",
       c10::demangle(typeid(ModuleType).name()));
 }
 
-} // namespace torch::nn
+} // namespace nn
+} // namespace torch

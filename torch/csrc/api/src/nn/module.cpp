@@ -34,7 +34,6 @@ Module::Module()
     : parameters_("Parameter"), buffers_("Buffer"), children_("Submodule") {}
 
 Module::Module(std::string name) : Module() {
-  // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
   name_ = std::move(name);
 }
 
@@ -65,8 +64,7 @@ const std::string& Module::name() const noexcept {
 
 std::shared_ptr<Module> Module::clone(
     const std::optional<Device>& device) const {
-  TORCH_CHECK(
-      false,
+  AT_ERROR(
       "clone() has not been implemented for ",
       name(),
       ". Subclass torch::nn::Cloneable<",
@@ -380,8 +378,7 @@ std::shared_ptr<Module> Module::shared_from_this_checked() const {
   try {
     ptr = shared_from_this();
   } catch (const std::bad_weak_ptr&) {
-    TORCH_CHECK(
-        false,
+    AT_ERROR(
         "It looks like you attempted to retrieve your top-level module "
         "as a shared_ptr, but it is not stored in a shared_ptr. "
         "Use std::make_shared<",

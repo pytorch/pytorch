@@ -4308,32 +4308,6 @@ class TestSerialization(TestCase, SerializationMixin):
                 f.seek(0)
                 torch.load(f, weights_only=True)
 
-    @parametrize("force_weights_only", (True, False))
-    def test_weights_only_env_variables(self, force_weights_only):
-        env_var = "TORCH_FORCE_WEIGHTS_ONLY_LOAD" if force_weights_only else "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"
-        args = (
-            (pickle.UnpicklingError, "Weights only load failed")
-            if force_weights_only
-            else (UserWarning, "forcing weights_only=False")
-        )
-        ctx = self.assertRaisesRegex if force_weights_only else self.assertWarnsRegex
-        m = torch.nn.Linear(3, 5)
-        with TemporaryFileName() as f:
-            torch.save(m, f)
-            try:
-                old_value = os.environ[env_var] if env_var in os.environ else None
-                os.environ[env_var] = "1"
-                # if weights_only is explicitly set, TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD cannot override it
-                with self.assertRaisesRegex(pickle.UnpicklingError, "Weights only load failed"):
-                    m = torch.load(f, weights_only=not force_weights_only)
-                with ctx(*args):
-                    m = torch.load(f, weights_only=None)
-            finally:
-                if old_value is None:
-                    del os.environ[env_var]
-                else:
-                    os.environ[env_var] = old_value
-
     @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
     @parametrize("compute_crc32", (True, False))
     @parametrize("filename", (True, False))
@@ -4554,14 +4528,6 @@ class TestSubclassSerialization(TestCase):
                     torch.load(f, weights_only=True)
         finally:
             torch.serialization.clear_safe_globals()
-
-    def test_sets_are_loadable_with_weights_only(self):
-        s = {1, 2, 3}
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(s, f)
-            f.seek(0)
-            l_s = torch.load(f, weights_only=True)
-            self.assertEqual(l_s, s)
 
     @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
     def test_tensor_subclass_map_location(self):

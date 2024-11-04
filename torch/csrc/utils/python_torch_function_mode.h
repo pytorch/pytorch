@@ -11,12 +11,6 @@ struct StashTorchFunctionModeGuard {
   ~StashTorchFunctionModeGuard() {
     at::impl::PythonTorchFunctionTLS::push_onto_stack(cur_mode_);
   }
-  StashTorchFunctionModeGuard(const StashTorchFunctionModeGuard&) = delete;
-  StashTorchFunctionModeGuard(StashTorchFunctionModeGuard&&) = delete;
-  StashTorchFunctionModeGuard& operator=(const StashTorchFunctionModeGuard&) =
-      delete;
-  StashTorchFunctionModeGuard& operator=(StashTorchFunctionModeGuard&&) =
-      delete;
 
   const std::shared_ptr<c10::SafePyObject>& get_cur_mode() {
     return cur_mode_;

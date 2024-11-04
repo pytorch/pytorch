@@ -4,19 +4,17 @@
 from __future__ import annotations
 
 import glob
+import io
 import os
 import shutil
-from typing import Any, Mapping, TYPE_CHECKING
+import zipfile
+from typing import Any, Mapping
 
 import torch
 import torch.jit._trace
 import torch.serialization
-from torch.onnx import errors
+from torch.onnx import _constants, _exporter_states, errors
 from torch.onnx._internal import jit_utils, registration
-
-
-if TYPE_CHECKING:
-    import io
 
 
 def export_as_test_case(
@@ -56,6 +54,7 @@ def export_as_test_case(
     _export_file(
         model_bytes,
         os.path.join(test_case_dir, "model.onnx"),
+        _exporter_states.ExportTypes.PROTOBUF_FILE,
         {},
     )
     data_set_dir = os.path.join(test_case_dir, "test_data_set_0")
@@ -164,12 +163,47 @@ def export_data(data, value_info_proto, f: str) -> None:
 def _export_file(
     model_bytes: bytes,
     f: io.BytesIO | str,
+    export_type: str,
     export_map: Mapping[str, bytes],
 ) -> None:
     """export/write model bytes into directory/protobuf/zip"""
-    assert len(export_map) == 0
-    with torch.serialization._open_file_like(f, "wb") as opened_file:
-        opened_file.write(model_bytes)
+    if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
+        assert len(export_map) == 0
+        with torch.serialization._open_file_like(f, "wb") as opened_file:
+            opened_file.write(model_bytes)
+    elif export_type in {
+        _exporter_states.ExportTypes.ZIP_ARCHIVE,
+        _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
+    }:
+        compression = (
+            zipfile.ZIP_DEFLATED
+            if export_type == _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
+            else zipfile.ZIP_STORED
+        )
+        with zipfile.ZipFile(f, "w", compression=compression) as z:
+            z.writestr(_constants.ONNX_ARCHIVE_MODEL_PROTO_NAME, model_bytes)
+            for k, v in export_map.items():
+                z.writestr(k, v)
+    elif export_type == _exporter_states.ExportTypes.DIRECTORY:
+        if isinstance(f, io.BytesIO) or not os.path.isdir(f):  # type: ignore[arg-type]
+            raise ValueError(
+                f"f should be directory when export_type is set to DIRECTORY, instead get type(f): {type(f)}"
+            )
+        if not os.path.exists(f):  # type: ignore[arg-type]
+            os.makedirs(f)  # type: ignore[arg-type]
+
+        model_proto_file = os.path.join(f, _constants.ONNX_ARCHIVE_MODEL_PROTO_NAME)  # type: ignore[arg-type]
+        with torch.serialization._open_file_like(model_proto_file, "wb") as opened_file:
+            opened_file.write(model_bytes)
+
+        for k, v in export_map.items():
+            weight_proto_file = os.path.join(f, k)  # type: ignore[arg-type]
+            with torch.serialization._open_file_like(
+                weight_proto_file, "wb"
+            ) as opened_file:
+                opened_file.write(v)
+    else:
+        raise ValueError("Unknown export type")
 
 
 def _add_onnxscript_fn(

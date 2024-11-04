@@ -225,7 +225,7 @@ class AOTInductorModelContainer {
   }
 
   bool _should_skip_update(const size_t idx) const {
-    auto constant_type = models_[0]->constant_type(static_cast<int64_t>(idx));
+    auto constant_type = models_[0]->constant_type(idx);
     return constant_type == ConstantType::TensorConstant;
   }
 

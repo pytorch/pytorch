@@ -57,7 +57,6 @@ from typing import Any, Callable, cast, Generator, Iterable, Iterator, Sequence,
 REPO_ROOT = Path(__file__).absolute().parent.parent
 GITHUB_REMOTE_URL = "https://github.com/pytorch/pytorch.git"
 SPECS_TO_INSTALL = ("pytorch", "mypy", "pytest", "hypothesis", "ipython", "sphinx")
-DEFAULT_ENV_NAME = "pytorch-deps"
 
 LOGGER: logging.Logger | None = None
 URL_FORMAT = "{base_url}/{platform}/{dist_name}.tar.bz2"
@@ -213,28 +212,6 @@ def check_branch(subcommand: str, branch: str | None) -> str | None:
     return None
 
 
-def check_conda_env_exists(name: str | None = None, prefix: str | None = None) -> bool:
-    """Checks that the conda environment exists."""
-    if name is not None and prefix is not None:
-        raise ValueError("Cannot specify both --name and --prefix")
-    if name is None and prefix is None:
-        raise ValueError("Must specify either --name or --prefix")
-
-    try:
-        cmd = ["conda", "info", "--envs"]
-        output = subprocess.check_output(cmd, text=True, encoding="utf-8")
-    except subprocess.CalledProcessError:
-        logger = cast(logging.Logger, LOGGER)
-        logger.warning("Failed to list conda environments", exc_info=True)
-        return False
-
-    if name is not None:
-        return len(re.findall(rf"^{name}\s+", output, flags=re.MULTILINE)) > 0
-    assert prefix is not None
-    prefix = Path(prefix).absolute()
-    return len(re.findall(rf"\s+{prefix}$", output, flags=re.MULTILINE)) > 0
-
-
 @contextlib.contextmanager
 def timer(logger: logging.Logger, prefix: str) -> Iterator[None]:
     """Timed context manager"""
@@ -294,7 +271,7 @@ def conda_solve(
     else:
         # create new environment
         existing_env = False
-        env_opts = ["--name", DEFAULT_ENV_NAME]
+        env_opts = ["--name", "pytorch-deps"]
     # run solve
     if existing_env:
         cmd = [
@@ -303,8 +280,8 @@ def conda_solve(
             "--yes",
             "--dry-run",
             "--json",
-            *env_opts,
         ]
+        cmd.extend(env_opts)
     else:
         cmd = [
             "conda",
@@ -344,9 +321,8 @@ def deps_install(deps: list[str], existing_env: bool, env_opts: list[str]) -> No
     """Install dependencies to deps environment"""
     if not existing_env:
         # first remove previous pytorch-deps env
-        if check_conda_env_exists(name=DEFAULT_ENV_NAME):
-            cmd = ["conda", "env", "remove", "--yes", *env_opts]
-            subprocess.check_output(cmd)
+        cmd = ["conda", "env", "remove", "--yes", *env_opts]
+        subprocess.check_call(cmd)
     # install new deps
     install_command = "install" if existing_env else "create"
     cmd = ["conda", install_command, "--yes", "--no-deps", *env_opts, *deps]

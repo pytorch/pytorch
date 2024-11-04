@@ -16,8 +16,10 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
 
-namespace torch::jit {
-namespace fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 void fuseGraph(std::shared_ptr<Graph>& g) {
   // Follow the process of the tensorexpr_fuser in profiling mode:
@@ -93,7 +95,8 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
   }
 }
 
-} // namespace fuser::onednn
+} // namespace onednn
+} // namespace fuser
 
 static Operation createLlgaKernel(const Node* node) {
   auto kernel = std::make_shared<fuser::onednn::LlgaKernel>(node);
@@ -175,4 +178,5 @@ RegisterOperators oneDNNGuardOp({
         createLlgaGuardKernel,
         AliasAnalysisKind::FROM_SCHEMA),
 });
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
