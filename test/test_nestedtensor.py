@@ -43,7 +43,6 @@ from torch.testing._internal.common_device_type import (
     skipCPUIf,
     skipCUDAIf,
     skipCUDAIfRocm,
-    skipIfRocm,
     skipMeta,
 )
 from torch.testing._internal.common_dtype import floating_types_and_half
@@ -58,6 +57,7 @@ from torch.testing._internal.common_utils import (
     NestedTensorTestCase,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
