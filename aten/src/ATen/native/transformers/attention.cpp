@@ -532,7 +532,7 @@ std::optional<Tensor> convert_boolean_attn_mask_(const std::optional<Tensor>& at
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
-    return at::where(attn_mask->logical_not(), neg_inf, at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
+    return at::where(*attn_mask, 0.0, at::scalar_tensor(neg_inf, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
   }
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
