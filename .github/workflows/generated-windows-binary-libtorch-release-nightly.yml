@@ -129,7 +129,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: acl_update_24.09
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -262,7 +262,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: acl_update_24.09
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -407,7 +407,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: acl_update_24.09
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -541,7 +541,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: acl_update_24.09
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -687,7 +687,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: acl_update_24.09
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -821,7 +821,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: acl_update_24.09
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -967,7 +967,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: acl_update_24.09
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -1101,7 +1101,7 @@ jobs:
       - name: Checkout pytorch/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: acl_update_24.09
           submodules: recursive
           repository: pytorch/builder
           path: builder
