@@ -3134,35 +3134,34 @@ class GraphModule(torch.nn.Module):
         for ref_v, res_v in zip(values_copy, values):
             self.assertEqual(ref_v.grad, res_v.grad)
 
-    # XXX TODO: Some failure with dynamic shapes appeared after changes in nested_tensor.
-    # @torch._dynamo.config.patch({"capture_scalar_outputs": True})
-    # def test_unbind(self):
-    #     # NB: If we have shape e.g. (3, j0, 3), duck sizing will give us (s0, s1, s0).
-    #     # This causes a recompile later on when it realizes the batch and last dim
-    #     # should not always be equal. To avoid that, we use (3, j0, 5) here.
-    #     nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
-    #     nt2, _ = self._get_jagged_tensor(((2, 3, 5), 2), None)
-    #     nt3, _ = self._get_jagged_tensor(((2, 3, 4, 5), 3), None)
+    @torch._dynamo.config.patch({"capture_scalar_outputs": True})
+    def test_unbind(self):
+        # NB: If we have shape e.g. (3, j0, 3), duck sizing will give us (s0, s1, s0).
+        # This causes a recompile later on when it realizes the batch and last dim
+        # should not always be equal. To avoid that, we use (3, j0, 5) here.
+        nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
+        nt2, _ = self._get_jagged_tensor(((2, 3, 5), 2), None)
+        nt3, _ = self._get_jagged_tensor(((2, 3, 4, 5), 3), None)
 
-    #     def fn(x):
-    #         return x.unbind()
+        def fn(x):
+            return x.unbind()
 
-    #     compiled_f = torch.compile(fn, fullgraph=True, backend="eager", dynamic=True)
-    #     out = compiled_f(nt)
+        compiled_f = torch.compile(fn, fullgraph=True, backend="eager", dynamic=True)
+        out = compiled_f(nt)
 
-    #     out_ref = fn(nt)
+        out_ref = fn(nt)
 
-    #     # correctness
-    #     self.assertEqual(len(out), len(out_ref))
-    #     for x, x_ref in zip(out, out_ref):
-    #         self.assertTrue(torch.allclose(x, x_ref))
+        # correctness
+        self.assertEqual(len(out), len(out_ref))
+        for x, x_ref in zip(out, out_ref):
+            self.assertTrue(torch.allclose(x, x_ref))
 
-    #     # We specialize on the length of offsets, e.g. (1) we recompile if the
-    #     # length of the offsets is different. (2) we don't recompile if the
-    #     # length of the offsets is the same, even if the size of the constituent
-    #     # tensors are different.
-    #     self._check_recompiles(fn, (nt,), (nt2,), False)
-    #     self._check_recompiles(fn, (nt,), (nt3,), True)
+        # We specialize on the length of offsets, e.g. (1) we recompile if the
+        # length of the offsets is different. (2) we don't recompile if the
+        # length of the offsets is the same, even if the size of the constituent
+        # tensors are different.
+        self._check_recompiles(fn, (nt,), (nt2,), False)
+        self._check_recompiles(fn, (nt,), (nt3,), True)
 
     def test_inline_nested_tensor_from_jagged(self):
         nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)

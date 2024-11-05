@@ -3,6 +3,7 @@ import functools
 import math
 import operator
 from typing import *  # noqa: F403
+from typing import List, Optional
 
 import torch
 import torch.nn.functional as F
@@ -923,9 +924,7 @@ def unbind_int(func, *args, **kwargs):
     lengths = inp.lengths()
     ragged_idx = inp._ragged_idx
 
-    offsets_scalars = offsets.tolist()
-
-    def _torch_check(_offsets, _lengths):
+    def _torch_check(_lengths: List[int], _offsets: Optional[List[int]] = None):
         lengths_sum = 0
         ragged_dim_size = values.shape[ragged_idx - 1]
         for i in range(len(_lengths)):
@@ -933,21 +932,21 @@ def unbind_int(func, *args, **kwargs):
             torch._check(_lengths[i] <= ragged_dim_size)
 
             lengths_sum += _lengths[i]
-            torch._check(
-                _offsets[i] + _lengths[i] <= ragged_dim_size,
-                lambda: "unbind(): nested tensor offsets and lengths do not match ragged_idx dimension",
-            )
+            if _offsets is not None:
+                torch._check(
+                    _offsets[i] + _lengths[i] <= ragged_dim_size,
+                    lambda: "unbind(): nested tensor offsets and lengths do not match ragged_idx dimension",
+                )
+        torch._check(lengths_sum <= ragged_dim_size)
 
-        for i in range(len(_offsets)):
-            torch._check_is_size(_offsets[i])
-            torch._check(_offsets[i] <= ragged_dim_size)
-
-        # ??? torch._check(lengths_sum == ragged_dim_size)
+        if _offsets is not None:
+            for i in range(len(_offsets)):
+                torch._check_is_size(_offsets[i])
+                torch._check(_offsets[i] <= ragged_dim_size)
 
     if lengths is None:
         lengths_scalars = offsets.diff().tolist()
-
-        _torch_check(offsets_scalars, lengths_scalars)
+        _torch_check(lengths_scalars)
 
         return torch.split(values, lengths_scalars, dim=(ragged_idx - 1))
 
@@ -957,8 +956,9 @@ def unbind_int(func, *args, **kwargs):
         )
 
     lengths_scalars = lengths.tolist()
+    offsets_scalars = offsets.tolist()
 
-    _torch_check(offsets_scalars, lengths_scalars)
+    _torch_check(lengths_scalars, offsets_scalars)
 
     return [
         torch.narrow(
