@@ -1105,7 +1105,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._index_queues = []
         self._workers = []
         # Pickle the dataset once up front in case it is large
-        pickled_dataset = pickle.dumps(self._dataset)
+        pickled_dataset = pickle.dumps(self._dataset, protocol=pickle.HIGHEST_PROTOCOL)
         for i in range(self._num_workers):
             # No certainty which module multiprocessing_context is
             index_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
