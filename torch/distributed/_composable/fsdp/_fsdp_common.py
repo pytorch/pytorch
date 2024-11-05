@@ -146,9 +146,6 @@ def _from_local_no_grad(
     This method is similar to ``DTensor.from_local()`` except that in eager mode
     it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
-    import torch._dynamo.compiled_autograd as ca  # ensure module is loaded
-
-    del ca
 
     if not compiled_autograd_enabled():
         return DTensor(
@@ -158,13 +155,14 @@ def _from_local_no_grad(
             sharding_spec,
             requires_grad=local_tensor.requires_grad,
         )
-    return DTensor.from_local(
-        local_tensor,
-        sharding_spec.mesh,
-        sharding_spec.placements,
-        shape=sharding_spec.shape,
-        stride=sharding_spec.stride,
-    )
+    else:
+        return DTensor.from_local(
+            local_tensor,
+            sharding_spec.mesh,
+            sharding_spec.placements,
+            shape=sharding_spec.shape,
+            stride=sharding_spec.stride,
+        )
 
 
 def _to_dtype_if_needed(
