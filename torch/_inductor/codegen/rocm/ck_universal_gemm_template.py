@@ -546,7 +546,14 @@ class CKGemmTemplate(CKTemplate):
         )
 
         if config.rocm.generate_test_runner:
-            M, N, K, LDA, LDB, LDC, LDD = self.size_args()
+            is_static_problem = all(is_static_int(arg) for arg in self.size_args())
+            M, N, K, LDA, LDB, LDC, LDD = (
+                self.size_args()
+                if is_static_problem
+                else (
+                    f"std::stoi(argv[{k}])" for k, _ in enumerate(self.size_args(), 1)
+                )
+            )
             has_bias = Bias is not None
             has_scale = scale_x is not None and scale_w is not None
             runner_code = self._template_from_string(
@@ -567,8 +574,12 @@ class CKGemmTemplate(CKTemplate):
                 b_ck_dtype=op.b_element_dtype,
                 c_ck_dtype=op.c_element_dtype,
                 bias_ck_dtype=op.ds_element_dtypes[0] if has_bias else "",
-                scale_a_ck_dtype=op.ds_element_dtypes[0] if has_scale and 2 == len(op.ds_element_dtypes) else "BF16",
-                scale_b_ck_dtype=op.ds_element_dtypes[1] if has_scale and 2 == len(op.ds_element_dtypes) else "BF16",
+                scale_a_ck_dtype=op.ds_element_dtypes[0]
+                if has_scale and 2 == len(op.ds_element_dtypes)
+                else "BF16",
+                scale_b_ck_dtype=op.ds_element_dtypes[1]
+                if has_scale and 2 == len(op.ds_element_dtypes)
+                else "BF16",
                 a_torch_dtype=DTYPE_TO_CPP[X.get_layout().dtype],
                 b_torch_dtype=DTYPE_TO_CPP[W.get_layout().dtype],
                 c_torch_dtype=DTYPE_TO_CPP[Y.get_layout().dtype],
