@@ -35,6 +35,9 @@ Scalar item(const Tensor& self) {
 #endif
 
 Scalar _local_scalar_dense_cpu(const Tensor& self) {
+  if (self.scalar_type() == kBool) {
+    return Scalar(static_cast<bool>(*reinterpret_cast<const uint8_t*>(self.const_data_ptr<bool>())));
+  }
   Scalar r;
   AT_DISPATCH_V2(
     self.scalar_type(),
