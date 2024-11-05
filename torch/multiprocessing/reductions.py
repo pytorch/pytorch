@@ -5,7 +5,7 @@ import threading
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
 from typing import Union
-from typing_extensions import deprecated
+from typing_extensions import deprecated as _deprecated
 
 import torch
 from torch._namedtensor_internals import check_serializing_named_tensor
@@ -153,7 +153,7 @@ def rebuild_meta_tensor(
     return t
 
 
-@deprecated(
+@_deprecated(
     "`torch.multiprocessing.reductions.rebuild_cuda_tensor` is deprecated."
     "Please use `torch.multiprocessing.reductions.rebuild_device_tensor` instead.",
     category=FutureWarning,
