@@ -447,18 +447,18 @@ def _register_quantized_linear_lowering(
     return qlinear
 
 
-def _reselect_binary_op(ori_binary_op_name, other, computation_node):
+def _reselect_binary_op(original_binary_op_name, other, computation_node):
+    # Change the post op from sum to binary add for the following two cases:
+    # 1. when outplace add is required.
+    # 2. broadcast add.
     from .mkldnn_fusion import _can_be_inplace
 
-    if ori_binary_op_name == "sum" and (
+    if original_binary_op_name == "sum" and (
         not _can_be_inplace(other)
         or other.data.shape != list(computation_node.meta["val"].size())
     ):
-        # Change the post op from sum to binary add for the following two cases:
-        # 1. when outplace add is required.
-        # 2. broadcast add.
         return "add"
-    return ori_binary_op_name
+    return original_binary_op_name
 
 
 def _register_quantized_linear_binary_lowering(
@@ -502,6 +502,7 @@ def _register_quantized_linear_binary_lowering(
 
         x2.realize()
 
+        # Change the post op from sum to binary add when outplace add is required.
         binary_op_name = _reselect_binary_op(
             binary_unary_attr.binary_op_name, x2, match.nodes[0]
         )
@@ -577,26 +578,6 @@ def _is_valid_quantized_op_binary_optimization_pattern(
         ):
             return False
 
-        extra_input_of_pattern = (
-            match.kwargs["other"]
-            if "other" in match.kwargs
-            else (
-                match.kwargs["accum"]
-                if output_dtype == torch.uint8 or (not extra_input_from_dequant)
-                else match.kwargs["accum_after_dequant"]
-            )
-        )
-        # the two inputs of binary node should have the same dimensions, and only supports extra_input for broadcasting
-        if (
-            binary_node_inputs[0].meta["val"].dim()  # type: ignore[union-attr]
-            != binary_node_inputs[1].meta["val"].dim()  # type: ignore[union-attr]
-        ) or not all(
-            binary_node_inputs[0].meta["val"].size(i) == binary_node_inputs[1].meta["val"].size(i)  # type: ignore[union-attr]
-            or extra_input_of_pattern.meta["val"].size(i) == 1  # type: ignore[union-attr]
-            for i in range(binary_node_inputs[0].meta["val"].dim())  # type: ignore[union-attr]
-        ):
-            return False
-
         if output_dtype in [torch.float32, torch.bfloat16]:
             extra_input_of_binary_node = None
             for arg in binary_node_inputs:
@@ -620,6 +601,26 @@ def _is_valid_quantized_op_binary_optimization_pattern(
                 )
             ):
                 return False
+
+        extra_input_of_pattern = (
+            match.kwargs["other"]
+            if "other" in match.kwargs
+            else (
+                match.kwargs["accum"]
+                if output_dtype == torch.uint8 or (not extra_input_from_dequant)
+                else match.kwargs["accum_after_dequant"]
+            )
+        )
+        # the two inputs of binary node should have the same dimensions, and only supports extra_input for broadcasting
+        if (
+            binary_node_inputs[0].meta["val"].dim()  # type: ignore[union-attr]
+            != binary_node_inputs[1].meta["val"].dim()  # type: ignore[union-attr]
+        ) or not all(
+            binary_node_inputs[0].meta["val"].size(i) == binary_node_inputs[1].meta["val"].size(i)  # type: ignore[union-attr]
+            or extra_input_of_pattern.meta["val"].size(i) == 1  # type: ignore[union-attr]
+            for i in range(binary_node_inputs[0].meta["val"].dim())  # type: ignore[union-attr]
+        ):
+            return False
 
         # All users of the extra input in this pattern should be
         # ancestor nodes of the compute node, except for the binary node
