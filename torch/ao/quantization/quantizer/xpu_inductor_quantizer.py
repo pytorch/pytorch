@@ -27,7 +27,11 @@ class XPUInductorQuantizer(X86InductorQuantizer):
     """
         Following annotate_xx overrides the impls in base class, as
         no XPU implementation for these operators currently. We would
-        gradually enable the XPU implementation and remove following overrides.
+        gradually enable the XPU implementation and remove following
+        overrides. We keep the annotate methods but make the function
+        body empty, aiming to let `_generate_qdq_quantized_model`
+        generate qdq around op and graph execute on fp32 dtype for
+        unspported operators.
     """
 
     def _annotate_qat_conv2d_fusion_pattern(
