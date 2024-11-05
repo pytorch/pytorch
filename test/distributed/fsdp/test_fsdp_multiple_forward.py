@@ -37,13 +37,14 @@ class TestMultiForward(FSDPTest):
     def _dist_train(self, device, wrap_fsdp):
         # keep everything deterministic for input data
         torch.manual_seed(0)
-        model = Model(device, wrap_fsdp).to(device if TEST_HPU else self.rank)
+        device_id = device if TEST_HPU else self.rank
+        model = Model(device, wrap_fsdp).to(device_id)
         if wrap_fsdp:
-            model = FSDP(model, device_id=device if TEST_HPU else self.rank)
+            model = FSDP(model, device_id=device_id)
         else:
-            model = DistributedDataParallel(model, device_ids=[device if TEST_HPU else self.rank])
+            model = DistributedDataParallel(model, device_ids=[device_id])
         optim = SGD(model.parameters(), lr=0.1)
-        in_data = torch.rand(64, 4).to(device if TEST_HPU else self.rank)
+        in_data = torch.rand(64, 4).to(device_id)
         in_data.requires_grad = True
         for _ in range(3):
             out = model(in_data)
