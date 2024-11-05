@@ -4,7 +4,7 @@ import hashlib
 import re
 import typing
 from enum import IntEnum
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, ForwardRef, Optional, Union
 
 from torch._export.serde import schema
 from torch._export.serde.union import _Union
@@ -51,6 +51,8 @@ def _staged_schema():
                 )
             elif t == ():
                 return "()"
+            elif isinstance(t, ForwardRef):
+                return t.__forward_arg__
             else:
                 raise AssertionError(f"Type {t} is not supported in export schema.")
 
