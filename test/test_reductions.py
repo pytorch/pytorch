@@ -20,6 +20,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
     parametrize,
+    skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
@@ -1044,7 +1045,6 @@ class TestReductions(TestCase):
             a[:, (shape[1] - 1) // 2:] = True
             values, indices = a.mode(-1)
             self.assertEqual(values, torch.ones(shape[0], dtype=torch.bool))
-            print(indices)
             indexed = a.gather(1, indices.unsqueeze(1)).squeeze(1)
             self.assertEqual(values, indexed)
 
@@ -2251,6 +2251,33 @@ class TestReductions(TestCase):
         self.assertEqual(x[:, :2].amax().item(), 5)
         self.assertEqual(x[:, :2].argmax().item(), 2)
 
+    @onlyCPU
+    @dtypes(*integral_types_and(torch.bool))
+    def test_nanmean_integral_types(self, device, dtype):
+
+        # List of tensor shapes to test
+        shapes = [
+            (),
+            (0,),
+            (1,),
+            (3, 4, 5),
+            (2, 0, 3),
+            (10, 10, 10),
+            (2, 3, 0, 4),
+            (100,),
+            (1, 1, 1),
+            (5, 5, 5, 5, 5),
+        ]
+
+        for shape in shapes:
+            # Tensor of the specified shape and dtype
+            t = make_tensor(shape, dtype=dtype, device=device)
+            # Attempt to call torch.nanmean and expect a RuntimeError
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"nanmean\(\): expected input to have floating point or complex dtype but got \w+"
+            ):
+                torch.nanmean(t)
 
     @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
     @dtypes(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.uint8})
@@ -2589,7 +2616,7 @@ class TestReductions(TestCase):
         self.assertEqual(a[:, ::2, :].median(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
         self.assertEqual(a[:, ::2, :].nanmedian(-1)[0], torch.tensor([[0, 4], [6, 10]], device=device))
 
-
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/pull/138657 discovers a latent bug")
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     def test_quantile(self, device, dtype):

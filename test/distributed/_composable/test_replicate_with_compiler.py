@@ -222,14 +222,18 @@ class ReplicateTest(MultiProcessInductorTestCase):
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False, reorder_for_peak_memory=False
+    )
     def test_compile_gpu(self):
         self._test_compile(use_gpu=True, no_sync=False, checkpoint=False)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(2)
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False, reorder_for_peak_memory=False
+    )
     def test_compile_gpu_ac(self):
         self._test_compile(use_gpu=True, no_sync=False, checkpoint=True)
 
@@ -313,7 +317,13 @@ class ReplicateTest(MultiProcessInductorTestCase):
     )
     # todo: This pass mucks things up since Inductor thinks its inference
     # and can apply this. Should turn off these passes in compiled autograd
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False,
+        reorder_for_peak_memory=False,
+        # The correctness of this test relies on the pointless permute ops
+        # in the joint graph does not get eliminated..
+        pattern_matcher=False,
+    )
     def test_bucketing_coalesced_op(self):
         # Gradient is None
         code = self._test_bucketing()
@@ -349,7 +359,13 @@ class ReplicateTest(MultiProcessInductorTestCase):
     )
     # todo: This pass mucks things up since Inductor thinks its inference
     # and can apply this. Should turn off these passes in compiled autograd
-    @torch._inductor.config.patch(reorder_for_locality=False)
+    @torch._inductor.config.patch(
+        reorder_for_locality=False,
+        reorder_for_peak_memory=False,
+        # The correctness of this test relies on the pointless permute ops
+        # in the joint graph does not get eliminated..
+        pattern_matcher=False,
+    )
     def test_bucketing_concat_op(self):
         # Gradient is None
         code = self._test_bucketing()

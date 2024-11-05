@@ -7,6 +7,7 @@ import inspect
 import itertools
 import logging
 import types
+import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
@@ -198,20 +199,24 @@ def validate_args_and_maybe_create_graph_inputs(
                 continue
             elif set_subgraph_inputs == "semi_automatic":
                 if isinstance(a, AutogradFunctionContextVariable):
+                    example_value = a.as_proxy().node.meta["example_value"]
                     arg_name = (
                         a.as_proxy().node.name
                         if sub_args_names is None
                         else sub_args_names[idx]
                     )
-                    tracer.create_graph_input(arg_name)
+                    tracer.create_graph_input(arg_name, a.python_type(), example_value)
                 elif a.maybe_fx_node() is not None:
                     node = a.maybe_fx_node()
+                    example_value = node.meta["example_value"]
                     arg_name = (
                         a.as_proxy().node.name
                         if sub_args_names is None
                         else sub_args_names[idx]
                     )
-                    new_proxy = tracer.create_graph_input(arg_name)
+                    new_proxy = tracer.create_graph_input(
+                        arg_name, a.python_type(), example_value
+                    )
                     example_value = (
                         node.meta["example_value"]
                         if "example_value" in node.meta
@@ -236,25 +241,30 @@ def validate_args_and_maybe_create_graph_inputs(
                     if sub_args_names is None
                     else f"const_unused_{sub_args_names[idx]}"
                 )
-                tracer.create_graph_input(arg_name)
+                tracer.create_graph_input(
+                    arg_name, a.python_type(), a.as_python_constant()
+                )
                 new_arg = a
             # Weird special case, we probably want to delete it or fold it
             # into the next case (of `a` being placeable into a graph)
             elif isinstance(a, AutogradFunctionContextVariable):
+                example_value = a.as_proxy().node.meta["example_value"]
                 arg_name = (
                     a.as_proxy().node.name
                     if sub_args_names is None
                     else sub_args_names[idx]
                 )
-                tracer.create_graph_input(arg_name)
+                tracer.create_graph_input(arg_name, a.python_type(), example_value)
                 new_arg = a
             # If `a` can be put into a graph
             elif a.maybe_fx_node() is not None:
                 node = a.maybe_fx_node()
-                arg_name = node.name if sub_args_names is None else sub_args_names[idx]
-                new_proxy = tracer.create_graph_input(arg_name)
                 example_value = (
                     node.meta["example_value"] if "example_value" in node.meta else None
+                )
+                arg_name = node.name if sub_args_names is None else sub_args_names[idx]
+                new_proxy = tracer.create_graph_input(
+                    arg_name, a.python_type(), example_value
                 )
                 new_arg = wrap_fx_proxy_cls(
                     target_cls=type(a),
@@ -679,38 +689,41 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         # Specialize into one of the branches since pred is constant
+        pred, true_fn, false_fn, operands = args
         if type(args[0]) is ConstantVariable:
-            log.warning(
-                "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
-                " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
+            warnings.warn(
+                "Pred is a Python constant. When used with torch.cond, it specializes on one of the branches."
+                " If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.",
+                UserWarning,
             )
-            if args[0].as_python_constant():
-                return args[1].call_function(tx, args[3].unpack_var_sequence(tx), {})
+            if pred.as_python_constant():
+                return true_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
             else:
-                return args[2].call_function(tx, args[3].unpack_var_sequence(tx), {})
+                return false_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
 
         # predicate
-        if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
+        if type(pred) not in (ConstantVariable, TensorVariable, SymNodeVariable):
             unimplemented(
                 f"Expected pred to be bool or a boolean tensor with single "
-                f"item but got {str(type(args[0]))} "
-                f"with original python type {str(args[0].python_type())}.",
+                f"item but got {str(type(pred))} "
+                f"with original python type {str(pred.python_type())}.",
             )
 
         # operands
-        if not isinstance(args[3], (ListVariable, TupleVariable)):
+        if not isinstance(operands, (ListVariable, TupleVariable)):
             unimplemented(
-                f"Expected a tuple but got {args[3].python_type()}",
+                f"Expected operands to be a list/tuple but got "
+                f"{operands.python_type()}",
             )
-        operands = args[3].unpack_var_sequence(tx)
-        if not only_consist_of(args[3], (TensorVariable,)):
+        operands_seq = operands.unpack_var_sequence(tx)
+        if not only_consist_of(operands, (TensorVariable,)):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
 
         # branches
-        _check_supported_callable_arg(tx, args[1], "true_fn")
-        _check_supported_callable_arg(tx, args[2], "false_fn")
+        _check_supported_callable_arg(tx, true_fn, "true_fn")
+        _check_supported_callable_arg(tx, false_fn, "false_fn")
 
         # Our strategy for tracing the true/false branches of cond
         # are to checkpoint our graphstate, run the true branch,
@@ -736,7 +749,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ) = speculate_subgraph(
                 tx,
                 args[ix],
-                operands,
+                operands_seq,
                 {},
                 "cond",
                 source_target=self.value,
@@ -823,7 +836,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         false_node = make_attr(tx, false_name)
 
         p_args = (
-            args[0].as_proxy(),
+            pred.as_proxy(),
             true_node,
             false_node,
             # We pick true_shared but it shouldn't matter
@@ -909,26 +922,30 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Usage: while_loop(cond_fn, body_fn, operands)",
             )
 
-        _check_supported_callable_arg(tx, args[0], "cond_fn")
-        _check_supported_callable_arg(tx, args[1], "body_fn")
+        cond_fn, body_fn, operands, additional_inputs = args
+        _check_supported_callable_arg(tx, cond_fn, "cond_fn")
+        _check_supported_callable_arg(tx, body_fn, "body_fn")
 
         # operands
-        if not isinstance(args[2], (ListVariable, TupleVariable)):
+        if not isinstance(operands, (ListVariable, TupleVariable)):
             unimplemented(
-                f"Expected a tuple but got {args[2].python_type()}",
+                f"Expected operands to be a list/tuple but got "
+                f"{operands.python_type()}",
             )
-        operands = args[2].unpack_var_sequence(tx)
-        if not only_consist_of(args[2], (TensorVariable,)):
+        operands_seq = operands.unpack_var_sequence(tx)
+        if not only_consist_of(operands, (TensorVariable,)):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
 
         # additional inputs check
-        if not isinstance(args[3], (ListVariable, TupleVariable)):
+        if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
             unimplemented(
-                f"Expected a tuple but got {args[3].python_type()}",
+                f"Expected additional_inputs to be a list/tuple but got "
+                f"{additional_inputs.python_type()}. It seems to be an "
+                f"internal error, please report an issue to PyTorch."
             )
-        additional_inputs = args[3].unpack_var_sequence(tx)
+        additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
 
         (
             (cond_r, cond_treespec),
@@ -936,8 +953,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_lifted_freevars,
         ) = speculate_subgraph(
             tx,
-            args[0],
-            operands + additional_inputs,
+            cond_fn,
+            operands_seq + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
@@ -965,8 +982,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_lifted_freevars,
         ) = speculate_subgraph(
             tx,
-            args[1],
-            operands + additional_inputs,
+            body_fn,
+            operands_seq + additional_inputs_seq,
             {},
             "while_loop",
             source_target=self.value,
@@ -1012,9 +1029,10 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             cond_node,
             body_node,
-            tuple([operand.as_proxy() for operand in operands]),
+            tuple([operand.as_proxy() for operand in operands_seq]),
             tuple(
-                [inp.as_proxy() for inp in additional_inputs] + additional_lifted_inputs
+                [inp.as_proxy() for inp in additional_inputs_seq]
+                + additional_lifted_inputs
             ),
         )
 
@@ -2188,7 +2206,8 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             out_meta = torch.empty_like(
                 query_meta, memory_format=torch.contiguous_format
             )
-            lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
+            # TODO: Figure out a better way to handle this for NJT than using sum()
+            lse_meta = torch.empty_like(query_meta, dtype=torch.float32).sum(dim=-1)
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args:
@@ -2620,7 +2639,11 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # using the saved attr name.
         from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 
-        fake_inputs = [arg.as_proxy().node.meta["example_value"] for arg in fn_args_vt]
+        fake_inputs = [
+            node.meta["example_value"]
+            for node in body_gmod.graph.nodes
+            if node.op == "placeholder"
+        ]
 
         # TODO(anijain2305) - This might be too big of a limitation. Consider
         # supporting mutation/aliasing in HOP itself to remove this restriction.
