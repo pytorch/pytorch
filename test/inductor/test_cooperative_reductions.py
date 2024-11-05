@@ -99,7 +99,7 @@ class CooperativeReductionTests(TestCase):
         if "async_compile.multi_kernel" in source_code:
             return
         self.assertEqual(source_code.count("triton_helpers.x_grid_barrier"), 16)
-        self.assertEqual(source_code.count("empty_strided_cuda"), 8)
+        self.assertEqual(source_code.count("empty_strided_cuda"), 5)
 
     def test_reduce_split(self):
         def fn(a, b):
