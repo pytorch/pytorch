@@ -794,7 +794,7 @@ class AutoChunker:
     # times.
     amplify_ratio_threshold = 16
 
-    num_chunk = None  # If not None, use this to force number of chunks
+    num_chunk = int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS")) if os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS") is not None else  None  # If not None, use this to force number of chunks
 
 
 # config specific to codegen/cpp.py
