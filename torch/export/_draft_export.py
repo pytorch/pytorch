@@ -251,7 +251,7 @@ def draft_export(
 
         str_to_filename: Dict[str, str] = {}
         failures: List[FailureReport] = []
-        custom_ops_logs: Dict[str, Tuple[Dict[str, Any], FailureType]] = {}  # Dedup custom ops
+        custom_ops_logs: Dict[Any, Tuple[Dict[str, Any], FailureType]] = {}  # Dedup custom ops
         data_dependent_logs: Dict[
             str, Dict[str, Any]
         ] = {}  # Dedup data dependent errors based on stacktrace
@@ -289,18 +289,18 @@ def draft_export(
                     log_contents["stack"], str_to_filename
                 )
                 log_contents["new_dynamic_shapes"] = new_shapes
-            elif log_name in [
-                "missing_fake_kernel",
-                "mismatched_fake_kernel",
-            ]:
+            elif log_name == "missing_fake_kernel":
                 if log_contents["op"] in custom_ops_logs:
                     continue
-
-                if log_name == "missing_fake_kernel":
-                    failure_type = FailureType.MISSING_FAKE_KERNEL
-                else:
-                    failure_type = FailureType.MISMATCHED_FAKE_KERNEL
+                failure_type = FailureType.MISSING_FAKE_KERNEL
                 custom_ops_logs[log_contents["op"]] = (log_contents, failure_type)
+            elif log_name == "mismatched_fake_kernel":
+                if (log_contents["op"], log_contents["reason"]) in custom_ops_logs:
+                    continue
+                failure_type = FailureType.MISMATCHED_FAKE_KERNEL
+                custom_ops_logs[
+                    (log_contents["op"], log_contents["reason"])
+                ] = (log_contents, failure_type)
             else:
                 raise RuntimeError(f"Unknown log name: {log_name}")
 

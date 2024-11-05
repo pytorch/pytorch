@@ -281,14 +281,14 @@ class TestDraftExport(TestCase):
         @torch.library.custom_op("mylib::foo", mutates_args={})
         def foo(a: torch.Tensor) -> List[torch.Tensor]:
             x = a * 2
-            y = a + 2
+            y = a.repeat(2, 2)
             z = a.to(torch.bfloat16)
             return [x, y, z]
 
         @foo.register_fake
         def foo_fake_impl(a):
             x = torch.empty_like(a)  # good
-            y = torch.empty_like(a)  # good
+            y = torch.empty_like(a)  # size mismatch
             z = torch.empty_like(a)  # dtype mismatch
             return [x, y, z]
 
@@ -303,9 +303,16 @@ class TestDraftExport(TestCase):
             self.assertTrue(torch.allclose(ep_out, eager_out))
             self.assertEqual(ep_out.dtype, eager_out.dtype)
 
-        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(len(report.failures), 2)
         self.assertEqual(report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL)
-        self.assertEqual(report.failures[0].data["reason"], "Dtypes torch.float32 and torch.bfloat16 are not equal!")
+        self.assertEqual(report.failures[1].failure_type, FailureType.MISMATCHED_FAKE_KERNEL)
+        self.assertEqual(
+            sorted([f.data["reason"] for f in report.failures]),
+            [
+                "Dtypes torch.float32 and torch.bfloat16 are not equal!",
+                "mismatch between fake value 3 and real value 6 ",
+            ],
+        )
 
     def test_override_pytree_mismatched_fake_kernels(self):
         class M(torch.nn.Module):
