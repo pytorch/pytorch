@@ -2056,8 +2056,12 @@ class AotCodeCompiler:
                 else:
                     run_command_and_check(link_cmd)
 
-                for o_file in [output_o, consts_o]:
-                    # remove .o files to save disk space since we already have the .so file
+                for o_file in [
+                    output_o,
+                    consts_o,
+                    os.path.splitext(consts_o)[0] + ".S",
+                ]:
+                    # No need to package .o or .S into the output artifact
                     os.remove(o_file)
 
                 if use_mmap_weights:
