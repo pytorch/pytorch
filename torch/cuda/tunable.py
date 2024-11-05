@@ -279,7 +279,7 @@ def tune_gemm_in_file(filename: str) -> None:
                 process_single_offline_gemm(line, deviceid)
 
 
-def gather_unique_untuned_gemm_from_files(filename_pattern: str) -> set[str]:
+def _gather_unique_untuned_gemm_from_files(filename_pattern: str) -> set[str]:
     r"""Process multiple untuned results file and return a set with duplicates removed."""
     unique_gemm_entries = set()  # set will avoid duplicates
 
@@ -292,7 +292,7 @@ def gather_unique_untuned_gemm_from_files(filename_pattern: str) -> set[str]:
     return unique_gemm_entries
 
 
-def gather_tunableop_results() -> None:
+def _gather_tunableop_results() -> None:
     r"""Gather results from multiple tunableop results file and create a single file."""
     gemm_lines = set()
     validator_lines = []
@@ -340,7 +340,7 @@ def gather_tunableop_results() -> None:
         shutil.copy(output_file, duplicate_file)
 
 
-def process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
+def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     r"""Process a single untuned GEMM."""
 
     deviceid = "cuda:" + str(gpu_id)
@@ -399,7 +399,7 @@ def process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
 
 def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
     r"""Process one or more files and distribute work over one or more GPUs."""
-    unique_gemm_entries = gather_unique_untuned_gemm_from_files(filename_pattern)
+    unique_gemm_entries = _gather_unique_untuned_gemm_from_files(filename_pattern)
 
     assert is_enabled()
     assert tuning_is_enabled()
@@ -418,7 +418,7 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
         max_workers=num_gpus, mp_context=mp_context
     ) as executor:
         for line in unique_gemm_entries:
-            future = executor.submit(process_single_offline_gemm, line, h)
+            future = executor.submit(_process_single_offline_gemm, line, h)
             futures.append(future)
             h = (h + 1) % num_gpus
 
@@ -427,4 +427,4 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
     torch.cuda.synchronize()
 
-    gather_tunableop_results()
+    _gather_tunableop_results()
