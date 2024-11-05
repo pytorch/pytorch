@@ -27,6 +27,7 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
@@ -38,6 +39,9 @@ from torch.testing._internal.inductor_utils import (
     IS_BIG_GPU,
 )
 from torch.utils import _pytree as pytree
+
+
+aten = torch.ops.aten
 
 
 class TestPatternMatcher(TestCase):
@@ -817,6 +821,72 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 1, 3)
 
+    def test_pointless_view_pair(self):
+        def f(x):
+            x = aten.view.default(x, [3, 5, 7])
+            x = aten.view.default(x, [15, 7])
+            return x
+
+        x = torch.randn(15, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.view.default(x, [3, 5, 7])
+            x2 = aten.view.default(x1, [15, 7])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
+
+    def test_pointless_permute_pair(self):
+        def f(x):
+            x = aten.permute.default(x, [1, 0])
+            x = aten.permute.default(x, [1, 0])
+            return x
+
+        x = torch.randn(15, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.permute.default(x, [1, 0])
+            x2 = aten.permute.default(x1, [1, 0])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
+
+    def test_pointless_permute_pair_3d(self):
+        def f(x):
+            x = aten.permute.default(x, [1, 0, 2])
+            x = aten.permute.default(x, [1, 0, 2])
+            return x
+
+        x = torch.randn(3, 5, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.permute.default(x, [1, 0, 2])
+            x2 = aten.permute.default(x1, [1, 0, 2])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
+
     def test_pointless_convert(self):
         def fn1(x):
             x = torch.ops.prims.convert_element_type.default(x, torch.float16)
@@ -1234,6 +1304,7 @@ class TestPatternMatcher(TestCase):
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
+    @skipIfXpu
     @inductor_config.patch(
         {
             "triton.unique_kernel_names": "original_aten",

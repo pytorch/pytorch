@@ -553,50 +553,10 @@ class CPUReproTests(TestCase):
                     self.assertEqual(fn_opt(*inps_var), mod(*inps_var))
 
     @parametrize(
-        "input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
         itertools.product(
             *[
-                [1, 2],
-                [2],
-                [1, 2],
-                [False, True],
-                [False, True],
-                [False, True],
                 [True, False],
-                [1, 2],
-                [1, 2],
-            ]
-        ),
-    )
-    def test_lstm_packed_unbatched(
-        self,
-        input_size,
-        hidden_size,
-        num_layers,
-        bidirectional,
-        bias,
-        empty_state,
-        batch_first,
-        batch_size,
-        seq_len,
-    ):
-        self._test_lstm_packed(
-            True,
-            input_size,
-            hidden_size,
-            num_layers,
-            bidirectional,
-            bias,
-            empty_state,
-            batch_first,
-            batch_size,
-            seq_len,
-        )
-
-    @parametrize(
-        "input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
-        itertools.product(
-            *[
                 [1, 2],
                 [2],
                 [1, 2],
@@ -611,6 +571,7 @@ class CPUReproTests(TestCase):
     )
     def test_lstm_packed(
         self,
+        unbatched,
         input_size,
         hidden_size,
         num_layers,
@@ -622,7 +583,7 @@ class CPUReproTests(TestCase):
         seq_len,
     ):
         self._test_lstm_packed(
-            False,
+            unbatched,
             input_size,
             hidden_size,
             num_layers,
@@ -4437,6 +4398,34 @@ class CPUReproTests(TestCase):
                 funcs, example_shapes, mixed_types, check_vecns
             ):
                 check_use_full_bits(func, shapes, dtype, mixed, check_vecn)
+
+    @config.patch("cpp.simdlen", 256)
+    @requires_vectorization
+    def test_avx2_bool_constant_pad_nd(self):
+        # NOTE: I tried using (0, 12, 12) and removing the cpp.simdlen=256 override, but
+        # that didn't repro the issue.
+        result = torch.testing.make_tensor(
+            (0, 6, 6), dtype=torch.bool, device=torch.device("cpu")
+        )
+
+        def fn(arg):
+            return torch.constant_pad_nd(arg, (1, 1, 1, 1, 1, 1))
+
+        self.common(fn, (result,))
+
+    @config.patch(unroll_reductions_threshold=9999)
+    @requires_vectorization
+    def test_unrolled_bool_prod_vectorized(self):
+        result = torch.zeros((37, 37, 37), dtype=torch.bool)
+        dim_select = [0, 1]
+        result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
+        result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
+        result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
+
+        def fn(arg):
+            return torch.prod(arg, 1, dtype=torch.bool)
+
+        self.common(fn, (result,))
 
     @requires_vectorization
     def test_for_loop_collapsed(self):

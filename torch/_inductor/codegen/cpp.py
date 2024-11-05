@@ -340,7 +340,7 @@ def stride_at(index: sympy.Expr, var: sympy.Symbol):
         # see test_torchinductor_dynamic_shapes.py::test_full_boolean_dynamic_shapes_cpu
         # which has tmp0 = ops.index_expr(s0 >= 1024, torch.bool) and fails below calculation.
         # in this case, there is no dependencies between index and var.
-        return sympy.Integer(0)
+        return sympy.S.Zero
     replacement = {var: var + 1}
     new_index = sympy_subs(index, replacement)  # type: ignore[arg-type]
     return sympy.simplify(new_index - index)
@@ -1550,18 +1550,21 @@ class CppVecOverrides(CppOverrides):
 
         dtype = result.dtype
         body_code = f"{var}()"
-        body_code_vec = (
-            body_code
-            if result.is_vec
-            else f"{V.kernel._get_vec_type(dtype)}({body_code})"
-        )
+
+        def maskify_or_vecify(code):
+            return (
+                f"{V.kernel._get_mask_type()}::from({code})"
+                if dtype == torch.bool
+                else f"{V.kernel._get_vec_type(dtype)}({code})"
+            )
+
+        if result.is_vec:
+            body_code_vec = body_code
+        else:
+            body_code_vec = maskify_or_vecify(body_code)
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
         # loading bool as VecMask<float, N>
-        other_code_vec = (
-            f"{V.kernel._get_mask_type()}::from({other_code})"
-            if dtype == torch.bool
-            else f"{V.kernel._get_vec_type(dtype)}({other_code})"
-        )
+        other_code_vec = maskify_or_vecify(other_code)
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec:
             code = BracesBuffer()
@@ -3221,7 +3224,12 @@ class CppTile2DKernel(CppVecKernel):
             tile_var = self.cse.cache[load_or_store]
 
         if need_define:
-            define_line = f"alignas({factor}) {DTYPE_TO_CPP[dtype]} {tile_var}[{factor}*{factor}];"
+            cpp_dtype = DTYPE_TO_CPP[dtype]
+            # tiling_factor might be smaller than the alignment of cpp_dtype, such as
+            # with a vector that only holds 4 elements due to NEON 128-bit vectors and
+            # cpp_dtype being a 64-bit integer.
+            alignas = f"alignas(std::max(std::size_t({factor}), alignof({cpp_dtype})))"
+            define_line = f"{alignas} {cpp_dtype} {tile_var}[{factor}*{factor}];"
             self.preloads.writeline(define_line)
 
         load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
@@ -3499,15 +3507,14 @@ class TilingSelect:
                             group[tiling_indices[0]],
                         ]
                     )
-                    and group[tiling_indices[0]] < tiling_factor / 2
+                    and group[tiling_indices[0]] < tiling_factor / 4
+                    and op_num < 10
                 ):
-                    # For case of Multi Thread AMP Static shape of pyhpc_isoneutral_mixing,
-                    # the inner loop range doesn't have enough elements to do vectorization
-                    # explicitly and found that `#pragma GCC ivdep` has better performance than
-                    # `#pragma omp simd simdlen(8)`. Disable vectorization for this case.
-                    # <TODO> Leslie: maybe we can always disable vectorization when loop range is less
-                    # than tiling factor and enable `#pragma omp simd simdlen(8)` for scalar kernel
-                    # when needed.
+                    # We found that when the number of elements in the inner loop range is
+                    # relatively small(< tiling_factor / 4) and the number of operations is
+                    # not large(< 10), vectorization is not efficient.
+                    # And found that `#pragma GCC ivdep` has better performance than
+                    # `#pragma omp simd simdlen(8)` for these cases.
                     return [], []
 
             if dtype in DTYPE_LOWP_FP:
@@ -4013,7 +4020,8 @@ class CppKernelProxy(CppKernel):
         for kernel in self.kernels:
             kernel.update_stores_with_parallel_reduction()
 
-    def gen_body(self, code):
+    def gen_body(self, code: Optional[BracesBuffer] = None):
+        assert code is not None
         if_prefix = "C10_LIKELY"
         for kernel in self.kernels:
             with contextlib.ExitStack() as stack:
@@ -4957,9 +4965,9 @@ class WorkSharing:
 class LoopLevel:
     var: Optional[sympy.Expr] = None
     size: Optional[sympy.Expr] = None
-    offset: sympy.Expr = sympy.Integer(0)
-    tiled_size: sympy.Expr = sympy.Integer(0)
-    steps: sympy.Expr = sympy.Integer(1)
+    offset: sympy.Expr = sympy.S.Zero
+    tiled_size: sympy.Expr = sympy.S.Zero
+    steps: sympy.Expr = sympy.S.One
     parallel: int = 0
     simd_omp: bool = False
     simd_vec: bool = False
