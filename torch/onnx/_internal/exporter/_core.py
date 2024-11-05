@@ -451,13 +451,23 @@ def _handle_call_function_node_with_lowering(
         val_args = tuple(n.meta["val"] for n in graph_args)
         # Expected `mod` to be an instance of `torch.nn.Module`, got <class 'torch.fx.graph.Graph'>.
         # But this scenario should be supported.
-        true_program = export(local_functions[true_graph.name], val_args, registry=registry)
-        false_program = export(local_functions[false_graph.name], val_args, registry=registry)
+        true_program = export(
+            local_functions[true_graph.name], val_args, registry=registry
+        )
+        false_program = export(
+            local_functions[false_graph.name], val_args, registry=registry
+        )
         true_function = ir.Function(
-            LOCAL_FUNCTION_DOMAIN, true_graph.name, graph=true_program.model.graph, attributes={}
+            LOCAL_FUNCTION_DOMAIN,
+            true_graph.name,
+            graph=true_program.model.graph,
+            attributes={},
         )
         false_function = ir.Function(
-            LOCAL_FUNCTION_DOMAIN, false_graph.name, graph=false_program.model.graph, attributes={}
+            LOCAL_FUNCTION_DOMAIN,
+            false_graph.name,
+            graph=false_program.model.graph,
+            attributes={},
         )
 
         inputs = [node_name_to_values[n.name] for n in graph_args]
@@ -465,10 +475,18 @@ def _handle_call_function_node_with_lowering(
         onnx_outputs_then = [ir.Value(name=node.name)]
         onnx_outputs_else = [ir.Value(name=node.name)]
 
-        then_node = ir.Node(LOCAL_FUNCTION_DOMAIN, true_graph.name, inputs, outputs=onnx_outputs_then)
-        then_graph = ir.Graph([], onnx_outputs_then, nodes=[then_node], name="then_graph")
-        else_node = ir.Node(LOCAL_FUNCTION_DOMAIN, false_graph.name, inputs, outputs=onnx_outputs_else)
-        else_graph = ir.Graph([], onnx_outputs_else, nodes=[else_node], name="else_graph")
+        then_node = ir.Node(
+            LOCAL_FUNCTION_DOMAIN, true_graph.name, inputs, outputs=onnx_outputs_then
+        )
+        then_graph = ir.Graph(
+            [], onnx_outputs_then, nodes=[then_node], name="then_graph"
+        )
+        else_node = ir.Node(
+            LOCAL_FUNCTION_DOMAIN, false_graph.name, inputs, outputs=onnx_outputs_else
+        )
+        else_graph = ir.Graph(
+            [], onnx_outputs_else, nodes=[else_node], name="else_graph"
+        )
         if_node = ir.Node(
             "",
             "If",
@@ -477,7 +495,7 @@ def _handle_call_function_node_with_lowering(
             attributes=[
                 ir.Attr("then_branch", ir.AttributeType.GRAPH, then_graph),
                 ir.Attr("else_branch", ir.AttributeType.GRAPH, else_graph),
-            ]
+            ],
         )
 
         outputs = if_node.outputs
@@ -506,7 +524,8 @@ def _handle_call_function_node_with_lowering(
 
         # Replace the input FX nodes with ONNX values
         onnx_args = [
-            _convert_fx_arg_to_onnx_arg(input_, node_name_to_values) for input_ in fx_args
+            _convert_fx_arg_to_onnx_arg(input_, node_name_to_values)
+            for input_ in fx_args
         ]
 
         onnx_kwargs = {}
@@ -594,7 +613,11 @@ def _add_nodes(
     constant_farm: dict[Any, ir.Value] = {}
     opset = _get_onnxscript_opset(registry.opset_version)
     local_functions: dict[str, torch.fx.Graph] = {}
-    graph = exported_program.graph if hasattr(exported_program, "graph") else exported_program
+    graph = (
+        exported_program.graph
+        if hasattr(exported_program, "graph")
+        else exported_program
+    )
     for node in graph.nodes:
         logger.debug(
             "%s", (node.name, node.args, node.target, node.op, node.type, node.kwargs)
