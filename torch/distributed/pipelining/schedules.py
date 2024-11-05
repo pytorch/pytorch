@@ -7,7 +7,7 @@ import itertools
 import logging
 import re
 from abc import ABC, abstractmethod
-from collections import defaultdict
+from collections import Counter, defaultdict
 from enum import Enum
 from typing import (
     Any,
@@ -613,7 +613,9 @@ class ScheduleGPipe(PipelineScheduleSingle):
                     work.wait()
 
                 loss = self._maybe_get_loss(self._stage, i)
-                self._stage.backward_one_chunk(i, loss=loss)
+                self._stage.backward_one_chunk(
+                    i, loss=loss, last_backward=i == self._n_microbatches - 1
+                )
 
                 ops = self._stage.get_bwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="bwd_send")
@@ -709,7 +711,11 @@ class Schedule1F1B(PipelineScheduleSingle):
 
             # Backward one chunk
             loss = self._maybe_get_loss(self._stage, bwd_mb_index)
-            self._stage.backward_one_chunk(bwd_mb_index, loss=loss)
+            self._stage.backward_one_chunk(
+                bwd_mb_index,
+                loss=loss,
+                last_backward=bwd_mb_index == self._n_microbatches - 1,
+            )
 
             # Get the bwd send ops, but don't fire, to be fused with the 1F below
             bwd_sends = self._stage.get_bwd_send_ops(bwd_mb_index)
@@ -748,7 +754,11 @@ class Schedule1F1B(PipelineScheduleSingle):
 
             # Backward one chunk
             loss = self._maybe_get_loss(self._stage, bwd_mb_index)
-            self._stage.backward_one_chunk(bwd_mb_index, loss=loss)
+            self._stage.backward_one_chunk(
+                bwd_mb_index,
+                loss=loss,
+                last_backward=bwd_mb_index == self._n_microbatches - 1,
+            )
 
             # Clear previous chunk's backward sends (hopefully they have well finished)
             if send_work:
@@ -1203,7 +1213,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 all_prev_ranks.add(self.stage_index_to_group_rank[stage_index - 1])
             if stage_index < self._num_stages - 1:
                 all_next_ranks.add(self.stage_index_to_group_rank[stage_index + 1])
-
+        # count either full_backward or backward_weight together, to determine when to sync DP grads
+        backward_counter: Counter[int] = Counter()
         for time_step, action in enumerate(self.pipeline_order[self.rank]):
             try:
                 ops: List[dist.P2POp] = []
@@ -1226,10 +1237,13 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         # perform backward computation
                         stage = stage_index_to_stage[stage_index]
                         loss = self._maybe_get_loss(stage, mb_index)
+                        backward_counter[stage_index] += 1
                         stage.backward_one_chunk(
                             mb_index,
                             loss=loss,
                             full_backward=True,
+                            last_backward=backward_counter[stage_index]
+                            == self._n_microbatches,
                         )
                         ops.extend(stage.get_bwd_send_ops(mb_index))
                     elif computation_type == _ComputationType.BACKWARD_INPUT:
@@ -1240,12 +1254,18 @@ class PipelineScheduleMulti(_PipelineSchedule):
                             mb_index,
                             loss=loss,
                             full_backward=False,
+                            last_backward=False,
                         )
                         ops.extend(stage.get_bwd_send_ops(mb_index))
                     elif computation_type == _ComputationType.BACKWARD_WEIGHT:
                         # perform weight update
                         stage = stage_index_to_stage[stage_index]
-                        stage.backward_weight_one_chunk(mb_index)
+                        backward_counter[stage_index] += 1
+                        stage.backward_weight_one_chunk(
+                            mb_index,
+                            last_backward=backward_counter[stage_index]
+                            == self._n_microbatches,
+                        )
                     else:
                         raise ValueError(f"Unknown computation type {computation_type}")
 
@@ -1459,6 +1479,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 stage_idx in unsharded_stages
             ), f"Attempted to compute on sharded {stage_idx=}"
 
+        # count either full_backward or backward_weight together, to determine when to sync DP grads
+        backward_counter: Counter[int] = Counter()
         for time_step, action in enumerate(self.pipeline_order_with_comms[self.rank]):
             try:
                 comp_type = action.computation_type
@@ -1569,10 +1591,13 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         )
                         bwd_recv_ops.pop((stage_idx, mb_index)).wait()
                     loss = self._maybe_get_loss(stage, mb_index)
+                    backward_counter[stage_idx] += 1
                     stage.backward_one_chunk(
                         mb_index,
                         loss=loss,
                         full_backward=True,
+                        last_backward=backward_counter[stage_idx]
+                        == self._n_microbatches,
                     )
                     # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                     # see [Note: V-schedule special case]
@@ -1597,6 +1622,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         mb_index,
                         loss=loss,
                         full_backward=False,
+                        last_backward=False,
                     )
                     # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                     # see [Note: V-schedule special case]
@@ -1607,8 +1633,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 elif comp_type == BACKWARD_WEIGHT:
                     if stage_uses_fsdp:
                         _assert_unsharded(stage_idx)
-
-                    stage.backward_weight_one_chunk(mb_index)
+                    backward_counter[stage_idx] += 1
+                    stage.backward_weight_one_chunk(
+                        mb_index,
+                        last_backward=backward_counter[stage_idx]
+                        == self._n_microbatches,
+                    )
                 else:
                     raise ValueError(f"{action=} is unknown or unsupported")
             except Exception as e:
