@@ -10222,6 +10222,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {0 < Mod(s0, 3): False, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, False: False, Mod(s0, 3) <= 0: True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False, True: True}
+  > Right: {}
 ==> divisible: values don't match.
   >  Left: {Mod(s0, 3)}
   > Right: {}
@@ -10259,6 +10262,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {False: False, True: True}
+  > Right: {}
 ==> guards: values don't match.
   >  Left: [Eq(s0, 3)]
   > Right: []
@@ -10300,6 +10306,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {3 <= s0: True, s0 < 3: False}
+  > Right: {}
 ==> guards: values don't match.
   >  Left: [s0 >= 3]
   > Right: []
@@ -10332,6 +10341,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {0 < PythonMod(u0, 3): False, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, False: False, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False, PythonMod(u0, 3) <= 0: True, True: True}
+  > Right: {}
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {u0: [Eq(PythonMod(u0, 3), 0)]}
   > Right: {}
