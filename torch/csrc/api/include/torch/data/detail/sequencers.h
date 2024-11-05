@@ -90,7 +90,7 @@ struct OrderedSequencer : public Sequencer<Result> {
       buffer(result->sequence_number) = std::move(result);
     }
     // The result was an empty optional, so we are done with this epoch.
-    return nullopt;
+    return std::nullopt;
   }
 
   /// Accesses the buffer at the `index` modulo the buffer size.

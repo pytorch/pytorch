@@ -135,7 +135,7 @@ void launch_glu_backward_kernel(
       });
 }
 
-REGISTER_DISPATCH(glu_stub, &glu_kernel);
-REGISTER_DISPATCH(glu_jvp_stub, &glu_jvp_kernel);
+REGISTER_DISPATCH(glu_stub, &glu_kernel)
+REGISTER_DISPATCH(glu_jvp_stub, &glu_jvp_kernel)
 
 } // namespace at::native
