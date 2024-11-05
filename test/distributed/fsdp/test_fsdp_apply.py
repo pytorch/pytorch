@@ -14,7 +14,7 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     TransformerWithSharedParams,
 )
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN, TEST_CUDA
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN, TEST_HPU
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 if not dist.is_available():
@@ -40,6 +40,8 @@ class TestApply(FSDPTest):
             m.weight.fill_(1.0)
             m.bias.fill_(1.0)
 
+    def set_device(self, device):
+        return device if TEST_HPU else self.rank
     def check_weights(self, fsdp, expected_tensor_fn, check):
         with FSDP.summon_full_params(fsdp, recurse=True):
             linear_modules = [
@@ -67,7 +69,7 @@ class TestApply(FSDPTest):
     def test_nested_module_apply(self, device):
         """Tests that ``apply()`` modifies parameter values in-place on a
         non-FSDP-root nested FSDP-wrapped model."""
-        fsdp_kwargs = {} if TEST_CUDA else {"device_id": device}
+        fsdp_kwargs = {"device_id": self.set_device(device)}
         nested_wrapped_module = NestedWrappedModule.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -80,7 +82,7 @@ class TestApply(FSDPTest):
     def test_transformer_module_apply(self, device):
         """Tests that ``apply()`` modifies parameter values in-place on an
         FSDP-wrapped transformer model with shared parameters."""
-        fsdp_kwargs = {} if TEST_CUDA else {"device_id": device}
+        fsdp_kwargs = {"device_id": self.set_device(device)}
         transformer = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -93,7 +95,7 @@ class TestApply(FSDPTest):
     def test_apply_in_summon_raises_error(self, device):
         """Tests that calling ``apply()`` on an FSDP instance inside the
         ``summon_full_params()`` context raises an error."""
-        fsdp_kwargs = {} if TEST_CUDA else {"device_id": device}
+        fsdp_kwargs = {"device_id": self.set_device(device)}
         transformer = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -104,7 +106,7 @@ class TestApply(FSDPTest):
             with self.assertRaisesRegex(ValueError, "expected to be in states"):
                 transformer.apply(self._init_linear_weights)
 
-devices = ("cuda", "hpu")
+devices = ("hpu" if TEST_HPU else "cuda")
 instantiate_device_type_tests(TestApply, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
