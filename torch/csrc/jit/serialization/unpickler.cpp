@@ -586,7 +586,7 @@ PickleOpCode Unpickler::readInstruction() {
         storage = storage_context_->getStorage(key);
       } else {
         int64_t numel = args.at(4).toInt();
-        auto dtype = scalarTypeToTypeMeta(type);
+        caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
 
         at::DataPtr storage_ptr;
         if (numel > 0) {
@@ -608,7 +608,7 @@ PickleOpCode Unpickler::readInstruction() {
         }
       }
 
-      auto options = at::device(at::kCPU).dtype(type);
+      auto options = at::CPU(type).options();
       if (use_storage_device_) {
         options = options.device(storage.device());
         device = storage.device();
