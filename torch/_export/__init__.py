@@ -24,6 +24,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 
 from torch._dispatch.python import enable_python_dispatcher
+from torch._guards import compile_context
 from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.graph_signature import (
@@ -35,12 +36,12 @@ from torch.export.graph_signature import (
     OutputKind,
     OutputSpec,
     SymIntArgument,
+    SymBoolArgument,
     TensorArgument,
 )
 from torch.fx import traceback as fx_traceback
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
