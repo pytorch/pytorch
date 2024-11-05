@@ -42,7 +42,7 @@ qconv_get_md(
   return {src_usr_md, wgh_usr_md, dst_usr_md};
 }
 
-at::Tensor quantized_convolution_pt2(
+at::Tensor quantized_convolution(
     at::Tensor act,
     double act_scale,
     int64_t act_zero_point,
