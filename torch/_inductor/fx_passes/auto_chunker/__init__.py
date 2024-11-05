@@ -372,17 +372,8 @@ class AutoChunkerTransform:
                 replacement[orig_nd] = replace_nd
 
     def _fake_tensor_prop(self):
-        inputs = []
-        for nd in self.gm.graph.nodes:
-            if nd.op == "placeholder":
-                fake_tensor = get_fake_tensor_from_node(nd)
-                if fake_tensor is not None:
-                    inputs.append(fake_tensor)
-                else:
-                    inputs.append(nd)
-
-        fake_mode = detect_fake_mode(inputs)
-        FakeTensorProp(self.gm, mode=fake_mode).propagate_dont_convert_inputs(*inputs)
+        from .applier import fake_tensor_prop
+        fake_tensor_prop(self.gm)
 
     def _chunk_non_source_node(self, chunk_id, node_id, orig_nd, chunk_replacement, final_replacement):
         # Special handling for gradient of the first matmul input
@@ -716,18 +707,29 @@ class AutoChunker:
 
             Propagator.add_chunking_meta(chunking_subgraph)
 
-            ChunkingApplier(chunking_subgraph, 2).apply()
+            ChunkingApplier(chunking_subgraph, config.AutoChunker.num_chunk or 2).apply()
+
+            metrics.num_auto_chunking += 1
+            newgm = torch.fx._lazy_graph_module._make_graph_module(
+                self.gm, chunking_subgraph.parent_graph
+            )
+            from .applier import fake_tensor_prop
+            fake_tensor_prop(newgm)
+            # breakpoint()
+            return newgm
+
 
             assert False
 
-            propagator = ChunkingMetaPropagator()
-            _add_chunking_meta_to_source_node(self.source_node)
-            try:
-                propagator.propagate(self.source_node)
-            except CantChunk as e:
-                raise
-            finally:
-                _print_graph_with_chunking_meta(graph)
+            if False:
+                propagator = ChunkingMetaPropagator()
+                _add_chunking_meta_to_source_node(self.source_node)
+                try:
+                    propagator.propagate(self.source_node)
+                except CantChunk as e:
+                    raise
+                finally:
+                    _print_graph_with_chunking_meta(graph)
 
         # We should not propagate beyond gradient of matmul input/weight since
         # we will 'un-chunk' them. The downstream nodes don't see the effect
@@ -744,7 +746,7 @@ class AutoChunker:
 
         if self.last_fwd_node not in reachable_nodes:
             log.debug("We can only chunk all the way to the end of the fwd graph.")
-            return
+            return self.gm
 
 
         # the last fwd node is affected by chunking.
@@ -775,3 +777,5 @@ class AutoChunker:
 
         with self.gm.graph.inserting_before(nodes_to_chunk[-1].next):
             AutoChunkerTransform(self, nodes_to_chunk)
+
+        return self.gm

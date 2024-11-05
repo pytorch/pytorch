@@ -334,11 +334,12 @@ def _recursive_pre_grad_passes(
         return pre_grad_passes(gm, example_inputs)
 
 
-def _recursive_joint_graph_passes(gm: GraphModule) -> None:
+def _recursive_joint_graph_passes(gm: GraphModule) -> GraphModule:
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
-        _recursive_joint_graph_passes(subgraph)
-    joint_graph_passes(gm)
+        new_subgraph = _recursive_joint_graph_passes(subgraph)
+        setattr(gm, subgraph_name, new_subgraph)
+    return joint_graph_passes(gm)
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
@@ -1276,7 +1277,7 @@ def fw_compiler_freezing(
     from torch._inductor.freezing import convert_conv_weights_to_channels_last, freeze
 
     # partition_fn won't be called
-    _recursive_joint_graph_passes(aot_autograd_model)
+    aot_autograd_model = _recursive_joint_graph_passes(aot_autograd_model)
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
@@ -1530,7 +1531,7 @@ def compile_fx(
         ) -> CompiledFxGraph:
             if is_inference:
                 # partition_fn won't be called
-                _recursive_joint_graph_passes(model)
+                model = _recursive_joint_graph_passes(model)
 
             fixed = torch._inductor.utils.num_fw_fixed_arguments(
                 num_example_inputs, len(example_inputs)
@@ -1622,7 +1623,7 @@ def compile_fx(
         ) -> Tuple[GraphModule, GraphModule]:
             cuda_context = get_cuda_device_context(gm)
             with cuda_context:
-                _recursive_joint_graph_passes(gm)
+                gm = _recursive_joint_graph_passes(gm)
             return min_cut_rematerialization_partition(
                 gm, joint_inputs, **kwargs, compiler="inductor"
             )

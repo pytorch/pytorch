@@ -802,6 +802,7 @@ def clear_inductor_caches():
     """
     Clear all registered caches.
     """
+    return # avoid deleting the compiled module
     for obj in _registered_caches:
         obj.cache_clear()
 

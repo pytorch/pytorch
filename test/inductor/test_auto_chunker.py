@@ -85,7 +85,7 @@ class AutoChunkerTest(TestCase):
     def test_linear_softmax(self):
         self.common_matmul_test(has_softmax=True, use_bias=True)
 
-    # TODO: this is the main target
+    @config.patch("AutoChunker.num_chunk", 8)
     def test_fused_linear_cel(self):
         B = 32
         T = 1024
