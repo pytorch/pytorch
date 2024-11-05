@@ -5310,6 +5310,8 @@ class ShapeEnv:
         self, e: SympyBoolean
     ) -> Tuple[Tuple[SympyBoolean, sympy.logic.boolalg.BooleanAtom], ...]:
         """Given a expression, it returns a list of predicates that follow from it"""
+        # This function assumes that the input is already simplified, and hence implications 
+        # can be created without further simplifications in many cases by passing evaluate=False.
         equiv: Dict[SympyBoolean, sympy.logic.boolalg.BooleanAtom] = {}
 
         def add_expr(expr: SympyBoolean) -> None:
@@ -5320,27 +5322,30 @@ class ShapeEnv:
                 # With this, we could remove the need for the commutativity part
                 opposite = sympy.Eq if isinstance(expr, sympy.Ne) else sympy.Ne
                 # Commutativity of == and !=
-                equiv[type(expr)(expr.lhs, expr.rhs)] = sympy.true
-                equiv[type(expr)(expr.rhs, expr.lhs)] = sympy.true
-                equiv[opposite(expr.lhs, expr.rhs)] = sympy.false
-                equiv[opposite(expr.rhs, expr.lhs)] = sympy.false
+                equiv[type(expr)(expr.lhs, expr.rhs, evaluate=False)] = sympy.true
+                equiv[type(expr)(expr.rhs, expr.lhs, evaluate=False)] = sympy.true
+                equiv[opposite(expr.lhs, expr.rhs, evaluate=False)] = sympy.false
+                equiv[opposite(expr.rhs, expr.lhs, evaluate=False)] = sympy.false
             else:
                 # Expr and negation
                 equiv[expr] = sympy.true
+                # we do not pass evaluate=False like others on purpose here!
+                # we want not(a<b) to be a>=b and not ~(a<b).
                 equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
 
         add_expr(e)
         # Other relational expressions this expression implies
         if isinstance(e, sympy.Eq):
-            add_expr(sympy.Le(e.lhs, e.rhs))
-            add_expr(sympy.Ge(e.lhs, e.rhs))
+            add_expr(sympy.Le(e.lhs, e.rhs, evaluate=False))
+            add_expr(sympy.Ge(e.lhs, e.rhs, evaluate=False))
         elif isinstance(e, sympy.Lt):
-            add_expr(sympy.Le(e.lhs, e.rhs))
-            add_expr(sympy.Ne(e.lhs, e.rhs))
+            add_expr(sympy.Le(e.lhs, e.rhs, evaluate=False))
+            add_expr(sympy.Ne(e.lhs, e.rhs, evaluate=False))
             if e.lhs.is_integer and e.rhs.is_integer:  # type: ignore[attr-defined]
-                add_expr(sympy.Le(e.lhs, e.rhs - 1))
+                add_expr(sympy.Le(e.lhs, e.rhs - 1, evaluate=False))
         elif isinstance(e, sympy.Le):
-            add_expr(sympy.Lt(e.lhs, e.rhs + 1))
+            add_expr(sympy.Lt(e.lhs, e.rhs + 1, evaluate=False))
+
         return tuple(equiv.items())
 
     @_lru_cache
