@@ -18,6 +18,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfRocm,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -248,6 +249,7 @@ class TestFSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                     self.assertEqual(type(v2), DTensor)
 
     @with_comms
+    @skipIfRocm
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_to_cpu", [True, False])
     @parametrize("is_even_sharded_model", [True, False])
