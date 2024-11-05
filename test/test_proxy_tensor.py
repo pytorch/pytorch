@@ -1984,10 +1984,7 @@ only_fake_tensor_failures = {
     xfail('narrow'),
 }
 
-fake_tensor_failures = {
-    # ASAN failures due to divide by 0
-    skip('nn.functional.nll_loss'),
-}
+fake_tensor_failures = set()
 
 symbolic_tensor_failures = {
     xfail('combinations', ''),
