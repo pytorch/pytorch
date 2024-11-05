@@ -526,7 +526,7 @@ inline void validate_sdpa_input(
 //    attn_mask: attn_mask of shape (B, L, S) or (L, S) or (B, N_heads, L, S)
 std::optional<Tensor> convert_boolean_attn_mask_(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype, double neg_inf) {
   // Pass through
-  if(!attn_mask.has_value()) {
+  if (!attn_mask.has_value()) {
     return std::nullopt;
   }
   // Convert boolean mask to additive mask; need to invert mask to indicate what
