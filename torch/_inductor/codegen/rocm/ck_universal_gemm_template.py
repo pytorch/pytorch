@@ -584,19 +584,19 @@ class CKGemmTemplate(CKTemplate):
                 b_torch_dtype=DTYPE_TO_CPP[W.get_layout().dtype],
                 c_torch_dtype=DTYPE_TO_CPP[Y.get_layout().dtype],
                 bias_torch_dtype=DTYPE_TO_CPP[Bias.get_layout().dtype]
-                if has_bias
+                if Bias is not None
                 else "",
                 scale_a_torch_dtype=DTYPE_TO_CPP[scale_x.get_layout().dtype]
-                if has_scale
+                if scale_x is not None
                 else "",
                 scale_b_torch_dtype=DTYPE_TO_CPP[scale_w.get_layout().dtype]
-                if has_scale
+                if scale_w is not None
                 else "",
                 a_layout=torch_layout_to_ck_layout(X.get_layout()),
                 b_layout=torch_layout_to_ck_layout(W.get_layout()),
                 c_layout=torch_layout_to_ck_layout(Y.get_layout()),
                 bias_layout=torch_layout_to_ck_layout(Bias.get_layout())
-                if has_bias
+                if Bias is not None
                 else "",
                 compile_cmd=rocm_compile_command(
                     ["<source_file_name>"], "<executable_name>", "exe"
