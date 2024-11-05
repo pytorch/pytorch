@@ -181,13 +181,12 @@ class TestUnaryUfuncs(TestCase):
     #   values on given tensors
     def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
         def _helper_reference_numerics(
-            expected, actual, msg, exact_dtype, equal_nan=True, op_name=None
+            expected, actual, msg, exact_dtype, equal_nan=True
         ):
             if not torch.can_cast(
                 numpy_to_torch_dtype_dict[expected.dtype.type], dtype
             ):
                 exact_dtype = False
-            msg = f"Operation {op_name}: tensor comparison failed"
 
             if dtype in [torch.uint8, torch.int8, torch.bool]:
                 # NOTE: For these dtypes, PyTorch computes in the default scalar type (float)
@@ -244,7 +243,6 @@ class TestUnaryUfuncs(TestCase):
 
             actual = op(t, **torch_kwargs)
             expected = op.ref(a, **numpy_kwargs)
-            msg = f"Operation SENTINEL{op}: "
 
             # Crafts a custom error message for smaller, printable tensors
             if t.numel() < 10:
@@ -259,12 +257,12 @@ class TestUnaryUfuncs(TestCase):
             exact_dtype = True
             if isinstance(actual, torch.Tensor):
                 _helper_reference_numerics(
-                    expected, actual, msg, exact_dtype, equal_nan, str(op)
+                    expected, actual, msg, exact_dtype, equal_nan
                 )
             else:
                 for x, y in zip(expected, actual):
                     # testing multi-outputs results
-                    _helper_reference_numerics(x, y, msg, exact_dtype, equal_nan, str(op))
+                    _helper_reference_numerics(x, y, msg, exact_dtype, equal_nan)
 
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on a range of tensors, including empty tensors, scalar tensors,
