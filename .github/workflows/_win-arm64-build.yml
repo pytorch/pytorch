@@ -8,10 +8,20 @@ on:
         type: string
         description: Top-level label for what's being built/tested.
       cuda-version:
-        required: false
+        required: true
         type: string
         description: What CUDA version to build with, "cpu" for none.
         default: "cpu"
+      use-xpu:
+        required: false
+        type: boolean
+        default: false
+        description: If set, build with XPU support.
+      vc-year:
+        required: false
+        type: string
+        default: "2022"
+        description: The Visual Studio year to use for building.
       build-with-debug:
         required: false
         type: boolean

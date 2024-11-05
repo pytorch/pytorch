@@ -8,7 +8,7 @@ on:
         type: string
         description: Top-level label for what's being built/tested.
       cuda-version:
-        required: false
+        required: true
         type: string
         description: What CUDA version to build with, "cpu" for none.
         default: "cpu"

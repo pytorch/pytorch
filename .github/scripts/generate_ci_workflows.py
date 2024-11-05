@@ -11,7 +11,7 @@ import generate_binary_build_matrix  # type: ignore[import]
 import jinja2
 
 
-Arch = Literal["windows", "linux", "macos"]
+Arch = Literal["windows", "linux", "macos", "windows-arm64"]
 
 GITHUB_DIR = Path(__file__).resolve().parent.parent
 
@@ -356,38 +356,6 @@ WINDOWS_BINARY_SMOKE_WORKFLOWS = [
     ),
 ]
 
-WINDOWS_ARM64_BINARY_SMOKE_WORKFLOWS = [
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS_ARM64,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.RELEASE,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS_ARM64,
-            generate_binary_build_matrix.RELEASE,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="main",
-        ciflow_config=CIFlowConfig(
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.WINDOWS,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.DEBUG,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.WINDOWS,
-            generate_binary_build_matrix.DEBUG,
-            arches=["cpu"],
-            libtorch_variants=["shared-with-deps"],
-        ),
-        branches="main",
-        ciflow_config=CIFlowConfig(
-            isolated_workflow=True,
-        ),
-    ),
-]
 
 MACOS_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
