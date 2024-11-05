@@ -553,6 +553,9 @@ def split_module(
             partition.graph.output(output_vals[0])
         elif num_output_vals > 1:
             partition.graph.output(output_vals)
+        else:
+            # Invariant - Graph should always have an output node.
+            partition.graph.output(())
 
         if keep_original_order:
             # first get the attr nodes required by this partition
