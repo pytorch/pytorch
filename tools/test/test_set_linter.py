@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 from __future__ import annotations
 
 import json
@@ -32,13 +33,13 @@ class TestSetLinter(TestCase):
         self.assertEqual(expected, actual)
 
     # TODO(rec): how to get parametrize to work with unittest?
-    def test_python(self):
+    def test_python(self) -> None:
         self._test_linting(TESTFILE)
 
-    def test_includes(self):
+    def test_includes(self) -> None:
         self._test_linting(INCLUDES_FILE)
 
-    def test_includes2(self):
+    def test_includes2(self) -> None:
         self._test_linting(INCLUDES_FILE2)
 
     def _test_linting(self, path: Path) -> None:
