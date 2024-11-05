@@ -204,15 +204,14 @@ std::string processErrorMsg(std::string str) {
 }
 
 static std::string formatMessage(const char* format, va_list fmt_args) {
-  static const size_t ERROR_BUF_SIZE = 1024;
-  // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-  char error_buf[ERROR_BUF_SIZE];
-  vsnprintf(error_buf, ERROR_BUF_SIZE, format, fmt_args);
-
-  // Ensure that the string is null terminated
-  error_buf[sizeof(error_buf) / sizeof(*error_buf) - 1] = 0;
-
-  return std::string(error_buf);
+  constexpr size_t ERROR_BUF_SIZE = 1024;
+  std::string error_buf(ERROR_BUF_SIZE, '\0');
+  auto res = vsnprintf(error_buf.data(), ERROR_BUF_SIZE, format, fmt_args);
+  if (res < 0) {
+    res = 0;
+  }
+  error_buf.resize(res);
+  return error_buf;
 }
 
 void translate_exception_to_python(const std::exception_ptr& e_ptr) {

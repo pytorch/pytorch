@@ -26,6 +26,7 @@ from torch.testing._internal.common_dtype import (
     get_all_dtypes,
 )
 from torch.testing._internal.common_utils import (
+    IS_FBCODE,
     is_iterable_of_tensors,
     noncontiguous_like,
     OPINFO_SAMPLE_INPUT_INDEX,
@@ -2817,7 +2818,14 @@ class ForeachFuncInfo(OpInfo):
             foreach_method = foreach_method_inplace
             torch_ref_method = torch_ref_inplace
 
-        self.dtypes = _dispatch_dtypes(get_all_dtypes(include_qint=False))
+        # We disable all complex128 tests internally for foreach due to reported flakiness
+        # tracked in #139648
+        supported_dtypes = get_all_dtypes(include_qint=False)
+        if IS_FBCODE:
+            supported_dtypes = [
+                x for x in supported_dtypes if x is not torch.complex128
+            ]
+        self.dtypes = _dispatch_dtypes(supported_dtypes)
 
         self.op = foreach_method
         self.method_variant = foreach_method
