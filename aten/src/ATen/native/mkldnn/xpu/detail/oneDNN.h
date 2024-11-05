@@ -89,6 +89,18 @@ TORCH_API sycl::event deconvolution_backward_weights(
     int64_t groups,
     const std::vector<sycl::event>& deps = {});
 
+TORCH_API sycl::event woq_matmul_int4(
+    at::Tensor& result, // dst, [M, N]
+    const at::Tensor& mat1_, // src, [M, K]
+    const at::Tensor& mat2_, // quantized weight, [K/8, N]
+    const at::Tensor& scale, // [K/group_size, N]
+    const at::Tensor& zp, // [k/group_size, N/8]
+    int64_t group_size,
+    Attr attr,
+    // const c10::optional<at::Tensor>& g_idx,
+    const std::vector<sycl::event>& deps={},
+    Tensor b_raw = at::Tensor());
+
 dnnl::memory::dims conv_dst_size(
     int64_t ndim,
     IntArrayRef src_tz,
