@@ -6,14 +6,6 @@ from typing import Generator
 import torch
 from torch._C import default_generator
 
-default_generator = torch.Generator()
-"""
-The default CPU generator used for random number generation in PyTorch.
-
-This generator is used by PyTorch for CPU-based random number generation when 
-no specific generator is provided in functions that require random numbers.
-"""
-
 def set_rng_state(new_state: torch.Tensor) -> None:
     r"""Sets the random number generator state.
 

@@ -171,6 +171,11 @@ Generators
 
     Generator
 
+.. toctree::
+    :maxdepth: 1
+
+    default_generator
+
 .. _random-sampling:
 
 Random sampling
@@ -184,7 +189,6 @@ Random sampling
     initial_seed
     get_rng_state
     set_rng_state
-    default_generator
     bernoulli
     multinomial
     normal
