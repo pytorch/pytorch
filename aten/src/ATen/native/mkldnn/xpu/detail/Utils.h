@@ -2,6 +2,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/Tensor.h>
+#include <iostream>
 
 #include <ATen/core/grad_mode.h>
 #include <c10/core/MemoryFormat.h>
