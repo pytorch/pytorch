@@ -334,6 +334,10 @@ class FunctionMeta(type):
         backward_fn._compiled_autograd_should_lift = attrs.get(  # type: ignore[attr-defined]
             "_compiled_autograd_should_lift", True
         )
+        backward_fn._bw_module = None  # type: ignore[attr-defined]
+        if "_lazy_backward_info" in attrs:
+            info = attrs.get("_lazy_backward_info")
+            backward_fn._bw_module = info.bw_module # type: ignore[attr-defined]
         cls._backward_cls = backward_fn
 
         super().__init__(name, bases, attrs)

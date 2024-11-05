@@ -2,7 +2,7 @@
 
 import functools
 import warnings
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -74,7 +74,7 @@ class FakeBackwardCFunction:
         self.real = real
         self.saved_tensors = saved_tensors
         self.aot_symints = real._get_compiled_autograd_symints()  # type: ignore[attr-defined]
-        self.bw_module = real._forward_cls._lazy_backward_info.bw_module  # type: ignore[attr-defined]
+        self.bw_module = real._bw_module  # type: ignore[attr-defined]
 
     def __getattr__(self, name: str) -> Any:
         if name == "saved_variables":
@@ -95,7 +95,7 @@ def normalize_as_list(x: Any) -> List[Any]:
     return [x]
 
 
-def call_backward_impl(
+def call_aot_bwd_impl(
     fakectx: FakeBackwardCFunction,
     *args: Any,
 ) -> List[torch.Tensor]:
@@ -104,7 +104,23 @@ def call_backward_impl(
     all_args = args[0]
     bw_module = fakectx.bw_module
     symints = fakectx.aot_symints
-    return normalize_as_list(bw_module(*all_args, *symints))
+    all_args[: len(symints)] = symints
+    out = bw_module(*all_args)
+    return normalize_as_list(out)
+
+
+def call_backward(
+    ctx: torch.autograd.function.BackwardCFunction,
+    saved_tensors: List[torch.Tensor],
+    *args: Any,
+) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+    fakectx = FakeBackwardCFunction(ctx, saved_tensors)
+    grads = fakectx._forward_cls.backward(fakectx, *args)  # type: ignore[attr-defined]
+
+    if not isinstance(grads, tuple):
+        grads = (grads,)
+
+    return grads
 
 
 def untyped_storage_size(x: torch.Tensor) -> int:
