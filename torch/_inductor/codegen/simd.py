@@ -101,8 +101,8 @@ class IterationRanges:
         prefix: str,
         *,
         kernel: SIMDKernel,
-        divisor=sympy.Integer(1),
-        length=sympy.Integer(1),
+        divisor=sympy.S.One,
+        length=sympy.S.One,
         root: IterationRangesRoot,
     ) -> None:
         super().__init__()
@@ -205,7 +205,7 @@ class IterationRangesRoot(IterationRanges):
         return self.nodes[expr]
 
     def construct_entries(self, lengths: List[sympy.Expr]):
-        divisor = sympy.Integer(1)
+        divisor = sympy.S.One
         itervars = []
         for length in reversed(lengths):
             itervars.append(self.lookup(divisor, length))
@@ -224,7 +224,7 @@ class IterationRangesRoot(IterationRanges):
                 x.divisor, fallback=config.unbacked_symint_fallback
             )
         )
-        divisor = sympy.Integer(1)
+        divisor = sympy.S.One
         index_vars = []
         sizes = []
 
@@ -348,7 +348,6 @@ class SIMDKernel(Kernel):
         self.range_tree_nodes: Dict[sympy.Symbol, IterationRangesEntry] = {}
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
-        self.last_usage: OrderedSet[str] = OrderedSet()
         self.cooperative_reduction: bool = (
             override_cooperative_reduction
             if override_cooperative_reduction is not None
@@ -482,7 +481,7 @@ class SIMDKernel(Kernel):
             new_index,
             {
                 tree_node.root.index_sym(): tree_node.root.lookup(
-                    sympy.Integer(1), tree_node.root.numel
+                    sympy.S.One, tree_node.root.numel
                 ).symbol()
             },
         )
@@ -511,15 +510,6 @@ class SIMDKernel(Kernel):
         new_index_vars = tree.construct(new_sizes)
         new_index = sympy_subs(index, dict(zip(index_vars, reindex(new_index_vars))))
         return new_index
-
-    def set_last_usage(self, nodes):
-        if not self.inside_reduction or self.persistent_reduction:
-            return
-        self.last_usage = OrderedSet(
-            itertools.chain.from_iterable(
-                n.last_usage for n in nodes if n is not EnableReduction
-            )
-        )
 
     def disable_reduction(self):
         should_flush = self.range_trees[-1].is_loop or self.cooperative_reduction
@@ -582,7 +572,7 @@ class SIMDKernel(Kernel):
             return_getters = []
             for size in length_group:
                 if sv.statically_known_equals(size, 1):  # type: ignore[arg-type]
-                    return_getters.append(lambda _: sympy.Integer(0))
+                    return_getters.append(lambda _: sympy.S.Zero)
                     continue
 
                 while current_group < len(remaining) and sv.statically_known_equals(
@@ -645,7 +635,7 @@ class SIMDKernel(Kernel):
         """
         groups = [rt.numel for rt in self.range_trees]
         if not self.inside_reduction:
-            groups[-1] = sympy.Integer(1)
+            groups[-1] = sympy.S.One
 
         if len(lengths) == len(self.range_trees) and all(
             V.graph.sizevars.simplify(sympy_product(x) - g) == 0
@@ -1329,12 +1319,8 @@ class SIMDScheduling(BaseScheduling):
         return [kernel]
 
     def codegen_node_schedule_with_kernel(self, node_schedule, kernel):
-        def current_reduction_nodes(nodes):
-            return itertools.takewhile(lambda n: n is not DisableReduction, nodes)
-
         with kernel:
             stack = contextlib.ExitStack()
-            kernel.set_last_usage(current_reduction_nodes(node_schedule))
             all_indexing = {}
 
             # First pass to collect indexing and decide inplace updates
@@ -1360,7 +1346,6 @@ class SIMDScheduling(BaseScheduling):
                     stack.enter_context(kernel.disable_reduction())
                 elif node is EnableReduction:
                     stack.close()
-                    kernel.set_last_usage(current_reduction_nodes(node_schedule[i:]))
                 else:
                     # TODO - use split ranges ?
                     indexing_dtype_strength_reduction(node._body)
@@ -1472,10 +1457,6 @@ class SIMDScheduling(BaseScheduling):
             )
 
             for pn, nodes in zip(node_group, fused_node_lists):
-                if only_gen_src_code:
-                    # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
-                    for n in nodes:
-                        n.last_usage = OrderedSet()
                 self.codegen_node_schedule_with_kernel(
                     node_schedule_map[pn][0],
                     kernel.create_sub_kernel(subkernel_map[pn]),
@@ -1521,7 +1502,7 @@ class SIMDScheduling(BaseScheduling):
             return ()
 
         rw = node.pointwise_read_writes()
-        assert len(rw.range_vars) == len(ranges)
+        assert len(rw.range_vars) == len(ranges), f"{rw.range_vars=} {ranges=}"
 
         # isinstance(dep, MemoryDep): this filters out StarDeps. StarDeps refer to reads
         # that need to access the entire tensor; they don't contribute read indexing
@@ -1583,7 +1564,7 @@ class SIMDScheduling(BaseScheduling):
         return tilings
 
     @classmethod
-    def select_tiling(cls, node_schedule, numel, reduction_numel=sympy.Integer(1)):
+    def select_tiling(cls, node_schedule, numel, reduction_numel=sympy.S.One):
         """
         Heuristics to decide how to tile kernels.
         Currently, we tile based on stride-1 dimensions.
@@ -1679,18 +1660,6 @@ class SIMDScheduling(BaseScheduling):
         return False
 
     def generate_kernel_code_from_nodes(self, nodes, benchmark_kernel=False):
-        @dataclasses.dataclass
-        class LastUsageHolder:
-            n: Any
-            last_usage: Any
-
-            def __del__(self) -> None:
-                self.n.last_usage = self.last_usage
-
-        # empty last_usage. May cause more aggressive 'evict_last'. Should be fine.
-        for n in nodes:
-            n.last_usage = OrderedSet()
-
         if not nodes[0].is_template():
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
