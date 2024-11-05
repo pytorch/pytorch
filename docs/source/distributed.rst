@@ -180,6 +180,10 @@ The package needs to be initialized using the :func:`torch.distributed.init_proc
 or :func:`torch.distributed.device_mesh.init_device_mesh` function before calling any other methods.
 Both block until all processes have joined.
 
+.. warning::
+    Initialization is not thread-safe.  Process group creation should be performed from a single thread, to prevent
+    inconsistent 'UUID' assignment across ranks, and to prevent races during initialization that can lead to hangs.
+
 .. autofunction:: is_available
 
 .. autofunction:: init_process_group
