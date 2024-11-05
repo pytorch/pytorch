@@ -1213,9 +1213,10 @@ def forward(self, arg0_1):
             return torch.add(t, y, out=out_1)
 
         inpt1, inpt2 = torch.tensor([1]), torch.tensor([1])
-        inpt1_func, inpt2_func = torch._to_functional_tensor(
-            inpt1
-        ), torch._to_functional_tensor(inpt2)
+        inpt1_func, inpt2_func = (
+            torch._to_functional_tensor(inpt1),
+            torch._to_functional_tensor(inpt2),
+        )
 
         out_ref = f(inpt1, inpt2)
         torch._enable_functionalization(reapply_views=True)

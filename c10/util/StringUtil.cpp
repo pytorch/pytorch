@@ -37,25 +37,30 @@ std::string ExcludeFileExtension(const std::string& file_name) {
 
 // Narrows the wstr argument and then passes it to _str.
 // Assumes that the input (wide) text is encoded as UTF-16.
-std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString);
+static std::ostream& _strFromWide(
+    std::ostream& ss,
+    const std::wstring& wString);
 
 #ifndef _WIN32
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
 // TODO (huydhn) https://en.cppreference.com/w/cpp/header/codecvt has been
 // deprecated in C++17 but there is no alternative yet, so I just ack it
-std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
+static std::ostream& _strFromWide(
+    std::ostream& ss,
+    const std::wstring& wString) {
   std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
   return _str(ss, converter.to_bytes(wString));
 }
-#pragma GCC diagnostic pop
+C10_DIAGNOSTIC_POP()
 
 #else // #ifndef _WIN32
 // The WIN32 implementation of wstring_convert leaks memory; see
 // https://github.com/microsoft/STL/issues/443
 
-std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
+static std::ostream& _strFromWide(
+    std::ostream& ss,
+    const std::wstring& wString) {
   return _str(ss, u16u8(wString));
 }
 

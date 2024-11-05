@@ -11,8 +11,7 @@
 #include <limits>
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 static std::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   if (index < 0) {
@@ -127,7 +126,7 @@ struct ListLenRefiner {
     }
     active_refinements_.pop_back();
     return block_refinements;
-  };
+  }
 
   std::optional<int64_t> tryFindRefinement(Value* v) {
     for (const auto& ref : active_refinements_) {
@@ -325,5 +324,4 @@ bool PeepholeOptimizeListIdioms(
   return opt.run();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

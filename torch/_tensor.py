@@ -78,6 +78,33 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # torch/_C/__init__.pyi.in to add a type annotation for your method;
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
+    def _clear_non_serializable_cached_data(self):
+        r"""Clears any data cached in the tensor's ``__dict__`` that would prevent the tensor
+        from being serialized.
+
+        For example, subclasses with custom dispatched sizes / strides cache this info in
+        non-serializable PyCapsules within the ``__dict__``, and this must be cleared out for
+        serialization to function.
+
+        Any subclass that overrides this MUST call ``super()._clear_non_serializable_cached_data().``
+        Additional data cleared within the override must be able to be re-cached transparently
+        to avoid breaking subclass functionality.
+        """
+        if has_torch_function_unary(self):
+            return handle_torch_function(
+                Tensor._clear_non_serializable_cached_data, (self,), self
+            )
+        # NB: Wrapper subclasses that implement custom-dispatched sizes / strides cache
+        # this info via non-serializable PyCapsules.
+        CACHED_SIZES_STRIDES_KEYS = [
+            "_sym_sizes_capsule",
+            "_sym_sizes_capsule_len",
+            "_sym_strides_capsule",
+            "_sym_strides_capsule_len",
+        ]
+        for key in CACHED_SIZES_STRIDES_KEYS:
+            self.__dict__.pop(key, None)
+
     def __deepcopy__(self, memo):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)
@@ -203,19 +230,35 @@ class Tensor(torch._C.TensorBase):
                     if hasattr(self, slot):
                         setattr(new_tensor, slot, deepcopy(getattr(self, slot), memo))
 
+            # don't try to deepcopy non-serializable cached data
+            self._clear_non_serializable_cached_data()
             new_tensor.__dict__ = deepcopy(self.__dict__, memo)
 
             memo[id(self)] = new_tensor
             return new_tensor
 
     def __reduce_ex__(self, proto):
+        materialize_fake_tensors = (
+            torch.serialization._serialization_tls.materialize_fake_tensors
+        )
         state = torch._utils._get_obj_state(self)
-        if type(self) is Tensor and not state:
+        # Ignore all state when using FakeTensor with skip_data(materialize_fake_tensors) because FakeTensor has
+        # some state that cannot be pickled
+        if (
+            # TODO: remove hasattr, it's a hack to support versions of torch that
+            # don't have _subclasses
+            hasattr(torch, "_subclasses")
+            and type(self) is torch._subclasses.fake_tensor.FakeTensor
+            and materialize_fake_tensors
+        ) or (type(self) is Tensor and not state):
             # Fast path for regular tensor without Python state.
             return self._reduce_ex_internal(proto)
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
+        # sizes / strides cache needs to be cleared here because it'll just be re-cached
+        # if cleared earlier. Note that state references the -actual- tensor dict.
+        self._clear_non_serializable_cached_data()
         return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
@@ -251,6 +294,26 @@ class Tensor(torch._C.TensorBase):
         # See Note [Don't serialize hooks]
         warn_if_has_hooks(self)
         backward_hooks: Dict[Any, Any] = OrderedDict()
+
+        skip_data = torch.serialization._serialization_tls.skip_data
+        materialize_fake_tensors = (
+            torch.serialization._serialization_tls.materialize_fake_tensors
+        )
+
+        if self.device.type in ["xla", "maia"] or (
+            not torch._C._has_storage(self)
+            and self.device.type == torch._C._get_privateuse1_backend_name()
+        ):
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize tensors on backends with no storage under skip_data context manager"
+                )
+            cpu_tensor = self.cpu()
+            return (
+                torch._utils._rebuild_device_tensor_from_cpu_tensor,
+                (cpu_tensor, self.dtype, str(self.device), self.requires_grad),
+            )
+        # Legacy comment that does not hold anymore.
         # Note: Numpy array is chosen to be the rebuild component for XLA, MTIA, MAIA Tensors.
         # We considered a few options:
         # 1. CPU tensor can't be used here.
@@ -261,13 +324,14 @@ class Tensor(torch._C.TensorBase):
         # 2. Python list is not a good fit due to performance reason.
         #    `tolist()` converts every single element in the tensor into python objects
         #    and serialize them one by one.
-        if self.device.type in ["xla", "mtia", "maia"] or (
-            not torch._C._has_storage(self)
-            and self.device.type == torch._C._get_privateuse1_backend_name()
-        ):
+        if self.device.type in ["mtia"]:
             # Convert BFloat16 tesors to Float32 before conversion to numpy, as numpy doesn't
             # support BFloat16. The rebuild tensor from numpy takes in the original self.dtype,
             # this would reconstruct the BFloat16 tensor from numpy.
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize tensors on backends with no storage under skip_data context manager"
+                )
             numpy_tensor = (
                 self.cpu().numpy()
                 if self.dtype != torch.bfloat16
@@ -280,6 +344,10 @@ class Tensor(torch._C.TensorBase):
         if self.device.type == "meta":
             # NB: This implementation BREAKS storage sharing.  Current
             # hypothesis is that no one cares for meta tensors.
+            if skip_data:
+                warnings.warn(
+                    "Serializing tensors on the meta device under skip_data context manager is a no-op"
+                )
             arg_meta = (
                 self.dtype,
                 tuple(self.size()),
@@ -288,6 +356,10 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_meta_tensor_no_storage, arg_meta)
         if self.is_quantized:
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize qtensor under skip_data context manager, file an issue if you need this feature"
+                )
             # quantizer_params can be different type based on torch attribute
             quantizer_params: Union[
                 Tuple[torch.qscheme, float, int], Tuple[Any, Tensor, Tensor, int]
@@ -369,6 +441,10 @@ class Tensor(torch._C.TensorBase):
             )
             return (torch._utils._rebuild_sparse_tensor, args_sparse_compressed)
         elif self.is_nested:
+            if skip_data:
+                raise RuntimeError(
+                    "Cannot serialize nested tensor under skip_data context manager, file an issue if you need this feature"
+                )
             args_nested = (
                 # NB: values() currently returns the storage as a buffer in an unsafe way.
                 # Ideally, we'd use a private API for this instead. TODO: Switch to this if
@@ -383,14 +459,30 @@ class Tensor(torch._C.TensorBase):
             type(self) is not torch.Tensor
             and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
             and (
-                isinstance(
-                    self,
-                    (
-                        torch._subclasses.fake_tensor.FakeTensor,
-                        torch._subclasses.functional_tensor.FunctionalTensor,
-                    ),
+                isinstance(self, torch._subclasses.functional_tensor.FunctionalTensor)
+                or (
+                    not isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                    and self.data_ptr() == 0
                 )
-                or self.data_ptr() == 0
+            )
+        ):
+            arg_wrapper_subclass = (
+                type(self),
+                self.dtype,
+                tuple(self.size()),
+                self.stride(),
+                self.storage_offset(),
+                self.layout,
+                self.device,
+                self.requires_grad,
+            )
+            return (torch._utils._rebuild_wrapper_subclass, arg_wrapper_subclass)
+        elif (
+            type(self) is not torch.Tensor
+            and type(self).__torch_dispatch__ is not torch.Tensor.__torch_dispatch__
+            and (
+                isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and not (skip_data and materialize_fake_tensors)
             )
         ):
             arg_wrapper_subclass = (
@@ -418,6 +510,16 @@ class Tensor(torch._C.TensorBase):
                     dtype=self.dtype,
                     _internal=True,
                 )  # type: ignore[assignment]
+
+            # TODO: remove hasattr, it's a hack to support versions of torch that
+            # don't have _subclasses
+            if (
+                hasattr(torch, "_subclasses")
+                and isinstance(self, torch._subclasses.fake_tensor.FakeTensor)
+                and skip_data
+            ):
+                storage._fake_device = self.device
+
             args = (
                 storage,
                 self.storage_offset(),
@@ -1131,7 +1233,11 @@ class Tensor(torch._C.TensorBase):
         """
         if has_torch_function_unary(self):
             # TODO mypy doesn't support @property, see: https://github.com/python/mypy/issues/6185
-            return handle_torch_function(Tensor.__cuda_array_interface__.__get__, (self,), self)  # type: ignore[attr-defined]
+            return handle_torch_function(
+                Tensor.__cuda_array_interface__.__get__,  # type: ignore[attr-defined]
+                (self,),
+                self,
+            )
 
         # raise AttributeError for unsupported tensors, so that
         # hasattr(cpu_tensor, "__cuda_array_interface__") is False.
@@ -1290,7 +1396,7 @@ class Tensor(torch._C.TensorBase):
             [name for name in names if not is_ellipsis(name)], ellipsis_idx
         )
 
-    def unflatten(self, dim, sizes):
+    def unflatten(self, dim, sizes):  # type: ignore[override]
         r"""
         unflatten(dim, sizes) -> Tensor
 

@@ -11,7 +11,6 @@ Dtype Dtype::scalar_dtype() const {
   return ToDtype(scalar_type_);
 }
 
-// NOLINTNEXTLINE
 #define DTYPE_DEFINE(_1, n) TORCH_API Dtype k##n(ScalarType::n, 1);
 
 AT_FORALL_SCALAR_TYPES_AND7(
@@ -23,8 +22,8 @@ AT_FORALL_SCALAR_TYPES_AND7(
     Float8_e4m3fn,
     Float8_e4m3fnuz,
     DTYPE_DEFINE)
-DTYPE_DEFINE(c10::quint8, QUInt8);
-DTYPE_DEFINE(c10::qint8, QInt8);
+DTYPE_DEFINE(c10::quint8, QUInt8)
+DTYPE_DEFINE(c10::qint8, QInt8)
 
 #undef DTYPE_DEFINE
 
@@ -68,7 +67,6 @@ TORCH_API std::ostream& operator<<(std::ostream& stream, const Dtype& dtype) {
 int Dtype::byte_size() const {
   int scalar_size = -1;
   switch (scalar_type_) {
-// NOLINTNEXTLINE
 #define TYPE_CASE(Type, Name)   \
   case ScalarType::Name:        \
     scalar_size = sizeof(Type); \
@@ -90,7 +88,7 @@ int Dtype::byte_size() const {
       throw std::runtime_error(
           "invalid scalar type; " + std::to_string(scalar_type_));
   }
-  return scalar_size * lanes();
+  return static_cast<int>(scalar_size * lanes());
 }
 
 std::string Dtype::ToCppString() const {

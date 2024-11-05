@@ -73,6 +73,7 @@ inductor_fallback_ops = {
     "aten.kthvalue.default",
     "aten.logcumsumexp.default",
     "aten.lu_unpack.default",
+    "aten.masked_select.default",
     "aten.masked_scatter.default",
     "aten.masked_scatter_backward.default",
     "aten.max_pool2d_with_indices_backward.default",
@@ -121,6 +122,7 @@ inductor_fallback_ops = {
     "aten._scaled_dot_product_flash_attention_for_cpu_backward.default",
     "aten._scaled_dot_product_flash_attention_for_cpu.default",
     "aten._scaled_mm.default",
+    "aten._scaled_mm.out",
     "aten.scatter_reduce.two_out",
     "aten.scatter.src_out",
     "aten.scatter.value_out",
@@ -145,5 +147,6 @@ inductor_fallback_ops = {
     "aten.view_as_complex.default",
     "aten.view_as_real.default",
     "aten.view.dtype",
+    "aten._weight_int8pack_mm.default",
     "aten.zeros.names",
 }

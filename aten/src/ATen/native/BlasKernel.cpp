@@ -3,6 +3,8 @@
 #include <ATen/Config.h>
 #include <ATen/OpMathType.h>
 #include <ATen/Parallel.h>
+#include <ATen/cpu/vec/vec.h>
+#include <ATen/native/cpu/ReducedPrecisionFloatGemvFastPathKernel.h>
 #include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -15,6 +17,7 @@
 
 #if defined(__aarch64__) && !defined(C10_MOBILE)
 #include <arm_neon.h>
+#include <cpuinfo.h>
 #endif
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
@@ -81,37 +84,64 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 #endif // AT_BUILD_WITH_BLAS
 
 namespace at::native {
+#if !defined(C10_MOBILE)
+DEFINE_DISPATCH(fp16_dot_with_fp32_arith_stub);
+DEFINE_DISPATCH(fp16_gemv_trans_stub);
+#endif // !defined(C10_MOBILE)
 
 namespace blas_impl {
-#if defined(__aarch64__) && !defined(C10_MOBILE)
-void fp16_gemv_notrans(
+#if !defined(C10_MOBILE)
+void fp16_gemv_trans(
     const int m,
     const int n,
     const float alpha,
-    const float16_t* a,
+    const Half* a,
     const int lda,
-    const float16_t* x,
+    const Half* x,
     const int incx,
     const float beta,
-    float16_t* y,
+    Half* y,
     const int incy);
+
+float fp16_dot_with_fp32_arith(
+    const Half* vec1,
+    const Half* vec2,
+    int64_t len);
+
+float fp16_dot_with_fp32_arith(
+  const Half* x,
+  const Half* a,
+  int64_t len) {
+  return fp16_dot_with_fp32_arith_stub(kCPU, x, a, len);
+}
 
 void fp16_gemv_trans(
     const int m,
     const int n,
     const float alpha,
-    const float16_t* a,
+    const Half* a,
     const int lda,
-    const float16_t* x,
+    const Half* x,
     const int incx,
     const float beta,
-    float16_t* y,
-    const int incy);
+    Half* y,
+    const int incy) {
+  fp16_gemv_trans_stub(kCPU, m, n, alpha, a, lda, x, incx, beta, y, incy);
+}
+#endif // !defined(C10_MOBILE)
 
-float fp16_dot_with_fp32_arith(
-    const float16_t* vec1,
-    const float16_t* vec2,
-    int64_t len);
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const Half* a,
+    const int lda,
+    const Half* x,
+    const int incx,
+    const float beta,
+    Half* y,
+    const int incy);
 
 void bf16_gemv_trans(
     const int m,
@@ -129,33 +159,53 @@ float bf16_dot_with_fp32_arith(
     const at::BFloat16* vec1,
     const at::BFloat16* vec2,
     int64_t len);
-#endif
+#endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
 template <typename scalar_t>
-bool scal_use_fast_path(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
+bool scal_use_fast_path(
+    [[maybe_unused]] int64_t n,
+    [[maybe_unused]] int64_t incx) {
   return false;
 }
 
 template <typename scalar_t>
-bool gemv_use_fast_path(C10_UNUSED char trans, C10_UNUSED int64_t m,
-                        C10_UNUSED int64_t n, C10_UNUSED scalar_t alpha,
-                        C10_UNUSED int64_t lda,
-                        C10_UNUSED int64_t incx, C10_UNUSED scalar_t beta,
-                        C10_UNUSED int64_t incy) {
+bool gemv_use_fast_path(
+    [[maybe_unused]] char trans,
+    [[maybe_unused]] int64_t m,
+    [[maybe_unused]] int64_t n,
+    [[maybe_unused]] scalar_t alpha,
+    [[maybe_unused]] int64_t lda,
+    [[maybe_unused]] int64_t incx,
+    [[maybe_unused]] scalar_t beta,
+    [[maybe_unused]] int64_t incy) {
   return false;
 }
 
 template <typename scalar_t>
-void scal_fast_path(C10_UNUSED int *n, C10_UNUSED scalar_t *a, C10_UNUSED scalar_t *x, C10_UNUSED int *incx) {
-  TORCH_INTERNAL_ASSERT(false, "scal_fast_path shouldn't be called for this configuration");
+void scal_fast_path(
+    [[maybe_unused]] int* n,
+    [[maybe_unused]] scalar_t* a,
+    [[maybe_unused]] scalar_t* x,
+    [[maybe_unused]] int* incx) {
+  TORCH_INTERNAL_ASSERT(
+      false, "scal_fast_path shouldn't be called for this configuration");
 }
 
 template <typename scalar_t>
-void gemv_fast_path(C10_UNUSED const char *trans, C10_UNUSED const int *m, C10_UNUSED const int *n,
-                    C10_UNUSED  const scalar_t *alpha, C10_UNUSED const scalar_t *a, C10_UNUSED const int *lda,
-                    C10_UNUSED  const scalar_t *x, C10_UNUSED const int *incx, C10_UNUSED const scalar_t *beta,
-                    C10_UNUSED  scalar_t *y, C10_UNUSED const int *incy) {
-  TORCH_INTERNAL_ASSERT(false, "gemv_fast_path shouldn't be called for this configuration");
+void gemv_fast_path(
+    [[maybe_unused]] const char* trans,
+    [[maybe_unused]] const int* m,
+    [[maybe_unused]] const int* n,
+    [[maybe_unused]] const scalar_t* alpha,
+    [[maybe_unused]] const scalar_t* a,
+    [[maybe_unused]] const int* lda,
+    [[maybe_unused]] const scalar_t* x,
+    [[maybe_unused]] const int* incx,
+    [[maybe_unused]] const scalar_t* beta,
+    [[maybe_unused]] scalar_t* y,
+    [[maybe_unused]] const int* incy) {
+  TORCH_INTERNAL_ASSERT(
+      false, "gemv_fast_path shouldn't be called for this configuration");
 }
 
 #define INSTANTIATE(scalar_t)                                                                                                                                                     \
@@ -187,15 +237,32 @@ void scal_fast_path<float>(int *n, float *a, float *x, int *incx) {
 }
 
 template <>
-bool gemv_use_fast_path<float>(C10_UNUSED char trans, int64_t m, int64_t n, C10_UNUSED float alpha, int64_t lda, int64_t incx, C10_UNUSED float beta, int64_t incy) {
+bool gemv_use_fast_path<float>(
+    [[maybe_unused]] char trans,
+    int64_t m,
+    int64_t n,
+    [[maybe_unused]] float alpha,
+    int64_t lda,
+    int64_t incx,
+    [[maybe_unused]] float beta,
+    int64_t incy) {
   auto intmax = std::numeric_limits<int>::max();
   return (m <= intmax) && (n <= intmax) && (lda <= intmax) &&
          (incx > 0) && (incx <= intmax) && (incy > 0) && (incy <= intmax);
 }
 
 template <>
-bool gemv_use_fast_path<double>(C10_UNUSED char trans, int64_t m, int64_t n, C10_UNUSED double alpha, int64_t lda, int64_t incx, C10_UNUSED double beta, int64_t incy) {
-  return gemv_use_fast_path<float>(trans, m, n, (float)alpha, lda, incx, (float)beta, incy);
+bool gemv_use_fast_path<double>(
+    [[maybe_unused]] char trans,
+    int64_t m,
+    int64_t n,
+    [[maybe_unused]] double alpha,
+    int64_t lda,
+    int64_t incx,
+    [[maybe_unused]] double beta,
+    int64_t incy) {
+  return gemv_use_fast_path<float>(
+      trans, m, n, (float)alpha, lda, incx, (float)beta, incy);
 }
 
 template <>
@@ -208,86 +275,99 @@ void gemv_fast_path<float>(const char *trans, const int *m, const int *n, const 
   sgemv_(remove_const(trans), remove_const(m), remove_const(n), remove_const(alpha), remove_const(a), remove_const(lda), remove_const(x), remove_const(incx), remove_const(beta), y, remove_const(incy));
 }
 #else
-INSTANTIATE(float);
-INSTANTIATE(double);
+INSTANTIATE(float)
+INSTANTIATE(double)
 #endif // AT_BUILD_WITH_BLAS
 
-INSTANTIATE(uint8_t);
-INSTANTIATE(int8_t);
-INSTANTIATE(int16_t);
-INSTANTIATE(int);
-INSTANTIATE(int64_t);
-#if defined(__aarch64__) && !defined(C10_MOBILE)
+INSTANTIATE(uint8_t)
+INSTANTIATE(int8_t)
+INSTANTIATE(int16_t)
+INSTANTIATE(int)
+INSTANTIATE(int64_t)
+#if !defined(C10_MOBILE)
+#if !defined(__aarch64__)
+// Currently, only fp16_gemv_trans is built for non-aarch64.
 template <>
-bool scal_use_fast_path<at::Half>(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
+bool gemv_use_fast_path<at::Half>(
+    char trans,
+    [[maybe_unused]] int64_t m,
+    [[maybe_unused]] int64_t n,
+    at::Half alpha,
+    [[maybe_unused]] int64_t lda,
+    [[maybe_unused]] int64_t incx,
+    [[maybe_unused]] at::Half beta,
+    [[maybe_unused]] int64_t incy) {
+  // clang is capable of constant-folding fp16_ieee_from_fp32_value,
+  // so use it to get simple integer comparisons.
+  // https://godbolt.org/z/v936hroYb
+  using c10::detail::fp16_ieee_from_fp32_value;;
+  return (trans == 'T' || trans == 't') && incx == 1 &&
+    alpha.x == fp16_ieee_from_fp32_value(1.0f);
+}
+template <>
+void gemv_fast_path<at::Half>(
+    const char* trans,
+    const int* m,
+    const int* n,
+    const at::Half* alpha,
+    const at::Half* a,
+    const int* lda,
+    const at::Half* x,
+    const int* incx,
+    const at::Half* beta,
+    at::Half* y,
+    const int* incy) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(trans[0] == 'T' || trans[0] == 't');
+  fp16_gemv_trans(
+      *m,
+      *n,
+      *alpha,
+      a,
+      *lda,
+      x,
+      *incx,
+      *beta,
+      y,
+      *incy);
+}
+INSTANTIATE(c10::BFloat16)
+#else
+template <>
+bool scal_use_fast_path<at::Half>(
+    [[maybe_unused]] int64_t n,
+    [[maybe_unused]] int64_t incx) {
   return false;
 }
 
 template <>
 bool gemv_use_fast_path<at::Half>(
-    C10_UNUSED char trans,
-    C10_UNUSED int64_t m,
-    C10_UNUSED int64_t n,
+    char trans,
+    [[maybe_unused]] int64_t m,
+    [[maybe_unused]] int64_t n,
     at::Half alpha,
-    C10_UNUSED int64_t lda,
-    C10_UNUSED int64_t incx,
+    [[maybe_unused]] int64_t lda,
+    [[maybe_unused]] int64_t incx,
     at::Half beta,
-    C10_UNUSED int64_t incy) {
+    [[maybe_unused]] int64_t incy) {
   return incx == 1 && c10::detail::fp16_from_bits(alpha.x) == 1.0f &&
-    c10::detail::fp16_from_bits(beta.x) == 0.0f;
+      // TODO: enable nonzero beta for fp16_gemv_notrans
+      (c10::detail::fp16_from_bits(beta.x) == 0.0f || trans == 't' || trans == 'T');
 }
 
 template <>
 bool gemv_use_fast_path<at::BFloat16>(
-  C10_UNUSED char trans,
-  C10_UNUSED int64_t m,
-    C10_UNUSED int64_t n,
+    [[maybe_unused]] char trans,
+    [[maybe_unused]] int64_t m,
+    [[maybe_unused]] int64_t n,
     at::BFloat16 alpha,
-    C10_UNUSED int64_t lda,
-    C10_UNUSED int64_t incx,
+    [[maybe_unused]] int64_t lda,
+    [[maybe_unused]] int64_t incx,
     at::BFloat16 beta,
-    C10_UNUSED int64_t incy) {
-  return (trans == 'T' || trans == 't') && incx == 1 && alpha == 1.0 && beta == 0.0;
+    [[maybe_unused]] int64_t incy) {
+  return (trans == 'T' || trans == 't') && incx == 1 && alpha == 1.0 &&
+      beta == 0.0;
 }
 
-
-#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-static inline float16_t reduce(float16x4_t x) {
-        auto sum = vpadd_f16(x, x);
-        return vget_lane_f16(vpadd_f16(sum, sum), 0);
-}
-static inline float16_t reduce(float16x8_t x) {
-        return reduce(vadd_f16(vget_low_f16(x), vget_high_f16(x)));
-}
-
-/*
- * NOTE [ GGML Copyright Notice ]
- * The below reduce overload and fp16_dot_with_fp16_arith function is
- * adapted from llama.cpp's ggml_vec_dot_f16 and surrounding utility
- * functions, so here is the required copyright notice:
- *
- * MIT License
- *
- * Copyright (c) 2023-2024 The ggml authors
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- */
 // We need the shift for reduce(), hence the extra constants.
 static constexpr auto kF16ElementsPerIterationShift = 7;
 static constexpr auto kF16ElementsPerIteration = 1 << kF16ElementsPerIterationShift;
@@ -300,102 +380,6 @@ static_assert(kF16ElementsPerRegister == 8);
 static constexpr auto kF16RegistersPerIterationShift = kF16ElementsPerIterationShift - kF16ElementsPerRegisterShift;
 static constexpr auto kF16RegistersPerIteration = 1 << kF16RegistersPerIterationShift;
 static_assert(kF16RegistersPerIteration == kF16ElementsPerIteration / kF16ElementsPerRegister);
-
-static inline double reduce(float16x8_t x[kF16RegistersPerIteration]) {
-  int offset = kF16RegistersPerIteration;
-  c10::ForcedUnroll<kF16RegistersPerIterationShift>{}([&offset, &x](auto idx) {
-    offset /= 2;
-    for (int i = 0; i < offset; ++i) {
-      x[i] = vaddq_f16(x[i], x[offset + i]);
-    }
-  });
-  const float32x4_t t0 = vcvt_f32_f16(vget_low_f16(x[0]));
-  const float32x4_t t1 = vcvt_f32_f16(vget_high_f16(x[0]));
-  return (double)vaddvq_f32(vaddq_f32(t0, t1));
-}
-
-static inline float16x8_t f16_fma(float16x8_t a, float16x8_t b, float16x8_t c) {
-#ifdef __ARM_FEATURE_FMA
-  return vfmaq_f16(a, b, c);
-#else
-  return vaddq_f16(a, vmulq_f16(b, c));
-#endif
-}
-
-static float fp16_dot_with_fp16_arith(const float16_t* x, const float16_t* a, int len) {
-  float16x8_t sum[kF16RegistersPerIteration] = {vdupq_n_f16(0)};
-
-  const auto len_aligned = len & ~(kF16ElementsPerIteration - 1);
-  for (int j = 0; j < len_aligned ; j += kF16ElementsPerIteration) {
-    for (int k = 0; k < kF16RegistersPerIteration; ++k) {
-      const auto temp_x = vld1q_f16(x + j + k * kF16ElementsPerRegister);
-      const auto temp_a = vld1q_f16(a + j + k * kF16ElementsPerRegister);
-      sum[k] = f16_fma(sum[k], temp_x, temp_a);
-    }
-  }
-  auto reducedSum = reduce(sum);
-
-  for (int j = len_aligned; j < len; ++j) {
-    reducedSum += x[j] * a[j];
-  }
-  return reducedSum;
-}
-
-// Rather than unrolling to process multiple rows (transposed columns)
-// of matrix A at once as done in fp16_gemv_trans_fp16_arith, unroll
-// along an individual dot product.
-static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
-  parallel_for(0, n, 1, [&](int begin, int end) {
-    for (int i = begin; i < end; ++i) {
-      y[i * incy] = fp16_dot_with_fp16_arith(x, a + lda * i, m);
-    }
-  });
-}
-
-#endif
-
-static inline float reduce(float32x4_t x) {
-        auto sum = vpaddq_f32(x, x);
-        return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
-}
-
-static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
-#ifdef __ARM_FEATURE_FMA
-  return vfmaq_f32(a, b, c);
-#else
-  return vaddq_f32(a, vmulq_f32(b, c));
-#endif
-}
-
-static inline float32x4_t f32_fma_low_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
-#ifdef __ARM_FEATURE_FP16_FML
-  // NOTE: this instruction is an optional instruction in ARM v8.2 and
-  // v8.3, but mandatory in v8.4 per
-  // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
-  // I'm not certain that I have the right feature test macro.
-  return vfmlalq_low_f16(a, b, c);
-#else
-  return f32_fma(a, vcvt_f32_f16(vget_low_f16(b)), vcvt_f32_f16(vget_low_f16(c)));
-#endif
-}
-
-static inline float32x4_t f32_fma_high_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
-#ifdef __ARM_FEATURE_FP16_FML
-  // See above note about this instruction.
-  return vfmlalq_high_f16(a, b, c);
-#else
-  return f32_fma(a, vcvt_f32_f16(vget_high_f16(b)), vcvt_f32_f16(vget_high_f16(c)));
-#endif
-}
-
-static inline float32x4_t f32_fma_f16(float32x4_t a, float16x4_t b, float16x4_t c) {
-  return f32_fma_low_f16(a, vcombine_f16(b, vdup_n_f16(0)), vcombine_f16(c, vdup_n_f16(0)));
-}
-
-// The below reduce overload and fp16_dot_with_fp32_arith are adapted
-// from llama.cpp's ggml_vec_dot_f32 and surrounding utility
-// functions. See NOTE [ GGML Copyright Notice ] above for the
-// required notice.
 
 // We need the shift for reduce(), hence the extra constants.
 static constexpr auto kF32ElementsPerIterationShift = 5;
@@ -412,7 +396,106 @@ static constexpr auto kF32RegistersPerIterationShift = 3;
 static_assert(kF32RegistersPerIteration == kF32ElementsPerIteration / kF32ElementsPerRegister);
 static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
 
-static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
+static float32x4_t to_bfloat16(uint16x4_t u16) {
+  int32x4_t shift = vdupq_n_s32(16);
+  return vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16), shift));
+}
+
+static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
+#ifdef __ARM_FEATURE_FMA
+  return vfmaq_f32(a, b, c);
+#else
+  return vaddq_f32(a, vmulq_f32(b, c));
+#endif
+}
+
+static float32x4_t f32_fma_bf16(float32x4_t a, uint16x4_t b, uint16x4_t c) {
+  return f32_fma(a, to_bfloat16(b), to_bfloat16(c));
+}
+
+#if defined(__clang__) && __clang_major__ > 15
+// https://godbolt.org/z/z8P4Yncra
+#define COMPILER_SUPPORTS_BF16_TARGET 1
+#elif !defined(__clang__) && defined(__GNUC__) && __GNUC__ >= 10
+// https://gcc.gnu.org/gcc-10/changes.html
+// https://godbolt.org/z/cdGG7vn8o
+#define COMPILER_SUPPORTS_BF16_TARGET 1
+#else
+#define COMPILER_SUPPORTS_BF16_TARGET 0
+#endif
+
+#if COMPILER_SUPPORTS_BF16_TARGET
+#define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("arch=armv8.2-a+bf16")))
+
+TARGET_ARM_BF16_ATTRIBUTE static C10_ALWAYS_INLINE float32x4_t
+f32_dot_bf16(float32x4_t a, bfloat16x8_t b, bfloat16x8_t c) {
+  return vbfdotq_f32(a, b, c);
+}
+
+TARGET_ARM_BF16_ATTRIBUTE static C10_ALWAYS_INLINE void
+dot_with_fp32_arith_main_inner_loop_bfdot(
+    const BFloat16* vec1,
+    const BFloat16* vec2,
+    vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
+    int registerPairIndex) {
+  const bfloat16x8_t temp_vec1 = vld1q_bf16(reinterpret_cast<const __bf16*>(
+                                                &vec1[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
+  const bfloat16x8_t temp_vec2 = vld1q_bf16(reinterpret_cast<const __bf16*>(
+                                                &vec2[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
+  sum[registerPairIndex] =
+    f32_dot_bf16(sum[registerPairIndex], temp_vec1, temp_vec2);
+}
+
+// See NOTE [GCC code duplication] below for why we have _bfdot and
+// _no_bfdot versions of
+// dot_with_fp32_arith_vectorized_tail_inner_loop.
+TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE
+static void dot_with_fp32_arith_vectorized_tail_inner_loop_bfdot(
+    const at::BFloat16* vec1,
+    const at::BFloat16* vec2,
+    vec::Vectorized<float>* tail_sum,
+    int idx) {
+  const auto temp_vec1 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
+  const auto temp_vec2 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
+  *tail_sum = f32_fma_bf16(*tail_sum, temp_vec1, temp_vec2);
+}
+
+#else
+#define TARGET_ARM_BF16_ATTRIBUTE
+#endif // COMPILER_SUPPORTS_BF16_TARGET
+
+static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop_no_bfdot(
+    const BFloat16* vec1,
+    const BFloat16* vec2,
+    vec::VectorizedN<float, kF32RegistersPerIteration>& sum,
+    int registerPairIndex) {
+  const uint16x8_t temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(
+                                             &vec1[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
+  const uint16x8_t temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(
+                                             &vec2[registerPairIndex * 2 * vec::Vectorized<float>::size()]));
+
+  sum[2 * registerPairIndex] = f32_fma_bf16(
+      sum[2 * registerPairIndex],
+      vget_low_u16(temp_vec1),
+      vget_low_u16(temp_vec2));
+  sum[2 * registerPairIndex + 1] = f32_fma_bf16(
+      sum[2 * registerPairIndex + 1],
+      vget_high_u16(temp_vec1),
+      vget_high_u16(temp_vec2));
+}
+
+static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop_no_bfdot(
+    const at::BFloat16* vec1,
+    const at::BFloat16* vec2,
+    vec::Vectorized<float>* tail_sum,
+    int idx) {
+  const auto temp_vec1 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
+  const auto temp_vec2 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
+  *tail_sum = f32_fma_bf16(*tail_sum, temp_vec1, temp_vec2);
+}
+
+namespace {
+static inline float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
   int offset = kF32RegistersPerIteration;
   c10::ForcedUnroll<kF32RegistersPerIterationShift>{}([&offset, &x](auto idx) {
     offset /= 2;
@@ -423,110 +506,135 @@ static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
   return vaddvq_f32(x[0]);
 }
 
-static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop(
-  const float16_t* vec1,
-  const float16_t* vec2,
-  float32x4_t sum[kF32RegistersPerIteration],
-  int registerPairIndex) {
-  // Load a pair of f32 registers at a time.
-  const auto temp_vec1 = vld1q_f16(&vec1[registerPairIndex * 2 * kF32ElementsPerRegister]);
-  const auto temp_vec2 = vld1q_f16(&vec2[registerPairIndex * 2 * kF32ElementsPerRegister]);
+#if COMPILER_SUPPORTS_BF16_TARGET
+template <int n>
+struct ForcedUnrollTargetBFloat16 {
+  template <typename Func>
+  TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE void operator()(const Func& f) const {
+    ForcedUnrollTargetBFloat16<n - 1>{}(f);
+    f(n - 1);
+  }
+};
 
-  sum[2 * registerPairIndex] = f32_fma_low_f16(sum[2 * registerPairIndex], temp_vec1, temp_vec2);
-  sum[2 * registerPairIndex + 1] = f32_fma_high_f16(sum[2 * registerPairIndex + 1], temp_vec1, temp_vec2);
-}
+template <>
+struct ForcedUnrollTargetBFloat16<1> {
+  template <typename Func>
+  TARGET_ARM_BF16_ATTRIBUTE C10_ALWAYS_INLINE void operator()(const Func& f) const {
+    f(0);
+  }
+};
 
-static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop(
-  const float16_t* vec1,
-  const float16_t* vec2,
-  float32x4_t* tailSum,
-  int idx) {
-  const auto temp_vec1 = vld1_f16(&vec1[idx]);
-  const auto temp_vec2 = vld1_f16(&vec2[idx]);
-  *tailSum = f32_fma_f16(*tailSum, temp_vec1, temp_vec2);
-}
-
-static C10_ALWAYS_INLINE float32x4_t to_bfloat16(uint16x4_t u16) {
-  int32x4_t shift = vdupq_n_s32(16);
-  return vreinterpretq_f32_u32(vshlq_u32(vmovl_u16(u16), shift));
-}
-
-static C10_ALWAYS_INLINE float32x4_t f32_fma_bf16(float32x4_t a, uint16x4_t b, uint16x4_t c) {
-  return f32_fma(a, to_bfloat16(b), to_bfloat16(c));
-}
-
-static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop(
-  const at::BFloat16* vec1,
-  const at::BFloat16* vec2,
-  float32x4_t sum[kF32RegistersPerIteration],
-  int registerPairIndex) {
-  // TODO: detect intrinsic availability, use them if they're available. __ARM_FEATURE_BF16
-  // Load a pair of f32 registers at a time.
-  const uint16x8_t temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec1[registerPairIndex * 2 * kF32ElementsPerRegister]));
-  const uint16x8_t temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec2[registerPairIndex * 2 * kF32ElementsPerRegister]));
-
-  sum[2 * registerPairIndex] = f32_fma_bf16(sum[2 * registerPairIndex], vget_low_u16(temp_vec1), vget_low_u16(temp_vec2));
-  sum[2 * registerPairIndex + 1] = f32_fma_bf16(sum[2 * registerPairIndex + 1], vget_high_u16(temp_vec1), vget_high_u16(temp_vec2));
-}
-
-static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop(
-  const at::BFloat16* vec1,
-  const at::BFloat16* vec2,
-  float32x4_t* tailSum,
-  int idx) {
-  const auto temp_vec1 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec1[idx]));
-  const auto temp_vec2 = vld1_u16(reinterpret_cast<const uint16_t*>(&vec2[idx]));
-  *tailSum = f32_fma_bf16(*tailSum, temp_vec1, temp_vec2);
-}
-
-template <typename T>
-float dot_with_fp32_arith(const T* vec1, const T* vec2, int64_t len) {
-  float32x4_t sum[kF32RegistersPerIteration] = {vdupq_n_f32(0)};
+C10_ALWAYS_INLINE TARGET_ARM_BF16_ATTRIBUTE auto
+dot_with_fp32_arith_main_loop_bfdot(
+    const BFloat16* vec1,
+    const BFloat16* vec2,
+    int64_t len) {
+  vec::VectorizedN<float, kF32RegistersPerIteration> sum(0);
   const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);
   for (int j = 0; j < len_aligned ; j += kF32ElementsPerIteration) {
     const auto* vec1_ = vec1 + j;
     const auto* vec2_ = vec2 + j;
-    c10::ForcedUnroll<kF32RegisterPairsPerIteration>{}([vec1_, vec2_, &sum](auto k) {
-      dot_with_fp32_arith_main_inner_loop(vec1_, vec2_, sum, k);
+    ForcedUnrollTargetBFloat16<kF32RegisterPairsPerIteration>{}([vec1_, vec2_, &sum](auto k)
+                                                                C10_ALWAYS_INLINE_ATTRIBUTE TARGET_ARM_BF16_ATTRIBUTE {
+      dot_with_fp32_arith_main_inner_loop_bfdot(vec1_, vec2_, sum, k);
     });
   }
-  auto reducedSum = reduce(sum);
+  return reduce(sum);
+}
+#endif // COMPILER_SUPPORTS_BF16_TARGET
 
-  // First-tier tail fixup: make sure we handle workloads that can
-  // benefit from vectorization, but don't fit into our fully unrolled
-  // loop above.
-  float32x4_t tailSum = vdupq_n_f32(0);
-  const auto len_aligned_4 = len & ~3;
-  for (int j = len_aligned; j < len_aligned_4; j += 4) {
-    dot_with_fp32_arith_vectorized_tail_inner_loop(vec1, vec2, &tailSum, j);
-  }
-  auto reducedTail = vpaddq_f32(tailSum, tailSum);
-  reducedSum += vgetq_lane_f32(vpaddq_f32(reducedTail, reducedTail), 0);
+template <typename T>
+C10_ALWAYS_INLINE auto
+dot_with_fp32_arith_main_loop_no_bfdot(
+    const T* vec1,
+    const T* vec2,
+    int64_t len) {
+  vec::VectorizedN<float, kF32RegistersPerIteration> sum(0);
 
-  // Second-tier tail fixup: handle all workloads.
-  for (int j = len_aligned_4; j < len; ++j) {
-    reducedSum += vec1[j] * vec2[j];
+  const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);
+  for (int j = 0; j < len_aligned ; j += kF32ElementsPerIteration) {
+    const auto* vec1_ = vec1 + j;
+    const auto* vec2_ = vec2 + j;
+    c10::ForcedUnroll<kF32RegisterPairsPerIteration>{}([vec1_, vec2_, &sum](auto k) C10_ALWAYS_INLINE_ATTRIBUTE {
+      dot_with_fp32_arith_main_inner_loop_no_bfdot(vec1_, vec2_, sum, k);
+    });
   }
-  return reducedSum;
+  return reduce(sum);
 }
 
-float fp16_dot_with_fp32_arith(const float16_t* vec1, const float16_t* vec2, int64_t len) {
-  return dot_with_fp32_arith(vec1, vec2, len);
+template <typename T>
+struct half_to_float16 {
+  using type = T;
+};
+
+#ifdef __aarch64__
+template <>
+struct half_to_float16<Half> {
+  using type = float16_t;
+};
+#endif
+
+template <typename T>
+using half_to_float16_t = typename half_to_float16<T>::type;
+
+// NOTE [GCC code duplication]: The first attempt at landing BFDOT support with
+// TARGET_ARM_BF16_ATTRIBUTE failed because unlike clang, GCC will not
+// allow inlining a non-bf16-specific function into a bf16-specific
+// function. We can work around this by duplicating the code into the
+// bfdot and non-bfdot callsites. The code is in this macro to avoid
+// actual copy/paste.
+#define DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY(bfdot_suffix)     \
+  /* First-tier tail fixup: make sure we handle workloads that can */   \
+  /* benefit from vectorization, but don't fit into our fully unrolled */ \
+  /* loop above. */                                                     \
+  vec::Vectorized<float> tail_sum(0);                                   \
+  const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);       \
+  const auto len_aligned_4 = len & ~3;                                  \
+  for (int j = len_aligned; j < len_aligned_4; j += 4) {                \
+    dot_with_fp32_arith_vectorized_tail_inner_loop##bfdot_suffix(vec1, vec2, &tail_sum, j); \
+  }                                                                     \
+  auto reduced_tail = vpaddq_f32(tail_sum, tail_sum);                   \
+  reduced_sum += vgetq_lane_f32(vpaddq_f32(reduced_tail, reduced_tail), 0); \
+                                                                        \
+  /* Second-tier tail fixup: handle all workloads. */                   \
+  for (int j = len_aligned_4; j < len; ++j) {                           \
+    /* We use half_to_float16_t here because changing to Half was */    \
+    /* causing arithmetic to at fp16 precision, but the necessary */    \
+    /* necessary behavior to pass python test/test_mps.py -k */         \
+    /* test_output_grad_match_nn_functional_linear_cpu_float16 is */    \
+    /* fp32. (I'm not sure exactly why this fixes it.) */               \
+    half_to_float16_t<std::decay_t<decltype(vec1[j])>> x1 = vec1[j];    \
+    half_to_float16_t<std::decay_t<decltype(vec2[j])>> x2 = vec2[j];    \
+    reduced_sum += x1 * x2;                                             \
+  }                                                                     \
+  return reduced_sum
+
+#if COMPILER_SUPPORTS_BF16_TARGET
+TARGET_ARM_BF16_ATTRIBUTE float
+dot_with_fp32_arith_bfdot(const BFloat16* vec1, const BFloat16* vec2, int64_t len) {
+  auto reduced_sum = dot_with_fp32_arith_main_loop_bfdot(vec1, vec2, len);
+  DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY(_bfdot);
 }
+#endif // COMPILER_SUPPORTS_BF16_TARGET
+
+template <typename T>
+C10_ALWAYS_INLINE float
+dot_with_fp32_arith_no_bfdot(const T* vec1, const T* vec2, int64_t len) {
+  auto reduced_sum = dot_with_fp32_arith_main_loop_no_bfdot(vec1, vec2, len);
+  DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY(_no_bfdot);
+}
+#undef DOT_WITH_FP32_ARITH_TAIL_AFTER_MAIN_LOOP_BODY
+} // namespace
 
 float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec2, int64_t len) {
-  return dot_with_fp32_arith(vec1, vec2, len);
-}
-
-// On my Apple M1 Macbook (which is ARM v8.5 and thus has the
-// instructions f32_fma_{low,high}_f16 is targeting), this kernel has
-// equivalent performance to the fp16-native kernel.
-static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
-  parallel_for(0, n, 1, [&](int begin, int end) {
-    for (int i = begin; i < end; ++i) {
-      y[i * incy] = fp16_dot_with_fp32_arith(x, a + lda * i, m);
-    }
-  });
+#if COMPILER_SUPPORTS_BF16_TARGET
+  if (cpuinfo_has_arm_bf16()) {
+    return dot_with_fp32_arith_bfdot(vec1, vec2, len);
+  } else
+#endif
+  {
+    return dot_with_fp32_arith_no_bfdot(vec1, vec2, len);
+  }
 }
 
 static void bf16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const at::BFloat16* a, const int lda, const at::BFloat16 *x, at::BFloat16* y, int incy) {
@@ -535,26 +643,6 @@ static void bf16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n,
       y[i * incy] = bf16_dot_with_fp32_arith(x, a + lda * i, m);
     }
   });
-}
-
-void fp16_gemv_trans(
-    const int m,
-    const int n,
-    const float alpha,
-    const float16_t* a,
-    const int lda,
-    const float16_t* x,
-    const int incx,
-    const float beta,
-    float16_t* y,
-    const int incy) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
-#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-  if (at::globalContext().allowFP16ReductionCPU()) {
-    return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, y, incy);
-  }
-#endif
-  return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
 }
 
 void bf16_gemv_trans(
@@ -612,20 +700,20 @@ void fp16_gemv_notrans(
     const int m,
     const int n,
     const float alpha,
-    const float16_t* a,
+    const Half* a,
     const int lda,
-    const float16_t* x,
+    const Half* x,
     const int incx,
     const float beta,
-    float16_t* y,
+    Half* y,
     const int incy) {
   if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
 #ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-    return at::globalContext().allowFP16ReductionCPU() ? fp16_gemv_notrans_fp16_arith(m, n, a, lda, x, y)
-                                                       : fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
-#else
-    return fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
+    if (at::globalContext().allowFP16ReductionCPU())  {
+      return fp16_gemv_notrans_fp16_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
+    }
 #endif
+    return fp16_gemv_notrans_fp32_arith(m, n, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(x), reinterpret_cast<float16_t*>(y));
   }
   std::vector<float> sum(m);
   for (const auto j : c10::irange(n)) {
@@ -664,25 +752,25 @@ void gemv_fast_path<at::Half>(
     fp16_gemv_trans(
         *m,
         *n,
-        fp16_from_bits(alpha->x),
-        reinterpret_cast<const float16_t*>(a),
+        *alpha,
+        a,
         *lda,
-        reinterpret_cast<const float16_t*>(x),
+        x,
         *incx,
-        fp16_from_bits(beta->x),
-        reinterpret_cast<float16_t*>(y),
+        *beta,
+        y,
         *incy);
   } else {
     fp16_gemv_notrans(
         *m,
         *n,
-        fp16_from_bits(alpha->x),
-        reinterpret_cast<const float16_t*>(a),
+        *alpha,
+        a,
         *lda,
-        reinterpret_cast<const float16_t*>(x),
+        x,
         *incx,
-        fp16_from_bits(beta->x),
-        reinterpret_cast<float16_t*>(y),
+        *beta,
+        y,
         *incy);
   }
 }
@@ -713,10 +801,12 @@ void gemv_fast_path<at::BFloat16>(
     y,
     *incy);
 }
-#else // defined(__aarch64__) && !defined(C10_MOBILE)
-INSTANTIATE(c10::Half);
-INSTANTIATE(c10::BFloat16);
-#endif // defined(__aarch64__) && !defined(C10_MOBILE)
+// Note that the above block was an else, so it's active if __aarch64__ *is* defined.
+#endif // !defined(__aarch64__)
+#else // !defined(C10_MOBILE))
+INSTANTIATE(c10::Half)
+INSTANTIATE(c10::BFloat16)
+#endif // !defined(C10_MOBILE)
 #undef INSTANTIATE
 
 } // namespace blas_impl
@@ -815,8 +905,8 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
 
 #define INSTANTIATE(scalar_t, _) \
 template void gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, int64_t lda, const scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
-AT_FORALL_SCALAR_TYPES_AND2(BFloat16, Half, INSTANTIATE);
-AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
+AT_FORALL_SCALAR_TYPES_AND2(BFloat16, Half, INSTANTIATE)
+AT_FORALL_COMPLEX_TYPES(INSTANTIATE)
 #undef INSTANTIATE
 
 namespace blas_impl {
@@ -952,19 +1042,19 @@ scalar_t vdot_impl(int64_t n, scalar_t* x, int64_t incx, scalar_t* y, int64_t in
 #define INSTANTIATE_DOT_IMPL(scalar_t)  \
   template scalar_t dot_impl<scalar_t>( \
       int64_t n, scalar_t * x, int64_t incx, scalar_t * y, int64_t incy);
-INSTANTIATE_DOT_IMPL(uint8_t);
-INSTANTIATE_DOT_IMPL(int8_t);
-INSTANTIATE_DOT_IMPL(int16_t);
-INSTANTIATE_DOT_IMPL(int);
-INSTANTIATE_DOT_IMPL(int64_t);
-INSTANTIATE_DOT_IMPL(c10::Half);
-INSTANTIATE_DOT_IMPL(c10::BFloat16);
+INSTANTIATE_DOT_IMPL(uint8_t)
+INSTANTIATE_DOT_IMPL(int8_t)
+INSTANTIATE_DOT_IMPL(int16_t)
+INSTANTIATE_DOT_IMPL(int)
+INSTANTIATE_DOT_IMPL(int64_t)
+INSTANTIATE_DOT_IMPL(c10::Half)
+INSTANTIATE_DOT_IMPL(c10::BFloat16)
 
 #define INSTANTIATE_VDOT_IMPL(scalar_t)  \
   template scalar_t vdot_impl<scalar_t>( \
       int64_t n, scalar_t * x, int64_t incx, scalar_t * y, int64_t incy);
-INSTANTIATE_VDOT_IMPL(c10::complex<float>);
-INSTANTIATE_VDOT_IMPL(c10::complex<double>);
+INSTANTIATE_VDOT_IMPL(c10::complex<float>)
+INSTANTIATE_VDOT_IMPL(c10::complex<double>)
 
 #undef INSTANTIATE_DOT_IMPL
 

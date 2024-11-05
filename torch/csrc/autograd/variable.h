@@ -329,7 +329,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 /// e.g. fake-ification, where we want to use symbolic values or fake tensors
 /// instead.
 struct TORCH_API ViewFunc {
-  virtual ~ViewFunc() {}
+  virtual ~ViewFunc() = default;
   /// Returns any SymInts in the saved state.
   virtual std::vector<c10::SymInt> get_symints() const {
     return {};
@@ -358,10 +358,12 @@ struct TORCH_API ViewFunc {
   /// Sets the values of any SymInts in the saved state. The input vector size
   /// must match the number of SymInts in the saved state (i.e. the size of the
   /// list returned by get_symints()).
+  /// NOLINTNEXTLINE(performance-unnecessary-value-param)
   virtual void set_symints(std::vector<c10::SymInt>) {}
   /// Sets the values of any Tensors in the saved state. The input vector size
   /// must match the number of Tensors in the saved state (i.e. the size of the
   /// list returned by get_tensors()).
+  /// NOLINTNEXTLINE(performance-unnecessary-value-param)
   virtual void set_tensors(std::vector<at::Tensor>) {}
 };
 
@@ -371,17 +373,17 @@ struct ChainedViewFunc : public ViewFunc {
       std::unique_ptr<ViewFunc> first,
       std::unique_ptr<ViewFunc> second)
       : first(std::move(first)), second(std::move(second)) {}
-  virtual ~ChainedViewFunc() override{};
-  virtual std::vector<c10::SymInt> get_symints() const override;
-  virtual size_t num_symints() const override {
+  ~ChainedViewFunc() override = default;
+  std::vector<c10::SymInt> get_symints() const override;
+  size_t num_symints() const override {
     return first->num_symints() + second->num_symints();
   }
-  virtual std::vector<at::Tensor> get_tensors() const override;
-  virtual size_t num_tensors() const override {
+  std::vector<at::Tensor> get_tensors() const override;
+  size_t num_tensors() const override {
     return first->num_tensors() + second->num_tensors();
   }
-  virtual at::Tensor operator()(const at::Tensor&) const override;
-  virtual std::unique_ptr<ViewFunc> clone_and_set(
+  at::Tensor operator()(const at::Tensor&) const override;
+  std::unique_ptr<ViewFunc> clone_and_set(
       std::optional<std::vector<c10::SymInt>> = std::nullopt,
       std::optional<std::vector<at::Tensor>> = std::nullopt) const override;
 
@@ -392,12 +394,12 @@ struct ChainedViewFunc : public ViewFunc {
 
 /// ViewFunc that errors with a specified error message when called.
 struct ErroringViewFunc : public ViewFunc {
-  ErroringViewFunc(const std::string& error_msg) : error_msg(error_msg) {}
-  virtual ~ErroringViewFunc() override{};
-  virtual at::Tensor operator()(const at::Tensor&) const override {
+  ErroringViewFunc(std::string error_msg) : error_msg(std::move(error_msg)) {}
+  ~ErroringViewFunc() override = default;
+  at::Tensor operator()(const at::Tensor&) const override {
     TORCH_CHECK(false, error_msg);
   }
-  virtual std::unique_ptr<ViewFunc> clone_and_set(
+  std::unique_ptr<ViewFunc> clone_and_set(
       std::optional<std::vector<c10::SymInt>> = std::nullopt,
       std::optional<std::vector<at::Tensor>> = std::nullopt) const override {
     return std::make_unique<ErroringViewFunc>(error_msg);

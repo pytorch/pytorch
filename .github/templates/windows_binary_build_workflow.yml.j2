@@ -53,10 +53,25 @@ env:
 !{{ common.concurrency(build_environment) }}
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: windows.4xlarge.nonephemeral
+    needs: get-label-type
+    {%- if branches == "nightly" %}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
+    {%- else %}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
     {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
@@ -85,15 +100,17 @@ jobs:
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: !{{ config["build_name"] }}-build
+    needs:
+      - !{{ config["build_name"] }}-build
+      - get-label-type
 {%- if config["gpu_arch_type"] == "cuda" %}
 {%- if branches == "nightly" %}
-    runs-on: windows.8xlarge.nvidia.gpu
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge"
 {%- else %}
-    runs-on: windows.8xlarge.nvidia.gpu.nonephemeral
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.g4dn.xlarge.nonephemeral"
 {%- endif %}
 {%- else %}
-    runs-on: windows.4xlarge.nonephemeral
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
 {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}

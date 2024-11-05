@@ -5,6 +5,15 @@
 #include <string>
 #include <vector>
 
+/**
+ * This file provides a network flow implementation.
+ * https://en.wikipedia.org/wiki/Flow_network
+ *
+ * It aims to mirror some of the behavior of networkx, which is/was used by
+ * functorch partitioners for splitting the graph into a forward and backward
+ * graph.
+ */
+
 namespace c10 {
 
 enum class C10_API_ENUM MinCutStatus {

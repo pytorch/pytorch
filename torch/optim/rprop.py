@@ -1,7 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 r"""Implementation for the Resilient backpropagation."""
-from typing import List, Optional, Tuple, Union
+from typing import cast, List, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
@@ -15,6 +15,7 @@ from .optimizer import (
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
+    _params_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
@@ -202,16 +203,15 @@ Rprop.__doc__ = (
     """
     + rf"""
     Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
+        {_params_doc}
         lr (float, optional): learning rate (default: 1e-2)
         etas (Tuple[float, float], optional): pair of (etaminus, etaplus), that
             are multiplicative increase and decrease factors
             (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
             maximal allowed step sizes (default: (1e-6, 50))
-        {_foreach_doc}
         {_capturable_doc}
+        {_foreach_doc}
         {_maximize_doc}
         {_differentiable_doc}
 
@@ -318,15 +318,21 @@ def _multi_tensor_rprop(
         ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, prevs, step_sizes, state_steps]
+        [params, grads, prevs, step_sizes, state_steps]  # type: ignore[list-item]
     )
     for (
-        grouped_params,
-        grouped_grads,
-        grouped_prevs,
-        grouped_step_sizes,
-        grouped_state_steps,
+        grouped_params_,
+        grouped_grads_,
+        grouped_prevs_,
+        grouped_step_sizes_,
+        grouped_state_steps_,
     ), _ in grouped_tensors.values():
+        grouped_params = cast(List[Tensor], grouped_params_)
+        grouped_grads = cast(List[Tensor], grouped_grads_)
+        grouped_prevs = cast(List[Tensor], grouped_prevs_)
+        grouped_step_sizes = cast(List[Tensor], grouped_step_sizes_)
+        grouped_state_steps = cast(List[Tensor], grouped_state_steps_)
+
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just

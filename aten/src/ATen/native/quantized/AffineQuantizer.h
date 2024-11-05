@@ -16,15 +16,15 @@ Tensor& quantize_tensor_per_tensor_affine(
 Tensor& quantize_tensor_per_channel_affine(
     const Tensor& rtensor,
     Tensor& qtensor,
-    Tensor scales,
+    const Tensor& scales,
     Tensor zero_points,
     int64_t axis);
 
 Tensor& quantize_tensor_per_channel_float_qparams(
     const Tensor& rtensor,
     Tensor& qtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis);
 
 Tensor& dequantize_tensor_per_tensor_affine(
@@ -35,14 +35,14 @@ Tensor& dequantize_tensor_per_tensor_affine(
 Tensor& dequantize_tensor_per_channel_affine(
     const Tensor& qtensor,
     Tensor& rtensor,
-    Tensor scales,
+    const Tensor& scales,
     Tensor zero_points,
     int64_t axis);
 Tensor& dequantize_tensor_per_channel_float_qparams(
     const Tensor& qtensor,
     Tensor& rtensor,
-    Tensor scales,
-    Tensor zero_points,
+    const Tensor& scales,
+    const Tensor& zero_points,
     int64_t axis);
 
 using quantize_tensor_per_tensor_affine_fn =
@@ -87,31 +87,31 @@ using dequantize_tensor_per_tensor_affine_sub_byte_fn =
 
 DECLARE_DISPATCH(
     quantize_tensor_per_tensor_affine_fn,
-    quantize_tensor_per_tensor_affine_stub);
+    quantize_tensor_per_tensor_affine_stub)
 DECLARE_DISPATCH(
     quantize_tensor_per_channel_affine_fn,
-    quantize_tensor_per_channel_affine_stub);
+    quantize_tensor_per_channel_affine_stub)
 DECLARE_DISPATCH(
     quantize_tensor_per_channel_float_qparams_fn,
-    quantize_tensor_per_channel_float_qparams_stub);
+    quantize_tensor_per_channel_float_qparams_stub)
 
 DECLARE_DISPATCH(
     dequantize_tensor_per_tensor_affine_fn,
-    dequantize_tensor_per_tensor_affine_stub);
+    dequantize_tensor_per_tensor_affine_stub)
 DECLARE_DISPATCH(
     dequantize_tensor_per_channel_affine_fn,
-    dequantize_tensor_per_channel_affine_stub);
+    dequantize_tensor_per_channel_affine_stub)
 DECLARE_DISPATCH(
     dequantize_tensor_per_channel_float_qparams_fn,
-    dequantize_tensor_per_channel_float_qparams_stub);
+    dequantize_tensor_per_channel_float_qparams_stub)
 
 DECLARE_DISPATCH(
     quantize_tensor_per_tensor_affine_sub_byte_fn,
-    quantize_tensor_per_tensor_affine_sub_byte_stub);
+    quantize_tensor_per_tensor_affine_sub_byte_stub)
 
 DECLARE_DISPATCH(
     dequantize_tensor_per_tensor_affine_sub_byte_fn,
-    dequantize_tensor_per_tensor_affine_sub_byte_stub);
+    dequantize_tensor_per_tensor_affine_sub_byte_stub)
 
 template <typename T>
 TORCH_API Tensor quantize_tensor(

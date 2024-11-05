@@ -92,12 +92,27 @@ struct NodeCalls : public std::unordered_map<Node*, NodeCall> {
     auto it = find(function.get());
     if (it == end()) {
       it = emplace(function.get(), NodeCall(_next_id++, function)).first;
+      nodes.emplace_back(function.get());
     }
     return it->second;
   }
 
+  const NodeCall& lookup(uint32_t id) const {
+    TORCH_INTERNAL_ASSERT(id < nodes.size());
+    auto it = find(nodes[id]);
+    TORCH_INTERNAL_ASSERT(it != end());
+    return it->second;
+  }
+
+  void clear() {
+    _next_id = 0;
+    std::unordered_map<Node*, NodeCall>::clear();
+    nodes.clear();
+  }
+
  private:
   uint32_t _next_id = 0;
+  std::vector<Node*> nodes;
 };
 
 struct TensorArg {
@@ -118,6 +133,8 @@ struct TensorArgs {
   // Manages a collection of TensorArgs and mappings from Tensors/SavedVariables
   // to them.  This also allows us to unpack SavedVariable exactly once and
   // store the unpacked Tensor.
+  TensorArgs(const std::optional<size_t>& active_node_call_idx)
+      : active_node_call_idx(active_node_call_idx) {}
 
   TensorArg& lookup(const at::Tensor& tensor, bool create = false) {
     if (!tensor.defined()) {
@@ -129,6 +146,9 @@ struct TensorArgs {
       TORCH_INTERNAL_ASSERT(create && inputs.size() == _next_id - 1);
       it = _args.emplace(impl, TensorArg(_next_id++)).first;
       inputs.emplace_back(tensor);
+      if (active_node_call_idx.has_value()) {
+        input_origins.emplace_back(active_node_call_idx.value());
+      }
     }
     return it->second;
   }
@@ -155,8 +175,11 @@ struct TensorArgs {
 
   // the concrete tensors that will get passed into the graph as inputs
   std::vector<at::Tensor> inputs;
+  // NodeCall id of each input, only when verbose logging is enabled
+  std::vector<uint32_t> input_origins;
 
  private:
+  const std::optional<size_t>& active_node_call_idx;
   std::unordered_map<const c10::TensorImpl*, TensorArg> _args;
   // Every TensorArg from this is actually owned by _args (or _undefined) and
   // that's why we have an un-owned pointer here.
@@ -165,10 +188,53 @@ struct TensorArgs {
   uint32_t _next_id = 1; // id=0 used by _undefined
 };
 
+struct LiftedIValueArg {
+  LiftedIValueArg() = delete;
+  LiftedIValueArg(const at::IValue* ptr)
+      : actual_ptr(ptr), proxy(at::IValue::uninitialized()) {}
+
+  const at::IValue* actual_ptr; // lifetime handled by autograd node
+  at::IValue proxy;
+};
+
+struct LiftedIValueArgs {
+  LiftedIValueArgs(const std::optional<size_t>& active_node_call_idx)
+      : active_node_call_idx(active_node_call_idx) {}
+
+  at::IValue& next_proxy(const at::IValue* actual_ptr) {
+    TORCH_INTERNAL_ASSERT(next < args.size());
+    auto& iv_arg = args.at(next++);
+    TORCH_INTERNAL_ASSERT(iv_arg.actual_ptr == actual_ptr);
+    return iv_arg.proxy;
+  }
+
+  void add(const at::IValue* iv) {
+    args.emplace_back(iv);
+    if (active_node_call_idx.has_value()) {
+      args_origins.emplace_back(active_node_call_idx.value());
+    }
+  }
+
+  std::vector<LiftedIValueArg> args;
+  size_t next = 0;
+  // NodeCall id of each arg, only when verbose logging is enabled
+  std::vector<uint32_t> args_origins;
+
+ private:
+  const std::optional<size_t>& active_node_call_idx;
+};
+
 struct AutogradCompilerCall {
+  AutogradCompilerCall()
+      : active_node_call_idx(std::nullopt),
+        tensor_args(active_node_call_idx),
+        lifted_ivalue_args(active_node_call_idx) {}
   void add_size_input(const c10::SymInt& s) {
     all_size_inputs.emplace_back(
         default_dyn_type, s.guard_int(__FILE__, __LINE__));
+    if (active_node_call_idx.has_value()) {
+      size_input_origins.emplace_back(active_node_call_idx.value());
+    }
   }
 
   size_t emplace_hook(c10::SafePyObject&& fn) {
@@ -176,12 +242,20 @@ struct AutogradCompilerCall {
     return hooks.size() - 1;
   }
 
+  void set_active_node_call_idx(size_t node_call_idx) {
+    active_node_call_idx = node_call_idx;
+  }
+
+  std::optional<size_t> active_node_call_idx;
   TensorArgs tensor_args;
   std::vector<SizeInput> all_size_inputs;
+  LiftedIValueArgs lifted_ivalue_args;
   std::vector<int64_t> dyn_size_inputs;
   std::vector<c10::SafePyObject> hooks;
   NodeCalls node_calls;
   SizeInput::DynType default_dyn_type = SizeInput::STATIC;
+  // NodeCall id of each size, only when verbose logging is enabled
+  std::vector<uint32_t> size_input_origins;
 };
 
 class CompiledNodeArgs {
@@ -207,17 +281,30 @@ class CompiledNodeArgs {
   void collect(const at::Tensor& t) {
     collect(_compiler.tensor_args.add(t));
   }
-  void collect(const SavedVariable& t) {
-    collect(_compiler.tensor_args.add(t, _node_call.node));
+  void collect(const SavedVariable& sv, bool is_output) {
+    collect(
+        _compiler.tensor_args.add(sv, is_output ? _node_call.node : nullptr));
   }
   void collect(const c10::SymInt& t) {
     _compiler.add_size_input(t);
+  }
+  void collect(const std::vector<SavedVariable>& t, bool is_output) {
+    collect_size(t.size());
+    for (const SavedVariable& i : t) {
+      collect(i, is_output);
+    }
   }
   template <typename T>
   void collect(const std::vector<T>& t) {
     collect_size(t.size());
     for (const T& i : t) {
       collect(i);
+    }
+  }
+  void collect(const c10::ArrayRef<SavedVariable>& t, bool is_output) {
+    collect_size(t.size());
+    for (const SavedVariable& i : t) {
+      collect(i, is_output);
     }
   }
   template <typename T>
@@ -258,13 +345,13 @@ class CompiledNodeArgs {
       collect(m.at(k));
     }
   }
-  void collect(const at::IValue& iv) {
+  void collect(const at::IValue& iv, bool nested = false) {
     // used by AutogradContext::saved_data from CppNode
     if (iv.isList()) {
       c10::List<at::IValue> list = iv.toList();
       collect_size(list.size());
       for (auto&& value : list) {
-        collect(value);
+        collect(value, true);
       }
     } else if (iv.isGenericDict()) {
       c10::Dict<at::IValue, at::IValue> ordered_dict = iv.toGenericDict();
@@ -272,10 +359,15 @@ class CompiledNodeArgs {
       // NOLINTNEXTLINE(modernize-loop-convert)
       for (auto it = ordered_dict.begin(); it != ordered_dict.end(); it++) {
         collect(it->key());
-        collect(it->value());
+        collect(it->value(), true);
       }
     } else if (iv.isTensor()) {
       collect(iv.toTensor());
+    } else if (
+        !nested &&
+        (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat())) {
+      // can't lift ivalues nested in collections
+      _compiler.lifted_ivalue_args.add(&iv);
     } else {
       try {
         collect(static_cast<uint64_t>(at::IValue::hash(iv)));
@@ -378,21 +470,21 @@ class CompiledNodeArgs {
   void collect(T t) {       \
     specialize_on_bytes(t); \
   }
-  COLLECT_AS_BYTES(c10::ScalarType);
-  COLLECT_AS_BYTES(c10::DeviceType);
-  COLLECT_AS_BYTES(c10::Layout);
-  COLLECT_AS_BYTES(c10::MemoryFormat);
-  COLLECT_AS_BYTES(int8_t);
-  COLLECT_AS_BYTES(int16_t);
-  COLLECT_AS_BYTES(int32_t);
-  COLLECT_AS_BYTES(int64_t);
-  COLLECT_AS_BYTES(uint8_t);
-  COLLECT_AS_BYTES(uint16_t);
-  COLLECT_AS_BYTES(uint32_t);
-  COLLECT_AS_BYTES(uint64_t);
-  COLLECT_AS_BYTES(bool);
-  COLLECT_AS_BYTES(float);
-  COLLECT_AS_BYTES(double);
+  COLLECT_AS_BYTES(c10::ScalarType)
+  COLLECT_AS_BYTES(c10::DeviceType)
+  COLLECT_AS_BYTES(c10::Layout)
+  COLLECT_AS_BYTES(c10::MemoryFormat)
+  COLLECT_AS_BYTES(int8_t)
+  COLLECT_AS_BYTES(int16_t)
+  COLLECT_AS_BYTES(int32_t)
+  COLLECT_AS_BYTES(int64_t)
+  COLLECT_AS_BYTES(uint8_t)
+  COLLECT_AS_BYTES(uint16_t)
+  COLLECT_AS_BYTES(uint32_t)
+  COLLECT_AS_BYTES(uint64_t)
+  COLLECT_AS_BYTES(bool)
+  COLLECT_AS_BYTES(float)
+  COLLECT_AS_BYTES(double)
 #undef COLLECT_AS_BYTES
 
   void collect_hooks_from(Node* fn) {
@@ -559,8 +651,10 @@ class SwapSavedVariables {
     TensorArg& arg = compiler.tensor_args.lookup(t);
     stashed_variables.save(&t, std::move(t));
     if (arg.defined()) {
+      bool prior = at::SavedTensorDefaultHooks::set_tracing(true);
       TORCH_INTERNAL_ASSERT(arg.proxy_tensor.defined());
       t = SavedVariable(arg.proxy_tensor, false);
+      at::SavedTensorDefaultHooks::set_tracing(prior);
     }
   }
   void after(SavedVariable& t) {
@@ -578,11 +672,14 @@ class SwapSavedVariables {
     stashed_symints.restore(&t);
   }
 
-  void before(at::IValue& t) {
-    if (t.isTensor()) {
-      before(t.toTensor());
+  void before(at::IValue& iv) {
+    if (iv.isTensor()) {
+      before(iv.toTensor());
     } else {
-      stashed_ivalues.save(&t, at::IValue(t));
+      stashed_ivalues.save(&iv, at::IValue(iv));
+      if (iv.isInt() || iv.isSymInt() || iv.isDouble() || iv.isSymFloat()) {
+        iv = compiler.lifted_ivalue_args.next_proxy(&iv);
+      }
     }
   }
 
@@ -709,18 +806,18 @@ class SwapSavedVariables {
 #define NO_OP_VISIT(T)     \
   void before(const T&) {} \
   void after(const T&) {}
-  NO_OP_VISIT(caffe2::TypeMeta);
-  NO_OP_VISIT(c10::Device);
-  NO_OP_VISIT(c10::DeviceType);
-  NO_OP_VISIT(c10::Layout);
-  NO_OP_VISIT(c10::MemoryFormat);
-  NO_OP_VISIT(c10::ScalarType);
-  NO_OP_VISIT(c10::Scalar);
-  NO_OP_VISIT(c10::TensorOptions);
-  NO_OP_VISIT(std::string);
-  NO_OP_VISIT(int64_t);
-  NO_OP_VISIT(bool);
-  NO_OP_VISIT(double);
+  NO_OP_VISIT(caffe2::TypeMeta)
+  NO_OP_VISIT(c10::Device)
+  NO_OP_VISIT(c10::DeviceType)
+  NO_OP_VISIT(c10::Layout)
+  NO_OP_VISIT(c10::MemoryFormat)
+  NO_OP_VISIT(c10::ScalarType)
+  NO_OP_VISIT(c10::Scalar)
+  NO_OP_VISIT(c10::TensorOptions)
+  NO_OP_VISIT(std::string)
+  NO_OP_VISIT(int64_t)
+  NO_OP_VISIT(bool)
+  NO_OP_VISIT(double)
 #undef NO_OP_VISIT
 
   SwapSavedVariables(

@@ -6,8 +6,8 @@
 #include <ATen/native/quantized/FakeQuantAffine.h>
 
 // FakeQuantize Op for PerTensorAffine quantization scheme.
-namespace at {
-namespace native {
+
+namespace at::native {
 
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
 DEFINE_DISPATCH(fake_quant_tensor_cachemask_stub);
@@ -226,5 +226,4 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
   return std::make_tuple(dX, dScale, dZeroPoint);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

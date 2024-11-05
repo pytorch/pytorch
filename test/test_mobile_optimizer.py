@@ -427,7 +427,6 @@ class TestOptimizer(TestCase):
 
             def fuse_model(self):
                 torch.ao.quantization.fuse_modules(self, [['conv2', 'relu']], inplace=True)
-                pass
 
         class Child(nn.Module):
             def __init__(self) -> None:
