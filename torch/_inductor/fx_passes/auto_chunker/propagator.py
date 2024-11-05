@@ -146,15 +146,23 @@ class Propagator:
                     if node in no_chunk_nodes:
                         return False
 
+                    # TODO: we should have a general way to decide if we should chunk an external argument of not
+                    # Don't chunk if current is 1D tensor and is used to add the source_user. This is the pattern
+                    # for bias
+                    if node.meta["val"].ndim == 1:
+                        for user in node.users:
+                            if user.target == aten.add.Tensor and user.args[0] == source_user and user.args[1] == node:
+                                return False
+
                     # Sanity check the tensor size
                     if node.meta["val"].size(0) != batch_size:
                         raise CantChunk("First dimension does not match batch_size. {batch_size=} v.s. {node.meta['val'].size(0)}.")
                     return True
 
+                chunking_subgraph.add_external_node(node)
                 if _should_chunk(node):
                     # attach the chunking metadata
                     set_chunking_meta(node, chunk_dim=0)
-                    chunking_subgraph.add_external_node_to_chunk(node)
 
     @classmethod
     def add_chunking_meta(cls, chunking_subgraph):
@@ -225,10 +233,25 @@ def propagate_permute(permute_node):
     set_chunking_meta(permute_node, meta=input_meta, chunk_dim=new_chunk_dim)
     return True
 
+@register_propagate_rule([
+    aten.sub.Tensor,
+    aten.add.Tensor,
+])
+def propagate_broadcastable(out_node):
+    lhs_node, rhs_node = out_node.args[:2]
+
+    lhs_meta = get_chunking_meta(lhs_node)
+
+    lhs_ft = get_fake_tensor_from_node(lhs_node)
+    rhs_ft = get_fake_tensor_from_node(rhs_node)
+    if get_chunking_meta(rhs_node) is None and rhs_ft is not None and rhs_ft.ndim == 1 and lhs_ft is not None and lhs_ft.ndim > 1 and lhs_meta is not None and lhs_meta.chunk_dim is not None and lhs_meta.chunk_dim != lhs_ft.ndim - 1:
+        copy_chunking_meta(out_node, lhs_node)
+        return True
+
+    return propagate_general_copy_from_input(out_node)
 
 @register_propagate_rule([
     prims.convert_element_type.default,
-    aten.sub.Tensor,
     aten.exp.default,
     aten.log.default,
     aten.squeeze.dim,
@@ -323,6 +346,9 @@ def propagate_div(div_node):
     lhs_meta = get_chunking_meta(lhs_node)
     rhs_meta = get_chunking_meta(rhs_node)
 
+    if lhs_meta == rhs_meta:
+        return propagate_general_copy_from_input(div_node)
+
     # Divide by a non-chunked scalar, just copy the metadata from
     # the numerator.
     if lhs_meta is not None and rhs_meta is None and rhs_node.meta["val"].numel() == 1:
@@ -389,6 +415,43 @@ def propagate_full(full_node):
     return False
 
 @register_propagate_rule([
+    aten.expand.default,
+])
+def propagate_expand(expand_node):
+    # expand from scalar
+    if expand_node.meta["val"].numel() != 1:
+        arg = expand_node.args[0]
+        arg_meta = get_chunking_meta(arg)
+        if arg_meta and arg.meta["val"].numel() == 1:
+            set_chunking_meta(expand_node, chunk_dim=0, scale_by=arg_meta.scale_by)
+            return True
+    return False
+
+def _propagate_mul(lhs_meta, rhs_meta):
+    """
+    Return out_meta if can chunk. Otherwise None.
+    Having this API since this can be shared by aten.mul and aten.fma
+    """
+    if lhs_meta is None or rhs_meta is None:
+        return None
+
+    # Compare disregarding scale_by
+    lhs_meta_copy = lhs_meta.copy()
+    lhs_meta_copy.scale_by = None
+    rhs_meta_copy = rhs_meta.copy()
+    rhs_meta_copy.scale_by = None
+    if lhs_meta_copy != rhs_meta_copy:
+        return None
+
+    # TODO: too restrictive. Loose the check if there is a use case
+    # that both lhs and rhs are scaled.
+    scale_by = get_scale_by_from_metas(lhs_meta, rhs_meta)
+
+    out_meta = lhs_meta_copy.copy()
+    out_meta.scale_by = scale_by
+    return out_meta
+
+@register_propagate_rule([
     aten.mul.Tensor,
 ])
 def propagate_mul(mul_node):
@@ -398,19 +461,27 @@ def propagate_mul(mul_node):
     lhs_node, rhs_node = mul_node.args[:2]
     lhs_meta = get_chunking_meta(lhs_node)
     rhs_meta = get_chunking_meta(rhs_node)
-    if lhs_meta is None or rhs_meta is None:
+    out_meta = _propagate_mul(lhs_meta, rhs_meta)
+
+    if out_meta is None:
         return False
 
-    # Compare disregarding scale_by
-    lhs_meta_copy = lhs_meta.copy()
-    lhs_meta_copy.scale_by = None
-    rhs_meta_copy = rhs_meta.copy()
-    rhs_meta_copy.scale_by = None
-    if lhs_meta_copy != rhs_meta_copy:
-        return False
-
-    # TODO: too restrictive. Loose the check if there is a use case
-    # that both lhs and rhs are scaled.
-    scale_by = get_scale_by_from_metas(lhs_meta, rhs_meta)
-    set_chunking_meta(mul_node, meta=lhs_meta_copy, scale_by=scale_by)
+    set_chunking_meta(mul_node, meta=out_meta)
     return True
+
+@register_propagate_rule([
+    prims.fma.default,
+])
+def propagate_fma(fma_node):
+    lhs_node, rhs_node, addend_node = fma_node.args[:3]
+    lhs_meta = get_chunking_meta(lhs_node)
+    rhs_meta = get_chunking_meta(rhs_node)
+    mul_meta = _propagate_mul(lhs_meta, rhs_meta)
+    if mul_meta is None:
+        return False
+
+    addend_meta = get_chunking_meta(addend_node)
+    if mul_meta == addend_meta:
+        copy_chunking_meta(fma_node, mul_meta)
+        return True
+    return False

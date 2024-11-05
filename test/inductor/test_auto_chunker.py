@@ -85,7 +85,7 @@ class AutoChunkerTest(TestCase):
     def test_linear_softmax(self):
         self.common_matmul_test(has_softmax=True, use_bias=True)
 
-    @config.patch("AutoChunker.num_chunk", 8)
+    @config.patch("AutoChunker.num_chunk", 2)
     def test_fused_linear_cel(self):
         B = 32
         T = 1024
@@ -125,6 +125,7 @@ class AutoChunkerTest(TestCase):
         torch.cuda.reset_peak_memory_stats()
         actual = (opt_f(x, y), x.grad, mod.linear.weight.grad, mod.linear.bias.grad)
         peak_memory = torch.cuda.max_memory_allocated()
+        print(f"Peak memory {peak_memory / 10 ** 9 :.6f} GB")
 
         self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
 

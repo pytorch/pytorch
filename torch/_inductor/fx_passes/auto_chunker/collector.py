@@ -191,22 +191,24 @@ class Collector:
         return list(reversed(reachable_nodes))
 
     @classmethod
-    def find_reachable_nodes_backward(cls, candidate_list, source_user):
+    def find_reachable_nodes_backward(cls, chunking_subgraph_nodes, candidate_list, source_node, source_user):
         """
         Discover node as large as `source_user` from the `candidate_list`.
         """
-        reachable_nodes = set()
         source_user_size = compute_tensor_size(source_user, count_bytes=False)
         while candidate_list:
             curr_node = candidate_list.pop()
             curr_node_size = compute_tensor_size(curr_node, count_bytes=False)
 
-            if curr_node_size != source_user_size:
-                continue
-
-            reachable_nodes.add(curr_node)
-            candidate_list += get_args_of_node_type(curr_node)
-        return reachable_nodes
+            if curr_node_size == source_user_size:
+                chunking_subgraph_nodes.add(curr_node)
+                candidate_list += get_args_of_node_type(curr_node)
+            else:
+                for arg in get_args_of_node_type(curr_node):
+                    # If an op uses `source_node`, we add it
+                    if arg is source_node:
+                        chunking_subgraph_nodes.add(curr_node)
+                        break
 
     @classmethod
     def collect_chunking_subgraph_nodes(cls, graph: torch.fx.Graph) -> Set[Node]:
@@ -263,7 +265,7 @@ class Collector:
         # We check if such node can go backward in the graph and reach a node which is as large as the
         # `chunk_user` node. Add those nodes to `chunking_subgraph_nodes`
         external_args = set(itertools.chain.from_iterable(get_args_of_node_type(node) for node in chunking_subgraph_nodes)) - chunking_subgraph_nodes
-        chunking_subgraph_nodes |= cls.find_reachable_nodes_backward(list(external_args), source_user)
+        cls.find_reachable_nodes_backward(chunking_subgraph_nodes, list(external_args), source_node, source_user)
 
         # print_non_selected_nodes(graph, chunking_subgraph_nodes)
         return chunking_subgraph_nodes

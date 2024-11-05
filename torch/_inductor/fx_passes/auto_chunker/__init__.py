@@ -707,14 +707,9 @@ class AutoChunker:
 
             Propagator.add_chunking_meta(chunking_subgraph)
 
-            ChunkingApplier(chunking_subgraph, config.AutoChunker.num_chunk or 2).apply()
+            newgm = ChunkingApplier(gm, chunking_subgraph, config.AutoChunker.num_chunk or 2).apply()
 
             metrics.num_auto_chunking += 1
-            newgm = torch.fx._lazy_graph_module._make_graph_module(
-                self.gm, chunking_subgraph.parent_graph
-            )
-            from .applier import fake_tensor_prop
-            fake_tensor_prop(newgm)
             # breakpoint()
             return newgm
 
