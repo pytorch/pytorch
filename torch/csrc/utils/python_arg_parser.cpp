@@ -830,6 +830,18 @@ bool is_tensor_list_and_append_overloaded(
   return true;
 }
 
+static bool is_float_or_symfloat(PyObject* obj) {
+  if (torch::is_symfloat(py::handle(obj))) {
+    return true;
+  }
+
+  if (THPUtils_checkDouble(obj)) {
+    return true;
+  }
+
+  return false;
+}
+
 static bool is_float_or_symfloat_or_complex_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
@@ -840,8 +852,7 @@ static bool is_float_or_symfloat_or_complex_list(PyObject* obj) {
   const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
   if (size > 0) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
-    if (!THPUtils_checkDouble(iobj) && !PyComplex_Check(iobj) &&
-        !torch::is_symfloat(py::handle(iobj))) {
+    if (!is_float_or_symfloat(iobj) && !PyComplex_Check(iobj)) {
       return false;
     }
   }
@@ -874,18 +885,6 @@ static bool is_int_or_symint(PyObject* obj) {
   }
 
   if (THPUtils_checkIndex(obj)) {
-    return true;
-  }
-
-  return false;
-}
-
-static bool is_float_or_symfloat(PyObject* obj) {
-  if (torch::is_symfloat(py::handle(obj))) {
-    return true;
-  }
-
-  if (PyFloat_Check(obj)) {
     return true;
   }
 
@@ -1515,8 +1514,7 @@ bool FunctionSignature::parse(
   // expand((5,3))
   if (max_pos_args == 1 &&
       (params[0].type_ == ParameterType::INT_LIST ||
-       params[0].type_ == ParameterType::SYM_INT_LIST ||
-       params[0].type_ == ParameterType::SYM_FLOAT_LIST)) {
+       params[0].type_ == ParameterType::SYM_INT_LIST)) {
     allow_varargs_intlist = true;
   }
 
