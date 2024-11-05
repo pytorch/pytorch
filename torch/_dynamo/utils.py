@@ -73,7 +73,11 @@ from torch._C import (
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
-from torch._utils_internal import log_chromium_event_internal, log_compilation_event
+from torch._utils_internal import (
+    log_chromium_event_internal,
+    log_compilation_event,
+    signpost_event,
+)
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
@@ -141,6 +145,51 @@ frame_phase_timing: Dict[str, Dict[str, float]] = collections.defaultdict(
 )
 
 timer_counter = itertools.count()
+
+
+# Abstraction on top of counters.
+class ReInplaceTrigger(enum.Enum):
+    AUTO_FUNC_V1 = 1
+    AUTO_FUNC_V2 = 2
+    TRITON_OPS = 3
+
+
+class ReinplaceCounters:
+    _values: DefaultDict[str, int] = collections.defaultdict(int)
+
+    # Track sizes of known not re-inplaced tensors (exclude dynamic shapes).
+    @classmethod
+    def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int):
+        cls._values[f"missed_bytes_{trigger.name}"] += bytes
+
+    # Track number of not re-inplaced tensors.
+    @classmethod
+    def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int):
+        cls._values[f"missed_tensors_{trigger}"] += count
+
+    @classmethod
+    def clear(cls):
+        cls._values.clear()
+
+    @classmethod
+    def get_total_missed(cls):
+        sum = 0
+        for trigger in ReInplaceTrigger:
+            sum += cls._values.get(f"missed_tensors_{trigger}", 0)
+        return sum
+
+    @classmethod
+    def get_total_missed_bytes(cls):
+        sum = 0
+        for trigger in ReInplaceTrigger:
+            sum += cls._values.get(f"missed_bytes_{trigger.name}", 0)
+        return sum
+
+    @classmethod
+    def log(cls):
+        # if not empty log.
+        if cls._values:
+            signpost_event("inductor", "reinplace_counters", cls._values)
 
 
 def tabulate(
@@ -269,6 +318,7 @@ def add_remote_cache_time_saved(time_saved_ns: int, is_backward: bool = False) -
 def dynamo_timed(
     key: str,
     phase_name: Optional[str] = None,
+    log_pt2_compile_event: bool = False,  # Whether or not to log it to internal pt2 compile event
     fwd_only: bool = True,
 ):
     chromium_log: ChromiumEventLogger = get_chromium_event_logger()
@@ -302,9 +352,10 @@ def dynamo_timed(
                 end_ns,
                 {},
                 start_ns,
+                log_pt2_compile_event,
             )
         else:
-            chromium_log.log_event_end(key, end_ns, {}, start_ns)
+            chromium_log.log_event_end(key, end_ns, {}, start_ns, log_pt2_compile_event)
         # Only record backward compilation metrics if phase_name is not None!
         if phase_name:
             frame_key = str(curr_frame)
@@ -841,7 +892,6 @@ class CompilationMetrics:
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
     has_guarded_code: Optional[bool] = None
-    possibly_missed_reinplacing_opportunities: Optional[int] = None
     remote_cache_time_saved_s: Optional[float] = None
     structured_logging_overhead_s: Optional[float] = None
     config_suppress_errors: Optional[bool] = None
@@ -1023,6 +1073,8 @@ class ChromiumEventLogger:
             metadata,
         )
         self.get_stack().append(event_name)
+        # Add metadata from start event
+        self.add_event_data(event_name, **metadata)
 
     def reset(self) -> None:
         # We this on every compile in case a compile crashes or restarts and we haven't
@@ -1039,6 +1091,7 @@ class ChromiumEventLogger:
         time_ns: int,
         metadata: Dict[str, Any],
         start_time_ns: int,
+        log_pt2_compile_event: bool,
     ) -> None:
         """
         Logs the end of a single event. This function should only be
@@ -1085,8 +1138,8 @@ class ChromiumEventLogger:
                 "ChromiumEventLogger: Detected overlapping events, fixing stack"
             )
             stack.pop()
-
-        log_chromium_event_internal(event, stack, self.id_, start_time_ns)
+        if log_pt2_compile_event:
+            log_chromium_event_internal(event, stack, self.id_, start_time_ns)
         # Finally pop the actual event off the stack
         stack.pop()
 
@@ -1123,6 +1176,8 @@ class ChromiumEventLogger:
         event_name: str,
         time_ns: int,
         metadata: Optional[Dict[str, Any]] = None,
+        # By default, an instant event isn't logged internally, only to structured logging.
+        log_pt2_compile_event: bool = False,
     ) -> None:
         """
         Log an instant event with no associated duration.
@@ -1152,8 +1207,9 @@ class ChromiumEventLogger:
             suppress_context=False,
             expect_trace_id=True,
         )
-        # Log an instant event with the same start and end time
-        log_chromium_event_internal(event, self.get_stack(), self.id_, time_ns)
+        if log_pt2_compile_event:
+            # Log an instant event with the same start and end time
+            log_chromium_event_internal(event, self.get_stack(), self.id_, time_ns)
 
 
 CHROMIUM_EVENT_LOG: Optional[ChromiumEventLogger] = None
@@ -2176,6 +2232,15 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
 
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+
+    if node.name in ["interpolate", "is_integer"]:
+        # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
+        args = tuple(
+            float(arg)
+            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+            else arg
+            for arg in args
+        )
 
     try:
         with tx.fake_mode, enable_python_dispatcher():
