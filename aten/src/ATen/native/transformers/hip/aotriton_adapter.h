@@ -18,7 +18,7 @@
   TORCH_CHECK(TENSOR.is_cuda(), #TENSOR " must be a CUDA tensor");     \
   TORCH_CHECK(!TENSOR.is_sparse(), #TENSOR " must be a dense tensor"); \
   TORCH_CHECK(                                                         \
-      TENSOR.stride(-1) == 1, #TENSOR ": last dimension must be contiguous");
+      TENSOR.stride(-1) == 1 || TENSOR.size(-1) == 1, #TENSOR ": last dimension must be contiguous");
 
 #define CHECK_ALIGNED_PTR(PTR, ALIGNMENT) \
   TORCH_CHECK(                         \
