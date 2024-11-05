@@ -132,7 +132,7 @@ template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, 
 inline void cvt_to_fp32(const __m128i& a, __m256& o);
 template <> inline void cvt_to_fp32<BFloat16>(const __m128i& a, __m256& o) {
   cvtbf16_fp32(a, o);
-};
+}
 template <> inline void cvt_to_fp32<Half>(const __m128i& a, __m256& o) {
   cvtfp16_fp32(a, o);
 }
@@ -1071,8 +1071,8 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(c
 inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const Vectorized<float>& b) { \
   return cvt_from_fp32<type>(__m256(a), __m256(b)); \
 }
-CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
-CONVERT_VECTORIZED_INIT(Half, half);
+CONVERT_VECTORIZED_INIT(BFloat16, bfloat16)
+CONVERT_VECTORIZED_INIT(Half, half)
 
 #else // defined(CPU_CAPABILITY_AVX2)
 
@@ -1096,9 +1096,9 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
   convert(arr, arr2, K); \
   return Vectorized<type>::loadu(arr2); \
 }
-CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
+CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16)
 #if !(defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256))
-CONVERT_NON_VECTORIZED_INIT(Half, half);
+CONVERT_NON_VECTORIZED_INIT(Half, half)
 #endif
 
 #endif // defined(CPU_CAPABILITY_AVX2)
@@ -1119,8 +1119,8 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   out1 = out1_values; \
   out2 = out2_values; \
 }
-LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
-LOAD_FP32_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16)
+LOAD_FP32_VECTORIZED_INIT(Half, fp16)
 
 #else // defined(CPU_CAPABILITY_AVX2)
 #define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \
