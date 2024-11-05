@@ -664,10 +664,12 @@ class TensorVariable(VariableTracker):
             tensortype = next(
                 k for k, v in tensortype_to_dtype.items() if self.dtype in v
             )
-            if self.device.type == "cuda":
-                return ConstantVariable.create(f"torch.cuda.{tensortype.__name__}")
-            else:
+            if self.device.type == "cpu":
                 return ConstantVariable.create(f"torch.{tensortype.__name__}")
+            else:
+                return ConstantVariable.create(
+                    f"torch.{self.device.type}.{tensortype.__name__}"
+                )
         elif (
             dtype is not None
             and fqn(type(dtype.as_python_constant())) == "torch.tensortype"
@@ -1448,6 +1450,6 @@ class DataPtrVariable(VariableTracker):
         self.from_tensor = from_tensor
 
     def reconstruct(self, codegen):
-        codegen(self.from_tensor, allow_cache=False)
+        codegen(self.from_tensor)
         codegen.load_method("data_ptr")
         codegen.call_method(0)

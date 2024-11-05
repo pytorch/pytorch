@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any, Mapping, Sequence, TYPE_CHECKING
+from typing import Any, Callable, Mapping, Sequence, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnxscript_apis, onnxscript_ir as ir
-from torch.onnx._internal.exporter import _core, _onnx_program
+from torch.onnx._internal.exporter import _core, _onnx_program, _registration
 
 
 if TYPE_CHECKING:
@@ -221,6 +221,8 @@ def export_compat(
     input_names: Sequence[str] | None = None,
     output_names: Sequence[str] | None = None,
     opset_version: int | None = None,
+    custom_translation_table: dict[Callable, Callable | Sequence[Callable]]
+    | None = None,
     dynamic_axes: Mapping[str, Mapping[int, str]]
     | Mapping[str, Sequence[int]]
     | None = None,
@@ -263,12 +265,22 @@ def export_compat(
                 input_names=input_names,
             )
 
+    registry = _registration.ONNXRegistry.from_torchlib()
+    if custom_translation_table is not None:
+        for torch_op, onnx_ops in custom_translation_table.items():
+            # TODO(justinchuby): Support complex inputs with annotations
+            if not isinstance(onnx_ops, Sequence):
+                onnx_ops = (onnx_ops,)
+            for op in reversed(onnx_ops):
+                # register_op places the op in the front of all onnx variants,
+                # so we reverse the list to maintain the order of the custom ops provided
+                registry.register_op(torch_op, op, is_complex=False)
     try:
         onnx_program = _core.export(
             model,
             args,
             kwargs,
-            registry=None,
+            registry=registry,
             dynamic_shapes=dynamic_shapes,
             input_names=input_names,
             output_names=output_names,

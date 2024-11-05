@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 
 import ast
+import contextlib
 import io
 import itertools
 import math
@@ -3657,7 +3658,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ["contig", "noncontig_transposed", "noncontig_with_holes"],
         name_fn=lambda c: c,
     )
-    def test_serialization(self, device, dtype, contiguity):
+    @parametrize("weights_only", [True, False])
+    def test_serialization(self, device, dtype, contiguity, weights_only):
         # Test with 3 cases:
         # 1. contiguous
         # 2. non-contiguous transposed
@@ -3693,8 +3695,21 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         with tempfile.TemporaryFile() as f:
             torch.save(nt, f)
+            safe_globals = [
+                torch.nested._internal.nested_tensor.NestedTensor,
+                torch.nested._internal.nested_tensor._rebuild_njt,
+                set,
+                torch._dynamo.decorators._DimRange,
+            ]
             f.seek(0)
-            nt_loaded = torch.load(f)
+            ctx = (
+                torch.serialization.safe_globals(safe_globals)
+                if weights_only
+                else contextlib.nullcontext()
+            )
+
+            with ctx:
+                nt_loaded = torch.load(f, weights_only=weights_only)
 
             self.assertIsNot(nt, nt_loaded)
             # we expect a new offsets tensor -> different nested int upon load
@@ -4339,7 +4354,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
             out = func(nt, dim=rd, keepdim=keepdim)
             ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
-            if not torch.compiler.is_compiling:  # if not using torch dynamo
+            if not torch.compiler.is_compiling():  # if not using torch dynamo
                 self.assertEqual(len(out.shape), len(ref_shape))
                 for o, r in zip(out.shape, ref_shape):
                     if r is not None:
@@ -4582,7 +4597,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         # requires_grad = False does not currently work with dynamo tests and throws this error:
         #   AssertionError: SymInts must use SymNodeVariable.
         #   If the underlying value is static, we will create a ConstantVariable and specialize.
-        if torch._dynamo.is_compiling() and not requires_grad:
+        if torch.compiler.is_compiling() and not requires_grad:
             return
 
         tensor_lists = self._get_example_tensor_lists(

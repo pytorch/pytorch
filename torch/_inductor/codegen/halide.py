@@ -788,7 +788,7 @@ class HalideKernel(SIMDKernel):
             if not nodes:
                 nodes.append(tree.lookup(1, tree.numel))
             handled_count = 0
-            divisor = sympy.Integer(1)
+            divisor = sympy.S.One
             added_sym_size = []
             # decide on a minimal set of symbols and put them in self.halide_vars
             while handled_count < len(nodes) and not eq(tree.numel, divisor):
@@ -846,7 +846,7 @@ class HalideKernel(SIMDKernel):
                         idx += 1
                         divisor *= size
                     length = 1
-                    expr = sympy.Integer(0)
+                    expr = sympy.S.Zero
                     while not eq(node.length, length):
                         sym, size = added_sym_size[idx]
                         idx += 1
@@ -855,8 +855,8 @@ class HalideKernel(SIMDKernel):
                     self.index_replacements[node.symbol()] = expr
                 except IndexError:
                     assert had_fallback
-                    full_index = sympy.Integer(0)
-                    stride = sympy.Integer(1)
+                    full_index = sympy.S.Zero
+                    stride = sympy.S.One
                     for sym, size in added_sym_size:
                         full_index += stride * sym
                         stride *= size
@@ -937,8 +937,8 @@ class HalideKernel(SIMDKernel):
                 ), sym
 
         # group the expression by variables used
-        offset = sympy.Integer(0)
-        split_expr = {s: sympy.Integer(0) for s in symbols}
+        offset = sympy.S.Zero
+        split_expr = {s: sympy.S.Zero for s in symbols}
         split_failed: List[Tuple[List[sympy.Symbol], sympy.Expr]] = []
         index = sympy.expand(self.rename_indexing(index))
         for part in index.args if isinstance(index, sympy.Add) else [index]:
@@ -972,7 +972,7 @@ class HalideKernel(SIMDKernel):
             length = sympy.simplify(
                 sympy_subs(expr, {sym: self.sym_size(sym) - 1 for sym in syms}) + 1
             )
-            stride = sympy.Integer(1)
+            stride = sympy.S.One
             if isinstance(expr, sympy.Mul):
                 for term in expr.args:
                     if isinstance(term, sympy.Integer):
@@ -994,11 +994,11 @@ class HalideKernel(SIMDKernel):
         if not dims:  # scalar load/store
             if self.has_indirect_indexing:
                 # workaround https://github.com/halide/Halide/issues/8338
-                dims.append(DimensionInfo(sympy.Integer(0), 1, 1))
+                dims.append(DimensionInfo(sympy.S.Zero, 1, 1))
         elif not V.graph.sizevars.statically_known_equals(dims[0].stride, 1):
             # Halide assumes dimension 0 is stride == 1, so add a dummy dimension
             dims.insert(
-                0, DimensionInfo(sympy.Integer(0), 1 if is_store else dims[0].stride, 1)
+                0, DimensionInfo(sympy.S.Zero, 1 if is_store else dims[0].stride, 1)
             )
 
         if dims and not is_store:
