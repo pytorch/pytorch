@@ -4,8 +4,8 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 // Copying from float to QInt, used for assigning float value to QTensor
 // The second exception condition `self.is_contiguous() && src.is_contiguous()`
@@ -36,5 +36,4 @@ Tensor& quantized_copy_from_float_(Tensor& self, const Tensor& src) {
   });
   return self;
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

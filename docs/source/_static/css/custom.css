@@ -1,0 +1,46 @@
+/* styles needed for the Google Search button */
+
+.pytorch-left-menu-search input[type=text] {
+    background-image: none;
+}
+
+.gsc-control-cse {
+   padding-left: 0px !important;
+   padding-bottom: 0px !important;
+}
+
+.gsc-search-button .gsc-search-button-v2:focus {
+   border: transparent !important;
+   outline: none;
+   box-shadow: none;
+}
+
+.gsc-search-button-v2:active {
+   border: none !important;
+}
+
+.gsc-search-button-v2 {
+   border: none !important;
+}
+
+/* End of Google Search button styles */
+
+/* Classes needed for the survey link*/
+
+.pytorch-left-menu-search { /* This is needed so the distance between the search and menu is not too big */
+  margin-bottom: 0px;
+}
+
+.survey-link {
+  padding-top: 10px;
+  color: #262626;
+  text-align: center
+}
+
+.pytorch-left-menu-search .survey-link a {
+  color: #262626;
+  text-decoration: underline;
+  font-weight: 500;
+}
+
+/* End of classes needed for the survey banner*/

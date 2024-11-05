@@ -1,7 +1,7 @@
 #include <stdexcept>
 
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_ROCM)
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
 
@@ -29,12 +29,14 @@ MyAOTIClass::MyAOTIClass(
     const std::string& model_path,
     const std::string& device)
     : lib_path_(model_path), device_(device) {
-  if (device_ == "cuda") {
-    runner_ = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
-        model_path.c_str());
-  } else if (device_ == "cpu") {
+  if (device_ == "cpu") {
     runner_ = std::make_unique<torch::inductor::AOTIModelContainerRunnerCpu>(
         model_path.c_str());
+#if defined(USE_CUDA) || defined(USE_ROCM)
+  } else if (device_ == "cuda") {
+    runner_ = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+        model_path.c_str());
+#endif
   } else {
     throw std::runtime_error("invalid device: " + device);
   }

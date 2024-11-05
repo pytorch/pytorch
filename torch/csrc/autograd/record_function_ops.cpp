@@ -9,12 +9,10 @@
 namespace caffe2 {
 // Required for cpp_custom_type_hack to work
 // NOLINTNEXTLINE(bugprone-exception-escape)
-CAFFE_KNOWN_TYPE(at::RecordFunction);
+CAFFE_KNOWN_TYPE(at::RecordFunction)
 } // namespace caffe2
 
-namespace torch {
-namespace autograd {
-namespace profiler {
+namespace torch::autograd::profiler {
 
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
@@ -165,6 +163,4 @@ TORCH_LIBRARY_FRAGMENT(profiler, m) {
       c10::AliasAnalysisKind::FROM_SCHEMA));
 }
 
-} // namespace profiler
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::profiler

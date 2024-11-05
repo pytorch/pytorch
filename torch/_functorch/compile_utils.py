@@ -5,6 +5,7 @@ from typing import Callable
 
 import torch
 import torch.fx as fx
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten
 
@@ -50,6 +51,37 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     )
 
     compute_mutation_region_ids(fx_g)  # type: ignore[arg-type]
+
+    # Make a set of separate storages returned from the output, which will be preserved
+    # when pruning.  This prevents us from deduplicating returned tensors which have
+    # experienced identical operations, but are separate data structures in eager mode.
+    output_node: fx.Node = list(fx_g.nodes)[-1]
+    assert output_node.op == "output"
+
+    def checkable_node(node: fx.Node) -> bool:
+        """We can evaluate only nodes that represent tensors with defined storage."""
+        if "val" not in node.meta or not isinstance(node.meta["val"], torch.Tensor):
+            return False
+
+        try:
+            node.meta["val"].untyped_storage()
+        except NotImplementedError:
+            return False
+
+        return True
+
+    output_storages = {
+        StorageWeakRef(n.meta["val"].untyped_storage())
+        for n in output_node.all_input_nodes
+        if checkable_node(n)
+    }
+    nodes_that_alias_outputs = {
+        n
+        for n in fx_g.nodes
+        if checkable_node(n)
+        and StorageWeakRef(n.meta["val"].untyped_storage()) in output_storages
+    }
+
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new graph without change
         # do not CSE away random operations
@@ -58,6 +90,11 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             or n.op == "output"
             or n.op == "get_attr"
             or get_aten_target(n) in rand_ops
+            # aten.empty is non-deterministic, so don't CSE it.
+            # Also, aten.empty is almost always fusible into its consumer,
+            # so it's not worth CSEing.
+            or get_aten_target(n) is aten.empty
+            or n in nodes_that_alias_outputs
         ):
             new_node = new_graph.node_copy(n, lambda x: env[x])
             env[n] = new_node

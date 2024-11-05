@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import collections
+import contextlib
 import copy
 import itertools
 import os
@@ -21,6 +22,7 @@ from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
+from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
@@ -1138,6 +1140,22 @@ def make_test(fn, expected_ops=None):
     return test_fn
 
 
+@contextlib.contextmanager
+def temporary_tensor_subclass(torch_function=None):
+    class TensorProxy(torch.Tensor):
+        @classmethod
+        def __torch_function__(cls, func, types, args=(), kwargs=None):
+            if torch_function is not None:
+                torch_function()
+            return super().__torch_function__(func, types, args, kwargs)
+
+    torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
+    try:
+        yield TensorProxy
+    finally:
+        torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
+
+
 class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_seq = make_test(Seq())
     test_basicmodule1 = make_test(BasicModule())
@@ -1243,6 +1261,26 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
 
+    def test_nn_module_setattr(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.var = 0
+
+        @torch.compile(backend="eager", dynamic=False)
+        def f(x, m):
+            return x + m.var
+
+        inp = torch.ones(3)
+        m = Mod()
+
+        self.assertEqual(f(inp, m), inp)
+        # In 3.13.0, setattr will not fire a __dict__'s watchers,
+        # so guards may not be invalidated.
+        m.var = 1
+        # should trigger a recompile
+        self.assertEqual(f(inp, m), inp + 1)
+
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_generation_tag(self):
         cnt = torch._dynamo.testing.CompileCounter()
@@ -1276,14 +1314,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             x = x.sigmoid()
             return x
 
-        class TensorProxy(torch.Tensor):
-            @classmethod
-            def __torch_function__(cls, func, types, args=(), kwargs=None):
-                return super().__torch_function__(func, types, args, kwargs)
-
-        torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
-
-        try:
+        with temporary_tensor_subclass() as TensorProxy:
             x = torch.randn(1).as_subclass(TensorProxy)
             cnt = torch._dynamo.testing.CompileCounter()
             out1 = foo(x)
@@ -1293,13 +1324,8 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(cnt.op_count, 4)
             self.assertTrue(torch._dynamo.testing.same(out1, out2))
 
-        finally:
-            torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
-
     def test_torch_function_with_closure(self):
         def run():
-            counter = 0
-
             def foo(x):
                 # function call, twice to test wrapping
                 x = F.sigmoid(x)
@@ -1309,18 +1335,15 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
                 x = x.sigmoid()
                 return x
 
-            class TensorProxy(torch.Tensor):
-                @classmethod
-                def __torch_function__(cls, func, types, args=(), kwargs=None):
-                    nonlocal counter
-                    # for now, only support reads from closure cells
-                    # TODO(future PR): support writes as well
-                    counter + 1
-                    return super().__torch_function__(func, types, args, kwargs)
+            counter = 0
 
-            torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
+            def function():
+                nonlocal counter
+                # for now, only support reads from closure cells
+                # TODO(future PR): support writes as well
+                counter + 1
 
-            try:
+            with temporary_tensor_subclass(function) as TensorProxy:
                 x = torch.randn(1).as_subclass(TensorProxy)
                 x = torch.randn(1)
                 cnt = torch._dynamo.testing.CompileCounter()
@@ -1330,10 +1353,60 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
                 self.assertEqual(cnt.op_count, 4)
                 self.assertTrue(torch._dynamo.testing.same(out1, out2))
-            finally:
-                torch._dynamo.config.traceable_tensor_subclasses.remove(TensorProxy)
 
         run()
+
+    def test_torch_mangled_class_name(self):
+        original = TensorWithTFOverrideVariable.global_mangled_class_name
+        results = []
+
+        def instrumented(self, tx):
+            result = original(self, tx)
+            results.append(result)
+            return result
+
+        TensorWithTFOverrideVariable.global_mangled_class_name = instrumented
+
+        def one_break(x):
+            x = F.sigmoid(x)
+            print()  # force break
+            x = x.sigmoid()
+            return x
+
+        try:
+            with temporary_tensor_subclass() as TensorProxy:
+                x = torch.randn(1).as_subclass(TensorProxy)
+                x1 = one_break(x)
+
+                cnt = torch._dynamo.testing.CompileCounter()
+                opt_one_break = torch._dynamo.optimize(cnt)(one_break)
+                x2 = opt_one_break(x)
+
+                self.assertTrue(torch._dynamo.testing.same(x1, x2))
+                self.assertEqual(cnt.frame_count, 2)
+                self.assertEqual(cnt.op_count, 2)
+
+                compile_ids = set()
+                for r in results:
+                    # A mangled classname looks like __subclass_TensorProxy_94524181138240_c0
+                    # where the last segment contains the compile_id.
+                    prefix = "__subclass_TensorProxy_"
+                    before, sep, after = r.partition(prefix)
+                    self.assertEqual(before, "")
+                    self.assertEqual(sep, prefix)
+
+                    class_type_id, compile_id = after.split("_")
+                    self.assertTrue(class_type_id.isnumeric())
+                    self.assertTrue(compile_id.startswith("c"))
+
+                    cid = compile_id[1:]
+                    self.assertTrue(cid.isnumeric())
+                    compile_ids.add(cid)
+
+                self.assertEqual(len(compile_ids), 3)
+
+        finally:
+            TensorWithTFOverrideVariable.global_mangled_class_name = original
 
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_nn_moduledict_contains(self):
@@ -1559,6 +1632,45 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         opt_m = torch.compile(backend="eager", fullgraph=True)(m)
         exp_res = m(x, y)
         self.assertTrue(torch.allclose(exp_res, opt_m(x, y)))
+
+    # RuntimeError: SymIntArrayRef expected to contain only concrete integers
+    @expectedFailureDynamic
+    def test_lazy_module_speculation_log_divergence(self):
+        class ModWithOneLazyLinear(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer = torch.nn.LazyLinear(8)
+
+            def forward(self, x):
+                return self.layer(x)
+
+        # This allows us to restart tracing without clearing speculation log
+        def id_and_fail_inlining(x):
+            torch._dynamo.graph_break()
+            return x
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def test(mod, x):
+            res = mod(x)
+            # Speculation log must not diverge in the 2nd round of tracing,
+            # after we've initialized the `LazyLinear` into a `Linear` in the
+            # 1st round.
+            res2 = id_and_fail_inlining(res)
+            return res
+
+        mod = ModWithOneLazyLinear()
+        x = torch.ones(10, 3)
+
+        # Make sure we don't get recompilation across multiple runs
+        actual_res = test(mod, x)
+        expect_res = mod(x)
+        self.assertTrue(torch.allclose(expect_res, actual_res))
+        actual_res = test(mod, x)
+        expect_res = mod(x)
+        self.assertTrue(torch.allclose(expect_res, actual_res))
+        self.assertEqual(cnt.frame_count, 1)
 
     def test_call_fn_with_non_const_inputs_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
@@ -1941,9 +2053,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             mod = Mod()
             opt_mod(torch.randn(5, 5), mod)
 
-        # fn compiles twice, and forward twice
-        # (since forward is inlined when fn is compiled)
-        self.assertEqual(cnts.frame_count, 4)
+        # fn compiles twice
+        self.assertEqual(cnts.frame_count, 2)
 
     @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_inline_inbuilt_nn_modules(self):
@@ -2719,6 +2830,49 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(num_compiles, 1)
 
     @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_mark_static_nn_module_tensor(self):
+        # This test verifies that dynamo will mark
+        # the nn module tensor attributes as static
+        num_compiles = 0
+
+        def debug_compiler(gm, _):
+            nonlocal num_compiles
+            num_compiles += 1
+
+            input_nodes = [
+                n
+                for n in gm.graph.nodes
+                if n.op == "placeholder" and n.name == "l_mod_buf"
+            ]
+
+            self.assertGreater(len(input_nodes), 0)
+            for input_node in input_nodes:
+                self.assertEqual(
+                    input_node.meta["tensor_dict"]["_dynamo_static_input_type"],
+                    "unguarded",
+                )
+
+            return gm
+
+        class TestModule(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.buf = torch.ones(2, 2)
+
+            def forward(self, x):
+                return self.buf * x
+
+        mod = TestModule()
+
+        @torch._dynamo.optimize(backend=debug_compiler)
+        def fn(x):
+            return x * mod(x)
+
+        inp = torch.ones(2)
+        fn(inp)
+        self.assertEqual(num_compiles, 1)
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     @torch._inductor.config.patch("freezing", True)
     @torch.no_grad()
     def test_mark_static_with_freezing(self):
@@ -2848,7 +3002,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
-            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            # weights_only=False as this is a legacy use case that loads a module
+            loaded_model = torch.load(
+                os.path.join(tmpdirname, "model.pt"), weights_only=False
+            )
         loaded_model(inp)
         self.assertTrue(same_two_models(loaded_model, mod, [inp]))
         self.assertTrue(same_two_models(loaded_model, opt_mod, [inp]))
@@ -2866,7 +3023,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 opt_mod = torch.compile(mod, backend=backend)
                 with tempfile.TemporaryDirectory() as tmpdirname:
                     torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
-                    loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+                    # weights_only=False as this is a legacy use case that loads a module
+                    loaded_model = torch.load(
+                        os.path.join(tmpdirname, "model.pt"), weights_only=False
+                    )
                 torch._dynamo.reset()  # force recompiles
                 torch._inductor.metrics.generated_kernel_count = 0
                 opt_mod(inp)
@@ -2916,6 +3076,113 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         helper()
         with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
             helper()
+
+    def test_user_defined_nn_module_dynamic(self):
+        class Conv2d(torch.nn.Conv2d):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def forward(self, x):
+                x = torch.nn.functional.conv2d(
+                    x,
+                    self.weight,
+                    self.bias,
+                    self.stride,
+                    self.padding,
+                    self.dilation,
+                    self.groups,
+                )
+                return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        mod1 = Conv2d(64, 64, kernel_size=(2, 2), stride=(1, 1))
+        mod2 = Conv2d(64, 64, kernel_size=(2, 2), stride=(2, 2))
+        mod3 = Conv2d(64, 64, kernel_size=(2, 2), stride=(3, 3))
+
+        opt_mod1 = torch.compile(mod1, backend=cnts, fullgraph=True)
+        opt_mod2 = torch.compile(mod2, backend=cnts, fullgraph=True)
+        opt_mod3 = torch.compile(mod3, backend=cnts, fullgraph=True)
+
+        x = torch.randn(1, 64, 64, 64)
+        opt_mod1(x)
+        opt_mod2(x)
+        opt_mod3(x)
+
+        # Must be 3 compilations. If not marked static there would be 2, because strides would be converted to symints.
+        self.assertEqual(cnts.frame_count, 3)
+
+    @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
+    def test_overridden_call(self):
+        class OverRiddenCallModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def __call__(self, x):
+                # Overrides the __call__ method of torch.nn.Module
+                return 5 * self.forward(x)
+
+            def forward(self, x):
+                return x * 3
+
+        m = OverRiddenCallModule()
+
+        def fn(x):
+            return m(x)
+
+        x = torch.ones(4)
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    @patch.object(
+        torch._dynamo.config, "skip_tensor_guards_with_matching_dict_tags", False
+    )
+    def test_param_requires_grad(self):
+        def adjust_model(model):
+            to_freeze = model.num_iter % 2 == 0
+            if to_freeze:
+                for param in model.layer2.parameters():
+                    param.requires_grad = False
+            else:
+                for param in model.layer2.parameters():
+                    param.requires_grad = True
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, output_size):
+                super().__init__()
+
+                self.layer1 = torch.nn.Linear(hidden_size, hidden_size)
+                self.layer2 = torch.nn.Linear(hidden_size, hidden_size)
+
+                self.num_iter = 0
+
+            def forward(self, x):
+                x = self.layer2(x + self.layer1.bias)
+
+                self.num_iter += 1
+                return x
+
+        input_size = 1024
+        hidden_size = 1024
+        output_size = 1
+        num_samples = 2048
+        features = torch.randn(num_samples, input_size)
+
+        model = MyModule(input_size, hidden_size, output_size)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_model = torch.compile(model, backend=cnt, fullgraph=True)
+
+        for _ in range(3):
+            model.zero_grad(True)
+            adjust_model(model)
+            res = opt_model(features)
+            res.sum().backward()
+
+        # Check that we have recompiled twice, which leads to 3 frames
+        self.assertEqual(cnt.frame_count, 3)
 
 
 if __name__ == "__main__":

@@ -168,7 +168,8 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
       if (err == EINTR) {
         continue;
       } else {
-        AT_ERROR("read(): fd ", fildes, " failed with ", strerror(err));
+        TORCH_CHECK(
+            false, "read(): fd ", fildes, " failed with ", strerror(err));
       }
     } else if (r == 0) {
       break;
@@ -180,7 +181,8 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
     nbytes -= r;
   }
   if (nbytes != 0) {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "unexpected EOF, expected ",
         nbytes,
         " more bytes. The file might be corrupted.");
@@ -208,7 +210,8 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
       if (err == EINTR) {
         continue;
       } else {
-        AT_ERROR("write(): fd ", fildes, " failed with ", strerror(err));
+        TORCH_CHECK(
+            false, "write(): fd ", fildes, " failed with ", strerror(err));
       }
     }
     buf += r;
@@ -254,7 +257,7 @@ void THPStorage_writeFileRaw(
       doWrite(fd, &numel, sizeof(int64_t));
     else {
       int64_t nsize{}; // convert big endian cpu to little endian storage
-      torch::utils::THP_encodeInt64Buffer(
+      torch::utils::THP_encodeBuffer(
           (uint8_t*)&nsize,
           (const int64_t*)&numel,
           torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
@@ -274,19 +277,19 @@ void THPStorage_writeFileRaw(
     for (size_t i = 0; i < numel; i += buffer_size) {
       size_t to_convert = std::min(numel - i, buffer_size);
       if (element_size == 2) {
-        torch::utils::THP_encodeInt16Buffer(
+        torch::utils::THP_encodeBuffer(
             le_buffer.data(),
             (const int16_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (element_size == 4) {
-        torch::utils::THP_encodeInt32Buffer(
+        torch::utils::THP_encodeBuffer(
             le_buffer.data(),
             (const int32_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       } else if (element_size == 8) {
-        torch::utils::THP_encodeInt64Buffer(
+        torch::utils::THP_encodeBuffer(
             le_buffer.data(),
             (const int64_t*)data + i,
             torch::utils::THPByteOrder::THP_LITTLE_ENDIAN,
@@ -322,7 +325,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
   if (torch::utils::THP_nativeByteOrder() ==
       torch::utils::THPByteOrder::THP_BIG_ENDIAN) {
     int64_t tsize = size; // convert little endian storage to big endian cpu
-    torch::utils::THP_decodeInt64Buffer(&size, (const uint8_t*)&tsize, true, 1);
+    torch::utils::THP_decodeBuffer(&size, (const uint8_t*)&tsize, true, 1);
   }
   size_t nbytes = element_size * size;
   if (!storage.defined()) {
@@ -369,13 +372,13 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
 
       // NOLINTNEXTLINE(bugprone-branch-clone)
       if (element_size == 2) {
-        torch::utils::THP_decodeInt16Buffer(
+        torch::utils::THP_decodeBuffer(
             (int16_t*)data + i, le_buffer.get(), true, to_convert);
       } else if (element_size == 4) {
-        torch::utils::THP_decodeInt32Buffer(
+        torch::utils::THP_decodeBuffer(
             (int32_t*)data + i, le_buffer.get(), true, to_convert);
       } else if (element_size == 8) {
-        torch::utils::THP_decodeInt64Buffer(
+        torch::utils::THP_decodeBuffer(
             (int64_t*)data + i, le_buffer.get(), true, to_convert);
       }
     }

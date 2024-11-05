@@ -29,8 +29,7 @@
 #endif
 #endif
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 enum class can_mutate_inplace_result {
   success,
   non_default_backward_view,
@@ -94,7 +93,8 @@ inline void check_inplace(at::ITensorListRef tensors, bool requires_grad) {
 }
 
 inline void throw_error_out_requires_grad(const char* name) {
-  AT_ERROR(
+  TORCH_CHECK(
+      false,
       name,
       "(): functions with out=... arguments don't support automatic differentiation, "
       "but one of the arguments requires grad.");
@@ -398,7 +398,7 @@ namespace {
 // call in this functor so it can be passed to c10::BoxedKernel::makeFromFunctor
 class WrapperFunctor final : public c10::OperatorKernel {
  public:
-  WrapperFunctor(JitDecompInterface* impl) : impl_(impl){};
+  WrapperFunctor(JitDecompInterface* impl) : impl_(impl) {}
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -438,5 +438,4 @@ Return run_jit_decomposition_with_args_for_jvp(
 
 } // namespace impl
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

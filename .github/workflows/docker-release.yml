@@ -34,9 +34,20 @@ env:
 permissions: read-all
 
 jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   generate-matrix:
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.large]
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.large"
     outputs:
       matrix: ${{ steps.generate-matrix.outputs.matrix }}
     steps:
@@ -54,10 +65,12 @@ jobs:
 
   build:
     if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
     environment: ${{ (github.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
     timeout-minutes: 240
-    needs: generate-matrix
+    needs:
+      - generate-matrix
+      - get-label-type
     strategy:
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
       fail-fast: false
@@ -110,7 +123,7 @@ jobs:
           if [[ ${{ github.event.ref }} =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+-rc[0-9]+$ ]]; then
             {
               echo "DOCKER_IMAGE=pytorch-test";
-              echo "INSTALL_CHANNEL=pytorch-test";
+              echo "INSTALL_CHANNEL=whl/test";
               echo "TRITON_VERSION=$(cut -f 1 .ci/docker/triton_version.txt)";
             } >> "${GITHUB_ENV}"
           fi
@@ -119,7 +132,7 @@ jobs:
         run: |
           {
             echo "DOCKER_IMAGE=pytorch-nightly";
-            echo "INSTALL_CHANNEL=pytorch-nightly";
+            echo "INSTALL_CHANNEL=whl/nightly";
             echo "TRITON_VERSION=$(cut -f 1 .ci/docker/triton_version.txt)+$(cut -c -10 .ci/docker/ci_commit_pins/triton.txt)";
           } >> "${GITHUB_ENV}"
       - name: Run docker build / push

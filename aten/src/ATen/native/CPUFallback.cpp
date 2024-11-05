@@ -87,7 +87,11 @@ static bool validate_tensor_list(const c10::List<at::Tensor>& tensorlist) {
   return flag;
 }
 
-void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool error_on_views) {
+void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool error_on_views,
+                  c10::DispatchKey cpu_dispatch_key) {
+  TORCH_CHECK(c10::BackendComponent::CPUBit == c10::toBackendComponent(cpu_dispatch_key),
+              "Expected CPU backend DispatchKey but got ",
+              c10::toString(cpu_dispatch_key));
   auto& schema_args = op.schema().arguments();
   const auto num_arguments = schema_args.size();
   auto arguments = torch::jit::last(stack, num_arguments);
@@ -143,7 +147,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   }
 
   // Step 2: Call the underlying CPU implementation of the operator
-  op.redispatchBoxed(c10::DispatchKeySet(c10::DispatchKey::CPU), stack);
+  op.redispatchBoxed(c10::DispatchKeySet(cpu_dispatch_key), stack);
 
   // Step 3: We need to take special care to handle mutable aliases properly:
   // If any input tensors are mutable aliases, we need to

@@ -8,13 +8,19 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 from torch.utils import _pytree as pytree
 
 
-run_const_graph = HigherOrderOperator("run_const_graph")
+class RunConstGraph(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("run_const_graph")
+
+    def __call__(self, *args):
+        return super().__call__(*args)
+
+
+run_const_graph = RunConstGraph()
 
 
 @run_const_graph.py_impl(ProxyTorchDispatchMode)
 def run_const_graph_dispatch_mode(mode, *args):
-    if not mode.enable_tracing:
-        return run_const_graph(*args)
     const_gm, weights = args
     p_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
     assert isinstance(const_gm, torch.fx.GraphModule)

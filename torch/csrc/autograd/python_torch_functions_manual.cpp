@@ -41,8 +41,7 @@ using at::TensorOptions;
 using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 PyObject* THPVariableFunctionsModule = nullptr;
@@ -533,9 +532,8 @@ void gatherTorchFunctions(std::vector<PyMethodDef>& torch_functions) {
 }
 
 static PyTypeObject THPVariableFunctions = {
-    PyVarObject_HEAD_INIT(
-        nullptr,
-        0) "torch._C._VariableFunctionsClass", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C._VariableFunctionsClass", /* tp_name */
     0, /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -665,6 +663,10 @@ void initTorchFunctions(PyObject* module) {
             !at::functionalization::impl::isFunctionalTensor(o));
         at::functionalization::impl::replace_(t, o);
       });
+  py_module.def("_is_functional_tensor_base", [](const at::Tensor& t) {
+    TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
+    return at::functionalization::impl::isBaseTensor(t);
+  });
   py_module.def("_functionalize_is_multi_output_view", [](const at::Tensor& t) {
     TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(t));
     auto t_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(t);
@@ -734,13 +736,6 @@ void initTorchFunctions(PyObject* module) {
             dst.sym_sizes(),
             dst.sym_strides());
       });
-  py_module.def(
-      "_functionalize_mark_mutation_hidden_from_autograd",
-      [](const at::Tensor& t) {
-        TORCH_INTERNAL_ASSERT(
-            at::functionalization::impl::isFunctionalTensor(t));
-        at::functionalization::impl::mark_mutation_hidden_from_autograd(t);
-      });
   py_module.def("_is_functional_tensor", [](const at::Tensor& t) {
     return at::functionalization::impl::isFunctionalTensor(t);
   });
@@ -796,5 +791,4 @@ void initTorchFunctions(PyObject* module) {
       });
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

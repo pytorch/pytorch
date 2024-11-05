@@ -48,7 +48,9 @@ struct TORCH_API Slice final {
       step_ = std::move(step_index).value();
     }
 
-    TORCH_CHECK_VALUE(step_ != 0, "slice step cannot be zero");
+    TORCH_CHECK_VALUE(
+        step_.sym_ne(0).expect_true(__FILE__, __LINE__),
+        "slice step cannot be zero");
 
     if (!start_index.has_value()) {
       start_ = c10::SymInt(step_ < 0 ? INDEX_MAX : 0);
@@ -207,7 +209,9 @@ inline Tensor applySlice(
     const at::Device& self_device,
     const std::optional<SymIntArrayRef>& self_sizes) {
   // TODO: implement negative step
-  TORCH_CHECK_VALUE(step > 0, "step must be greater than zero");
+  TORCH_CHECK_VALUE(
+      step.sym_gt(0).expect_true(__FILE__, __LINE__),
+      "step must be greater than zero");
 
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
@@ -251,7 +255,9 @@ inline Tensor applySelect(
     // the other hand, indexing wraping is valid for all negative int64_t
     // values, as x[INT64_MIN] is the same as x[INT64_MAX]
     TORCH_CHECK_INDEX(
-        size > -1 - index && size > index,
+        size.sym_gt(-1 - index)
+            .sym_and(size.sym_gt(index))
+            .expect_true(__FILE__, __LINE__),
         "index ",
         index,
         " is out of bounds for dimension ",
@@ -313,7 +319,7 @@ inline void recordTensorIndex(
   outIndices.resize(*dim_ptr + 1);
   outIndices[*dim_ptr] = tensor;
   (*dim_ptr)++;
-};
+}
 
 inline c10::List<::std::optional<Tensor>> typeConvertIndices(
     const Tensor& /*self*/,

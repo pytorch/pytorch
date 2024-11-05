@@ -12,13 +12,19 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 from torch.utils import _pytree as pytree
 
 
-_export_tracepoint = HigherOrderOperator("_export_tracepoint")
+class ExportTracepoint(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("_export_tracepoint")
+
+    def __call__(self, *args, **kwargs):
+        return super().__call__(*args, **kwargs)
+
+
+_export_tracepoint = ExportTracepoint()
 
 
 @_export_tracepoint.py_impl(ProxyTorchDispatchMode)
 def export_tracepoint_dispatch_mode(mode, *args, **kwargs):
-    if not mode.enable_tracing:
-        return _export_tracepoint(*args, **kwargs)
     p_args, p_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, (args, kwargs))
     proxy = mode.tracer.create_proxy(
         "call_function", _export_tracepoint, p_args, p_kwargs

@@ -95,9 +95,9 @@ import torch.nn.functional as F
 # Testing utils
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
-from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
-    freeze_rng_state, slowTest, TemporaryFileName, \
+from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
+    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
+    TestCase, freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
@@ -9706,9 +9706,9 @@ dedent """
     def test_script_pad_sequence_pack_sequence(self):
         from torch.nn.utils.rnn import pad_sequence, pack_sequence, pad_packed_sequence
 
-        def pad_sequence_func(tensor_list, batch_first=False, padding_value=0.0):
-            # type: (List[Tensor], bool, float) -> Tensor
-            return pad_sequence(tensor_list, batch_first, padding_value)
+        def pad_sequence_func(tensor_list, batch_first=False, padding_value=0.0, padding_side="right"):
+            # type: (List[Tensor], bool, float, str) -> Tensor
+            return pad_sequence(tensor_list, batch_first, padding_value, padding_side)
 
         def pack_sequence_func(tensor_list, enforce_sorted=True):
             # type: (List[Tensor], bool) -> Tensor
@@ -9727,6 +9727,10 @@ dedent """
                              ([ones3, ones4, ones5], True))
             self.checkScript(pad_sequence_func,
                              ([ones3, ones4, ones5], True, 2.5))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], True, 2.5, "left"))
+            self.checkScript(pad_sequence_func,
+                             ([ones3, ones4, ones5], False, 2.5, "left"))
             self.checkScript(pack_sequence_func,
                              ([tensor1, tensor2, tensor3],))
             self.checkScript(pack_sequence_func,
@@ -15632,7 +15636,7 @@ dedent """
     def test_unicode_comments(self):
         @torch.jit.script
         def test(self, a):
-            # shrug
+            # 🤷🤷🤷🤷
             return torch.nn.functional.relu(a)
 
     def test_get_set_state_with_tensors(self):
@@ -16004,44 +16008,6 @@ class TestJitGeneratedModule(JitTestCase):
 class TestJitGeneratedFunctional(JitTestCase):
     pass
 
-# UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
-# and we have to disable the failing tests here instead.
-UBSAN_DISABLED_TESTS = [
-    "test___rdiv___constant",
-    "test___rdiv___scalar_constant",
-    "test_addcdiv",
-    "test_addcdiv_broadcast_all",
-    "test_addcdiv_broadcast_rhs",
-    "test_addcdiv_scalar",
-    "test_addcdiv_scalar_broadcast_lhs",
-    "test_addcdiv_scalar_broadcast_rhs",
-    "test_addcdiv_scalar_scale",
-    "test_addcdiv_scalar_scale_broadcast_lhs",
-    "test_addcdiv_scalar_scale_broadcast_rhs",
-    "test_addcdiv_scale",
-    "test_addcdiv_scale_broadcast_all",
-    "test_addcdiv_scale_broadcast_rhs",
-    "test_add_broadcast_all",
-    "test_add_broadcast_lhs",
-    "test_add_broadcast_rhs",
-    "test_add_constant",
-    "test_add_scalar",
-    "test_add_scalar_broadcast_lhs",
-    "test_add_scalar_broadcast_rhs",
-    "test_div",
-    "test_div_broadcast_all",
-    "test_div_broadcast_lhs",
-    "test_div_broadcast_rhs",
-    "test_div_scalar",
-    "test_div_scalar_broadcast_lhs",
-    "test_div_scalar_broadcast_rhs",
-    "test_rsqrt",
-    "test_rsqrt_scalar",
-    "test_add",
-    "test_reciprocal",
-    "test_reciprocal_scalar",
-]
-
 L = 20
 M = 10
 S = 5
@@ -16179,8 +16145,7 @@ def post_add_test(test_name, skipTestIf, do_test, test_class):
     for skip in skipTestIf:
         do_test = skip(do_test)
 
-    if not (TEST_WITH_UBSAN and test_name in UBSAN_DISABLED_TESTS):
-        setattr(test_class, test_name, do_test)
+    setattr(test_class, test_name, do_test)
 
 
 def normalize_check_ad(check_ad, name):
