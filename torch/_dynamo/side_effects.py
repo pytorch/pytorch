@@ -439,7 +439,7 @@ class SideEffects:
         assert isinstance(hook, variables.VariableTracker)
         assert (
             isinstance(handle, variables.RemovableHandleVariable)
-            and handle.mutation_type
+            and handle.is_mutable()
         )
         assert hasattr(torch.Tensor, name)
         idx = len(self.tensor_hooks.keys())
