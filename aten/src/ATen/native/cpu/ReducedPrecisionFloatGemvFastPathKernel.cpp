@@ -22,7 +22,7 @@ inline namespace CPU_CAPABILITY {
 constexpr auto kF32RegisterPairsPerIteration = 4;
 constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration * 2;
 constexpr auto kF32ElementsPerRegister = vec::Vectorized<float>::size();
-constexpr auto kF32ElementsPerIteration = kF32RegistersPerIteration * kF32ElementsPerRegister;;
+constexpr auto kF32ElementsPerIteration = kF32RegistersPerIteration * kF32ElementsPerRegister;
 
 namespace {
 template <typename T>
@@ -328,8 +328,8 @@ void fp16_gemv_trans(
 #if !defined(C10_MOBILE)
 // NOTE: we don't *need* to go through dispatch for the ARM-only
 // implementation right now, but we will need it when we cover x86.
-REGISTER_DISPATCH(fp16_dot_with_fp32_arith_stub, &fp16_dot_with_fp32_arith);
-REGISTER_DISPATCH(fp16_gemv_trans_stub, &fp16_gemv_trans);
+REGISTER_DISPATCH(fp16_dot_with_fp32_arith_stub, &fp16_dot_with_fp32_arith)
+REGISTER_DISPATCH(fp16_gemv_trans_stub, &fp16_gemv_trans)
 #else
 #endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
