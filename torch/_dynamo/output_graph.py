@@ -936,7 +936,7 @@ class OutputGraph:
             if not (
                 (
                     x not in self.side_effects.store_attr_mutations
-                    or isinstance(x.mutable_local, AttributeMutationExisting)
+                    or isinstance(x.mutation_type, AttributeMutationExisting)
                 )
                 and isinstance(x.source, GetItemSource)
                 and isinstance(x.source.base, LocalSource)

@@ -22,42 +22,75 @@ from .source import GlobalSource, LocalSource, Source
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     is_side_effect_safe,
-    MutableLocalBase,
-    MutableLocalSource,
+    MutationType,
+    SourceType,
     VariableTracker,
 )
 from .variables.user_defined import FrozenDataClassVariable
 
 
-class MutableSideEffects(MutableLocalBase):
+class ValueMutationExisting(MutationType):
     """
-    VariableTracker.mutable_local marker to indicate a list passed as
-    an input that if we mutate we need to re-apply those mutations after
-    the graph runs.
+    This case of VariableTracker.mutation_type marker indicates
+    1. Dynamo allows mutation on the value itself (rather than its attributes).
+    2. The value exists before Dynamo tracing started.
+
+    For instance, Dynamo could model a pre-existing list with this marker,
+    indicating that if we encounter mutations to this list, we need to buffer
+    and re-apply those mutations after the graph runs, since the list might be
+    used afterwards in Python.
     """
 
+    # A flag to indicate whether mutation happened on the associated
+    # `VariableTracker`. This enables SideEffects to accurately and quickly
+    # filter out which pre-existing values it needs to generate mutation for.
+    is_modified: bool
+
     def __init__(self, is_modified: bool = False):
-        super().__init__(MutableLocalSource.Existing)
+        super().__init__(SourceType.Existing)
         self.is_modified = is_modified
 
 
-class AttributeMutation(MutableLocalBase):
+class AttributeMutation(MutationType):
     """
-    VariableTracker.mutable_local marker to track changes to attributes
+    This case of VariableTracker.mutation_type marker indicates that Dynamo
+    allows mutation on the value's attributes.
     """
 
-    def __init__(self, typ: MutableLocalSource):
+    def __init__(self, typ: SourceType):
         super().__init__(typ)
 
 
 class AttributeMutationExisting(AttributeMutation):
+    """
+    This case of VariableTracker.mutation_type marker indicates
+    1. Dynamo allows mutation on the value's attributes.
+    2. The value exists before Dynamo tracing started.
+
+    For instance, Dynamo could model a pre-existing object with this marker,
+    indicating that if we encounter mutations to this object, we need to buffer
+    then re-apply those mutations after the graph runs, since the object might
+    be used afterwards in Python.
+    """
+
     def __init__(self):
-        super().__init__(MutableLocalSource.Existing)
+        super().__init__(SourceType.Existing)
 
 
 class AttributeMutationNew(AttributeMutation):
+    """
+    This case of VariableTracker.mutation_type marker indicates
+    1. Dynamo allows mutation on the value's attributes.
+    2. The value is created by the bytecode Dynamo is tracing through.
+
+    For instance, Dynamo could model a newly created object with this marker,
+    indicating that while we need to model mutations to this object, we don't
+    have to emit bytecode for these mutations if the object doesn't escape into
+    the Python world.
+    """
+
     def __init__(self, cls_source: Optional[Source] = None):
-        super().__init__(MutableLocalSource.Local)
+        super().__init__(SourceType.New)
         self.cls_source = cls_source
 
 
@@ -164,7 +197,7 @@ class SideEffects:
             return True
         if self.should_allow_side_effects_under_checkpoint():
             return True
-        if not is_side_effect_safe(item.mutable_local):
+        if not is_side_effect_safe(item.mutation_type):
             unimplemented(
                 "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)"
             )
@@ -209,7 +242,7 @@ class SideEffects:
         )
 
     def is_attribute_mutation(self, item):
-        return isinstance(item.mutable_local, AttributeMutation)
+        return isinstance(item.mutation_type, AttributeMutation)
 
     def has_pending_mutation(self, item):
         return self.is_attribute_mutation(item) and bool(
@@ -222,17 +255,17 @@ class SideEffects:
         ) and name in self.store_attr_mutations.get(item, ())
 
     def is_modified(self, item):
-        if isinstance(item.mutable_local, AttributeMutationNew):
+        if isinstance(item.mutation_type, AttributeMutationNew):
             return True
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
-        return item.mutable_local.is_modified
+        return item.mutation_type.is_modified
 
     def _track_obj(
         self,
         item: Any,
         variable: VariableTracker,
-        mutable_cls=MutableSideEffects,
+        mutation_type_cls=ValueMutationExisting,
     ):
         """Start tracking a new variable for mutation"""
         assert variable.source is not None
@@ -246,7 +279,7 @@ class SideEffects:
                 f"Source of previously tracked object: {self.id_to_variable[id(item)].source}."
             )
 
-        variable.mutable_local = mutable_cls()
+        variable.mutation_type = mutation_type_cls()
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
@@ -258,7 +291,9 @@ class SideEffects:
         item: Any,
         variable: VariableTracker,
     ):
-        return self._track_obj(item, variable, mutable_cls=AttributeMutationExisting)
+        return self._track_obj(
+            item, variable, mutation_type_cls=AttributeMutationExisting
+        )
 
     def track_object_new(
         self,
@@ -282,7 +317,7 @@ class SideEffects:
                 unimplemented(f"Unable to construct the object of type {user_cls}")
         variable = variable_cls(
             obj,
-            mutable_local=AttributeMutationNew(cls_source),
+            mutation_type=AttributeMutationNew(cls_source),
             **options,
         )
         self.id_to_variable[id(obj)] = variable
@@ -320,7 +355,7 @@ class SideEffects:
     ):
         obj = object()
         variable = variables.NewCellVariable(
-            mutable_local=AttributeMutationNew(),
+            mutation_type=AttributeMutationNew(),
         )
         self.id_to_variable[id(obj)] = variable
         self.keepalive.append(obj)
@@ -328,7 +363,7 @@ class SideEffects:
 
     def track_cell_existing(self, source: Source, item: Any):
         variable = variables.NewCellVariable(
-            mutable_local=AttributeMutationExisting(),
+            mutation_type=AttributeMutationExisting(),
             source=source,
         )
         self.id_to_variable[id(item)] = variable
@@ -337,7 +372,7 @@ class SideEffects:
 
     def track_global_existing(self, source: Source, item: Any):
         variable = variables.NewGlobalVariable(
-            mutable_local=AttributeMutationExisting(),
+            mutation_type=AttributeMutationExisting(),
             source=source,
         )
         self.id_to_variable[id(item)] = variable
@@ -363,7 +398,7 @@ class SideEffects:
     def prune_dead_object_new(self, tx):
         live_new_objects: Set[VariableTracker] = set()
 
-        # use this to avoid cycles in mutable_local (though I'm not sure if that
+        # use this to avoid cycles in mutation_type (though I'm not sure if that
         # can actually happen).
         visited: Set[VariableTracker] = set({})
 
@@ -372,7 +407,7 @@ class SideEffects:
                 return
             visited.add(var)
             # Object may have been mutated, store this mutation.
-            if isinstance(var.mutable_local, AttributeMutationNew):
+            if isinstance(var.mutation_type, AttributeMutationNew):
                 live_new_objects.add(var)
             # It's possible that we have mutated the value of this variable
             # to be another one. The new value is in store_attr_mutations.
@@ -383,14 +418,14 @@ class SideEffects:
                 )
 
         def is_live(var: VariableTracker):
-            if isinstance(var.mutable_local, AttributeMutationNew):
+            if isinstance(var.mutation_type, AttributeMutationNew):
                 return var in live_new_objects
             return True
 
         pre_existing_vars = [
             var
             for var in self.id_to_variable.values()
-            if not isinstance(var.mutable_local, AttributeMutationNew)
+            if not isinstance(var.mutation_type, AttributeMutationNew)
         ]
 
         # The only live side effects come from returns (tx.stack), any intermediates
@@ -417,15 +452,15 @@ class SideEffects:
 
     def mutation(self, var):
         self.check_allowed_side_effect(var)
-        if isinstance(var.mutable_local, MutableSideEffects):
-            var.mutable_local.is_modified = True
+        if isinstance(var.mutation_type, ValueMutationExisting):
+            var.mutation_type.is_modified = True
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
     def codegen_save_tempvars(self, cg: PyCodegen):
         for var in self._get_modified_vars():
-            if isinstance(var.mutable_local, AttributeMutationNew) and isinstance(
+            if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
                 var, variables.NewCellVariable
             ):
                 cg.add_push_null(
@@ -434,13 +469,13 @@ class SideEffects:
                 cg.extend_output(create_call_function(0, False))
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
-            elif isinstance(var.mutable_local, AttributeMutationNew):
+            elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
                 cg.add_push_null(
                     lambda: cg.load_import_from(utils.__name__, "object_new")
                 )
-                cg(var.mutable_local.cls_source)
+                cg(var.mutation_type.cls_source)
                 cg.extend_output(create_call_function(1, False))
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])
@@ -467,7 +502,7 @@ class SideEffects:
         assert isinstance(hook, variables.VariableTracker)
         assert (
             isinstance(handle, variables.RemovableHandleVariable)
-            and handle.mutable_local
+            and handle.mutation_type
         )
         assert hasattr(torch.Tensor, name)
         idx = len(self.tensor_hooks.keys())
@@ -536,11 +571,11 @@ class SideEffects:
             cg.add_cache(handle)
 
     def get_ca_final_callbacks_var(self):
-        from .variables.base import MutableLocal
+        from .variables.base import ValueMutationNew
 
         if self.ca_final_callbacks_var is None:
             self.ca_final_callbacks_var = variables.ListVariable(
-                [], mutable_local=MutableLocal()
+                [], mutation_type=ValueMutationNew()
             )
         return self.ca_final_callbacks_var
 
@@ -677,7 +712,7 @@ class SideEffects:
                         )
                     elif isinstance(value, variables.DeletedVariable):
                         if isinstance(
-                            var.mutable_local, AttributeMutationExisting
+                            var.mutation_type, AttributeMutationExisting
                         ) and hasattr(getattr(var, "value", None), name):
                             cg.tx.output.update_co_names(name)
                             cg(var.source)
