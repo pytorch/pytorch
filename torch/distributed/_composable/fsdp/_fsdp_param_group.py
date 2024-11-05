@@ -2,7 +2,6 @@
 import contextlib
 import logging
 from typing import Any, Callable, cast, Dict, List, NamedTuple, Optional, Set, Tuple
-import functools
 
 import torch
 import torch.distributed as dist
@@ -346,7 +345,10 @@ class FSDPParamGroup:
         self._post_forward_indices.append(post_forward_index)
 
     def pre_backward(self, default_prefetch: bool, *unused: Any):
-        if compiled_autograd_enabled() and self._training_state == TrainingState.PRE_BACKWARD:
+        if (
+            compiled_autograd_enabled()
+            and self._training_state == TrainingState.PRE_BACKWARD
+        ):
             # Traceable FSDP2 cannot trigger the param group's post-backward immediately after param usage;
             # instead it relies on this to trigger the previously pending post-backward.
             self.post_backward()
@@ -685,7 +687,7 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
 When Traceable FSDP2 is enabled, we should not be calling into `RegisterPostBackwardFunction`.
 Instead, we rely on the param group's next `pre_backward` hook to trigger its previously unexecuted
 `post_backward` hook, and we rely on FSDPState's `root_post_backward_callback` to trigger the resharding
-of any leftover unsharded param groups. 
+of any leftover unsharded param groups.
 If you are here, it means the forward part of this FSDP2 instance is not compiled, and you must also
 compile the forward part if you want to use Traceable FSDP2."""
             torch._dynamo.comptime.comptime.print(msg)

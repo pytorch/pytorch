@@ -174,7 +174,10 @@ class TestFullyShardCompile(FSDPTest):
     def _get_resize_count_in_fx_graph(self, graph: torch.fx.Graph):
         resize_count = 0
         for node in graph.nodes:
-            if node.op == "call_function" and node.target == torch.ops.inductor.resize_storage_bytes_.default:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.inductor.resize_storage_bytes_.default
+            ):
                 resize_count += 1
         return resize_count
 
@@ -222,8 +225,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         self, model, *, bwd_resize_count_before_pass=None, fwd_fullgraph=False
     ):
         def _run_with_checks(graph, orig_fn):
-            if self._is_bwd_fx_graph(graph) and bwd_resize_count_before_pass is not None:
-                self.assertEqual(bwd_resize_count_before_pass, self._get_resize_count_in_fx_graph(graph))
+            if (
+                self._is_bwd_fx_graph(graph)
+                and bwd_resize_count_before_pass is not None
+            ):
+                self.assertEqual(
+                    bwd_resize_count_before_pass,
+                    self._get_resize_count_in_fx_graph(graph),
+                )
             self._assert_no_aliased_unsharded_params_in_graph_inputs(model, graph)
             orig_fn(graph)
 
@@ -324,7 +333,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
     def _is_bwd_fx_graph(self, graph):
         for node in graph.nodes:
-            if node.op == "call_function" and node.target == torch.ops._c10d_functional.reduce_scatter_tensor.default:
+            if (
+                node.op == "call_function"
+                and node.target
+                == torch.ops._c10d_functional.reduce_scatter_tensor.default
+            ):
                 return True
         return False
 
@@ -491,7 +504,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
             counters.clear()
             with self._remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
-                model, bwd_resize_count_before_pass=bwd_resize_count_before_inductor, fwd_fullgraph=fwd_fullgraph,
+                model,
+                bwd_resize_count_before_pass=bwd_resize_count_before_inductor,
+                fwd_fullgraph=fwd_fullgraph,
             ):
                 fwd_bwd_fn_compiled = torch.compile(
                     fwd_bwd_fn,
