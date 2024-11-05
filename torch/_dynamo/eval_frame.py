@@ -446,10 +446,12 @@ class _TorchDynamoContext:
             )
         self.cleanup_fns = [enter() for enter in self.enter_exit_hooks]
         self.prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
+        torch._C._dynamo.eval_frame.compiled_region_enter()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         assert self.prior is not unset
         _maybe_set_eval_frame(self.prior)
+        torch._C._dynamo.eval_frame.compiled_region_exit()
         self.prior = unset
         for cleanup in self.cleanup_fns:
             cleanup()
@@ -541,6 +543,7 @@ class _TorchDynamoContext:
 
             cleanups = [enter() for enter in self.enter_exit_hooks]
             prior = _maybe_set_eval_frame(_callback_from_stance(callback))
+            torch._C._dynamo.eval_frame.compiled_region_enter()
 
             # Ensure that if an assertion occurs after graph pushes
             # something onto the DynamicLayerStack then we pop it off (the
@@ -560,6 +563,7 @@ class _TorchDynamoContext:
                     saved_dynamic_layer_stack_depth
                 )
 
+                torch._C._dynamo.eval_frame.compiled_region_exit()
                 _maybe_set_eval_frame(prior)
                 for cleanup in cleanups:
                     cleanup()
@@ -717,9 +721,11 @@ class DisableContext(_TorchDynamoContext):
         @functools.wraps(fn)
         def _fn(*args, **kwargs):
             prior = _maybe_set_eval_frame(_callback_from_stance(self.callback))
+            torch._C._dynamo.eval_frame.compiled_region_enter()
             try:
                 return fn(*args, **kwargs)
             finally:
+                torch._C._dynamo.eval_frame.compiled_region_exit()
                 _maybe_set_eval_frame(prior)
 
         _fn._torchdynamo_disable = True  # type: ignore[attr-defined]

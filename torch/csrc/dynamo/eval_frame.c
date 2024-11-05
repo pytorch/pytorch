@@ -887,6 +887,16 @@ static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+static PyObject* compiled_region_enter(PyObject* dummy, PyObject* obj) {
+  _compiled_region_enter();
+  Py_RETURN_NONE;
+}
+
+static PyObject* compiled_region_exit(PyObject* dummy, PyObject* obj) {
+  _compiled_region_exit();
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
@@ -895,6 +905,8 @@ static PyMethodDef _methods[] = {
     {"skip_code", skip_code, METH_O, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
+    {"compiled_region_enter", compiled_region_enter, METH_NOARGS, NULL},
+    {"compiled_region_exit", compiled_region_exit, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {
