@@ -368,22 +368,11 @@ if torch._C._has_mkldnn:
         ):
             return False
 
-        def _find_other_node(args):
-            if args[0].target not in computation_ops:
-                return args[0]
-            elif args[1].target not in computation_ops:
-                return args[1]
-            else:
-                return None
-
         if any(
             get_meta_value(n.args[0]).dim() != get_meta_value(n.args[1]).dim()
             or not all(
                 get_meta_value(n.args[0]).size(i) == get_meta_value(n.args[1]).size(i)
-                or (
-                    _find_other_node(n.args) is not None
-                    and get_meta_value(_find_other_node(n.args)).size(i) == 1
-                )
+                or get_meta_value(match.kwargs["other"]).size(i) == 1
                 for i in range(get_meta_value(n.args[0]).dim())
             )
             or get_meta_value(n.args[0]).device != get_meta_value(n.args[1]).device
