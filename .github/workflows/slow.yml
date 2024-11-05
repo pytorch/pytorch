@@ -142,8 +142,8 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 2, runner: "linux.rocm.gpu", owners: ["amd"] },
-          { config: "slow", shard: 2, num_shards: 2, runner: "linux.rocm.gpu", owners: ["amd"] },
+          { config: "slow", shard: 1, num_shards: 2, runner: "linux.rocm.gpu", owners: ["module:rocm"] },
+          { config: "slow", shard: 2, num_shards: 2, runner: "linux.rocm.gpu", owners: ["module:rocm"] },
         ]}
 
   linux-focal-rocm6_2-py3_10-test:
