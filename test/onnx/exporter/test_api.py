@@ -298,7 +298,7 @@ class TestCustomTranslationTable(common_utils.TestCase):
 class TestFakeTensorExport(common_utils.TestCase):
     """Test exporting in fake mode."""
 
-    def test_onnx_program_fails_when_model_defined_in_fake_mode(self):
+    def test_onnx_program_raises_when_model_defined_in_fake_mode(self):
         with torch.onnx.enable_fake_mode():
 
             class Model(torch.nn.Module):
@@ -317,7 +317,7 @@ class TestFakeTensorExport(common_utils.TestCase):
             # The tensors need to be replaced with real tensors
             _ = onnx_program.model_proto
 
-    def test_onnx_program_save_fails_when_model_initialized_in_fake_mode(self):
+    def test_onnx_program_save_raises_when_model_initialized_in_fake_mode(self):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
