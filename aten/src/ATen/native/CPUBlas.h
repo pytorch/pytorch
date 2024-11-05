@@ -189,7 +189,7 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
 
 // Batch-reduce GEMM
 // Operates by the following formula:
-// C = alpha * SUM(A[i] x B[i]) + beta * C, i = 0 to batch size
+// C = SUM(A[i] x B[i]) + C if add_C is true, i = 0 to batch size
 // A Base pointer to a tensor A.
 // B Base pointer to a tensor B.
 // C Pointer to a tensor C (accumulation buffer).
@@ -200,8 +200,7 @@ TORCH_API void brgemm(
     int64_t ld_a,
     int64_t ld_b,
     int64_t ld_c,
-    const float alpha,
-    const float beta,
+    const bool add_C,
     const at::Half* A,
     const at::Half* B,
     float* C);
