@@ -139,6 +139,11 @@ def check_compiler_exist_windows(compiler: str) -> None:
 
 
 def get_cpp_compiler() -> str:
+    if os.environ.get("USE_XPU", "OFF") in ("1", "on", "ON"):
+        from torch.utils.cpp_extension import _join_sycl_home
+
+        return _join_sycl_home("bin", "icpx")
+
     if _IS_WINDOWS:
         compiler = os.environ.get("CXX", "cl")
         check_compiler_exist_windows(compiler)
@@ -406,8 +411,8 @@ class BuildOptionsBase:
         self._passthough_args = _remove_duplication_in_list(self._passthough_args)
 
     def _finalize_options(self) -> None:
-        self._process_compile_only_options
-        self._remove_duplicate_options
+        self._process_compile_only_options()
+        self._remove_duplicate_options()
 
     def get_compiler(self) -> str:
         return self._compiler
@@ -1222,7 +1227,12 @@ def get_cpp_torch_device_options(
 
     if device_type == "xpu":
         definations.append(" USE_XPU")
-        cflags += ["fsycl"]
+        # Add "-Wno-unsupported-floating-point-opt" here to
+        # suppress compiler warning:
+        # "warning: overriding currently unsupported use of floating point
+        # exceptions on this target [-Wunsupported-floating-point-opt]".
+        # Since the compiler has not support some features.
+        cflags += ["fsycl", "Wno-unsupported-floating-point-opt"]
         libraries += ["c10_xpu", "sycl", "ze_loader", "torch_xpu"]
 
     if aot_mode:
@@ -1283,10 +1293,6 @@ class CppTorchDeviceOptions(CppTorchOptions):
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
         )
-        if device_type == "xpu":
-            from torch.utils.cpp_extension import _join_sycl_home
-
-            self._compiler = _join_sycl_home("bin", "icpx")
 
         device_definations: List[str] = []
         device_include_dirs: List[str] = []
