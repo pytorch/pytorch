@@ -21,77 +21,14 @@ from .exc import unimplemented
 from .source import GlobalSource, LocalSource, Source
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
+    AttributeMutation,
+    AttributeMutationExisting,
+    AttributeMutationNew,
     is_side_effect_safe,
-    MutationType,
-    SourceType,
+    ValueMutationExisting,
     VariableTracker,
 )
 from .variables.user_defined import FrozenDataClassVariable
-
-
-class ValueMutationExisting(MutationType):
-    """
-    This case of VariableTracker.mutation_type marker indicates
-    1. Dynamo allows mutation on the value itself (rather than its attributes).
-    2. The value exists before Dynamo tracing started.
-
-    For instance, Dynamo could model a pre-existing list with this marker,
-    indicating that if we encounter mutations to this list, we need to buffer
-    and re-apply those mutations after the graph runs, since the list might be
-    used afterwards in Python.
-    """
-
-    # A flag to indicate whether mutation happened on the associated
-    # `VariableTracker`. This enables SideEffects to accurately and quickly
-    # filter out which pre-existing values it needs to generate mutation for.
-    is_modified: bool
-
-    def __init__(self, is_modified: bool = False):
-        super().__init__(SourceType.Existing)
-        self.is_modified = is_modified
-
-
-class AttributeMutation(MutationType):
-    """
-    This case of VariableTracker.mutation_type marker indicates that Dynamo
-    allows mutation on the value's attributes.
-    """
-
-    def __init__(self, typ: SourceType):
-        super().__init__(typ)
-
-
-class AttributeMutationExisting(AttributeMutation):
-    """
-    This case of VariableTracker.mutation_type marker indicates
-    1. Dynamo allows mutation on the value's attributes.
-    2. The value exists before Dynamo tracing started.
-
-    For instance, Dynamo could model a pre-existing object with this marker,
-    indicating that if we encounter mutations to this object, we need to buffer
-    then re-apply those mutations after the graph runs, since the object might
-    be used afterwards in Python.
-    """
-
-    def __init__(self):
-        super().__init__(SourceType.Existing)
-
-
-class AttributeMutationNew(AttributeMutation):
-    """
-    This case of VariableTracker.mutation_type marker indicates
-    1. Dynamo allows mutation on the value's attributes.
-    2. The value is created by the bytecode Dynamo is tracing through.
-
-    For instance, Dynamo could model a newly created object with this marker,
-    indicating that while we need to model mutations to this object, we don't
-    have to emit bytecode for these mutations if the object doesn't escape into
-    the Python world.
-    """
-
-    def __init__(self, cls_source: Optional[Source] = None):
-        super().__init__(SourceType.New)
-        self.cls_source = cls_source
 
 
 def _manual_update_dict(dict_from, dict_to):
