@@ -29,6 +29,7 @@ from torch.cuda._memory_viz import (
     segment_plot,
     trace_plot,
 )
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
@@ -765,18 +766,11 @@ class TestCuda(TestCase):
         dummy = torch.randn(1, 1, 1, 1, dtype = torch.half, device='cuda')
         torch.nn.functional.conv2d(dummy, dummy)
 
-        x = torch.randn(1, 3, 512, 512, 512, dtype=torch.half, device='cuda')
-        w = torch.randn(64, 3, 3, 3, 3, dtype=torch.half, device='cuda')
-        try:
-            with torch.backends.cudnn.flags(enabled=True, force=False):
-                o = torch.nn.functional.conv3d(x, w)
-        except RuntimeError as e:
-            self.assertTrue('CUDNN' not in str(e))
-        try:
+        x = torch.ones(1, 3, 512, 512, 512, dtype=torch.int8, device='cuda')
+        w = torch.ones(64, 3, 3, 3, 3, dtype=torch.int8, device='cuda')
+        with self.assertRaisesRegex(RuntimeError, 'GET was unable'):
             with torch.backends.cudnn.flags(enabled=True, force=True):
                 o = torch.nn.functional.conv3d(x, w)
-        except RuntimeError as e:
-            self.assertTrue('CUDNN' in str(e))
 
     def test_force_cudnn_batchnorm(self):
         dtype = torch.float
@@ -786,12 +780,24 @@ class TestCuda(TestCase):
         weight = torch.randn(1, dtype=dtype, device='cuda')
         with torch.backends.cudnn.flags(enabled=True, force=False):
             torch.nn.functional.batch_norm(x, mean, var, weight)
+
         # cuDNN expects bias tensor
-        try:
+        with self.assertRaisesRegex(RuntimeError, 'undefined Tensor'):
             with torch.backends.cudnn.flags(enabled=True, force=True):
                 torch.nn.functional.batch_norm(x, mean, var, weight)
-        except RuntimeError as e:
-            self.assertTrue(('undefined Tensor') in str(e))
+
+    def test_force_cudnn_sdpa(self):
+        dtype = torch.half
+        q = torch.randn(85, 21, 36529, 8, dtype=dtype, device='cuda', requires_grad=True).permute(0, 1, 2, 3)
+        # incorrect GQA setup
+        k = torch.randn(16209, 5, 85, 8, dtype=dtype, device='cuda', requires_grad=True).permute(2, 1, 0, 3)
+        v = torch.randn(16209, 7, 85, 8, dtype=dtype, device='cuda', requires_grad=True).permute(2, 1, 0, 3)
+
+        with self.assertRaisesRegex(RuntimeError, 'cuDNN'):
+            with torch.backends.cudnn.flags(enabled=True, force=True):
+                with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+                    out = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                    out.backward(torch.ones_like(out))
 
     def test_force_cudnn_CTCLoss(self):
         target_lengths = [30, 25, 500]
