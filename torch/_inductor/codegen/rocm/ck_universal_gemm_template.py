@@ -122,12 +122,20 @@ class CKGemmTemplate(CKTemplate):
         {% if has_bias %}
         using BiasElementType = {{bias_ck_dtype}};
         {% endif %}
+        {% if has_scale %}
+        using ScaleAElementType = {{scale_a_ck_dtype}};
+        using ScaleBElementType = {{scale_b_ck_dtype}};
+        {% endif %}
 
         using AArgType = {{a_torch_dtype}};
         using BArgType = {{b_torch_dtype}};
         using CArgType = {{c_torch_dtype}};
         {% if has_bias %}
         using BiasArgType = {{bias_torch_dtype}};
+        {% endif %}
+        {% if has_scale %}
+        using ScaleAArgType = {{scale_a_torch_dtype}};
+        using ScaleBArgType = {{scale_b_torch_dtype}};
         {% endif %}
 
         using ALayout = {{a_layout}};
@@ -151,6 +159,11 @@ class CKGemmTemplate(CKTemplate):
         {% if has_bias %}
         Tensor<BiasElementType> d_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDD, BiasLayout{}) ) );
         {% endif %}
+        {% if has_scale %}
+        // NB: these are hardcoded
+        Tensor<ScaleAElementType> s_a_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(0, Row{}) ));
+        Tensor<ScaleAElementType> s_b_m_n ( HostTensorDescriptor ( strides_t{M, N}, get_strides(0, Col{}) ));
+        {% endif %}
 
         Tensor<CElementType> c_m_n_host ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
         Tensor<CElementType> c_m_n_device ( HostTensorDescriptor ( strides_t{M, N}, get_strides(LDC, CLayout{}) ) );
@@ -160,10 +173,18 @@ class CKGemmTemplate(CKTemplate):
         {% if has_bias %}
         d_m_n.GenerateTensorValue(GeneratorTensor_2<BiasElementType>());
         {% endif %}
+        {% if has_scale %}
+        s_a_m_n.GenerateTensorValue(GeneratorTensor_2<ScaleAElementType>());
+        s_b_m_n.GenerateTensorValue(GeneratorTensor_2<ScaleBElementType>());
+        {% endif %}
         DeviceMem a_m_k_device_buf(sizeof(AElementType) * a_m_k.mDesc.GetElementSpaceSize());
         DeviceMem b_k_n_device_buf(sizeof(BElementType) * b_k_n.mDesc.GetElementSpaceSize());
         {% if has_bias %}
         DeviceMem d_m_n_device_buf(sizeof(BiasElementType) * d_m_n.mDesc.GetElementSpaceSize());
+        {% endif %}
+        {% if has_scale %}
+        DeviceMem s_a_m_n_device_buf(sizeof(ScaleAElementType) * s_a_m_n.mDesc.GetElementSpaceSize());
+        DeviceMem s_b_m_n_device_buf(sizeof(ScaleBElementType) * s_b_m_n.mDesc.GetElementSpaceSize());
         {% endif %}
         DeviceMem c_m_n_device_buf(sizeof(CElementType) * c_m_n_device.mDesc.GetElementSpaceSize());
 
@@ -172,12 +193,20 @@ class CKGemmTemplate(CKTemplate):
         {% if has_bias %}
         d_m_n_device_buf.ToDevice(d_m_n.mData.data());
         {% endif %}
+        {% if has_scale %}
+        s_a_m_n_device_buf.ToDevice(s_a_m_n.mData.data());
+        s_b_m_n_device_buf.ToDevice(s_b_m_n.mData.data());
+        {% endif %}
 
         {{kernel_name}}(
             static_cast<const AArgType*>(a_m_k_device_buf.GetDeviceBuffer()),
             static_cast<const BArgType*>(b_k_n_device_buf.GetDeviceBuffer()),
             {% if has_bias %}
             static_cast<const BiasArgType*>(d_m_n_device_buf.GetDeviceBuffer()),
+            {% endif %}
+            {% if has_scale %}
+            static_cast<const ScaleAArgType*>(s_a_m_n_device_buf.GetDeviceBuffer()),
+            static_cast<const ScaleBArgType*>(s_b_m_n_device_buf.GetDeviceBuffer()),
             {% endif %}
             static_cast<CArgType*>(c_m_n_device_buf.GetDeviceBuffer()),
             M,
@@ -518,6 +547,8 @@ class CKGemmTemplate(CKTemplate):
 
         if config.rocm.generate_test_runner:
             M, N, K, LDA, LDB, LDC, LDD = self.size_args()
+            has_bias = Bias is not None
+            has_scale = scale_x is not None and scale_w is not None
             runner_code = self._template_from_string(
                 self.standalone_runner_template
             ).render(
@@ -530,22 +561,31 @@ class CKGemmTemplate(CKTemplate):
                 LDB=LDB,
                 LDC=LDC,
                 LDD=LDD,
-                has_bias=Bias is not None,
+                has_bias=has_bias,
+                has_scale=has_scale,
                 a_ck_dtype=op.a_element_dtype,
                 b_ck_dtype=op.b_element_dtype,
                 c_ck_dtype=op.c_element_dtype,
-                bias_ck_dtype=op.ds_element_dtypes[0] if Bias is not None else "",
+                bias_ck_dtype=op.ds_element_dtypes[0] if has_bias else "",
+                scale_a_ck_dtype=op.ds_element_dtypes[0] if has_scale and 2 == len(op.ds_element_dtypes) else "BF16",
+                scale_b_ck_dtype=op.ds_element_dtypes[1] if has_scale and 2 == len(op.ds_element_dtypes) else "BF16",
                 a_torch_dtype=DTYPE_TO_CPP[X.get_layout().dtype],
                 b_torch_dtype=DTYPE_TO_CPP[W.get_layout().dtype],
                 c_torch_dtype=DTYPE_TO_CPP[Y.get_layout().dtype],
                 bias_torch_dtype=DTYPE_TO_CPP[Bias.get_layout().dtype]
-                if Bias is not None
+                if has_bias
+                else "",
+                scale_a_torch_dtype=DTYPE_TO_CPP[scale_x.get_layout().dtype]
+                if has_scale
+                else "",
+                scale_b_torch_dtype=DTYPE_TO_CPP[scale_w.get_layout().dtype]
+                if has_scale
                 else "",
                 a_layout=torch_layout_to_ck_layout(X.get_layout()),
                 b_layout=torch_layout_to_ck_layout(W.get_layout()),
                 c_layout=torch_layout_to_ck_layout(Y.get_layout()),
                 bias_layout=torch_layout_to_ck_layout(Bias.get_layout())
-                if Bias is not None
+                if has_bias
                 else "",
                 compile_cmd=rocm_compile_command(
                     ["<source_file_name>"], "<executable_name>", "exe"
