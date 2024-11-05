@@ -122,6 +122,7 @@ CPU_TEST_FAILURES = {
     # segfault
     # 'AOTInductorTestABICompatibleCpuWithStackAllocation' object has no attribute 'code_check_count'
     "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
+    "test_zero_size_buffer": fail_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
@@ -172,12 +173,18 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_size_from_multi_output": fail_stack_allocation(is_skip=True),
+    "test_masked_select_dynamic": fail_stack_allocation(is_skip=True),
     "test_torchvision_transforms_functional_tensor_resize": fail_minimal_arrayref_interface(),
+    # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
+    "test_symint_item": fail_minimal_arrayref_interface(is_skip=True),
+    # TODO: AttributeError: 'ShapeAsConstantBuffer' object has no attribute 'dtype'
+    "test_symbool_item": fail_minimal_arrayref_interface(is_skip=True),
 }
 
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(AOTITestCase):
     device = "cpu"
+    device_type = "cpu"
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
@@ -197,6 +204,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocationAndMinimalArrayRefInterf
     TestCase
 ):
     device = "cpu"
+    device_type = "cpu"
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count

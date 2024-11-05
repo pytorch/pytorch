@@ -5191,31 +5191,3 @@ def _get_process_group_name(pg: ProcessGroup) -> str:
 
 def _get_process_group_store(pg: ProcessGroup) -> Store:
     return _world.pg_map[pg][1]
-
-
-# This ops are not friendly to TorchDynamo. So, we decide to disallow these ops
-# in FX graph, allowing them to run them on eager, with torch.compile.
-dynamo_unsupported_distributed_c10d_ops = [
-    recv,
-    all_gather_object,
-    all_gather_coalesced,
-    all_to_all_single,
-    all_reduce,
-    gather_object,
-    all_to_all,
-    all_reduce_coalesced,
-    gather,
-    send_object_list,
-    recv_object_list,
-    broadcast_object_list,
-    barrier,
-    scatter,
-    scatter_object_list,
-    reduce,
-    all_gather,
-    reduce_scatter,
-    all_gather_into_tensor,
-    broadcast,
-    reduce_scatter_tensor,
-    send,
-]

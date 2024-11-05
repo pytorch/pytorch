@@ -1230,7 +1230,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
       }
     }
   }
-};
+}
 
 static Tensor& s_addmm_out_sparse_dense_cpu(
     Tensor& r,
