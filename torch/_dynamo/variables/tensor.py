@@ -1070,7 +1070,7 @@ class TensorVariable(VariableTracker):
             )
 
         handle_variable = variables.RemovableHandleVariable(
-            mutable_local=variables.base.MutableLocal(),
+            mutation_type=variables.base.ValueMutationNew(),
         )
         tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable
