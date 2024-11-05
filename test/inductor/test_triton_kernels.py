@@ -3377,6 +3377,56 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             "grid_wrapper_for_op_zeros_0"
         ).check_next("return (256").check_next("return (64").run(output)
 
+    @requires_gpu
+    def test_autotune_no_pre_or_post_hook(self):
+        def init_to_zero(name):
+            return lambda nargs: nargs[name].zero_()
+
+        # pre_hook requires running arbitrary code at runtime, which we cannot handle at this time
+        # https://github.com/pytorch/pytorch/issues/139059
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"BLOCK_SIZE": 1024},
+                    num_warps=4,
+                    num_stages=2,
+                    pre_hook=init_to_zero("output_ptr"),
+                )
+            ],
+            key=["n_elements"],
+        )
+        @triton.jit
+        def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+
+            x = tl.load(x_ptr + offsets, mask=mask)
+            y = tl.load(y_ptr + offsets, mask=mask)
+            output = x + y
+            tl.atomic_add(output_ptr + offsets, output, mask=mask)
+
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, output, n_elements)
+            return output
+
+        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+
+        # should always pass
+        assert add(x, y).mean() == 2, "Problem with add kernel"
+
+        # this should cause an exception, since pre_hook is not allowed
+        msg = "pre_hook is not supported in triton.Autotune Configs"
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            add_compiled = torch.compile(add, mode="reduce-overhead", fullgraph=True)
+            add_compiled(x, y).mean()
+
 
 common_utils.instantiate_parametrized_tests(KernelTests)
 common_utils.instantiate_parametrized_tests(CustomOpTests)
