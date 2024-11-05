@@ -97,7 +97,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       default:
         TORCH_CHECK(false, "THis should never happen!");
     }
-  };
+  }
 
   static BackendType strToBackendType(const std::string& backend) {
     if (backend == "undefined") {
@@ -113,7 +113,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     } else {
       return BackendType::CUSTOM;
     }
-  };
+  }
 
   // Not used, set for backwards compatibility and only used for TypeDef in
   // Ops.cpp
@@ -146,11 +146,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   virtual const std::string getBackendName() const {
     return backendTypeToString(backendType_);
-  };
+  }
 
   BackendType getBackendType() const {
     return backendType_;
-  };
+  }
 
   virtual void startCoalescing(c10::DeviceType deviceType) {
     // only nccl has implemented startCoalescing so only execute for nccl
