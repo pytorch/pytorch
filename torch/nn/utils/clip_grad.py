@@ -205,9 +205,12 @@ def clip_grad_norm_(
     Returns:
         Total norm of the parameter gradients (viewed as a single vector).
     """
-    total_norm = get_grad_norm(
-        parameters, norm_type, error_if_nonfinite, foreach
-    )
+    # prevent generators from being exhausted due to the two separate calls to get_grad_norm and scale_grads
+    if isinstance(parameters, torch.Tensor):
+        parameters = [parameters]
+    else:
+        parameters = list(parameters)
+    total_norm = get_grad_norm(parameters, norm_type, error_if_nonfinite, foreach)
     scale_grads_(parameters, max_norm, total_norm, foreach)
     return total_norm
 
