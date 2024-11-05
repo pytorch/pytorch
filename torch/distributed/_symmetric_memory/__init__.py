@@ -1339,3 +1339,109 @@ def _low_contention_reduce_scatter(
         return _low_contention_reduce_scatter_with_workspace(
             tensor, reduce_op, workspace
         )
+
+
+# =============================================================================
+# User-facing APIs
+# =============================================================================
+
+
+from typing import Any, overload, Sequence, TYPE_CHECKING, Union
+
+from torch.types import _device, _dtype, _int
+
+
+if TYPE_CHECKING:
+    from torch._C._distributed_c10d import ProcessGroup
+
+
+@overload
+def empty(
+    *size: _int, dtype: Optional[_dtype] = None, device: Optional[_device] = None
+) -> torch.Tensor:
+    ...
+
+
+@overload
+def empty(
+    size: Sequence[_int],
+    *,
+    dtype: Optional[_dtype] = None,
+    device: Optional[_device] = None,
+) -> torch.Tensor:
+    ...
+
+
+def empty(  # type: ignore[misc]
+    *size: Any,
+    dtype: Optional[_dtype] = None,
+    device: Optional[_device] = None,
+) -> torch.Tensor:
+    r"""
+    empty(*size, *, dtype=None, device=None) -> Tensor
+
+    Similar to :func:`torch.empty()`. The returned tensor can be used by
+    :func:`torch._distributed._symmetric_memory.rendezvous()` to establish a
+    symmetric memory setup among participating processes.
+
+    Args:
+        size (int...): a sequence of integers defining the shape of the output tensor.
+            Can be a variable number of arguments or a collection like a list or tuple.
+
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+            Default: if ``None``, uses a global default (see :func:`torch.set_default_dtype`).
+        device (:class:`torch.device`, optional): the desired device of returned tensor.
+            Default: if ``None``, uses the current device for the default tensor type
+            (see :func:`torch.set_default_device`). :attr:`device` will be the CPU
+            for CPU tensor types and the current CUDA device for CUDA tensor types.
+    """
+    if len(size) == 1 and isinstance(size[0], Sequence):
+        size = tuple(size[0])
+    else:
+        size = tuple(size)
+
+    if dtype is None:
+        dtype = torch.get_default_dtype()
+
+    if device is None:
+        device = torch.get_default_device()
+
+    return _SymmetricMemory.empty_strided_p2p(
+        size=size,
+        stride=torch._prims_common.make_contiguous_strides_for(size),
+        dtype=dtype,
+        device=torch.device(device),
+    )
+
+
+def rendezvous(
+    tensor: torch.Tensor, group: Union[str, "ProcessGroup"]
+) -> _SymmetricMemory:
+    r"""
+    rendezvous(tensor, group) -> _SymmetricMemory
+
+    Establish a symmetric memory arrangement among participating processes.
+
+    Args:
+        tensor (:class:`torch.Tensor`): the tensor used to establish the symmetric memory
+            setup. The shape, dtype, and device type must be identical across all the
+            participating processes.
+        group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying
+            the participants in the symmetric memory setup. This can be either a group
+            name or a process group object.
+    """
+    from torch._C._distributed_c10d import ProcessGroup
+
+    if isinstance(group, str):
+        group_name = group
+    elif isinstance(group, ProcessGroup):
+        group_name = group.group_name
+    else:
+        raise TypeError(f"rendezvous: unsupported group type: {type(group)}")
+
+    enable_symm_mem_for_group(group_name)
+    return _SymmetricMemory.rendezvous(tensor, group_name)
+
+
+__all__ = ["empty", "rendezvous"]
