@@ -75,7 +75,7 @@ T i0(T _x) {
   return static_cast<T>((exp(x) * chbevl(32.0 / x - 2.0, B, 25)) / sqrt(x));
 }
 
-template <typename T, typename Tout=T>
+template <typename T, typename Tout = T>
 void kernel
 i0(constant T* input,
    device Tout* output,
@@ -83,9 +83,9 @@ i0(constant T* input,
   output[index] = i0(static_cast<Tout>(input[index]));
 }
 
-#define REGISTER_I0(DTI,DTO)                              \
-template [[host_name("i0_" #DTI "_" #DTO )]]              \
-void kernel i0<DTI, DTO>(constant DTI*, device DTO*, uint)
+#define REGISTER_I0(DTI, DTO)                                           \
+  template [[host_name("i0_" #DTI "_" #DTO)]] void kernel i0<DTI, DTO>( \
+      constant DTI*, device DTO*, uint)
 
 REGISTER_I0(float, float);
 REGISTER_I0(bool, float);

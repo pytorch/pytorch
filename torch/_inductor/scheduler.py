@@ -395,7 +395,7 @@ class BaseSchedulerNode:
         from .codegen.wrapper import buffer_reuse_key
 
         if not (
-            isinstance(self, (SchedulerNode,))
+            isinstance(self, SchedulerNode)
             and config.inplace_buffers
             and V.graph.has_feature(self.get_device(), BackendFeature.INPLACE_BUFFERS)
             and (
@@ -412,6 +412,12 @@ class BaseSchedulerNode:
         }
 
         ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
+        # NOTE remove V.graph.removed_operations once deps issue is fixed
+        inconsequential_nodes = (
+            self.ancestors
+            | V.graph.removed_operations
+            | self.scheduler.completed_operations
+        )
 
         for buf in self.get_outputs():
             buf_node = buf.node
@@ -424,7 +430,7 @@ class BaseSchedulerNode:
             ):
                 continue
 
-            for read in ordered_reads:
+            for read in self.read_writes.reads:
                 input_buf: Optional[SchedulerBuffer] = self.scheduler.name_to_buf.get(
                     read.name
                 )
@@ -433,16 +439,11 @@ class BaseSchedulerNode:
                     and V.graph.wrapper_code.can_reuse(input_buf, self)
                     and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
                 ):
-                    # If the writers of input_buf are in the same FusedSchedulerNode as the current op, then there is
-                    # no need to inplace.
-                    if input_buf.defining_op.get_name() in fused_nodes:
-                        continue
-
                     assert input_buf.users is not None
                     remaining_uses = [
                         x
                         for x in input_buf.users
-                        if x.node.get_name() not in self.scheduler.completed_operations
+                        if x.node.get_name() not in inconsequential_nodes
                     ]
                     if (
                         len(remaining_uses) == 1
@@ -476,9 +477,6 @@ class BaseSchedulerNode:
                         ):
                             V.kernel.mutations.add(input_buf.get_name())
                             V.kernel.mutations.add(buf.get_name())
-
-                        # update last usage of reused node
-                        self.last_usage.discard(input_buf.get_name())
 
                         V.kernel.inplace_update_buffers[
                             buf.get_name()
@@ -1035,7 +1033,7 @@ class SchedulerNode(BaseSchedulerNode):
         """
         sizes, reduction_sizes = self._sizes
         return dependencies.extract_read_writes(
-            self._body, sizes, hidden_args=[[sympy.Integer(0)] * len(reduction_sizes)]
+            self._body, sizes, hidden_args=[[sympy.S.Zero] * len(reduction_sizes)]
         )
 
     def can_inplace(self, read_dep: dependencies.Dep) -> bool:
@@ -2785,6 +2783,66 @@ class Scheduler:
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         """
+        Return true if fusing the two nodes can potentially increasing peak memory.
+
+        The implementation is more like a heuristic since we don't really know if we are at peak
+        or not when trying to fuse these two ndoes. The order of nodes may change later which makes the
+        peak memory estimation hard.
+
+        Here is how we decide the LOWER BOUND of extra memory allocation if we fuse these 2 nodes:
+        1. find all buffers read by each node with a single user. These buffers are supposed to
+           be reused if we don't fuses these 2 nodes
+        2. find the intersection of these buffers for the two node and sum the total buffer size.
+           If we don't fuse these two nodes, we can at lease avoid this much memory allocation.
+           Note that the extra memory allocation is not necessarily causing peak memory increase.
+           This is just a heuristic.
+
+        We return true only if the saving for fusion can not trade off the extra memory allocation.
+        """
+
+        from .codegen.wrapper import buffer_reuse_key
+
+        def _find_single_user_inputs(
+            node: BaseSchedulerNode,
+        ) -> List[ir.Buffer]:
+            output = []
+            for rd in node.read_writes.reads:
+                name = rd.name
+                if name not in self.name_to_buf:
+                    continue
+                buf = self.name_to_buf[name]
+                if len(buf.users) == 1:
+                    output.append(buf.node)
+            return output
+
+        # Check inputs that can be potentially reused
+        lhs_dep_nodes = _find_single_user_inputs(node1)
+        rhs_dep_nodes = _find_single_user_inputs(node2)
+
+        lhs_reuse_keys = {buffer_reuse_key(buf) for buf in lhs_dep_nodes}
+        rhs_reuse_keys = {buffer_reuse_key(buf) for buf in rhs_dep_nodes}
+
+        common_reuse_keys = lhs_reuse_keys.intersection(rhs_reuse_keys)
+
+        memory_overhead = 0
+        for key in common_reuse_keys:
+            try:
+                memory_overhead += int(key[2])
+            except ValueError:
+                # not an interger. Fallback is to fuse
+                return False
+
+        bw_saving = self.score_fusion_memory(node1, node2)
+
+        # The factor 32 here is quite arbitrary.
+        if V.graph.sizevars.statically_known_gt(memory_overhead, 32 * bw_saving):
+            return True
+        return False
+
+    def are_long_distant_nodes(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """
         This function prevents fusion for nodes that can increase memory
         footprint. This problem is more common in horizontal fusion, where nodes
         that are far apart in the original order get fused, lengthening the live
@@ -3051,6 +3109,10 @@ class Scheduler:
             why("exceeds max fusion")
             return False  # heuristic not needed for correctness
 
+        if self.can_fusion_increase_peak_memory(node1, node2):
+            why("Fusion will increase peak memory")
+            return False
+
         if node1.get_operation_names() & node2.ancestors:
             # node2 depends on node1 outputs
             if not self.can_fuse_vertical(node1, node2):
@@ -3064,8 +3126,8 @@ class Scheduler:
             ):
                 why("score_fusion_memory_threshold")
                 return False
-            if self.can_fusion_increase_peak_memory(node1, node2):
-                why("will increase peak memory")
+            if self.are_long_distant_nodes(node1, node2):
+                why("Nodes are too far away. Fusing them may increase peak memory.")
                 return False
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
@@ -3336,67 +3398,6 @@ class Scheduler:
 
         self.buffer_names_to_free.clear()
 
-    def remove_kernel_local_buffers(self) -> None:
-        """
-        Any buffers that are both created and have a last use in the
-        same kernel can be removed.
-        """
-
-        fused_node_names = OrderedSet(
-            self.name_to_buf[buf].defining_op.get_name()
-            for buf in V.kernel.store_buffer_names
-            if buf in self.name_to_buf
-        )
-        names_to_remove = []
-        for out_buf in V.kernel.store_buffer_names:
-            if out_buf not in self.name_to_buf:
-                # Aux buffers created during kernel codegen
-                names_to_remove.append(out_buf)
-                continue
-            users = self.name_to_buf[out_buf].users
-            assert users is not None
-            users = OrderedSet(user.get_name() for user in users if not user.is_weak)
-            if users.issubset(fused_node_names):
-                names_to_remove.append(out_buf)
-
-        def remove_filter(n: str) -> bool:
-            return (
-                n not in V.kernel.must_keep_buffers
-                and n not in V.kernel.args.input_buffers
-                and n not in self.mutation_renames
-                and n not in self.mutation_real_name
-            )
-
-        names_to_remove = list(filter(remove_filter, names_to_remove))
-
-        for name in names_to_remove:
-            if name in V.kernel.args.inplace_buffers:
-                buf = V.kernel.args.inplace_buffers[name]
-                if isinstance(buf, str) and buf.startswith("REMOVED"):
-                    continue
-                remove = all(n in names_to_remove for n in buf.other_names)
-                if remove:
-                    self.remove_inplace_buffer(name)
-                V.kernel.inplaced_to_remove.add(name)
-            else:
-                self.remove_buffer(name)
-
-    def remove_buffer(self, name: str) -> None:
-        # Assign a special value instead of deleting the entry
-        # because we still rely on output_buffers's length to
-        # generate unique arg name.
-        log.debug("remove_buffer(%r)", name)
-        V.kernel.args.output_buffers[name] = "REMOVED"
-        V.kernel.removed_buffers.add(name)
-
-    def remove_inplace_buffer(self, name: str) -> None:
-        log.debug("removing_inplace_buffer(%r)", name)
-        inner_name = V.kernel.args.inplace_buffers[name].inner_name
-        V.kernel.args.inplace_buffers[name] = inner_name.replace(
-            "in_out_ptr", "REMOVED"
-        )
-        V.kernel.removed_buffers.add(name)
-
     def flush(self) -> None:
         for backend in self.backends.values():
             backend.flush()
@@ -3464,6 +3465,19 @@ class Scheduler:
         if origins:
             _, last = max(origins, key=operator.itemgetter(0))
             V.graph.wrapper_code.enter_context(last)
+
+    def can_buffer_be_removed_through_fusion(
+        self, name: str, fused_node_names: OrderedSet[str]
+    ) -> bool:
+        try:
+            users = self.name_to_buf[name].users
+        except KeyError:
+            return False
+        return (
+            all(user.is_weak or user.get_name() in fused_node_names for user in users)
+            and name not in self.mutation_renames
+            and name not in self.mutation_real_name
+        )
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):

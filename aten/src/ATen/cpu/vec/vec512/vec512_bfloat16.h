@@ -1707,8 +1707,8 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   out1 = out1_values; \
   out2 = out2_values; \
 }
-LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
-LOAD_FP32_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16)
+LOAD_FP32_VECTORIZED_INIT(Half, fp16)
 
 #else // defined(CPU_CAPABILITY_AVX512)
 #define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \

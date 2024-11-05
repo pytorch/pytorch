@@ -10,7 +10,6 @@ from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._higher_order_ops.wrap import wrap
 from torch._library.fake_class_registry import FakeScriptObject
-from torch.export import export
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
@@ -134,14 +133,16 @@ class TestExportTorchbind(TestCase):
     ):
         kwargs = kwargs or {}
 
-        def export_wrapper(f, args, kwargs, strcit, pre_dispatch):
+        def export_wrapper(f, args, kwargs, strict, pre_dispatch):
             with enable_torchbind_tracing():
                 if pre_dispatch:
-                    exported_program = _export(
-                        f, args, kwargs, strict=strict, pre_dispatch=True
-                    )
+                    exported_program = torch.export.export_for_training(
+                        f, args, kwargs, strict=strict
+                    ).run_decompositions({})
                 else:
-                    exported_program = export(f, args, kwargs, strict=strict)
+                    exported_program = _export(
+                        f, args, kwargs, strict=strict, pre_dispatch=False
+                    )
             return exported_program
 
         exported_program = export_wrapper(f, args, kwargs, strict, pre_dispatch)
@@ -314,7 +315,10 @@ def forward(self, token, x, cc):
         # aot_export_function runs the program twice
         # in run_functionalized_fw_and_collect_metadata and create_aot_dispatcher_function
         # We also have a re-tracing test, which doubles the count.
-        self.assertEqual(self.foo_add_tensor_counter, 4)
+        if pre_dispatch:
+            self.assertEqual(self.foo_add_tensor_counter, 6)
+        else:
+            self.assertEqual(self.foo_add_tensor_counter, 4)
 
     @parametrize("pre_dispatch", [True, False])
     def test_input_as_custom_op_argument(self, pre_dispatch):
@@ -693,7 +697,9 @@ def forward(self, arg0_1, arg1_1):
         b = torch.randn(2, 2)
         tq.push(a)
         tq.push(b)
-        ep = torch.export.export(mod, (tq, torch.randn(2, 2)), strict=False)
+        ep = torch.export.export_for_training(
+            mod, (tq, torch.randn(2, 2)), strict=False
+        ).run_decompositions({})
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
@@ -745,7 +751,9 @@ def forward(self, L_safe_obj_ : torch.ScriptObject):
         )
 
         with enable_torchbind_tracing():
-            ep = torch.export.export(mod, (safe_obj,), strict=False)
+            ep = torch.export.export_for_training(
+                mod, (safe_obj,), strict=False
+            ).run_decompositions({})
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
                 """\
@@ -1307,7 +1315,7 @@ class TestCompileTorchbind(TestCase):
             f(_empty_tensor_queue(), x),
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x),
         )
-        if not torch._dynamo.is_compiling() and backend == "eager":
+        if not torch.compiler.is_compiling() and backend == "eager":
             self.assertExpectedInline(
                 backend.graphs[0].code.strip(),
                 """\
@@ -1338,7 +1346,9 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         mod = TestMod()
 
         torch.compile(mod, backend=backend, fullgraph=True)(test_obj, torch.randn(3, 1))
-        ep = torch.export.export(mod, (test_obj, torch.randn(3, 1)), strict=False)
+        ep = torch.export.export_for_training(
+            mod, (test_obj, torch.randn(3, 1)), strict=False
+        ).run_decompositions({})
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
