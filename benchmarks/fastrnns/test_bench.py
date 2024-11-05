@@ -1,4 +1,5 @@
 import pytest
+
 import torch
 
 from .fuser import set_fuser

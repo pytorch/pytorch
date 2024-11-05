@@ -7,11 +7,11 @@ namespace at {
 
 using GeneratorFuncType = std::function<at::Generator(c10::DeviceIndex)>;
 
-c10::optional<GeneratorFuncType>& GetGeneratorPrivate();
+std::optional<GeneratorFuncType>& GetGeneratorPrivate();
 
 class TORCH_API _GeneratorRegister {
  public:
-  explicit _GeneratorRegister(GeneratorFuncType func);
+  explicit _GeneratorRegister(const GeneratorFuncType& func);
 };
 
 TORCH_API at::Generator GetGeneratorForPrivateuse1(

@@ -18,6 +18,7 @@ Tensors
     set_default_dtype
     get_default_dtype
     set_default_device
+    get_default_device
     set_default_tensor_type
     numel
     set_printoptions
@@ -55,6 +56,7 @@ Creation Ops
     asarray
     as_tensor
     as_strided
+    from_file
     from_numpy
     from_dlpack
     frombuffer
@@ -132,10 +134,32 @@ Indexing, Slicing, Joining, Mutating Ops
     tile
     transpose
     unbind
+    unravel_index
     unsqueeze
     vsplit
     vstack
     where
+
+.. _accelerators:
+
+Accelerators
+----------------------------------
+Within the PyTorch repo, we define an "Accelerator" as a :class:`torch.device` that is being used
+alongside a CPU to speed up computation. These device use an asynchronous execution scheme,
+using :class:`torch.Stream` and :class:`torch.Event` as their main way to perform synchronization.
+We also assume that only one such accelerator can be available at once on a given host. This allows
+us to use the current accelerator as the default device for relevant concepts such as pinned memory,
+Stream device_type, FSDP, etc.
+
+As of today, accelerator devices are (in no particular order) :doc:`"CUDA" <cuda>`, :doc:`"MTIA" <mtia>`,
+:doc:`"XPU" <xpu>`, and PrivateUse1 (many device not in the PyTorch repo itself).
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Stream
+    Event
 
 .. _generators:
 
@@ -271,13 +295,21 @@ Examples::
 
     no_grad
     enable_grad
-    set_grad_enabled
+    autograd.grad_mode.set_grad_enabled
     is_grad_enabled
-    inference_mode
+    autograd.grad_mode.inference_mode
     is_inference_mode_enabled
 
 Math operations
 ---------------
+
+Constants
+~~~~~~~~~~~~~~~~~~~~~~
+
+======================================= ===========================================
+``inf``                                     A floating-point positive infinity. Alias for :attr:`math.inf`.
+``nan``                                     A floating-point "not a number" value. This value is not a legal number. Alias for :attr:`math.nan`.
+======================================= ===========================================
 
 Pointwise Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -681,6 +713,7 @@ Utilities
     set_float32_matmul_precision
     get_float32_matmul_precision
     set_warn_always
+    get_device_module
     is_warn_always_enabled
     vmap
     _assert
@@ -705,6 +738,32 @@ Symbolic Numbers
     sym_max
     sym_min
     sym_not
+    sym_ite
+    sym_sum
+
+Export Path
+-------------
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+.. warning::
+    This feature is a prototype and may have compatibility breaking changes in the future.
+
+    export
+    generated/exportdb/index
+
+Control Flow
+------------
+
+.. warning::
+    This feature is a prototype and may have compatibility breaking changes in the future.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    cond
 
 Optimizations
 -------------
@@ -714,7 +773,7 @@ Optimizations
 
     compile
 
-`torch.compile documentation <https://pytorch.org/docs/main/compile/index.html>`__
+`torch.compile documentation <https://pytorch.org/docs/main/torch.compiler.html>`__
 
 Operator Tags
 ------------------------------------
@@ -725,9 +784,6 @@ Operator Tags
 .. py:module:: torch.contrib
 .. py:module:: torch.utils.backcompat
 
-.. This submodule is split manually without a top level page.
-.. py:module:: torch.utils
-
 .. This module is only used internally for ROCm builds.
 .. py:module:: torch.utils.hipify
 
@@ -735,14 +791,13 @@ Operator Tags
 .. for tracking purposes
 .. py:module:: torch.utils.model_dump
 .. py:module:: torch.utils.viz
-
-.. automodule:: torch.autograd
-.. currentmodule:: torch.autograd
-
-Engine Configuration
-----------------------------------
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    set_multithreading_enabled
+.. py:module:: torch.functional
+.. py:module:: torch.quasirandom
+.. py:module:: torch.return_types
+.. py:module:: torch.serialization
+.. py:module:: torch.signal.windows.windows
+.. py:module:: torch.sparse.semi_structured
+.. py:module:: torch.storage
+.. py:module:: torch.torch_version
+.. py:module:: torch.types
+.. py:module:: torch.version

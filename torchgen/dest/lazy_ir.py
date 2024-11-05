@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import itertools
 from abc import ABC
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 import torchgen.api.dispatcher as dispatcher
 from torchgen.api.lazy import (
@@ -59,13 +61,13 @@ def node_ctor_arg_rvalue_string(arg: LazyArgument) -> str:
             if arg.is_symint_or_list:
                 # TODO: I don't understand when you should put lazy_ in the name
                 # or not
-                return f"{arg.name} ? c10::make_optional(GetSymIntValue(*{arg.name})) : c10::nullopt"
+                return f"{arg.name} ? std::make_optional(GetSymIntValue(*{arg.name})) : ::std::nullopt"
             elif arg.is_wrapped_scalar:
                 return f"node_{arg.name}"
             return (
                 f"lazy_{arg.name} ? "
-                f"c10::make_optional(lazy_{arg.name}->GetIrValue()) : "
-                "c10::nullopt"
+                f"std::make_optional(lazy_{arg.name}->GetIrValue()) : "
+                "::std::nullopt"
             )
         else:
             raise AssertionError(
@@ -109,7 +111,7 @@ def node_ctor_inputs(schema: LazyIrSchema) -> str:
 
 def gen_fallback_code(
     schema: LazyIrSchema,
-    sig: Union[DispatcherSignature, NativeSignature],
+    sig: DispatcherSignature | NativeSignature,
     overload_name: str,
 ) -> str:
     """
@@ -122,12 +124,8 @@ def gen_fallback_code(
         aten_op_str = f"ATEN_OP2({schema.aten_name}, {overload_name})"
     else:
         aten_op_str = f"ATEN_OP({schema.aten_name})"
-    or_has_generator = ""
-    if schema.generator_arg:
-        # generators are always optional and there is never more than one, at least currently
-        or_has_generator = f" || ({schema.generator_arg.name}.has_value() && {schema.generator_arg.name}->defined())"
     return f"""
-        if (force_eager_fallback({aten_symbol(schema)}){or_has_generator}) {{
+        if (force_eager_fallback({aten_symbol(schema)})) {{
             return at::native::call_fallback_fn_symint<&ltc_eager_fallback, {aten_op_str}>::call(
                 {fallback_args}
             );
@@ -151,9 +149,9 @@ def aten_symbol(schema: LazyIrSchema) -> str:
 # converts  all tensor-like arguments to meta tensors. Returns:
 # (1) a string containing all of the logic that does the conversions.
 # (2) a context, to be used by translate(), with all of the relevant bindings.
-def convert_to_meta_tensors(sig: DispatcherSignature) -> Tuple[str, List[Binding]]:
-    context: List[Binding] = []
-    unwrapped_tensor_args: List[str] = []
+def convert_to_meta_tensors(sig: DispatcherSignature) -> tuple[str, list[Binding]]:
+    context: list[Binding] = []
+    unwrapped_tensor_args: list[str] = []
     for arg in sig.arguments():
         if isinstance(arg.argument, Argument) and arg.argument.type.is_tensor_like():
             unwrapped_name = f"{arg.name}_meta"
@@ -175,7 +173,7 @@ class GenLazyIR(ABC):
     use_lazy_shape: bool
 
     @method_with_native_function
-    def __call__(self, f: Union[NativeFunctionsGroup, NativeFunction]) -> List[str]:
+    def __call__(self, f: NativeFunctionsGroup | NativeFunction) -> list[str]:
         func = f.functional.func if isinstance(f, NativeFunctionsGroup) else f.func
         metadata = self.backend_index.get_kernel(
             f.functional if isinstance(f, NativeFunctionsGroup) else f
@@ -216,7 +214,7 @@ class GenLazyIR(ABC):
 
         scalar_args = schema.filtered_args(values=False, scalars=True)
 
-        # Shape constuction.
+        # Shape construction.
         # Conditionally build shape depending on specified shape property
         if schema.properties.ShapePrecompute:
             shape_ctor_arg = "std::move(shapes),"
@@ -240,13 +238,12 @@ class GenLazyIR(ABC):
               /* num_outputs */ {len(schema.returns)},
               torch::lazy::MHash({scalar_hashes}))"""
 
-    def gen(self, schema: LazyIrSchema) -> List[str]:
+    def gen(self, schema: LazyIrSchema) -> list[str]:
         opkind = schema.opkind or aten_symbol(schema)
 
         # for now, we just want one IR class decl and soon after also the method defs
         # and we use the functional version not out/inplace.
         all_args = schema.filtered_args()
-        value_args = schema.filtered_args(values=True, scalars=False)
         scalar_args = schema.filtered_args(values=False, scalars=True)
 
         ctor_args = [f"const {i.lazy_type.cpp_type()}& {i.name}" for i in all_args]
@@ -258,8 +255,8 @@ class GenLazyIR(ABC):
         scalar_initializers = ",\n        ".join(
             [
                 # This code is just special casing the mapping from string_view -> strings
-                f"{a.name}({a.name}.has_value() ? c10::make_optional(std::string(*{a.name})) : c10::nullopt)"
-                if a.lazy_type.cpp_type() == "c10::optional<c10::string_view>"
+                f"{a.name}({a.name}.has_value() ? ::std::make_optional(std::string(*{a.name})) : ::std::nullopt)"
+                if a.lazy_type.cpp_type() == "::std::optional<c10::string_view>"
                 else f"{a.name}({a.name})"
                 for a in scalar_args
             ]
@@ -270,8 +267,8 @@ class GenLazyIR(ABC):
             [
                 f"std::string {a.name};"
                 if a.lazy_type.cpp_type() == "c10::string_view"
-                else f"c10::optional<std::string> {a.name};"
-                if a.lazy_type.cpp_type() == "c10::optional<c10::string_view>"
+                else f"::std::optional<std::string> {a.name};"
+                if a.lazy_type.cpp_type() == "::std::optional<c10::string_view>"
                 else f"{a.lazy_type.cpp_type()} {a.name};"
                 for a in scalar_args
             ]
@@ -290,9 +287,12 @@ class GenLazyIR(ABC):
         members_to_string = []
         for arg in scalar_args:
             if isinstance(arg.lazy_type, OptionalCType):
+                value = f"{arg.name}.value()"
+                if arg.is_generator:
+                    value = '"torch.Generator()"'
                 members_to_string.append(
                     f"""if ({arg.name}.has_value()) {{
-      ss << ", {arg.name}=" << {arg.name}.value();
+      ss << ", {arg.name}=" << {value};
     }} else {{
       ss << ", {arg.name}=null";
     }}"""
@@ -415,15 +415,15 @@ class GenLazyNativeFuncDefinition:
     def lazy_tensor_decls(self, func: NativeFunction, schema: LazyIrSchema) -> str:
         value_args = schema.filtered_args(values=True, scalars=False)
         # Generates lazy_{name} variables for LazyTensors wrapping input tensors
-        lazy_tensor_decls: List[str] = []
+        lazy_tensor_decls: list[str] = []
         for arg in value_args:
             if arg.is_wrapped_scalar:
                 if isinstance(arg.lazy_type, OptionalCType):
                     lazy_tensor_decls.append(
                         f"""auto node_{arg.name} = {arg.name} ?
-                c10::make_optional(torch::lazy::LazyGraphExecutor::Get()->
+                std::make_optional(torch::lazy::LazyGraphExecutor::Get()->
                     GetIrValueForScalarFromCodegen(*{arg.name}, *common_device)):
-                c10::nullopt;"""
+                ::std::nullopt;"""
                     )
                 else:
                     lazy_tensor_decls.append(
@@ -462,7 +462,7 @@ class GenLazyNativeFuncDefinition:
         func: NativeFunction,
         schema: LazyIrSchema,
         metadata: BackendMetadata,
-        sig: Union[DispatcherSignature, NativeSignature],
+        sig: DispatcherSignature | NativeSignature,
     ) -> str:
         if self.gen_forced_fallback_code:
             return gen_fallback_code(
@@ -576,7 +576,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         }}
         """
 
-    def create_lazy_tensor(self, first_tensor_name: Optional[str] = None) -> str:
+    def create_lazy_tensor(self, first_tensor_name: str | None = None) -> str:
         # xla uses an instance method for tensor creation, for the time being
         if self.create_from_first_tensor:
             # TODO(whc) remove this if XLA switches to using static method for creation
@@ -617,7 +617,7 @@ std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type()
         return bridge_str
 
     @method_with_native_function
-    def __call__(self, func: NativeFunction) -> List[str]:
+    def __call__(self, func: NativeFunction) -> list[str]:
         sig = kernel_signature(func, self.backend_index)
         metadata = self.backend_index.get_kernel(func)
         assert metadata is not None
@@ -641,7 +641,7 @@ class ComputeShapeSignature:
     Here we use the base name as the suffix of the signature to avoid generating for in-place variants.
     """
 
-    def __init__(self, kernel_name: str, f: NativeFunction, *, symint: bool):
+    def __init__(self, kernel_name: str, f: NativeFunction, *, symint: bool) -> None:
         self.__schema = LazyIrSchema(f.func, symint=symint)
         self.__dispatch_args = ", ".join(
             [a.decl() for a in dispatcher.arguments(f.func, symint=symint)]
@@ -672,8 +672,7 @@ class GenLazyShapeInferenceDefinition:
     tensor_class: str
 
     @method_with_native_function
-    def __call__(self, f: NativeFunction) -> List[str]:
-        sig = kernel_signature(f, self.backend_index)
+    def __call__(self, f: NativeFunction) -> list[str]:
         metadata = self.backend_index.get_kernel(f)
         assert metadata is not None
 
@@ -690,8 +689,8 @@ class GenLazyShapeInferenceDefinition:
 
 
 def generate_non_native_lazy_ir_nodes(
-    non_native: List[Dict[str, Any]], gen_lazy_ir: GenLazyIR
-) -> List[str]:
+    non_native: list[dict[str, Any]], gen_lazy_ir: GenLazyIR
+) -> list[str]:
     """Generate the non-native lazy IR node classes"""
     nodes = []
     for op in non_native:

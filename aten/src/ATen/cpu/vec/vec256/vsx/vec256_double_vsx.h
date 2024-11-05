@@ -219,11 +219,17 @@ class Vectorized<double> {
   Vectorized<double> C10_ALWAYS_INLINE acos() const {
      return {Sleef_acosd2_u10(_vec0), Sleef_acosd2_u10(_vec1)};
   }
+  Vectorized<double> C10_ALWAYS_INLINE acosh() const {
+  return {Sleef_acoshd2_u10(_vec0), Sleef_acoshd2_u10(_vec1)};
+  }
   Vectorized<double> C10_ALWAYS_INLINE asin() const {
      return {Sleef_asind2_u10(_vec0), Sleef_asind2_u10(_vec1)};
   }
   Vectorized<double> atan() const {
      return {Sleef_atand2_u10(_vec0), Sleef_atand2_u10(_vec1)};
+  }
+  Vectorized<double> atanh() const {
+     return {Sleef_atanhd2_u10(_vec0), Sleef_atanhd2_u10(_vec1)};
   }
   Vectorized<double> atan2(const Vectorized<double>& b) const {
      return {Sleef_atan2d2_u10(_vec0, b._vec0), Sleef_atan2d2_u10(_vec1, b._vec1)};
@@ -245,6 +251,9 @@ class Vectorized<double> {
   }
   Vectorized<double> expm1() const {
      return {Sleef_expm1d2_u10(_vec0), Sleef_expm1d2_u10(_vec1)};
+  }
+  Vectorized<double> C10_ALWAYS_INLINE exp_u20() const {
+     return exp();
   }
 
   Vectorized<double> lgamma() const __ubsan_ignore_undefined__ {
@@ -364,6 +373,10 @@ class Vectorized<double> {
     return map(calc_i0e);
   }
 
+  Vectorized<double> digamma() const {
+    return map(calc_digamma);
+  }
+
   Vectorized<double> _nor() const {
     return {vec_nor(_vec0, _vec0), vec_nor(_vec1, _vec1)};
   }
@@ -372,6 +385,19 @@ class Vectorized<double> {
     auto x = *this;
     auto ret = (x == x);
     return ret._nor();
+  }
+  bool has_inf_nan() const {
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
+        return true;
+      }
+    }
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec1[i]) || _isinf(_vec1[i])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   DEFINE_MEMBER_OP(operator==, double, vec_cmpeq)
@@ -410,6 +436,42 @@ Vectorized<double> inline minimum(
     const Vectorized<double>& b) {
   return a.minimum(b);
 }
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator+(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator-(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator*(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator/(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_div(a.vec0(), b.vec0()), vec_div(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator&(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator|(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<double> C10_ALWAYS_INLINE operator^(const Vectorized<double>& a, const Vectorized<double>& b) {
+  return Vectorized<double>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
+}
+
 } // namespace
 } // namespace vec
 } // namespace at

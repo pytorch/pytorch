@@ -1,7 +1,10 @@
+# mypy: allow-untyped-defs
 import torch
 from torch.distributions.distribution import Distribution
 
-__all__ = ['ExponentialFamily']
+
+__all__ = ["ExponentialFamily"]
+
 
 class ExponentialFamily(Distribution):
     r"""

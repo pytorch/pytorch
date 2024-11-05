@@ -2,22 +2,26 @@
 
 #include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 
+#include <cstdint>
 #include <limits>
+#include <ostream>
+#include <utility>
 
 namespace c10 {
 
 // NB: this is actually double precision; we're using the Python naming here
 class C10_API SymFloat {
  public:
-  /*implicit*/ SymFloat(double d) : data_(d){};
+  /*implicit*/ SymFloat(double d) : data_(d) {}
   SymFloat(SymNode ptr)
       : data_(std::numeric_limits<double>::quiet_NaN()), ptr_(std::move(ptr)) {
     TORCH_CHECK(ptr_->is_float());
-  };
+  }
   SymFloat() : data_(0.0) {}
 
   SymNodeImpl* toSymNodeImplUnowned() const {

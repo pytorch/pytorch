@@ -71,6 +71,7 @@ derivative would be as follows::
     loss.backward()
 """
 
+from . import transforms
 from .bernoulli import Bernoulli
 from .beta import Beta
 from .binomial import Binomial
@@ -90,7 +91,8 @@ from .gumbel import Gumbel
 from .half_cauchy import HalfCauchy
 from .half_normal import HalfNormal
 from .independent import Independent
-from .kl import kl_divergence, register_kl, _add_kl_info
+from .inverse_gamma import InverseGamma
+from .kl import _add_kl_info, kl_divergence, register_kl
 from .kumaraswamy import Kumaraswamy
 from .laplace import Laplace
 from .lkj_cholesky import LKJCholesky
@@ -114,56 +116,57 @@ from .uniform import Uniform
 from .von_mises import VonMises
 from .weibull import Weibull
 from .wishart import Wishart
-from . import transforms
+
 
 _add_kl_info()
 del _add_kl_info
 
 __all__ = [
-    'Bernoulli',
-    'Beta',
-    'Binomial',
-    'Categorical',
-    'Cauchy',
-    'Chi2',
-    'ContinuousBernoulli',
-    'Dirichlet',
-    'Distribution',
-    'Exponential',
-    'ExponentialFamily',
-    'FisherSnedecor',
-    'Gamma',
-    'Geometric',
-    'Gumbel',
-    'HalfCauchy',
-    'HalfNormal',
-    'Independent',
-    'Kumaraswamy',
-    'LKJCholesky',
-    'Laplace',
-    'LogNormal',
-    'LogisticNormal',
-    'LowRankMultivariateNormal',
-    'MixtureSameFamily',
-    'Multinomial',
-    'MultivariateNormal',
-    'NegativeBinomial',
-    'Normal',
-    'OneHotCategorical',
-    'OneHotCategoricalStraightThrough',
-    'Pareto',
-    'RelaxedBernoulli',
-    'RelaxedOneHotCategorical',
-    'StudentT',
-    'Poisson',
-    'Uniform',
-    'VonMises',
-    'Weibull',
-    'Wishart',
-    'TransformedDistribution',
-    'biject_to',
-    'kl_divergence',
-    'register_kl',
-    'transform_to',
+    "Bernoulli",
+    "Beta",
+    "Binomial",
+    "Categorical",
+    "Cauchy",
+    "Chi2",
+    "ContinuousBernoulli",
+    "Dirichlet",
+    "Distribution",
+    "Exponential",
+    "ExponentialFamily",
+    "FisherSnedecor",
+    "Gamma",
+    "Geometric",
+    "Gumbel",
+    "HalfCauchy",
+    "HalfNormal",
+    "Independent",
+    "InverseGamma",
+    "Kumaraswamy",
+    "LKJCholesky",
+    "Laplace",
+    "LogNormal",
+    "LogisticNormal",
+    "LowRankMultivariateNormal",
+    "MixtureSameFamily",
+    "Multinomial",
+    "MultivariateNormal",
+    "NegativeBinomial",
+    "Normal",
+    "OneHotCategorical",
+    "OneHotCategoricalStraightThrough",
+    "Pareto",
+    "RelaxedBernoulli",
+    "RelaxedOneHotCategorical",
+    "StudentT",
+    "Poisson",
+    "Uniform",
+    "VonMises",
+    "Weibull",
+    "Wishart",
+    "TransformedDistribution",
+    "biject_to",
+    "kl_divergence",
+    "register_kl",
+    "transform_to",
 ]
 __all__.extend(transforms.__all__)

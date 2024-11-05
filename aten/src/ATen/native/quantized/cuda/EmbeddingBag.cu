@@ -19,8 +19,7 @@
 #include <ATen/ops/resize_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // BEGIN QUANTIZE HELPER FUNCTIONS
 __device__ __forceinline__ float bfe(uint32_t val, uint32_t pos, uint32_t len) {
@@ -90,7 +89,7 @@ __global__ void embedding_bag_nbits_rowwise_offsets_kernel(
     const PackedTensorAccessor32<index_t, 1, RestrictPtrTraits> offsets,
     const bool /* pruned_weights */,
     const PackedTensorAccessor32<float, 1, RestrictPtrTraits> per_sample_weights_,
-    const c10::optional<Tensor>& compressed_indices_mapping,
+    const std::optional<Tensor>& compressed_indices_mapping,
     const bool include_last_offset,
     PackedTensorAccessor32<float, 2, RestrictPtrTraits> output) {
   static_assert(bits_per_dim == 4 || bits_per_dim == 8, "the current embedding_bag_nbits_rowwise_offsets_kernel only has been tested for 4 and 8 bits per dim");
@@ -192,8 +191,8 @@ at::Tensor& embedding_bag_byte_impl(
     const at::Tensor& indices,
     const at::Tensor& offsets,
     bool pruned_weights,
-    const c10::optional<at::Tensor>& per_sample_weights_,
-    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    const std::optional<at::Tensor>& per_sample_weights_,
+    const std::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
     bool is_embedding_op) {
   TORCH_CHECK(weight.is_cuda());
@@ -240,7 +239,7 @@ at::Tensor& embedding_bag_byte_impl(
   }
 
   const std::vector<int64_t> shape = {output_size, D};
-  at::native::resize_(output, shape, c10::nullopt);
+  at::native::resize_(output, shape, std::nullopt);
   AT_DISPATCH_INDEX_TYPES(
       indices.scalar_type(), "embedding_bag_byte_rowwise_offsets_kernel", ([&] {
         embedding_bag_nbits_rowwise_offsets_kernel<index_t, 8><<<
@@ -267,12 +266,12 @@ at::Tensor& embedding_bag_byte_impl(
 Tensor embedding_bag_byte_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
-    const c10::optional<Tensor>& offsets_in,
+    const std::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool pruned_weights,
-    const c10::optional<Tensor>& per_sample_weights_,
-    const c10::optional<Tensor>& compressed_indices_mapping,
+    const std::optional<Tensor>& per_sample_weights_,
+    const std::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   bool is_embedding_op = false;
   auto output = create_empty_from(weight, at::kFloat);
@@ -375,8 +374,8 @@ at::Tensor& embedding_bag_4bit_impl(
     const at::Tensor& indices,
     const at::Tensor& offsets,
     bool pruned_weights,
-    const c10::optional<at::Tensor>& per_sample_weights_,
-    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    const std::optional<at::Tensor>& per_sample_weights_,
+    const std::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   TORCH_CHECK(weight.is_cuda());
   TORCH_CHECK(indices.is_cuda());
@@ -422,7 +421,7 @@ at::Tensor& embedding_bag_4bit_impl(
   }
 
   const std::vector<int64_t> shape = {output_size, D};
-  at::native::resize_(output, shape, c10::nullopt);
+  at::native::resize_(output, shape, std::nullopt);
   AT_DISPATCH_INDEX_TYPES(
       indices.scalar_type(), "embedding_bag_4bit_rowwise_offsets_kernel", ([&] {
         embedding_bag_nbits_rowwise_offsets_kernel<index_t, 4><<<
@@ -449,12 +448,12 @@ at::Tensor& embedding_bag_4bit_impl(
 Tensor embedding_bag_4bit_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
-    const c10::optional<Tensor>& offsets_in,
+    const std::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool pruned_weights,
-    const c10::optional<Tensor>& per_sample_weights_,
-    const c10::optional<Tensor>& compressed_indices_mapping,
+    const std::optional<Tensor>& per_sample_weights_,
+    const std::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   auto output = create_empty_from(weight, at::kFloat);
 
@@ -545,7 +544,7 @@ Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
   int BIT_RATE = 4;
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
-  const auto* input_data = packed_weight.data_ptr<uint8_t>();
+  const auto* input_data = packed_weight.const_data_ptr<uint8_t>();
   int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
 
   // The last 4 bytes per row are two fp16 scale and zero_point.
@@ -577,5 +576,4 @@ TORCH_LIBRARY_IMPL(quantized, CUDA, m) {
       TORCH_FN(embedding_bag_4bit_rowwise_offsets));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

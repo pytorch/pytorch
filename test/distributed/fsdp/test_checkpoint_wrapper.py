@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import contextlib
 import unittest
 from copy import deepcopy
 from functools import partial
@@ -17,6 +18,7 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.utils.checkpoint import checkpoint
+
 
 _SAVED_PREFIX = "_saved_"
 GRAD_FN_NEXT_FUNCTIONS = "next_functions"
@@ -54,7 +56,7 @@ class CheckpointWrapperTest(TestCase):
 
     def test_checkpoint_wrapper_kwarg_support(self):
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = nn.Linear(10, 10)
 
@@ -85,7 +87,7 @@ class CheckpointWrapperTest(TestCase):
 
         # Test model that enforces kwarg inputs
         class ModelEnforceKwarg(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = nn.Linear(10, 10)
 
@@ -99,6 +101,34 @@ class CheckpointWrapperTest(TestCase):
         inp = torch.ones(4, 10, requires_grad=True)
         out = model(a=inp, b=inp)
         self.assertEqual(2, len(out))
+
+    def test_checkpoint_wrapper_args_kwargs(self):
+        """
+        Tests that checkpoint_wrapper can pass down args / kwargs to configure
+        torch.utils.checkpoint.
+        """
+
+        count = 0
+
+        @contextlib.contextmanager
+        def ctx_manager():
+            nonlocal count
+            count += 1
+            yield
+
+        def get_ctx_mgrs():
+            return (ctx_manager(), ctx_manager())
+
+        # kwargs test
+        torch_utils_checkpoint = torch.utils.checkpoint.checkpoint
+        m = checkpoint_wrapper(
+            torch.nn.Linear(1, 1),
+            checkpoint_fn=torch_utils_checkpoint,
+            use_reentrant=False,
+            context_fn=get_ctx_mgrs,
+        )
+        m(torch.randn(2, 1)).sum().backward()
+        self.assertEqual(2, count)
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
     def test_checkpoint_wrapper_parity(self):
@@ -195,7 +225,7 @@ class CheckpointWrapperTest(TestCase):
         """
 
         class LinearWithBatchNorm(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.lin = nn.Linear(10, 10)
                 self.bn = nn.BatchNorm1d(10)
@@ -205,7 +235,7 @@ class CheckpointWrapperTest(TestCase):
                 return self.bn(self.nested_linear(self.lin(x)))
 
         class MyModel(nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.seq = nn.Sequential(
                     LinearWithBatchNorm(), LinearWithBatchNorm(), LinearWithBatchNorm()

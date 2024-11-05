@@ -93,7 +93,7 @@ format, it will instead be in a:
       -- feature value
 ```
 
-Essentially, all the informations for each of the modules are consolidated across the different reports.
+Essentially, all the information for each of the modules are consolidated across the different reports.
 Moreover, the modules are kept in the same chronological order they would appear in the model's `forward()` method.
 
 Then, when it comes to the visualizer, there are two main things you can do:

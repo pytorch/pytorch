@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
-#include <cstring>
+#include <cstdint>
 #include <limits>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
@@ -13,9 +13,8 @@ namespace c10 {
 
 /// Constructors
 
-inline C10_HOST_DEVICE Float8_e4m3fn::Float8_e4m3fn(float value) {
-  x = detail::fp8e4m3fn_from_fp32_value(value);
-}
+inline C10_HOST_DEVICE Float8_e4m3fn::Float8_e4m3fn(float value)
+    : x(detail::fp8e4m3fn_from_fp32_value(value)) {}
 
 /// Implicit conversions
 

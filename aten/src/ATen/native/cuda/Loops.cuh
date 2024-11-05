@@ -11,8 +11,9 @@
 
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
+#include <tuple>
 
-namespace at { namespace native {
+namespace at::native {
 
 template<int N>
 static OffsetCalculator<N> make_input_offset_calculator(const TensorIteratorBase& iter) {
@@ -45,18 +46,19 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   using traits = function_traits<func_t>;
   using return_t = typename traits::result_type;
   using args_t = typename traits::ArgsTuple;
+  constexpr int elems_per_thread = policy_t::tws;
 
   int idx = blockIdx.x;
 
-  return_t results[thread_work_size()];
-  args_t args[thread_work_size()];
+  return_t results[elems_per_thread];
+  args_t args[elems_per_thread];
 
   // load
   policy.load(args, idx);
 
   // compute
   #pragma unroll
-  for (int i = 0; i < thread_work_size(); i++) {
+  for (int i = 0; i < elems_per_thread; i++) {
     if (policy.check_inbounds(i)) {
       results[i] = c10::guts::apply(f, args[i]);
     }
@@ -66,21 +68,34 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   policy.store(results, idx);
 }
 
-}}  // namespace at::native
+}  // namespace at::native
 
-// Note:
-// CUDA and ROCm get diverged in this PR:
-//   https://github.com/pytorch/pytorch/pull/32383
-// Because for some reason trying to enable vectorized
-// memory access introduce regression on ROCm.
+#include <ATen/native/cuda/CUDALoops.cuh>
 
-#if !defined(USE_ROCM)
-  #include <ATen/native/cuda/CUDALoops.cuh>
-#else
-  #include <ATen/native/cuda/ROCmLoops.cuh>
-#endif
+namespace at:: native {
 
-namespace at { namespace native {
+template <typename func_t>
+void gpu_kernel_nocast(TensorIteratorBase& iter, const func_t& f) {
+
+  for (int arg = 0; arg < iter.ntensors(); arg++) {
+    TORCH_INTERNAL_ASSERT(
+      iter.device(arg).is_cuda(),
+      "argument ", arg, ": expected a CUDA device but found ", iter.device(arg));
+  }
+
+  if (iter.numel() == 0) {
+    return;
+  }
+
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      gpu_kernel_nocast(sub_iter, f);
+    }
+    return;
+  }
+
+  gpu_kernel_impl_nocast(iter, f);
+}
 
 template <typename func_t>
 void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
@@ -191,7 +206,7 @@ void opmath_symmetric_gpu_kernel_with_scalars(TensorIteratorBase& iter, const fu
   static_assert(
       traits::arity == 2,
       "gpu_kernel_with_scalars only supports two input arguments");
-  static_assert(std::is_same<opmath_arg_t, typename traits::template arg<1>::type>::value,
+  static_assert(std::is_same_v<opmath_arg_t, typename traits::template arg<1>::type>,
                 "f is not symmetric");
 
   OptionalDeviceGuard device_guard;
@@ -310,4 +325,4 @@ void gpu_kernel_multiple_outputs(TensorIteratorBase& iter, const func_t& f) {
   gpu_kernel_multiple_outputs_impl(iter, f);
 }
 
-}} //namespace at::native
+} //namespace at::native

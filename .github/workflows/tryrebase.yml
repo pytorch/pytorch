@@ -21,7 +21,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
           check-latest: false
           cache: pip
@@ -38,7 +38,7 @@ jobs:
           PR_NUM: ${{ github.event.client_payload.pr_num }}
           BRANCH: ${{ github.event.client_payload.branch }}
         run: |
-          set -ex
+          set -x
           if [ -n "${BRANCH}" ]; then
             python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${BRANCH}"
           else

@@ -5,8 +5,7 @@
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 // See note [Jiterator]
 // TODO: elaborate in this comment on the structure of math.cuh
 #if AT_USE_JITERATOR()
@@ -226,7 +225,7 @@ const auto lcm_string = jiterator_stringify(
 ); // lcm_string
 
 /*
- * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information, please refer to the cpu implementation located in "ATen/native/Math.h".
  */
 // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
 const auto digamma_string = jiterator_stringify(
@@ -3038,7 +3037,7 @@ static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
 }
 
 /*
- * For licensing information, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information, please refer to the cpu implementation located in "ATen/native/Math.h".
  */
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_digamma(scalar_t in) {
@@ -3127,7 +3126,7 @@ static inline C10_HOST_DEVICE scalar_t calc_trigamma(scalar_t in) {
 }
 
 /*
- * For licensing information and documentation, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information and documentation, please refer to the cpu implementation located in "ATen/native/Math.h".
  */
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t
@@ -3149,7 +3148,7 @@ chbevl(scalar_t _x, const scalar_t array[], size_t len) {
 }
 
 /*
- * For licensing information and documentation, please refer to the the cpu implementation located in "ATen/native/Math.h".
+ * For licensing information and documentation, please refer to the cpu implementation located in "ATen/native/Math.h".
  */
 template <typename T>
 C10_HOST_DEVICE inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
@@ -3226,7 +3225,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
 
 template <typename T>
 C10_HOST_DEVICE inline
-    typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+    typename std::enable_if_t<std::is_same_v<double, T>, std::tuple<const T*, size_t>>
     chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
@@ -3255,7 +3254,7 @@ C10_HOST_DEVICE inline
 
 template <typename T>
 C10_HOST_DEVICE inline
-    typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+    typename std::enable_if_t<std::is_same_v<float, T>, std::tuple<const T*, size_t>>
     chebyshev_coefficients_i1e_A() {
   /* Chebyshev coefficients for exp(-x) I1(x)
    * in the interval [0,8].
@@ -3285,7 +3284,7 @@ C10_HOST_DEVICE inline
 
 template <typename T>
 C10_HOST_DEVICE inline
-    typename std::enable_if<std::is_same<double, T>::value, std::tuple<const T*, size_t>>::type
+    typename std::enable_if_t<std::is_same_v<double, T>, std::tuple<const T*, size_t>>
     chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
@@ -3312,7 +3311,7 @@ C10_HOST_DEVICE inline
 
 template <typename T>
 C10_HOST_DEVICE inline
-    typename std::enable_if<std::is_same<float, T>::value, std::tuple<const T*, size_t>>::type
+    typename std::enable_if_t<std::is_same_v<float, T>, std::tuple<const T*, size_t>>
     chebyshev_coefficients_i1e_B() {
   /* Chebyshev coefficients for exp(-x) sqrt(x) I1(x)
    * in the inverted interval [8,infinity].
@@ -3371,5 +3370,4 @@ static inline C10_HOST_DEVICE scalar_t calc_i1e(scalar_t _x) {
 
 #endif // AT_USE_JITERATOR() (this closes the "else" branch of a if/else preprocessor directive)
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -234,9 +234,18 @@ class Vectorized<float> {
     return ret._nor();
   }
 
-  Vectorized<float> _isinf() const {
-    auto x = *this;
-    return (x == v_inf) | (x == v_minus_inf);
+  bool has_inf_nan() const {
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec0[i]) || _isinf(_vec0[i])) {
+        return true;
+      }
+    }
+    for (const auto i : c10::irange(size()/2)) {
+      if(_isnan(_vec1[i]) || _isinf(_vec1[i])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   int zero_mask() const {
@@ -258,11 +267,17 @@ class Vectorized<float> {
   Vectorized<float> C10_ALWAYS_INLINE acos() const {
     return {Sleef_acosf4_u10(_vec0), Sleef_acosf4_u10(_vec1)};
   }
+  Vectorized<float> C10_ALWAYS_INLINE acosh() const {
+  return {Sleef_acoshf4_u10(_vec0), Sleef_acoshf4_u10(_vec1)};
+  }
   Vectorized<float> C10_ALWAYS_INLINE asin() const {
     return {Sleef_asinf4_u10(_vec0), Sleef_asinf4_u10(_vec1)};
   }
   Vectorized<float> atan() const {
     return {Sleef_atanf4_u10(_vec0), Sleef_atanf4_u10(_vec1)};
+  }
+  Vectorized<float> atanh() const {
+    return {Sleef_atanhf4_u10(_vec0), Sleef_atanhf4_u10(_vec1)};
   }
   Vectorized<float> atan2(const Vectorized<float>& b) const {
     return {Sleef_atan2f4_u10(_vec0, b._vec0), Sleef_atan2f4_u10(_vec1, b._vec1)};
@@ -308,6 +323,9 @@ class Vectorized<float> {
   }
   Vectorized<float> expm1() const {
     return {Sleef_expm1f4_u10(_vec0), Sleef_expm1f4_u10(_vec1)};
+  }
+  Vectorized<float> C10_ALWAYS_INLINE exp_u20() const {
+    return exp();
   }
 
   Vectorized<float> C10_ALWAYS_INLINE log() const {
@@ -403,6 +421,10 @@ class Vectorized<float> {
     return map(calc_i0e);
   }
 
+  Vectorized<float> digamma() const {
+    return map(calc_digamma);
+  }
+
   DEFINE_MEMBER_OP(operator==, float, vec_cmpeq)
   DEFINE_MEMBER_OP(operator!=, float, vec_cmpne)
   DEFINE_MEMBER_OP(operator<, float, vec_cmplt)
@@ -435,6 +457,41 @@ Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<fl
 template <>
 Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<float>& b) {
   return a.minimum(b);
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator+(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator-(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator*(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator/(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_div(a.vec0(), b.vec0()), vec_div(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator&(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator|(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<float> C10_ALWAYS_INLINE operator^(const Vectorized<float>& a, const Vectorized<float>& b) {
+  return Vectorized<float>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
 }
 
 } // namespace

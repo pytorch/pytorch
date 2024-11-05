@@ -1,14 +1,12 @@
 #pragma once
 
-#include <c10/util/variant.h>
 #include <torch/arg.h>
 #include <torch/csrc/Export.h>
 #include <torch/enum.h>
 #include <torch/expanding_array.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 /// Options for a `D`-dimensional ReflectionPad module.
 template <size_t D>
@@ -195,7 +193,7 @@ namespace functional {
 /// 2}).mode(torch::kReplicate));
 /// ```
 struct TORCH_API PadFuncOptions {
-  typedef c10::variant<
+  typedef std::variant<
       enumtype::kConstant,
       enumtype::kReflect,
       enumtype::kReplicate,
@@ -216,5 +214,4 @@ struct TORCH_API PadFuncOptions {
 
 } // namespace functional
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

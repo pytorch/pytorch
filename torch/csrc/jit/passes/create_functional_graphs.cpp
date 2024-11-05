@@ -4,13 +4,11 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <cstddef>
 #include <limits>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -28,7 +26,7 @@ struct FunctionalGraphSlicer {
     // subgraphs, invalidating the AliasDb, so we need to do our analysis
     // first.
     for (size_t i = 0; i < MAX_NUM_ITERATIONS && changed; ++i) {
-      aliasDb_ = torch::make_unique<AliasDb>(graph_);
+      aliasDb_ = std::make_unique<AliasDb>(graph_);
       AnalyzeFunctionalSubset(graph_->block());
       changed = CreateFunctionalGraphsImpl(graph_->block());
     }
@@ -82,7 +80,6 @@ struct FunctionalGraphSlicer {
         graph_->createWithSubgraph(prim::FunctionalGraph)
             ->insertBefore(block->return_node());
     auto reverse_iter = block->nodes().reverse();
-    std::vector<Value*> graph_outputs;
     for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
       Node* n = *it++;
 
@@ -224,5 +221,4 @@ void InlineFunctionalGraphs(const std::shared_ptr<Graph>& graph) {
   InlineFunctionalGraphs(graph->block());
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

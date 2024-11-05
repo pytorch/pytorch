@@ -89,7 +89,7 @@ TEST(TestStream, GetAndSetTest) {
   ASSERT_EQ_CUDA(curStream, defaultStream);
 }
 
-void thread_fun(at::optional<at::cuda::CUDAStream>& cur_thread_stream) {
+void thread_fun(std::optional<at::cuda::CUDAStream>& cur_thread_stream) {
   auto new_stream = at::cuda::getStreamFromPool();
   at::cuda::setCurrentCUDAStream(new_stream);
   cur_thread_stream = {at::cuda::getCurrentCUDAStream()};
@@ -99,7 +99,7 @@ void thread_fun(at::optional<at::cuda::CUDAStream>& cur_thread_stream) {
 // Ensures streams are thread local
 TEST(TestStream, MultithreadGetAndSetTest) {
   if (!at::cuda::is_available()) return;
-  at::optional<at::cuda::CUDAStream> s0, s1;
+  std::optional<at::cuda::CUDAStream> s0, s1;
 
   std::thread t0{thread_fun, std::ref(s0)};
   std::thread t1{thread_fun, std::ref(s1)};
@@ -408,7 +408,7 @@ TEST(TestStream, ExternalMultiThreadTest) {
 
   std::promise<void> aToBProm;
   std::promise<void> bToAProm;
-  c10::optional<at::cuda::CUDAStream> foundStream;
+  std::optional<at::cuda::CUDAStream> foundStream;
 
   std::thread threadA([&]() {
     at::cuda::CUDAGuard device_guard(0);

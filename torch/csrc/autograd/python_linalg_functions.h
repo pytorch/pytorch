@@ -1,9 +1,8 @@
 #pragma once
+#include <torch/csrc/utils/pythoncapi_compat.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 void initLinalgFunctions(PyObject* module);
 
 }
-} // namespace torch

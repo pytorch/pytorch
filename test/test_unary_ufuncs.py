@@ -20,6 +20,8 @@ from torch.testing._internal.common_utils import (
     skipIfNoSciPy,
     IS_WINDOWS,
     gradcheck,
+    is_iterable_of_tensors,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
@@ -39,6 +41,7 @@ from torch.testing._internal.common_device_type import (
     precisionOverride,
     dtypesIfCPU,
 )
+from torch.utils import _pytree as pytree
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
@@ -47,7 +50,6 @@ from torch.testing._internal.common_dtype import (
     integral_types_and,
     get_all_math_dtypes,
     complex_types,
-    all_types_and,
     floating_and_complex_types_and,
 )
 
@@ -102,9 +104,9 @@ class TestUnaryUfuncs(TestCase):
                     result.item(),
                     float("nan"),
                     msg=(
-                        "input of {} outside lower domain boundary"
-                        " {} produced {}, not nan!"
-                    ).format(lower_tensor.item(), low, result.item()),
+                        f"input of {lower_tensor.item()} outside lower domain boundary"
+                        f" {low} produced {result.item()}, not nan!"
+                    ),
                 )
 
         if high is not None:
@@ -121,9 +123,9 @@ class TestUnaryUfuncs(TestCase):
                     result.item(),
                     float("nan"),
                     msg=(
-                        "input of {} outside upper domain boundary"
-                        " {} produced {}, not nan!"
-                    ).format(higher_tensor.item(), high, result.item()),
+                        f"input of {higher_tensor.item()} outside upper domain boundary"
+                        f" {high} produced {result.item()}, not nan!"
+                    ),
                 )
 
     # Helper for comparing torch tensors and numpy arrays
@@ -246,9 +248,9 @@ class TestUnaryUfuncs(TestCase):
             if t.numel() < 10:
                 msg = (
                     "Failed to produce expected results! Input tensor was"
-                    " {}, torch result is {}, and reference result is"
-                    " {}."
-                ).format(t, actual, expected)
+                    f" {t}, torch result is {actual}, and reference result is"
+                    f" {expected}."
+                )
             else:
                 msg = None
 
@@ -319,9 +321,10 @@ class TestUnaryUfuncs(TestCase):
         self.assertFalse(non_contig.is_contiguous())
 
         torch_kwargs, _ = op.sample_kwargs(device, dtype, non_contig)
-        self.assertEqual(
-            op(contig, **torch_kwargs)[::2], op(non_contig, **torch_kwargs)
-        )
+        expected = op(non_contig, **torch_kwargs)
+        result = op(contig, **torch_kwargs)
+        result = pytree.tree_map(lambda x: x[::2], result)
+        self.assertEqual(result, expected)
 
     @ops(unary_ufuncs)
     def test_contig_vs_transposed(self, device, dtype, op):
@@ -334,7 +337,10 @@ class TestUnaryUfuncs(TestCase):
         self.assertFalse(non_contig.is_contiguous())
 
         torch_kwargs, _ = op.sample_kwargs(device, dtype, contig)
-        self.assertEqual(op(contig, **torch_kwargs).T, op(non_contig, **torch_kwargs))
+        expected = op(non_contig, **torch_kwargs)
+        result = op(contig, **torch_kwargs)
+        result = pytree.tree_map(lambda x: x.T, result)
+        self.assertEqual(result, expected)
 
     @ops(unary_ufuncs)
     def test_non_contig(self, device, dtype, op):
@@ -386,8 +392,9 @@ class TestUnaryUfuncs(TestCase):
             contig = op(contig, **torch_kwargs)
             non_contig = op(non_contig, **torch_kwargs)
             for i in range(3):
+                non_contig_i = pytree.tree_map(lambda x: x[i], non_contig)
                 self.assertEqual(
-                    contig, non_contig[i], msg="non-contiguous expand[" + str(i) + "]"
+                    contig, non_contig_i, msg="non-contiguous expand[" + str(i) + "]"
                 )
 
     @ops(unary_ufuncs)
@@ -434,11 +441,16 @@ class TestUnaryUfuncs(TestCase):
 
         torch_kwargs, _ = op.sample_kwargs(device, dtype, input)
         actual = op(input, **torch_kwargs)
-        expected = torch.stack([op(slice, **torch_kwargs) for slice in input])
+
+        all_outs = [op(slice, **torch_kwargs) for slice in input]
+        if is_iterable_of_tensors(actual):
+            expected = [torch.stack([out[i] for out in all_outs]) for i in range(len(actual))]
+        else:
+            expected = torch.stack(all_outs)
 
         self.assertEqual(actual, expected)
 
-    @dtypes(*all_types_and(torch.bool, torch.half))
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.half))
     def test_nan_to_num(self, device, dtype):
         for contiguous in [False, True]:
             x = make_tensor((64, 64), low=0.0, high=100.0, dtype=dtype, device=device)
@@ -502,6 +514,24 @@ class TestUnaryUfuncs(TestCase):
             for id1, id2, extremal in zip(torch.randint(0, 2, (3,)), torch.randint(0, 5, (3,)), extremals):
                 x[0, id1, id2, :] = extremal
             test_dtype(func(), x, torch.bfloat16)
+
+    @dtypes(torch.complex64, torch.complex128)
+    def test_nan_to_num_complex(self, device, dtype):
+        value_dtype = torch.tensor([], dtype=dtype).real.dtype
+
+        def gen_tensor(a):
+            return torch.view_as_complex(torch.tensor(a, dtype=value_dtype, device=device))
+
+        for extremal, kwarg_name in zip(['nan', 'inf', '-inf'], ['nan', 'posinf', 'neginf']):
+            a = gen_tensor([123, float(extremal)])
+            res = torch.nan_to_num(a, **{kwarg_name: 12})
+            res_check = gen_tensor([123, 12])
+            self.assertEqual(res, res_check)
+
+            a = gen_tensor([float(extremal), 456])
+            res = torch.nan_to_num(a, **{kwarg_name: 21})
+            res_check = gen_tensor([21, 456])
+            self.assertEqual(res, res_check)
 
     @dtypes(torch.cdouble)
     def test_complex_edge_values(self, device, dtype):
@@ -759,6 +789,8 @@ class TestUnaryUfuncs(TestCase):
                     _test(op, data[0:sz], data[1 : sz + 1])
 
     # TODO: run on non-native device types
+    # https://github.com/pytorch/pytorch/issues/126474
+    @xfailIfTorchDynamo
     @dtypes(torch.double)
     def test_unary_out_op_mem_overlap(self, device, dtype):
         sz = 3
@@ -1036,6 +1068,30 @@ class TestUnaryUfuncs(TestCase):
             atol=atol,
             rtol=rtol,
         )
+
+    @dtypes(torch.complex64, torch.complex128)
+    def test_silu_complex(self, device, dtype):
+        atol = 1e-6
+        rtol = 1e-6
+        inouts = [
+            (0.2 + 0.3j, 0.08775215595960617065 + 0.18024823069572448730j),
+            (1e-19 + 1e-18j, 4.99999984132761269448e-20 + 5.00000022906852482872e-19j),
+            (-1.0 + 2.0j, -0.78546208143234252930 + -0.44626939296722412109j),
+            (0.0 + 0.5j, -0.06383547931909561157 + 0.25000000000000000000j),
+            (2.0j, -1.55740761756896972656 + 0.99999988079071044922j)
+        ]
+
+        for inp, out in inouts:
+            res = torch.nn.functional.silu(torch.tensor(inp, dtype=dtype, device=device))
+            self.assertFalse(torch.any(torch.isnan(res)))
+            self.assertEqual(res.real, out.real, atol=atol, rtol=rtol)
+            self.assertEqual(res.imag, out.imag, atol=atol, rtol=rtol)
+
+        for inp, out in inouts:
+            res = torch.nn.functional.silu(torch.tensor(inp, dtype=dtype, device=device), inplace=True)
+            self.assertFalse(torch.any(torch.isnan(res)))
+            self.assertEqual(res.real, out.real, atol=atol, rtol=rtol)
+            self.assertEqual(res.imag, out.imag, atol=atol, rtol=rtol)
 
     # It is not obvious how to merge this into OpInfo becuase these inputs
     # succeed for gradcheck but are expected to fail for gradgradcheck

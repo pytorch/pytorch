@@ -9,9 +9,8 @@ TEST(ReduceOpsTest, MaxValuesAndMinValues) {
   const int W = 10;
   const int H = 10;
   if (hasCUDA()) {
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    for (const auto dtype : {kHalf, kFloat, kDouble, kShort, kInt, kLong}) {
-      auto a = at::rand({H, W}, TensorOptions(kCUDA).dtype(at::kHalf));
+    for (const auto dtype : {kHalf, kFloat, kDouble}) {
+      auto a = at::rand({H, W}, TensorOptions(kCUDA).dtype(dtype));
       ASSERT_FLOAT_EQ(
         a.amax(c10::IntArrayRef{0, 1}).item<double>(),
         a.max().item<double>()

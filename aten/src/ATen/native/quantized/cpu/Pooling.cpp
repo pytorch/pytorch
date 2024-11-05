@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <torch/library.h>
 #include <ATen/native/Pool.h>
+#include <ATen/native/MaxPooling.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
@@ -16,6 +17,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/empty.h>
 #include <ATen/ops/_empty_affine_quantized.h>
 #include <ATen/ops/quantized_max_pool1d.h>
 #include <ATen/ops/quantized_max_pool1d_native.h>
@@ -27,8 +29,7 @@
 #include <algorithm>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qmaxpool_2d_nhwc_stub);
 DEFINE_DISPATCH(qmaxpool_3d_nthwc_stub);
@@ -254,67 +255,92 @@ Tensor q_maxpool_2d(
     // In this case, we can preserve the data layout in memory
     // as well as use a loop nest that is more amenable to
     // vectorization.
-    Tensor qy = at::_empty_affine_quantized(
+    Tensor qy;
+    if constexpr(std::is_same_v<Q, uint8_t>) {
+      qy = at::empty(
         oSizes,
         qx.options()
-          .dtype(toQIntType(qx.scalar_type()))
-          .memory_format(qx.suggest_memory_format()),
-        qx.q_scale(),
-        qx.q_zero_point(),
-        c10::nullopt);
+          .device(c10::kCPU)
+          .dtype(qx.scalar_type())
+          .memory_format(c10::MemoryFormat::ChannelsLast));
+    } else {
+      qy = at::_empty_affine_quantized(
+          oSizes,
+          qx.options()
+            .dtype(toQIntType(qx.scalar_type()))
+            .memory_format(qx.suggest_memory_format()),
+          qx.q_scale(),
+          qx.q_zero_point(),
+          std::nullopt);
+    }
     qmaxpool_2d_nhwc_stub(qx.device().type(), qx, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
     return qy;
   } else {
-    Tensor qy = at::_empty_affine_quantized(
-        oSizes,
-        qx.options().dtype(toQIntType(qx.scalar_type())),
-        qx.q_scale(),
-        qx.q_zero_point());
-    auto qx_contig = qx.contiguous();
-    auto qxd = qx_contig.data_ptr<Q>();
-    auto qyd = qy.data_ptr<Q>();
-    if (ndim == 3 || nbatch == 1) {
-      auto* iData = qxd;
-      auto* oData = qyd;
-      spatial_dilated_max_pooling<Q>(
-          iData,
-          iC,
-          iH,
-          iW,
-          oH,
-          oW,
-          kH,
-          kW,
-          sH,
-          sW,
-          pH,
-          pW,
-          dH,
-          dW,
-          oData);
+    Tensor qy;
+    if constexpr(!std::is_same_v<Q, uint8_t>) {
+      qy = at::_empty_affine_quantized(
+              oSizes,
+              qx.options().dtype(toQIntType(qx.scalar_type())),
+              qx.q_scale(),
+              qx.q_zero_point());
+      auto qx_contig = qx.contiguous();
+      auto qxd = qx_contig.data_ptr<Q>();
+      auto qyd = qy.data_ptr<Q>();
+      if (ndim == 3 || nbatch == 1) {
+        auto* iData = qxd;
+        auto* oData = qyd;
+        spatial_dilated_max_pooling<Q>(
+            iData,
+            iC,
+            iH,
+            iW,
+            oH,
+            oW,
+            kH,
+            kW,
+            sH,
+            sW,
+            pH,
+            pW,
+            dH,
+            dW,
+            oData);
+      } else {
+        at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
+          for (const auto p : c10::irange(start, end)) {
+            auto* iData = qxd + p * iC * iW * iH;
+            auto* oData = qyd + p * oC * oW * oH;
+            spatial_dilated_max_pooling<Q>(
+                iData,
+                iC,
+                iH,
+                iW,
+                oH,
+                oW,
+                kH,
+                kW,
+                sH,
+                sW,
+                pH,
+                pW,
+                dH,
+                dW,
+                oData);
+          }
+        });
+      }
     } else {
-      at::parallel_for(0, nbatch, 0, [&](int64_t start, int64_t end) {
-        for (const auto p : c10::irange(start, end)) {
-          auto* iData = qxd + p * iC * iW * iH;
-          auto* oData = qyd + p * oC * oW * oH;
-          spatial_dilated_max_pooling<Q>(
-              iData,
-              iC,
-              iH,
-              iW,
-              oH,
-              oW,
-              kH,
-              kW,
-              sH,
-              sW,
-              pH,
-              pW,
-              dH,
-              dW,
-              oData);
-        }
-      });
+      // If qx is uint8 and contiguous memory format,
+      // Use the channels_last implementation and convert qy back to contiguous.
+      qy = at::empty(
+        oSizes,
+        qx.options()
+          .device(c10::kCPU)
+          .dtype(qx.scalar_type())
+          .memory_format(c10::MemoryFormat::ChannelsLast));
+      auto qx_nhwc = qx.contiguous(c10::MemoryFormat::ChannelsLast);
+      qmaxpool_2d_nhwc_stub(qx_nhwc.device().type(), qx_nhwc, iC, iH, iW, oH, oW, kH, kW, sH, sW, pH, pW, dH, dW, qy);
+      qy = qy.contiguous();
     }
     return qy;
   }
@@ -395,7 +421,7 @@ Tensor q_maxpool_3d(
           .memory_format(qx.suggest_memory_format()),
         qx.q_scale(),
         qx.q_zero_point(),
-        c10::nullopt);
+        std::nullopt);
     qmaxpool_3d_nthwc_stub(qx.device().type(), qx, iC, iT, iH, iW, oT, oH, oW, kT, kH, kW, sT, sH, sW, pT, pH, pW, dT, dH, dW, qy);
     return qy;
   } else {
@@ -451,6 +477,8 @@ void check_maxpool2d_params(
               "Expected 1d or 2d padding, got ", padding.size());
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
               "Expected 1d or 2d dilation, got ", dilation.size());
+  TORCH_CHECK(dilation.allMatch([](const auto& ele) { return ele >= 1L; }),
+              "Expected dilation >= 1");
 }
 
 void check_maxpool3d_params(
@@ -463,6 +491,8 @@ void check_maxpool3d_params(
               "Expected no strides or 3d strides, got", stride.size());
   TORCH_CHECK(padding.size() == 3, "Expected 3d padding, got ", padding.size());
   TORCH_CHECK(dilation.size() == 3, "Expected 1d or 3d dilation, got ", dilation.size());
+  TORCH_CHECK(dilation.allMatch([](const auto& ele) { return ele >= 1L; }),
+              "Expected dilation >= 1");
 }
 
 #ifdef USE_PYTORCH_QNNPACK
@@ -611,7 +641,7 @@ Tensor quantized_max_pool2d(
   }
 #endif
   Tensor qy;
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "max_pool2d", [&]() {
+  AT_DISPATCH_QINT_TYPES_AND(ScalarType::Byte, qx.scalar_type(), "max_pool2d", [&]() {
     qy = q_maxpool_2d<scalar_t>(
         qx,
         kernel_size[0],
@@ -676,6 +706,7 @@ Tensor quantized_max_pool1d(
     IntArrayRef padding,
     IntArrayRef dilation,
     bool ceil_mode) {
+  check_max_pool1d(qx, kernel_size, stride, padding, dilation, ceil_mode);
   // (C, L) -> (C, 1, L) => kSqueezeDim = 1
   // (N, C, L) -> (N, C, 1, L) => kSqueezeDim = 2
   const int32_t kSqueezeDim = qx.dim() - 1;
@@ -700,12 +731,16 @@ template <uint32_t kSpatialDim>
 class QMaxPool_arr_args final {
  public:
   static Tensor run(
-      Tensor qx,
+      const Tensor& qx,
       std::vector<int64_t> kernel_size,
       std::vector<int64_t> stride,
       std::vector<int64_t> padding,
       std::vector<int64_t> dilation,
       bool ceil_mode) {
+    if (!qx.is_quantized() && kSpatialDim == 2 && qx.scalar_type() == c10::ScalarType::Byte){
+      return at::native::quantized_max_pool2d(qx, kernel_size, stride, padding,
+                                      dilation, ceil_mode);
+    }
     if (kSpatialDim == 1) {
       return at::quantized_max_pool1d(qx, kernel_size, stride, padding,
                                       dilation, ceil_mode);
@@ -722,6 +757,9 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::max_pool2d"), TORCH_FN(QMaxPool_arr_args<2>::run));
 }
 
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("quantized::max_pool2d"), TORCH_FN(QMaxPool_arr_args<2>::run));
+}
+
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

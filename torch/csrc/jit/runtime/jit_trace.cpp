@@ -17,9 +17,7 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <unordered_map>
 
-namespace torch {
-
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -58,8 +56,8 @@ Node* traceNode(Node* node, TracingData& td, Stack& stack) {
 }
 
 void eraseAllOutputs(Node* opt_pn) {
-  // NOLINTNEXTLINE
-  for (int i = opt_pn->outputs().size() - 1; i >= 0; i--) {
+  for (auto i = static_cast<int64_t>(opt_pn->outputs().size()) - 1; i >= 0;
+       i--) {
     opt_pn->eraseOutput(i);
   }
 }
@@ -250,9 +248,9 @@ void insertTracingNodes(Block* block, ProfilingRecord* pr, TracingData& td) {
 
       GRAPH_DEBUG("Tracing ", getHeader(n));
       auto tracer = traceNode(n, td, stack);
-      auto ouputs_size = n->outputs().size();
-      auto iivs = pop(stack, ouputs_size);
-      for (size_t j = 0; j < ouputs_size; j++) {
+      auto outputs_size = n->outputs().size();
+      auto iivs = pop(stack, outputs_size);
+      for (size_t j = 0; j < outputs_size; j++) {
         auto& iiv = iivs[j];
         if (iiv.isTensor()) {
           auto t = iiv.toTensor();
@@ -277,10 +275,12 @@ void insertTracingNodes(Block* block, ProfilingRecord* pr, TracingData& td) {
 // nodes and the outputs of the node in the scripted graph.
 // There are a few subtleties with tracing Ifs and Loops
 // discussed above
-std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
+std::shared_ptr<Graph> TraceGraph(
+    const std::shared_ptr<Graph>& graph,
+    Stack& stack) {
   TracingData td;
   GRAPH_DUMP("Before Inline:", graph);
-  Inline(*graph.get());
+  Inline(*graph);
   EliminateDeadCode(graph);
   GRAPH_DUMP("After Inline:", graph);
   auto pr = ProfilingRecord::instrumentGraph(graph);
@@ -315,5 +315,4 @@ std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
   GRAPH_DUMP("Traced graph:", td.traced_graph_);
   return td.traced_graph_;
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

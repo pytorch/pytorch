@@ -26,11 +26,10 @@
 
 #include <c10/util/irange.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 bool is_same_size(const Tensor& self, const Tensor& other) {
-  return self.sizes().equals(other.sizes());
+  return self.sym_sizes().equals(other.sym_sizes());
 }
 
 bool nested_is_same_size(const Tensor& self, const Tensor& other) {
@@ -102,12 +101,8 @@ bool cudnn_is_acceptable(const Tensor& self) {
 
 Tensor & detach_(Tensor & self) {
   // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
-  //AT_ERROR("detach_ is not implemented for Tensor");
+  //TORCH_CHECK(false, "detach_ is not implemented for Tensor");
   return self;
-}
-
-static Tensor contiguous(const Tensor & self) {
-  return contiguous(self, MemoryFormat::Contiguous);
 }
 
 Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
@@ -135,5 +130,4 @@ bool is_set_to(const Tensor& self, const Tensor& src) {
   return false;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

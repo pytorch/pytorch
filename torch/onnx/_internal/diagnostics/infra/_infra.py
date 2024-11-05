@@ -1,11 +1,12 @@
+# mypy: allow-untyped-defs
 """This file defines an additional layer of abstraction on top of the SARIF OM."""
 
 from __future__ import annotations
 
 import dataclasses
 import enum
-import pprint
-from typing import FrozenSet, List, Mapping, Optional, Sequence, Tuple
+import logging
+from typing import Mapping, Sequence
 
 from torch.onnx._internal.diagnostics.infra import formatter, sarif
 
@@ -49,14 +50,14 @@ class Tag(enum.Enum):
 class PatchedPropertyBag(sarif.PropertyBag):
     """Key/value pairs that provide additional information about the object.
 
-    The definition of PropertyBag via SARIF spec is "A property bag is an object (§3.6)
+    The definition of PropertyBag via SARIF spec is "A property bag is an object (section 3.6)
     containing an unordered set of properties with arbitrary names." However it is not
     reflected in the json file, and therefore not captured by the python representation.
     This patch adds additional **kwargs to the `__init__` method to allow recording
     arbitrary key/value pairs.
     """
 
-    def __init__(self, tags: Optional[List[str]] = None, **kwargs):
+    def __init__(self, tags: list[str] | None = None, **kwargs):
         super().__init__(tags=tags)
         self.__dict__.update(kwargs)
 
@@ -66,10 +67,10 @@ class Rule:
     id: str
     name: str
     message_default_template: str
-    short_description: Optional[str] = None
-    full_description: Optional[str] = None
-    full_description_markdown: Optional[str] = None
-    help_uri: Optional[str] = None
+    short_description: str | None = None
+    full_description: str | None = None
+    full_description_markdown: str | None = None
+    help_uri: str | None = None
 
     @classmethod
     def from_sarif(cls, **kwargs):
@@ -112,7 +113,7 @@ class Rule:
             help_uri=self.help_uri,
         )
 
-    def format(self, level: Level, *args, **kwargs) -> Tuple[Rule, Level, str]:
+    def format(self, level: Level, *args, **kwargs) -> tuple[Rule, Level, str]:
         """Returns a tuple of (rule, level, message) for a diagnostic.
 
         This method is used to format the message of a diagnostic. The message is
@@ -131,19 +132,16 @@ class Rule:
         """
         return self.message_default_template.format(*args, **kwargs)
 
-    def pretty_print(self):
-        pass
-
 
 @dataclasses.dataclass
 class Location:
-    uri: Optional[str] = None
-    line: Optional[int] = None
-    message: Optional[str] = None
-    start_column: Optional[int] = None
-    end_column: Optional[int] = None
-    snippet: Optional[str] = None
-    function: Optional[str] = None
+    uri: str | None = None
+    line: int | None = None
+    message: str | None = None
+    start_column: int | None = None
+    end_column: int | None = None
+    snippet: str | None = None
+    function: str | None = None
 
     def sarif(self) -> sarif.Location:
         """Returns the SARIF representation of this location."""
@@ -162,16 +160,6 @@ class Location:
             else None,
         )
 
-    def pretty_print(self):
-        """Prints the location in a traceback style format."""
-        unknown = "<unknown>"
-        snippet = self.snippet or unknown
-        uri = self.uri or unknown
-        function = self.function or unknown
-        lineno = self.line if self.line is not None else unknown
-        message = f"  # {self.message}" if self.message is not None else ""
-        print(f'  File "{uri}", line {lineno}, in {function}\n    {snippet}{message}')
-
 
 @dataclasses.dataclass
 class StackFrame:
@@ -181,17 +169,13 @@ class StackFrame:
         """Returns the SARIF representation of this stack frame."""
         return sarif.StackFrame(location=self.location.sarif())
 
-    def pretty_print(self):
-        """Prints the stack frame in a human-readable format."""
-        self.location.pretty_print()
-
 
 @dataclasses.dataclass
 class Stack:
     """Records a stack trace. The frames are in order from newest to oldest stack frame."""
 
-    frames: List[StackFrame] = dataclasses.field(default_factory=list)
-    message: Optional[str] = None
+    frames: list[StackFrame] = dataclasses.field(default_factory=list)
+    message: str | None = None
 
     def sarif(self) -> sarif.Stack:
         """Returns the SARIF representation of this stack."""
@@ -202,12 +186,6 @@ class Stack:
             else None,
         )
 
-    def pretty_print(self):
-        """Prints the stack in a human-readable format."""
-        formatter.pretty_print_title(f"Stack: {self.message}", fill_char="-")
-        for frame in reversed(self.frames):
-            frame.pretty_print()
-
 
 @dataclasses.dataclass
 class ThreadFlowLocation:
@@ -216,7 +194,7 @@ class ThreadFlowLocation:
     location: Location
     state: Mapping[str, str]
     index: int
-    stack: Optional[Stack] = None
+    stack: Stack | None = None
 
     def sarif(self) -> sarif.ThreadFlowLocation:
         """Returns the SARIF representation of this thread flow location."""
@@ -225,15 +203,6 @@ class ThreadFlowLocation:
             state=self.state,
             stack=self.stack.sarif() if self.stack is not None else None,
         )
-
-    def pretty_print(self, verbose: bool = False):
-        """Prints the thread flow location in a human-readable format."""
-        formatter.pretty_print_title(f"Step {self.index}", fill_char="-")
-        self.location.pretty_print()
-        if verbose:
-            print(f"State: {pprint.pformat(self.state)}")
-            if self.stack is not None:
-                self.stack.pretty_print()
 
 
 @dataclasses.dataclass
@@ -246,7 +215,7 @@ class Graph:
 
     graph: str
     name: str
-    description: Optional[str] = None
+    description: str | None = None
 
     def sarif(self) -> sarif.Graph:
         """Returns the SARIF representation of this graph."""
@@ -255,26 +224,10 @@ class Graph:
             properties=PatchedPropertyBag(name=self.name, description=self.description),
         )
 
-    def pretty_print(
-        self,
-        verbose: bool = False,
-    ):
-        """Prints the diagnostics in a human-readable format.
-
-        Args:
-            verbose: If True, prints all information. Otherwise, only prints compact
-                information. E.g., graph name and description.
-            log_level: The minimum level of diagnostics to print.
-        """
-        formatter.pretty_print_title(f"Graph: {self.name}", fill_char="-")
-        print(self.description)
-        if verbose:
-            print(self.graph)
-
 
 @dataclasses.dataclass
 class RuleCollection:
-    _rule_id_name_set: FrozenSet[Tuple[str, str]] = dataclasses.field(init=False)
+    _rule_id_name_set: frozenset[tuple[str, str]] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
         self._rule_id_name_set = frozenset(
@@ -312,16 +265,21 @@ class Invocation:
     # TODO: Implement this.
     # Tracks top level call arguments and diagnostic options.
     def __init__(self) -> None:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 @dataclasses.dataclass
 class DiagnosticOptions:
-    """
-    Options for diagnostic context.
+    """Options for diagnostic context.
+
+    Attributes:
+        verbosity_level: Set the amount of information logged for each diagnostics,
+            equivalent to the 'level' in Python logging module.
+        warnings_as_errors: When True, warning diagnostics are treated as error diagnostics.
     """
 
-    log_verbose: bool = dataclasses.field(default=False)
-    log_level: Level = dataclasses.field(default=Level.ERROR)
+    verbosity_level: int = dataclasses.field(default=logging.INFO)
+    """Set the amount of information logged for each diagnostics, equivalent to the 'level' in Python logging module."""
+
     warnings_as_errors: bool = dataclasses.field(default=False)
-    """If True, warnings are treated as errors."""
+    """If True, warning diagnostics are treated as error diagnostics."""

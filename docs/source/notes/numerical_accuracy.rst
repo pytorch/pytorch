@@ -4,7 +4,7 @@ Numerical accuracy
 ==================
 
 In modern computers, floating point numbers are represented using IEEE 754 standard.
-For more details on floating point arithmetics and IEEE 754 standard, please see
+For more details on floating point arithmetic and IEEE 754 standard, please see
 `Floating point arithmetic <https://en.wikipedia.org/wiki/Floating-point_arithmetic>`_
 In particular, note that floating point provides limited accuracy (about 7 decimal digits
 for single precision floating point numbers, about 16 decimal digits for double precision
@@ -86,10 +86,10 @@ Analyzing the spectrum of the inputs via :func:`torch.linalg.svdvals` or their c
 may help to detect these issues.
 
 
-TensorFloat-32(TF32) on Nvidia Ampere devices
----------------------------------------------
+TensorFloat-32(TF32) on Nvidia Ampere (and later) devices
+---------------------------------------------------------
 
-On Ampere Nvidia GPUs, PyTorch can use TensorFloat32 (TF32) to speed up mathematically intensive operations, in particular matrix multiplications and convolutions.
+On Ampere (and later) Nvidia GPUs, PyTorch can use TensorFloat32 (TF32) to speed up mathematically intensive operations, in particular matrix multiplications and convolutions.
 When an operation is performed using TF32 tensor cores, only the first 10 bits of the input mantissa are read.
 This may reduce accuracy and produce surprising results (e.g., multiplying a matrix by the identity matrix may produce results that are different from the input).
 By default, TF32 tensor cores are disabled for matrix multiplications and enabled for convolutions, although most neural network workloads have the same convergence behavior when using TF32 as they have with fp32.
@@ -98,7 +98,7 @@ If your network needs full float32 precision for both matrix multiplications and
 
 For more information see :ref:`TensorFloat32<tf32_on_ampere>`.
 
-Reduced Precision Reduction for FP16  and BF16 GEMMs
+Reduced Precision Reduction for FP16 and BF16 GEMMs
 ----------------------------------------------------
 Half-precision GEMM operations are typically done with intermediate accumulations (reduction) in single-precision for numerical accuracy and improved resilience to overflow. For performance, certain GPU architectures, especially more recent ones, allow a few truncations of the intermediate accumulation results to the reduced precision (e.g., half-precision). This change is often benign from the perspective of model convergence, though it may lead to unexpected results (e.g., ``inf`` values when the final result should be be representable in half-precision).
 If reduced-precision reductions are problematic, they can be turned off with
@@ -109,6 +109,13 @@ reduced-precision reductions are problematic, they can be turned off with
 ``torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False``
 
 For more information see :ref:`allow_fp16_reduced_precision_reduction<fp16reducedprecision>` and :ref:`allow_bf16_reduced_precision_reduction<bf16reducedprecision>`
+
+Reduced Precision Reduction for FP16 and BF16 in Scaled Dot Product Attention (SDPA)
+------------------------------------------------------------------------------------
+A naive SDPA math backend, when using FP16/BF16 inputs, can accumulate significant numerical errors due to the usage of low-precision intermediate buffers. To mitigate this issue, the default behavior now involves upcasting FP16/BF16 inputs to FP32. Computations are performed in FP32/TF32, and the final FP32 results are then downcasted back to FP16/BF16. This will improve numerical accuracy of the final output for the math backend with FP16/BF16 inputs, but increases memory usages and may cause the performance regressions in the math backend as computations shift from FP16/BF16 BMM to FP32/TF32 BMM/Matmul.
+
+For scenarios where reduced-precision reductions are preferred for speed, they can be enabled with the following setting:
+``torch.backends.cuda.allow_fp16_bf16_reduction_math_sdp(True)``
 
 .. _fp16_on_mi200:
 

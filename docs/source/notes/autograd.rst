@@ -240,9 +240,9 @@ This better runtime comes with a drawback: tensors created in inference mode
 will not be able to be used in computations to be recorded by autograd after
 exiting inference mode.
 
-Enable inference mode when you are performing computations that don’t need
-to be recorded in the backward graph, AND you don’t plan on using the tensors
-created in inference mode in any computation that is to be recorded by autograd later.
+Enable inference mode when you are performing computations that do not have
+interactions with autograd, AND you don’t plan on using the tensors created
+in inference mode in any computation that is to be recorded by autograd later.
 
 It is recommended that you try out inference mode in the parts of your code
 that do not require autograd tracking (e.g., data processing and model evaluation).
@@ -418,8 +418,8 @@ The short version:
   the gradients are computed under the assumption that the function is a part of a larger real-valued
   loss function :math:`g(input)=L`. The gradient computed is :math:`\frac{\partial L}{\partial z^*}`
   (note the conjugation of z), the negative of which is precisely the direction of steepest descent
-  used in Gradient Descent algorithm. Thus, all the existing optimizers work out of
-  the box with complex parameters.
+  used in Gradient Descent algorithm. Thus, there is a viable path in making the existing optimizers
+  work out of the box with complex parameters.
 - This convention matches TensorFlow's convention for complex
   differentiation, but is different from JAX (which computes
   :math:`\frac{\partial L}{\partial z}`).
@@ -463,7 +463,7 @@ functions are used in the research community since complex numbers are not part 
 ordered field and so having complex valued loss does not make much sense.
 
 It also turns out that no interesting real-valued objective fulfill the
-Cauchy-Riemann equations. So the theory with homomorphic function cannot be
+Cauchy-Riemann equations. So the theory with holomorphic function cannot be
 used for optimization and most people therefore use the Wirtinger calculus.
 
 Wirtinger Calculus comes into the picture ...
@@ -602,7 +602,7 @@ Solving the above equations for :math:`\frac{\partial L}{\partial u}` and :math:
     .. math::
         \begin{aligned}
             \frac{\partial L}{\partial u} = \frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*} \\
-            \frac{\partial L}{\partial v} = -1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right)
+            \frac{\partial L}{\partial v} = 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right)
         \end{aligned}
         :label: [3]
 
@@ -610,9 +610,9 @@ Substituting :eq:`[3]` in :eq:`[1]`, we get:
 
     .. math::
         \begin{aligned}
-            \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}\right) * \frac{\partial u}{\partial z^*} - 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right) * \frac{\partial v}{\partial z^*}  \\
+            \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}\right) * \frac{\partial u}{\partial z^*} + 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right) * \frac{\partial v}{\partial z^*}  \\
                                             &= \frac{\partial L}{\partial s} * \left(\frac{\partial u}{\partial z^*} + \frac{\partial v}{\partial z^*} j\right) + \frac{\partial L}{\partial s^*} * \left(\frac{\partial u}{\partial z^*} - \frac{\partial v}{\partial z^*} j\right)  \\
-                                            &= \frac{\partial L}{\partial s^*} * \frac{\partial (u + vj)}{\partial z^*} + \frac{\partial L}{\partial s} * \frac{\partial (u + vj)^*}{\partial z^*}  \\
+                                            &= \frac{\partial L}{\partial s} * \frac{\partial (u + vj)}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial (u + vj)^*}{\partial z^*}  \\
                                             &= \frac{\partial L}{\partial s} * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial s^*}{\partial z^*}    \\
         \end{aligned}
 
@@ -849,19 +849,29 @@ Backward Hooks execution
 
 This section will discuss when different hooks fire or don't fire.
 Then it will discuss the order in which they are fired.
-The hooks that will be covered are: hooks registered to Tensor via
-:meth:`torch.tensor.register_hook`,
-post-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_hook`, and
+The hooks that will be covered are: backward hooks registered to Tensor via
+:meth:`torch.Tensor.register_hook`, post-accumulate-grad hooks registered to
+Tensor via :meth:`torch.Tensor.register_post_accumulate_grad_hook`, post-hooks
+registered to Node via :meth:`torch.autograd.graph.Node.register_hook`, and
 pre-hooks registered to Node via :meth:`torch.autograd.graph.Node.register_prehook`.
 
 Whether a particular hook will be fired
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Hooks registered to a Tensor via :meth:`torch.tensor.register_hook`
+Hooks registered to a Tensor via :meth:`torch.Tensor.register_hook`
 are executed when gradients are being computed for that Tensor. (Note that this does not require
 the Tensor's grad_fn to be executed. For example, if the Tensor is passed
 as part of the ``inputs`` argument to :func:`torch.autograd.grad`,
 the Tensor's grad_fn may not be executed, but the hook register to that Tensor will always be executed.)
+
+Hooks registered to a Tensor via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+are executed after the gradients have been accumulated for that Tensor, meaning the
+Tensor's grad field has been set. Whereas hooks registered via :meth:`torch.Tensor.register_hook`
+are run as gradients are being computed, hooks registered via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+are only triggered once the Tensor's grad field is updated by autograd at the end of
+the backward pass. Thus, post-accumulate-grad hooks can only be registered for leaf
+Tensors. Registering a hook via :meth:`torch.Tensor.register_post_accumulate_grad_hook`
+on a non-leaf Tensor will error, even if you call `backward(retain_graph=True)`.
 
 Hooks registered to :class:`torch.autograd.graph.Node` using
 :meth:`torch.autograd.graph.Node.register_hook` or
@@ -890,11 +900,13 @@ The order in which the different hooks are fired
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The order in which things happen are:
-1. hooks registered to Tensor are executed
-2. pre-hook registered to Node are executed (if Node is executed).
-3. The ``.grad`` field is updated for Tensors that retain_grad
-4. Node is executed (subject to rules above)
-5. post-hook registered to Node are executed (if Node is executed)
+
+#. hooks registered to Tensor are executed
+#. pre-hooks registered to Node are executed (if Node is executed).
+#. the ``.grad`` field is updated for Tensors that retain_grad
+#. Node is executed (subject to rules above)
+#. for leaf Tensors that have ``.grad`` accumulated, post-accumulate-grad hooks are executed
+#. post-hooks registered to Node are executed (if Node is executed)
 
 If multiple hooks of the same type are registered on the same Tensor or Node
 they are executed in the order in which they are registered.

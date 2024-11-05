@@ -4,3 +4,4 @@
 .github/generated-* linguist-generated=true
 .github/scripts/gql_mocks.json linguist-generated=true
 third_party/LICENSES_BUNDLED.txt linguist-generated=true
+tools/build/bazel/requirements.txt linguist-generated=true

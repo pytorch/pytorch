@@ -4,6 +4,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/BinaryKernel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -13,6 +14,7 @@
 #include <ATen/ops/atan2_native.h>
 #include <ATen/ops/div_native.h>
 #include <ATen/ops/eq_native.h>
+#include <ATen/ops/floor_divide_native.h>
 #include <ATen/ops/fmod_native.h>
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
@@ -21,6 +23,9 @@
 #include <ATen/ops/lerp_native.h>
 #include <ATen/ops/logaddexp2_native.h>
 #include <ATen/ops/logaddexp_native.h>
+#include <ATen/ops/logical_and_native.h>
+#include <ATen/ops/logical_or_native.h>
+#include <ATen/ops/logical_xor_native.h>
 #include <ATen/ops/lt_native.h>
 #include <ATen/ops/maximum_native.h>
 #include <ATen/ops/minimum_native.h>
@@ -31,6 +36,7 @@
 #include <ATen/ops/remainder_native.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/sub_native.h>
+#include <ATen/ops/view_as_real.h>
 #include <ATen/ops/xlogy_native.h>
 #endif
 
@@ -47,15 +53,21 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 #define BinaryOpFn(graph, primary, secondary) \
   MPSGraphTensor*(mps::BinaryOpCachedGraph * graph, MPSGraphTensor * primary, MPSGraphTensor * secondary)
 
+static inline Tensor legacy_complex_as_view(const Tensor& t) {
+  // Convert non-complex types (and cdouble CPU scalars) to cfloat
+  if (!isComplexType(t.scalar_type()) || t.scalar_type() == kComplexDouble) {
+    return at::view_as_real(t.to(kMPS, kComplexFloat));
+  }
+  return at::view_as_real(t.dim() != 0 ? t : t.to(kMPS));
+}
+
 // alpha is always 1.0 except when this function is called from add_sub_lerp_template()
-void binaryOpTensor(const Tensor& self,
-                    const Tensor& other,
-                    const Scalar& alpha,
-                    const Tensor& output_,
-                    std::string op_name,
-                    BinaryOpBlock binaryBlock) {
-  TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
-              "MPS support binary op with uint8 natively starting from macOS 13.0");
+static void binaryOpTensor(const Tensor& self,
+                           const Tensor& other,
+                           const Scalar& alpha,
+                           const Tensor& output_,
+                           std::string op_name,
+                           BinaryOpBlock binaryBlock) {
   TORCH_CHECK(!(op_name == "power" && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) &&
                 (self.scalar_type() == ScalarType::Long ||
                  (other.scalar_type() == ScalarType::Long &&
@@ -63,6 +75,8 @@ void binaryOpTensor(const Tensor& self,
               "MPS: ",
               op_name,
               " op with int64 input is supported natively starting from macOS 13.2");
+  TORCH_CHECK_TYPE(!isComplexType(self.scalar_type()) || mps::supportsComplex(),
+                   "Complex types are supported starting from MacOS 14.0+");
   MPSStream* mpsStream = getCurrentMPSStream();
 
   const bool is_self_scalar = self.dim() == 0;
@@ -81,31 +95,16 @@ void binaryOpTensor(const Tensor& self,
   Tensor output = output_;
   bool needsCopyToOutput = false;
 
-  if (!output_.is_contiguous()) {
-    output = output_.contiguous();
-    needsCopyToOutput = true;
-    // else, determine if this is an in-place operation on a view output
-  } else if (output_.is_view() && (self.is_alias_of(output_) || other.is_alias_of(output_))) {
-    output = at::empty(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
+  if (!is_macOS_15_0_or_newer &&
+      (needsGather(output_) || (output_.is_view() && (self.is_alias_of(output_) || other.is_alias_of(output_))))) {
+    output = at::empty(output_.sizes(), output_.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
     needsCopyToOutput = true;
   }
 
   auto inputDataType = self.scalar_type();
   auto otherDataType = other.scalar_type();
   auto outputDataType = output_.scalar_type();
-  if (!is_macos_13_or_newer()) {
-    // workaround for signed vs. unsigned comparison issue in MacOS 12
-    if (outputDataType == kBool && (inputDataType == kByte || otherDataType == kByte)) {
-      inputDataType = otherDataType = kByte;
-    } else {
-      if (inputDataType == kBool || inputDataType == kByte) {
-        inputDataType = kChar;
-      }
-      if (otherDataType == kBool || otherDataType == kByte) {
-        otherDataType = kChar;
-      }
-    }
-  }
 
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, other, output_});
@@ -181,9 +180,7 @@ void binaryOpTensor(const Tensor& self,
     }
 
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, needsCopyToOutput ? output : output_);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, outputPlaceholder);
 
     if (needsCopyToOutput) {
       output_.copy_(output);
@@ -191,20 +188,20 @@ void binaryOpTensor(const Tensor& self,
   }
 }
 
-void binaryOpScalar(const Tensor& self,
-                    const Scalar& other,
-                    const Scalar& alpha,
-                    const Tensor& output,
-                    std::string op_name,
-                    BinaryOpBlock binaryBlock) {
+static void binaryOpScalar(const Tensor& self,
+                           const Scalar& other,
+                           const Scalar& alpha,
+                           const Tensor& output,
+                           std::string op_name,
+                           BinaryOpBlock binaryBlock) {
   binaryOpTensor(self, wrapped_scalar_tensor(other), alpha, output, op_name, binaryBlock);
 }
 
-void div_mode_template(const Tensor& self,
-                       const Tensor& other,
-                       c10::optional<c10::string_view> rounding_mode,
-                       const Tensor& output,
-                       const string op_name) {
+static void div_mode_template(const Tensor& self,
+                              const Tensor& other,
+                              std::optional<c10::string_view> rounding_mode,
+                              const Tensor& output,
+                              const string op_name) {
   if (rounding_mode.has_value() && *rounding_mode == "trunc") {
     TORCH_CHECK(self.scalar_type() != ScalarType::Half, "MPS: does not support trunc_divide op with float16 input");
   }
@@ -256,11 +253,11 @@ void div_mode_template(const Tensor& self,
                  div_mode_op_block);
 }
 
-void add_sub_lerp_template(const Tensor& self,
-                           const Tensor& other,
-                           const Scalar& alpha,
-                           const Tensor& output,
-                           std::string op_name) {
+static void add_sub_lerp_template(const Tensor& self,
+                                  const Tensor& other,
+                                  const Scalar& alpha,
+                                  const Tensor& output,
+                                  std::string op_name) {
   if (alpha.toDouble() == 0.0) {
     if (!self.is_alias_of(output)) { // if inplace, no-op
       output.copy_(self);
@@ -334,10 +331,6 @@ void add_sub_lerp_template(const Tensor& self,
 
 #define CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(func_out, func_stub, other_type)                     \
   TORCH_IMPL_FUNC(func_out)(const Tensor& self, const other_type& other, const Tensor& output) {  \
-    TORCH_CHECK(!(self.scalar_type() == ScalarType::Long && std::string(#func_stub) == "atan2"),  \
-                "MPS does not support ",                                                          \
-                #func_stub,                                                                       \
-                " op with int64 input")                                                           \
     mps::binaryOp##other_type(self,                                                               \
                               other,                                                              \
                               Scalar(1.0),                                                        \
@@ -384,29 +377,65 @@ CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_tensor_out_mps, greaterThan, Tensor);
 // Arithmetic Binary Ops
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(minimum_out_mps, minimum, Tensor);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(maximum_out_mps, maximum, Tensor);
-CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(mul_out_mps, multiplication, Tensor);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_scalar_out_mps, power, Scalar);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_tensor_out_mps, power, Tensor);
-CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(atan2_mps_out, atan2, Tensor);
-
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_out_mps, logicalAND, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_out_mps, logicalOR, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_xor_out_mps, logicalXOR, Tensor);
 
+TORCH_IMPL_FUNC(mul_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
+  if (!mps::supportsComplex() && (c10::isComplexType(self.scalar_type()) || c10::isComplexType(other.scalar_type()))) {
+    return mps::complex_mul_out(self, other, output);
+  }
+  mps::binaryOpTensor(
+      self, other, Scalar(1.0), output, "mul", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+        MPSGraph* mpsGraph = cachedGraph->graph();
+        return [mpsGraph multiplicationWithPrimaryTensor:primaryCastTensor
+                                         secondaryTensor:secondaryCastTensor
+                                                    name:nil];
+      });
+}
+TORCH_IMPL_FUNC(atan2_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
+  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS does not support atan2 op with int64 input");
+  mps::binaryOpTensor(
+      self, other, Scalar(1.0), output, "atan2", ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+        MPSGraph* mpsGraph = cachedGraph->graph();
+        return [mpsGraph atan2WithPrimaryTensor:primaryCastTensor secondaryTensor:secondaryCastTensor name:nil];
+      });
+}
+
 TORCH_IMPL_FUNC(div_out_mode_mps)
-(const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode, const Tensor& output) {
+(const Tensor& self, const Tensor& other, std::optional<c10::string_view> rounding_mode, const Tensor& output) {
   mps::div_mode_template(self, other, rounding_mode, output, "div_mode_out");
 }
 
 TORCH_IMPL_FUNC(div_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::div_mode_template(self, other, c10::nullopt, output, "div_out");
+  mps::div_mode_template(self, other, std::nullopt, output, "div_out");
 }
 
 TORCH_IMPL_FUNC(add_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
+  if ((isComplexType(self.scalar_type()) || isComplexType(other.scalar_type())) && !alpha.isComplex() &&
+      !mps::supportsComplex()) {
+    // Complex add with non-complex alpha is just add over views
+    return mps::add_sub_lerp_template(mps::legacy_complex_as_view(self),
+                                      mps::legacy_complex_as_view(other),
+                                      alpha,
+                                      mps::legacy_complex_as_view(output),
+                                      "add");
+  }
   mps::add_sub_lerp_template(self, other, alpha, output, "add");
 }
 
 TORCH_IMPL_FUNC(sub_out_mps)(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
+  if ((isComplexType(self.scalar_type()) || isComplexType(other.scalar_type())) && !alpha.isComplex() &&
+      !mps::supportsComplex()) {
+    // Complex sub with non-complex alpha is just add over views
+    return mps::add_sub_lerp_template(mps::legacy_complex_as_view(self),
+                                      mps::legacy_complex_as_view(other),
+                                      alpha,
+                                      mps::legacy_complex_as_view(output),
+                                      "sub");
+  }
   mps::add_sub_lerp_template(self, other, alpha, output, "sub");
 }
 

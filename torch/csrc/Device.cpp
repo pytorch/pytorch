@@ -11,9 +11,11 @@
 #include <c10/util/Exception.h>
 
 #include <structmember.h>
-#include <cstring>
 #include <limits>
 #include <sstream>
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static PyObject* THPUpperModuleOfDevice = nullptr;
 
 PyObject* THPDevice_New(const at::Device& device) {
   auto type = (PyTypeObject*)&THPDeviceType;
@@ -25,7 +27,7 @@ PyObject* THPDevice_New(const at::Device& device) {
   return self.release();
 }
 
-PyObject* THPDevice_repr(THPDevice* self) {
+static PyObject* THPDevice_repr(THPDevice* self) {
   std::ostringstream oss;
   oss << "device(type=\'" << self->device.type() << "\'";
   if (self->device.has_index()) {
@@ -38,49 +40,54 @@ PyObject* THPDevice_repr(THPDevice* self) {
   return THPUtils_packString(oss.str().c_str());
 }
 
-PyObject* THPDevice_str(THPDevice* self) {
+static PyObject* THPDevice_str(THPDevice* self) {
   std::ostringstream oss;
   oss << self->device;
   return THPUtils_packString(oss.str().c_str());
 }
 
-PyObject* THPDevice_pynew(
+static PyObject* THPDevice_pynew(
     PyTypeObject* type,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser(
-      {"Device(Device device)",
-       "Device(c10::string_view type, int64_t? index=-1)"});
+      {"device(Device device)",
+       "device(c10::string_view type, int64_t? index=-1)"});
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.has_torch_function()) {
+    return handle_torch_function(
+        r, nullptr, args, kwargs, THPUpperModuleOfDevice, "torch");
+  }
   if (r.idx == 0) {
     auto device = r.device(0);
     return THPDevice_New(device);
   } else if (r.idx == 1) {
     auto as_device = r.device(0); // this works, because device can take strings
-    auto device_type = r.string(0);
     if (as_device.has_index()) {
+      auto device_type = r.string(0);
       throw std::runtime_error(
           "type (string) must not include an index because index "
           "was passed explicitly: " +
           device_type);
     }
-    int32_t device_index = -1;
+    int64_t device_index = -1;
     if (!r.isNone(1)) {
       device_index = r.toInt64(1);
       // -1 is allowed in ATen/C++, to mean the default device, but not in
       // Python.
       TORCH_CHECK(device_index >= 0, "Device index must not be negative");
     }
-    at::Device device(as_device.type(), device_index);
+    at::Device device(
+        as_device.type(), static_cast<c10::DeviceIndex>(device_index));
     return THPDevice_New(device);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDevice_type(THPDevice* self, PyObject* noargs) {
+static PyObject* THPDevice_type(THPDevice* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   std::ostringstream oss;
   oss << self->device.type();
@@ -89,7 +96,7 @@ PyObject* THPDevice_type(THPDevice* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDevice_index(THPDevice* self, PyObject* noargs) {
+static PyObject* THPDevice_index(THPDevice* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   if (self->device.has_index()) {
     return THPUtils_packInt64(self->device.index());
@@ -107,7 +114,7 @@ static Py_ssize_t THPDevice_hash(THPDevice* self) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-PyObject* THPDevice_rc(PyObject* a, PyObject* b, int op) {
+static PyObject* THPDevice_rc(PyObject* a, PyObject* b, int op) {
   HANDLE_TH_ERRORS
   if (!THPDevice_Check(a) || !THPDevice_Check(b)) {
     // Py_RETURN_NOTIMPLEMENTED not in python 2.
@@ -141,7 +148,7 @@ PyObject* THPDevice_rc(PyObject* a, PyObject* b, int op) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
+static PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = (THPDevice*)_self;
   auto ret = THPObjectPtr{PyTuple_New(2)};
@@ -156,8 +163,8 @@ PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
   std::ostringstream oss;
   oss << self->device.type();
   if (self->device.has_index()) {
-    args = THPObjectPtr{
-        Py_BuildValue("(si)", oss.str().c_str(), self->device.index())};
+    args = THPObjectPtr{Py_BuildValue(
+        "(si)", oss.str().c_str(), static_cast<int>(self->device.index()))};
   } else {
     args = THPObjectPtr{Py_BuildValue("(s)", oss.str().c_str())};
   }
@@ -169,7 +176,7 @@ PyObject* THPDevice_reduce(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDevice_enter(PyObject* self, PyObject* noargs) {
+static PyObject* THPDevice_enter(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   py::object mode = py::module::import("torch.utils._device")
                         .attr("DeviceContext")(py::handle(self));
@@ -182,14 +189,22 @@ PyObject* THPDevice_enter(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDevice_exit(PyObject* self, PyObject* unused) {
+static PyObject* THPDevice_exit(PyObject* self, PyObject* unused) {
   HANDLE_TH_ERRORS
   at::impl::PythonTorchFunctionTLS::pop_stack();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPDevice_call(PyObject* self, PyObject* args, PyObject* kwargs) {
+/*
+// TODO: We're not sure if this is a good idea or not, because making
+// torch.device callable means that it will start returning true
+// for callable() queries, and that is unexpected.  We can always add
+// this later, so for now, don't actually implement this.
+static PyObject* THPDevice_call(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
   py::object deco =
       py::module::import("torch.utils._device").attr("device_decorator");
@@ -198,19 +213,18 @@ PyObject* THPDevice_call(PyObject* self, PyObject* args, PyObject* kwargs) {
       .ptr();
   END_HANDLE_TH_ERRORS
 }
+*/
 
 typedef PyObject* (*getter)(PyObject*, void*);
 
 // NB: If you edit these properties/methods, update torch/_C/__init__.pyi.in
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static struct PyGetSetDef THPDevice_properties[] = {
+static const std::initializer_list<PyGetSetDef> THPDevice_properties = {
     {"type", (getter)THPDevice_type, nullptr, nullptr, nullptr},
     {"index", (getter)THPDevice_index, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static PyMethodDef THPDevice_methods[] = {
+static const std::initializer_list<PyMethodDef> THPDevice_methods = {
     {"__reduce__", THPDevice_reduce, METH_NOARGS, nullptr},
     {"__enter__", THPDevice_enter, METH_NOARGS, nullptr},
     {"__exit__", THPDevice_exit, METH_VARARGS, nullptr},
@@ -218,7 +232,8 @@ static PyMethodDef THPDevice_methods[] = {
 };
 
 PyTypeObject THPDeviceType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch.device", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch.device", /* tp_name */
     sizeof(THPDevice), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -249,9 +264,11 @@ PyTypeObject THPDeviceType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPDevice_methods, /* tp_methods */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyMethodDef*>(std::data(THPDevice_methods)), /* tp_methods */
     nullptr, /* tp_members */
-    THPDevice_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyGetSetDef*>(std::data(THPDevice_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */
@@ -267,6 +284,7 @@ void THPDevice_init(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPDeviceType);
+  THPUpperModuleOfDevice = module;
   if (PyModule_AddObject(module, "device", (PyObject*)&THPDeviceType) != 0) {
     throw python_error();
   }

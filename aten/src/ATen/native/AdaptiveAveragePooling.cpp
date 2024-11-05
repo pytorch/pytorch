@@ -17,8 +17,7 @@
 #endif
 
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -118,7 +117,7 @@ namespace {
       return at::mkldnn_adaptive_avg_pool2d(input, C10_AS_INTARRAYREF_SLOW(output_size));
     }
 
-    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1 && !input.is_xpu()) {
+    if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
       #if defined(C10_MOBILE) && defined(USE_XNNPACK)
@@ -153,5 +152,4 @@ namespace {
 DEFINE_DISPATCH(adaptive_avg_pool2d_kernel);
 DEFINE_DISPATCH(adaptive_avg_pool2d_backward_kernel);
 
-} // at::native
-} // at
+} // namespace at::native

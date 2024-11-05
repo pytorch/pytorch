@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/PeerToPeerAccess.h>
 #include <ATen/native/ResizeCommon.h>
+#include <c10/cuda/CUDAGuard.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -18,18 +19,18 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   auto allocator = storage->allocator();
   TORCH_CHECK(allocator != nullptr, "Trying to resize storage without an allocator");
 
-  auto device = at::cuda::current_device();
+  c10::Device device = storage->device();
+
   if (size_bytes == 0) {
-    storage->set_data_ptr_noswap(at::DataPtr(nullptr, at::Device(at::DeviceType::CUDA, device)));
+    storage->set_data_ptr_noswap(at::DataPtr(nullptr, device));
     storage->set_nbytes(0);
     return;
   }
 
+  c10::cuda::CUDAGuard guard(device.index());
   at::DataPtr data = allocator->allocate(size_bytes);
   if (storage->data_ptr()) {
-    // Enable p2p access when the memcpy is across devices
-    at::globalContext().lazyInitCUDA();
-    at::cuda::get_p2p_access(device, storage->device().index());
+    at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
     C10_CUDA_CHECK(
         cudaMemcpyAsync(
@@ -48,13 +49,13 @@ void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
 const Tensor& resize_cuda_(
     const Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   if (self.has_names()) {
     return resize_named_tensor_(self, size, optional_memory_format);
   }
   auto* self_ = self.unsafeGetTensorImpl();
-  int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().nbytes() : 0;
-  resize_impl_cuda_(self_, size, /*strides=*/c10::nullopt);
+  auto old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().nbytes() : 0;
+  resize_impl_cuda_(self_, size, /*stride=*/std::nullopt);
   if (optional_memory_format.has_value()) {
     auto memory_format =
         optional_memory_format.value();
@@ -65,8 +66,8 @@ const Tensor& resize_cuda_(
     self_->empty_tensor_restride(memory_format);
   }
   // See Note [Enabling Deterministic Operations]
-  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms())) {
-    at::native::fill_resize_deterministic_(self, old_storage_nbytes);
+  if (C10_UNLIKELY(at::globalContext().deterministicAlgorithms() && at::globalContext().deterministicFillUninitializedMemory())) {
+    at::native::fill_resize_deterministic_(self, static_cast<int64_t>(old_storage_nbytes));
   }
   return self;
 }

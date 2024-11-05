@@ -8,24 +8,24 @@
 
 import os
 import tempfile
-
 from base64 import b64encode
 from datetime import timedelta
-from typing import ClassVar, cast, Callable
-from unittest import TestCase, mock
+from typing import Callable, cast, ClassVar
+from unittest import mock, TestCase
 
-from torch.distributed import TCPStore, FileStore
+from rendezvous_backend_test import RendezvousBackendTestMixin
 
+from torch.distributed import FileStore, TCPStore
 from torch.distributed.elastic.rendezvous import (
     RendezvousConnectionError,
+    RendezvousError,
     RendezvousParameters,
-    RendezvousError)
+)
 from torch.distributed.elastic.rendezvous.c10d_rendezvous_backend import (
     C10dRendezvousBackend,
     create_backend,
 )
-
-from rendezvous_backend_test import RendezvousBackendTestMixin
+from torch.distributed.elastic.utils.distributed import get_free_port
 
 
 class TCPStoreBackendTest(TestCase, RendezvousBackendTestMixin):
@@ -43,6 +43,7 @@ class TCPStoreBackendTest(TestCase, RendezvousBackendTestMixin):
 
     def _corrupt_state(self) -> None:
         self._store.set("torch.rendezvous.dummy_run_id", "non_base64")
+
 
 class FileStoreBackendTest(TestCase, RendezvousBackendTestMixin):
     _store: ClassVar[FileStore]
@@ -69,9 +70,11 @@ class CreateBackendTest(TestCase):
         # For testing, the default parameters used are for tcp. If a test
         # uses parameters for file store, we set the self._params to
         # self._params_filestore.
+
+        port = get_free_port()
         self._params = RendezvousParameters(
             backend="dummy_backend",
-            endpoint="localhost:29300",
+            endpoint=f"localhost:{port}",
             run_id="dummy_run_id",
             min_nodes=1,
             max_nodes=1,
@@ -95,13 +98,12 @@ class CreateBackendTest(TestCase):
         self._expected_temp_dir = tempfile.gettempdir()
 
         self._expected_endpoint_host = "localhost"
-        self._expected_endpoint_port = 29300
+        self._expected_endpoint_port = port
         self._expected_store_type = TCPStore
         self._expected_read_timeout = timedelta(seconds=10)
 
     def tearDown(self) -> None:
         os.remove(self._expected_endpoint_file)
-
 
     def _run_test_with_store(self, store_type: str, test_to_run: Callable):
         """
@@ -124,10 +126,10 @@ class CreateBackendTest(TestCase):
 
         typecast_store = cast(self._expected_store_type, store)
         self.assertEqual(typecast_store.timeout, self._expected_read_timeout)  # type: ignore[attr-defined]
-        if (self._expected_store_type == TCPStore):
+        if self._expected_store_type == TCPStore:
             self.assertEqual(typecast_store.host, self._expected_endpoint_host)  # type: ignore[attr-defined]
             self.assertEqual(typecast_store.port, self._expected_endpoint_port)  # type: ignore[attr-defined]
-        if (self._expected_store_type == FileStore):
+        if self._expected_store_type == FileStore:
             if self._params.endpoint:
                 self.assertEqual(typecast_store.path, self._expected_endpoint_file)  # type: ignore[attr-defined]
             else:
@@ -142,7 +144,9 @@ class CreateBackendTest(TestCase):
     def test_create_backend_returns_backend(self) -> None:
         for store_type in ["tcp", "file"]:
             with self.subTest(store_type=store_type):
-                self._run_test_with_store(store_type, self._assert_create_backend_returns_backend)
+                self._run_test_with_store(
+                    store_type, self._assert_create_backend_returns_backend
+                )
 
     def test_create_backend_returns_backend_if_is_host_is_false(self) -> None:
         store = TCPStore(  # type: ignore[call-arg] # noqa: F841
@@ -169,28 +173,39 @@ class CreateBackendTest(TestCase):
 
         self._assert_create_backend_returns_backend()
 
-    def test_create_backend_returns_backend_if_endpoint_port_is_not_specified(self) -> None:
-        self._params.endpoint = self._expected_endpoint_host
+    def test_create_backend_returns_backend_if_endpoint_port_is_not_specified(
+        self,
+    ) -> None:
+        # patch default port and pass endpoint with no port specified
+        with mock.patch(
+            "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.DEFAULT_PORT",
+            self._expected_endpoint_port,
+        ):
+            self._params.endpoint = self._expected_endpoint_host
 
-        self._expected_endpoint_port = 29400
+            self._assert_create_backend_returns_backend()
 
-        self._assert_create_backend_returns_backend()
-
-    def test_create_backend_returns_backend_if_endpoint_file_is_not_specified(self) -> None:
+    def test_create_backend_returns_backend_if_endpoint_file_is_not_specified(
+        self,
+    ) -> None:
         self._params_filestore.endpoint = ""
 
         self._run_test_with_store("file", self._assert_create_backend_returns_backend)
 
-    def test_create_backend_returns_backend_if_store_type_is_not_specified(self) -> None:
+    def test_create_backend_returns_backend_if_store_type_is_not_specified(
+        self,
+    ) -> None:
         del self._params.config["store_type"]
 
         self._expected_store_type = TCPStore
-        if (not self._params.get("read_timeout")):
+        if not self._params.get("read_timeout"):
             self._expected_read_timeout = timedelta(seconds=60)
 
         self._assert_create_backend_returns_backend()
 
-    def test_create_backend_returns_backend_if_read_timeout_is_not_specified(self) -> None:
+    def test_create_backend_returns_backend_if_read_timeout_is_not_specified(
+        self,
+    ) -> None:
         del self._params.config["read_timeout"]
 
         self._expected_read_timeout = timedelta(seconds=60)
@@ -225,7 +240,8 @@ class CreateBackendTest(TestCase):
         self._params.config["store_type"] = "dummy_store_type"
 
         with self.assertRaisesRegex(
-            ValueError, r"^Invalid store type given. Currently only supports file and tcp.$"
+            ValueError,
+            r"^Invalid store type given. Currently only supports file and tcp.$",
         ):
             create_backend(self._params)
 
@@ -240,18 +256,24 @@ class CreateBackendTest(TestCase):
                     create_backend(self._params)
 
     @mock.patch("tempfile.mkstemp")
-    def test_create_backend_raises_error_if_tempfile_creation_fails(self, tempfile_mock) -> None:
+    def test_create_backend_raises_error_if_tempfile_creation_fails(
+        self, tempfile_mock
+    ) -> None:
         tempfile_mock.side_effect = OSError("test error")
         # Set the endpoint to empty so it defaults to creating a temp file
         self._params_filestore.endpoint = ""
         with self.assertRaisesRegex(
             RendezvousError,
-            r"The file creation for C10d store has failed. See inner exception for details."
+            r"The file creation for C10d store has failed. See inner exception for details.",
         ):
             create_backend(self._params_filestore)
 
-    @mock.patch("torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore")
-    def test_create_backend_raises_error_if_file_path_is_invalid(self, filestore_mock) -> None:
+    @mock.patch(
+        "torch.distributed.elastic.rendezvous.c10d_rendezvous_backend.FileStore"
+    )
+    def test_create_backend_raises_error_if_file_path_is_invalid(
+        self, filestore_mock
+    ) -> None:
         filestore_mock.side_effect = RuntimeError("test error")
         self._params_filestore.endpoint = "bad file path"
         with self.assertRaisesRegex(

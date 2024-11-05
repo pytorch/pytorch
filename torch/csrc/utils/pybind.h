@@ -1,25 +1,25 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/irange.h>
-#include <c10/util/variant.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
 #include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/Stream.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
-#include <stdexcept>
-#include <utility>
-
 namespace py = pybind11;
+
+#define IS_PYBIND_2_13_PLUS PYBIND11_VERSION_HEX >= 0x020D0000
 
 // This makes intrusive_ptr to be available as a custom pybind11 holder type,
 // see
@@ -29,8 +29,7 @@ PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonOrSharedTypePtr<T>);
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::SingletonTypePtr<T>, true);
 
-namespace pybind11 {
-namespace detail {
+namespace pybind11::detail {
 
 // torch.Tensor <-> at::Tensor conversions (without unwrapping)
 template <>
@@ -160,7 +159,7 @@ struct type_caster<at::MemoryFormat> {
       at::MemoryFormat src,
       return_value_policy /* policy */,
       handle /* parent */) {
-    return handle(torch::utils::getTHPMemoryFormat(src));
+    return handle(Py_NewRef(torch::utils::getTHPMemoryFormat(src)));
   }
 };
 
@@ -194,17 +193,52 @@ struct type_caster<at::Device> {
 };
 
 template <>
+struct type_caster<at::ScalarType> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(at::ScalarType, _("torch.dtype"));
+
+  // PYBIND11_TYPE_CASTER defines a member field called value. at::ScalarType
+  // cannot be default-initialized, we provide this constructor to explicitly
+  // initialize that field. The value doesn't matter as it will be overwritten
+  // after a successful call to load.
+  type_caster() : value(at::kFloat) {}
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (THPDtype_Check(obj)) {
+      value = reinterpret_cast<THPDtype*>(obj)->scalar_type;
+      return true;
+    }
+    return false;
+  }
+
+  static handle cast(
+      const at::ScalarType& src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    return Py_NewRef(torch::getTHPDtype(src));
+  }
+};
+
+template <>
 struct type_caster<c10::Stream> {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   PYBIND11_TYPE_CASTER(c10::Stream, _("torch.Stream"));
+
+  // PYBIND11_TYPE_CASTER defines a member field called value. Since c10::Stream
+  // cannot be default-initialized, we provide this constructor to explicitly
+  // initialize that field. The value doesn't matter as it will be overwritten
+  // after a successful call to load.
+  type_caster() : value(c10::Stream::DEFAULT, c10::Device(c10::kCPU, 0)) {}
 
   bool load(handle src, bool) {
     PyObject* obj = src.ptr();
     if (THPStream_Check(obj)) {
       value = c10::Stream::unpack3(
           ((THPStream*)obj)->stream_id,
-          ((THPStream*)obj)->device_index,
+          static_cast<c10::DeviceIndex>(((THPStream*)obj)->device_index),
           static_cast<c10::DeviceType>(((THPStream*)obj)->device_type));
       return true;
     }
@@ -223,7 +257,7 @@ template <>
 struct type_caster<c10::DispatchKey>
     : public type_caster_base<c10::DispatchKey> {
   using base = type_caster_base<c10::DispatchKey>;
-  c10::DispatchKey tmp;
+  c10::DispatchKey tmp{};
 
  public:
   bool load(handle src, bool convert) {
@@ -267,7 +301,7 @@ struct TORCH_PYTHON_API type_caster<c10::SymInt> {
   bool load(py::handle src, bool);
 
   static py::handle cast(
-      c10::SymInt si,
+      const c10::SymInt& si,
       return_value_policy /* policy */,
       handle /* parent */);
 };
@@ -279,7 +313,7 @@ struct TORCH_PYTHON_API type_caster<c10::SymFloat> {
   bool load(py::handle src, bool);
 
   static py::handle cast(
-      c10::SymFloat si,
+      const c10::SymFloat& si,
       return_value_policy /* policy */,
       handle /* parent */);
 };
@@ -291,7 +325,7 @@ struct TORCH_PYTHON_API type_caster<c10::SymBool> {
   bool load(py::handle src, bool);
 
   static py::handle cast(
-      c10::SymBool si,
+      const c10::SymBool& si,
       return_value_policy /* policy */,
       handle /* parent */);
 };
@@ -325,19 +359,9 @@ struct type_caster<c10::complex<T>> {
   }
 };
 
-// Pybind11 bindings for our optional and variant types.
-// http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
-template <typename T>
-struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};
+} // namespace pybind11::detail
 
-template <typename... Ts>
-struct C10_MPARK_VISIBILITY_HIDDEN type_caster<c10::variant<Ts...>>
-    : variant_caster<c10::variant<Ts...>> {};
-} // namespace detail
-} // namespace pybind11
-
-namespace torch {
-namespace impl {
+namespace torch::impl {
 
 // Use this function if you have a C++ object that is used from both C++
 // and Python contexts, and you need its GIL to be released when you
@@ -393,5 +417,4 @@ inline void destroy_without_gil(T* ptr) {
   }
 }
 
-} // namespace impl
-} // namespace torch
+} // namespace torch::impl

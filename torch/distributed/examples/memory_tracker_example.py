@@ -1,6 +1,7 @@
-import torch
+# mypy: allow-untyped-defs
 import torchvision
 
+import torch
 from torch.distributed._tools import MemoryTracker
 
 

@@ -1,12 +1,33 @@
-
-from typing import Optional
+# mypy: allow-untyped-defs
+import logging
 import multiprocessing
 import multiprocessing.connection
+import os
+import pickle
 import signal
 import sys
+import tempfile
+import time
 import warnings
+from concurrent.futures import as_completed, ThreadPoolExecutor
+from typing import Optional
 
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
+
+
+ENV_VAR_PARALLEL_START = "TORCH_MP_PARALLEL_START"
+
+log = logging.getLogger(__name__)
+
+__all__ = [
+    "ProcessContext",
+    "ProcessException",
+    "ProcessExitedException",
+    "ProcessRaisedException",
+    "spawn",
+    "SpawnContext",
+    "start_processes",
+]
 
 
 class ProcessException(Exception):
@@ -23,10 +44,8 @@ class ProcessException(Exception):
 
 
 class ProcessRaisedException(ProcessException):
-    """
-    Exception is thrown when the process failed due to exception
-    raised by the code.
-    """
+    """Exception raised when a process failed due to an exception raised by the code."""
+
     def __init__(
         self,
         msg: str,
@@ -37,15 +56,17 @@ class ProcessRaisedException(ProcessException):
 
 
 class ProcessExitedException(ProcessException):
-    """
-    Exception is thrown when the process failed due to signal
-    or exited with a specific code.
-    """
+    """Exception raised when a process failed due to signal or exited with a specific code."""
+
     __slots__ = ["exit_code"]
 
     def __init__(
-            self, msg: str, error_index: int, error_pid: int,
-            exit_code: int, signal_name: Optional[str] = None
+        self,
+        msg: str,
+        error_index: int,
+        error_pid: int,
+        exit_code: int,
+        signal_name: Optional[str] = None,
     ):
         super().__init__(msg, error_index, error_pid)
         self.exit_code = exit_code
@@ -58,7 +79,7 @@ class ProcessExitedException(ProcessException):
         )
 
 
-def _wrap(fn, i, args, error_queue):
+def _wrap(fn, i, args, error_file):
     # prctl(2) is a Linux specific system call.
     # On other systems the following function call has no effect.
     # This is set to ensure that non-daemonic child processes can
@@ -72,34 +93,48 @@ def _wrap(fn, i, args, error_queue):
     except Exception:
         # Propagate exception to parent process, keeping original traceback
         import traceback
-        error_queue.put(traceback.format_exc())
+
+        with open(error_file, "wb") as fh:
+            pickle.dump(traceback.format_exc(), fh)
         sys.exit(1)
 
 
 class ProcessContext:
-    def __init__(self, processes, error_queues):
-        self.error_queues = error_queues
+    def __init__(self, processes, error_files):
+        self.error_files = error_files
         self.processes = processes
         self.sentinels = {
-            process.sentinel: index
-            for index, process in enumerate(processes)
+            process.sentinel: index for index, process in enumerate(processes)
         }
 
     def pids(self):
         return [int(process.pid) for process in self.processes]
 
-    def join(self, timeout=None):
-        r"""
-        Tries to join one or more processes in this spawn context.
+    def _join_procs_with_timeout(self, timeout: float):
+        """Attempt to join all processes with a shared timeout."""
+        end = time.monotonic() + timeout
+        for process in self.processes:
+            time_to_wait = max(0, end - time.monotonic())
+            process.join(time_to_wait)
+
+    def join(
+        self, timeout: Optional[float] = None, grace_period: Optional[float] = None
+    ):
+        r"""Join one or more processes within spawn context.
+
+        Attempt to join one or more processes in this spawn context.
         If one of them exited with a non-zero exit status, this function
-        kills the remaining processes and raises an exception with the cause
-        of the first process exiting.
+        kills the remaining processes (optionally with a grace period)
+        and raises an exception with the cause of the first process exiting.
 
         Returns ``True`` if all processes have been joined successfully,
         ``False`` if there are more processes that need to be joined.
 
         Args:
-            timeout (float): Wait this long before giving up on waiting.
+            timeout (float): Wait this long (in seconds) before giving up on waiting.
+            grace_period (float): When any processes fail, wait this long (in seconds)
+                for others to shutdown gracefully before terminating them. If they
+                still don't exit, wait another grace period before killing them.
         """
         # Ensure this function can be called even when we're done.
         if len(self.sentinels) == 0:
@@ -124,46 +159,66 @@ class ProcessContext:
         if error_index is None:
             # Return whether or not all processes have been joined.
             return len(self.sentinels) == 0
-
-        # Assume failure. Terminate processes that are still alive.
+        # An error occurred. Clean-up all processes before returning.
+        # First, allow a grace period for processes to shutdown themselves.
+        if grace_period is not None:
+            self._join_procs_with_timeout(grace_period)
+        # Then, terminate processes that are still alive. Try SIGTERM first.
         for process in self.processes:
             if process.is_alive():
+                log.warning("Terminating process %s via signal SIGTERM", process.pid)
                 process.terminate()
+
+        # Try SIGKILL if the process isn't going down after another grace_period.
+        # The reason is related to python signal handling is limited
+        # to main thread and if that is in c/c++ land and stuck it won't
+        # to handle it. We have seen processes getting stuck not handling
+        # SIGTERM for the above reason.
+        self._join_procs_with_timeout(30 if grace_period is None else grace_period)
+        for process in self.processes:
+            if process.is_alive():
+                log.warning(
+                    "Unable to shutdown process %s via SIGTERM , forcefully exiting via SIGKILL",
+                    process.pid,
+                )
+                process.kill()
             process.join()
 
-        # There won't be an error on the queue if the process crashed.
+        # The file will only be created if the process crashed.
         failed_process = self.processes[error_index]
-        if self.error_queues[error_index].empty():
+        if not os.access(self.error_files[error_index], os.R_OK):
             exitcode = self.processes[error_index].exitcode
             if exitcode < 0:
-                name = signal.Signals(-exitcode).name
+                try:
+                    name = signal.Signals(-exitcode).name
+                except ValueError:
+                    name = f"<Unknown signal {-exitcode}>"
                 raise ProcessExitedException(
-                    "process %d terminated with signal %s" %
-                    (error_index, name),
+                    "process %d terminated with signal %s" % (error_index, name),
                     error_index=error_index,
                     error_pid=failed_process.pid,
                     exit_code=exitcode,
-                    signal_name=name
+                    signal_name=name,
                 )
             else:
                 raise ProcessExitedException(
-                    "process %d terminated with exit code %d" %
-                    (error_index, exitcode),
+                    "process %d terminated with exit code %d" % (error_index, exitcode),
                     error_index=error_index,
                     error_pid=failed_process.pid,
-                    exit_code=exitcode
+                    exit_code=exitcode,
                 )
 
-        original_trace = self.error_queues[error_index].get()
+        with open(self.error_files[error_index], "rb") as fh:
+            original_trace = pickle.load(fh)
         msg = "\n\n-- Process %d terminated with the following error:\n" % error_index
         msg += original_trace
         raise ProcessRaisedException(msg, error_index, failed_process.pid)
 
 
 class SpawnContext(ProcessContext):
-    def __init__(self, processes, error_queues):
-        warnings.warn('SpawnContext is renamed to ProcessContext since 1.4 release.')
-        super().__init__(processes, error_queues)
+    def __init__(self, processes, error_files):
+        warnings.warn("SpawnContext is renamed to ProcessContext since 1.4 release.")
+        super().__init__(processes, error_files)
 
 
 # Note: [start_processes]
@@ -174,22 +229,66 @@ class SpawnContext(ProcessContext):
 # general enough, and backends like XLA can reuse them in Colab notebooks as well.
 # Currently we only add this API first, we can consider adding it to documentation as
 # needed in the future.
-def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
+def start_processes(
+    fn,
+    args=(),
+    nprocs=1,
+    join=True,
+    daemon=False,
+    start_method="spawn",
+):
+    # To speed up performance in certain cases (see https://github.com/pytorch/pytorch/issues/133010),
+    # this func will start processes in parallel if start_method is 'forkserver'.
+    # Please opt in to this perf optimization by setting env var (TORCH_MP_PARALLEL_START) to 1.
+    # todo: investigate why spawn does not work with threadpool and raises SIGINT
+    if (
+        start_method == "forkserver"
+        and os.environ.get(ENV_VAR_PARALLEL_START, "0") == "1"
+    ):
+        log.info("Starting processes in parallel.")
+        start_parallel = True
+    else:
+        # Set env var TORCH_MP_PARALLEL_START to 0 to disable parallel start
+        start_parallel = False
+
     mp = multiprocessing.get_context(start_method)
-    error_queues = []
-    processes = []
-    for i in range(nprocs):
-        error_queue = mp.SimpleQueue()
+    error_files = [None] * nprocs
+    processes = [None] * nprocs
+
+    def start_process(i):
+        # Each process is assigned a file to write tracebacks to.  We
+        # use the file being non-empty to indicate an exception
+        # occurred (vs an expected shutdown).  Note: this previously
+        # used a multiprocessing.Queue but that can be prone to
+        # deadlocks, so we went with a simpler solution for a one-shot
+        # message between processes.
+        tf = tempfile.NamedTemporaryFile(
+            prefix="pytorch-errorfile-", suffix=".pickle", delete=False
+        )
+        tf.close()
+        os.unlink(tf.name)
         process = mp.Process(
             target=_wrap,
-            args=(fn, i, args, error_queue),
+            args=(fn, i, args, tf.name),
             daemon=daemon,
         )
         process.start()
-        error_queues.append(error_queue)
-        processes.append(process)
+        return i, process, tf.name
 
-    context = ProcessContext(processes, error_queues)
+    if not start_parallel:
+        for i in range(nprocs):
+            idx, process, tf_name = start_process(i)
+            error_files[idx] = tf_name
+            processes[idx] = process
+    else:
+        with ThreadPoolExecutor(max_workers=nprocs) as executor:
+            futures = [executor.submit(start_process, i) for i in range(nprocs)]
+            for fut in as_completed(futures):
+                idx, process, tf_name = fut.result()
+                # idx and process rank needs to be the same.
+                error_files[idx] = tf_name
+                processes[idx] = process
+    context = ProcessContext(processes, error_files)
     if not join:
         return context
 
@@ -198,7 +297,7 @@ def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method
         pass
 
 
-def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
+def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method="spawn"):
     r"""Spawns ``nprocs`` processes that run ``fn`` with ``args``.
 
     If one of the processes exits with a non-zero exit status, the
@@ -231,9 +330,11 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
         :class:`~ProcessContext` if ``join`` is ``False``
 
     """
-    if start_method != 'spawn':
-        msg = ('This method only supports start_method=spawn (got: %s).\n'
-               'To use a different start_method use:\n\t\t'
-               ' torch.multiprocessing.start_processes(...)' % start_method)
-        warnings.warn(msg)
-    return start_processes(fn, args, nprocs, join, daemon, start_method='spawn')
+    if start_method != "spawn":
+        msg = (
+            f"This method only supports start_method=spawn (got: {start_method}).\n"
+            "To use a different start_method use:\n\t\t"
+            " torch.multiprocessing.start_processes(...)"
+        )
+        warnings.warn(msg, FutureWarning, stacklevel=2)
+    return start_processes(fn, args, nprocs, join, daemon, start_method="spawn")

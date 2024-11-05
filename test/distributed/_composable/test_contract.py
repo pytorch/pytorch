@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 from copy import deepcopy
-from typing import Tuple
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn
@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 
 
 class ToyModel(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.seq1 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(2)])
         self.seq2 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(2)])
@@ -25,7 +25,7 @@ class ToyModel(nn.Module):
 
 
 class TestContract(TestCase):
-    @skipIfTorchDynamo("Dynamo does not yet capture module hooks")
+    @skipIfTorchDynamo("Dynamo does not support the state key")
     def test_add_hooks(self):
         def forward_pre_hook(
             module: nn.Module, inp: Tuple[torch.Tensor]
@@ -69,7 +69,7 @@ class TestContract(TestCase):
         for p1, p2 in zip(model.parameters(), model_with_hooks.parameters()):
             self.assertEqual(p1, p2)
 
-    @skipIfTorchDynamo("Dynamo does not yet capture module hooks")
+    @skipIfTorchDynamo("Dynamo does not support the state key")
     def test_modify_fqn(self):
         class ModelWrapper(nn.Module):
             def __init__(self, module):
@@ -85,13 +85,11 @@ class TestContract(TestCase):
 
         model = ToyModel()
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Check parameters, Composable distributed API implementations cannot modify FQNs",
-        ):
+        regex = "Checking parameters: Composable distributed API implementations cannot modify FQNs."
+        with self.assertRaisesRegex(RuntimeError, regex):
             wrap_module(model.seq1)
 
-    @skipIfTorchDynamo("Dynamo does not yet capture module hooks")
+    @skipIfTorchDynamo("Dynamo does not support the state key")
     def test_state(self):
         def check_and_update_state_hook(
             module: nn.Module, inp: Tuple[torch.Tensor]
@@ -115,7 +113,7 @@ class TestContract(TestCase):
         model(torch.zeros(10, 10), torch.zeros(10, 10))
         self.assertEqual(api.state(model.seq1).dummy_state, 8)
 
-    @skipIfTorchDynamo("Dynamo does not yet capture module hooks")
+    @skipIfTorchDynamo("Dynamo does not support the state key")
     def test_registry(self):
         @contract()
         def api1(module: nn.Module) -> nn.Module:
@@ -132,9 +130,46 @@ class TestContract(TestCase):
         model = api2(model)
         self.assertEqual(2, len(_get_registry(model)))
         self.assertTrue([_get_registry(model).keys()], ["api1", "api2"])
+        self.assertEqual(None, _get_registry(model.seq1))
+        self.assertEqual(None, _get_registry(model.seq2))
 
         with self.assertRaisesRegex(AssertionError, "api1 has already been applied"):
             model = api1(model)
+
+    @skipIfTorchDynamo("Dynamo does not support the state key")
+    def test_multi_module_api(self):
+        @contract()
+        def multi_module_api(modules: List[nn.Module]) -> nn.Module:
+            return modules
+
+        model = nn.Sequential(*[nn.Linear(3, 3) for _ in range(5)])
+        multi_module_api([model[0], model[1]])
+        multi_module_api([model[2], model[3]])
+        multi_module_api([model[4]])
+        # Check that modules have the same state and registry iff they shared
+        # the same API call
+        states = [multi_module_api.state(module) for module in model]
+        self.assertEqual(states[0], states[1])
+        self.assertEqual(states[2], states[3])
+        self.assertNotEqual(states[0], states[2])
+        self.assertNotEqual(states[0], states[4])
+        self.assertNotEqual(states[2], states[4])
+        registries = [_get_registry(module) for module in model]
+        self.assertEqual(registries[0], registries[1])
+        self.assertEqual(registries[2], registries[3])
+        self.assertNotEqual(registries[0], registries[2])
+        self.assertNotEqual(registries[0], registries[4])
+        self.assertNotEqual(registries[2], registries[4])
+        # Check that applying an API to a module multiple times errors
+        model = nn.Sequential(*[nn.Linear(3, 3) for _ in range(5)])
+        multi_module_api([model[0], model[1]])
+        with self.assertRaisesRegex(
+            AssertionError,
+            "Each distinct composable distributed API can only be applied to "
+            r"a module once. multi_module_api has already been applied to the "
+            "following module:",
+        ):
+            multi_module_api([model[0], model[2]])
 
 
 if __name__ == "__main__":

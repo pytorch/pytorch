@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # This file establishes the public comptime interface to Dynamo.
 # This allows Dynamo users to execute arbitrary Python code while
 # Dynamo is symbolically evaluating their original programs.
@@ -7,12 +8,18 @@
 
 import builtins
 import dis
+import time
 import traceback
 from typing import Optional, Union
 
 import torch
+from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .exc import unimplemented
+from .variables import NewCellVariable
+from .variables.constant import ConstantVariable
+from .variables.misc import ClosureVariable
+from .variables.tensor import SymNodeVariable
 
 
 class ComptimeVar:
@@ -26,7 +33,7 @@ class ComptimeVar:
     actual data in the Tensor is.)
     """
 
-    def __init__(self, v):
+    def __init__(self, v) -> None:
         self.__variable = v
 
     def as_proxy(self):
@@ -93,6 +100,26 @@ class ComptimeVar:
         """
         return self.__variable.is_python_constant()
 
+    def is_dynamic(self):
+        if isinstance(self.__variable, SymNodeVariable):
+            fs = free_symbols(self.__variable.sym_num)
+            return bool(fs)
+        return False
+
+    def force_static(self):
+        """
+        Forces that a value is static, inducing a guard on its specific value
+        """
+        if isinstance(self.__variable, SymNodeVariable):
+            self.__variable.evaluate_expr()
+        elif isinstance(self.__variable, ConstantVariable):
+            # TODO: Maybe complain if this isn't a int/bool/float variable
+            pass
+        else:
+            raise AssertionError(
+                f"cannot force {self.__variable} ({type(self.__variable)}) static"
+            )
+
     def _i_will_not_complain_if_bc_breaks_VariableTracker(self):
         """
         Returns the internal data structure VariableTracker that Dynamo uses
@@ -102,9 +129,8 @@ class ComptimeVar:
         """
         return self.__variable
 
-    def __repr__(self):
-        # TODO: The default repr is pretty bad, do better
-        return repr(self.__variable)
+    def __repr__(self) -> str:
+        return self.__variable.debug_repr()
 
     # TODO: API for adding a custom guard
 
@@ -116,7 +142,7 @@ class ComptimeContext:
     file a feature request at https://github.com/pytorch/pytorch/
     """
 
-    def __init__(self, tx):
+    def __init__(self, tx) -> None:
         self.__tx = tx
 
     def get_local(self, name: str, *, stacklevel=0) -> ComptimeVar:
@@ -124,7 +150,20 @@ class ComptimeContext:
         Retrieve the compile-time known information about a local.
         """
         tx = self.__get_tx(stacklevel)
-        return ComptimeVar(tx.symbolic_locals[name])
+
+        # This is analogous to LOAD_DEREF
+        if hasattr(tx, "closure_cells") and name in tx.closure_cells:
+            cell = tx.closure_cells[name]
+            if isinstance(cell, ClosureVariable):
+                return ComptimeVar(tx.output.root_tx.symbolic_locals[cell.name])
+            else:
+                return ComptimeVar(tx.output.side_effects.load_cell(cell))
+        else:
+            r = tx.symbolic_locals[name]
+            if isinstance(r, NewCellVariable):
+                return ComptimeVar(tx.output.side_effects.load_cell(r))
+            else:
+                return ComptimeVar(r)
 
     def graph_break(self, msg="ComptimeContext.graph_break"):
         """
@@ -138,6 +177,14 @@ class ComptimeContext:
         passed to the user compiler after compilation.
         """
         return self.__tx.output.graph
+
+    def assert_static(self, val):
+        """
+        Asserts that the int is static (and not dynamic, per dynamic shapes)
+        """
+        assert (
+            not val.is_dynamic()
+        ), "expected static but got dynamic (run with TORCH_LOGS=dynamic for more info)"
 
     def print_graph(self, *, verbose=True, file=None):
         """
@@ -156,6 +203,9 @@ class ComptimeContext:
         for _ in range(stacklevel):
             tx = tx.parent
         return tx
+
+    def print(self, val, *, file=None):
+        print(repr(val), file=file)
 
     def print_disas(self, *, file=None, stacklevel=0):
         """
@@ -183,10 +233,9 @@ class ComptimeContext:
 
         NB: Stack grows downwards in our print
         """
-        # TODO: improve printing
         tx = self.__get_tx(stacklevel)
         for s in tx.stack:
-            print(f"- {s}", file=file)
+            print(f"- {s.debug_repr()}", file=file)
 
     def print_locals(self, *, file=None, stacklevel=0):
         """
@@ -194,10 +243,9 @@ class ComptimeContext:
         By default this view is very limited; you can get more information
         about any individual local using get_local().
         """
-        # TODO: improve by improving the VariableTracker printing
         tx = self.__get_tx(stacklevel)
         for k, v in tx.symbolic_locals.items():
-            print(f"{k} = {v}", file=file)
+            print(f"{k} = {v.debug_repr()}", file=file)
 
     def print_bt(self, *, file=None, stacklevel=0):
         """
@@ -241,101 +289,113 @@ class ComptimeContext:
         """
         return self.__tx
 
-
-# Convenience wrappers that are more compact to use
-
-
-def graph_break():
-    comptime(lambda ctx: ctx.graph_break())
+    def sleep(self, sec):
+        time.sleep(sec)
 
 
-def print_graph():
-    comptime(lambda ctx: ctx.print_graph())
+class _Comptime:
+    @staticmethod
+    def __call__(fn, fallback_fn=lambda: None):
+        """fn gets called at compile time in TorchDynamo, calls fallback_fn otherwise"""
+        fallback_fn()
 
+    # Convenience wrappers that are more compact to use
 
-def print_disas(*, stacklevel=0):
-    comptime(
-        lambda ctx: ctx.print_disas(
-            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+    @staticmethod
+    def graph_break():
+        comptime(lambda ctx: ctx.graph_break())
+
+    @staticmethod
+    def print(e):
+        comptime(lambda ctx: ctx.print(ctx.get_local("e")), lambda: print(e))
+
+    @staticmethod
+    def print_graph():
+        comptime(lambda ctx: ctx.print_graph())
+
+    @staticmethod
+    def print_disas(*, stacklevel=0):
+        comptime(
+            lambda ctx: ctx.print_disas(
+                stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+            )
         )
-    )
 
-
-def print_value_stack(*, stacklevel=0):
-    comptime(
-        lambda ctx: ctx.print_value_stack(
-            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+    @staticmethod
+    def print_value_stack(*, stacklevel=0):
+        comptime(
+            lambda ctx: ctx.print_value_stack(
+                stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+            )
         )
-    )
 
-
-# This is a more useful variant of print_value_stack that can be used
-# in an expression context; e.g., x + print_value_stack_and_return(y + z),
-# you will see x on the stack prior to the addition operation
-def print_value_stack_and_return(e, *, stacklevel=0):
-    comptime(
-        lambda ctx: ctx.print_value_stack(
-            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+    # This is a more useful variant of print_value_stack that can be used
+    # in an expression context; e.g., x + print_value_stack_and_return(y + z),
+    # you will see x on the stack prior to the addition operation
+    @staticmethod
+    def print_value_stack_and_return(e, *, stacklevel=0):
+        comptime(
+            lambda ctx: ctx.print_value_stack(
+                stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+            )
         )
-    )
-    return e
+        return e
 
-
-def print_locals(*, stacklevel=0):
-    comptime(
-        lambda ctx: ctx.print_locals(
-            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+    @staticmethod
+    def print_locals(*, stacklevel=0):
+        comptime(
+            lambda ctx: ctx.print_locals(
+                stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+            )
         )
-    )
 
-
-def print_bt(*, stacklevel=0):
-    comptime(
-        lambda ctx: ctx.print_bt(
-            stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+    @staticmethod
+    def print_bt(*, stacklevel=0):
+        comptime(
+            lambda ctx: ctx.print_bt(
+                stacklevel=ctx.get_local("stacklevel").as_python_constant() + 1
+            )
         )
-    )
+
+    @staticmethod
+    def print_guards():
+        comptime(lambda ctx: ctx.print_guards())
+
+    @staticmethod
+    def assert_static(val):
+        comptime(lambda ctx: ctx.assert_static(ctx.get_local("val")))
+
+    @staticmethod
+    def force_static(val):
+        comptime(lambda ctx: ctx.get_local("val").force_static())
+
+    @staticmethod
+    def breakpoint():
+        """
+        Like pdb breakpoint(), but drop into pdb whenever this line
+        of code is compiled by dynamo.  Use it by putting
+        this in your model code::
+
+            from torch._dynamo.comptime import comptime
+            comptime.breakpoint()
+
+        And then, inside pdb, you can access 'ctx' to query things
+        about the compilation context::
+
+            (Pdb) !ctx.print_bt()
+            (Pdb) !ctx.print_locals()
+            (Pdb) p ctx.get_local("attention").as_fake()
+        """
+
+        def inner(inner_ctx):
+            ctx = inner_ctx.parent()
+            builtins.breakpoint()
+
+        comptime(inner)
+
+    @staticmethod
+    def sleep(sec):
+        comptime(lambda ctx: ctx.sleep(ctx.get_local("sec").as_python_constant()))
 
 
-def print_guards():
-    comptime(lambda ctx: ctx.print_guards())
-
-
-def breakpoint():
-    """
-    Like pdb breakpoint(), but drop into pdb whenever this line
-    of code is compiled by dynamo.  Use it by putting
-    this in your model code::
-
-        from torch._dynamo.comptime import comptime
-        comptime.breakpoint()
-
-    And then, inside pdb, you can access 'ctx' to query things
-    about the compilation context::
-
-        (Pdb) !ctx.print_bt()
-        (Pdb) !ctx.print_locals()
-        (Pdb) p ctx.get_local("attention").as_fake()
-    """
-
-    def inner(inner_ctx):
-        ctx = inner_ctx.parent()
-        builtins.breakpoint()
-
-    comptime(inner)
-
-
-def comptime(fn):
-    """fn gets called at compile time in TorchDynamo, does nothing otherwise"""
-    return
-
-
-comptime.graph_break = graph_break
-comptime.print_graph = print_graph
-comptime.print_disas = print_disas
-comptime.print_value_stack = print_value_stack
-comptime.print_value_stack_and_return = print_value_stack_and_return
-comptime.print_locals = print_locals
-comptime.print_bt = print_bt
-comptime.print_guards = print_guards
-comptime.breakpoint = breakpoint
+comptime = _Comptime()

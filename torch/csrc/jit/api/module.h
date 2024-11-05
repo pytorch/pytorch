@@ -11,13 +11,12 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <optional>
 
 #include <functional>
 #include <memory>
@@ -33,8 +32,7 @@
 // modules and their methods into flattened graphs which don't have any
 // function calls.
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::Argument;
 using ::c10::FunctionSchema;
@@ -90,6 +88,10 @@ struct TORCH_API Module : public Object {
   explicit Module(c10::QualifiedName class_name);
   Module(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Module() = default;
+  Module(const Module&) = default;
+  Module& operator=(const Module&) = default;
+  Module(Module&&) noexcept = default;
+  Module& operator=(Module&&) noexcept = default;
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,
@@ -121,6 +123,7 @@ struct TORCH_API Module : public Object {
   void register_buffer(const std::string& name, at::Tensor v) {
     bool is_param = false;
     bool is_buffer = true;
+    std::lock_guard<std::mutex> lock(*register_mutex_);
     type()->addOrCheckAttribute(name, TensorType::get(), is_param, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
@@ -129,6 +132,7 @@ struct TORCH_API Module : public Object {
       const std::string& name,
       at::Tensor v,
       bool is_buffer) {
+    std::lock_guard<std::mutex> lock(*register_mutex_);
     type()->addOrCheckAttribute(name, TensorType::get(), !is_buffer, is_buffer);
     _ivalue()->setAttr(name, std::move(v));
   }
@@ -234,7 +238,7 @@ struct TORCH_API Module : public Object {
 
   Module copy() const;
 
-  Module deepcopy() const;
+  Module deepcopy(std::optional<at::Device> device = std::nullopt) const;
 
   // Clones both the underlying `ClassType` and the module instance(data), this
   // function creates a new `ClassType` and returns a new instance that has the
@@ -268,22 +272,24 @@ struct TORCH_API Module : public Object {
   }
 
   void set_delete_memory(std::shared_ptr<char> delete_mem) {
-    mem_to_delete_ = delete_mem;
+    mem_to_delete_ = std::move(delete_mem);
   }
 
   // A set of functions to maintain input shapes through torch.jit.save and
   // torch.jit.load. It only works on tensors and lists/dicts of tensors
   // because tracing is only supported by these types.
-  void store_traced_inputs(std::string func_name, std::vector<IValue> inputs) {
-    if (inputs.size() == 0) {
+  void store_traced_inputs(
+      const std::string& func_name,
+      std::vector<IValue> inputs) {
+    if (inputs.empty()) {
       return;
     }
     auto c10_inputs = c10::impl::GenericList(AnyType::get());
-    for (const IValue& value : inputs) {
+    for (IValue& value : inputs) {
       // Not checking whether this is traceable type as that is already checked
       // higher up in the stack and changing that would require a larger
       // restructuring.
-      c10_inputs.push_back(value);
+      c10_inputs.emplace_back(std::move(value));
     }
     traced_inputs_.insert_or_assign(func_name, c10_inputs);
   }
@@ -297,7 +303,7 @@ struct TORCH_API Module : public Object {
   Module clone_impl(
       std::unordered_map<TypePtr, TypePtr>& type_remap,
       bool inplace,
-      IValue::HashAliasedIValueMap memo,
+      IValue::HashIdentityIValueMap memo,
       const std::unordered_set<std::string>& ignored_methods,
       const std::unordered_set<std::string>& ignored_attributes) const;
 
@@ -311,8 +317,8 @@ struct TORCH_API Module : public Object {
   }
 
   void to_impl(
-      const c10::optional<at::Device>& device,
-      const c10::optional<at::ScalarType>& dtype,
+      const std::optional<at::Device>& device,
+      const std::optional<at::ScalarType>& dtype,
       bool non_blocking);
 
   // Extra handle for the module to delete when itself is deleted
@@ -320,13 +326,17 @@ struct TORCH_API Module : public Object {
 
   // Map of function names to the traced inputs that they have been traced with
   c10::Dict<std::string, c10::impl::GenericList> traced_inputs_;
+
+  // Mutex to keep registring buffer or parameter thread safe.
+  std::shared_ptr<std::mutex> register_mutex_ = std::make_shared<std::mutex>();
 };
 
 // C++ equivalent api of `torch.jit.freeze`. See documentation there for
 // details.
 TORCH_API Module freeze(
     const Module& module,
-    c10::optional<std::vector<std::string>> preserved_attrs = c10::nullopt,
+    const std::optional<std::vector<std::string>>& preserved_attrs =
+        std::nullopt,
     bool optimize_numerics = true);
 
 // C++ equivalent api of `torch.jit.optimize_for_inference`. See documentation
@@ -400,7 +410,7 @@ struct slot_iterator_impl {
                     // slots of root
       bool return_module) // if true include root itself as the first thing
                           // visited (used in modules())
-      : cursors_({SlotCursor{root, return_module ? -1 : 0}}),
+      : cursors_({SlotCursor{std::move(root), return_module ? -1 : 0}}),
         recurse_(recurse) {
     // advance iterator to first valid element (or the end, if empty)
     while_not_valid_next();
@@ -533,9 +543,7 @@ struct slot_list_impl {
   size_t size() const {
     if (!size_) {
       size_ = size_t(0);
-      // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-      for (const value_type& s : *(this)) {
-        (void)s; // Suppress unused variable warning
+      for ([[maybe_unused]] const value_type& _ : *(this)) {
         ++*size_;
       }
     }
@@ -543,10 +551,10 @@ struct slot_list_impl {
   }
 
   slot_list_impl(Module module, bool recurse, bool return_module)
-      : module_(module),
+      : module_(std::move(module)),
         recurse_(recurse),
         return_module_(return_module),
-        size_(c10::nullopt) {
+        size_(std::nullopt) {
     if (!recurse && !return_module && Policy::all_slots) {
       size_ = module_.num_slots();
     }
@@ -558,7 +566,7 @@ struct slot_list_impl {
   bool return_module_;
   // size of this list, cached on first request
   // when we need to filter the slot list
-  mutable c10::optional<size_t> size_;
+  mutable std::optional<size_t> size_;
   friend struct Module;
 };
 
@@ -585,7 +593,7 @@ struct TORCH_API ModulePolicy {
   }
   // are we going to return everything? If so, we can optimize the calculate
   // of the size of the list.
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API ParameterPolicy {
@@ -598,7 +606,7 @@ struct TORCH_API ParameterPolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return typ->is_parameter(i) && v.isTensor();
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API BufferPolicy {
@@ -612,7 +620,7 @@ struct TORCH_API BufferPolicy {
     return typ->getAttribute(i)->isSubtypeOf(*TensorType::get()) &&
         typ->is_buffer(i);
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = false;
+  static constexpr bool all_slots = false;
 };
 
 struct TORCH_API AttributePolicy {
@@ -625,7 +633,7 @@ struct TORCH_API AttributePolicy {
   static bool valid(const ClassTypePtr& typ, size_t i, const IValue& v) {
     return true;
   }
-  static CONSTEXPR_EXCEPT_WIN_CUDA bool all_slots = true;
+  static constexpr bool all_slots = true;
 };
 
 // take a Policy object, and make a version of it that returns the slot.
@@ -674,5 +682,4 @@ using Module = ::torch::jit::Module;
 using ExtraFilesMap = ::torch::jit::ExtraFilesMap;
 } // namespace script
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

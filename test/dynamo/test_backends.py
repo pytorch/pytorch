@@ -1,23 +1,25 @@
 # Owner(s): ["module: dynamo"]
-import functools
+import sys
 import unittest
+from unittest.mock import MagicMock, patch
 
 import torch
-
 import torch._dynamo
+import torch._dynamo.backends
 import torch._dynamo.test_case
 from torch._dynamo.backends.debugging import ExplainWithBackend
 from torch._dynamo.backends.onnxrt import has_onnxruntime
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfRocm
+from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 class Seq(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layers = torch.nn.Sequential(
             torch.nn.Linear(10, 10),
@@ -97,16 +99,20 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    def _check_backend_works(self, backend):
+    def _check_backend_works(self, backend, options=None):
         model = Seq().eval()
         input = torch.randn(2, 10)
         r1 = model(input)
-        r2 = torch.compile(model, backend=backend)(input)
+        r2 = torch.compile(model, backend=backend, options=options)(input)
         self.assertTrue(same(r1, r2.float(), tol=0.01))
 
     def test_eager(self):
         self._check_backend_works("eager")
 
+    def test_eager_noexcept(self):
+        self._check_backend_works("eager_noexcept")
+
+    @_force_skip_lazy_graph_module()
     def test_torchscript(self):
         self._check_backend_works("ts")
 
@@ -116,27 +122,13 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_eager_decomp_partition(self):
         self._check_backend_works("aot_eager_decomp_partition")
 
+    @_force_skip_lazy_graph_module()
     def test_aot_ts(self):
         self._check_backend_works("aot_ts")
 
-    @requires_cuda()
+    @requires_cuda
     def test_aot_cudagraphs(self):
         self._check_backend_works("cudagraphs")
-
-    @skipIfRocm
-    @requires_cuda()
-    def test_aot_ts_nvfuser(self):
-        self._check_backend_works("aot_ts_nvfuser")
-
-    @requires_cuda()
-    @unittest.skipIf(IS_FBCODE, "BackendCompilerError")
-    def test_nvprims_nvfuser(self):
-        self._check_backend_works("nvprims_nvfuser")
-
-    @requires_cuda()
-    @unittest.skipIf(IS_FBCODE, "BackendCompilerError")
-    def test_nvprims_aten(self):
-        self._check_backend_works("nvprims_aten")
 
     @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
     def test_onnxrt(self):
@@ -145,6 +137,8 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm(self):
         self._check_backend_works("tvm")
+        self._check_backend_works("tvm", options={"scheduler": None})
+        self._check_backend_works("tvm", options={"opt_level": 0})
 
     def test_list_backends(self):
         self.assertIn("inductor", torch._dynamo.list_backends())
@@ -229,6 +223,128 @@ class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
         self.assertEqual(8, explain_output.graph_count)
         self.assertEqual(7, explain_output.graph_break_count)
         self.assertEqual(8, explain_output.op_count)
+
+
+class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
+    """Test APIs documented by https://pytorch.org/docs/main/torch.compiler_custom_backends.html"""
+
+    def test_register_backend_api(self):
+        from torch._dynamo import register_backend
+
+        backend_run = False
+
+        @register_backend
+        def my_custom_backend(gm, example_inputs):
+            nonlocal backend_run
+            backend_run = True
+            return gm.forward
+
+        def f(x):
+            return torch.relu(x)
+
+        opt_f = torch.compile(f, backend="my_custom_backend")
+        opt_f(torch.randn(3, 3))
+        self.assertTrue(backend_run)
+
+    def test_aot_autograd_api(self):
+        from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
+
+        backend_run = False
+
+        def my_compiler(gm, example_inputs):
+            nonlocal backend_run
+            backend_run = True
+            return make_boxed_func(gm.forward)
+
+        my_backend = aot_autograd(fw_compiler=my_compiler)
+
+        def f(x):
+            return torch.relu(x)
+
+        opt_f = torch.compile(f, backend=my_backend)
+        opt_f(torch.randn(3, 3))
+        self.assertTrue(backend_run)
+
+    def test_lookup_backend(self):
+        from torch._dynamo import list_backends, lookup_backend
+
+        backends = list_backends()
+        backend_run = False
+
+        def my_compiler(gm, example_inputs):
+            nonlocal backend_run
+            backend_run = True
+            try:
+                trt_compiled = lookup_backend("tensorrt")(gm, example_inputs)
+                if trt_compiled is not None:
+                    return trt_compiled
+            except Exception:
+                pass
+            # first backend failed, try something else...
+            try:
+                inductor_compiled = lookup_backend("inductor")(gm, example_inputs)
+                if inductor_compiled is not None:
+                    return inductor_compiled
+            except Exception:
+                pass
+            return gm.forward
+
+        def f(x):
+            return torch.relu(x)
+
+        opt_f = torch.compile(f, backend=my_compiler)
+        opt_f(torch.randn(3, 3))
+        self.assertTrue(backend_run)
+
+    def test_lookup_custom_backend(self):
+        from torch._dynamo import list_backends
+
+        backends_group = "torch_dynamo_backends"
+        name = "mycustombackend"
+
+        mock_3_9 = MagicMock()
+        mock_3_9.load.return_value = lambda: "mocked 3.9"
+        mock_3_9.name = name
+
+        mock_3_10 = MagicMock()
+        mock_3_10.load.return_value = lambda: "mocked 3.10"
+
+        def mock_eps(group=None):
+            if sys.version_info < (3, 10):
+                return {backends_group: [mock_3_9]}
+            else:
+                assert group == backends_group, group
+                mock_group = MagicMock()
+                mock_group.names = [name]
+                mock_group[name] = mock_3_10
+                # mock_group[name].load.return_value = lambda: "mocked 3.10"
+                return mock_group
+
+        with patch("importlib.metadata.entry_points", mock_eps):
+            from torch._dynamo.backends import registry
+
+            registry._lazy_import.cache_clear()
+            registry._discover_entrypoint_backends.cache_clear()
+
+            backends = list_backends()
+            assert name in backends, (name, backends)
+
+    def test_backend_recompilation(self):
+        def fn(x):
+            return x + x
+
+        input = torch.tensor(2.0)
+
+        opt_fn = torch.compile(
+            fn, backend="inductor", options={"_raise_error_for_testing": False}
+        )
+        opt_fn(input)
+        with self.assertRaises(torch._dynamo.exc.BackendCompilerFailed):
+            opt_fn = torch.compile(
+                fn, backend="inductor", options={"_raise_error_for_testing": True}
+            )
+            opt_fn(input)
 
 
 if __name__ == "__main__":

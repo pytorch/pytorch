@@ -97,15 +97,12 @@ public:
     return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
   }
   static Vectorized<int64_t> loadu(const void* ptr, int64_t count) {
-    __at_align__ int64_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+    if (count == size()) {
+      return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
+    } else {
+      __mmask8 mask = (1ULL << count) - 1;
+      return _mm512_maskz_loadu_epi64(mask, ptr);
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
-    return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
@@ -113,9 +110,8 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm512-storeu-si512.html
       _mm512_storeu_si512(reinterpret_cast<__m512i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ int64_t tmp_values[size()];
-      _mm512_storeu_si512(reinterpret_cast<__m512i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
+      __mmask8 mask = (1ULL << count) - 1;
+      _mm512_mask_storeu_epi64(ptr, mask, values);
     }
   }
   const int64_t& operator[](int idx) const  = delete;
@@ -249,15 +245,12 @@ public:
     return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
   }
   static Vectorized<int32_t> loadu(const void* ptr, int32_t count) {
-    __at_align__ int32_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+    if (count == size()) {
+      return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
+    } else {
+      __mmask16 mask = (1ULL << count) - 1;
+      return _mm512_maskz_loadu_epi32(mask, ptr);
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
-    return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
@@ -265,9 +258,8 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm512-storeu-si512.html
       _mm512_storeu_si512(reinterpret_cast<__m512i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ int32_t tmp_values[size()];
-      _mm512_storeu_si512(reinterpret_cast<__m512i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
+      __mmask16 mask = (1ULL << count) - 1;
+      _mm512_mask_storeu_epi32(ptr, mask, values);
     }
   }
   const int32_t& operator[](int idx) const  = delete;
@@ -480,15 +472,12 @@ public:
     return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
   }
   static Vectorized<int16_t> loadu(const void* ptr, int16_t count) {
-    __at_align__ int16_t tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+    if (count == size()) {
+      return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
+    } else {
+      __mmask32 mask = (1ULL << count) - 1;
+      return _mm512_maskz_loadu_epi16(mask, ptr);
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
-    return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
@@ -496,9 +485,8 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm512-storeu-si512.html
       _mm512_storeu_si512(reinterpret_cast<__m512i*>(ptr), values);
     } else if (count > 0) {
-      __at_align__ int16_t tmp_values[size()];
-      _mm512_storeu_si512(reinterpret_cast<__m512i*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
+      __mmask32 mask = (1ULL << count) - 1;
+      _mm512_mask_storeu_epi16(ptr, mask, values);
     }
   }
   const int16_t& operator[](int idx) const  = delete;
@@ -552,7 +540,7 @@ public:
 template <typename T>
 class Vectorized8 : public Vectorizedi {
   static_assert(
-    std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value,
+    std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>,
     "Only int8_t/uint8_t are supported");
 protected:
   static constexpr __m512i zero_vector {0, 0, 0, 0, 0, 0, 0, 0};
@@ -762,15 +750,15 @@ public:
       return _mm512_castsi128_si512(input_128);
   }
   static Vectorized<T> loadu(const void* ptr, T count) {
-    __at_align__ T tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
-    for (const auto i : c10::irange(size())) {
-      tmp_values[i] = 0;
+    if (count == size()) {
+      return _mm512_loadu_si512(reinterpret_cast<const __m512i*>(ptr));
+    } else if (count == 16) {
+      // Fast path if only load element number of 16
+      return loadu_one_fourth(ptr);
+    } else {
+      __mmask64 mask = (1ULL << count) - 1;
+      return _mm512_maskz_loadu_epi8(mask, ptr);
     }
-    std::memcpy(tmp_values, ptr, count * sizeof(T));
-    return loadu(tmp_values);
   }
   void store(void* ptr, int count = size()) const {
     if (count == size()) {
@@ -784,9 +772,8 @@ public:
           reinterpret_cast<__m128i*>(ptr),
           _mm512_castsi512_si128(values));
       } else {
-        __at_align__ T tmp_values[size()];
-        _mm512_storeu_si512(reinterpret_cast<__m512i*>(tmp_values), values);
-        std::memcpy(ptr, tmp_values, count * sizeof(T));
+        __mmask64 mask = (1ULL << count) - 1;
+        _mm512_mask_storeu_epi8(ptr, mask, values);
       }
     }
   }
@@ -1002,13 +989,37 @@ Vectorized<T> inline int_elementwise_binary_512(const Vectorized<T>& a, const Ve
 template <>
 Vectorized<int8_t> inline operator*(const Vectorized<int8_t>& a, const Vectorized<int8_t>& b) {
   // We don't have an instruction for multiplying int8_t
+#ifndef CPU_CAPABILITY_AVX512
   return int_elementwise_binary_512(a, b, std::multiplies<int8_t>());
+#else
+  __m512i mask00FF = _mm512_set1_epi16(0x00FF);
+  __m512i a_lo = _mm512_srai_epi16(_mm512_slli_epi16(a, 8), 8);
+  __m512i b_lo = _mm512_srai_epi16(_mm512_slli_epi16(b, 8), 8);
+  __m512i a_hi = _mm512_srai_epi16(a, 8);
+  __m512i b_hi = _mm512_srai_epi16(b, 8);
+  __m512i res_lo = _mm512_and_si512(_mm512_mullo_epi16(a_lo, b_lo), mask00FF);
+  __m512i res_hi = _mm512_slli_epi16(_mm512_mullo_epi16(a_hi, b_hi), 8);
+  __m512i res = _mm512_or_si512(res_hi, res_lo);
+  return res;
+#endif
 }
 
 template <>
 Vectorized<uint8_t> inline operator*(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
   // We don't have an instruction for multiplying uint8_t
+#ifndef CPU_CAPABILITY_AVX512
   return int_elementwise_binary_512(a, b, std::multiplies<uint8_t>());
+#else
+  __m512i mask00FF = _mm512_set1_epi16(0x00FF);
+  __m512i a_lo = _mm512_and_si512 (a, mask00FF);
+  __m512i b_lo = _mm512_and_si512 (b, mask00FF);
+  __m512i a_hi = _mm512_srli_epi16(a, 8);
+  __m512i b_hi = _mm512_srli_epi16(b, 8);
+  __m512i res_lo = _mm512_and_si512(_mm512_mullo_epi16(a_lo, b_lo), mask00FF);
+  __m512i res_hi = _mm512_slli_epi16(_mm512_mullo_epi16(a_hi, b_hi), 8);
+  __m512i res = _mm512_or_si512(res_hi, res_lo);
+  return res;
+#endif
 }
 
 template <>
@@ -1058,7 +1069,7 @@ Vectorized<int8_t> inline maximum(const Vectorized<int8_t>& a, const Vectorized<
 
 template <>
 Vectorized<uint8_t> inline maximum(const Vectorized<uint8_t>& a, const Vectorized<uint8_t>& b) {
-  return _mm512_max_epi8(a, b);
+  return _mm512_max_epu8(a, b);
 }
 
 template <>
@@ -1309,7 +1320,7 @@ inline Vectorized<uint8_t> Vectorized<uint8_t>::le(const Vectorized<uint8_t>& ot
   return (*this <= other) & Vectorized<uint8_t>(1);
 }
 
-template <bool left_shift, typename T, typename std::enable_if_t<std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value, int> = 0>
+template <bool left_shift, typename T, typename std::enable_if_t<std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>, int> = 0>
 Vectorized<T> inline shift_512_8(const Vectorized<T>& a, const Vectorized<T>& b) {
   // No vector instruction for shifting int8_t/uint8_t, so emulating
   // it instead.

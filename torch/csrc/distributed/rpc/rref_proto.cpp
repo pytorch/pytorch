@@ -4,9 +4,7 @@
 
 #include <limits>
 
-namespace torch {
-namespace distributed {
-namespace rpc {
+namespace torch::distributed::rpc {
 
 namespace {
 
@@ -142,8 +140,7 @@ std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(
     const Message& message) {
   auto pair =
       ForkMessageBase::fromMessage(message, MessageType::RREF_USER_DELETE);
-  return std::make_unique<RRefUserDelete>(
-      RRefUserDelete(pair.first, pair.second));
+  return std::make_unique<RRefUserDelete>(pair.first, pair.second);
 }
 
 std::unique_ptr<RemoteRet> RemoteRet::fromMessage(const Message& message) {
@@ -189,6 +186,4 @@ std::unique_ptr<RRefAck> RRefAck::fromMessage(const Message& message) {
   return std::make_unique<RRefAck>();
 }
 
-} // namespace rpc
-} // namespace distributed
-} // namespace torch
+} // namespace torch::distributed::rpc

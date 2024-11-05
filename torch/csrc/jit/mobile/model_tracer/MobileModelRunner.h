@@ -1,6 +1,5 @@
 #pragma once
 
-#include <iostream>
 #include <mutex>
 #include <sstream>
 
@@ -10,9 +9,7 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/script.h>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 class MobileModelRunner {
   std::shared_ptr<torch::jit::mobile::Module> module_;
@@ -105,7 +102,7 @@ class MobileModelRunner {
    */
   bool has_new_style_bundled_inputs() const {
     return module_->find_method("get_bundled_inputs_functions_and_info") !=
-        c10::nullopt;
+        std::nullopt;
   }
 
   /**
@@ -146,6 +143,4 @@ class MobileModelRunner {
   void run_argless_functions(const std::vector<std::string>& functions);
 };
 
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

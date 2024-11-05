@@ -1,20 +1,13 @@
-#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 
 #include <c10/util/irange.h>
-#include <fcntl.h>
 #include <algorithm>
 #include <array>
-#include <system_error>
 #include <unordered_map>
 #include <utility>
 
-#ifdef _WIN32
-#include <io.h>
-#include <winsock2.h>
-#else
-#include <poll.h>
-#include <unistd.h>
-#endif
+#include <c10/util/thread_name.h>
+#include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
+#include <torch/csrc/distributed/c10d/logging.h>
 
 #ifdef _WIN32
 #include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
@@ -24,15 +17,10 @@
 
 #include <torch/csrc/distributed/c10d/socket.h>
 
-namespace c10d {
-namespace detail {
+namespace c10d::detail {
 
 // Background thread parent class methods
-BackgroundThread::BackgroundThread(Socket&& storeListenSocket)
-    : storeListenSocket_{std::move(storeListenSocket)} {
-  // Signal instance destruction to the daemon thread.
-  initStopSignal();
-}
+BackgroundThread::BackgroundThread() = default;
 
 BackgroundThread::~BackgroundThread() = default;
 
@@ -44,62 +32,13 @@ void BackgroundThread::dispose() {
   // Stop the run
   stop();
   // Join the thread
-  join();
-  // Close unclosed sockets
-  sockets_.clear();
-  // Now close the rest control pipe
-  closeStopSignal();
-}
-
-void BackgroundThread::join() {
   daemonThread_.join();
 }
 
-#ifdef _WIN32
-void BackgroundThread::initStopSignal() {
-  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
-  if (ghStopEvent_ == NULL) {
-    TORCH_CHECK(
-        false,
-        "Failed to create the control pipe to start the "
-        "BackgroundThread run");
-  }
+void BackgroundThread::start() {
+  daemonThread_ = std::thread{&BackgroundThread::run, this};
+  is_running_.store(true);
 }
-
-void BackgroundThread::closeStopSignal() {
-  CloseHandle(ghStopEvent_);
-}
-
-void BackgroundThread::stop() {
-  SetEvent(ghStopEvent_);
-}
-#else
-void BackgroundThread::initStopSignal() {
-  if (pipe(controlPipeFd_.data()) == -1) {
-    TORCH_CHECK(
-        false,
-        "Failed to create the control pipe to start the "
-        "BackgroundThread run");
-  }
-}
-
-void BackgroundThread::closeStopSignal() {
-  for (int fd : controlPipeFd_) {
-    if (fd != -1) {
-      ::close(fd);
-    }
-  }
-}
-
-void BackgroundThread::stop() {
-  if (controlPipeFd_[1] != -1) {
-    ::write(controlPipeFd_[1], "\0", 1);
-    // close the write end of the pipe
-    ::close(controlPipeFd_[1]);
-    controlPipeFd_[1] = -1;
-  }
-}
-#endif
 
 // Separate thread that is only launched on master
 class TCPStoreMasterDaemon : public BackgroundThread {
@@ -108,16 +47,25 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 
   ~TCPStoreMasterDaemon() override;
 
-  std::uint16_t port() const override;
+  uint16_t port() const override;
+
+ protected:
+  void run() override;
+  void stop() override;
 
  private:
-  void run();
+  void initStopSignal();
+  void closeStopSignal();
+
   void queryFds(std::vector<struct pollfd>& fds);
   void query(int socket);
+
   void clearSocketWaitState(int socket);
 
   // The master runs on a single thread so only
   // one handler can be executed at a time
+  void validateHandler(int socket);
+  void pingHandler(int socket);
   void setHandler(int socket);
   void compareSetHandler(int socket);
   void addHandler(int socket);
@@ -130,6 +78,9 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   void multiGetHandler(int socket);
   void multiSetHandler(int socket);
   void cancelWaitHandler(int socket);
+  void addMiscellaneousSocket(int socket);
+  void removeMiscellaneousSocket(int socket);
+  bool isMiscellaneousSocket(int socket);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
   // Helper function to alerts waiting workers, used in setHandler, getHandler
@@ -141,21 +92,98 @@ class TCPStoreMasterDaemon : public BackgroundThread {
   std::unordered_map<std::string, std::vector<int>> waitingSockets_;
   // From socket -> number of keys awaited
   std::unordered_map<int, size_t> keysAwaited_;
+  // miscellaneous sockets
+  std::unordered_set<int> miscellaneousSockets_;
+
+  Socket storeListenSocket_;
+  std::vector<Socket> sockets_{};
+#ifdef _WIN32
+  const std::chrono::milliseconds checkTimeout_ = std::chrono::milliseconds{10};
+  HANDLE ghStopEvent_{};
+#else
+  std::array<int, 2> controlPipeFd_{-1, -1};
+#endif
 };
 
 // Simply start the daemon thread
 TCPStoreMasterDaemon::TCPStoreMasterDaemon(Socket&& storeListenSocket)
-    : BackgroundThread{std::move(storeListenSocket)} {
-  daemonThread_ = std::thread{&TCPStoreMasterDaemon::run, this};
+    : storeListenSocket_{std::move(storeListenSocket)} {
+  initStopSignal();
 }
 
 TCPStoreMasterDaemon::~TCPStoreMasterDaemon() {
   dispose();
+  // it's now safe for us to cleanup
+  // Close unclosed sockets
+  sockets_.clear();
+  // Now close the rest control pipe
+  closeStopSignal();
 }
 
 std::uint16_t TCPStoreMasterDaemon::port() const {
   return storeListenSocket_.port();
 }
+
+#ifdef _WIN32
+void TCPStoreMasterDaemon::initStopSignal() {
+  ghStopEvent_ = CreateEvent(NULL, TRUE, FALSE, NULL);
+  if (ghStopEvent_ == NULL) {
+    TORCH_CHECK(
+        false,
+        "Failed to create the control pipe to start the "
+        "BackgroundThread run");
+  }
+}
+
+void TCPStoreMasterDaemon::closeStopSignal() {
+  CloseHandle(ghStopEvent_);
+}
+
+void TCPStoreMasterDaemon::stop() {
+  SetEvent(ghStopEvent_);
+}
+
+#else
+void TCPStoreMasterDaemon::initStopSignal() {
+  if (pipe(controlPipeFd_.data()) == -1) {
+    TORCH_CHECK(
+        false,
+        "Failed to create the control pipe to start the "
+        "BackgroundThread run");
+  }
+}
+
+void TCPStoreMasterDaemon::closeStopSignal() {
+  for (int fd : controlPipeFd_) {
+    if (fd != -1) {
+      ::close(fd);
+    }
+  }
+}
+
+void TCPStoreMasterDaemon::stop() {
+  if (controlPipeFd_[1] != -1) {
+    ssize_t written_bytes = -1;
+    while (true) {
+      written_bytes = ::write(controlPipeFd_[1], "\0", 1);
+      if (written_bytes < 0) {
+        if (errno == EAGAIN) {
+          continue;
+        }
+        TORCH_CHECK(false, "Failed to write the control pipe:", errno);
+      }
+      break;
+    }
+    if (written_bytes == 0) {
+      TORCH_CHECK(false, "Failed to write the control pipe");
+    }
+
+    // close the write end of the pipe
+    ::close(controlPipeFd_[1]);
+    controlPipeFd_[1] = -1;
+  }
+}
+#endif
 
 void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
   // Skipping the fds[0] and fds[1],
@@ -179,8 +207,10 @@ void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
       // we hit an exception here.
       clearSocketWaitState(fds[fdIdx].fd);
 
-      fds.erase(fds.begin() + fdIdx);
-      sockets_.erase(sockets_.begin() + fdIdx - CONNECT_SOCKET_OFFSET);
+      fds.erase(fds.begin() + static_cast<std::ptrdiff_t>(fdIdx));
+      sockets_.erase(
+          sockets_.begin() + static_cast<std::ptrdiff_t>(fdIdx) -
+          CONNECT_SOCKET_OFFSET);
       --fdIdx;
       continue;
     }
@@ -218,9 +248,23 @@ void TCPStoreMasterDaemon::clearSocketWaitState(int socket) {
 // or, in the case of wait
 // type of query | number of args | size of arg1 | arg1 | ...
 void TCPStoreMasterDaemon::query(int socket) {
-  QueryType qt;
+  QueryType qt{};
   tcputil::recvBytes<QueryType>(socket, &qt, 1);
-  if (qt == QueryType::SET) {
+
+  if (isMiscellaneousSocket(socket)) {
+    removeMiscellaneousSocket(socket);
+    if (qt == QueryType::VALIDATE) {
+      validateHandler(socket);
+    } else {
+      // real miscellaneous client: the first msg is not VALIDATE
+      TORCH_CHECK(
+          false, "Miscellaneous client without VALIDATE query is detected");
+    }
+
+  } else if (qt == QueryType::PING) {
+    pingHandler(socket);
+
+  } else if (qt == QueryType::SET) {
     setHandler(socket);
 
   } else if (qt == QueryType::COMPARE_SET) {
@@ -275,6 +319,22 @@ void TCPStoreMasterDaemon::doSet(
   tcpStore_[key] = newData;
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
+}
+
+void TCPStoreMasterDaemon::validateHandler(int socket) {
+  uint32_t validateNumber = 0;
+  tcputil::recvBytes<uint32_t>(socket, &validateNumber, 1);
+  if (validateNumber != detail::validationMagicNumber) {
+    TORCH_CHECK(
+        false,
+        "Miscellaneous client with incorrect VALIDATE query is detected");
+  }
+}
+
+void TCPStoreMasterDaemon::pingHandler(int socket) {
+  uint32_t nonce = 0;
+  tcputil::recvBytes<uint32_t>(socket, &nonce, 1);
+  tcputil::sendValue<uint32_t>(socket, nonce);
 }
 
 void TCPStoreMasterDaemon::setHandler(int socket) {
@@ -333,13 +393,13 @@ void TCPStoreMasterDaemon::getHandler(int socket) const {
 }
 
 void TCPStoreMasterDaemon::getNumKeysHandler(int socket) const {
-  tcputil::sendValue<int64_t>(socket, tcpStore_.size());
+  tcputil::sendValue<size_t>(socket, tcpStore_.size());
 }
 
 void TCPStoreMasterDaemon::deleteHandler(int socket) {
   std::string key = tcputil::recvString(socket);
   auto numDeleted = tcpStore_.erase(key);
-  tcputil::sendValue<int64_t>(socket, numDeleted);
+  tcputil::sendValue<size_t>(socket, numDeleted);
 }
 
 void TCPStoreMasterDaemon::checkHandler(int socket) const {
@@ -429,6 +489,23 @@ bool TCPStoreMasterDaemon::checkKeys(
   });
 }
 
+void TCPStoreMasterDaemon::addMiscellaneousSocket(int socket) {
+  if (miscellaneousSockets_.find(socket) == miscellaneousSockets_.end()) {
+    miscellaneousSockets_.insert(socket);
+  }
+}
+
+void TCPStoreMasterDaemon::removeMiscellaneousSocket(int socket) {
+  auto it = miscellaneousSockets_.find(socket);
+  if (it != miscellaneousSockets_.end()) {
+    miscellaneousSockets_.erase(it);
+  }
+}
+
+bool TCPStoreMasterDaemon::isMiscellaneousSocket(int socket) {
+  return miscellaneousSockets_.find(socket) != miscellaneousSockets_.end();
+}
+
 #ifdef _WIN32
 void TCPStoreMasterDaemon::run() {
   std::vector<struct pollfd> fds;
@@ -457,9 +534,8 @@ void TCPStoreMasterDaemon::run() {
     // accept new connections.
     if (fds[0].revents != 0) {
       if (!(fds[0].revents & POLLIN)) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
+        C10_THROW_ERROR(
+            DistStoreError,
             "Unexpected poll revent on the master's listening socket: " +
                 std::to_string(fds[0].revents));
       }
@@ -467,65 +543,77 @@ void TCPStoreMasterDaemon::run() {
       int rawSocket = socket.handle();
       sockets_.emplace_back(std::move(socket));
       tcputil::addPollfd(fds, rawSocket, POLLIN);
+      addMiscellaneousSocket(rawSocket);
     }
     queryFds(fds);
   }
 }
 #else
 void TCPStoreMasterDaemon::run() {
-  std::vector<struct pollfd> fds;
-  tcputil::addPollfd(fds, storeListenSocket_.handle(), POLLIN);
-  // Although we haven't found any documentation or literature describing this,
-  // we've seen cases that, under certain circumstances, the read end of the
-  // pipe won't receive POLLHUP when the write end is closed. However, under
-  // the same circumstances, writing to the pipe will guarantee POLLIN to be
-  // received on the read end.
-  //
-  // For more reliable termination, the main thread will write a byte to the
-  // pipe before closing it, and the background thread will poll for both
-  // POLLIN and POLLHUP.
-  tcputil::addPollfd(fds, controlPipeFd_[0], POLLIN | POLLHUP);
+  try {
+    c10::setThreadName("pt_tcpstore");
 
-  // receive the queries
-  bool finished = false;
-  while (!finished) {
-    for (const auto i : c10::irange(sockets_.size())) {
-      fds[i].revents = 0;
-    }
+    std::vector<struct pollfd> fds;
+    tcputil::addPollfd(fds, storeListenSocket_.handle(), POLLIN);
+    // Although we haven't found any documentation or literature describing
+    // this, we've seen cases that, under certain circumstances, the read end of
+    // the pipe won't receive POLLHUP when the write end is closed. However,
+    // under the same circumstances, writing to the pipe will guarantee POLLIN
+    // to be received on the read end.
+    //
+    // For more reliable termination, the main thread will write a byte to the
+    // pipe before closing it, and the background thread will poll for both
+    // POLLIN and POLLHUP.
+    tcputil::addPollfd(fds, controlPipeFd_[0], POLLIN | POLLHUP);
 
-    SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
-
-    // TCPStore's listening socket has an event and it should now be able to
-    // accept new connections.
-    if (fds[0].revents != 0) {
-      if (fds[0].revents ^ POLLIN) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
-            "Unexpected poll revent on the master's listening socket: " +
-                std::to_string(fds[0].revents));
+    // receive the queries
+    bool finished = false;
+    while (!finished) {
+      for (const auto i : c10::irange(sockets_.size())) {
+        fds[i].revents = 0;
       }
-      Socket socket = storeListenSocket_.accept();
-      int rawSocket = socket.handle();
-      sockets_.emplace_back(std::move(socket));
-      tcputil::addPollfd(fds, rawSocket, POLLIN);
-    }
 
-    // The pipe receives an event which tells us to shutdown the daemon
-    if (fds[1].revents != 0) {
-      // The main thread will write a byte to the pipe then close it before
-      // joining the background thread
-      if (fds[1].revents & ~(POLLIN | POLLHUP)) {
-        throw std::system_error(
-            ECONNABORTED,
-            std::system_category(),
-            "Unexpected poll revent on the control pipe's reading fd: " +
-                std::to_string(fds[1].revents));
+      SYSCHECK_ERR_RETURN_NEG1(::poll(fds.data(), fds.size(), -1));
+
+      // TCPStore's listening socket has an event and it should now be able to
+      // accept new connections.
+      if (fds[0].revents != 0) {
+        if (fds[0].revents ^ POLLIN) {
+          C10_THROW_ERROR(
+              DistStoreError,
+              "Unexpected poll revent on the master's listening socket: " +
+                  std::to_string(fds[0].revents));
+        }
+        Socket socket = storeListenSocket_.accept();
+        int rawSocket = socket.handle();
+        sockets_.emplace_back(std::move(socket));
+        tcputil::addPollfd(fds, rawSocket, POLLIN);
+        // all clients are miscellaneous before getting its validation query
+        addMiscellaneousSocket(rawSocket);
       }
-      finished = true;
-      break;
+
+      // The pipe receives an event which tells us to shutdown the daemon
+      if (fds[1].revents != 0) {
+        // The main thread will write a byte to the pipe then close it before
+        // joining the background thread
+        if (fds[1].revents & ~(POLLIN | POLLHUP)) {
+          C10_THROW_ERROR(
+              DistStoreError,
+              "Unexpected poll revent on the control pipe's reading fd: " +
+                  std::to_string(fds[1].revents));
+        }
+        finished = true;
+        break;
+      }
+      queryFds(fds);
     }
-    queryFds(fds);
+  } catch (const std::exception& ex) {
+    C10D_ERROR(
+        "TCPStoreMasterDaemon::run() failed with exception: ", ex.what());
+    throw;
+  } catch (...) {
+    C10D_ERROR("TCPStoreMasterDaemon::run() failed with unknown exception");
+    throw;
   }
 }
 #endif
@@ -539,5 +627,4 @@ std::unique_ptr<BackgroundThread> create_tcpstore_backend(
   return std::make_unique<TCPStoreMasterDaemon>(std::move(socket));
 }
 
-} // namespace detail
-} // namespace c10d
+} // namespace c10d::detail

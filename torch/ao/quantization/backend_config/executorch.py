@@ -9,12 +9,12 @@ import torch.ao.nn.qat as nnqat
 import torch.ao.nn.quantized.reference as nnqr
 import torch.nn as nn
 import torch.nn.functional as F
-
-from ..fuser_method_mappings import (
+from torch.ao.quantization.fuser_method_mappings import (
     _sequential_wrapper2,
     fuse_conv_bn,
     fuse_conv_bn_relu,
 )
+
 from ._common_operator_config_utils import _Conv2dMetadata
 from .backend_config import (
     BackendConfig,
@@ -311,12 +311,19 @@ def _get_binary_ops_configs() -> List[BackendPatternConfig]:
         2: ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
     }
     binary_op_configs: List[BackendPatternConfig] = []
-    for op in [operator.add, torch.add, operator.sub, torch.sub, operator.mul, torch.mul]:
+    for op in [
+        operator.add,
+        torch.add,
+        operator.sub,
+        torch.sub,
+        operator.mul,
+        torch.mul,
+    ]:
         bop_patterns = [
             (op, torch.nn.ReLU),
             (op, torch.nn.functional.relu),
             (op, torch.relu),
-            op
+            op,
         ]
         for bop_pattern in bop_patterns:
             binary_op_configs.append(
@@ -345,6 +352,7 @@ def _get_share_qparams_ops_configs() -> List[BackendPatternConfig]:
         executorch_default_op_quint8_dtype_config,
     ]
     share_qparams_ops = [
+        torch.nn.Flatten,
         F.adaptive_avg_pool2d,
         F.elu,
         F.hardtanh,
@@ -469,7 +477,6 @@ def _get_embedding_op_configs() -> List[BackendPatternConfig]:
             ._set_input_type_to_index({"weight": 1})
         )
     return embedding_op_configs
-
 
 
 # =====================

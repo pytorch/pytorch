@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <ATen/ATen.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/jit.h>
@@ -110,7 +111,7 @@ TEST(ArgumentSpecTest, CompleteArgumentSpec_CUDA) {
 // }
 
 // TEST(ArgumentSpecTest, VaryingShape) {
-//   c10::VaryingShape<int64_t> vs(c10::optional<size_t>{});
+//   c10::VaryingShape<int64_t> vs(std::optional<size_t>{});
 //   auto ptt_empty1 = TensorType::create({}, {}, vs, vs, false);
 //   auto ptt_empty2 = TensorType::create({}, {}, vs, vs, false);
 //   ASSERT_EQ(hashCode(ptt_empty1), hashCode(ptt_empty2));

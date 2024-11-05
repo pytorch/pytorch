@@ -1,10 +1,11 @@
+import operator_benchmark as op_bench
+
 import torch
 
-import operator_benchmark as op_bench
 
 """Microbenchmarks for the quantized interpolate op.
 
-Note: We are not benchmarking `upsample` as it is being depricated, and calls
+Note: We are not benchmarking `upsample` as it is being deprecated, and calls
 the `interpolate` anyway.
 """
 

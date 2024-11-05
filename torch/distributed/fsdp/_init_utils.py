@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import itertools
 import os
@@ -15,6 +16,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -25,6 +27,7 @@ import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.distributed.fsdp.fully_sharded_data_parallel as fsdp_file
 import torch.nn as nn
 from torch.distributed.algorithms._comm_hooks import default_hooks
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.fsdp._common_utils import (
     _FSDPDeviceHandle,
@@ -34,6 +37,12 @@ from torch.distributed.fsdp._common_utils import (
     _named_parameters_with_duplicates,
     clean_tensor_name,
     TrainingState,
+)
+from torch.distributed.fsdp._flat_param import (
+    _FSDP_USE_FULL_PREC_IN_EVAL,
+    FlatParameter,
+    FlatParamHandle,
+    HandleShardingStrategy,
 )
 from torch.distributed.fsdp._limiter_utils import _FreeEventQueue
 from torch.distributed.fsdp.api import (
@@ -46,15 +55,14 @@ from torch.distributed.fsdp.api import (
     StateDictConfig,
     StateDictType,
 )
-from torch.distributed.fsdp.flat_param import (
-    _FSDP_USE_FULL_PREC_IN_EVAL,
-    FlatParameter,
-    FlatParamHandle,
-    HandleShardingStrategy,
-)
-from torch.distributed.fsdp.wrap import _FSDPPolicy
+from torch.distributed.fsdp.wrap import _Policy
+from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.utils import _sync_params_and_buffers
-from torch.utils.hooks import RemovableHandle
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 _TORCHDISTX_AVAIL = True
 try:
@@ -78,10 +86,10 @@ SHARDING_STRATEGY_MAP = {
     ShardingStrategy.HYBRID_SHARD: HandleShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2: HandleShardingStrategy._HYBRID_SHARD_ZERO2,
 }
-HYBRID_SHARDING_STRATEGIES = {
+HYBRID_SHARDING_STRATEGIES = [
     ShardingStrategy.HYBRID_SHARD,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
-}
+]
 NO_RESHARD_AFTER_FORWARD_STRATEGIES = (
     ShardingStrategy.SHARD_GRAD_OP,
     ShardingStrategy._HYBRID_SHARD_ZERO2,
@@ -97,34 +105,71 @@ def _init_process_group_state(
     state: _FSDPState,
     process_group: ProcessGroupType,
     sharding_strategy: ShardingStrategy,
-    policy: Optional[_FSDPPolicy],
+    policy: Optional[_Policy],
+    device_mesh: Optional[DeviceMesh] = None,
 ) -> _FSDPState:
-    if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
-        if process_group is None and policy is None:
+    if process_group is not None and device_mesh is not None:
+        raise ValueError(
+            "Cannot pass both process_group and device_mesh at the "
+            "same time. Please just pass only one of them."
+        )
+    is_hybrid_strategy = sharding_strategy in HYBRID_SHARDING_STRATEGIES
+    if is_hybrid_strategy:
+        if process_group is None and policy is None and device_mesh is None:
             # Raise an error here, since this is manual wrapping with no process group
             # passed in, there is no way to ensure all wrapped FSDP instances use the same
             # process groups.
             raise ValueError(
-                f"Manual wrapping with {sharding_strategy} requires explicit specification of process group."
+                f"Manual wrapping with {sharding_strategy} "
+                "requires explicit specification of process group or device_mesh."
             )
         else:
-            state = _init_process_group_state_for_hybrid_shard(state, process_group)
+            state = _init_process_group_state_for_hybrid_shard(
+                state, process_group, device_mesh
+            )
     else:
-        state.process_group = (
-            process_group if process_group is not None else _get_default_group()
-        )
+        if device_mesh:
+            state._device_mesh = device_mesh
+            state.process_group = device_mesh.get_group(mesh_dim=0)
+        else:
+            state.process_group = (
+                process_group if process_group is not None else _get_default_group()
+            )
 
     state.rank = state.process_group.rank()
     state.world_size = state.process_group.size()
-
+    data_parallel_world_size = state.world_size
+    if is_hybrid_strategy:
+        data_parallel_world_size *= state._inter_node_pg.size()
+    state._gradient_predivide_factor = (
+        default_hooks.DefaultState._get_gradient_predivide_factor(
+            data_parallel_world_size
+        )
+    )
+    state._gradient_postdivide_factor = (
+        data_parallel_world_size / state._gradient_predivide_factor
+    )
     return state
 
 
 @no_type_check
 def _init_process_group_state_for_hybrid_shard(
-    state: _FSDPState, process_group
+    state: _FSDPState,
+    process_group: ProcessGroupType,
+    device_mesh: DeviceMesh,
 ) -> _FSDPState:
-    if process_group is None:
+    if device_mesh:
+        if _is_valid_hybrid_shard_device_mesh(device_mesh):
+            state._device_mesh = device_mesh
+            # We currently only allow _inter_node_pg to be the outermost dimension, and the
+            # process_group(intra_node) to be the innermost dimension.
+            state._inter_node_pg = device_mesh.get_group(mesh_dim=0)
+            state.process_group = device_mesh.get_group(mesh_dim=1)
+        else:
+            raise ValueError(
+                f"Expected device_mesh to have ndim=2 but got {device_mesh.ndim}"
+            )
+    elif process_group is None:
         default_group = _get_default_group()
         intra_node_group, inter_node_group = _init_intra_and_inter_node_groups(
             default_group, state._device_handle.device_count()
@@ -161,15 +206,21 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
 
 
 @no_type_check
+def _is_valid_hybrid_shard_device_mesh(device_mesh: DeviceMesh) -> bool:
+    return isinstance(device_mesh, DeviceMesh) and device_mesh.ndim == 2
+
+
+@no_type_check
 def _init_intra_node_process_group(num_devices_per_node: int) -> dist.ProcessGroup:
     """
-    Returns a process group across the current node.
+    Return a process group across the current node.
+
     For example, given each row is a distinct node:
-    0 1 2 3 4 5 6 7 8
-    9 10 11 12 13 14 15
+    0  1  2  3  4  5  6  7
+    8  9 10 11 12 13 14 15
     This API would return an intra-node subgroup across
-    [0, 7] or [8, 15] depending on the process's rank.
-    For example, rank 3 would get [0, 7].
+    [0, 1, ..., 7] or [8, 9, ..., 15] depending on the process's rank.
+    For example, rank 3 would get [0, 1, ..., 7].
     """
     intra_node_subgroup, _ = dist.new_subgroups(num_devices_per_node)
     return intra_node_subgroup
@@ -181,13 +232,14 @@ def _init_inter_node_process_group(
     num_devices_per_node: int,
 ) -> dist.ProcessGroup:
     """
-    Returns an inter-node process group where each contained rank has
-    the same local rank. For example, given each row is a distinct node:
-    0 1 2 3 4 5 6 7 8
-    9 10 11 12 13 14 15
-    This API would return inter-node process group {0, 8}, {1, 9}, {2, 10}, and so forth
-    depending on the process's rank. For example, rank 1 would get {1, 9}, rank 5
-    would get {5, 13}.
+    Return an inter-node process group where each contained rank has the same local rank.
+
+    For example, given each row is a distinct node:
+    0  1  2  3  4  5  6  7
+    8  9 10 11 12 13 14 15
+    This API would return inter-node process group [0, 8], [1, 9], [2, 10], and so forth
+    depending on the process's rank. For example, rank 1 would get [1, 9], rank 5
+    would get [5, 13].
     """
     # the inter-node pg that is returned
     inter_node_pg = None
@@ -216,8 +268,8 @@ def _init_intra_and_inter_node_groups(
     num_devices_per_node: int,
 ) -> Tuple[dist.ProcessGroup, dist.ProcessGroup]:
     """
-    Initializes intra and inter-node process groups and returns the ones corresponding
-    to this process's rank.
+    Initialize intra and inter-node process groups and return the ones corresponding to this process's rank.
+
     This function can be used to initialize process groups for ``HYBRID_SHARD`` or
     ``_HYBRID_SHARD_ZERO2`` in FSDP.
     This function assumes each node has an equal number of CUDA-enabled devices.
@@ -265,6 +317,10 @@ def _init_ignored_module_states(
         state._ignored_modules,
         ignored_parameters,
     )
+    state._ignored_buffer_names = _get_ignored_buffer_names(
+        module,
+        state._ignored_modules,
+    )
     # TODO: FSDP's contract for buffers is not well-defined. They are
     # implicitly ignored for most functionality since they are not sharded;
     # however, FSDP still imposes some semantics on buffers (e.g. buffer mixed
@@ -277,8 +333,9 @@ def _check_ignored_states(
     ignored_states: List[Any], passed_as_ignored_states: bool
 ) -> None:
     """
-    Checks that the ignored states are uniformly parameters or uniformly
-    modules. We may remove this check in the future if we permit mixing.
+    Check that the ignored states are uniformly parameters or uniformly modules.
+
+    We may remove this check in the future if we permit mixing.
     """
     if len(ignored_states) == 0:
         return
@@ -287,18 +344,14 @@ def _check_ignored_states(
         all_modules = all(isinstance(state, nn.Module) for state in ignored_states)
         if not all_params and not all_modules:
             # Sort for consistent ordering for unit test regex matching
-            sorted_types = sorted(
-                {type(state) for state in ignored_states}, key=lambda x: repr(x)
-            )
+            sorted_types = sorted({type(state) for state in ignored_states}, key=repr)
             raise ValueError(
                 "ignored_states expects all nn.Parameter or all nn.Module list "
                 f"elements but got types {sorted_types}"
             )
     else:
         if not all(isinstance(state, nn.Module) for state in ignored_states):
-            sorted_types = sorted(
-                {type(state) for state in ignored_states}, key=lambda x: repr(x)
-            )
+            sorted_types = sorted({type(state) for state in ignored_states}, key=repr)
             raise ValueError(
                 "ignored_modules expects nn.Module list elements but got "
                 f"types {sorted_types}"
@@ -313,10 +366,14 @@ def _init_device_handle(
     device_id: Optional[Union[int, torch.device]],
 ) -> _FSDPState:
     """
-    Determines device handle used for initializing FSDP. If a device is specified by ``device_id``,
+    Determine device handle used for initializing FSDP.
+
+    If a device is specified by ``device_id``,
     then returns device handle corresponds to that device type. Otherwise, If the
     module is already on a non-CPU device, then the device type is that non-CPU device type.
-    If the module is on CPU or meta, then the device type is the current cuda device.
+    If the module is on CPU or meta, then the device type is the current accelerator device.
+    See the :ref:`Accelerators<accelerators>` for details.
+
 
     This method will be called once ignored paramters was determined, as the device handle maybe needed
     for other initialization.
@@ -340,9 +397,11 @@ def _init_device_handle(
                         f"FSDP does not support modules with different device types "
                         f"but got params on {determined_device.type} and {param.device.type}"
                     )
-        determined_device = determined_device or torch.device(
-            "cuda", torch.cuda.current_device()
-        )
+        determined_device = determined_device or torch._C._get_accelerator()
+        if determined_device.type == "cpu":
+            raise RuntimeError(
+                "FSDP needs a non-CPU accelerator device, but no accelerator device is detected."
+            )
 
     state._device_handle = _FSDPDeviceHandle.from_device(determined_device)
     return state
@@ -388,6 +447,15 @@ def _init_core_state(
                 "the world size is 1."
             )
         sharding_strategy = ShardingStrategy.NO_SHARD
+    elif sharding_strategy == ShardingStrategy.NO_SHARD:
+        warnings.warn(
+            "The `NO_SHARD` sharding strategy is deprecated. If having issues, "
+            "please use `DistributedDataParallel` instead.",
+            FutureWarning,
+            # Level 1 is here, level 2 is from `FullyShardedDataParallel`, and
+            # level 3 is from the true caller
+            stacklevel=3,
+        )
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
     state.mixed_precision = mixed_precision or MixedPrecision()
     if mixed_precision is not None:
@@ -409,13 +477,14 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
+    state._unshard_event = None
     # Mapping from fully sharded module to the handles it is responsible to
     # unshard and reshard (see [Note: Fully Sharded Module])
-    _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = dict()
+    _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = {}
     state._fully_sharded_module_to_handle = _fully_sharded_module_to_handle
     # Invariant: `state.params` contains exactly the `FlatParameter`s of the
     # handles in `state._handle`
-    _handle: FlatParamHandle = None
+    _handle: Optional[FlatParamHandle] = None
     state._handle = _handle
     params: List[FlatParameter] = []
     state.params = params
@@ -433,12 +502,9 @@ def _init_runtime_state(
     _post_forward_handles: List[RemovableHandle] = []
     state._post_forward_handles = _post_forward_handles
     state._sync_gradients = True
-    state._communication_hook = _get_default_comm_hook(state.sharding_strategy)
-    state._communication_hook_state = _get_default_comm_hook_state(state.process_group)
-    state._hook_registered = False
+    state._comm_hook = None
+    state._comm_hook_state = None
     # Used to prevent running the pre-backward hook multiple times
-    _ran_pre_backward_hook: Dict[FlatParamHandle, bool] = {}
-    state._ran_pre_backward_hook = _ran_pre_backward_hook
     return state
 
 
@@ -455,6 +521,23 @@ def _init_prefetching_state(
     return state
 
 
+@no_type_check
+def _init_extension(state: _FSDPState, device_mesh: DeviceMesh = None) -> _FSDPState:
+    # TODO: we need to add additional check once we support FSDP + PiPPy.
+    # This check is currently sufficient, since we only support FSDP + TP.
+    root_mesh = _mesh_resources.get_root_mesh(device_mesh)
+    # if a root mesh is not the same as device_mesh,
+    # meaning the device_mesh is sliced out from the root mesh.
+    if device_mesh and root_mesh != state._device_mesh:
+        state._fsdp_extension = DTensorExtensions(state._device_handle)
+    else:
+        # We need to explicilty set _fsdp_extension to None.
+        # Otherwise, we will run into an infinite recursion when getting the attribute.
+        state._fsdp_extension = None
+    return state
+
+
+@no_type_check
 def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_type = StateDictType.FULL_STATE_DICT
     state_dict_config: StateDictConfig = FullStateDictConfig()
@@ -462,7 +545,27 @@ def _init_state_dict_state(state: _FSDPState) -> _FSDPState:
     state._state_dict_config = state_dict_config
     unshard_params_ctx: Dict[nn.Module, Generator] = {}
     state._unshard_params_ctx = unshard_params_ctx
+
     return state
+
+
+def _verify_managed_params(module: nn.Module, params: List[nn.Parameter]) -> None:
+    """
+    Verify if the parameters are accepted by FSDP. The only restriction now
+    is that the parameter cannot be a scalar tensor (param.shape == []).
+    """
+    for param in params:
+        if len(param.shape) == 0:
+            param_name = ""
+            for name, param_ in module.named_parameters():
+                if param is param_:
+                    param_name = name
+                    break
+            assert param_name
+            raise ValueError(
+                "FSDP doesn't support salar parameters. "
+                f"Change {param_name} to a 1D tensor with numel equal to 1."
+            )
 
 
 @no_type_check
@@ -473,39 +576,63 @@ def _init_param_handle_from_module(
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
 ) -> _FSDPState:
-    """
-    Initializes a ``FlatParamHandle`` from a module ``fully_sharded_module``.
-    """
+    """Initialize a ``FlatParamHandle`` from a module ``fully_sharded_module``."""
     _check_single_device_module(fully_sharded_module, state._ignored_params, device_id)
-    device_from_device_id = _get_device_from_device_id(device_id, state.rank)
+    device_from_device_id = _get_device_from_device_id(
+        device_id, state.rank, state._device_handle
+    )
     is_meta_module, is_torchdistX_deferred_init = _need_to_materialize_module(
         fully_sharded_module, state._ignored_params, state._ignored_modules
     )
     # Materialize the module if needed
     if (is_meta_module or is_torchdistX_deferred_init) and param_init_fn is not None:
-        _materialize_with_param_init_fn(fully_sharded_module, param_init_fn)
+        _materialize_with_param_init_fn(
+            fully_sharded_module, param_init_fn, state._ignored_modules
+        )
     elif is_meta_module:
-        _materialize_meta_module(fully_sharded_module, device_id)
+        _materialize_meta_module(
+            fully_sharded_module,
+            device_id,
+            state._ignored_modules,
+            state._device_handle,
+        )
     elif is_torchdistX_deferred_init:
         deferred_init.materialize_module(
             fully_sharded_module,
-            check_fn=lambda k: _get_module_fsdp_state(k) is None,
+            check_fn=lambda submodule: _get_module_fsdp_state(submodule) is None
+            and submodule not in state._ignored_modules,
         )
+
+    ignored_buffers = {
+        buffer
+        for ignored_module in state._ignored_modules
+        for buffer in ignored_module.buffers()
+    }
+
     _move_module_to_device(
-        fully_sharded_module, state._ignored_params, device_from_device_id
+        fully_sharded_module,
+        state._ignored_params,
+        ignored_buffers,
+        device_from_device_id,
     )
     state.compute_device = _get_compute_device(
         fully_sharded_module,
         state._ignored_params,
         device_from_device_id,
         state.rank,
+        state._device_handle,
     )
 
     managed_params = list(_get_orig_params(fully_sharded_module, state._ignored_params))
+    _verify_managed_params(fully_sharded_module, managed_params)
     if sync_module_states:
         _sync_module_params_and_buffers(
             fully_sharded_module, managed_params, state.process_group
         )
+        if state.sharding_strategy in HYBRID_SHARDING_STRATEGIES:
+            _sync_module_params_and_buffers(
+                fully_sharded_module, managed_params, state._inter_node_pg
+            )
     _init_param_handle_from_params(state, managed_params, fully_sharded_module)
     return state
 
@@ -529,6 +656,7 @@ def _init_param_handle_from_params(
         state.mixed_precision.keep_low_precision_grads,
         state.process_group,
         state._use_orig_params,
+        fsdp_extension=state._fsdp_extension,
     )
     handle.shard()
     assert not state._handle
@@ -545,8 +673,9 @@ def _get_ignored_modules(
     _ignored_modules: Optional[Iterable[torch.nn.Module]],
 ) -> Set[nn.Module]:
     """
-    Checks that ``_ignored_modules`` is an iterable of ``nn.Module`` s without
-    any FSDP instances, and returns the modules contained in their module
+    Check that ``_ignored_modules`` is an iterable of ``nn.Module`` s without any FSDP instances.
+
+    Return the modules contained in their module
     subtrees as a :class:`set`. Nested FSDP instances are excluded, but their
     already-computed ignored modules are included.
 
@@ -602,8 +731,9 @@ def _get_ignored_params(
     ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
 ) -> Set[torch.nn.Parameter]:
     """
-    Returns the parameters of the modules in ``ignored_modules`` and
-    the parameters in ``ignored_parameters``, excluding any :class:`FlatParameter` s.
+    Return the parameters of the modules in ``ignored_modules`` and the parameters in ``ignored_parameters``.
+
+    :class:`FlatParameter` s are excluded from the result.
     """
     all_ignored_params: Set[torch.nn.Parameter] = set()
 
@@ -629,11 +759,37 @@ def _get_ignored_params(
     return all_ignored_params
 
 
+def _get_ignored_buffer_names(
+    root_module: torch.nn.Module,
+    ignored_modules: Set[torch.nn.Module],
+) -> Set[str]:
+    """Return the cleaned buffer FQNs in ``ignored_modules``."""
+    all_ignored_buffer_names: Set[str] = set()
+
+    buffers_in_ignored_modules = {
+        buffer for m in ignored_modules for buffer in m.buffers()
+    }
+
+    all_ignored_buffer_names.update(
+        {
+            clean_tensor_name(buffer_name)
+            for buffer_name, buffer in root_module.named_buffers()
+            if buffer in buffers_in_ignored_modules
+        }
+    )
+
+    # Always include nested FSDP modules' ignored buffer names
+    for submodule in root_module.modules():
+        optional_fsdp_state = _get_module_fsdp_state(submodule)
+        if optional_fsdp_state is not None:
+            assert hasattr(optional_fsdp_state, "_ignored_buffer_names")
+            all_ignored_buffer_names.update(optional_fsdp_state._ignored_buffer_names)
+
+    return all_ignored_buffer_names
+
+
 def _get_buffer_names(root_module: nn.Module) -> Set[str]:
-    """
-    Returns the fully prefixed names of all buffers in the module hierarchy
-    rooted at ``root_module`` as a class:`set`.
-    """
+    """Return the fully prefixed names of all buffers in the module hierarchy rooted at ``root_module`` as a class:`set`."""
     return {
         clean_tensor_name(buffer_name) for buffer_name, _ in root_module.named_buffers()
     }
@@ -645,8 +801,9 @@ def _check_single_device_module(
     device_id: Optional[Union[int, torch.device]],
 ) -> None:
     """
-    Raises an error if ``module`` has original parameters on multiple devices,
-    ignoring the parameters in ``ignored_params``. Thus, after this method, the
+    Raise an error if ``module`` has original parameters on multiple devices, ignoring the parameters in ``ignored_params``.
+
+    Thus, after this method, the
     module must be either fully on the CPU or fully on a non-CPU device.
     """
     devices = {param.device for param in _get_orig_params(module, ignored_params)}
@@ -671,8 +828,11 @@ def _check_single_device_module(
 def _get_device_from_device_id(
     device_id: Optional[Union[int, torch.device]],
     rank: int,
+    device_handle: _FSDPDeviceHandle,
 ) -> Optional[torch.device]:
     """
+    Return a ``torch.device`` for the specified ``device_id``.
+
     Processes ``device_id`` and returns either the corresponding device or
     ``None`` if ``device_id`` is ``None``.
     """
@@ -681,16 +841,16 @@ def _get_device_from_device_id(
     device = (
         device_id if isinstance(device_id, torch.device) else torch.device(device_id)
     )
-    if device == torch.device("cuda"):
+    if device.type != "cpu" and device.index is None:
         warnings.warn(
             f"FSDP got the argument `device_id` {device_id} on rank "
             f"{rank}, which does not have an explicit index. "
-            f"FSDP will use the current device {torch.cuda.current_device()}. "
-            "If this is incorrect, please explicitly call `torch.cuda.set_device()` "
+            f"FSDP will use the current device {device_handle.current_device()}. "
+            f"If this is incorrect, please explicitly call `torch.{device.type}.set_device()` "
             "before FSDP initialization or pass in the explicit device "
             "index as the `device_id` argument."
         )
-        device = torch.device("cuda", torch.cuda.current_device())
+        device = torch.device(device_handle.current_device())
     return device
 
 
@@ -700,8 +860,9 @@ def _need_to_materialize_module(
     ignored_modules: Set[nn.Module],
 ) -> Tuple[bool, bool]:
     """
-    Returns if ``module`` has parameters on meta device and if ``module`` is
-    using torchdistX deferred initialization. At most of the returned bools can
+    Return if ``module`` has parameters on meta device and if ``module`` is using torchdistX deferred initialization.
+
+    At most of the returned bools can
     be ``True``. If either is ``True``, then ``module`` needs to be
     materialized.
     """
@@ -726,12 +887,13 @@ def _need_to_materialize_module(
 def _materialize_with_param_init_fn(
     root_module: nn.Module,
     param_init_fn: Callable[[nn.Module], None],
+    ignored_modules: Set[nn.Module],
 ) -> None:
     if not callable(param_init_fn):
         raise ValueError(
             f"Expected {param_init_fn} to be callable but got {type(param_init_fn)}"
         )
-    modules_to_materialize = _get_modules_to_materialize(root_module)
+    modules_to_materialize = _get_modules_to_materialize(root_module, ignored_modules)
     for module in modules_to_materialize:
         param_init_fn(module)
 
@@ -739,12 +901,15 @@ def _materialize_with_param_init_fn(
 def _materialize_meta_module(
     root_module: nn.Module,
     device_from_device_id: Optional[torch.device],
+    ignored_modules: Set[nn.Module],
+    device_handle: _FSDPDeviceHandle,
 ):
     # Run default meta device initialization
     materialization_device = device_from_device_id or torch.device(
-        torch.cuda.current_device()
+        device_handle.current_device()
     )
-    modules_to_materialize = _get_modules_to_materialize(root_module)
+    modules_to_materialize = _get_modules_to_materialize(root_module, ignored_modules)
+    module = None
     try:
         # Assume that each module's `reset_parameters()` only initializes its
         # own parameters and not those of its children
@@ -763,14 +928,16 @@ def _materialize_meta_module(
         warnings.warn(
             "Unable to call `reset_parameters()` for module on meta "
             f"device with error {str(e)}. Please ensure that your module of"
-            f"type {type(module)} implements a `reset_parameters()` method."
+            f"type {type(module)} implements a `reset_parameters()` method."  # type: ignore[possibly-undefined]
         )
         raise e
 
 
-def _get_modules_to_materialize(root_module: nn.Module) -> List[nn.Module]:
+def _get_modules_to_materialize(
+    root_module: nn.Module, ignored_modules: Set[nn.Module]
+) -> List[nn.Module]:
     # Run BFS to collect the modules to materialize via `reset_parameters()`,
-    # stopping at any module with FSDP already applied
+    # stopping at any module with FSDP already applied or at ignored modules.
     modules_to_materialize: List[nn.Module] = []
     queue = collections.deque([root_module])
     visited_modules: Set[nn.Module] = {root_module}
@@ -781,6 +948,7 @@ def _get_modules_to_materialize(root_module: nn.Module) -> List[nn.Module]:
             if (
                 child_module not in visited_modules
                 and _get_module_fsdp_state(child_module) is None
+                and child_module not in ignored_modules
             ):
                 visited_modules.add(child_module)
                 queue.append(child_module)
@@ -790,11 +958,13 @@ def _get_modules_to_materialize(root_module: nn.Module) -> List[nn.Module]:
 def _move_module_to_device(
     module: nn.Module,
     ignored_params: Set[nn.Parameter],
+    ignored_buffers: Set[torch.Tensor],
     device_from_device_id: Optional[torch.device],
 ) -> None:
     """
-    Moves ``module`` depending on ``device_from_device_id`` and its current
-    device. This includes moving ignored modules' parameters.
+    Move ``module`` depending on ``device_from_device_id`` and its current device.
+
+    This includes moving ignored modules' parameters.
 
     - If ``device_from_device_id`` is not ``None``, then this moves
     ``module`` to the device.
@@ -830,10 +1000,9 @@ def _move_module_to_device(
             for submodule in curr_module.children():
                 if not isinstance(submodule, fsdp_file.FullyShardedDataParallel):
                     queue.append(submodule)
-        # NOTE: This includes moving ignored modules' parameters. If we
-        # decide to change the semantics in the future, simply filter based
-        # on the ignored parameters (and buffers).
-        _move_states_to_device(params, buffers, device_from_device_id)
+        params_to_move = [p for p in params if p not in ignored_params]
+        bufs_to_move = [p for p in buffers if p not in ignored_buffers]
+        _move_states_to_device(params_to_move, bufs_to_move, device_from_device_id)
         return
     param = next(_get_orig_params(module, ignored_params), None)
     if param is not None and param.device == cpu_device:
@@ -846,6 +1015,8 @@ def _move_states_to_device(
     device_from_device_id: Optional[torch.device],
 ) -> None:
     """
+    Move states to the specified device.
+
     Precondition: ``_check_single_device_module()`` and module's parameters and
     buffers have been materialized if needed.
     """
@@ -866,7 +1037,7 @@ def _move_states_to_device(
                     param.grad.data = param.grad.to(device_from_device_id)
         for buffer in buffers:
             buffer.data = buffer.to(device_from_device_id)
-    elif current_device == cpu_device:
+    elif current_device == cpu_device:  # type: ignore[possibly-undefined]
         _warn_cpu_init()
 
 
@@ -886,17 +1057,18 @@ def _get_compute_device(
     ignored_params: Set[nn.Parameter],
     device_from_device_id: Optional[torch.device],
     rank: int,
+    device_handle: _FSDPDeviceHandle,
 ) -> torch.device:
     """
-    Determines and returns this FSDP instance's compute device. If a device is
-    specified by ``device_id``, then returns that device. Otherwise, If the
-    module is already on a non-CPU device, then the compute device is that non-CPU
+    Determine and return this FSDP instance's compute device.
+
+    If the module is already on a non-CPU device, then the compute device is that non-CPU
     device. If the module is on CPU, then the compute device is the current
     device.
 
     Since this method should be called after materializing the module, any
     non-CPU device should not be meta device. For now, the compute device is
-    always a CUDA GPU device with its explicit index.
+    always a CUDA or CUDA-like device with its explicit index.
 
     Precondition: ``_check_single_device_module()`` and
     ``_move_module_to_device()``.
@@ -905,10 +1077,7 @@ def _get_compute_device(
     if param is not None and param.device.type != "cpu":
         compute_device = param.device  # Determined by model param placement
     else:
-        if device_from_device_id is not None and device_from_device_id.type != "cuda":
-            compute_device = device_from_device_id  # Determined by custom backend
-        else:
-            compute_device = torch.device("cuda", torch.cuda.current_device())
+        compute_device = torch.device(device_handle.current_device())
     if device_from_device_id is not None and compute_device != device_from_device_id:
         raise ValueError(
             f"Inconsistent compute device and `device_id` on rank {rank}: "
@@ -924,8 +1093,7 @@ def _sync_module_params_and_buffers(
     process_group: dist.ProcessGroup,
 ) -> None:
     """
-    Synchronizes module states (i.e. parameters ``params`` and all
-    not-yet-synced buffers) by broadcasting from rank 0 to all ranks.
+    Synchronize module states (i.e. parameters ``params`` and all not-yet-synced buffers) by broadcasting from rank 0 to all ranks.
 
     Precondition: ``sync_module_states == True`` and ``self.process_group`` has
     been set.
@@ -935,31 +1103,29 @@ def _sync_module_params_and_buffers(
         # Avoid re-synchronizing buffers in case of nested wrapping
         if not getattr(buffer, FSDP_SYNCED, False):
             setattr(buffer, FSDP_SYNCED, True)
-            module_states.append(buffer.detach())
-    module_states.extend(param.detach() for param in params)
+            detached_buffer = buffer.detach()
+            if is_traceable_wrapper_subclass(detached_buffer):
+                # NOTE: Here we assume no nested subclasses, at most one level of subclass
+                # in both model's buffers and params
+                attrs, _ = detached_buffer.__tensor_flatten__()  # type: ignore[attr-defined]
+                inner_buffers = [getattr(detached_buffer, attr) for attr in attrs]
+                module_states.extend(inner_buffers)
+            else:
+                module_states.append(detached_buffer)
+
+    for param in params:
+        detached_param = param.detach()
+        if is_traceable_wrapper_subclass(detached_param):
+            attrs, _ = detached_param.__tensor_flatten__()  # type: ignore[attr-defined]
+            inner_params = [getattr(detached_param, attr) for attr in attrs]
+            module_states.extend(inner_params)
+        else:
+            module_states.append(detached_param)
+
     _check_module_states_for_sync_module_states(module_states)
     _sync_params_and_buffers(
         process_group,
         module_states,
-        PARAM_BROADCAST_BUCKET_SIZE,
-        src=0,
-    )
-
-
-def _sync_module_states(
-    params: List[nn.Parameter],
-    buffers: List[torch.Tensor],
-    process_group: dist.ProcessGroup,
-) -> None:
-    # Assumes that each call to this method passes in disjoint `params` and
-    # and `buffers` across calls, so there is no chance of re-synchronizing
-    params_and_buffers = [param.detach() for param in params] + [
-        buffer.detach() for buffer in buffers
-    ]
-    _check_module_states_for_sync_module_states(params_and_buffers)
-    _sync_params_and_buffers(
-        process_group,
-        params_and_buffers,
         PARAM_BROADCAST_BUCKET_SIZE,
         src=0,
     )
@@ -983,9 +1149,11 @@ def _get_orig_params(
     ignored_params: Set[nn.Parameter],
 ) -> Iterator[nn.Parameter]:
     """
-    Returns an iterator over the original parameters in ``module``, ignoring
+    Return an iterator over the original parameters in ``module``.
+
+    The iterator does not return
     the parameters in ``ignored_params``, any ``FlatParameter`` s (which may be
-    present due to nested FSDP wrapping), and any original parameters already
+    present due to nested FSDP wrapping), or any original parameters already
     flattened (only relevant when ``use_orig_params=True``).
     """
     param_gen = module.parameters()
@@ -1003,7 +1171,9 @@ def _check_orig_params_flattened(
     ignored_params: Set[nn.Parameter],
 ) -> None:
     """
-    Checks that all original parameters have been flattened and hence made
+    Check that original parameters in ``fsdp_module`` have been flattened.
+
+    The flattened parameters are made
     invisible to ``named_parameters()`` for the module hierarchy rooted at
     ``fsdp_module``. This should be called as a sanity check after flattening
     the wrapped module's parameters.

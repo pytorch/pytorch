@@ -1,25 +1,36 @@
-
-
+# mypy: allow-untyped-defs
 import torch
 from torch import Tensor
+
+
 aten = torch.ops.aten
-from typing import Optional, List, Dict, Set
 import inspect
 import warnings
+from typing import Callable, Dict, List, Optional, Set, TypeVar
+from typing_extensions import ParamSpec
+
 from torch.types import Number
+
 
 decomposition_table: Dict[str, torch.jit.ScriptFunction] = {}
 function_name_set: Set[str] = set()
 
-def check_decomposition_has_type_annotations(f):
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
+
+def check_decomposition_has_type_annotations(f):
     inspect_empty = inspect._empty  # type: ignore[attr-defined]
     sig = inspect.signature(f)
     for param in sig.parameters.values():
-        assert param.annotation != inspect_empty, \
-            f"No signature on param {param.name} for function {f.name}"
+        assert (
+            param.annotation != inspect_empty
+        ), f"No signature on param {param.name} for function {f.name}"
 
-    assert sig.return_annotation != inspect_empty, f"No return annotation for function {f.name}"
+    assert (
+        sig.return_annotation != inspect_empty
+    ), f"No return annotation for function {f.name}"
+
 
 def signatures_match(decomposition_sig, torch_op_sig):
     decomp_params = decomposition_sig.parameters
@@ -28,15 +39,14 @@ def signatures_match(decomposition_sig, torch_op_sig):
     if len(decomp_params) != len(op_params):
         return False
 
-
     for decomp_param, op_param in zip(decomp_params.values(), op_params.values()):
         # can't check full equality yet because not all fields are correcly deduced
         # in the torch_op_sig - like default value
         # can't check 'kind' bc
         # kwarg-only values with defaults not yet supported in TS
         inspect_empty = inspect._empty  # type: ignore[attr-defined]
-        for field in ['name', 'annotation']:
-            if field == 'name' and decomp_param.name == "self":
+        for field in ["name", "annotation"]:
+            if field == "name" and decomp_param.name == "self":
                 warnings.warn("PyTorch uses 'input' instead of 'self' on public api")
 
             if getattr(decomp_param, field) != getattr(op_param, field):
@@ -52,8 +62,12 @@ def signatures_match(decomposition_sig, torch_op_sig):
 
     return decomposition_sig.return_annotation == torch_op_sig.return_annotation
 
-def register_decomposition(aten_op, registry=None):
-    def decomposition_decorator(f):
+
+def register_decomposition(
+    aten_op: torch._ops.OpOverload,
+    registry: Optional[Dict[str, torch.jit.ScriptFunction]] = None,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def decomposition_decorator(f: Callable[_P, _T]) -> Callable[_P, _T]:
         nonlocal registry
         if registry is None:
             registry = decomposition_table
@@ -61,7 +75,9 @@ def register_decomposition(aten_op, registry=None):
         assert isinstance(aten_op, torch._ops.OpOverload)
 
         # Need unique name for jit function serialization
-        assert f.__name__ not in function_name_set, f"Duplicated function name {f.__name__}"
+        assert (
+            f.__name__ not in function_name_set
+        ), f"Duplicated function name {f.__name__}"
         function_name_set.add(f.__name__)
 
         scripted_func = torch.jit.script(f)
@@ -76,12 +92,17 @@ def register_decomposition(aten_op, registry=None):
 
     return decomposition_decorator
 
+
 # TODO: replace torch.sigmoid -> aten.sigmoid
 
+
 @register_decomposition(aten.var.correction)
-def var_decomposition(input: Tensor, dim: Optional[List[int]] = None,
-                      correction: Optional[Number] = None,
-                      keepdim: bool = False) -> Tensor:
+def var_decomposition(
+    input: Tensor,
+    dim: Optional[List[int]] = None,
+    correction: Optional[Number] = None,
+    keepdim: bool = False,
+) -> Tensor:
     if dim is None:
         dim_i: List[int] = []
         dim = dim_i
@@ -109,6 +130,7 @@ def var_decomposition(input: Tensor, dim: Optional[List[int]] = None,
             raise RuntimeError("correction must be int or float")
 
     return sum / max(0, denom)
+
 
 @register_decomposition(aten.var.default)
 def var(input: Tensor, unbiased: bool = True) -> Tensor:

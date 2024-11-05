@@ -11,7 +11,7 @@ std::unordered_map<std::string, ClientSocket> managers;
 std::string manager_executable_path;
 
 AllocInfo get_alloc_info(const char* filename) {
-  AllocInfo info = {0};
+  AllocInfo info = {};
   info.pid = getpid();
   info.free = false;
   size_t len = strlen(filename);
@@ -38,7 +38,8 @@ void start_manager() {
     std::string msg("ERROR: execl failed: ");
     msg += std::strerror(errno);
     msg += '\n';
-    write(1, msg.c_str(), msg.size());
+    auto res = write(1, msg.c_str(), msg.size());
+    (void)res;
 
     exit(1);
   }

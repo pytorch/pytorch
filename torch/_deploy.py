@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import io
 
 import torch
@@ -23,10 +24,8 @@ def _save_storages(importer, obj):
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can
                 # remove this case
-                storage = obj._untyped_storage
                 dtype = obj.dtype
             else:
-                storage = obj
                 dtype = torch.uint8
 
             serialized_storages.append(obj)
@@ -88,7 +87,7 @@ def _load_storages(id, zip_reader, obj_bytes, serialized_storages, serialized_dt
         importer = sys_importer
 
     unpickler = PackageUnpickler(importer, io.BytesIO(obj_bytes))
-    unpickler.persistent_load = persistent_load  # type: ignore[assignment]
+    unpickler.persistent_load = persistent_load  # type: ignore[method-assign]
     result = _deploy_objects[id] = unpickler.load()
     return result
 

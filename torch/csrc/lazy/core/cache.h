@@ -12,8 +12,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 // Generic key and object cache with LRU expiration policy. The objects of type
 // T will be stored as std::shared_ptr<T> and taken and returned as such, by the
@@ -34,6 +33,9 @@ class Cache {
   // beyond the limit set during construction, the oldest used object will be
   // removed from the cache.
   TypePtr Add(K key, TypePtr object) {
+    if (!max_size_) {
+      return object;
+    }
     std::lock_guard<std::mutex> slock(lock_);
     element_list_.emplace_front(Element(std::move(key), std::move(object)));
     auto it = element_list_.begin();
@@ -54,6 +56,9 @@ class Cache {
   // Returns nullptr if no object with the specified key is found within the
   // cache.
   TypePtr Get(const K& key) {
+    if (!max_size_) {
+      return nullptr;
+    }
     std::lock_guard<std::mutex> slock(lock_);
     auto it = element_map_.find(&key);
     if (it == element_map_.end()) {
@@ -70,6 +75,9 @@ class Cache {
   }
 
   bool Erase(const K& key) {
+    if (!max_size_) {
+      return false;
+    }
     std::lock_guard<std::mutex> slock(lock_);
     auto it = element_map_.find(&key);
     if (it == element_map_.end()) {
@@ -82,12 +90,18 @@ class Cache {
   }
 
   void Clear() {
+    if (!max_size_) {
+      return;
+    }
     std::lock_guard<std::mutex> slock(lock_);
     element_map_.clear();
     element_list_.clear();
   }
 
   int Numel() const {
+    if (!max_size_) {
+      return 0;
+    }
     std::lock_guard<std::mutex> g(lock_);
     TORCH_CHECK(element_map_.size() == element_list_.size());
     return element_map_.size();
@@ -120,10 +134,9 @@ class Cache {
   }
 
   mutable std::mutex lock_;
-  size_t max_size_ = 0;
+  const size_t max_size_ = 0;
   ElementList element_list_;
   ElementMap element_map_;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

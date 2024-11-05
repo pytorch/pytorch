@@ -14,10 +14,12 @@ from file_io_utils import (
     zip_folder,
 )
 
+
 PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
 PYTEST_CACHE_DIR_NAME = ".pytest_cache"
 BUCKET = "gha-artifacts"
 LASTFAILED_FILE_PATH = Path("v/cache/lastfailed")
+TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL = "previous_failures_additional.json"
 
 # Temp folders
 ZIP_UPLOAD = "zip-upload"
@@ -56,6 +58,8 @@ def upload_pytest_cache(
     pr_identifier: PRIdentifier,
     repo: GithubRepo,
     job_identifier: str,
+    sha: str,
+    test_config: str,
     shard: str,
     cache_dir: Path,
     temp_dir: Path,
@@ -79,25 +83,11 @@ def upload_pytest_cache(
     if not bucket:
         bucket = BUCKET
 
-    # Merge the current cache with any caches from previous runs before uploading
-    # We only need to merge it with the cache for the same shard (which will have already been downloaded if it exists)
-    # since the other shards will handle themselves
-    shard_cache_path = _get_temp_cache_dir_path(
-        temp_dir, pr_identifier, repo, job_identifier, shard
-    )
-
-    if shard_cache_path.is_dir():
-        _merge_pytest_caches(shard_cache_path, cache_dir)
-
-    #
     # Upload the cache
-    #
-
-    obj_key_prefix = _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
-    # This doesn't include the zip file extension. That'll get added later
-    zip_file_path = temp_dir / ZIP_UPLOAD / obj_key_prefix
-
-    zip_file_path = zip_folder(cache_dir, zip_file_path)
+    obj_key_prefix = _get_s3_key_prefix(
+        pr_identifier, repo, job_identifier, sha, test_config, shard
+    )
+    zip_file_path = zip_folder(cache_dir, temp_dir / ZIP_UPLOAD / obj_key_prefix)
     obj_key = f"{obj_key_prefix}{os.path.splitext(zip_file_path)[1]}"  # Keep the new file extension
     upload_file_to_s3(zip_file_path, bucket, obj_key)
 
@@ -136,38 +126,22 @@ def download_pytest_cache(
     )
 
     for downloaded_zip in downloads:
-        # the file name of the zip is the shard id
-        shard = os.path.splitext(os.path.basename(downloaded_zip))[0]
-        cache_dir_for_shard = _get_temp_cache_dir_path(
-            temp_dir, pr_identifier, repo, job_identifier, shard
+        # Unzip into random folder, then merge with the current cache
+        cache_dir_for_shard = (
+            temp_dir / UNZIPPED_CACHES / os.urandom(16).hex() / PYTEST_CACHE_DIR_NAME
         )
 
         unzip_folder(downloaded_zip, cache_dir_for_shard)
-        print(
-            f"Merging cache for job_identifier `{job_identifier}`, shard `{shard}` into `{dest_cache_dir}`"
-        )
+        print(f"Merging cache from {downloaded_zip}")
         _merge_pytest_caches(cache_dir_for_shard, dest_cache_dir)
-
-
-def _get_temp_cache_dir_path(
-    temp_dir: Path,
-    pr_identifier: PRIdentifier,
-    repo: GithubRepo,
-    job_identifier: str,
-    shard: str,
-) -> Path:
-    return (
-        temp_dir
-        / UNZIPPED_CACHES
-        / _get_s3_key_prefix(pr_identifier, repo, job_identifier, shard)
-        / PYTEST_CACHE_DIR_NAME
-    )
 
 
 def _get_s3_key_prefix(
     pr_identifier: PRIdentifier,
     repo: GithubRepo,
     job_identifier: str,
+    sha: str = "",
+    test_config: str = "",
     shard: str = "",
 ) -> str:
     """
@@ -176,6 +150,10 @@ def _get_s3_key_prefix(
     """
     prefix = f"{PYTEST_CACHE_KEY_PREFIX}/{repo.owner}/{repo.name}/{pr_identifier}/{sanitize_for_s3(job_identifier)}"
 
+    if sha:
+        prefix += f"/{sha}"
+    if test_config:
+        prefix += f"/{sanitize_for_s3(test_config)}"
     if shard:
         prefix += f"/{shard}"
 
@@ -212,6 +190,10 @@ def _merge_pytest_caches(
 
     # Handle the v/cache/lastfailed file
     _merge_lastfailed_files(
+        pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merge_into
+    )
+
+    _merge_additional_failures_files(
         pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merge_into
     )
 
@@ -256,3 +238,27 @@ def _merged_lastfailed_content(
             del to_lastfailed[""]
 
     return to_lastfailed
+
+
+def _merge_additional_failures_files(
+    source_pytest_cache: Path, dest_pytest_cache: Path
+) -> None:
+    # Simple cases where one of the files doesn't exist
+    source_lastfailed_file = (
+        source_pytest_cache / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
+    )
+    dest_lastfailed_file = dest_pytest_cache / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
+
+    if not source_lastfailed_file.exists():
+        return
+    if not dest_lastfailed_file.exists():
+        copy_file(source_lastfailed_file, dest_lastfailed_file)
+        return
+
+    # Both files exist, so we need to merge them
+    from_lastfailed = load_json_file(source_lastfailed_file)
+    to_lastfailed = load_json_file(dest_lastfailed_file)
+    merged_content = list(set(from_lastfailed + to_lastfailed))
+
+    # Save the results
+    write_json_file(dest_lastfailed_file, merged_content)

@@ -732,7 +732,7 @@ TEST(Simplify, SimplifyMuls) {
 
   {
     // (x + y) * (x + y) => (x + y) * (x + y)
-    // We don't attempt to simplify mulitplication of polynomials since the
+    // We don't attempt to simplify multiplication of polynomials since the
     // result is only very rarely more efficient.
     ExprHandle body = (x + y) * (x + y);
     ExprHandle simplified = IRSimplifier::simplify(body);
@@ -3884,8 +3884,7 @@ TEST(Simplify, SimplifyEliminateEmptyFor) {
   {
     // Flatten many layers around an empty block to an empty block.
     StmtPtr last = alloc<Block>(std::vector<StmtPtr>({}));
-    for (const auto i : c10::irange(11)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(11)) {
       VarHandle loopVar("loopVar", kInt);
       last = For::make(loopVar, 0, 10, last);
     }
@@ -3969,8 +3968,7 @@ TEST(Simplify, SimplifyFlattenBlock) {
   {
     // Flatten many layers around an empty block to an empty block.
     StmtPtr last = alloc<Block>(std::vector<StmtPtr>({}));
-    for (const auto i : c10::irange(11)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(11)) {
       last = alloc<Block>(std::vector<StmtPtr>({last}));
     }
 

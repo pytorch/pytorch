@@ -4,7 +4,6 @@
 #include <ATen/native/xnnpack/Convolution.h>
 #include <ATen/native/xnnpack/Linear.h>
 #include <ATen/native/xnnpack/OpContext.h>
-#include <ATen/Tensor.h>
 #include <torch/custom_class.h>
 
 namespace at::native::xnnpack {
@@ -23,11 +22,12 @@ TORCH_LIBRARY(xnnpack, m) {
         [](SerializationTypeLinearPrePack state)
             -> c10::intrusive_ptr<LinearOpContext> { // __setstate__
           return createLinearClampPrePackOpContext(
-              std::move(std::get<0>(state)),
-              std::move(std::get<1>(state)),
-              std::move(std::get<2>(state)),
-              std::move(std::get<3>(state)));
-        });
+              std::get<0>(state),
+              std::get<1>(state),
+              std::get<2>(state),
+              std::get<3>(state));
+        })
+    .def("unpack", &LinearOpContext::unpack);
 
   m.class_<Conv2dOpContext>(TORCH_SELECTIVE_CLASS("Conv2dOpContext"))
     .def_pickle(
@@ -38,15 +38,16 @@ TORCH_LIBRARY(xnnpack, m) {
         [](SerializationTypeConv2dPrePack state)
             -> c10::intrusive_ptr<Conv2dOpContext> { // __setstate__
           return createConv2dClampPrePackOpContext(
-              std::move(std::get<0>(state)),
-              std::move(std::get<1>(state)),
-              std::move(std::get<2>(state)),
-              std::move(std::get<3>(state)),
-              std::move(std::get<4>(state)),
-              std::move(std::get<5>(state)),
-              std::move(std::get<6>(state)),
-              std::move(std::get<7>(state)));
-        });
+              std::get<0>(state),
+              std::get<1>(state),
+              std::get<2>(state),
+              std::get<3>(state),
+              std::get<4>(state),
+              std::get<5>(state),
+              std::get<6>(state),
+              std::get<7>(state));
+        })
+    .def("unpack", &Conv2dOpContext::unpack);
 
   m.class_<TransposeConv2dOpContext>(TORCH_SELECTIVE_CLASS("TransposeConv2dOpContext"))
     .def_pickle(
@@ -57,15 +58,15 @@ TORCH_LIBRARY(xnnpack, m) {
         [](SerializationTypeTransposeConv2dPrePack state)
             -> c10::intrusive_ptr<TransposeConv2dOpContext> { // __setstate__
           return createConv2dTransposeClampPrePackOpContext(
-              std::move(std::get<0>(state)),
-              std::move(std::get<1>(state)),
-              std::move(std::get<2>(state)),
-              std::move(std::get<3>(state)),
-              std::move(std::get<4>(state)),
-              std::move(std::get<5>(state)),
-              std::move(std::get<6>(state)),
-              std::move(std::get<7>(state)),
-              std::move(std::get<8>(state)));
+              std::get<0>(state),
+              std::get<1>(state),
+              std::get<2>(state),
+              std::get<3>(state),
+              std::get<4>(state),
+              std::get<5>(state),
+              std::get<6>(state),
+              std::get<7>(state),
+              std::get<8>(state));
         });
 
 }

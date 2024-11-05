@@ -15,7 +15,7 @@ torch.sparse
 Why and when to use sparsity
 ++++++++++++++++++++++++++++
 
-By default PyTorch stores :class:`torch.Tensor` stores elements contiguously
+By default, PyTorch stores :class:`torch.Tensor` elements contiguously in
 physical memory. This leads to efficient implementations of various array
 processing algorithms that require fast access to elements.
 
@@ -176,7 +176,7 @@ Sparse Semi-Structured Tensors
 
 .. warning::
 
-   Sparse semi-sturctured tensors are currently a prototype feature and subject to change. Please feel free to open an issue to report a bug or if you have feedback to share.
+   Sparse semi-structured tensors are currently a prototype feature and subject to change. Please feel free to open an issue to report a bug or if you have feedback to share.
 
 Semi-Structured sparsity is a sparse data layout that was first introduced in NVIDIA's Ampere architecture. It is also referred to as **fine-grained structured sparsity** or **2:4 structured sparsity**.
 
@@ -546,7 +546,7 @@ Let's consider the following example:
 
 As mentioned above, a sparse COO tensor is a :class:`torch.Tensor`
 instance and to distinguish it from the `Tensor` instances that use
-some other layout, on can use :attr:`torch.Tensor.is_sparse` or
+some other layout, one can use :attr:`torch.Tensor.is_sparse` or
 :attr:`torch.Tensor.layout` properties:
 
     >>> isinstance(s, torch.Tensor)
@@ -1147,6 +1147,7 @@ multiplication, and ``@`` is matrix multiplication.
    :func:`torch.addmm`; no; ``f * M[strided] + f * (M[SparseSemiStructured] @ M[strided]) -> M[strided]``
    :func:`torch.addmm`; no; ``f * M[strided] + f * (M[strided] @ M[SparseSemiStructured]) -> M[strided]``
    :func:`torch.sparse.addmm`; yes; ``f * M[strided] + f * (M[sparse_coo] @ M[strided]) -> M[strided]``
+   :func:`torch.sparse.spsolve`; no; ``SOLVE(M[sparse_csr], V[strided]) -> V[strided]``
    :func:`torch.sspaddmm`; no; ``f * M[sparse_coo] + f * (M[sparse_coo] @ M[strided]) -> M[sparse_coo]``
    :func:`torch.lobpcg`; no; ``GENEIG(M[sparse_coo]) -> M[strided], M[strided]``
    :func:`torch.pca_lowrank`; yes; ``PCA(M[sparse_coo]) -> M[strided], M[strided], M[strided]``
@@ -1292,6 +1293,7 @@ Torch functions specific to sparse Tensors
     hspmm
     smm
     sparse.softmax
+    sparse.spsolve
     sparse.log_softmax
     sparse.spdiags
 
@@ -1332,10 +1334,19 @@ To manage checking sparse tensor invariants, see:
 
     sparse.check_sparse_tensor_invariants
 
-Unary functions
----------------
+To use sparse tensors with :func:`~torch.autograd.gradcheck` function,
+see:
 
-We aim to support all zero-preserving unary functions.
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    sparse.as_sparse_gradcheck
+
+Zero-preserving unary functions
+-------------------------------
+
+We aim to support all 'zero-preserving unary functions': functions of one argument that map zero to zero.
 
 If you find that we are missing a zero-preserving unary function
 that you need, please feel encouraged to open an issue for a feature request.

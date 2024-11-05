@@ -1,12 +1,13 @@
+# mypy: allow-untyped-defs
 """Adds docstrings to Tensor functions"""
 
 import torch._C
 from torch._C import _add_docstr as add_docstr
-from ._torch_docs import parse_kwargs, reproducibility_notes
+from torch._torch_docs import parse_kwargs, reproducibility_notes
 
 
 def add_docstr_all(method, docstr):
-    add_docstr(getattr(torch._C._TensorBase, method), docstr)
+    add_docstr(getattr(torch._C.TensorBase, method), docstr)
 
 
 common_args = parse_kwargs(
@@ -78,9 +79,7 @@ Example::
     tensor([[ 0,  1],
             [ 2,  3]], dtype=torch.int8)
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -113,9 +112,7 @@ Example::
             [ 3.1416,  3.1416,  3.1416,  3.1416],
             [ 3.1416,  3.1416,  3.1416,  3.1416]], dtype=torch.float64)
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -148,9 +145,7 @@ Example::
     tensor([[ 5.8182e-18,  4.5765e-41, -1.0545e+30],
             [ 3.0949e-41,  4.4842e-44,  0.0000e+00]])
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -183,9 +178,7 @@ Example::
     tensor([[ 5.8182e-18,  4.5765e-41, -1.0545e+30],
             [ 3.0949e-41,  4.4842e-44,  0.0000e+00]])
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -218,9 +211,7 @@ Example::
     tensor([[ 1,  1,  1],
             [ 1,  1,  1]], dtype=torch.int32)
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -253,9 +244,7 @@ Example::
     tensor([[ 0.,  0.,  0.],
             [ 0.,  0.,  0.]], dtype=torch.float64)
 
-""".format(
-        **new_common_args
-    ),
+""".format(**new_common_args),
 )
 
 add_docstr_all(
@@ -1086,6 +1075,9 @@ Fills the tensor with numbers drawn from the Cauchy distribution:
 .. math::
 
     f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - \text{median})^2 + \sigma^2}
+
+.. note::
+  Sigma (:math:`\sigma`) is used to denote the scale parameter in Cauchy distribution.
 """,
 )
 
@@ -1176,9 +1168,7 @@ add_docstr_all(
 clone(*, memory_format=torch.preserve_format) -> Tensor
 
 See :func:`torch.clone`
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -1343,9 +1333,7 @@ then no copy is performed and the original object is returned.
 Args:
     {memory_format}
 
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -1401,9 +1389,27 @@ Args:
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
+)
+
+add_docstr_all(
+    "mtia",
+    r"""
+mtia(device=None, non_blocking=False, memory_format=torch.preserve_format) -> Tensor
+
+Returns a copy of this object in MTIA memory.
+
+If this object is already in MTIA memory and on the correct device,
+then no copy is performed and the original object is returned.
+
+Args:
+    device (:class:`torch.device`): The destination MTIA device.
+        Defaults to the current MTIA device.
+    non_blocking (bool): If ``True`` and the source is in pinned memory,
+        the copy will be asynchronous with respect to the host.
+        Otherwise, the argument has no effect. Default: ``False``.
+    {memory_format}
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -1423,9 +1429,7 @@ Args:
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -1445,9 +1449,7 @@ Args:
         the copy will be asynchronous with respect to the host.
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -1906,11 +1908,19 @@ add_docstr_all(
     r"""
 exponential_(lambd=1, *, generator=None) -> Tensor
 
-Fills :attr:`self` tensor with elements drawn from the exponential distribution:
+Fills :attr:`self` tensor with elements drawn from the PDF (probability density function):
 
 .. math::
 
-    f(x) = \lambda e^{-\lambda x}
+    f(x) = \lambda e^{-\lambda x}, x > 0
+
+.. note::
+  In probability theory, exponential distribution is supported on interval [0, :math:`\inf`) (i.e., :math:`x >= 0`)
+  implying that zero can be sampled from the exponential distribution.
+  However, :func:`torch.Tensor.exponential_` does not sample zero,
+  which means that its actual support is the interval (0, :math:`\inf`).
+
+  Note that :func:`torch.distributions.exponential.Exponential` is supported on the interval [0, :math:`\inf`) and can sample zero.
 """,
 )
 
@@ -2103,8 +2113,12 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    f(X=k) = (1 - p)^{k - 1} p
+    P(X=k) = (1 - p)^{k - 1} p, k = 1, 2, ...
 
+.. note::
+  :func:`torch.Tensor.geometric_` `k`-th trial is the first success hence draws samples in :math:`\{1, 2, \ldots\}`, whereas
+  :func:`torch.distributions.geometric.Geometric` :math:`(k+1)`-th trial is the first success
+  hence draws samples in :math:`\{0, 1, \ldots\}`.
 """,
 )
 
@@ -2405,9 +2419,7 @@ Example::
             [  1.,   1.,   1.],
             [  1.,   1.,   1.],
             [  1.,   1.,   1.]])
-""".format(
-        **reproducibility_notes
-    ),
+""".format(**reproducibility_notes),
 )
 
 add_docstr_all(
@@ -2567,9 +2579,7 @@ Example::
             [ 7.,  8.,  9.],
             [ 2.,  2.,  2.],
             [ 4.,  5.,  6.]])
-""".format(
-        **reproducibility_notes
-    ),
+""".format(**reproducibility_notes),
 )
 
 add_docstr_all(
@@ -3152,7 +3162,7 @@ Args:
 Example:
 
     >>> self = torch.tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
-    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]], dtype=torch.bool)
     >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
     >>> self.masked_scatter_(mask, source)
     tensor([[0, 0, 0, 0, 1],
@@ -4027,8 +4037,10 @@ add_docstr_all(
     r"""
 record_stream(stream)
 
-Ensures that the tensor memory is not reused for another tensor until all
-current work queued on :attr:`stream` are complete.
+Marks the tensor as having been used by this stream.  When the tensor
+is deallocated, ensure the tensor memory is not reused for another tensor
+until all work queued on :attr:`stream` at the time of deallocation is
+complete.
 
 .. note::
 
@@ -4039,6 +4051,66 @@ current work queued on :attr:`stream` are complete.
     unexpectedly. Calling this method lets the allocator know which streams
     have used the tensor.
 
+.. warning::
+
+    This method is most suitable for use cases where you are providing a
+    function that created a tensor on a side stream, and want users to be able
+    to make use of the tensor without having to think carefully about stream
+    safety when making use of them.  These safety guarantees come at some
+    performance and predictability cost (analogous to the tradeoff between GC
+    and manual memory management), so if you are in a situation where
+    you manage the full lifetime of your tensors, you may consider instead
+    manually managing CUDA events so that calling this method is not necessary.
+    In particular, when you call this method, on later allocations the
+    allocator will poll the recorded stream to see if all operations have
+    completed yet; you can potentially race with side stream computation and
+    non-deterministically reuse or fail to reuse memory for an allocation.
+
+    You can safely use tensors allocated on side streams without
+    :meth:`~Tensor.record_stream`; you must manually ensure that
+    any non-creation stream uses of a tensor are synced back to the creation
+    stream before you deallocate the tensor.  As the CUDA caching allocator
+    guarantees that the memory will only be reused with the same creation stream,
+    this is sufficient to ensure that writes to future reallocations of the
+    memory will be delayed until non-creation stream uses are done.
+    (Counterintuitively, you may observe that on the CPU side we have already
+    reallocated the tensor, even though CUDA kernels on the old tensor are
+    still in progress.  This is fine, because CUDA operations on the new
+    tensor will appropriately wait for the old operations to complete, as they
+    are all on the same stream.)
+
+    Concretely, this looks like this::
+
+        with torch.cuda.stream(s0):
+            x = torch.zeros(N)
+
+        s1.wait_stream(s0)
+        with torch.cuda.stream(s1):
+            y = some_comm_op(x)
+
+        ... some compute on s0 ...
+
+        # synchronize creation stream s0 to side stream s1
+        # before deallocating x
+        s0.wait_stream(s1)
+        del x
+
+    Note that some discretion is required when deciding when to perform
+    ``s0.wait_stream(s1)``.  In particular, if we were to wait immediately
+    after ``some_comm_op``, there wouldn't be any point in having the side
+    stream; it would be equivalent to have run ``some_comm_op`` on ``s0``.
+    Instead, the synchronization must be placed at some appropriate, later
+    point in time where you expect the side stream ``s1`` to have finished
+    work.  This location is typically identified via profiling, e.g., using
+    Chrome traces produced
+    :meth:`torch.autograd.profiler.profile.export_chrome_trace`.  If you
+    place the wait too early, work on s0 will block until ``s1`` has finished,
+    preventing further overlapping of communication and computation.  If you
+    place the wait too late, you will use more memory than is strictly
+    necessary (as you are keeping ``x`` live for longer.)  For a concrete
+    example of how this guidance can be applied in practice, see this post:
+    `FSDP and CUDACachingAllocator
+    <https://dev-discuss.pytorch.org/t/fsdp-cudacachingallocator-an-outsider-newb-perspective/1486>`_.
 """,
 )
 
@@ -4081,7 +4153,7 @@ In-place version of :meth:`~Tensor.renorm`
 add_docstr_all(
     "repeat",
     r"""
-repeat(*sizes) -> Tensor
+repeat(*repeats) -> Tensor
 
 Repeats this tensor along the specified dimensions.
 
@@ -4096,8 +4168,7 @@ Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
     For the operator similar to `numpy.repeat`, see :func:`torch.repeat_interleave`.
 
 Args:
-    sizes (torch.Size or int...): The number of times to repeat this tensor along each
-        dimension
+    repeat (torch.Size, int..., tuple of int or list of int): The number of times to repeat this tensor along each dimension
 
 Example::
 
@@ -4217,10 +4288,12 @@ memory is uninitialized.
 
 .. note::
 
-    If :func:`torch.use_deterministic_algorithms()` is set to ``True``, new
-    elements are initialized to prevent nondeterministic behavior from using
-    the result as an input to an operation. Floating point and complex values
-    are set to NaN, and integer values are set to the maximum value.
+    If :func:`torch.use_deterministic_algorithms()` and
+    :attr:`torch.utils.deterministic.fill_uninitialized_memory` are both set to
+    ``True``, new elements are initialized to prevent nondeterministic behavior
+    from using the result as an input to an operation. Floating point and
+    complex values are set to NaN, and integer values are set to the maximum
+    value.
 
 Args:
     sizes (torch.Size or int...): the desired size
@@ -4301,7 +4374,7 @@ In-place version of :meth:`~Tensor.rsqrt`
 add_docstr_all(
     "scatter_",
     r"""
-scatter_(dim, index, src, reduce=None) -> Tensor
+scatter_(dim, index, src, *, reduce=None) -> Tensor
 
 Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
@@ -4364,7 +4437,9 @@ Args:
     index (LongTensor): the indices of elements to scatter, can be either empty
         or of the same dimensionality as ``src``. When empty, the operation
         returns ``self`` unchanged.
-    src (Tensor or float): the source element(s) to scatter.
+    src (Tensor): the source element(s) to scatter.
+
+Keyword args:
     reduce (str, optional): reduction operation to apply, can be either
         ``'add'`` or ``'multiply'``.
 
@@ -4394,6 +4469,32 @@ Example::
     tensor([[2.0000, 2.0000, 3.2300, 2.0000],
             [2.0000, 2.0000, 2.0000, 3.2300]])
 
+.. function:: scatter_(dim, index, value, *, reduce=None) -> Tensor:
+   :noindex:
+
+Writes the value from :attr:`value` into :attr:`self` at the indices
+specified in the :attr:`index` tensor.  This operation is equivalent to the previous version,
+with the :attr:`src` tensor filled entirely with :attr:`value`.
+
+Args:
+    dim (int): the axis along which to index
+    index (LongTensor): the indices of elements to scatter, can be either empty
+        or of the same dimensionality as ``src``. When empty, the operation
+        returns ``self`` unchanged.
+    value (Scalar): the value to scatter.
+
+Keyword args:
+    reduce (str, optional): reduction operation to apply, can be either
+        ``'add'`` or ``'multiply'``.
+
+Example::
+
+    >>> index = torch.tensor([[0, 1]])
+    >>> value = 2
+    >>> torch.zeros(3, 5).scatter_(0, index, value)
+    tensor([[2., 0., 0., 0., 0.],
+            [0., 2., 0., 0., 0.],
+            [0., 0., 0., 0., 0.]])
 """,
 )
 
@@ -4448,9 +4549,7 @@ Example::
             [0., 2., 0., 0., 0.],
             [0., 0., 2., 1., 1.]])
 
-""".format(
-        **reproducibility_notes
-    ),
+""".format(**reproducibility_notes),
 )
 
 add_docstr_all(
@@ -4516,9 +4615,7 @@ Example::
     tensor([3., 6., 5., 2.])
 
 
-""".format(
-        **reproducibility_notes
-    ),
+""".format(**reproducibility_notes),
 )
 
 add_docstr_all(
@@ -4723,6 +4820,26 @@ Example::
     torch.Size([3, 4, 5])
     >>> t.size(dim=1)
     4
+
+""",
+)
+
+add_docstr_all(
+    "shape",
+    r"""
+shape() -> torch.Size
+
+Returns the size of the :attr:`self` tensor. Alias for :attr:`size`.
+
+See also :meth:`Tensor.size`.
+
+Example::
+
+    >>> t = torch.empty(3, 4, 5)
+    >>> t.size()
+    torch.Size([3, 4, 5])
+    >>> t.shape
+    torch.Size([3, 4, 5])
 
 """,
 )
@@ -5058,7 +5175,7 @@ In-place version of :meth:`~Tensor.t`
 add_docstr_all(
     "tile",
     r"""
-tile(*reps) -> Tensor
+tile(dims) -> Tensor
 
 See :func:`torch.tile`
 """,
@@ -5133,9 +5250,7 @@ Example::
     >>> tensor.to(other, non_blocking=True)
     tensor([[-0.5044,  0.0005],
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5147,9 +5262,7 @@ byte(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5161,9 +5274,7 @@ bool(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5175,9 +5286,7 @@ char(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5188,9 +5297,7 @@ bfloat16(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5202,9 +5309,7 @@ double(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5216,9 +5321,7 @@ float(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5230,9 +5333,7 @@ cdouble(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5244,9 +5345,7 @@ cfloat(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5258,9 +5357,7 @@ chalf(memory_format=torch.preserve_format) -> Tensor
 
 Args:
      {memory_format}
- """.format(
-        **common_args
-    ),
+ """.format(**common_args),
 )
 
 add_docstr_all(
@@ -5272,9 +5369,7 @@ half(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5286,9 +5381,7 @@ int(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5312,9 +5405,7 @@ long(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5326,9 +5417,7 @@ short(memory_format=torch.preserve_format) -> Tensor
 
 Args:
     {memory_format}
-""".format(
-        **common_args
-    ),
+""".format(**common_args),
 )
 
 add_docstr_all(
@@ -5950,7 +6039,7 @@ Fills :attr:`self` tensor with numbers sampled from the continuous uniform
 distribution:
 
 .. math::
-    P(x) = \dfrac{1}{\text{to} - \text{from}}
+    f(x) = \dfrac{1}{\text{to} - \text{from}}
 """,
 )
 
@@ -6457,7 +6546,7 @@ Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
 Example:
 
     >>> self = torch.tensor([0, 0, 0, 0, 0])
-    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]])
+    >>> mask = torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 1, 1]], dtype=torch.bool)
     >>> source = torch.tensor([[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]])
     >>> self.masked_scatter(mask, source)
     tensor([[0, 0, 0, 0, 1],

@@ -25,11 +25,10 @@
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
-namespace torch {
-namespace jit {
-namespace mobile {
-namespace nnc {
+namespace torch::jit::mobile::nnc {
 
+// TODO(mvz): temporarily disable NNC backend in mobile builds.
+/*
 static std::vector<int64_t> getConstSizes(const BufPtr b) {
   std::vector<int64_t> r;
   for (const auto& dim : b->dims()) {
@@ -250,7 +249,7 @@ static std::vector<std::vector<int64_t>> parseInputShapes(
     std::vector<int64_t> input_dims;
     input_dims.reserve(input_dims_str.size());
     for (const auto& s : input_dims_str) {
-      input_dims.push_back(c10::stoi(s));
+      input_dims.push_back(std::stoi(s));
     }
     inputs.push_back(input_dims);
   }
@@ -301,7 +300,7 @@ static std::vector<int64_t> parseInputDynamicShapes(
   std::vector<int64_t> dynamic_dims;
   dynamic_dims.reserve(dynamic_dims_list.size());
   for (const auto& dim : dynamic_dims_list) {
-    dynamic_dims.push_back(c10::stoi(dim));
+    dynamic_dims.push_back(std::stoi(dim));
   }
   return dynamic_dims;
 }
@@ -328,7 +327,7 @@ static std::string getNncKernelFuncName(
 static std::pair<std::shared_ptr<Graph>, std::vector<int64_t>>
 preprocessGraphPasses(
     std::shared_ptr<Graph>& graph,
-    const std::vector<c10::optional<at::Tensor>>& example_inputs,
+    const std::vector<std::optional<at::Tensor>>& example_inputs,
     const std::vector<int64_t>& dynamic_sizes) {
   GRAPH_DEBUG("Before preprocessing graph passes: ", *graph);
   torch::jit::RemoveTensorMutation(graph);
@@ -368,11 +367,11 @@ preprocessGraphPasses(
   return std::make_pair(graph, sym_val);
 }
 
-static std::vector<c10::optional<at::Tensor>> generateExampleInputs(
+static std::vector<std::optional<at::Tensor>> generateExampleInputs(
     const std::vector<std::vector<int64_t>>& inputShapes,
     const std::vector<at::ScalarType>& inputTypes,
     const std::vector<at::MemoryFormat>& inputMemoryFormats) {
-  std::vector<c10::optional<at::Tensor>> example_inputs;
+  std::vector<std::optional<at::Tensor>> example_inputs;
   example_inputs.reserve(inputShapes.size());
   for (const auto i : c10::irange(inputShapes.size())) {
     const auto dtype = at::dtype(inputTypes[i]);
@@ -440,11 +439,8 @@ static c10::IValue preprocess(
   }
   return cu.serialize();
 }
+*/
 
-// TODO(mvz): temporarily disable NNC backend in mobile builds.
 // static auto reg = torch::jit::backend_preprocess_register("nnc", preprocess);
 
-} // namespace nnc
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile::nnc

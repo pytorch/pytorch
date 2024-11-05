@@ -144,17 +144,15 @@ void invoke_parallel(
   const std::function<void(int64_t, int64_t)>& f) {
   at::internal::lazy_init_num_threads();
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  size_t num_tasks, chunk_size;
+  size_t num_tasks = 0, chunk_size = 0;
   std::tie(num_tasks, chunk_size) =
       internal::calc_num_tasks_and_chunk_size(begin, end, grain_size);
 
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   struct {
     std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
     std::exception_ptr eptr;
     std::mutex mutex;
-    volatile size_t remaining;
+    std::atomic_size_t remaining{0};
     std::condition_variable cv;
   } state;
 
@@ -275,10 +273,10 @@ bool in_parallel_region() {
 #endif // C10_MOBILE
 }
 
-void intraop_launch(std::function<void()> func) {
+void intraop_launch(const std::function<void()>& func) {
 #ifndef C10_MOBILE
   if (!in_parallel_region() && get_num_threads() > 1) {
-    _get_intraop_pool().run(std::move(func));
+    _get_intraop_pool().run(func);
   } else {
     // execute inline if we're in parallel region
     func();
@@ -291,7 +289,7 @@ void intraop_launch(std::function<void()> func) {
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
-    std::function<void()> func) {
+    const std::function<void()>& func) {
 #ifndef C10_MOBILE
   auto future = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
   if (!in_parallel_region() && get_num_threads() > 1) {

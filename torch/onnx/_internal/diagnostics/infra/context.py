@@ -1,15 +1,14 @@
+# mypy: allow-untyped-defs
 """A diagnostic context based on SARIF."""
 
 from __future__ import annotations
 
 import contextlib
-
 import dataclasses
 import gzip
-
 import logging
-
-from typing import Callable, Generator, List, Literal, Mapping, Optional, TypeVar
+from typing import Callable, Generator, Generic, Literal, Mapping, TypeVar
+from typing_extensions import Self
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif, utils
@@ -18,23 +17,28 @@ from torch.onnx._internal.diagnostics.infra.sarif import version as sarif_versio
 
 # This is a workaround for mypy not supporting Self from typing_extensions.
 _Diagnostic = TypeVar("_Diagnostic", bound="Diagnostic")
+diagnostic_logger: logging.Logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
 class Diagnostic:
     rule: infra.Rule
     level: infra.Level
-    message: Optional[str] = None
-    locations: List[infra.Location] = dataclasses.field(default_factory=list)
-    stacks: List[infra.Stack] = dataclasses.field(default_factory=list)
-    graphs: List[infra.Graph] = dataclasses.field(default_factory=list)
-    thread_flow_locations: List[infra.ThreadFlowLocation] = dataclasses.field(
+    message: str | None = None
+    locations: list[infra.Location] = dataclasses.field(default_factory=list)
+    stacks: list[infra.Stack] = dataclasses.field(default_factory=list)
+    graphs: list[infra.Graph] = dataclasses.field(default_factory=list)
+    thread_flow_locations: list[infra.ThreadFlowLocation] = dataclasses.field(
         default_factory=list
     )
-    additional_message: Optional[str] = None
-    tags: List[infra.Tag] = dataclasses.field(default_factory=list)
-    source_exception: Optional[Exception] = None
+    additional_messages: list[str] = dataclasses.field(default_factory=list)
+    tags: list[infra.Tag] = dataclasses.field(default_factory=list)
+    source_exception: Exception | None = None
     """The exception that caused this diagnostic to be created."""
+    logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
+    """The logger for this diagnostic. Defaults to 'diagnostic_logger' which has the same
+    log level setting with `DiagnosticOptions.verbosity_level`."""
+    _current_log_section_depth: int = 0
 
     def __post_init__(self) -> None:
         pass
@@ -42,9 +46,10 @@ class Diagnostic:
     def sarif(self) -> sarif.Result:
         """Returns the SARIF Result representation of this diagnostic."""
         message = self.message or self.rule.message_default_template
-        if self.additional_message:
+        if self.additional_messages:
+            additional_message = "\n".join(self.additional_messages)
             message_markdown = (
-                f"{message}\n\n## Additional Message:\n\n{self.additional_message}"
+                f"{message}\n\n## Additional Message:\n\n{additional_message}"
             )
         else:
             message_markdown = message
@@ -76,40 +81,141 @@ class Diagnostic:
         )
         return sarif_result
 
-    def with_location(self: _Diagnostic, location: infra.Location) -> _Diagnostic:
+    def with_location(self: Self, location: infra.Location) -> Self:
         """Adds a location to the diagnostic."""
         self.locations.append(location)
         return self
 
     def with_thread_flow_location(
-        self: _Diagnostic, location: infra.ThreadFlowLocation
-    ) -> _Diagnostic:
+        self: Self, location: infra.ThreadFlowLocation
+    ) -> Self:
         """Adds a thread flow location to the diagnostic."""
         self.thread_flow_locations.append(location)
         return self
 
-    def with_stack(self: _Diagnostic, stack: infra.Stack) -> _Diagnostic:
+    def with_stack(self: Self, stack: infra.Stack) -> Self:
         """Adds a stack to the diagnostic."""
         self.stacks.append(stack)
         return self
 
-    def with_graph(self: _Diagnostic, graph: infra.Graph) -> _Diagnostic:
+    def with_graph(self: Self, graph: infra.Graph) -> Self:
         """Adds a graph to the diagnostic."""
         self.graphs.append(graph)
         return self
 
-    def with_additional_message(self: _Diagnostic, message: str) -> _Diagnostic:
-        """Adds an additional message to the diagnostic."""
-        if self.additional_message is None:
-            self.additional_message = message
-        else:
-            self.additional_message = f"{self.additional_message}\n{message}"
-        return self
+    @contextlib.contextmanager
+    def log_section(
+        self, level: int, message: str, *args, **kwargs
+    ) -> Generator[None, None, None]:
+        """
+        Context manager for a section of log messages, denoted by a title message and increased indentation.
 
-    def with_source_exception(self: _Diagnostic, exception: Exception) -> _Diagnostic:
-        """Adds the source exception to the diagnostic."""
+        Same api as `logging.Logger.log`.
+
+        This context manager logs the given title at the specified log level, increases the current
+        section depth for subsequent log messages, and ensures that the section depth is decreased
+        again when exiting the context.
+
+        Args:
+            level: The log level.
+            message: The title message to log.
+            *args: The arguments to the message. Use `LazyString` to defer the
+                expensive evaluation of the arguments until the message is actually logged.
+            **kwargs: The keyword arguments for `logging.Logger.log`.
+
+        Yields:
+            None: This context manager does not yield any value.
+
+        Example:
+            >>> with DiagnosticContext("DummyContext", "1.0"):
+            ...     rule = infra.Rule("RuleID", "DummyRule", "Rule message")
+            ...     diagnostic = Diagnostic(rule, infra.Level.WARNING)
+            ...     with diagnostic.log_section(logging.INFO, "My Section"):
+            ...         diagnostic.log(logging.INFO, "My Message")
+            ...         with diagnostic.log_section(logging.INFO, "My Subsection"):
+            ...             diagnostic.log(logging.INFO, "My Submessage")
+            ...     diagnostic.additional_messages
+            ['## My Section', 'My Message', '### My Subsection', 'My Submessage']
+        """
+        if self.logger.isEnabledFor(level):
+            indented_format_message = (
+                f"##{'#' * self._current_log_section_depth } {message}"
+            )
+            self.log(
+                level,
+                indented_format_message,
+                *args,
+                **kwargs,
+            )
+        self._current_log_section_depth += 1
+        try:
+            yield
+        finally:
+            self._current_log_section_depth -= 1
+
+    def log(self, level: int, message: str, *args, **kwargs) -> None:
+        """Logs a message within the diagnostic. Same api as `logging.Logger.log`.
+
+        If logger is not enabled for the given level, the message will not be logged.
+        Otherwise, the message will be logged and also added to the diagnostic's additional_messages.
+
+        The default setting for `DiagnosticOptions.verbosity_level` is `logging.INFO`. Based on this default,
+        the log level recommendations are as follows. If you've set a different default verbosity level in your
+        application, please adjust accordingly:
+
+        - logging.ERROR: Log any events leading to application failure.
+        - logging.WARNING: Log events that might result in application issues or failures, although not guaranteed.
+        - logging.INFO: Log general useful information, ensuring minimal performance overhead.
+        - logging.DEBUG: Log detailed debug information, which might affect performance when logged.
+
+        Args:
+            level: The log level.
+            message: The message to log.
+            *args: The arguments to the message. Use `LazyString` to defer the
+                expensive evaluation of the arguments until the message is actually logged.
+            **kwargs: The keyword arguments for `logging.Logger.log`.
+        """
+        if self.logger.isEnabledFor(level):
+            formatted_message = message % args
+            self.logger.log(level, formatted_message, **kwargs)
+            self.additional_messages.append(formatted_message)
+
+    def debug(self, message: str, *args, **kwargs) -> None:
+        """Logs a debug message within the diagnostic. Same api as logging.Logger.debug.
+
+        Checkout `log` for more details.
+        """
+        self.log(logging.DEBUG, message, *args, **kwargs)
+
+    def info(self, message: str, *args, **kwargs) -> None:
+        """Logs an info message within the diagnostic. Same api as logging.Logger.info.
+
+        Checkout `log` for more details.
+        """
+        self.log(logging.INFO, message, *args, **kwargs)
+
+    def warning(self, message: str, *args, **kwargs) -> None:
+        """Logs a warning message within the diagnostic. Same api as logging.Logger.warning.
+
+        Checkout `log` for more details.
+        """
+        self.log(logging.WARNING, message, *args, **kwargs)
+
+    def error(self, message: str, *args, **kwargs) -> None:
+        """Logs an error message within the diagnostic. Same api as logging.Logger.error.
+
+        Checkout `log` for more details.
+        """
+        self.log(logging.ERROR, message, *args, **kwargs)
+
+    def log_source_exception(self, level: int, exception: Exception) -> None:
+        """Logs a source exception within the diagnostic.
+
+        Invokes `log_section` and `log` to log the exception in markdown section format.
+        """
         self.source_exception = exception
-        return self
+        with self.log_section(level, "Exception log"):
+            self.log(level, "%s", formatter.lazy_format_exception(exception))
 
     def record_python_call_stack(self, frames_to_skip: int) -> infra.Stack:
         """Records the current Python call stack."""
@@ -124,7 +230,7 @@ class Diagnostic:
         self,
         fn: Callable,
         state: Mapping[str, str],
-        message: Optional[str] = None,
+        message: str | None = None,
         frames_to_skip: int = 0,
     ) -> infra.ThreadFlowLocation:
         """Records a python call as one thread flow step."""
@@ -143,41 +249,6 @@ class Diagnostic:
         self.with_thread_flow_location(thread_flow_location)
         return thread_flow_location
 
-    def pretty_print(
-        self, verbose: bool = False, log_level: infra.Level = infra.Level.ERROR
-    ):
-        """Prints the diagnostics in a human-readable format.
-
-        Args:
-            verbose: If True, prints all information. E.g. stack frames, graphs, etc.
-                Otherwise, only prints compact information. E.g., rule name and display message.
-            log_level: The minimum level of diagnostics to print.
-        """
-        if self.level.value < log_level.value:
-            return
-        formatter.pretty_print_item_title(f"{self.level.name}: {self.rule.name}")
-        print(self.message)
-        print(self.additional_message)
-
-        if not verbose:
-            print("<Set verbose=True to see more details>\n")
-            return
-
-        formatter.pretty_print_title("Locations", fill_char="-")
-        for location in self.locations:
-            location.pretty_print()
-        for stack in self.stacks:
-            stack.pretty_print()
-        formatter.pretty_print_title("Thread Flow Locations", fill_char="-")
-        for thread_flow_location in self.thread_flow_locations:
-            thread_flow_location.pretty_print(verbose=verbose)
-        for graph in self.graphs:
-            graph.pretty_print(verbose=verbose)
-
-        print()
-
-        # TODO: print help url to rule at the end.
-
 
 class RuntimeErrorWithDiagnostic(RuntimeError):
     """Runtime error with enclosed diagnostic information."""
@@ -188,33 +259,36 @@ class RuntimeErrorWithDiagnostic(RuntimeError):
 
 
 @dataclasses.dataclass
-class DiagnosticContext:
+class DiagnosticContext(Generic[_Diagnostic]):
     name: str
     version: str
     options: infra.DiagnosticOptions = dataclasses.field(
         default_factory=infra.DiagnosticOptions
     )
-    diagnostics: List[Diagnostic] = dataclasses.field(init=False, default_factory=list)
-    logger: logging.Logger = dataclasses.field(
-        init=True, default_factory=lambda: logging.getLogger().getChild("diagnostics")
-    )
+    diagnostics: list[_Diagnostic] = dataclasses.field(init=False, default_factory=list)
     # TODO(bowbao): Implement this.
     # _invocation: infra.Invocation = dataclasses.field(init=False)
-    _inflight_diagnostics: List[Diagnostic] = dataclasses.field(
+    _inflight_diagnostics: list[_Diagnostic] = dataclasses.field(
         init=False, default_factory=list
     )
+    _previous_log_level: int = dataclasses.field(init=False, default=logging.WARNING)
+    logger: logging.Logger = dataclasses.field(init=False, default=diagnostic_logger)
+    _bound_diagnostic_type: type = dataclasses.field(init=False, default=Diagnostic)
 
     def __enter__(self):
+        self._previous_log_level = self.logger.level
+        self.logger.setLevel(self.options.verbosity_level)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self.logger.setLevel(self._previous_log_level)
         return None
 
     def sarif(self) -> sarif.Run:
         """Returns the SARIF Run object."""
         unique_rules = {diagnostic.rule for diagnostic in self.diagnostics}
         return sarif.Run(
-            tool=sarif.Tool(
+            sarif.Tool(
                 driver=sarif.ToolComponent(
                     name=self.name,
                     version=self.version,
@@ -244,24 +318,37 @@ class DiagnosticContext:
             with open(file_path, "w") as f:
                 f.write(self.to_json())
 
-    def log(self, diagnostic: Diagnostic) -> None:
-        """Adds a diagnostic to the context.
+    def log(self, diagnostic: _Diagnostic) -> None:
+        """Logs a diagnostic.
 
-        Use this method to add diagnostics that are not created by the context.
+        This method should be used only after all the necessary information for the diagnostic
+        has been collected.
+
         Args:
             diagnostic: The diagnostic to add.
         """
-        if not isinstance(diagnostic, Diagnostic):
+        if not isinstance(diagnostic, self._bound_diagnostic_type):
             raise TypeError(
-                f"Expected diagnostic of type {Diagnostic}, got {type(diagnostic)}"
+                f"Expected diagnostic of type {self._bound_diagnostic_type}, got {type(diagnostic)}"
             )
-        if self.options.warnings_as_errors and diagnostic.level == infra.Level.WARNING:
-            diagnostic.level = infra.Level.ERROR
-        self.diagnostics.append(diagnostic)
-        self.logger.log(diagnostic.level, diagnostic.message)
-        self.logger.log(diagnostic.level, diagnostic.additional_message)
+        if self.options.warnings_as_errors and diagnostic.level == infra.Level.WARNING:  # type: ignore[attr-defined]
+            diagnostic.level = infra.Level.ERROR  # type: ignore[attr-defined]
+        self.diagnostics.append(diagnostic)  # type: ignore[arg-type]
 
-    def log_and_raise_if_error(self, diagnostic: Diagnostic) -> None:
+    def log_and_raise_if_error(self, diagnostic: _Diagnostic) -> None:
+        """Logs a diagnostic and raises an exception if it is an error.
+
+        Use this method for logging non inflight diagnostics where diagnostic level is not known or
+        lower than ERROR. If it is always expected raise, use `log` and explicit
+        `raise` instead. Otherwise there is no way to convey the message that it always
+        raises to Python intellisense and type checking tools.
+
+        This method should be used only after all the necessary information for the diagnostic
+        has been collected.
+
+        Args:
+            diagnostic: The diagnostic to add.
+        """
         self.log(diagnostic)
         if diagnostic.level == infra.Level.ERROR:
             if diagnostic.source_exception is not None:
@@ -270,8 +357,8 @@ class DiagnosticContext:
 
     @contextlib.contextmanager
     def add_inflight_diagnostic(
-        self, diagnostic: Diagnostic
-    ) -> Generator[Diagnostic, None, None]:
+        self, diagnostic: _Diagnostic
+    ) -> Generator[_Diagnostic, None, None]:
         """Adds a diagnostic to the context.
 
         Use this method to add diagnostics that are not created by the context.
@@ -284,7 +371,7 @@ class DiagnosticContext:
         finally:
             self._inflight_diagnostics.pop()
 
-    def push_inflight_diagnostic(self, diagnostic: Diagnostic) -> None:
+    def push_inflight_diagnostic(self, diagnostic: _Diagnostic) -> None:
         """Pushes a diagnostic to the inflight diagnostics stack.
 
         Args:
@@ -295,7 +382,7 @@ class DiagnosticContext:
         """
         self._inflight_diagnostics.append(diagnostic)
 
-    def pop_inflight_diagnostic(self) -> Diagnostic:
+    def pop_inflight_diagnostic(self) -> _Diagnostic:
         """Pops the last diagnostic from the inflight diagnostics stack.
 
         Returns:
@@ -303,7 +390,7 @@ class DiagnosticContext:
         """
         return self._inflight_diagnostics.pop()
 
-    def inflight_diagnostic(self, rule: Optional[infra.Rule] = None) -> Diagnostic:
+    def inflight_diagnostic(self, rule: infra.Rule | None = None) -> _Diagnostic:
         if rule is None:
             # TODO(bowbao): Create builtin-rules and create diagnostic using that.
             if len(self._inflight_diagnostics) <= 0:
@@ -311,50 +398,7 @@ class DiagnosticContext:
 
             return self._inflight_diagnostics[-1]
         else:
-            # TODO(bowbao): Improve efficiency with Mapping[Rule, List[Diagnostic]]
             for diagnostic in reversed(self._inflight_diagnostics):
                 if diagnostic.rule == rule:
                     return diagnostic
             raise AssertionError(f"No inflight diagnostic for rule {rule.name}")
-
-    def pretty_print(
-        self, verbose: Optional[bool] = None, log_level: Optional[infra.Level] = None
-    ) -> None:
-        """Prints the diagnostics in a human-readable format.
-
-        Args:
-            verbose: Whether to print the diagnostics in verbose mode. See Diagnostic.pretty_print.
-                If not specified, uses the value of 'self.options.log_verbose'.
-            log_level: The minimum level of diagnostics to print.
-                If not specified, uses the value of 'self.options.log_level'.
-        """
-        if verbose is None:
-            verbose = self.options.log_verbose
-        if log_level is None:
-            log_level = self.options.log_level
-
-        formatter.pretty_print_title(
-            f"Diagnostic Run {self.name} version {self.version}"
-        )
-        print(f"verbose: {verbose}, log level: {log_level}")
-        diagnostic_stats = {level: 0 for level in infra.Level}
-        for diagnostic in self.diagnostics:
-            diagnostic_stats[diagnostic.level] += 1
-        formatter.pretty_print_title(
-            " ".join(f"{diagnostic_stats[level]} {level.name}" for level in infra.Level)
-        )
-
-        for diagnostic in self.diagnostics:
-            diagnostic.pretty_print(verbose, log_level)
-
-        unprinted_diagnostic_stats = [
-            (level, count)
-            for level, count in diagnostic_stats.items()
-            if count > 0 and level.value < log_level.value
-        ]
-        if unprinted_diagnostic_stats:
-            print(
-                f"{' '.join(f'{count} {level.name}' for level, count in unprinted_diagnostic_stats)} "
-                "were not printed due to the log level."
-            )
-        print()

@@ -335,6 +335,20 @@ class Vectorized<int16_t> {
 };
 
 template <>
+Vectorized<int16_t> inline operator<<(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+               vuint16 shift_vec0 = reinterpret_cast<vuint16>(b.vec0());
+               vuint16 shift_vec1 = reinterpret_cast<vuint16>(b.vec1());
+         return Vectorized<int16_t>{vec_sl(a.vec0(), shift_vec0), vec_sl(a.vec1(), shift_vec1)};
+}
+
+template <>
+Vectorized<int16_t> inline operator>>(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+               vuint16 shift_vec0 = reinterpret_cast<vuint16>(b.vec0());
+               vuint16 shift_vec1 = reinterpret_cast<vuint16>(b.vec1()) ;
+         return Vectorized<int16_t>{vec_sr(a.vec0(), shift_vec0), vec_sr(a.vec1(), shift_vec1)};
+}
+
+template <>
 Vectorized<int16_t> inline maximum(
     const Vectorized<int16_t>& a,
     const Vectorized<int16_t>& b) {
@@ -348,6 +362,40 @@ Vectorized<int16_t> inline minimum(
   return a.minimum(b);
 }
 
+template <>
+Vectorized<int16_t> C10_ALWAYS_INLINE operator+(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return Vectorized<int16_t>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int16_t> C10_ALWAYS_INLINE operator-(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return Vectorized<int16_t>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int16_t> C10_ALWAYS_INLINE operator*(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return Vectorized<int16_t>{vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int16_t> C10_ALWAYS_INLINE operator/(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return Vectorized<int16_t>{a.vec0()/b.vec0(), a.vec1()/b.vec1()};
+}
+
+template <>
+Vectorized<int16_t> C10_ALWAYS_INLINE operator&(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return Vectorized<int16_t>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int16_t> C10_ALWAYS_INLINE operator|(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return Vectorized<int16_t>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int16_t> C10_ALWAYS_INLINE operator^(const Vectorized<int16_t>& a, const Vectorized<int16_t>& b) {
+  return Vectorized<int16_t>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
+}
 
 } // namespace
 } // namespace vec

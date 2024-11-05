@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/profiler/containers.h>
 #include <torch/csrc/profiler/util.h>
@@ -48,13 +49,12 @@ TEST(ProfilerTest, AppendOnlyList_ref) {
 // Test that we can convert TSC measurements back to wall clock time.
 TEST(ProfilerTest, clock_converter) {
   const int n = 10001;
-  torch::profiler::impl::ApproximateClockToUnixTimeConverter converter;
-  std::vector<torch::profiler::impl::ApproximateClockToUnixTimeConverter::
-                  UnixAndApproximateTimePair>
+  c10::ApproximateClockToUnixTimeConverter converter;
+  std::vector<
+      c10::ApproximateClockToUnixTimeConverter::UnixAndApproximateTimePair>
       pairs;
   for (const auto i : c10::irange(n)) {
-    pairs.push_back(torch::profiler::impl::ApproximateClockToUnixTimeConverter::
-                        measurePair());
+    pairs.push_back(c10::ApproximateClockToUnixTimeConverter::measurePair());
   }
   auto count_to_ns = converter.makeConverter();
   std::vector<int64_t> deltas;
@@ -85,6 +85,6 @@ TEST(ProfilerTest, soft_assert) {
   torch::profiler::impl::setSoftAssertRaises(false);
   EXPECT_NO_THROW(SOFT_ASSERT(false));
   // Reset soft assert behavior to default
-  torch::profiler::impl::setSoftAssertRaises(c10::nullopt);
+  torch::profiler::impl::setSoftAssertRaises(std::nullopt);
   EXPECT_NO_THROW(SOFT_ASSERT(false));
 }

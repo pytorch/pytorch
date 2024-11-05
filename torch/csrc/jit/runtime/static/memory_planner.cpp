@@ -7,8 +7,7 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <iterator>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -402,7 +401,7 @@ void StandardMemoryPlanner::allocateManagedTensors() {
   if (managed_bytes_ == 0) {
     return;
   }
-  DCHECK(storages_.size() > 0);
+  DCHECK(!storages_.empty());
   size_t offset = 0;
   auto* start = allocateBuffer(managed_bytes_);
 
@@ -513,5 +512,4 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
   VLOG(1) << "managed_bytes: " << managed_bytes_;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

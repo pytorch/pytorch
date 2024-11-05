@@ -36,8 +36,8 @@ class OrderedDict {
   // values. I tried to make this noexcept (conditional on the move constructors
   // of index_ and items_ being noexcept) but the obvious spelling didn't
   // compile on Windows.
-  OrderedDict(OrderedDict&& other) = default;
-  OrderedDict& operator=(OrderedDict&& other) = default;
+  OrderedDict(OrderedDict&& other) noexcept = default;
+  OrderedDict& operator=(OrderedDict&& other) noexcept = default;
 
   ~OrderedDict() = default;
 
@@ -349,7 +349,7 @@ Value& OrderedDict<Key, Value>::operator[](const Key& key) {
   if (auto* value = find(key)) {
     return *value;
   }
-  AT_ERROR(key_description_, " '", key, "' is not defined");
+  TORCH_CHECK(false, key_description_, " '", key, "' is not defined");
 }
 
 template <typename Key, typename Value>
@@ -357,7 +357,7 @@ const Value& OrderedDict<Key, Value>::operator[](const Key& key) const {
   if (auto* value = find(key)) {
     return *value;
   }
-  AT_ERROR(key_description_, " '", key, "' is not defined");
+  TORCH_CHECK(false, key_description_, " '", key, "' is not defined");
 }
 
 template <typename Key, typename Value>

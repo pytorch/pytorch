@@ -5,13 +5,12 @@
 
 #include <ATen/core/DimVector.h>
 #include <ATen/core/Tensor.h>
-#include <functional>
 
 namespace at {
 
 using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
 
-inline bool has_names(ITensorListRef tensors) {
+inline bool has_names(const ITensorListRef& tensors) {
   return std::any_of(tensors.begin(), tensors.end(), [](const Tensor& t) {
     return t.has_names();
   });
@@ -81,7 +80,7 @@ namespace namedinference {
 
 const Tensor& propagate_names_if_present_and_nonempty(
     const Tensor& result,
-    c10::optional<DimnameList> maybe_names,
+    std::optional<DimnameList> maybe_names,
     bool validate_names = false);
 // Propagates `names` to `result` if `names` is not empty.
 // `names` can be empty; see [NOTE] Writing name inference rules

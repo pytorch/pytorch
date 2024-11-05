@@ -8,8 +8,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ========================TransformerEncoderLayerImpl=========================
 TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
@@ -71,14 +70,14 @@ Tensor TransformerEncoderLayerImpl::forward(
   Tensor ret = norm1(src + dropout1(src2));
 
   // feedforward
-  if (c10::get_if<enumtype::kGELU>(&options.activation())) {
+  if (std::holds_alternative<enumtype::kGELU>(options.activation())) {
     src2 = linear2(dropout(F::gelu(linear1(ret))));
-  } else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
+  } else if (std::holds_alternative<enumtype::kReLU>(options.activation())) {
     src2 = linear2(dropout(F::relu(linear1(ret))));
-  } else if (c10::get_if<std::function<Tensor(const Tensor&)>>(
-                 &options.activation())) {
+  } else if (std::holds_alternative<std::function<Tensor(const Tensor&)>>(
+                 options.activation())) {
     auto callable_activation =
-        *c10::get_if<std::function<Tensor(const Tensor&)>>(
+        *std::get_if<std::function<Tensor(const Tensor&)>>(
             &options.activation());
     src2 = linear2(dropout(callable_activation(linear1(ret))));
   } else {
@@ -198,14 +197,14 @@ Tensor TransformerDecoderLayerImpl::forward(
 }
 
 Tensor TransformerDecoderLayerImpl::activation(const Tensor& input) {
-  if (c10::get_if<enumtype::kGELU>(&options.activation())) {
+  if (std::holds_alternative<enumtype::kGELU>(options.activation())) {
     return F::gelu(input);
-  } else if (c10::get_if<enumtype::kReLU>(&options.activation())) {
+  } else if (std::holds_alternative<enumtype::kReLU>(options.activation())) {
     return F::relu(input);
-  } else if (c10::get_if<std::function<Tensor(const Tensor&)>>(
-                 &options.activation())) {
+  } else if (std::holds_alternative<std::function<Tensor(const Tensor&)>>(
+                 options.activation())) {
     auto callable_activation =
-        *c10::get_if<std::function<Tensor(const Tensor&)>>(
+        *std::get_if<std::function<Tensor(const Tensor&)>>(
             &options.activation());
     return callable_activation(input);
   } else {
@@ -223,8 +222,7 @@ TransformerEncoderImpl::TransformerEncoderImpl(
 
 void TransformerEncoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
-  for (const auto i : c10::irange(options.num_layers())) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.encoder_layer()->clone());
   }
 
@@ -290,8 +288,7 @@ TransformerDecoderImpl::TransformerDecoderImpl(
 
 void TransformerDecoderImpl::reset() {
   layers = this->register_module("layers", ModuleList());
-  for (const auto i : c10::irange(options.num_layers())) {
-    (void)i; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto i : c10::irange(options.num_layers())) {
     layers->push_back(options.decoder_layer()->clone());
   }
 
@@ -486,5 +483,4 @@ Tensor TransformerImpl::generate_square_subsequent_mask(int64_t sz) {
   }
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

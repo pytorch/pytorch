@@ -1,13 +1,16 @@
 import argparse
 import datetime
+import logging
 import re
 import sys
-import warnings
 from collections import defaultdict
 
 import torch
-from torch._C import parse_schema
+from torch._C import parse_schema, Tag
 
+
+FORMAT = "[%(levelname)s %(asctime)s %(filename)s:%(lineno)s] %(message)s"
+logging.basicConfig(level=logging.INFO, format=FORMAT)
 
 # How to run this test locally:
 # 1 Have two virtual environments (eg conda env), one without PyTorch installed (venv_nightly)
@@ -22,7 +25,10 @@ from torch._C import parse_schema
 # 5. Run this test with
 #    `python test/forward_backward_compatibility/check_forward_backward_compatibility.py --existing-schemas nightly_schemas.txt`
 
-# The date specifies how long the allowlist exclusion should apply to.
+# The date specifies how long the allowlist exclusion should apply to. Note that core ATen opset
+# (https://pytorch.org/docs/stable/torch.compiler_ir.html#core-aten-ir) is guaranteed to be BC, based on this policy
+# (https://dev-discuss.pytorch.org/t/core-aten-opset-backward-forward-compatibility-policy/1772) and hence the
+# allowlist does not apply (or the date is always arbitrarily far for core ATen ops).
 #
 #   - If we NEVER give BC guarantee for an operator, you can put the
 #     date arbitrarily far in the future.
@@ -46,6 +52,7 @@ ALLOW_LIST = [
     ("prim::ModuleDictIndex", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6", datetime.date(9999, 1, 1)),
     ("prim::MKLDNNRelu6_", datetime.date(9999, 1, 1)),
+    ("prim::is_ort", datetime.date(9999, 1, 1)),
     ("prim::Concat", datetime.date(9999, 1, 1)),
     ("aten::_NestedTensor_GeneralizedBMM", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
@@ -108,212 +115,28 @@ ALLOW_LIST = [
     ("aten::mps_max_pool2d_backward.out", datetime.date(9999, 1, 1)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
-    ("aten::_amp_foreach_non_finite_check_and_unscale.out", datetime.date(2022, 9, 1)),
-    ("aten::_amp_foreach_non_finite_check_and_unscale_", datetime.date(2022, 9, 1)),
-    ("aten::_cudnn_rnn_backward.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_abs.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_abs_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_acos.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_acos_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_add.List_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_add.ScalarList_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_add.Scalar_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_add_.List", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_add_.Scalar", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_add_.ScalarList", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_addcdiv.ScalarList_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_addcdiv.Scalar_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_addcdiv_.Scalar", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_addcdiv_.ScalarList", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_addcmul.ScalarList_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_addcmul.Scalar_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_addcmul_.Scalar", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_addcmul_.ScalarList", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_asin.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_asin_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_atan.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_atan_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_ceil.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_ceil_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_cos.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_cos_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_cosh.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_cosh_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_div.List_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_div.ScalarList_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_div.Scalar_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_div_.List", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_div_.Scalar", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_div_.ScalarList", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_erf.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_erf_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_erfc.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_erfc_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_exp.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_exp_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_expm1.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_expm1_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_floor.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_floor_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_frac.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_frac_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_lgamma.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_lgamma_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_log.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_log10.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_log10_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_log1p.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_log1p_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_log2.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_log2_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_log_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_maximum.List_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_maximum_.List", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_minimum.List_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_minimum_.List", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_mul.List_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_mul.ScalarList_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_mul.Scalar_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_mul_.List", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_mul_.Scalar", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_mul_.ScalarList", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_neg.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_neg_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_norm.Scalar_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_reciprocal.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_reciprocal_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_round.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_round_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sigmoid.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sigmoid_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sin.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sin_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sinh.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sinh_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sqrt.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sqrt_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sub.List_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sub.ScalarList_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sub.Scalar_out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sub_.List", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sub_.Scalar", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_sub_.ScalarList", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_tan.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_tan_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_tanh.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_tanh_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_trunc.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_trunc_", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_zero.out", datetime.date(2022, 9, 1)),
-    ("aten::_foreach_zero_", datetime.date(2022, 9, 1)),
-    ("aten::_histogramdd_bin_edges.out", datetime.date(2022, 9, 1)),
-    ("aten::chunk", datetime.date(2022, 9, 1)),
-    ("aten::dequantize.tensors_out", datetime.date(2022, 9, 1)),
-    ("aten::dsplit.array", datetime.date(2022, 9, 1)),
-    ("aten::dsplit.int", datetime.date(2022, 9, 1)),
-    ("aten::hsplit.array", datetime.date(2022, 9, 1)),
-    ("aten::hsplit.int", datetime.date(2022, 9, 1)),
-    ("aten::lstm_mps_backward.out", datetime.date(2022, 9, 1)),
-    ("aten::miopen_rnn_backward.out", datetime.date(2022, 9, 1)),
-    ("aten::quantize_per_tensor.tensors_out", datetime.date(2022, 9, 1)),
-    ("aten::split", datetime.date(2022, 9, 1)),
-    ("aten::split.Tensor", datetime.date(2022, 9, 1)),
-    ("aten::split.sizes", datetime.date(2022, 9, 1)),
-    ("aten::split_copy.Tensor_out", datetime.date(2022, 9, 1)),
-    ("aten::split_with_sizes", datetime.date(2022, 9, 1)),
-    ("aten::split_with_sizes_copy.out", datetime.date(2022, 9, 1)),
-    ("aten::tensor_split.indices", datetime.date(2022, 9, 1)),
-    ("aten::tensor_split.sections", datetime.date(2022, 9, 1)),
-    ("aten::tensor_split.tensor_indices_or_sections", datetime.date(2022, 9, 1)),
-    ("aten::unbind.Dimname", datetime.date(2022, 9, 1)),
-    ("aten::unbind.int", datetime.date(2022, 9, 1)),
-    ("aten::unbind_copy.int_out", datetime.date(2022, 9, 1)),
-    ("aten::unsafe_split.Tensor_out", datetime.date(2022, 9, 1)),
-    ("aten::unsafe_split_with_sizes.out", datetime.date(2022, 9, 1)),
-    ("aten::vsplit.array", datetime.date(2022, 9, 1)),
-    ("aten::vsplit.int", datetime.date(2022, 9, 1)),
-    ("aten::sym_numel", datetime.date(2022, 10, 1)),
-    ("aten::to_padded_tensor", datetime.date(2022, 10, 1)),
-    ("aten::nested_to_padded_tensor", datetime.date(2022, 10, 1)),
-    ("aten::nested_tensor", datetime.date(2022, 10, 15)),
-    ("aten::_nested_tensor_layer_norm", datetime.date(2022, 10, 15)),
-    ("aten::_torch_cuda_cu_linker_symbol_op", datetime.date(2022, 11, 1)),
-    ("aten::_test_inductor_realize", datetime.date(2023, 1, 1)),
-
-    ("aten::upsample_linear1d_backward", datetime.date(2022, 12, 15)),
-    ("aten::upsample_bicubic2d_backward", datetime.date(2022, 12, 15)),
-    ("aten::upsample_trilinear3d", datetime.date(2022, 12, 15)),
-    ("aten::upsample_bilinear2d", datetime.date(2022, 12, 15)),
-    ("aten::upsample_nearest3d", datetime.date(2022, 12, 15)),
-    ("aten::upsample_nearest2d_backward", datetime.date(2022, 12, 15)),
-    ("aten::upsample_bilinear2d_backward", datetime.date(2022, 12, 15)),
-    ("aten::upsample_trilinear3d_backward", datetime.date(2022, 12, 15)),
-    ("aten::upsample_nearest2d", datetime.date(2022, 12, 15)),
-    ("aten::upsample_bicubic2d", datetime.date(2022, 12, 15)),
-    ("aten::upsample_nearest1d_backward", datetime.date(2022, 12, 15)),
-    ("aten::upsample_nearest3d_backward", datetime.date(2022, 12, 15)),
-    ("aten::upsample_linear1d", datetime.date(2022, 12, 15)),
-    ("aten::upsample_nearest1d", datetime.date(2022, 12, 15)),
-    ("aten::_upsample_nearest_exact3d", datetime.date(2022, 12, 15)),
-    ("aten::_upsample_nearest_exact3d_backward", datetime.date(2022, 12, 15)),
-    ("aten::_upsample_bilinear2d_aa", datetime.date(2022, 12, 15)),
-    ("aten::_upsample_bilinear2d_aa_backward", datetime.date(2022, 12, 15)),
-    ("aten::_upsample_bicubic2d_aa", datetime.date(2022, 12, 15)),
-    ("aten::_upsample_bicubic2d_aa_backward", datetime.date(2022, 12, 15)),
-    ("aten::_upsample_nearest_exact1d", datetime.date(2022, 12, 15)),
-    ("aten::_upsample_nearest_exact1d_backward", datetime.date(2022, 12, 15)),
-    ("aten::_upsample_nearest_exact2d", datetime.date(2022, 12, 15)),
-    ("aten::_upsample_nearest_exact2d_backward", datetime.date(2022, 12, 15)),
-    ("aten::_scaled_dot_product_attention", datetime.date(2023, 8, 1)),
-    ("aten::_chunk_grad_outputs_efficient_attention", datetime.date(2023, 8, 1)),
-    ("aten::_scaled_dot_product_flash_attention", datetime.date(2023, 5, 15)),
-    ("aten::_scaled_dot_product_efficient_attention", datetime.date(2023, 7, 1)),
-    ("aten::_scaled_dot_product_efficient_attention_backward", datetime.date(2023, 7, 1)),
-    ("aten::_sparse_mask_helper", datetime.date(2023, 3, 15)),
-    ("aten::_fused_sdp_choice", datetime.date(2023, 3, 15)),
-    ("aten::_flash_attention_forward", datetime.date(2023, 5, 15)),
-    ("aten::_flash_attention_backward", datetime.date(2023, 5, 15)),
-    ("aten::_efficient_attention_forward", datetime.date(2023, 7, 1)),
-    ("aten::_efficient_attention_backward", datetime.date(2023, 7, 1)),
-    ("mkldnn::_convolution_pointwise.binary", datetime.date(2022, 12, 15)),
-    ("prim::CudaFusionIvalGuard", datetime.date(2023, 2, 1)),
-    ("prim::CudaFusionGuard", datetime.date(2023, 2, 1)),
-    ("prim::CudaFusionGroup", datetime.date(2023, 2, 1)),
-    ("prim::CudaFusionViewGuard", datetime.date(2023, 2, 1)),
-    ("prim::CudaFusionSizeEq", datetime.date(2023, 2, 1)),
-    ("prim::transpose_copy.int", datetime.date(2023, 2, 1)),
-    ("prim::expand_as_copy", datetime.date(2023, 2, 1)),
-    ("prim::squeeze_copy", datetime.date(2023, 2, 1)),
-    ("prim::squeeze_copy.dim", datetime.date(2023, 2, 1)),
-    ("prim::unsqueeze_copy", datetime.date(2023, 2, 1)),
-    ("prim::expand_copy", datetime.date(2023, 2, 1)),
-    ("prim::flatten_copy", datetime.date(2023, 2, 1)),
-    ("prim::add_optional", datetime.date(2023, 2, 1)),
-    ("prim::reshape_copy", datetime.date(2023, 2, 1)),
-    ("prim::permute_copy", datetime.date(2023, 2, 1)),
-    ("prim::infer_unsqueeze_size", datetime.date(2023, 2, 1)),
-    ("prim::t_copy", datetime.date(2023, 2, 1)),
-    ("prim::view_copy", datetime.date(2023, 2, 1)),
+    ("aten::_scaled_dot_product_cudnn_attention", datetime.date(9999, 1, 1)),
     # BetterTransformer 1.0 internal operators
     ("aten::_transformer_decoder_only_layer_fwd", datetime.date(9999, 1, 1)),
-    ("aten::_native_decoder_only_multi_head_attention",
-     datetime.date(9999, 1, 1)),
-    ("mkldnn::_convolution_pointwise_.binary", datetime.date(2023, 7, 1)),
+    ("aten::_native_decoder_only_multi_head_attention", datetime.date(9999, 1, 1)),
     # These ops were moved to python under the c10d_functional namespace
-    ("c10d::allreduce_", datetime.date(2023, 7, 30)),
     ("aten::wait_tensor", datetime.date(9999, 1, 30)),
     ("aten::reduce_scatter_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_gather_into_tensor", datetime.date(9999, 1, 30)),
     ("aten::all_reduce", datetime.date(9999, 1, 30)),
-    ("aten::to_sparse.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse.sparse_dim_out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_bsc.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_bsr.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_csc.out", datetime.date(2023, 12, 31)),
-    ("aten::to_sparse_csr.out", datetime.date(2023, 12, 31)),
-    ("aten::_structured_sparse_linear", datetime.date(2023, 12, 31)),
-    ("aten::batch_norm_backward_elemt.out", datetime.date(2023, 12, 31)),
-    ("aten::batch_norm_backward_elemt", datetime.date(2023, 12, 31)),
+    ("onednn::qconv1d_pointwise", datetime.date(2024, 12, 31)),
+    ("onednn::qconv2d_pointwise", datetime.date(2024, 12, 31)),
+    ("onednn::qconv3d_pointwise", datetime.date(2024, 12, 31)),
+    ("onednn::qconv2d_pointwise.binary", datetime.date(2024, 12, 31)),
+    ("onednn::qlinear_pointwise.binary", datetime.date(2024, 12, 31)),
+    ("onednn::qlinear_pointwise.binary_tensor", datetime.date(2024, 12, 31)),
+    ("aten::_scaled_mm.out", datetime.date(2024, 12, 31)),
+    ("aten::_scaled_mm", datetime.date(2024, 12, 31)),
+    ("aten::wrapped_quantized_linear_prepacked", datetime.date(2024, 12, 31)),
+    ("aten::wrapped_linear_prepack", datetime.date(2024, 12, 31)),
+    ("_quantized::wrapped_linear_prepack", datetime.date(2024, 12, 31)),
+    ("_quantized::wrapped_linear_prepacked", datetime.date(2024, 12, 31)),
+    ("_quantized::wrapped_quantized_linear_prepacked", datetime.date(2024, 12, 31)),
 ]
 
 ALLOW_LIST_COMPILED = [
@@ -321,8 +144,11 @@ ALLOW_LIST_COMPILED = [
         re.compile(item[0]),
         item[1],
         re.compile(item[2]) if len(item) > 2 else None,
-    ) for item in ALLOW_LIST if item[1] >= datetime.date.today()
+    )
+    for item in ALLOW_LIST
+    if item[1] >= datetime.date.today()
 ]
+
 
 def allow_listed(schema):
     for item in ALLOW_LIST_COMPILED:
@@ -342,6 +168,7 @@ dont_parse_list = [
     ("dist_c10d", datetime.date(2099, 9, 17)),
     ("__backends__.nnc", datetime.date(2099, 9, 17)),
 ]
+
 
 def has_valid_upgraders(schema, version_map):
     # we want to parse through the map to find if
@@ -371,6 +198,7 @@ def has_valid_upgraders(schema, version_map):
 
     return False
 
+
 def dont_parse(schema_line):
     for item in dont_parse_list:
         if item[1] < datetime.date.today():
@@ -380,6 +208,7 @@ def dont_parse(schema_line):
             return True
     return False
 
+
 def load_schemas_to_dict():
     new_schemas = torch._C._jit_get_all_schemas()
     new_schemas += torch._C._jit_get_custom_class_schemas()
@@ -387,6 +216,7 @@ def load_schemas_to_dict():
     for s in new_schemas:
         new_schema_dict[s.name].append(s)
     return new_schema_dict
+
 
 def process_version_map(version_map):
     # version map maps full schema name to
@@ -397,11 +227,20 @@ def process_version_map(version_map):
     # Dict[schema_name, Dict[overload, List[schema]]]
 
     output = defaultdict(dict)
-    for (key, entries) in version_map.items():
+    for key, entries in version_map.items():
         operator_name = key.split(".")[0]
         schema_entries = [parse_schema(entry.old_schema) for entry in entries]
         output[operator_name][key] = schema_entries
     return output
+
+
+def is_core_aten_op(schema) -> bool:
+    # Check if the schema is a core ATen op
+    if "::" not in schema.name:
+        return False
+    _, _, tags = torch._C._get_operation_overload(schema.name, schema.overload_name)
+    return Tag.core in tags
+
 
 def check_bc(existing_schemas):
     new_schema_dict = load_schemas_to_dict()
@@ -410,12 +249,23 @@ def check_bc(existing_schemas):
     broken_ops = []
     for existing_schema in existing_schemas:
         if allow_listed(existing_schema):
-            print("schema: ", str(existing_schema), " found on allowlist, skipping")
-            continue
+            if not is_core_aten_op(existing_schema):
+                logging.info("schema: %s found on allowlist, skipping", existing_schema)
+                continue
+            else:
+                logging.info(
+                    "schema: %s found on allowlist, but is a core ATen op, checking BC",
+                    existing_schema,
+                )
         if has_valid_upgraders(existing_schema, version_map):
-            print("schema: ", str(existing_schema), " has valid upgrader, skipping")
-            continue
-        print("processing existing schema: ", str(existing_schema))
+            if not is_core_aten_op(existing_schema):
+                logging.info("schema: %s has valid upgrader, skipping", existing_schema)
+                continue
+            else:
+                logging.info(
+                    "schema: %s has a valid upgrader, but is a core ATen op, checking BC"
+                )
+        logging.debug("processing existing schema: %s", existing_schema)
         matching_new_schemas = new_schema_dict.get(existing_schema.name, [])
         found = False
         for matching_new_schema in matching_new_schemas:
@@ -423,26 +273,27 @@ def check_bc(existing_schemas):
                 found = True
                 break
         if not found:
-            print(
+            logging.warning(
                 "Can NOT find backward compatible schemas after changes "
-                "for schema {} from the following candidates:\n[\n{}\n]".format(
-                    str(existing_schema),
-                    "\n\t".join(str(s) for s in matching_new_schemas),
-                )
+                "for schema %s from the following candidates:\n[\n%s\n]",
+                str(existing_schema),
+                "\n\t".join(str(s) for s in matching_new_schemas),
             )
             # TODO Print out more details about why candidates don't match.
             broken_ops.append(str(existing_schema))
             is_bc = False
     if is_bc:
-        print("Found backward compatible schemas for all existing schemas")
+        logging.info("Found backward compatible schemas for all existing schemas")
     else:
-        print(
+        logging.warning(
             "The PR is introducing backward incompatible changes to the "
             "operator library. Please contact PyTorch team to confirm "
             "whether this change is wanted or not. \n\nBroken ops: "
-            "[\n\t{}\n]".format("\n\t".join(broken_ops))
+            "[\n\t%s\n]",
+            "\n\t".join(broken_ops),
         )
     return is_bc
+
 
 def check_fc(existing_schemas):
     new_schema_dict = load_schemas_to_dict()
@@ -450,43 +301,44 @@ def check_fc(existing_schemas):
     broken_ops = []
     for existing_schema in existing_schemas:
         if allow_listed(existing_schema):
-            print("schema: ", str(existing_schema), " found on allowlist, skipping")
+            logging.info("schema: %s found on allowlist, skipping", existing_schema)
             continue
-        print("processing existing schema: ", str(existing_schema))
+        logging.info("processing existing schema: %s", existing_schema)
         matching_new_schemas = new_schema_dict.get(existing_schema.name, [])
         found = False
         possible_failure_reasons = []
         for matching_new_schema in matching_new_schemas:
-            is_compatible, reason = matching_new_schema.check_forward_compatible_with(existing_schema)
+            is_compatible, reason = matching_new_schema.check_forward_compatible_with(
+                existing_schema
+            )
             if is_compatible:
                 found = True
                 break
             if reason != "":
                 possible_failure_reasons.append(reason)
         if not found:
-            print(
+            logging.warning(
                 "Can NOT find forward compatible schemas after changes "
-                "for schema {} from the following candidates:\n[\n{}\n]".format(
-                    str(existing_schema),
-                    "\n\t".join(str(s) for s in matching_new_schemas),
-                )
+                "for schema %s from the following candidates:\n[\n\t%s\n]",
+                str(existing_schema),
+                "\n\t".join(str(s) for s in matching_new_schemas),
             )
-            print(
+            logging.warning(
                 "Refer to following reasons for failure "
-                "to find FC schema:\n[\n{}\n]".format(
-                    "\n\t".join(str(r) for r in possible_failure_reasons)
-                )
+                "to find FC schema:\n[\n%s\n]",
+                "\n\t".join(str(r) for r in possible_failure_reasons),
             )
             broken_ops.append(str(existing_schema))
             is_fc = False
     if is_fc:
-        print("Found forward compatible schemas for all existing schemas")
+        logging.info("Found forward compatible schemas for all existing schemas")
     else:
-        warnings.warn(
+        logging.warning(
             "The PR is introducing a potentially forward incompatible changes to the "
             "operator library. Please contact PyTorch team to confirm "
             "whether this change is wanted or not. \n\nBroken ops: "
-            "[\n\t{}\n]".format("\n\t".join(broken_ops))
+            "[\n\t%s\n]",
+            "\n\t".join(broken_ops),
         )
 
 
@@ -508,7 +360,7 @@ if __name__ == "__main__":
                 break
 
             if dont_parse(line.strip()):
-                print("Not parsing schema line: ", line.strip())
+                logging.info("Not parsing schema line: %s", line.strip())
                 continue
             s = parse_schema(line.strip())
             slist.append(s)

@@ -45,8 +45,7 @@
 #include <thrust/for_each.h>
 #include <thrust/sequence.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -68,7 +67,7 @@ __global__ void convert_indices_from_coo_to_csr_cuda_kernel(output_t* data_out, 
 template <typename input_t, typename output_t>
 void convert_indices_from_coo_to_csr_cuda(const Tensor& result, const Tensor& input, const int64_t size) {
   int64_t numel = input.numel();
-  const input_t* data_in = input.data_ptr<input_t>();
+  const input_t* data_in = input.const_data_ptr<input_t>();
   output_t* data_out = result.data_ptr<output_t>();
 
   if (numel == 0) {
@@ -85,52 +84,66 @@ void convert_indices_from_coo_to_csr_cuda(const Tensor& result, const Tensor& in
 }
 
 template <typename input_t, typename output_t>
-__global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, const input_t* data_in, const int64_t nrows) {
+__global__ void convert_indices_from_csr_to_coo_cuda_kernel(output_t* data_out, const input_t* data_in, const int64_t nrows, const int64_t nnz, const int64_t nbatches) {
   int64_t tid = blockDim.x * blockIdx.x + threadIdx.x;
 
-  if (tid < nrows) {
-    for (int64_t i = data_in[tid]; i < data_in[tid + 1]; i++)
-      data_out[i] = static_cast<output_t>(tid);
+  if (tid < nrows * nbatches) {
+    int64_t b = tid / nrows;
+    int64_t i_ = b * (nrows + 1) + tid % nrows;
+    for (int64_t i = data_in[i_]; i < data_in[i_ + 1]; i++) {
+      data_out[b * nnz + i] = static_cast<output_t>(tid % nrows);
+    }
   }
 }
 
 template <typename input_t, typename output_t>
 void convert_indices_from_csr_to_coo_cuda(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices, const bool transpose=false) {
-  int64_t nrows = crow_indices.numel() - 1;
-  if (nrows == 0) {
+  int64_t nrows = crow_indices.size(-1) - 1;
+  int64_t nnz = col_indices.size(-1);
+  if (nrows == 0 || nnz == 0) {
     indices.zero_();
     return;
   }
+  int64_t total_nnz = col_indices.numel();
+  int64_t batch_ndim = crow_indices.dim() - 1;
+  if (batch_ndim > 0) {
+    auto batch_indices = indices.narrow(0, 0, batch_ndim);
+    batch_indices.copy_(at::sparse::full_coo_indices(crow_indices.sizes().slice(0, batch_ndim), indices.options())
+                        .repeat_interleave(nnz, 1));
+  }
 
   auto crow_indices_ = crow_indices.expect_contiguous();
-  const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
+  const input_t* crow_indices_data_in = crow_indices_->const_data_ptr<input_t>();
   TORCH_INTERNAL_ASSERT(indices.is_contiguous());
-  auto row0 = indices.select(0, transpose?1:0);
-  auto row1 = indices.select(0, transpose?0:1);
+  auto row0 = indices.select(0, transpose?batch_ndim + 1:batch_ndim + 0);
+  auto row1 = indices.select(0, transpose?batch_ndim + 0:batch_ndim + 1);
+  auto col_indices_ = col_indices.expect_contiguous();
+  row1.copy_(col_indices_->view({-1}));
   output_t* data_out = row0.data_ptr<output_t>();
 
-  // Run nrows threads...
+  // Run nrows * nbatches threads...
+  int64_t nbatches = total_nnz / nnz;
   int64_t THREADS = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
-  int64_t BLOCKS = (nrows + THREADS) / THREADS;
+  int64_t BLOCKS = (nrows * nbatches + THREADS) / THREADS;
   at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
-  row1.copy_(*col_indices.expect_contiguous());
-  convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows);
+  convert_indices_from_csr_to_coo_cuda_kernel<<<BLOCKS, THREADS, 0, stream>>>(data_out, crow_indices_data_in, nrows, nnz, nbatches);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // namespace
 
 using namespace at::sparse_csr;
-// certain utiliy functions are usable from sparse COO.
+// certain utility functions are usable from sparse COO.
 using namespace at::sparse;
 
-Tensor& add_out_dense_sparse_csr_cuda(
+Tensor& add_out_dense_sparse_compressed_cuda(
     Tensor& output,
     const Tensor& dense,
     const SparseCsrTensor& src,
     const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(dense.layout() == kStrided);
-  TORCH_INTERNAL_ASSERT(src.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT(
+      src.layout() == kSparseCsr || src.layout() == kSparseCsc);
   TORCH_INTERNAL_ASSERT(dense.is_cuda());
 
   TORCH_CHECK(
@@ -182,67 +195,111 @@ Tensor& add_out_dense_sparse_csr_cuda(
 
   auto valuesBuffer = src_values.to(commonDtype).reshape({-1, src_values.size(-1)}).contiguous();
   resultBuffer = resultBuffer.view({-1, output.size(-2), output.size(-1)});
-  auto src_crow_indices = src.crow_indices().reshape({-1, src.crow_indices().size(-1)}).contiguous();
-  auto src_col_indices = src.col_indices().reshape({-1, src.col_indices().size(-1)}).contiguous();
+  Tensor src_compressed_indices;
+  Tensor src_plain_indices;
+  std::tie(src_compressed_indices, src_plain_indices) =
+      at::sparse_csr::getCompressedPlainIndices(src);
+  src_compressed_indices =
+      src_compressed_indices.reshape({-1, src_compressed_indices.size(-1)});
+  src_plain_indices =
+      src_plain_indices.reshape({-1, src_plain_indices.size(-1)});
+  auto src_layout = src.layout();
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      kComplexHalf, kHalf, kBool, kBFloat16,
+      kComplexHalf,
+      kHalf,
+      kBool,
+      kBFloat16,
       commonDtype,
       "add_out_op2_sparse_csr",
-      [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {
+      [&valuesBuffer,
+       &resultBuffer,
+       &alpha,
+       &src_compressed_indices,
+       &src_plain_indices,
+       &src_layout]() {
         AT_DISPATCH_INDEX_TYPES(
-            src_crow_indices.scalar_type(),
+            src_compressed_indices.scalar_type(),
             "csr_add_out_crow_indices",
-              [&valuesBuffer, &resultBuffer, &alpha, &src_crow_indices, &src_col_indices]() {
-                auto batch_count = resultBuffer.dim() > 2 ? resultBuffer.size(-3) : 1;
-                scalar_t* values_accessor = valuesBuffer.data_ptr<scalar_t>();
-                scalar_t* out_ptr = resultBuffer.data_ptr<scalar_t>();
-                scalar_t cast_value = alpha.to<scalar_t>();
+            [&valuesBuffer,
+             &resultBuffer,
+             &alpha,
+             &src_compressed_indices,
+             &src_plain_indices,
+             &src_layout]() {
+              auto batch_count =
+                  resultBuffer.dim() > 2 ? resultBuffer.size(-3) : 1;
+              scalar_t* values_accessor = valuesBuffer.data_ptr<scalar_t>();
+              scalar_t* out_ptr = resultBuffer.data_ptr<scalar_t>();
+              scalar_t cast_value = alpha.to<scalar_t>();
 
-                index_t* crow_indices_accessor = src_crow_indices.data_ptr<index_t>();
-                index_t* col_indices_accessor = src_col_indices.data_ptr<index_t>();
-                int64_t out_storage_offset = resultBuffer.storage_offset();
+              index_t* compressed_indices_accessor =
+                  src_compressed_indices.data_ptr<index_t>();
+              index_t* plain_indices_accessor =
+                  src_plain_indices.data_ptr<index_t>();
+              int64_t out_storage_offset = resultBuffer.storage_offset();
 
-                auto out_strides = resultBuffer.strides();
-                auto out_strides0 = out_strides[0];
-                auto out_strides1 = out_strides[1];
-                auto crow_stride0 = src_crow_indices.stride(0);
-                auto col_stride0 = src_col_indices.stride(0);
-                auto val_stride0 = valuesBuffer.stride(0);
+              auto out_strides = resultBuffer.strides();
+              auto const out_stride_batch = out_strides[0];
+              auto const out_stride_compressed =
+                  AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+                      src_layout,
+                      "add_out_dense_sparse_compressed_cpu",
+                      [&out_strides] { return out_strides[1]; },
+                      [&out_strides] { return out_strides[2]; });
+              auto const out_stride_plain =
+                  AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+                      src_layout,
+                      "add_out_dense_sparse_compressed_cpu",
+                      [&out_strides] { return out_strides[2]; },
+                      [&out_strides] { return out_strides[1]; });
+              auto compressed_stride0 = src_compressed_indices.stride(0);
+              auto plain_stride0 = src_plain_indices.stride(0);
+              auto val_stride0 = valuesBuffer.stride(0);
 
-                cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-                at::cuda::ThrustAllocator allocator;
-                auto policy = thrust::cuda::par(allocator).on(stream);
+              cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+              at::cuda::ThrustAllocator allocator;
+              auto policy = thrust::cuda::par(allocator).on(stream);
 
-               // Note that this could be wildly imbalanced if the sparsity pattern varies a lot between rows.
-               thrust::for_each(
-                    policy,
-                    thrust::make_counting_iterator(int64_t(0)),
-                    thrust::make_counting_iterator(int64_t(src_crow_indices.size(-1) - 1)),
-                    [values_accessor,
-                    crow_indices_accessor,
-                    col_indices_accessor,
-                    out_ptr,
-                    cast_value,
-                    out_strides0,
-                    out_strides1,
-                    crow_stride0,
-                    col_stride0,
-                    val_stride0,
-                    batch_count
-                    ]__device__(int64_t irow) {
-                      for (index_t batch_idx = 0; batch_idx < batch_count; batch_idx++) {
-                        index_t start_index = crow_indices_accessor[batch_idx*crow_stride0 + irow];
-                        index_t end_index = crow_indices_accessor[batch_idx*crow_stride0 + irow + 1];
+              // Note that this could be wildly imbalanced if the sparsity
+              // pattern varies a lot between slices along the compressed
+              // dimension.
+              thrust::for_each(
+                  policy,
+                  thrust::make_counting_iterator(int64_t(0)),
+                  thrust::make_counting_iterator(
+                      int64_t(src_compressed_indices.size(-1) - 1)),
+                  [values_accessor,
+                   compressed_indices_accessor,
+                   plain_indices_accessor,
+                   out_ptr,
+                   cast_value,
+                   out_stride_batch,
+                   out_stride_compressed,
+                   out_stride_plain,
+                   compressed_stride0,
+                   plain_stride0,
+                   val_stride0,
+                   batch_count] __device__(int64_t i_compressed) {
+                    for (index_t batch_idx = 0; batch_idx < batch_count;
+                         batch_idx++) {
+                      index_t start_index = compressed_indices_accessor
+                          [batch_idx * compressed_stride0 + i_compressed];
+                      index_t end_index = compressed_indices_accessor
+                          [batch_idx * compressed_stride0 + i_compressed + 1];
 
-                        for (index_t i = start_index; i < end_index; ++i) {
-                            auto icol = col_indices_accessor[batch_idx*col_stride0 + i];
-                            auto index = batch_idx * out_strides0 + irow * out_strides1 + icol;
-                            out_ptr[index] += cast_value * values_accessor[batch_idx*val_stride0 + i];
-                        }
+                      for (index_t i = start_index; i < end_index; ++i) {
+                        auto i_plain = plain_indices_accessor
+                            [batch_idx * plain_stride0 + i];
+                        auto index = batch_idx * out_stride_batch +
+                            i_compressed * out_stride_compressed +
+                            i_plain * out_stride_plain;
+                        out_ptr[index] += cast_value *
+                            values_accessor[batch_idx * val_stride0 + i];
                       }
-                    });
-              });
+                    }
+                  });
+            });
       });
   if (output.scalar_type() != commonDtype) {
     output.copy_(resultBuffer);
@@ -250,13 +307,15 @@ Tensor& add_out_dense_sparse_csr_cuda(
   return output;
 }
 
-Tensor& add_out_sparse_csr_cuda(
+Tensor& add_out_sparse_compressed_cuda(
     const Tensor& self,
     const SparseCsrTensor& other,
     const Scalar& alpha,
     SparseCsrTensor& out) {
   if (self.layout() == kStrided) {
-    add_out_dense_sparse_csr_cuda(out, self, other, alpha);
+    add_out_dense_sparse_compressed_cuda(out, self, other, alpha);
+  } else if (other.layout() == kStrided) {
+    add_out_dense_sparse_compressed_cuda(out, other, self, alpha);
   } else {
     TORCH_CHECK(
         self.sizes().equals(other.sizes()),
@@ -330,7 +389,7 @@ struct Reduction...Op {
 };
 
 
-Tensor _sparse_csr_..._cuda(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_..._cuda(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, std::optional<ScalarType> dtype) {
   ...
       result = reduce_sparse_csr_cuda_template<scalar_t>(input_, dims_to_sum, keepdim, Reduction...Op<scalar_t>());
   ...
@@ -420,9 +479,8 @@ Tensor reduce_sparse_csr_dim0_cuda_template(const Tensor& sparse, ReductionOp ro
   Tensor values = sparse.values();
   auto ncols = sparse.size(1);
   auto nnz = col_indices.numel();
-  Tensor new_col_indices;
 
-  std::tie(new_col_indices, std::ignore) = at::_unique(col_indices, true, false);
+  auto new_col_indices = std::get<0>(at::_unique(col_indices, true, false));
   auto new_nnz = new_col_indices.numel();
   Tensor new_crow_indices = at::tensor(ArrayRef<int64_t>{0, new_nnz}, col_indices.options());
 
@@ -647,9 +705,74 @@ struct ReductionMulOp {
   __forceinline__ scalar_t identity_cpu() const { return 1; }
 };
 
+void _apply_sparse_csr_linear_solve(
+  const Tensor& A,
+  const Tensor& b,
+  const bool left,
+  const Tensor& x) {
+#if defined(USE_ROCM) || !defined(USE_CUDSS)
+  TORCH_CHECK(
+      false,
+      "Calling linear solver with sparse tensors requires compiling ",
+      "PyTorch with CUDA cuDSS and is not supported in ROCm build.");
+#else
+  // layout check
+  TORCH_CHECK(A.is_sparse_csr(), "A must be a CSR matrix");
+  TORCH_CHECK(b.layout() == kStrided, "b must be a strided tensor");
+  TORCH_CHECK(x.layout() == kStrided, "x must be a strided tensor");
+  // dim check
+  TORCH_CHECK(b.dim() == 1, "b must be a 1D tensor");
+  TORCH_CHECK(b.stride(0) == 1, "b must be a column major tensor");
+  TORCH_CHECK(b.size(0) == A.size(0), "linear system size mismatch.");
+  TORCH_CHECK(x.dim() == 1, "x must be a 1D tensor");
+  TORCH_CHECK(x.stride(0) == 1, "x must be a column major tensor");
+  TORCH_CHECK(x.size(0) == A.size(1), "linear system size mismatch.");
+  TORCH_CHECK(A.dtype() == b.dtype() && A.dtype() == x.dtype(), "A, x, and b must have the same dtype");
+  TORCH_CHECK(left == true, "only left == true is supported by the Sparse CSR backend")
+
+  Tensor crow = A.crow_indices();
+  Tensor col = A.col_indices();
+  if (crow.scalar_type() != ScalarType::Int) {
+    crow = crow.to(crow.options().dtype(ScalarType::Int));
+    col = col.to(col.options().dtype(ScalarType::Int));
+  }
+  int* rowOffsets = crow.data_ptr<int>();
+  int* colIndices = col.data_ptr<int>();
+  Tensor values = A.values();
+  // cuDSS data structures and handle initialization
+  cudssConfig_t config;
+  cudssMatrix_t b_mt;
+  cudssMatrix_t A_mt;
+  cudssMatrix_t x_mt;
+  cudssData_t cudss_data;
+  cudssHandle_t handle = at::cuda::getCurrentCudssHandle();
+
+  TORCH_CUDSS_CHECK(cudssConfigCreate(&config));
+  TORCH_CUDSS_CHECK(cudssDataCreate(handle, &cudss_data));
+
+  AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "create_matrix", ([&] {
+    scalar_t* values_ptr = values.data_ptr<scalar_t>();
+    scalar_t* b_ptr = b.data_ptr<scalar_t>();
+    scalar_t* x_ptr = x.data_ptr<scalar_t>();
+    auto CUDA_R_TYP = std::is_same_v<scalar_t, double> ? CUDA_R_64F : CUDA_R_32F;
+    TORCH_CUDSS_CHECK(cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
+    TORCH_CUDSS_CHECK(cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR));
+    TORCH_CUDSS_CHECK(cudssMatrixCreateCsr(&A_mt, A.size(0), A.size(1),  A._nnz(), rowOffsets, rowOffsets + crow.size(0), colIndices, values_ptr, CUDA_R_32I, CUDA_R_TYP, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO));
+  }));
+  TORCH_CUDSS_CHECK(cudssExecute(handle, CUDSS_PHASE_ANALYSIS, config, cudss_data, A_mt, x_mt, b_mt));
+  TORCH_CUDSS_CHECK(cudssExecute(handle, CUDSS_PHASE_FACTORIZATION, config, cudss_data, A_mt, x_mt, b_mt));
+  TORCH_CUDSS_CHECK(cudssExecute(handle, CUDSS_PHASE_SOLVE, config, cudss_data, A_mt, x_mt, b_mt));
+  // Destroy the opaque objects
+  TORCH_CUDSS_CHECK(cudssConfigDestroy(config));
+  TORCH_CUDSS_CHECK(cudssDataDestroy(handle, cudss_data));
+  TORCH_CUDSS_CHECK(cudssMatrixDestroy(A_mt));
+  TORCH_CUDSS_CHECK(cudssMatrixDestroy(x_mt));
+  TORCH_CUDSS_CHECK(cudssMatrixDestroy(b_mt));
+#endif
+}
 } // namespace
 
-Tensor _sparse_csr_sum_cuda(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_sum_cuda(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, std::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
   Tensor input_ = at::sparse_csr::to_type(input, dtype_);
   Tensor result;
@@ -665,7 +788,7 @@ Tensor _sparse_csr_sum_cuda(const Tensor& input, IntArrayRef dims_to_sum, bool k
   return result;
 }
 
-Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bool keepdim, std::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
   Tensor input_ = input.to(dtype_);
   Tensor result;
@@ -677,5 +800,12 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
   return result;
 }
 
-} // namespace native
-} // namespace at
+Tensor _sparse_csr_linear_solve(const Tensor& A, const Tensor& b, const bool left) {
+  Tensor b_copy = b.contiguous();
+  Tensor out = b_copy.new_empty(b_copy.sizes());
+  _apply_sparse_csr_linear_solve(A, b_copy, left, out);
+  return out;
+}
+
+
+} // namespace at::native

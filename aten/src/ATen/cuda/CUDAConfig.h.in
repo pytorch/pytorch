@@ -6,8 +6,8 @@
 //
 // NB: This header MUST NOT be included from other headers; it should
 // only be included from C++ files.
-
 #define AT_CUDNN_ENABLED() @AT_CUDNN_ENABLED@
+#define AT_CUSPARSELT_ENABLED() @AT_CUSPARSELT_ENABLED@
 #define AT_ROCM_ENABLED() @AT_ROCM_ENABLED@
 #define AT_MAGMA_ENABLED() @AT_MAGMA_ENABLED@
 

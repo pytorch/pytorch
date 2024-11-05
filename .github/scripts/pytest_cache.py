@@ -9,6 +9,7 @@ from pytest_caching_utils import (
     upload_pytest_cache,
 )
 
+
 TEMP_DIR = "./tmp"  # a backup location in case one isn't provided
 
 
@@ -38,6 +39,12 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="A unique job identifier that should be the same for all runs of job",
     )
+    parser.add_argument(
+        "--sha", required="--upload" in sys.argv, help="SHA of the commit"
+    )  # Only required for upload
+    parser.add_argument(
+        "--test_config", required="--upload" in sys.argv, help="The test config"
+    )  # Only required for upload
     parser.add_argument(
         "--shard", required="--upload" in sys.argv, help="The shard id"
     )  # Only required for upload
@@ -84,6 +91,8 @@ def main() -> None:
             pr_identifier=pr_identifier,
             repo=repo,
             job_identifier=args.job_identifier,
+            sha=args.sha,
+            test_config=args.test_config,
             shard=args.shard,
             cache_dir=cache_dir,
             bucket=args.bucket,

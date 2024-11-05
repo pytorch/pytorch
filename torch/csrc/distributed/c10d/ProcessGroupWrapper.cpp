@@ -7,11 +7,11 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -31,12 +31,12 @@ struct CollectiveFingerPrint {
   std::vector<int8_t> tensor_device_types_;
   // input tensor sizes
   std::vector<std::vector<int64_t>> tensor_sizes_;
-  int sequence_number_;
+  uint64_t sequence_number_;
 
   CollectiveFingerPrint(
       OpType op_type,
       const std::vector<at::Tensor>& input_tensors,
-      int sequence_number)
+      uint64_t sequence_number)
       : op_type_(op_type),
         num_tensors_(input_tensors.size()),
         sequence_number_(sequence_number) {
@@ -57,7 +57,7 @@ struct CollectiveFingerPrint {
       std::vector<int8_t> tensor_dtypes,
       std::vector<int8_t> tensor_device_types,
       std::vector<std::vector<int64_t>> tensor_sizes,
-      int sequence_number)
+      uint64_t sequence_number)
       : op_type_(op_type),
         num_tensors_(num_tensors),
         tensor_dtypes_(std::move(tensor_dtypes)),
@@ -89,15 +89,15 @@ struct CollectiveFingerPrint {
   // Takes a serialized fingerprint from
   // CollectiveFingerPrint::serialize_fingerprint and deserializes it back to a
   // CollectiveFingerPrint struct
-  CollectiveFingerPrint deserialize_fingerprint(at::Tensor serialized_tensor) {
-    OpType optype;
+  CollectiveFingerPrint deserialize_fingerprint(
+      const at::Tensor& serialized_tensor) {
     auto dtypes = std::vector<int8_t>();
     auto device_types = std::vector<int8_t>();
     auto sizes = std::vector<std::vector<int64_t>>();
     int index = 0;
-    int seq = 0;
+    int64_t seq = 0;
     // 1. OpType
-    optype = OpType(serialized_tensor[index].item<int>());
+    auto optype = OpType(serialized_tensor[index].item<int>());
     index++;
     int num_tensors = 0;
     if (index < serialized_tensor.size(0)) {
@@ -154,8 +154,7 @@ struct CollectiveFingerPrint {
       // tensor>]
       std::vector<at::Tensor> outputs;
       outputs.reserve(backend->getSize());
-      for (const auto i : c10::irange(backend->getSize())) {
-        std::ignore = i; // Suppress unused variable warning
+      for ([[maybe_unused]] const auto i : c10::irange(backend->getSize())) {
         outputs.emplace_back(at::zeros_like(tensor_shape));
       }
       output_tensors.emplace_back(outputs);
@@ -243,7 +242,7 @@ struct CollectiveFingerPrint {
     // Check op type
     auto other_op = opTypeToString(other.op_type_);
     auto this_op = opTypeToString(op_type_);
-    if (other_op.compare(this_op) != 0) {
+    if (other_op != this_op) {
       found_diff = true;
       ss << c10::str("  Op type: ", this_op, "vs ", other_op);
     }
@@ -258,7 +257,7 @@ struct CollectiveFingerPrint {
         return;
       }
       for (size_t i = 0; i < other.size(); ++i) {
-        if (other[i].compare(curr[i]) != 0) {
+        if (other[i] != curr[i]) {
           found_diff = true;
           ss << c10::str("  Tensor ", arg, ": ", curr, "vs ", other);
           return;
@@ -296,7 +295,7 @@ struct CollectiveFingerPrint {
     // 1. OpType
     data->push_back(static_cast<int64_t>(op_type_));
     // sequence number
-    data->push_back(sequence_number_);
+    data->push_back(static_cast<int64_t>(sequence_number_));
     // 2. Num tensors
     data->push_back(static_cast<int64_t>(num_tensors_));
     // 3. Tensor dtypes
@@ -309,13 +308,13 @@ struct CollectiveFingerPrint {
     }
     // 5. Shapes
     for (const auto& sizes : tensor_sizes_) {
-      data->push_back(sizes.size());
+      data->push_back(static_cast<int64_t>(sizes.size()));
       for (const auto& s : sizes) {
         data->push_back(s);
       }
     }
     // Serialize data into tensor
-    int64_t data_size = data->size();
+    int64_t data_size = static_cast<int64_t>(data->size());
     // Need to release here and get the ptr due to C++ parameter evaluation
     // order.
     auto d = data.release();
@@ -371,10 +370,19 @@ std::ostream& operator<<(
   return output << collectiveInfo;
 }
 
+bool check_same_size(const std::vector<at::Tensor>& input_tensors) {
+  for (const auto& input_tensor : input_tensors) {
+    if (!input_tensors[0].is_same_size(input_tensor)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
 
 ProcessGroupWrapper::ProcessGroupWrapper(
-    c10::intrusive_ptr<Backend> backend,
+    const c10::intrusive_ptr<Backend>& backend,
     c10::intrusive_ptr<Backend> glooBackend)
     : Backend(backend->getRank(), backend->getSize()),
       backend_(backend),
@@ -423,7 +431,11 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const AllgatherOptions& opts) {
-  runCollectiveChecks(OpType::ALLGATHER, inputTensors);
+  if (check_same_size(outputTensors.back())) {
+    runCollectiveChecks(OpType::ALLGATHER, inputTensors);
+  } else {
+    runCollectiveChecks(OpType::ALLGATHER, {});
+  }
   return backend_->allgather(outputTensors, inputTensors, opts);
 }
 
@@ -468,7 +480,11 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ReduceScatterOptions& opts) {
-  runCollectiveChecks(OpType::REDUCE_SCATTER, outputTensors);
+  if (check_same_size(inputTensors.back())) {
+    runCollectiveChecks(OpType::REDUCE_SCATTER, outputTensors);
+  } else {
+    runCollectiveChecks(OpType::REDUCE_SCATTER, {});
+  }
   return backend_->reduce_scatter(outputTensors, inputTensors, opts);
 }
 
@@ -544,6 +560,14 @@ c10::intrusive_ptr<Work> ProcessGroupWrapper::_reduce_scatter_base(
   runCollectiveChecks(
       OpType::_REDUCE_SCATTER_BASE, {inputBuffer, outputBuffer});
   return backend_->_reduce_scatter_base(outputBuffer, inputBuffer, opts);
+}
+
+void ProcessGroupWrapper::startCoalescing() {
+  return backend_->startCoalescing();
+}
+
+c10::intrusive_ptr<Work> ProcessGroupWrapper::endCoalescing() {
+  return backend_->endCoalescing();
 }
 
 c10::intrusive_ptr<Backend> ProcessGroupWrapper::getWrappedPg() const {

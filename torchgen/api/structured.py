@@ -1,7 +1,6 @@
-from typing import List, Union
+from __future__ import annotations
 
 from torchgen.api import cpp
-
 from torchgen.api.types import (
     ArgName,
     ArrayRefCType,
@@ -33,12 +32,13 @@ from torchgen.model import (
 )
 from torchgen.utils import assert_never
 
+
 # This file describes the translation of JIT schema to the structured functions API.
 # This is similar to native API, but a number of historical problems with native
 # API have been fixed.
 
 
-# Translation of types occuring in JIT arguments to a C++ argument type.
+# Translation of types occurring in JIT arguments to a C++ argument type.
 # NB: For now, mutable doesn't do anything; but it could if we make
 # some more nominal types
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
@@ -48,7 +48,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> NamedCType:
     # CompositeExplicitAutograd and the meta function (which could
     # hypothetically be SymInt), but for simplicity we plan for these to just
     # be handled in Python
-    r = cpp.valuetype_type(t, symint=False, binds=binds)
+    r = cpp.valuetype_type(t, symint=False, binds=binds, mutable=mutable)
     if r is not None:
         return r
 
@@ -97,7 +97,7 @@ def argument_type(a: Argument, *, binds: ArgName) -> NamedCType:
 
 
 # Structured kernels are never defaulted
-def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[Binding]:
+def argument(a: Argument | SelfArgument | TensorOptionsArguments) -> list[Binding]:
     if isinstance(a, Argument):
         return [
             Binding(
@@ -115,22 +115,21 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[B
         assert_never(a)
 
 
-def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
-    args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
+def impl_arguments(g: NativeFunctionsGroup) -> list[Binding]:
+    args: list[Argument | TensorOptionsArguments | SelfArgument] = []
 
     if g.out.precomputed:
         # A list of parameters for the impl function with
         # certain parameters replaced with precomputed counterparts
         # as specified in native_functions.yaml.
-        non_out_args_replaced: List[
-            Union[Argument, TensorOptionsArguments, SelfArgument]
+        non_out_args_replaced: list[
+            Argument | TensorOptionsArguments | SelfArgument
         ] = []
         for a in g.out.func.arguments.non_out:
             if isinstance(a, Argument) and a.name in g.out.precomputed.replace:
                 # If a is in precompute.replace, append the parameters
                 # that should replace it onto non_out_args_replaced.
-                for replacement in g.out.precomputed.replace[a.name]:
-                    non_out_args_replaced.append(replacement)
+                non_out_args_replaced.extend(g.out.precomputed.replace[a.name])
             else:
                 # If not, push a as it is.
                 non_out_args_replaced.append(a)
@@ -146,13 +145,13 @@ def impl_arguments(g: NativeFunctionsGroup) -> List[Binding]:
     return [r for arg in args for r in argument(arg)]
 
 
-def meta_arguments(g: NativeFunctionsGroup) -> List[Binding]:
-    args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
+def meta_arguments(g: NativeFunctionsGroup) -> list[Binding]:
+    args: list[Argument | TensorOptionsArguments | SelfArgument] = []
     args.extend(g.functional.func.arguments.non_out)
     return [r for arg in args for r in argument(arg)]
 
 
-def out_arguments(g: NativeFunctionsGroup) -> List[Binding]:
-    args: List[Union[Argument, TensorOptionsArguments, SelfArgument]] = []
+def out_arguments(g: NativeFunctionsGroup) -> list[Binding]:
+    args: list[Argument | TensorOptionsArguments | SelfArgument] = []
     args.extend(g.out.func.arguments.out)
     return [r for arg in args for r in argument(arg)]

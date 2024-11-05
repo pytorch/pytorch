@@ -1,5 +1,5 @@
 # flake8: noqa: F401
-r"""Quantized Reference Modules
+r"""Quantized Reference Modules.
 
 This module is in the process of migration to
 `torch/ao/nn/quantized/reference`, and is kept here for
@@ -9,5 +9,4 @@ appropriate file under the `torch/ao/nn/quantized/reference`,
 while adding an import statement here.
 """
 
-from torch.ao.nn.quantized.reference.modules.sparse import Embedding
-from torch.ao.nn.quantized.reference.modules.sparse import EmbeddingBag
+from torch.ao.nn.quantized.reference.modules.sparse import Embedding, EmbeddingBag

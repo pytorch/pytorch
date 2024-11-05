@@ -1,23 +1,46 @@
-# flake8: noqa: F403
+# mypy: allow-untyped-defs
+
+from typing import Callable, List, Optional, Tuple, Union
+
+import torch
+from torch import Tensor
 
 from .fake_quantize import *  # noqa: F403
-from .fuse_modules import fuse_modules  # noqa: F403
-from .fuse_modules import fuse_modules_qat  # noqa: F403
+from .fuse_modules import fuse_modules, fuse_modules_qat  # noqa: F403
 from .fuser_method_mappings import *  # noqa: F403
 from .observer import *  # noqa: F403
+from .pt2e._numeric_debugger import (  # noqa: F401
+    compare_results,
+    CUSTOM_KEY,
+    extract_results_from_loggers,
+    generate_numeric_debug_handle,
+    NUMERIC_DEBUG_HANDLE_KEY,
+    prepare_for_propagation_comparison,
+)
+from .pt2e.export_utils import (
+    _allow_exported_model_train_eval as allow_exported_model_train_eval,
+    _move_exported_model_to_eval as move_exported_model_to_eval,
+    _move_exported_model_to_train as move_exported_model_to_train,
+)
 from .qconfig import *  # noqa: F403
 from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403
-from .quantization_mappings import *  # type: ignore[no-redef]
+from .quantization_mappings import *  # noqa: F403 # type: ignore[no-redef]
 from .quantize import *  # noqa: F403
 from .quantize_jit import *  # noqa: F403
 from .stubs import *  # noqa: F403
-from typing import Union, List, Callable, Tuple, Optional
-from torch import Tensor
-import torch
 
+
+# ensure __module__ is set correctly for public APIs
 ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
 ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
+for _f in [
+    compare_results,
+    extract_results_from_loggers,
+    generate_numeric_debug_handle,
+    prepare_for_propagation_comparison,
+]:
+    _f.__module__ = "torch.ao.quantization"
 
 __all__ = [
     "DeQuantStub",
@@ -119,6 +142,9 @@ __all__ = [
     "get_quantized_operator",
     "get_static_quant_module_class",
     "load_observer_state_dict",
+    "move_exported_model_to_eval",
+    "move_exported_model_to_train",
+    "allow_exported_model_train_eval",
     "no_observer_set",
     "per_channel_weight_observer_range_neg_127_to_127",
     "prepare",
@@ -136,28 +162,41 @@ __all__ = [
     "script_qconfig_dict",
     "swap_module",
     "weight_observer_range_neg_127_to_127",
+    "generate_numeric_debug_handle",
+    "CUSTOM_KEY",
+    "NUMERIC_DEBUG_HANDLE_KEY",
+    "prepare_for_propagation_comparison",
+    "extract_results_from_loggers",
+    "compare_results",
 ]
 
+
 def default_eval_fn(model, calib_data):
-    r"""
+    r"""Define the default evaluation function.
+
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
     """
     for data, target in calib_data:
         model(data)
 
+
 class _DerivedObserverOrFakeQuantize(ObserverBase):
-    r""" This observer is used to describe an observer whose quantization parameters
+    r"""This observer is used to describe an observer whose quantization parameters
     are derived from other observers
     """
+
     def __init__(
         self,
         dtype: torch.dtype,
         obs_or_fqs: List[ObserverOrFakeQuantize],
-        derive_qparams_fn: Callable[[List[ObserverOrFakeQuantize]], Tuple[Tensor, Tensor]],
-        quant_min: Optional[int]=None,
-        quant_max: Optional[int]=None,
-        qscheme: Optional[torch.qscheme]=None,
+        derive_qparams_fn: Callable[
+            [List[ObserverOrFakeQuantize]], Tuple[Tensor, Tensor]
+        ],
+        quant_min: Optional[int] = None,
+        quant_max: Optional[int] = None,
+        qscheme: Optional[torch.qscheme] = None,
+        ch_axis: Optional[int] = None,
     ):
         super().__init__(dtype)
         self.obs_or_fqs = obs_or_fqs
@@ -165,9 +204,17 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
         self.quant_min = quant_min
         self.quant_max = quant_max
         self.qscheme = qscheme
+        self.ch_axis = ch_axis
+
+        from .utils import is_per_channel
+
+        if is_per_channel(self.qscheme):
+            assert (
+                self.ch_axis is not None
+            ), "Must provide a valid ch_axis if qscheme is per channel"
 
     def forward(self, x: Tensor) -> Tensor:
         return x
 
-    def calculate_qparams(self):
+    def calculate_qparams(self):  # type:ignore[override]
         return self.derive_qparams_fn(self.obs_or_fqs)

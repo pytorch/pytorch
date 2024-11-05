@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import json
 import subprocess
+import sys
 from enum import Enum
-from typing import NamedTuple, Optional, Tuple
+from typing import NamedTuple
 
 
 LINTER_CODE = "LINTRUNNER_VERSION"
@@ -15,18 +18,18 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: Optional[str]
-    line: Optional[int]
-    char: Optional[int]
+    path: str | None
+    line: int | None
+    char: int | None
     code: str
     severity: LintSeverity
     name: str
-    original: Optional[str]
-    replacement: Optional[str]
-    description: Optional[str]
+    original: str | None
+    replacement: str | None
+    description: str | None
 
 
-def toVersionString(version_tuple: Tuple[int, int, int]) -> str:
+def toVersionString(version_tuple: tuple[int, int, int]) -> str:
     return ".".join(str(x) for x in version_tuple)
 
 
@@ -51,9 +54,9 @@ if __name__ == "__main__":
             name="command-failed",
             original=None,
             replacement=None,
-            description="Lintrunner is not installed, did you forget to run `make setup_lint && make lint`?",
+            description="Lintrunner is not installed, did you forget to run `make setup-lint && make lint`?",
         )
-        exit(0)
+        sys.exit(0)
 
     curr_version = int(version_match[1]), int(version_match[2]), int(version_match[3])
     min_version = (0, 10, 7)

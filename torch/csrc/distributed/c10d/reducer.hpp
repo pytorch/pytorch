@@ -1,25 +1,25 @@
 #pragma once
 
+#include <c10/core/ScalarType.h>
 #include <atomic>
 #include <memory>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
-#include <c10/core/ScalarType.h>
 
 #include <ATen/core/ivalue_inl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/intrusive_ptr.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
-#include <torch/csrc/distributed/c10d/reducer_timer.hpp>
 #include <torch/csrc/distributed/c10d/default_comm_hooks.hpp>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/distributed/c10d/reducer_timer.hpp>
 #ifndef _WIN32
 #include <torch/csrc/distributed/autograd/context/context.h>
 #endif
@@ -51,7 +51,7 @@ class TORCH_API Reducer {
   explicit Reducer(
       std::vector<at::Tensor> params,
       std::vector<std::vector<size_t>> bucket_indices,
-      std::vector<size_t> per_bucket_size_limits,
+      const std::vector<size_t>& per_bucket_size_limits,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
       std::vector<bool> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
@@ -101,7 +101,9 @@ class TORCH_API Reducer {
   // Informs reducer that optimizer is running in backward, so gradients
   // don't need to be copied from buckets as the optimizer would've already
   // been applied.
-  void set_optimizer_in_backward() { optim_in_backward_ = true; };
+  void set_optimizer_in_backward() {
+    optim_in_backward_ = true;
+  };
 
   // Runs allreduce or installed communication hook given GradBucket instance.
   c10::intrusive_ptr<c10::ivalue::Future> run_comm_hook(
@@ -109,7 +111,7 @@ class TORCH_API Reducer {
 
   // Runs default allreduce hook.
   c10::intrusive_ptr<c10::ivalue::Future> run_allreduce_hook(
-    GradBucket& grad_bucket);
+      GradBucket& grad_bucket);
 
   // Returns gradient buckets in sequential order of buckets_. This is the order
   // in which buckets are reduced across processes. If return_zero_tensors=true,
@@ -133,9 +135,10 @@ class TORCH_API Reducer {
   void setSparseMetadata(std::map<std::string, at::Tensor>& metadata);
 
   // Install futures that should be awaited at end of backwards. Currently these
-  // are only used by user-defined custom buffer reduction hooks, but can be generalized
-  // to any user-originating futures that need to be awaited.
-  void install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs);
+  // are only used by user-defined custom buffer reduction hooks, but can be
+  // generalized to any user-originating futures that need to be awaited.
+  void install_futures(
+      const c10::List<c10::intrusive_ptr<c10::ivalue::Future>>& futs);
 
   // Returns true if we should rebuild buckets, else false. We only rebuild
   // buckets once after the first iteration and never rebuild them if
@@ -183,8 +186,17 @@ class TORCH_API Reducer {
   // Removes autograd hooks registered by the Reducer on the model parameters.
   void remove_autograd_hooks();
 
-  // Checks whether or not the reducer has finalized the current backward iteration.
+  // Checks whether or not the reducer has finalized the current backward
+  // iteration.
   void check_finalized();
+
+  // Updates the underlying process group used by DDP with the new process
+  // group.
+  void update_process_group(
+      c10::intrusive_ptr<c10d::ProcessGroup> new_process_group);
+
+  // Resets reducer state.
+  void reset_state();
 
  protected:
   // Forward declaration.
@@ -197,7 +209,7 @@ class TORCH_API Reducer {
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const std::vector<at::Tensor> params_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  const c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
+  c10::intrusive_ptr<::c10d::ProcessGroup> process_group_;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::vector<bool> expect_sparse_gradients_;
 
@@ -248,11 +260,12 @@ class TORCH_API Reducer {
 
   // Weak pointer to associated DDP logger.
   std::weak_ptr<c10d::Logger> logger_;
-  // List of futures installed by Reducer::install_futures that should be awaited
-  // at the end of backwards pass.
-  c10::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>> installed_futures_{c10::nullopt};
+  // List of futures installed by Reducer::install_futures that should be
+  // awaited at the end of backwards pass.
+  std::optional<c10::List<c10::intrusive_ptr<c10::ivalue::Future>>>
+      installed_futures_{std::nullopt};
   // Mixed precision parameter dtype for bucket type checking.
-  c10::optional<c10::ScalarType> mixed_precision_param_dtype_{c10::nullopt};
+  std::optional<c10::ScalarType> mixed_precision_param_dtype_{std::nullopt};
 
   // Work handle for allreduce on local_used_map_
   c10::intrusive_ptr<c10d::Work> local_used_work_;
@@ -273,7 +286,8 @@ class TORCH_API Reducer {
   // bucket_index is a key to cache after buckets are rebuilt, after which this
   // mapping never changes.
   std::vector<at::Tensor> get_variables_for_bucket(
-      size_t bucket_index, const Bucket& bucket) const;
+      size_t bucket_index,
+      const Bucket& bucket) const;
 
   // Asserts that the reduction for the previous iteration has finished before
   // rebuilding buckets or kicking off the next one.
@@ -290,11 +304,9 @@ class TORCH_API Reducer {
   using GradCallback = std::function<bool(at::Tensor&)>;
 #ifndef _WIN32
   static_assert(
-      std::is_same<
+      std::is_same_v<
           GradCallback,
-          torch::distributed::autograd::DistAutogradContext::GradCallback>::
-          value,
-      "");
+          torch::distributed::autograd::DistAutogradContext::GradCallback>);
 #endif
   void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
@@ -378,14 +390,13 @@ class TORCH_API Reducer {
     bool expect_sparse_gradient = false;
 
     // Sparse indices tensor
-    c10::optional<at::Tensor> sparse_tensor_indices = c10::nullopt;
+    std::optional<at::Tensor> sparse_tensor_indices = std::nullopt;
 
     // TODO(@pietern)
     // Memory copies from gradient tensors into the bucket are potentially
     // done on different CUDA streams. We record an event for every copy
     // so that we can synchronize with them prior to kicking off the reduction.
     // std::vector<at::cuda::CUDAEvent> events;
-
   };
 
   std::vector<Bucket> buckets_;
@@ -401,7 +412,9 @@ class TORCH_API Reducer {
 
     VariableLocator() = default;
 
-    VariableLocator(size_t bucket_index_, size_t intra_bucket_index_) : bucket_index(bucket_index_), intra_bucket_index(intra_bucket_index_) {}
+    VariableLocator(size_t bucket_index_, size_t intra_bucket_index_)
+        : bucket_index(bucket_index_),
+          intra_bucket_index(intra_bucket_index_) {}
   };
 
   // Map the index of a variable to its location in the bucket structure.
@@ -409,10 +422,12 @@ class TORCH_API Reducer {
 
   // track the number of iterations to synchronize grads in training so far.
   long num_iterations_;
-  // track distinct iteration of backward call. This is distinct from num_iterations_,
-  // for example in the case of multiple forward before backward.
+  // track distinct iteration of backward call. This is distinct from
+  // num_iterations_, for example in the case of multiple forward before
+  // backward.
   long num_bwd_calls_;
-  // whether the first autograd hook for a distinct backward pass has been called.
+  // whether the first autograd hook for a distinct backward pass has been
+  // called.
   bool first_autograd_hook_called_;
   // track the number of buckets that have been ready for
   // communication calls like allReduce or communication hooks.
@@ -524,7 +539,7 @@ class TORCH_API Reducer {
   std::unordered_map<size_t, std::string> param_names_;
   // Variable indices stored sequentially in order of when the gradient is ready
   // for the current backwards pass.
-  std::vector<int> grad_ready_order_indices_;
+  std::vector<int64_t> grad_ready_order_indices_;
   // Bytes capacity of first bucket, can be configured by user
   int64_t first_bucket_bytes_cap_;
   // Per iteration set of parameter indices that have been marked ready.
@@ -543,7 +558,8 @@ class TORCH_API Reducer {
 
   // Cached bucket index to model parameter mapping. Populated after buckets
   // are rebuilt after which this mapping is static.
-  mutable std::unordered_map<size_t, std::vector<at::Tensor>> cached_variables_for_bucket_;
+  mutable std::unordered_map<size_t, std::vector<at::Tensor>>
+      cached_variables_for_bucket_;
 
   bool optim_in_backward_{false};
   friend class Logger;
@@ -561,12 +577,12 @@ compute_bucket_assignment_by_size(
     const std::vector<size_t>& bucket_size,
     const std::vector<bool>& expect_sparse_gradient = {},
     const std::vector<int64_t>& tensor_indices = {},
-    const c10::optional<std::weak_ptr<c10d::Logger>>& logger = {});
+    const std::optional<std::weak_ptr<c10d::Logger>>& logger = {});
 
 // Verify models across all processes are the same as model on rank 0 with
 // respect to no. of params and matching dtype/size/layout.
 TORCH_API void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     const std::vector<at::Tensor>& params,
-    const c10::optional<std::weak_ptr<c10d::Logger>>& logger);
+    const std::optional<std::weak_ptr<c10d::Logger>>& logger);
 } // namespace c10d

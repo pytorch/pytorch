@@ -19,12 +19,11 @@ def define_targets(rules):
             "CAFFE2_BUILD_SHARED_LIBS",
             "CAFFE2_PERF_WITH_AVX",
             "CAFFE2_PERF_WITH_AVX2",
-            "CAFFE2_PERF_WITH_AVX512",
             "CAFFE2_USE_EXCEPTION_PTR",
             "CAFFE2_USE_CUDNN",
             "USE_MKLDNN",
             "CAFFE2_USE_ITT",
-            "TORCH_DISABLE_GPU_ASSERTS",
+            "USE_ROCM_KERNEL_ASSERT",
             "EIGEN_MPL2_ONLY",
         ],
     )
@@ -37,7 +36,7 @@ def define_targets(rules):
             "caffe2/serialize/istream_adapter.cc",
             "caffe2/serialize/read_adapter_interface.cc",
         ],
-        copts = ["-fexceptions"],
+        copts = ["-fexceptions", "-DFBCODE_CAFFE2"],
         tags = [
             "-fbcode",
             "supermodule:android/default/pytorch",
@@ -73,16 +72,18 @@ def define_targets(rules):
         "$(execpath //torchgen:gen)",
         "--install_dir=$(RULEDIR)",
         "--source-path aten/src/ATen",
+        "--aoti_install_dir=$(RULEDIR)/torch/csrc/inductor/aoti_torch/generated"
     ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
 
     gen_aten_outs_cuda = (
-        GENERATED_H_CUDA + GENERATED_CPP_CUDA +
+        GENERATED_H_CUDA + GENERATED_CPP_CUDA + GENERATED_AOTI_CUDA_CPP +
         aten_ufunc_generated_cuda_sources()
     )
 
     gen_aten_outs = (
         GENERATED_H + GENERATED_H_CORE +
         GENERATED_CPP + GENERATED_CPP_CORE +
+        GENERATED_AOTI_CPP +
         aten_ufunc_generated_cpu_sources() +
         aten_ufunc_generated_cpu_kernel_sources() + [
             "Declarations.yaml",
@@ -255,11 +256,13 @@ GENERATED_CPP_CORE = [
 
 _GENERATED_AUTOGRAD_PYTHON_HEADERS = [
     "torch/csrc/autograd/generated/python_functions.h",
+    "torch/csrc/autograd/generated/python_return_types.h",
 ]
 
 _GENERATED_AUTOGRAD_CPP_HEADERS = [
     "torch/csrc/autograd/generated/Functions.h",
     "torch/csrc/autograd/generated/VariableType.h",
+    "torch/csrc/autograd/generated/ViewFuncs.h",
     "torch/csrc/autograd/generated/variable_factories.h",
 ]
 
@@ -302,6 +305,7 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/autograd/generated/VariableType_2.cpp",
     "torch/csrc/autograd/generated/VariableType_3.cpp",
     "torch/csrc/autograd/generated/VariableType_4.cpp",
+    "torch/csrc/autograd/generated/ViewFuncs.cpp",
     "torch/csrc/autograd/generated/TraceType_0.cpp",
     "torch/csrc/autograd/generated/TraceType_1.cpp",
     "torch/csrc/autograd/generated/TraceType_2.cpp",
@@ -313,3 +317,11 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
     "torch/csrc/lazy/generated/RegisterLazy.cpp",
 ] + _GENERATED_AUTOGRAD_CPP_HEADERS + GENERATED_LAZY_H
+
+GENERATED_AOTI_CPP = [
+    "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
+]
+
+GENERATED_AOTI_CUDA_CPP = [
+    "torch/csrc/inductor/aoti_torch/generated/c_shim_cuda.cpp",
+]

@@ -6,7 +6,7 @@
 namespace torch::jit {
 
 namespace {
-const int64_t kInvalidSourceRangeTag = -1;
+constexpr int64_t kInvalidSourceRangeTag = -1;
 } // namespace
 
 c10::IValue InlinedCallStackSerializer::serialize(
@@ -59,7 +59,7 @@ c10::IValue InlinedCallStackSerializer::serialize(
 }
 
 c10::IValue InlinedCallStackSerializer::serialize_module_instance_info(
-    const c10::optional<ModuleInstanceInfo>& m) {
+    const std::optional<ModuleInstanceInfo>& m) {
   if (!m) {
     return c10::IValue();
   }
@@ -155,12 +155,11 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
   InlinedCallStackPtr cs_ptr;
   if (callee) {
     cs_ptr = c10::make_intrusive<InlinedCallStack>(
-        callee, nullptr, source_range, module_instance_info);
+        callee, nullptr, source_range, module_instance_info, function_name);
   } else {
     cs_ptr = c10::make_intrusive<InlinedCallStack>(
-        nullptr, source_range, module_instance_info);
+        nullptr, source_range, module_instance_info, function_name);
   }
-  cs_ptr->set_function_name(function_name);
   cached_inlined_callstacks_[tup] = cs_ptr;
   // Invoking move constructor
   // It is not clear if copy-ellision can happen since
@@ -169,12 +168,12 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
   return cs_ptr;
 }
 
-c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
+std::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
     deserialize_module_instance_info(
         const c10::IValue& iv,
         const std::shared_ptr<CompilationUnit>& cu) {
   if (iv.isNone()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto tup = iv.toTuple();
   auto it = cached_module_instance_info_.find(tup);
@@ -210,7 +209,7 @@ c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
 
 ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
     unpickle(
-        at::DataPtr&& data,
+        const at::DataPtr& data,
         size_t size,
         const ska::flat_hash_map<int64_t, SourceRange>& source_range_map,
         const std::shared_ptr<CompilationUnit>& cu) {

@@ -17,8 +17,7 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size);
 
@@ -32,7 +31,7 @@ void fuseStaticSubgraphs(std::shared_ptr<Graph> graph, size_t min_size) {
   RemoveTensorMutation(graph);
   ConstantPropagation(graph);
   EliminateDeadCode(graph);
-  auto aliasDb = torch::make_unique<AliasDb>(graph);
+  auto aliasDb = std::make_unique<AliasDb>(graph);
   createFusionGroups(graph->block(), aliasDb.get(), min_size);
   ConstantPooling(graph);
   ConstantPropagation(graph);
@@ -161,20 +160,18 @@ static value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
 }
 
 static void debugDumpFusionGroup(const std::string& msg, Node* n) {
-  // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
   GRAPH_DEBUG(msg, *n);
-  // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   if (n->kind() == prim::StaticSubgraph) {
     GRAPH_DEBUG(*n->g(attr::Subgraph));
   }
 }
 
-static c10::optional<Node*> tryMerge(
+static std::optional<Node*> tryMerge(
     Node* fusion_group,
     Node* to_merge,
     AliasDb* aliasDb) {
   if (!canMerge(fusion_group, to_merge, aliasDb)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   std::vector<Node*> nodes_to_merge = {to_merge};
@@ -191,7 +188,7 @@ static c10::optional<Node*> tryMerge(
     GRAPH_UPDATE("Trying to move node next to fusion group: ", getHeader(n));
     if (!aliasDb->moveBeforeTopologicallyValid(n, move_point)) {
       GRAPH_UPDATE("Failed to move because of AliasDb checks!");
-      return c10::nullopt;
+      return std::nullopt;
     }
     move_point = n;
   }
@@ -274,8 +271,7 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
   while (any_changed) {
     any_changed = false;
     for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      bool changed;
+      bool changed = false;
       std::tie(it, changed) = scanNode(*it, aliasDb);
       any_changed |= changed;
     }
@@ -356,5 +352,4 @@ void performTensorExprFusion(
   GRAPH_DUMP("Graph after fusion: ", graph);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

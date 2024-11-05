@@ -3,7 +3,6 @@
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 
 #if AT_CUDNN_ENABLED()
-#include <ATen/native/cudnn/Macros.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Handle.h>
@@ -21,11 +20,13 @@
 
 #include <vector>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 namespace {
 // TODO: This function is the same as that of Pooling.cpp. We should refactor this into quantized directory
 // so that we don't need to duplicate the function
+#ifdef USE_CUDA
+#if AT_CUDNN_ENABLED()
 void check_maxpool2d_params(
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -40,6 +41,8 @@ void check_maxpool2d_params(
   TORCH_CHECK(dilation.size() == 1 || dilation.size() == 2,
               "Expected 1d or 2d dilation, got ", dilation.size());
 }
+#endif
+#endif
 }
 
 // The current implementation of quantized cuda adaptive average pooling uses the following:
@@ -54,7 +57,6 @@ Tensor adaptive_avg_pool2d_quantized_cuda(
 // TODO: renable these cudnn preprocessors like quantized_max_pool2d_cudnn below when we implement this function with cudnn
 #ifdef USE_CUDA
 // #if AT_CUDNN_ENABLED()
-// #if HAS_CUDNN_V8()
     // TODO: limit this to per tensor quantized tensors for now, though should be easy to adapt
     // to per channel quantized tensors
     TORCH_CHECK(input.qscheme() == at::kPerTensorAffine, "adaptive_avg_pool2d_quantized_cuda oonly supports per tensor quantized tensors");
@@ -62,7 +64,7 @@ Tensor adaptive_avg_pool2d_quantized_cuda(
     auto result_fp32 = at::adaptive_avg_pool2d(input_fp32, output_size);
     return at::quantize_per_tensor(result_fp32, input.q_scale(), input.q_zero_point(), input.scalar_type());
 #else // USE_CUDA
-  AT_ERROR("at::native::adaptive_avg_pool2d_quantized_cuda: ATen not compiled with USE_CUDA support");
+  TORCH_CHECK(false, "at::native::adaptive_avg_pool2d_quantized_cuda: ATen not compiled with USE_CUDA support");
   return Tensor{}; // never reached, placates the compiler
 #endif
 }
@@ -91,7 +93,6 @@ Tensor quantized_max_pool2d_cudnn(
     bool ceil_mode) {
 #ifdef USE_CUDA
 #if AT_CUDNN_ENABLED()
-#if HAS_CUDNN_V8()
   check_maxpool2d_params(
       kernel_size,
       stride,
@@ -176,7 +177,7 @@ Tensor quantized_max_pool2d_cudnn(
       (ndim == 4 ? MemoryFormat::ChannelsLast : MemoryFormat::Contiguous));
 
   cudnnHandle_t handle = getCudnnHandle();
-  cudnnPoolingDescriptor_t poolingDesc;
+  cudnnPoolingDescriptor_t poolingDesc = nullptr;
   AT_CUDNN_CHECK_WITH_SHAPES(cudnnCreatePoolingDescriptor(&poolingDesc));
   AT_CUDNN_CHECK_WITH_SHAPES(cudnnSetPooling2dDescriptor(
       poolingDesc,
@@ -207,16 +208,12 @@ Tensor quantized_max_pool2d_cudnn(
 
   // recall we casted our input and output to 4D if qx was 3D, so we recast it back to 3D prior to returning
   return (ndim == 3 ? qy.view(std::vector<int64_t>(output_shape.begin() + 1, output_shape.end())) : qy);
-#else // HAS_CUDNN_V8()
-  AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with cuDNN v8 support");
-  return Tensor{}; // never reached, placates the compiler
-#endif // HAS_CUDNN_V8()
 #else // AT_CUDNN_ENABLED()
-  AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with cuDNN support");
+  TORCH_CHECK(false, "at::native::quantized_max_pool2d_cudnn: ATen not compiled with cuDNN support");
   return Tensor{}; // never reached, placates the compiler
 #endif // AT_CUDNN_ENABLED()
 #else // USE_CUDA
-  AT_ERROR("at::native::quantized_max_pool2d_cudnn: ATen not compiled with USE_CUDA support");
+  TORCH_CHECK(false, "at::native::quantized_max_pool2d_cudnn: ATen not compiled with USE_CUDA support");
   return Tensor{}; // never reached, placates the compiler
 #endif
 }
@@ -227,13 +224,13 @@ template <uint32_t kSpatialDim>
 class QMaxPool_arr_args final {
  public:
   static Tensor run(
-      Tensor qx,
+      const Tensor& qx,
       std::vector<int64_t> kernel_size,
       std::vector<int64_t> stride,
       std::vector<int64_t> padding,
       std::vector<int64_t> dilation,
       bool ceil_mode) {
-    TORCH_CHECK(kSpatialDim == 2, "quantized max pool is only valid for 2D")
+    static_assert(kSpatialDim == 2, "quantized max pool is only valid for 2D");
     return quantized_max_pool2d_cudnn(qx, kernel_size, stride, padding,
                                     dilation, ceil_mode);
   }
@@ -244,5 +241,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCUDA, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native

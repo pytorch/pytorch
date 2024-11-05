@@ -33,6 +33,9 @@ for detailed steps on how to use this API.
     forward_ad.dual_level
     forward_ad.make_dual
     forward_ad.unpack_dual
+    forward_ad.enter_dual_level
+    forward_ad.exit_dual_level
+    forward_ad.UnpackedDualTensor
 
 .. _functional-api:
 
@@ -179,6 +182,7 @@ Tensor autograd functions
    torch.Tensor.detach
    torch.Tensor.detach_
    torch.Tensor.register_hook
+   torch.Tensor.register_post_accumulate_grad_hook
    torch.Tensor.retain_grad
 
 :hidden:`Function`
@@ -195,6 +199,8 @@ Tensor autograd functions
     Function.jvp
     Function.vmap
 
+.. _context_method_mixins:
+
 Context method mixins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 When creating a new :class:`Function`, the following methods are available to `ctx`.
@@ -208,10 +214,35 @@ When creating a new :class:`Function`, the following methods are available to `c
     function.FunctionCtx.save_for_backward
     function.FunctionCtx.set_materialize_grads
 
+Custom Function utilities
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Decorator for backward method.
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    function.once_differentiable
+
+Base custom :class:`Function` used to build PyTorch utilities
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    function.BackwardCFunction
+    function.InplaceFunction
+    function.NestedIOFunction
+
+
 .. _grad-check:
 
 Numerical gradient checking
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+.. automodule:: torch.autograd.gradcheck
+.. currentmodule:: torch.autograd.gradcheck
 
 .. autosummary::
     :toctree: generated
@@ -219,6 +250,10 @@ Numerical gradient checking
 
     gradcheck
     gradgradcheck
+    GradcheckError
+
+.. Just to reset the base path for the rest of this file
+.. currentmodule:: torch.autograd
 
 Profiler
 ^^^^^^^^
@@ -241,6 +276,14 @@ and vtune profiler based using
     profiler.profile.key_averages
     profiler.profile.self_cpu_time_total
     profiler.profile.total_average
+    profiler.parse_nvprof_trace
+    profiler.EnforceUnique
+    profiler.KinetoStepTracker
+    profiler.record_function
+    profiler_util.Interval
+    profiler_util.Kernel
+    profiler_util.MemRecordsAcc
+    profiler_util.StringTable
 
 .. autoclass:: torch.autograd.profiler.emit_nvtx
 .. autoclass:: torch.autograd.profiler.emit_itt
@@ -252,12 +295,19 @@ and vtune profiler based using
 
     profiler.load_nvprof
 
-Anomaly detection
+Debugging and anomaly detection
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: detect_anomaly
 
 .. autoclass:: set_detect_anomaly
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    grad_mode.set_multithreading_enabled
+
 
 
 Autograd graph
@@ -278,6 +328,7 @@ enabled and at least one of the inputs required gradients), or ``None`` otherwis
     graph.Node.next_functions
     graph.Node.register_hook
     graph.Node.register_prehook
+    graph.increment_version
 
 Some operations need intermediary results to be saved during the forward pass
 in order to execute the backward pass.
@@ -308,3 +359,22 @@ Also see :ref:`saved-tensors-hooks-doc`.
 .. autoclass:: torch.autograd.graph.register_multi_grad_hook
 
 .. autoclass:: torch.autograd.graph.allow_mutation_on_saved_tensors
+
+.. autoclass:: torch.autograd.graph.GradientEdge
+
+.. autofunction:: torch.autograd.graph.get_gradient_edge
+
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.autograd.anomaly_mode
+.. py:module:: torch.autograd.forward_ad
+.. py:module:: torch.autograd.function
+.. py:module:: torch.autograd.functional
+.. py:module:: torch.autograd.grad_mode
+.. py:module:: torch.autograd.graph
+.. py:module:: torch.autograd.profiler
+.. py:module:: torch.autograd.profiler_legacy
+.. py:module:: torch.autograd.profiler_util
+.. py:module:: torch.autograd.variable

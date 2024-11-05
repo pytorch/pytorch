@@ -1,7 +1,5 @@
 #pragma once
 
-#include <sys/types.h>
-
 #include <condition_variable>
 #include <mutex>
 #include <unordered_map>
@@ -24,7 +22,7 @@ class TORCH_API HashStore : public Store {
   std::vector<uint8_t> get(const std::string& key) override;
 
   void wait(const std::vector<std::string>& keys) override {
-    wait(keys, Store::kDefaultTimeout);
+    wait(keys, timeout_);
   }
 
   void wait(
@@ -39,15 +37,15 @@ class TORCH_API HashStore : public Store {
 
   bool deleteKey(const std::string& key) override;
 
-  void append(
-      const std::string& key,
-      const std::vector<uint8_t>& value) override;
+  void append(const std::string& key, const std::vector<uint8_t>& value)
+      override;
 
-  std::vector<std::vector<uint8_t>> multiGet(const std::vector<std::string>& keys) override;
+  std::vector<std::vector<uint8_t>> multiGet(
+      const std::vector<std::string>& keys) override;
 
   void multiSet(
-    const std::vector<std::string>& keys,
-    const std::vector<std::vector<uint8_t>>& values) override;
+      const std::vector<std::string>& keys,
+      const std::vector<std::vector<uint8_t>>& values) override;
 
   // Returns true if this store support append, multiGet and multiSet
   bool hasExtendedApi() const override;

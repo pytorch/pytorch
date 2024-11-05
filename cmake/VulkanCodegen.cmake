@@ -7,10 +7,12 @@ set(VULKAN_GEN_OUTPUT_PATH "${CMAKE_BINARY_DIR}/vulkan/ATen/native/vulkan")
 set(VULKAN_GEN_ARG_ENV "")
 
 if(USE_VULKAN_RELAXED_PRECISION)
-  list(APPEND VULKAN_GEN_ARG_ENV "precision=mediump")
+  list(APPEND VULKAN_GEN_ARG_ENV "PRECISION=mediump")
 endif()
 if(USE_VULKAN_FP16_INFERENCE)
-  list(APPEND VULKAN_GEN_ARG_ENV "format=rgba16f")
+  list(APPEND VULKAN_GEN_ARG_ENV "FLOAT_IMAGE_FORMAT=rgba16f")
+else()
+  list(APPEND VULKAN_GEN_ARG_ENV "FLOAT_IMAGE_FORMAT=rgba32f")
 endif()
 
 # Precompiling shaders
@@ -40,7 +42,7 @@ list(APPEND NEW_PYTHONPATH "${CMAKE_CURRENT_LIST_DIR}/..")
 set(ENV{PYTHONPATH} ${NEW_PYTHONPATH})
 execute_process(
   COMMAND
-  "${PYTHON_EXECUTABLE}"
+  "${Python_EXECUTABLE}"
   ${CMAKE_CURRENT_LIST_DIR}/../tools/gen_vulkan_spv.py
   --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
   --output-path ${VULKAN_GEN_OUTPUT_PATH}

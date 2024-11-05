@@ -5,6 +5,7 @@
 #include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -13,10 +14,18 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/argmax.h>
+#include <ATen/ops/bernoulli_native.h>
 #include <ATen/ops/div.h>
+#include <ATen/ops/exponential_native.h>
 #include <ATen/ops/full_like.h>
+#include <ATen/ops/multinomial_native.h>
+#include <ATen/ops/normal_native.h>
+#include <ATen/ops/random_native.h>
 #include <ATen/ops/randperm.h>
+#include <ATen/ops/randperm_native.h>
 #include <ATen/ops/topk.h>
+#include <ATen/ops/uniform_native.h>
+#include <ATen/ops/view_as_real.h>
 #endif
 
 namespace at::native {
@@ -41,10 +50,10 @@ template <typename scalar_t>
 Tensor& random_mps_impl(Tensor& self,
                         scalar_t val1,
                         scalar_t val2,
-                        const c10::optional<Tensor>& mean_opt,
-                        const c10::optional<Tensor>& std_opt,
+                        const std::optional<Tensor>& mean_opt,
+                        const std::optional<Tensor>& std_opt,
                         MPSGraphRandomDistribution distribution,
-                        c10::optional<Generator> gen,
+                        std::optional<Generator> gen,
                         std::string op_name,
                         RandomOpBlock randomBlock) {
   if (self.numel() == 0) {
@@ -55,18 +64,33 @@ Tensor& random_mps_impl(Tensor& self,
 
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, mean_opt.value_or(Tensor()), std_opt.value_or(Tensor())}) + ":" +
-        to_string(val1) + ":" + to_string(val2);
+        std::to_string(val1) + ":" + std::to_string(val2);
     auto cachedGraph = LookUpOrCreateCachedGraph<RandomCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->stateTensor =
           mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @(at::mps::detail::PHILOX_STATE_N) ]);
 
-      // FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
+      // BF16, FP16, FP32 and Int32 are the only data types supported for distributions on MPS backend.
       const MPSDataType inputDataType = [&] {
         // only for random_mps, we pass interval range of type int64_t
         if constexpr (std::is_same_v<scalar_t, int64_t>) {
           return MPSDataTypeInt32;
         }
-        return (self.scalar_type() == ScalarType::Half) ? MPSDataTypeFloat16 : MPSDataTypeFloat32;
+        // for bernoully always use float32
+        if constexpr (std::is_same_v<scalar_t, bool>) {
+          return MPSDataTypeFloat32;
+        }
+        switch (self.scalar_type()) {
+          case kHalf:
+            return MPSDataTypeFloat16;
+          case kFloat:
+            return MPSDataTypeFloat32;
+          case kBFloat16: {
+            checkSupportsBFloat16();
+            return MPSDataTypeBFloat16;
+          }
+          default:
+            TORCH_CHECK_TYPE(false, "Unsupported type ", self.scalar_type(), " for operation ", op_name);
+        }
       }();
       const MPSDataType outputDataType = std::is_same_v<scalar_t, bool> ? MPSDataTypeBool : inputDataType;
 
@@ -125,23 +149,19 @@ Tensor& random_mps_impl(Tensor& self,
     }
 
     Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, self);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return self;
 }
 
-Tensor& normal_mps_impl(Tensor& self,
-                        double mean_s,
-                        double std_s,
-                        const c10::optional<Tensor>& mean_opt,
-                        const c10::optional<Tensor>& std_opt,
-                        c10::optional<Generator> gen,
-                        std::string op_name) {
+static Tensor& normal_mps_impl(Tensor& self,
+                               double mean_s,
+                               double std_s,
+                               const std::optional<Tensor>& mean_opt,
+                               const std::optional<Tensor>& std_opt,
+                               std::optional<Generator> gen,
+                               std::string op_name) {
   const Tensor& std_t = *(at::borrow_from_optional_tensor(std_opt));
   const Tensor& mean_t = *(at::borrow_from_optional_tensor(mean_opt));
 
@@ -168,6 +188,19 @@ Tensor& normal_mps_impl(Tensor& self,
     }
     return resultTensor;
   };
+  if (c10::isComplexType(self.scalar_type())) {
+    auto real_view = at::view_as_real(self);
+    random_mps_impl<double>(real_view,
+                            mean_s,
+                            std_s,
+                            mean_opt,
+                            std_opt,
+                            MPSGraphRandomDistributionNormal,
+                            gen,
+                            op_name + getTensorsStringKey({mean_t, std_t}),
+                            random_op_block);
+    return self;
+  }
   return random_mps_impl<double>(self,
                                  mean_s,
                                  std_s,
@@ -179,7 +212,10 @@ Tensor& normal_mps_impl(Tensor& self,
                                  random_op_block);
 }
 
-Tensor& bernoulli_mps_impl(Tensor& self, const Tensor& prob_t, c10::optional<Generator> gen, std::string op_name) {
+static Tensor& bernoulli_mps_impl(Tensor& self,
+                                  const Tensor& prob_t,
+                                  std::optional<Generator> gen,
+                                  std::string op_name) {
   TORCH_CHECK(prob_t.is_same_size(self) || prob_t.dim() == 0,
               op_name,
               ": probability and self tensor should be of the same shape")
@@ -195,7 +231,7 @@ Tensor& bernoulli_mps_impl(Tensor& self, const Tensor& prob_t, c10::optional<Gen
   return mps::random_mps_impl<bool>(self,
                                     0.0,
                                     1.0,
-                                    c10::nullopt,
+                                    std::nullopt,
                                     prob_t,
                                     MPSGraphRandomDistributionUniform,
                                     gen,
@@ -205,14 +241,19 @@ Tensor& bernoulli_mps_impl(Tensor& self, const Tensor& prob_t, c10::optional<Gen
 
 } // namespace mps
 
-Tensor& uniform_mps_(Tensor& self, double from, double to, c10::optional<Generator> gen) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "check_uniform_bounds", [&] {
+Tensor& uniform_mps_(Tensor& self, double from, double to, std::optional<Generator> gen) {
+  auto scalar_type = self.scalar_type();
+  if (scalar_type == ScalarType::ComplexFloat)
+    scalar_type = ScalarType::Float;
+  else if (scalar_type == ScalarType::ComplexHalf)
+    scalar_type = ScalarType::Half;
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, scalar_type, "check_uniform_bounds", [&] {
     const auto min = static_cast<double>(std::numeric_limits<scalar_t>::lowest());
     const auto max = static_cast<double>(std::numeric_limits<scalar_t>::max());
     TORCH_CHECK(from <= to, "uniform_ expects to return a [from, to) range, but found from=", from, " > to=", to);
     TORCH_CHECK((to - from) <= std::numeric_limits<scalar_t>::max(),
                 "uniform_ expects to-from <= std::numeric_limits<",
-                toString(self.scalar_type()),
+                toString(scalar_type),
                 ">::max(), but found to=",
                 to,
                 " and from=",
@@ -222,66 +263,72 @@ Tensor& uniform_mps_(Tensor& self, double from, double to, c10::optional<Generat
     to = std::max(std::min(to, max), min);
   });
 
+  if (c10::isComplexType(self.scalar_type())) {
+    auto real_view = at::view_as_real(self);
+    mps::random_mps_impl<double>(
+        real_view, from, to, std::nullopt, std::nullopt, MPSGraphRandomDistributionUniform, gen, __func__, nullptr);
+    return self;
+  }
   return mps::random_mps_impl<double>(
-      self, from, to, c10::nullopt, c10::nullopt, MPSGraphRandomDistributionUniform, gen, __func__, nullptr);
+      self, from, to, std::nullopt, std::nullopt, MPSGraphRandomDistributionUniform, gen, __func__, nullptr);
 }
 
-Tensor& normal_mps_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  return mps::normal_mps_impl(self, mean, std, c10::nullopt, c10::nullopt, gen, "normal");
+Tensor& normal_mps_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
+  return mps::normal_mps_impl(self, mean, std, std::nullopt, std::nullopt, gen, "normal");
 }
 
-Tensor normal_mps(const Tensor& mean, double std, c10::optional<Generator> gen) {
-  Tensor self = at::empty(mean.sizes(), mean.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
-  return mps::normal_mps_impl(self, 0.0, std, mean, c10::nullopt, gen, "normal");
+Tensor normal_mps(const Tensor& mean, double std, std::optional<Generator> gen) {
+  Tensor self = at::empty(mean.sizes(), mean.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
+  return mps::normal_mps_impl(self, 0.0, std, mean, std::nullopt, gen, "normal");
 }
 
-Tensor normal_mps(double mean, const Tensor& std, c10::optional<Generator> gen) {
-  Tensor self = at::empty(std.sizes(), std.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+Tensor normal_mps(double mean, const Tensor& std, std::optional<Generator> gen) {
+  Tensor self = at::empty(std.sizes(), std.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   // when there's no tensor-type mean, we cannot pass scalar mean value due to the order of
   // multiply/add ops in random computation. So we create a mean tensor instead.
   Tensor mean_t = at::full_like(self, Scalar(mean));
   return mps::normal_mps_impl(self, 0.0, 1.0, mean_t, std, gen, "normal");
 }
 
-Tensor normal_mps(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+Tensor normal_mps(const Tensor& mean, const Tensor& std, std::optional<Generator> gen) {
   auto shape = at::infer_size(mean.sizes(), std.sizes());
-  Tensor self = at::empty(shape, mean.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
+  Tensor self = at::empty(shape, mean.scalar_type(), std::nullopt, kMPS, std::nullopt, std::nullopt);
   return mps::normal_mps_impl(self, 0.0, 1.0, mean, std, gen, "normal");
 }
 
-Tensor& normal_mps_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& self) {
-  return mps::normal_mps_impl(self, 0.0, std, mean, c10::nullopt, gen, "normal");
+Tensor& normal_mps_out(const Tensor& mean, double std, std::optional<Generator> gen, Tensor& self) {
+  return mps::normal_mps_impl(self, 0.0, std, mean, std::nullopt, gen, "normal");
 }
 
-Tensor& normal_mps_out(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& self) {
+Tensor& normal_mps_out(double mean, const Tensor& std, std::optional<Generator> gen, Tensor& self) {
   // when there's no tensor-type mean, we cannot pass scalar mean value due to the order of
   // multiply/add ops in random computation. So we create a mean tensor instead.
   Tensor mean_t = at::full_like(self, Scalar(mean));
   return mps::normal_mps_impl(self, 0.0, 1.0, mean_t, std, gen, "normal");
 }
 
-Tensor& normal_mps_out(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& self) {
+Tensor& normal_mps_out(const Tensor& mean, const Tensor& std, std::optional<Generator> gen, Tensor& self) {
   TORCH_CHECK(mean.numel() == std.numel(), "normal_mps_out: mean and std must have same number of elements")
   return mps::normal_mps_impl(self, 0.0, 1.0, mean, std, gen, "normal");
 }
 
-Tensor& bernoulli_out_mps(const Tensor& p_, c10::optional<Generator> gen, Tensor& result) {
+Tensor& bernoulli_out_mps(const Tensor& p_, std::optional<Generator> gen, Tensor& result) {
   result.resize_(p_.sizes());
   return mps::bernoulli_mps_impl(result, p_, gen, __func__);
 }
 
-Tensor& bernoulli_mps_(Tensor& self, double p, c10::optional<Generator> gen) {
+Tensor& bernoulli_mps_(Tensor& self, double p, std::optional<Generator> gen) {
   TORCH_CHECK(0.0 <= p && p <= 1.0, "bernoulli_mps_ expects p to be in [0, 1], but got p=", p);
   Tensor prob_t = at::full({}, Scalar(p), c10::TensorOptions().dtype(kFloat).device(kMPS));
   return mps::bernoulli_mps_impl(self, prob_t, gen, __func__);
 }
 
-Tensor& bernoulli_mps_(Tensor& self, const Tensor& p_, c10::optional<Generator> gen) {
+Tensor& bernoulli_mps_(Tensor& self, const Tensor& p_, std::optional<Generator> gen) {
   return mps::bernoulli_mps_impl(self, p_, gen, __func__);
 }
 
 // random_.from
-Tensor& random_mps_(Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c10::optional<Generator> gen) {
+Tensor& random_mps_(Tensor& self, int64_t from, std::optional<int64_t> to_opt, std::optional<Generator> gen) {
   auto input_dtype = self.scalar_type();
   int64_t to = 0;
 
@@ -290,17 +337,15 @@ Tensor& random_mps_(Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c
     to = *to_opt;
     TORCH_CHECK(from < to, "random_mps_ expects 'from' to be less than 'to', but got from=", from, " >= to=", to);
     if (isFloatingType(input_dtype)) {
-      AT_DISPATCH_FLOATING_TYPES_AND2(
-          at::ScalarType::Half, at::ScalarType::BFloat16, input_dtype, "random_update_from_to", [&] {
-            from = templates::update_from<scalar_t>(from);
-            to = templates::update_to<scalar_t>(to);
-            TORCH_CHECK(
-                from < to,
-                "random_mps_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=",
-                from,
-                " >= to=",
-                to);
-          });
+      AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input_dtype, "random_update_from_to", [&] {
+        from = templates::update_from<scalar_t>(from);
+        to = templates::update_to<scalar_t>(to);
+        TORCH_CHECK(from < to,
+                    "random_mps_ expects 'from' casted to dtype to be less than 'to' casted to dtype, but got from=",
+                    from,
+                    " >= to=",
+                    to);
+      });
       templates::check_from_to_in_range(from, to - 1, self.dtype());
     }
   } else if (from != std::numeric_limits<int64_t>::lowest()) {
@@ -340,19 +385,19 @@ Tensor& random_mps_(Tensor& self, int64_t from, c10::optional<int64_t> to_opt, c
   }
 
   return mps::random_mps_impl<int64_t>(
-      self, from, to - 1, c10::nullopt, c10::nullopt, MPSGraphRandomDistributionUniform, gen, __func__, nullptr);
+      self, from, to - 1, std::nullopt, std::nullopt, MPSGraphRandomDistributionUniform, gen, __func__, nullptr);
 }
 
-Tensor& random_mps_(Tensor& self, int64_t to, c10::optional<Generator> gen) {
+Tensor& random_mps_(Tensor& self, int64_t to, std::optional<Generator> gen) {
   return random_mps_(self, 0, to, gen);
 }
 
-Tensor& random_mps_(Tensor& self, c10::optional<Generator> gen) {
-  return random_mps_(self, 0, c10::nullopt, gen);
+Tensor& random_mps_(Tensor& self, std::optional<Generator> gen) {
+  return random_mps_(self, 0, std::nullopt, gen);
 }
 
 // Exponential distribution
-Tensor& exponential_mps_(Tensor& self, double lambda, c10::optional<Generator> gen) {
+Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> gen) {
   TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
 
   mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
@@ -368,26 +413,15 @@ Tensor& exponential_mps_(Tensor& self, double lambda, c10::optional<Generator> g
   return mps::random_mps_impl<double>(self,
                                       0.0,
                                       1.0,
-                                      c10::nullopt,
-                                      c10::nullopt,
+                                      std::nullopt,
+                                      std::nullopt,
                                       MPSGraphRandomDistributionUniform,
                                       gen,
                                       "exponential_mps_:" + std::to_string(lambda),
                                       random_op_block);
 }
 
-Tensor& randperm_out_mps(int64_t n, c10::optional<Generator> generator, Tensor& result) {
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE("MPS: randperm op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performance implications.");
-
-    auto result_cpu = result.to("cpu");
-    at::randperm_out(result_cpu, n);
-    result.resize_as_(result_cpu);
-    result.copy_(result_cpu);
-    return result;
-  }
-
+Tensor& randperm_out_mps(int64_t n, std::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
   TORCH_CHECK(!generator.has_value() || (generator.has_value() && result.device() == generator->device()),
               "Expected a '",
@@ -414,18 +448,18 @@ Tensor& randperm_out_mps(int64_t n, c10::optional<Generator> generator, Tensor& 
   return mps::random_mps_impl<int64_t>(result,
                                        std::numeric_limits<int64_t>::min(),
                                        std::numeric_limits<int64_t>::max(),
-                                       c10::nullopt,
-                                       c10::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
                                        MPSGraphRandomDistributionUniform,
                                        generator,
                                        "ranperm_out_mps:" + mps::getTensorsStringKey({result}),
                                        random_op_block);
 }
 
-Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
-                                                const int64_t n_sample,
-                                                c10::optional<Generator> generator,
-                                                Tensor& result) {
+static Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
+                                                       const int64_t n_sample,
+                                                       std::optional<Generator> generator,
+                                                       Tensor& result) {
   using namespace mps;
 
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(generator, at::mps::detail::getDefaultMPSGenerator());
@@ -440,7 +474,7 @@ Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "multinomial_with_replacement:" + getTensorsStringKey({self}) + ":" + to_string(n_sample);
+    string key = "multinomial_with_replacement:" + getTensorsStringKey({self}) + ":" + std::to_string(n_sample);
     auto cachedGraph = LookUpOrCreateCachedGraph<RandomCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSShape* prob_shape = getMPSShape(self_v);
       newCachedGraph->stateTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @7 ]);
@@ -540,10 +574,7 @@ Tensor& multinomial_with_replacement_mps_kernel(const Tensor& self,
       cachedGraph->stateTensor : stateTensorData,
       probPlaceholder.getMPSGraphTensor() : probPlaceholder.getMPSGraphTensorData()
     };
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return result;
@@ -555,7 +586,7 @@ constexpr int64_t FLOAT32_MAX_CONSECUTIVE_INT = 1 << (FLT_MANT_DIG);
 Tensor& multinomial_out_mps(const Tensor& self,
                             int64_t n_sample,
                             bool with_replacement,
-                            c10::optional<Generator> gen,
+                            std::optional<Generator> gen,
                             Tensor& result) {
   TORCH_CHECK(result.device() == self.device(), "multinomial arguments must have the same device");
   TORCH_CHECK(self.dim() > 0 && self.dim() <= 2, "prob_dist must be 1 or 2 dim");
@@ -626,7 +657,7 @@ Tensor& multinomial_out_mps(const Tensor& self,
   return result;
 }
 
-Tensor multinomial_mps(const Tensor& self, int64_t n_sample, bool with_replacement, c10::optional<Generator> gen) {
+Tensor multinomial_mps(const Tensor& self, int64_t n_sample, bool with_replacement, std::optional<Generator> gen) {
   Tensor result = at::empty({0}, self.options().dtype(kLong));
   multinomial_out_mps(self, n_sample, with_replacement, gen, result);
   return result;

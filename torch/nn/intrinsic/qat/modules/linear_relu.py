@@ -1,5 +1,5 @@
 # flake8: noqa: F401
-r"""Intrinsic QAT Modules
+r"""Intrinsic QAT Modules.
 
 This file is in the process of migration to `torch/ao/nn/intrinsic/qat`, and
 is kept here for compatibility while the migration process is ongoing.
@@ -8,8 +8,9 @@ appropriate file under the `torch/ao/nn/intrinsic/qat/modules`,
 while adding an import statement here.
 """
 
-__all__ = [
-    'LinearReLU',
-]
-
 from torch.ao.nn.intrinsic.qat import LinearReLU
+
+
+__all__ = [
+    "LinearReLU",
+]

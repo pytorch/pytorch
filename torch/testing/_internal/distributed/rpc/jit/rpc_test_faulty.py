@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 from typing import Dict, Tuple
 
 import torch

@@ -6,7 +6,8 @@
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPGenerator {
-  PyObject_HEAD at::Generator cdata;
+  PyObject_HEAD
+  at::Generator cdata;
 };
 
 // Creates a new Python object wrapping the default at::Generator. The reference
@@ -22,6 +23,8 @@ TORCH_PYTHON_API extern PyObject* THPGeneratorClass;
 bool THPGenerator_init(PyObject* module);
 
 TORCH_PYTHON_API PyObject* THPGenerator_Wrap(at::Generator gen);
+
+TORCH_PYTHON_API at::Generator THPGenerator_Unwrap(PyObject* state);
 
 // Creates a new Python object for a Generator. The Generator must not already
 // have a PyObject* associated with it.

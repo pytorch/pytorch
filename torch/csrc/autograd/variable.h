@@ -16,13 +16,11 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 /// `Variable` is exactly the same as `Tensor` (i.e. we have `using Variable =
 /// at::Tensor`). This means you can perform all the usual mathematical and
@@ -33,8 +31,7 @@ namespace autograd {
 /// is to eliminate the `Variable` class in the near future.
 using Variable = at::Tensor;
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
 
 // The following are all internal APIs and should not be shown in libtorch docs.
 // Therefore, we wrap the following code with `#ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -42,8 +39,7 @@ using Variable = at::Tensor;
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 /// Check if this type is supported by the autograd engine.
 /// If you change this, update the doc at the top of the
@@ -186,6 +182,12 @@ TORCH_API void add_hook(
 TORCH_API std::vector<std::unique_ptr<FunctionPreHook>>& hooks(const Variable&);
 TORCH_API void clear_hooks(const at::TensorBase&);
 
+TORCH_API void set_post_acc_grad_hooks(
+    const at::TensorBase&,
+    std::unique_ptr<PostAccumulateGradHook> dict);
+TORCH_API std::unique_ptr<PostAccumulateGradHook>& post_acc_grad_hooks(
+    const Variable&);
+
 TORCH_API void create_cpp_hook(
     const at::TensorBase&,
     bool is_retains_grad_hooks = false);
@@ -216,7 +218,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   //     shared by multiple Tensors. See Note [ Using ForwardGrad ]
   // Any transition from not_initialized to initialized
   // must be protected by mutex_
-  std::shared_ptr<ForwardGrad> fw_grad_;
+  mutable std::shared_ptr<ForwardGrad> fw_grad_;
 
   // The hooks_ field is actually reused by both python and cpp logic
   // For both cases, we have a data structure, cpp_hooks_list_ (cpp)
@@ -230,6 +232,12 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   // each other, so using both is not defined behavior.
   std::vector<std::unique_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list_;
+
+  // The post_acc_grad_hooks_ field stores only Python hooks
+  // (PyFunctionTensorPostAccGradHooks) that are called after the
+  // .grad field has been accumulated into. This is less complicated
+  // than the hooks_ field, which encapsulates a lot more.
+  std::unique_ptr<PostAccumulateGradHook> post_acc_grad_hooks_ = nullptr;
 
   // Only meaningful on leaf variables (must be false otherwise)
   bool requires_grad_{false};
@@ -255,8 +263,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   /// Sets the `requires_grad` property of `Variable`. This should be true for
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
-  void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl)
-      override {
+  void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) final {
     TORCH_CHECK(
         !requires_grad ||
             isDifferentiableType(at::typeMetaToScalarType(self_impl->dtype())),
@@ -296,7 +303,6 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     // set_requires_grad also checks error conditions.
     if (requires_grad) {
       TORCH_INTERNAL_ASSERT(self_impl);
-      // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
       set_requires_grad(requires_grad, self_impl);
     }
     TORCH_CHECK(
@@ -316,6 +322,93 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   }
 };
 
+/// Base class for view functions, providing reapplication of a view on a new
+/// base. Each view op should get a codegenerated subclass of this class
+/// containing any state needed to reconstruct the view. The class also provides
+/// convenience accessors for saved SymInts / tensor state. This is useful for
+/// e.g. fake-ification, where we want to use symbolic values or fake tensors
+/// instead.
+struct TORCH_API ViewFunc {
+  virtual ~ViewFunc() = default;
+  /// Returns any SymInts in the saved state.
+  virtual std::vector<c10::SymInt> get_symints() const {
+    return {};
+  }
+  /// Returns the number of SymInts in the saved state.
+  virtual size_t num_symints() const {
+    return 0;
+  }
+  /// Returns any tensors in the saved state.
+  virtual std::vector<at::Tensor> get_tensors() const {
+    return {};
+  }
+  /// Returns the number of tensors in the saved state.
+  virtual size_t num_tensors() const {
+    return 0;
+  }
+  /// Reapplies the view on the given base using the saved state.
+  virtual at::Tensor operator()(const at::Tensor&) const = 0;
+  /// Returns a clone of this ViewFunc, optionally with the specified saved
+  /// state.
+  virtual std::unique_ptr<ViewFunc> clone_and_set(
+      std::optional<std::vector<c10::SymInt>> = std::nullopt,
+      std::optional<std::vector<at::Tensor>> = std::nullopt) const = 0;
+
+ protected:
+  /// Sets the values of any SymInts in the saved state. The input vector size
+  /// must match the number of SymInts in the saved state (i.e. the size of the
+  /// list returned by get_symints()).
+  /// NOLINTNEXTLINE(performance-unnecessary-value-param)
+  virtual void set_symints(std::vector<c10::SymInt>) {}
+  /// Sets the values of any Tensors in the saved state. The input vector size
+  /// must match the number of Tensors in the saved state (i.e. the size of the
+  /// list returned by get_tensors()).
+  /// NOLINTNEXTLINE(performance-unnecessary-value-param)
+  virtual void set_tensors(std::vector<at::Tensor>) {}
+};
+
+/// ViewFunc that represents a chain of two ViewFuncs.
+struct ChainedViewFunc : public ViewFunc {
+  ChainedViewFunc(
+      std::unique_ptr<ViewFunc> first,
+      std::unique_ptr<ViewFunc> second)
+      : first(std::move(first)), second(std::move(second)) {}
+  ~ChainedViewFunc() override = default;
+  std::vector<c10::SymInt> get_symints() const override;
+  size_t num_symints() const override {
+    return first->num_symints() + second->num_symints();
+  }
+  std::vector<at::Tensor> get_tensors() const override;
+  size_t num_tensors() const override {
+    return first->num_tensors() + second->num_tensors();
+  }
+  at::Tensor operator()(const at::Tensor&) const override;
+  std::unique_ptr<ViewFunc> clone_and_set(
+      std::optional<std::vector<c10::SymInt>> = std::nullopt,
+      std::optional<std::vector<at::Tensor>> = std::nullopt) const override;
+
+ private:
+  std::unique_ptr<ViewFunc> first;
+  std::unique_ptr<ViewFunc> second;
+};
+
+/// ViewFunc that errors with a specified error message when called.
+struct ErroringViewFunc : public ViewFunc {
+  ErroringViewFunc(std::string error_msg) : error_msg(std::move(error_msg)) {}
+  ~ErroringViewFunc() override = default;
+  at::Tensor operator()(const at::Tensor&) const override {
+    TORCH_CHECK(false, error_msg);
+  }
+  std::unique_ptr<ViewFunc> clone_and_set(
+      std::optional<std::vector<c10::SymInt>> = std::nullopt,
+      std::optional<std::vector<at::Tensor>> = std::nullopt) const override {
+    return std::make_unique<ErroringViewFunc>(error_msg);
+  }
+
+ private:
+  std::string error_msg;
+};
+
 struct TORCH_API ViewInfo {
   /// The base `Variable`
   /// If this ViewInfo represents a forward (respectively backward) AD gradient,
@@ -325,17 +418,29 @@ struct TORCH_API ViewInfo {
   /// By default we use as_strided to recover views which is more efficient.
   /// view_fn is only saved when as_strided is not supported.
   /// If view_fn has value, we use it to recover views in backward.
-  std::function<Variable(const Variable&)> view_fn_;
+  std::unique_ptr<ViewFunc> view_fn_;
+
+  /// Analogue of view_fn but in reverse: given a view -> produce the base by
+  /// applying the inverse view.
+  std::function<Variable(const Variable&)> rev_view_fn_;
 
   /// Accessors for the view function
   bool has_view_fn() const {
+    // assume either BOTH or NEITHER of view_fn_ and rev_view_fn_ exist
     return view_fn_ != nullptr;
   }
 
-  std::function<Variable(const Variable&)> view_fn() const {
+  const ViewFunc& view_fn() const {
     TORCH_CHECK(
         has_view_fn(), "Can only access the view function if it exists.");
-    return view_fn_;
+    return *view_fn_;
+  }
+
+  std::function<Variable(const Variable&)> rev_view_fn() const {
+    TORCH_CHECK(
+        has_view_fn(),
+        "Can only access the reverse view function if it exists.");
+    return rev_view_fn_;
   }
 
   /// The chain function can be used to build a new ViewInfo for a
@@ -349,10 +454,16 @@ struct TORCH_API ViewInfo {
   ViewInfo chain(
       const Variable& base,
       const Variable& tensor,
-      std::function<Variable(const Variable&)> view_func = nullptr) const;
+      std::unique_ptr<ViewFunc> view_func = nullptr,
+      std::function<Variable(const Variable&)> rev_view_func = nullptr) const;
 
-  ViewInfo(Variable base, std::function<Variable(const Variable&)> view_fn)
-      : base_(std::move(base)), view_fn_(std::move(view_fn)) {
+  ViewInfo(
+      Variable base,
+      std::unique_ptr<ViewFunc> view_fn,
+      std::function<Variable(const Variable&)> rev_view_fn)
+      : base_(std::move(base)),
+        view_fn_(std::move(view_fn)),
+        rev_view_fn_(std::move(rev_view_fn)) {
     TORCH_CHECK(base_.defined(), "base is undefined");
   }
 };
@@ -572,9 +683,9 @@ TORCH_API void handle_view_on_rebase(
 
 struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
  private:
-  /// Informations about the views
-  c10::optional<ViewInfo> backward_info_;
-  c10::optional<ViewInfo> forward_info_;
+  /// Information about the views
+  std::optional<ViewInfo> backward_info_;
+  std::optional<ViewInfo> forward_info_;
 
   // Optimization to reduce the number of ViewInfo we create.
   // In the (very common) case where backward_info_ == forward_info_, we only
@@ -657,8 +768,8 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 
   DifferentiableViewMeta(
       at::TensorImpl* self_impl,
-      c10::optional<ViewInfo> backward_info,
-      c10::optional<ViewInfo> forward_info,
+      std::optional<ViewInfo> backward_info,
+      std::optional<ViewInfo> forward_info,
       bool shared_view_info,
       CreationMeta creation_meta = CreationMeta::DEFAULT);
 };
@@ -687,8 +798,8 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 // Differentiable view. Track history with DifferentiableViewMeta.
 inline Variable make_variable_differentiable_view(
     const at::Tensor& data,
-    c10::optional<ViewInfo> backward_info,
-    c10::optional<ViewInfo> forward_info,
+    std::optional<ViewInfo> backward_info,
+    std::optional<ViewInfo> forward_info,
     bool shared_view_info,
     CreationMeta creation_meta,
     bool allow_tensor_metadata_change = true) {
@@ -720,7 +831,7 @@ inline Variable make_variable_differentiable_view(
 // See NOTE [ Autograd View Variables ] for details.
 // Non-differentiable view. Just share version counter.
 inline Variable make_variable_non_differentiable_view(
-    Variable base,
+    const Variable& base,
     const at::Tensor& data,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
@@ -753,7 +864,6 @@ inline Variable make_variable(
         data.getIntrusivePtr()->unique_version()) {
       auto data_impl = data.unsafeReleaseIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (requires_grad) {
         data_impl->set_autograd_meta(
             std::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
@@ -765,7 +875,6 @@ inline Variable make_variable(
       auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
           /*version_counter=*/0,
           /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
-      // NOLINTNEXTLINE(bugprone-branch-clone)
       if (requires_grad) {
         data_impl_copy->set_autograd_meta(std::make_unique<AutogradMeta>(
             data_impl_copy.get(), requires_grad));
@@ -783,7 +892,7 @@ inline Variable make_variable(
 /// specifying the function in the autograd graph, and what particular input of
 /// that function, this variable is connected to.
 inline Variable make_variable(
-    at::Tensor data,
+    const at::Tensor& data,
     Edge gradient_edge,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
@@ -820,8 +929,8 @@ struct VariableHooks final : at::impl::VariableHooksInterface {
   void _backward(
       const at::Tensor& self,
       at::TensorList inputs,
-      const c10::optional<at::Tensor>& gradient,
-      c10::optional<bool> keep_graph,
+      const std::optional<at::Tensor>& gradient,
+      std::optional<bool> keep_graph,
       bool create_graph) const override;
   void requires_grad_(const at::TensorBase& self, bool _requires_grad)
       const override;
@@ -836,7 +945,6 @@ namespace utils {
 TORCH_API bool has_same_meta(const Variable& base, const Variable& other);
 
 } // namespace utils
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
 
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */

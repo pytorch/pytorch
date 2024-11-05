@@ -9,17 +9,15 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
-namespace torch {
-namespace serialize {
+namespace torch::serialize {
 class OutputArchive;
 class InputArchive;
-} // namespace serialize
-} // namespace torch
+} // namespace torch::serialize
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 struct TORCH_API RMSpropOptions
     : public OptimizerCloneableOptions<RMSpropOptions> {
@@ -37,7 +35,6 @@ struct TORCH_API RMSpropOptions
   TORCH_API friend bool operator==(
       const RMSpropOptions& lhs,
       const RMSpropOptions& rhs);
-  ~RMSpropOptions() override = default;
   double get_lr() const override;
   void set_lr(const double lr) override;
 };
@@ -55,17 +52,14 @@ struct TORCH_API RMSpropParamState
   TORCH_API friend bool operator==(
       const RMSpropParamState& lhs,
       const RMSpropParamState& rhs);
-  ~RMSpropParamState() override = default;
 };
 
 class TORCH_API RMSprop : public Optimizer {
  public:
   explicit RMSprop(
-      std::vector<OptimizerParamGroup> param_groups,
+      const std::vector<OptimizerParamGroup>& param_groups,
       RMSpropOptions defaults = {})
-      : Optimizer(
-            std::move(param_groups),
-            std::make_unique<RMSpropOptions>(defaults)) {
+      : Optimizer(param_groups, std::make_unique<RMSpropOptions>(defaults)) {
     TORCH_CHECK(defaults.lr() >= 0, "Invalid learning rate: ", defaults.lr());
     TORCH_CHECK(defaults.eps() >= 0, "Invalid epsilon value: ", defaults.eps());
     TORCH_CHECK(
@@ -81,7 +75,8 @@ class TORCH_API RMSprop : public Optimizer {
   }
 
   explicit RMSprop(std::vector<Tensor> params, RMSpropOptions defaults = {})
-      : RMSprop({OptimizerParamGroup(std::move(params))}, defaults) {}
+      : RMSprop({OptimizerParamGroup(std::move(params))}, std::move(defaults)) {
+  }
 
   torch::Tensor step(LossClosure closure = nullptr) override;
   void save(serialize::OutputArchive& archive) const override;
@@ -93,5 +88,4 @@ class TORCH_API RMSprop : public Optimizer {
     _TORCH_OPTIM_SERIALIZE_WITH_TEMPLATE_ARG(RMSprop);
   }
 };
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

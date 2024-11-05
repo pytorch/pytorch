@@ -7,19 +7,30 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wignored-qualifiers"
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
+
+#ifndef SLEEF_CONST
+#if (defined(__GNUC__) || defined(__CLANG__)) && !defined(__INTEL_COMPILER)
+#define SLEEF_CONST const
+#else
+#define SLEEF_CONST
+#endif
+#define SLEEF_CONST_OLD SLEEF_CONST
+#else
+#define SLEEF_CONST_OLD
+#endif
 
 // bfloat16 conversion
 static inline void cvtbf16_fp32(const __m128i& a, __m256& o) {
@@ -32,6 +43,28 @@ static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   cvtbf16_fp32(lo, o1);
   cvtbf16_fp32(hi, o2);
 }
+
+static inline __m128i cvtfp32_bf16(const __m256& src) {
+  __m256i value = _mm256_castps_si256(src);
+  __m256i nan = _mm256_set1_epi32(0xffff);
+  __m256i mask = _mm256_castps_si256(_mm256_cmp_ps(src, src, _CMP_ORD_Q));
+  __m256i ones = _mm256_set1_epi32(0x1);
+  __m256i vec_bias = _mm256_set1_epi32(0x7fff);
+  // uint32_t lsb = (input >> 16) & 1;
+  auto t_value = _mm256_and_si256(_mm256_srli_epi32(value, 16), ones);
+  // uint32_t rounding_bias = 0x7fff + lsb;
+  t_value = _mm256_add_epi32(t_value, vec_bias);
+  // input += rounding_bias;
+  t_value = _mm256_add_epi32(t_value, value);
+  // input = input >> 16;
+  t_value = _mm256_srli_epi32(t_value, 16);
+  // Check NaN before converting back to bf16
+  t_value = _mm256_blendv_epi8(nan, t_value, mask);
+  t_value = _mm256_packus_epi32(t_value, t_value);   // t[4-7] t[4-7] t[0-4] t[0-4]
+  t_value = _mm256_permute4x64_epi64(t_value, 0xd8); // 11     01     10     00
+  return _mm256_castsi256_si128(t_value);
+}
+
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
   __m256i hi = _mm256_castps_si256(b);
@@ -81,6 +114,11 @@ static inline void cvtfp16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   cvtfp16_fp32(hi, o2);
 }
 
+static inline __m128i cvtfp32_fp16(const __m256& src) {
+  return _mm256_cvtps_ph(
+      src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+}
+
 static inline __m256i cvtfp32_fp16(const __m256& a, const __m256& b) {
   __m128i lo = _mm256_cvtps_ph(
       a, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
@@ -94,7 +132,7 @@ template <typename T, typename std::enable_if_t<is_reduced_floating_point_v<T>, 
 inline void cvt_to_fp32(const __m128i& a, __m256& o);
 template <> inline void cvt_to_fp32<BFloat16>(const __m128i& a, __m256& o) {
   cvtbf16_fp32(a, o);
-};
+}
 template <> inline void cvt_to_fp32<Half>(const __m128i& a, __m256& o) {
   cvtfp16_fp32(a, o);
 }
@@ -266,12 +304,20 @@ public:
     }
     return b;
   }
-  Vectorized<T> map(const __m256 (*const vop)(__m256)) const {
+
+  Vectorized<T> map(SLEEF_CONST __m256 (*SLEEF_CONST_OLD vop)(__m256)) const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
     const auto o1 = vop(lo);
     const auto o2 = vop(hi);
     return cvt_from_fp32<T>(o1, o2);
+  }
+  Vectorized<T> isnan() const {
+    __m256 lo, hi;
+    cvt_to_fp32<T>(values, lo, hi);
+    lo = _mm256_cmp_ps(lo, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
+    hi = _mm256_cmp_ps(hi, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
+    return merge_compare_result(lo, hi);
   }
   Vectorized<T> abs() const {
     return _mm256_andnot_si256(_mm256_set1_epi16(0x8000), values);
@@ -279,14 +325,14 @@ public:
   Vectorized<T> angle() const {
     __m256 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
-    auto angle_lambda = [](__m256 values) {
+    auto angle_lambda = [](__m256 values_2) {
       const auto zero_vec = _mm256_set1_ps(0.f);
       const auto nan_vec = _mm256_set1_ps(NAN);
-      const auto not_nan_mask = _mm256_cmp_ps(values, values, _CMP_EQ_OQ);
+      const auto not_nan_mask = _mm256_cmp_ps(values_2, values_2, _CMP_EQ_OQ);
       const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
       const auto pi = _mm256_set1_ps(c10::pi<float>);
 
-      const auto neg_mask = _mm256_cmp_ps(values, zero_vec, _CMP_LT_OQ);
+      const auto neg_mask = _mm256_cmp_ps(values_2, zero_vec, _CMP_LT_OQ);
       auto angle = _mm256_blendv_ps(zero_vec, pi, neg_mask);
       angle = _mm256_blendv_ps(angle, nan_vec, nan_mask);
       return angle;
@@ -307,11 +353,17 @@ public:
   Vectorized<T> acos() const {
     return map(Sleef_acosf8_u10);
   }
+  Vectorized<T> acosh() const {
+    return map(Sleef_acoshf8_u10);
+  }
   Vectorized<T> asin() const {
     return map(Sleef_asinf8_u10);
   }
   Vectorized<T> atan() const {
     return map(Sleef_atanf8_u10);
+  }
+  Vectorized<T> atanh() const {
+    return map(Sleef_atanhf8_u10);
   }
   Vectorized<T> atan2(const Vectorized<T> &b) const {
     __m256 lo, hi;
@@ -360,6 +412,9 @@ public:
   Vectorized<T> expm1() const {
     return map(Sleef_expm1f8_u10);
   }
+  Vectorized<T> exp_u20() const {
+    return exp();
+  }
   Vectorized<T> fmod(const Vectorized<T> & q) const {
     __m256 x_lo, x_hi;
     cvt_to_fp32<T>(values, x_lo, x_hi);
@@ -403,6 +458,22 @@ public:
     for (auto i = decltype(sz){0}; i < sz / 2; i++) {
       tmp1[i] = calc_i0e(tmp1[i]);
       tmp2[i] = calc_i0e(tmp2[i]);
+    }
+    const auto o1 = _mm256_loadu_ps(tmp1);
+    const auto o2 = _mm256_loadu_ps(tmp2);
+    return cvt_from_fp32<T>(o1, o2);
+  }
+  Vectorized<T> digamma() const {
+    __m256 lo, hi;
+    cvt_to_fp32<T>(values, lo, hi);
+    constexpr auto sz = size();
+    __at_align__ float tmp1[sz / 2], tmp2[sz / 2];
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp1), lo);
+    _mm256_storeu_ps(reinterpret_cast<float*>(tmp2), hi);
+
+    for (auto i = decltype(sz){0}; i < sz / 2; i++) {
+      tmp1[i] = calc_digamma(tmp1[i]);
+      tmp2[i] = calc_digamma(tmp2[i]);
     }
     const auto o1 = _mm256_loadu_ps(tmp1);
     const auto o2 = _mm256_loadu_ps(tmp2);
@@ -723,12 +794,16 @@ Vectorized<BFloat16> inline clamp_min(const Vectorized<BFloat16>& a, const Vecto
 template <>
 inline void convert(const BFloat16* src, BFloat16* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<BFloat16>::size()); i += Vectorized<BFloat16>::size()) {
     auto vsrc = _mm256_loadu_si256(reinterpret_cast<__m256i*>((void*)(src + i)));
     _mm256_storeu_si256(reinterpret_cast<__m256i*>((void*)(dst + i)), vsrc);
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }
@@ -921,12 +996,16 @@ Vectorized<Half> inline clamp_min(const Vectorized<Half>& a, const Vectorized<Ha
 template <>
 inline void convert(const Half* src, Half* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<Half>::size()); i += Vectorized<Half>::size()) {
     auto vsrc = _mm256_loadu_si256(reinterpret_cast<__m256i*>((void*)(src + i)));
     _mm256_storeu_si256(reinterpret_cast<__m256i*>((void*)(dst + i)), vsrc);
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }
@@ -992,10 +1071,10 @@ inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(c
 inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const Vectorized<float>& b) { \
   return cvt_from_fp32<type>(__m256(a), __m256(b)); \
 }
-CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
-CONVERT_VECTORIZED_INIT(Half, half);
+CONVERT_VECTORIZED_INIT(BFloat16, bfloat16)
+CONVERT_VECTORIZED_INIT(Half, half)
 
-#else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#else // defined(CPU_CAPABILITY_AVX2)
 
 #define CONVERT_NON_VECTORIZED_INIT(type, name) \
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(const Vectorized<type>& a) { \
@@ -1017,12 +1096,14 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
   convert(arr, arr2, K); \
   return Vectorized<type>::loadu(arr2); \
 }
-CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
-CONVERT_NON_VECTORIZED_INIT(Half, half);
+CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16)
+#if !(defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && !defined(CPU_CAPABILITY_SVE256))
+CONVERT_NON_VECTORIZED_INIT(Half, half)
+#endif
 
-#endif // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#endif // defined(CPU_CAPABILITY_AVX2)
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 #define LOAD_FP32_VECTORIZED_INIT(type, name) \
 inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
   auto values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(data)); \
@@ -1038,10 +1119,10 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   out1 = out1_values; \
   out2 = out2_values; \
 }
-LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
-LOAD_FP32_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16)
+LOAD_FP32_VECTORIZED_INIT(Half, fp16)
 
-#else // defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#else // defined(CPU_CAPABILITY_AVX2)
 #define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \
 inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
   __at_align__ float values[Vectorized<float>::size()]; \
@@ -1056,10 +1137,10 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   data += Vectorized<float>::size(); \
   load_fp32_from_##name(data, out2); \
 }
-LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16);
-LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_NON_VECTORIZED_INIT(BFloat16, bf16)
+LOAD_FP32_NON_VECTORIZED_INIT(Half, fp16)
 
 #endif
-}}}
+}} // namsepace at::vec::CPU_CAPABILITY
 
 #pragma GCC diagnostic pop

@@ -168,13 +168,11 @@ struct alignas(sizeof(T) * 2) complex {
   // c10::complex<double>
   template <typename U = T>
   C10_HOST_DEVICE explicit constexpr complex(
-      const std::enable_if_t<std::is_same<U, float>::value, complex<double>>&
-          other)
+      const std::enable_if_t<std::is_same_v<U, float>, complex<double>>& other)
       : real_(other.real_), imag_(other.imag_) {}
   template <typename U = T>
   C10_HOST_DEVICE constexpr complex(
-      const std::enable_if_t<std::is_same<U, double>::value, complex<float>>&
-          other)
+      const std::enable_if_t<std::is_same_v<U, double>, complex<float>>& other)
       : real_(other.real_), imag_(other.imag_) {}
 
   constexpr complex<T>& operator=(T re) {
@@ -263,19 +261,19 @@ struct alignas(sizeof(T) * 2) complex {
 #endif
 
     if (abs_c >= abs_d) {
-      if (abs_c == 0 && abs_d == 0) {
+      if (abs_c == U(0) && abs_d == U(0)) {
         /* divide by zeros should yield a complex inf or nan */
         real_ = a / abs_c;
         imag_ = b / abs_d;
       } else {
         auto rat = d / c;
-        auto scl = 1.0 / (c + d * rat);
+        auto scl = U(1.0) / (c + d * rat);
         real_ = (a + b * rat) * scl;
         imag_ = (b - a * rat) * scl;
       }
     } else {
       auto rat = c / d;
-      auto scl = 1.0 / (d + c * rat);
+      auto scl = U(1.0) / (d + c * rat);
       real_ = (a * rat + b) * scl;
       imag_ = (b * rat - a) * scl;
     }
@@ -322,7 +320,7 @@ struct alignas(sizeof(T) * 2) complex {
   constexpr void real(T value) {
     real_ = value;
   }
-  constexpr T imag() const {
+  C10_HOST_DEVICE constexpr T imag() const {
     return imag_;
   }
   constexpr void imag(T value) {
@@ -332,19 +330,19 @@ struct alignas(sizeof(T) * 2) complex {
 
 namespace complex_literals {
 
-constexpr complex<float> operator"" _if(long double imag) {
+constexpr complex<float> operator""_if(long double imag) {
   return complex<float>(0.0f, static_cast<float>(imag));
 }
 
-constexpr complex<double> operator"" _id(long double imag) {
+constexpr complex<double> operator""_id(long double imag) {
   return complex<double>(0.0, static_cast<double>(imag));
 }
 
-constexpr complex<float> operator"" _if(unsigned long long imag) {
+constexpr complex<float> operator""_if(unsigned long long imag) {
   return complex<float>(0.0f, static_cast<float>(imag));
 }
 
-constexpr complex<double> operator"" _id(unsigned long long imag) {
+constexpr complex<double> operator""_id(unsigned long long imag) {
   return complex<double>(0.0, static_cast<double>(imag));
 }
 
@@ -435,9 +433,9 @@ constexpr complex<T> operator/(const T& lhs, const complex<T>& rhs) {
 // not support this when T is a floating-point number. This is useful because it
 // saves a lot of "static_cast" when operate a complex and an integer. This
 // makes the code both less verbose and potentially more efficient.
-#define COMPLEX_INTEGER_OP_TEMPLATE_CONDITION                           \
-  typename std::enable_if_t<                                            \
-      std::is_floating_point<fT>::value && std::is_integral<iT>::value, \
+#define COMPLEX_INTEGER_OP_TEMPLATE_CONDITION                 \
+  typename std::enable_if_t<                                  \
+      std::is_floating_point_v<fT> && std::is_integral_v<iT>, \
       int> = 0
 
 template <typename fT, typename iT, COMPLEX_INTEGER_OP_TEMPLATE_CONDITION>

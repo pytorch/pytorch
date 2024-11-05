@@ -3,9 +3,10 @@ from __future__ import annotations
 import dataclasses
 import json
 import re
-from typing import Any, Callable, Dict, List, Optional, Union
+import traceback
+from typing import Any, Callable, Union
 
-from torch.onnx._internal import _beartype
+from torch._logging import LazyString
 from torch.onnx._internal.diagnostics.infra import sarif
 
 
@@ -19,7 +20,20 @@ _SarifClass = Union[
 ]
 
 
-@_beartype.beartype
+def lazy_format_exception(exception: Exception) -> LazyString:
+    return LazyString(
+        lambda: "\n".join(
+            (
+                "```",
+                *traceback.format_exception(
+                    type(exception), exception, exception.__traceback__
+                ),
+                "```",
+            )
+        ),
+    )
+
+
 def snake_case_to_camel_case(s: str) -> str:
     splits = s.split("_")
     if len(splits) <= 1:
@@ -27,20 +41,17 @@ def snake_case_to_camel_case(s: str) -> str:
     return "".join([splits[0], *map(str.capitalize, splits[1:])])
 
 
-@_beartype.beartype
 def camel_case_to_snake_case(s: str) -> str:
     return re.sub(r"([A-Z])", r"_\1", s).lower()
 
 
-@_beartype.beartype
 def kebab_case_to_snake_case(s: str) -> str:
     return s.replace("-", "_")
 
 
-@_beartype.beartype
 def _convert_key(
-    object: Union[Dict[str, Any], Any], convert: Callable[[str], str]
-) -> Union[Dict[str, Any], Any]:
+    object: dict[str, Any] | Any, convert: Callable[[str], str]
+) -> dict[str, Any] | Any:
     """Convert and update keys in a dictionary with "convert".
 
     Any value that is a dictionary will be recursively updated.
@@ -53,19 +64,19 @@ def _convert_key(
     Returns:
         The updated object.
     """
-    if not isinstance(object, Dict):
+    if not isinstance(object, dict):
         return object
     new_dict = {}
     for k, v in object.items():
         new_k = convert(k)
-        if isinstance(v, Dict):
+        if isinstance(v, dict):
             new_v = _convert_key(v, convert)
-        elif isinstance(v, List):
+        elif isinstance(v, list):
             new_v = [_convert_key(elem, convert) for elem in v]
         else:
             new_v = v
         if new_v is None:
-            # Otherwise unnesseraily bloated sarif log with "null"s.
+            # Otherwise unnecessarily bloated sarif log with "null"s.
             continue
         if new_v == -1:
             # WAR: -1 as default value shouldn't be logged into sarif.
@@ -76,52 +87,16 @@ def _convert_key(
     return new_dict
 
 
-@_beartype.beartype
-def sarif_to_json(attr_cls_obj: _SarifClass, indent: Optional[str] = " ") -> str:
+def sarif_to_json(attr_cls_obj: _SarifClass, indent: str | None = " ") -> str:
     dict = dataclasses.asdict(attr_cls_obj)
     dict = _convert_key(dict, snake_case_to_camel_case)
     return json.dumps(dict, indent=indent, separators=(",", ":"))
 
 
-@_beartype.beartype
-def pretty_print_title(
-    title: str, width: int = 80, fill_char: str = "=", print_output: bool = True
-) -> str:
-    """Pretty prints title in below format:
-
-    ==================== title ====================
-    """
-    msg = f" {title} ".center(width, fill_char)
-    if print_output:
-        print(msg)
-    return msg
-
-
-@_beartype.beartype
-def pretty_print_item_title(
-    title: str, fill_char: str = "=", print_output: bool = True
-) -> str:
-    """Pretty prints title in below format:
-
-    title
-    =====
-    """
-    msg_list = []
-    msg_list.append(title)
-    msg_list.append(fill_char * len(title))
-
-    msg = "\n".join(msg_list)
-    if print_output:
-        print(msg)
-    return msg
-
-
-@_beartype.beartype
 def format_argument(obj: Any) -> str:
     return f"{type(obj)}"
 
 
-@_beartype.beartype
 def display_name(fn: Callable) -> str:
     if hasattr(fn, "__qualname__"):
         return fn.__qualname__

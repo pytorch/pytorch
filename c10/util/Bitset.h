@@ -1,14 +1,11 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
-#include <c10/util/C++17.h>
-#include <c10/util/Optional.h>
+#include <cstddef>
 #if defined(_MSC_VER)
 #include <intrin.h>
 #endif
 
-namespace c10 {
-namespace utils {
+namespace c10::utils {
 
 /**
  * This is a simple bitset class with sizeof(long long int) bits.
@@ -40,6 +37,7 @@ struct bitset final {
   // see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=68754.
   bitset& operator=(const bitset&) noexcept = default;
   bitset& operator=(bitset&&) noexcept = default;
+  ~bitset() = default;
 
   constexpr void set(size_t index) noexcept {
     bitset_ |= (static_cast<long long int>(1) << index);
@@ -116,5 +114,4 @@ inline bool operator!=(bitset lhs, bitset rhs) noexcept {
   return !(lhs == rhs);
 }
 
-} // namespace utils
-} // namespace c10
+} // namespace c10::utils

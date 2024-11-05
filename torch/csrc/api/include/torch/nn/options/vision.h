@@ -5,9 +5,7 @@
 #include <torch/enum.h>
 #include <torch/types.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 /// Options for `torch::nn::functional::grid_sample`.
 ///
@@ -18,8 +16,8 @@ namespace functional {
 /// F::GridSampleFuncOptions().mode(torch::kBilinear).padding_mode(torch::kZeros).align_corners(true));
 /// ```
 struct TORCH_API GridSampleFuncOptions {
-  typedef c10::variant<enumtype::kBilinear, enumtype::kNearest> mode_t;
-  typedef c10::
+  typedef std::variant<enumtype::kBilinear, enumtype::kNearest> mode_t;
+  typedef std::
       variant<enumtype::kZeros, enumtype::kBorder, enumtype::kReflection>
           padding_mode_t;
 
@@ -28,9 +26,7 @@ struct TORCH_API GridSampleFuncOptions {
   /// padding mode for outside grid values. Default: Zeros
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
   /// Specifies perspective to pixel as point. Default: false
-  TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
+  TORCH_ARG(std::optional<bool>, align_corners) = std::nullopt;
 };
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

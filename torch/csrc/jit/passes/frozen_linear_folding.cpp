@@ -12,8 +12,7 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -57,6 +56,23 @@ bool FoldFrozenLinearBatchnorm(Block* b) {
       auto bn_rv = constant_as<Tensor>(bn->namedInput("running_var")).value();
       auto bn_eps = constant_as<double>(bn->namedInput("eps")).value();
       auto linear_w = constant_as<Tensor>(linear->namedInput("weight")).value();
+
+      int64_t linear_out_features = linear_w.size(0);
+      int64_t bn_num_features = bn_rm.size(0);
+
+      // Linear-BN needs to be fused while preserving the shapes of linear
+      // weight/bias. To preserve the shapes of linear weight/bias, the channel
+      // dim of bn needs to be broadcastable with the last dim of linear,
+      // because bn operates over the channel dim, (N, C_in, H, W) while linear
+      // operates over the last dim, (*, H_in). To be broadcastable, the number
+      // of features in bn and the number of output features from linear must
+      // satisfy the following condition:
+      // 1. they are equal, or
+      // 2. the number of features in bn is 1
+      // Otherwise, skip the folding path
+      if (!(linear_out_features == bn_num_features || bn_num_features == 1)) {
+        continue;
+      }
 
       // implementation taken from torch/nn/utils/fusion.py
       Tensor linear_b;
@@ -123,5 +139,4 @@ bool FoldFrozenLinearBatchnorm(std::shared_ptr<Graph>& graph) {
   return graph_modified;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

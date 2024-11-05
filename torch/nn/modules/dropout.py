@@ -1,31 +1,43 @@
-from .module import Module
-from .. import functional as F
-
+import torch.nn.functional as F
 from torch import Tensor
 
-__all__ = ['Dropout', 'Dropout1d', 'Dropout2d', 'Dropout3d', 'AlphaDropout', 'FeatureAlphaDropout']
+from .module import Module
+
+
+__all__ = [
+    "Dropout",
+    "Dropout1d",
+    "Dropout2d",
+    "Dropout3d",
+    "AlphaDropout",
+    "FeatureAlphaDropout",
+]
+
 
 class _DropoutNd(Module):
-    __constants__ = ['p', 'inplace']
+    __constants__ = ["p", "inplace"]
     p: float
     inplace: bool
 
     def __init__(self, p: float = 0.5, inplace: bool = False) -> None:
         super().__init__()
         if p < 0 or p > 1:
-            raise ValueError(f"dropout probability has to be between 0 and 1, but got {p}")
+            raise ValueError(
+                f"dropout probability has to be between 0 and 1, but got {p}"
+            )
         self.p = p
         self.inplace = inplace
 
     def extra_repr(self) -> str:
-        return f'p={self.p}, inplace={self.inplace}'
+        return f"p={self.p}, inplace={self.inplace}"
 
 
 class Dropout(_DropoutNd):
-    r"""During training, randomly zeroes some of the elements of the input
-    tensor with probability :attr:`p` using samples from a Bernoulli
-    distribution. Each channel will be zeroed out independently on every forward
-    call.
+    r"""During training, randomly zeroes some of the elements of the input tensor with probability :attr:`p`.
+
+    The zeroed elements are chosen independently for each forward call and are sampled from a Bernoulli distribution.
+
+    Each channel will be zeroed out independently on every forward call.
 
     This has proven to be an effective technique for regularization and
     preventing the co-adaptation of neurons as described in the paper
@@ -59,9 +71,12 @@ class Dropout(_DropoutNd):
 
 
 class Dropout1d(_DropoutNd):
-    r"""Randomly zero out entire channels (a channel is a 1D feature map,
+    r"""Randomly zero out entire channels.
+
+    A channel is a 1D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 1D tensor :math:`\text{input}[i, j]`).
+    batched input is a 1D tensor :math:`\text{input}[i, j]`.
+
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
 
@@ -101,9 +116,12 @@ class Dropout1d(_DropoutNd):
 
 
 class Dropout2d(_DropoutNd):
-    r"""Randomly zero out entire channels (a channel is a 2D feature map,
+    r"""Randomly zero out entire channels.
+
+    A channel is a 2D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 2D tensor :math:`\text{input}[i, j]`).
+    batched input is a 2D tensor :math:`\text{input}[i, j]`.
+
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
 
@@ -150,9 +168,12 @@ class Dropout2d(_DropoutNd):
 
 
 class Dropout3d(_DropoutNd):
-    r"""Randomly zero out entire channels (a channel is a 3D feature map,
+    r"""Randomly zero out entire channels.
+
+    A channel is a 3D feature map,
     e.g., the :math:`j`-th channel of the :math:`i`-th sample in the
-    batched input is a 3D tensor :math:`\text{input}[i, j]`).
+    batched input is a 3D tensor :math:`\text{input}[i, j]`.
+
     Each channel will be zeroed out independently on every forward call with
     probability :attr:`p` using samples from a Bernoulli distribution.
 
@@ -234,9 +255,11 @@ class AlphaDropout(_DropoutNd):
 
 
 class FeatureAlphaDropout(_DropoutNd):
-    r"""Randomly masks out entire channels (a channel is a feature map,
+    r"""Randomly masks out entire channels.
+
+    A channel is a feature map,
     e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
-    is a tensor :math:`\text{input}[i, j]`) of the input tensor). Instead of
+    is a tensor :math:`\text{input}[i, j]` of the input tensor). Instead of
     setting activations to zero, as in regular Dropout, the activations are set
     to the negative saturation value of the SELU activation function. More details
     can be found in the paper `Self-Normalizing Neural Networks`_ .

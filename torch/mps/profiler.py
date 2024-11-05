@@ -1,7 +1,11 @@
-import torch
+# mypy: allow-untyped-defs
 import contextlib
 
+import torch
+
+
 __all__ = ["start", "stop", "profile"]
+
 
 def start(mode: str = "interval", wait_until_completed: bool = False) -> None:
     r"""Start OS Signpost tracing from MPS backend.
@@ -26,9 +30,11 @@ def start(mode: str = "interval", wait_until_completed: bool = False) -> None:
     mode_normalized = mode.lower().replace(" ", "")
     torch._C._mps_profilerStartTrace(mode_normalized, wait_until_completed)
 
+
 def stop():
     r"""Stops generating OS Signpost tracing from MPS backend."""
     torch._C._mps_profilerStopTrace()
+
 
 @contextlib.contextmanager
 def profile(mode: str = "interval", wait_until_completed: bool = False):

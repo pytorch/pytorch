@@ -12,8 +12,15 @@ import expecttest
 import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64)
+    IS_ARM64,
+    IS_WINDOWS,
+    run_tests,
+    skipIfTorchDynamo,
+    TEST_WITH_CROSSREF,
+    TestCase,
+)
 from torch.utils._pytree import tree_map
+
 
 # These functions can vary from based on platform and build (e.g. with CUDA)
 # and generally distract from rather than adding to the test.
@@ -28,7 +35,9 @@ PRUNE_FUNCTIONS = {
     "torch/profiler/profiler.py(...): _transit_action": KEEP_ELLIPSES,
     "<built-in method __exit__ of torch._C.DisableTorchFunctionSubclass object at 0xXXXXXXXXXXXX>": PRUNE_ALL,
     "cudaStreamIsCapturing": PRUNE_ALL,
-    "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags": PRUNE_ALL,
+    # These show up only on CUDA, prune them so the CUDA and CPU expected results can be the same
+    "cudaGetDeviceCount": PRUNE_ALL,
+    "cudaGetDeviceProperties_v2": PRUNE_ALL,
 }
 
 # ROCTracer is currently not producing events that profiler can extract. We
@@ -43,25 +52,20 @@ ALLOW_CUDA_FAILURE = (torch.version.hip is not None) or IS_WINDOWS
 
 
 class TorchFunctionTensor(torch.Tensor):
-
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         return super().__torch_function__(func, types, args, kwargs)
 
 
 class TorchDispatchTensor(torch.Tensor):
-
     @staticmethod
     def __new__(cls, elem):
         t = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
         t.elem = elem
         return t
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-
         def unwrap(x):
             return x.elem if isinstance(x, TorchDispatchTensor) else x
 
@@ -75,7 +79,6 @@ class TorchDispatchTensor(torch.Tensor):
 
 
 class ProfilerTree:
-
     @staticmethod
     def test(f):
         """Mark unit test that will be using ProfilerTree to test traces.
@@ -98,11 +101,11 @@ class ProfilerTree:
                 return out
             finally:
                 delattr(self, "tree_replicate")
+
         return begin_unit_test_marker
 
     @classmethod
     def format(cls, profiler, indent: int = 0):
-
         def flatten(nodes, depth=0, out=None):
             if out is None:
                 out = []
@@ -128,6 +131,10 @@ class ProfilerTree:
         flat_nodes = flatten(profiler.kineto_results.experimental_event_tree())
 
         # Profiler inserts a `cudaDeviceSynchronize` at the end of profiling.
+        # and may also insert 'Context Sync' CUDA synchronization event.
+        if flat_nodes and flat_nodes[-2][1] == "cudaDeviceSynchronize":
+            flat_nodes = flat_nodes[:-2]
+
         if flat_nodes and flat_nodes[-1][1] == "cudaDeviceSynchronize":
             flat_nodes = flat_nodes[:-1]
 
@@ -135,10 +142,19 @@ class ProfilerTree:
         if flat_nodes and flat_nodes[-1][1] == "hipDeviceSynchronize":
             flat_nodes = flat_nodes[:-1]
 
-        min_depth = min([d + 1 for d, name in flat_nodes if "begin_unit_test_marker" in name] or [0])
+        min_depth = min(
+            [d + 1 for d, name in flat_nodes if "begin_unit_test_marker" in name] or [0]
+        )
         return textwrap.indent(
-            "\n".join([f"{'  ' * (d - min_depth)}{name.rstrip()}" for d, name in flat_nodes if d >= min_depth]),
-            " " * indent)
+            "\n".join(
+                [
+                    f"{'  ' * (d - min_depth)}{name.rstrip()}"
+                    for d, name in flat_nodes
+                    if d >= min_depth
+                ]
+            ),
+            " " * indent,
+        )
 
     @staticmethod
     def fmt_name(name: str) -> str:
@@ -167,18 +183,15 @@ class ProfilerTree:
             "void at::native::reduce_kernel",
             "void at::native::vectorized_elementwise_kernel",
             "void at::native::unrolled_elementwise_kernel",
-
             r"void [a-zA-Z0-9]+_kernel",  # Nvidia kernels.
         ):
             name = re.sub(
                 rf"{kernel_pattern}<.+>\(.+\)$",
                 f"{kernel_pattern.replace('[a-zA-Z0-9]+', '...')}<...>(...)",
-                name)
+                name,
+            )
 
-        return re.sub(
-            "object at 0x[0-9a-fA-F]+>",
-            "object at 0xXXXXXXXXXXXX>",
-            name)
+        return re.sub("object at 0x[0-9a-fA-F]+>", "object at 0xXXXXXXXXXXXX>", name)
 
     @classmethod
     def validate_node(cls, node):
@@ -199,6 +212,7 @@ class ProfilerTree:
                 parent_name = to_string(parent.extra_fields.callsite)
                 caller_name = to_string(extra_fields.caller)
                 assert parent_name == caller_name, f"{parent_name} vs. {caller_name}"
+
 
 @unittest.skipIf(IS_ARM64, "Not working on ARM")
 class TestProfilerTree(TestCase):
@@ -223,7 +237,9 @@ class TestProfilerTree(TestCase):
         self.maxDiff = None
 
         replicate = getattr(self, "tree_replicate", None)
-        self.assertIsNotNone(replicate, "Please annotate test with `@ProfilerTree.test`")
+        self.assertIsNotNone(
+            replicate, "Please annotate test with `@ProfilerTree.test`"
+        )
 
         # The profiler should produce deterministic results and should return
         # to a clean state after each run. As a result, only the first
@@ -242,7 +258,12 @@ class TestProfilerTree(TestCase):
                 else:
                     raise
 
+    # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
+    @unittest.skipIf(
+        torch.cuda.is_available() or torch.xpu.is_available(),
+        "Test not working for CUDA and XPU",
+    )
     def test_profiler_experimental_tree(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile() as p:
@@ -292,10 +313,15 @@ class TestProfilerTree(TestCase):
             autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
               torch::autograd::AccumulateGrad
                 aten::detach
-                  detach"""
+                  detach""",
         )
 
+    # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
+    @unittest.skipIf(
+        torch.cuda.is_available() or torch.xpu.is_available(),
+        "Test not working for CUDA and XPU",
+    )
     def test_profiler_experimental_tree_with_record_function(self):
         with torch.profiler.profile() as p:
             with torch.autograd.profiler.record_function("Top level Annotation"):
@@ -304,7 +330,9 @@ class TestProfilerTree(TestCase):
 
                 # Check that we correctly handle the case when a user
                 # annotation does not call `__exit__`.
-                _ = torch.autograd.profiler.record_function("Second Annotation").__enter__()
+                _ = torch.autograd.profiler.record_function(
+                    "Second Annotation"
+                ).__enter__()
 
                 y = x + 1
                 with torch.autograd.profiler.record_function("Third Annotation"):
@@ -338,10 +366,15 @@ class TestProfilerTree(TestCase):
                     torch::autograd::AccumulateGrad
                       aten::new_empty_strided
                         aten::empty_strided
-                      aten::copy_"""
+                      aten::copy_""",
         )
 
+    # TODO: Add logic for CUDA version of test
     @ProfilerTree.test
+    @unittest.skipIf(
+        torch.cuda.is_available() or torch.xpu.is_available(),
+        "Test not working for CUDA and XPU",
+    )
     def test_profiler_experimental_tree_with_memory(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
         with torch.profiler.profile(profile_memory=True) as p:
@@ -410,10 +443,13 @@ class TestProfilerTree(TestCase):
               torch::autograd::AccumulateGrad
                 aten::detach
                   detach
-            [memory]"""
+            [memory]""",
         )
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
+    @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
+    @unittest.skipIf(
+        TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
+    )
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_memory_and_stack(self):
         t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
@@ -453,8 +489,19 @@ class TestProfilerTree(TestCase):
                   <built-in function len>
                   torch/autograd/__init__.py(...): _tensor_or_tensors_to_tuple
                   torch/autograd/__init__.py(...): _make_grads
+                    typing.py(...): inner
+                      typing.py(...): __hash__
+                        <built-in function hash>
+                    typing.py(...): cast
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
                     <built-in function isinstance>
                     <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                    <built-in function isinstance>
+                    <built-in function isinstance>
                     <built-in method ones_like of type object at 0xXXXXXXXXXXXX>
                       aten::ones_like
                         aten::empty_like
@@ -462,58 +509,63 @@ class TestProfilerTree(TestCase):
                             [memory]
                         aten::fill_
                     <built-in method append of list object at 0xXXXXXXXXXXXX>
-                  <built-in method run_backward of torch._C._EngineBase object at 0xXXXXXXXXXXXX>
-                    autograd::engine::evaluate_function: PowBackward0
-                      PowBackward0
-                        aten::pow
-                          aten::result_type
-                          aten::to
-                          [memory]
-                          aten::copy_
-                        aten::mul
-                          [memory]
-                          aten::mul
+                  torch/autograd/graph.py(...): _engine_run_backward
+                    logging/__init__.py(...): getEffectiveLevel
+                    <built-in method run_backward of torch._C._EngineBase object at 0xXXXXXXXXXXXX>
+                      autograd::engine::evaluate_function: PowBackward0
+                        PowBackward0
+                          aten::pow
+                            aten::result_type
                             aten::to
-                              aten::_to_copy
-                                aten::empty_strided
-                                  [memory]
-                                aten::copy_
                             [memory]
+                            aten::copy_
+                          aten::mul
+                            [memory]
+                            aten::mul
+                              aten::to
+                                aten::_to_copy
+                                  aten::empty_strided
+                                    [memory]
+                                  aten::copy_
+                              [memory]
+                              [memory]
+                            [memory]
+                          aten::mul
                             [memory]
                           [memory]
-                        aten::mul
                           [memory]
                         [memory]
-                        [memory]
-                      [memory]
-                    autograd::engine::evaluate_function: SubBackward0
-                      SubBackward0
-                        aten::neg
-                          [memory]
-                      [memory]
-                    autograd::engine::evaluate_function: AddBackward0
-                      AddBackward0
-                    autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
-                      torch::autograd::AccumulateGrad
-                        aten::new_empty_strided
-                          aten::empty_strided
+                      autograd::engine::evaluate_function: SubBackward0
+                        SubBackward0
+                          aten::neg
                             [memory]
-                        aten::copy_
-                    autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
-                      torch::autograd::AccumulateGrad
-                        aten::detach
-                          detach
+                        [memory]
+                      autograd::engine::evaluate_function: AddBackward0
+                        AddBackward0
+                      autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+                        torch::autograd::AccumulateGrad
+                          aten::new_empty_strided
+                            aten::empty_strided
+                              [memory]
+                          aten::copy_
+                      autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+                        torch::autograd::AccumulateGrad
+                          aten::detach
+                            detach
                 [memory]
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
-                  ..."""
+                  ...""",
         )
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
+    @skipIfTorchDynamo("too slow")
+    @unittest.skipIf(
+        TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
+    )
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.layers = [
                     torch.nn.ReLU(),
@@ -562,19 +614,19 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
+                              aten::reshape
+                                aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided
-                              aten::matmul
-                                aten::unsqueeze
+                              aten::addmm
+                                aten::expand
                                   aten::as_strided
-                                aten::mm
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                aten::squeeze_
-                                  aten::as_strided_
-                              aten::add_
+                                aten::copy_
+                                aten::resolve_conj
+                                aten::resolve_conj
+                                aten::resolve_conj
+                              aten::view
                     nn.Module: ReLU_1
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
@@ -609,19 +661,19 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
+                              aten::reshape
+                                aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided
-                              aten::matmul
-                                aten::unsqueeze
+                              aten::addmm
+                                aten::expand
                                   aten::as_strided
-                                aten::mm
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                  aten::resolve_conj
-                                aten::squeeze_
-                                  aten::as_strided_
-                              aten::add_
+                                aten::copy_
+                                aten::resolve_conj
+                                aten::resolve_conj
+                                aten::resolve_conj
+                              aten::view
                     nn.Module: ReLU_1
                       torch/nn/modules/module.py(...): _call_impl
                         <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
@@ -633,10 +685,12 @@ class TestProfilerTree(TestCase):
                                 aten::clamp_min
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
-                  ..."""
+                  ...""",
         )
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
+    @unittest.skipIf(
+        TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
+    )
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_torch_function(self):
         x = TorchFunctionTensor(torch.ones((1,)))
@@ -672,14 +726,20 @@ class TestProfilerTree(TestCase):
                       <built-in function isinstance>
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
-                  ..."""
+                  ...""",
         )
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
+    @unittest.skipIf(
+        TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
+    )
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_torch_dispatch(self):
         x = TorchDispatchTensor(torch.ones((1,)))
         y = torch.ones((1,))
+
+        # warmup round
+        with torch.profiler.profile(with_stack=True):
+            x + y
 
         with torch.profiler.profile(with_stack=True) as p:
             x + y
@@ -691,6 +751,10 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __enter__
                 ...
               aten::add
+                torch/_library/simple_registry.py(...): find_torch_dispatch_rule
+                  torch/_library/simple_registry.py(...): find
+                  torch/_library/simple_registry.py(...): find
+                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
                 test_profiler_tree.py(...): __torch_dispatch__
                   torch/utils/_pytree.py(...): tree_map
                     ...
@@ -703,7 +767,8 @@ class TestProfilerTree(TestCase):
                     ...
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
-                  ...""")
+                  ...""",
+        )
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
@@ -861,10 +926,15 @@ class TestProfilerTree(TestCase):
         )
 
     @unittest.skip("https://github.com/pytorch/pytorch/issues/83606")
-    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
+    @unittest.skipIf(
+        TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite."
+    )
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @ProfilerTree.test
     def test_profiler_experimental_tree_cuda_detailed(self):
+        # Do lazy imports ahead of time to avoid it showing up in the tree
+        import torch.nested._internal.nested_tensor
+
         model = torch.nn.modules.Linear(1, 1, device="cuda")
         model.train()
         opt = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
@@ -922,8 +992,19 @@ class TestProfilerTree(TestCase):
                     <built-in function len>
                     torch/autograd/__init__.py(...): _tensor_or_tensors_to_tuple
                     torch/autograd/__init__.py(...): _make_grads
+                      typing.py(...): inner
+                        typing.py(...): __hash__
+                          <built-in function hash>
+                      typing.py(...): cast
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
                       <built-in function isinstance>
                       <built-in method numel of Tensor object at 0xXXXXXXXXXXXX>
+                      <built-in function isinstance>
+                      <built-in function isinstance>
                       <built-in method ones_like of type object at 0xXXXXXXXXXXXX>
                         aten::ones_like
                           aten::empty_like
@@ -1057,5 +1138,5 @@ class TestProfilerTree(TestCase):
         )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

@@ -14,13 +14,10 @@
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#include <tuple>
-
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(nested_dense_elementwise_stub);
-REGISTER_NO_CPU_DISPATCH(nested_dense_elementwise_stub);
+REGISTER_NO_CPU_DISPATCH(nested_dense_elementwise_stub)
 
 std::pair<NestedTensorImpl*, NestedTensorImpl*>
 static get_elementwise_nested_tensor_impl(
@@ -143,6 +140,23 @@ Tensor NestedTensor_elementwise_Tensor(
       }
       return result;
     }
+
+    // check for the [B, C, *, *], [C, 1, 1] case
+    bool is_broadcastable_4d_3d = (
+        self_ptr->dim() == 4 &&
+        other.dim() == 3 &&
+        self_ptr->opt_size(1).has_value() &&
+        self_ptr->size(1) == other.size(0) &&
+        other.size(1) == 1 &&
+        other.size(2) == 1);
+    if (is_broadcastable_4d_3d) {
+      std::vector<Tensor> results;
+      for (const auto& t : self.unbind()) {
+        results.push_back(f(t, other));
+      }
+      return at::_nested_tensor_from_tensor_list(results);
+    }
+
     TORCH_CHECK(
         false,
         "Expected both self and other to be nested, but got a nested self and non-nested other for op: ",
@@ -150,13 +164,10 @@ Tensor NestedTensor_elementwise_Tensor(
         ".");
   }
 
-  NestedTensorImpl* self_impl = nullptr;
-  NestedTensorImpl* other_impl = nullptr;
-
   self_contiguous = supports_striding ? self.contiguous() : self;
   other_contiguous = supports_striding ? other.contiguous() : other;
 
-  std::tie(self_impl, other_impl) =
+  auto [self_impl, other_impl] =
       get_elementwise_nested_tensor_impl(self_contiguous, other_contiguous, op_name);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl);
@@ -240,9 +251,7 @@ Tensor& NestedTensor_elementwise__Tensor(
     f(self_impl->get_buffer(), other);
     return self;
   }
-  NestedTensorImpl* self_impl = nullptr;
-  NestedTensorImpl* other_impl = nullptr;
-  std::tie(self_impl, other_impl) =
+  auto [self_impl, other_impl] =
       get_elementwise_nested_tensor_impl(self, other, op_name);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl);
@@ -286,5 +295,37 @@ Tensor& fill_nested_(Tensor& self, const Tensor& value) {
   return self;
 }
 
-} // namespace native
-} // namespace at
+Tensor ge_scalar_nested(const Tensor& self, const Scalar& other) {
+  return NestedTensor_elementwise_Tensor(
+      self, wrapped_scalar_tensor(other), "ge", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.ge(b2);
+      });
+}
+
+Tensor gt_scalar_nested(const Tensor& self, const Scalar& other) {
+  return NestedTensor_elementwise_Tensor(
+      self, wrapped_scalar_tensor(other), "gt", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.gt(b2);
+      });
+}
+
+Tensor eq_scalar_nested(const Tensor& self, const Scalar& other) {
+  return NestedTensor_elementwise_Tensor(
+      self, wrapped_scalar_tensor(other), "eq", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.eq(b2);
+      });
+}
+
+Tensor eq_tensor_nested(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!other.is_nested(), "eq does not support nested tensor as other value.");
+  return NestedTensor_elementwise_Tensor(
+      self, other, "eq", false /*supports_striding*/,
+      [](const Tensor& b1, const Tensor& b2) {
+        return b1.eq(b2);
+      });
+}
+
+} // namespace at::native

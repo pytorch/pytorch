@@ -1,17 +1,19 @@
+# mypy: ignore-errors
+
 r"""This file is allowed to initialize CUDA context when imported."""
 
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS
 import inspect
 import contextlib
+import os
 
 
 CUDA_ALREADY_INITIALIZED_ON_IMPORT = torch.cuda.is_initialized()
 
 
-TEST_CUDA = torch.cuda.is_available()
 TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
@@ -25,14 +27,76 @@ TEST_CUDNN_VERSION = LazyVal(lambda: torch.backends.cudnn.version() if TEST_CUDN
 SM53OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3))
 SM60OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (6, 0))
 SM70OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 0))
+SM75OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (7, 5))
 SM80OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0))
+SM89OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 9))
 SM90OrLater = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() >= (9, 0))
+
+IS_JETSON = LazyVal(lambda: torch.cuda.is_available() and torch.cuda.get_device_capability() in [(7, 2), (8, 7)])
+
+def CDNA2OrLater():
+    if TEST_WITH_ROCM:
+        gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
+        return any(arch in gcn_arch_name for arch in {"gfx90a", "gfx940", "gfx941", "gfx942"})
+    return False
+
+def evaluate_gfx_arch_exact(matching_arch):
+    if not torch.cuda.is_available():
+        return False
+    gcn_arch_name = torch.cuda.get_device_properties('cuda').gcnArchName
+    arch = os.environ.get('PYTORCH_DEBUG_FLASH_ATTENTION_GCN_ARCH_OVERRIDE', gcn_arch_name)
+    return arch == matching_arch
+
+GFX90A_Exact = LazyVal(lambda: evaluate_gfx_arch_exact('gfx90a:sramecc+:xnack-'))
+GFX942_Exact = LazyVal(lambda: evaluate_gfx_arch_exact('gfx942:sramecc+:xnack-'))
+
+def evaluate_platform_supports_flash_attention():
+    if TEST_WITH_ROCM:
+        return evaluate_gfx_arch_exact('gfx90a:sramecc+:xnack-') or evaluate_gfx_arch_exact('gfx942:sramecc+:xnack-')
+    if TEST_CUDA:
+        return not IS_WINDOWS and SM80OrLater
+    return False
+
+def evaluate_platform_supports_efficient_attention():
+    if TEST_WITH_ROCM:
+        return evaluate_gfx_arch_exact('gfx90a:sramecc+:xnack-') or evaluate_gfx_arch_exact('gfx942:sramecc+:xnack-')
+    if TEST_CUDA:
+        return True
+    return False
+
+def evaluate_platform_supports_cudnn_attention():
+    return (not TEST_WITH_ROCM) and SM80OrLater and (TEST_CUDNN_VERSION >= 90000)
+
+PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
+PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())
+PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_cudnn_attention())
+# This condition always evaluates to PLATFORM_SUPPORTS_MEM_EFF_ATTENTION but for logical clarity we keep it separate
+PLATFORM_SUPPORTS_FUSED_ATTENTION: bool = LazyVal(lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION or
+                                                  PLATFORM_SUPPORTS_CUDNN_ATTENTION or
+                                                  PLATFORM_SUPPORTS_MEM_EFF_ATTENTION)
 
 PLATFORM_SUPPORTS_FUSED_SDPA: bool = TEST_CUDA and not TEST_WITH_ROCM
 
+PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
+
+def evaluate_platform_supports_fp8():
+    if torch.cuda.is_available():
+        if torch.version.hip:
+            return 'gfx94' in torch.cuda.get_device_properties(0).gcnArchName
+        else:
+            return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
+    return False
+
+PLATFORM_SUPPORTS_FP8: bool = LazyVal(lambda: evaluate_platform_supports_fp8())
+
+
 if TEST_NUMBA:
-    import numba.cuda
-    TEST_NUMBA_CUDA = numba.cuda.is_available()
+    try:
+        import numba.cuda
+        TEST_NUMBA_CUDA = numba.cuda.is_available()
+    except Exception:
+        TEST_NUMBA_CUDA = False
+        TEST_NUMBA = False
 else:
     TEST_NUMBA_CUDA = False
 
@@ -88,6 +152,23 @@ def tf32_on(self, tf32_precision=1e-5):
     finally:
         torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
         self.precision = old_precision
+
+
+@contextlib.contextmanager
+def tf32_enabled():
+    """
+    Context manager to temporarily enable TF32 for CUDA operations.
+    Restores the previous TF32 state after exiting the context.
+    """
+    old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
+    try:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        with torch.backends.cudnn.flags(
+            enabled=None, benchmark=None, deterministic=None, allow_tf32=True
+        ):
+            yield
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32_matmul
 
 
 # This is a wrapper that wraps a test to run this test twice, one with
@@ -189,6 +270,8 @@ def _check_cusparse_generic_available():
 def _check_hipsparse_generic_available():
     if not TEST_WITH_ROCM:
         return False
+    if not torch.version.hip:
+        return False
 
     rocm_version = str(torch.version.hip)
     rocm_version = rocm_version.split("-")[0]    # ignore git sha
@@ -199,7 +282,7 @@ def _check_hipsparse_generic_available():
 TEST_CUSPARSE_GENERIC = _check_cusparse_generic_available()
 TEST_HIPSPARSE_GENERIC = _check_hipsparse_generic_available()
 
-# Shared by test_cuda.py and test_multigpu.py
+# Shared by test_torch.py and test_multigpu.py
 def _create_scaling_models_optimizers(device="cuda", optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
     # Create a module+optimizer that will use scaling, and a control module+optimizer
     # that will not use scaling, against which the scaling-enabled module+optimizer can be compared.
@@ -217,14 +300,14 @@ def _create_scaling_models_optimizers(device="cuda", optimizer_ctor=torch.optim.
 
     return mod_control, mod_scaling, opt_control, opt_scaling
 
-
+# Shared by test_torch.py, test_cuda.py and test_multigpu.py
 def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
     data = [(torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
             (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
             (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device)),
             (torch.randn((8, 8), dtype=dtype, device=device), torch.randn((8, 8), dtype=dtype, device=device))]
 
-    loss_fn = torch.nn.MSELoss().cuda()
+    loss_fn = torch.nn.MSELoss().to(device)
 
     skip_iter = 2
 

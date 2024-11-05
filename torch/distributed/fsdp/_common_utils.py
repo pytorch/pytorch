@@ -1,7 +1,8 @@
+# mypy: allow-untyped-defs
 """
 This file includes private common utilities for FSDP.
 """
-
+import logging
 import traceback
 import warnings
 import weakref
@@ -20,18 +21,19 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TYPE_CHECKING,
 )
 
 import torch
 import torch.distributed as dist
-import torch.distributed.fsdp.flat_param as flat_param_file
+import torch.distributed.fsdp._flat_param as flat_param_file
 import torch.nn as nn
 from torch.distributed._composable_state import _get_module_state, _State
-from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     _CHECKPOINT_PREFIX,
 )
 from torch.distributed.utils import _apply_to_tensors
+from torch.utils._mode_utils import no_dispatch
 
 from .api import (
     FullOptimStateDictConfig,
@@ -41,6 +43,13 @@ from .api import (
     StateDictConfig,
     StateDictType,
 )
+
+
+if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
+    from torch.distributed.fsdp._fsdp_extensions import FSDPExtensions
+
+    from ._flat_param import FlatParamHandle
 
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "."
@@ -68,36 +77,38 @@ class _FSDPDeviceHandle:
             try:
                 self.__backend = getattr(torch, device.type)
                 self.__device = device
-            except AttributeError:
+            except AttributeError as exc:
                 raise AttributeError(
                     f"Device '{device}' does not have a corresponding backend registered as 'torch.{device.type}'."
-                )
+                ) from exc
         else:
             self.__backend = backend
 
     @classmethod
     def from_device(cls, device: torch.device) -> "_FSDPDeviceHandle":
         """
-        Return an device handle corresponding to the device, and through this handle,
+        Return a device handle corresponding to the device, and through this handle,
         operations with the same semantics as CUDA can be performed on the device.
         Just return torch.cuda if the device is cuda to make attribute-access faster.
         Custom backend must first register a module with the same name with {device.type} on torch.
         """
         if device.type == "cuda":
             return cast(_FSDPDeviceHandle, torch.cuda)
+        elif device.type == "mtia":
+            return cast(_FSDPDeviceHandle, torch.mtia)
         return cls(device)
 
     def __getattr__(self, __name: str) -> Any:
         try:
             return getattr(self.__backend, __name)
-        except AttributeError:
+        except AttributeError as exc:
             raise AttributeError(
                 f"Custom backend '{self.__device.type}' not implement 'torch.{self.__device.type}.{__name}'"
-            )
+            ) from exc
 
 
 class _UninitializedDeviceHandle(_FSDPDeviceHandle):
-    def __init__(self):
+    def __init__(self) -> None:
         pass
 
     def __getattribute__(self, __name: str) -> Any:
@@ -110,9 +121,12 @@ class _FSDPState(_State):
         # FSDP/fully_shard.
         self._ignored_modules: Set[nn.Module] = set()
         self._ignored_params: Set[nn.Parameter] = set()
+        # Buffer names are cleaned (without wrapper prefixes)
+        self._ignored_buffer_names: Set[str] = set()
         self.process_group: Optional[dist.ProcessGroup] = None
         self.rank: int = -1
         self.world_size: int = -1
+        self._device_mesh: Optional[DeviceMesh] = None
         self.sharding_strategy = ShardingStrategy.FULL_SHARD
         self._use_orig_params: bool = False
         self.training_state = TrainingState.IDLE
@@ -126,6 +140,11 @@ class _FSDPState(_State):
             nn.Module, Optional[flat_param_file.FlatParamHandle]
         ] = {}
         self.compute_device: Optional[torch.device] = None
+        self._gradient_predivide_factor: int = 0
+        self._gradient_postdivide_factor: int = 0
+        self._comm_hook: Optional[Callable] = None
+        self._comm_hook_state: Optional[Any] = None
+        self._unshard_event: Optional[torch.Event] = None
         # Abstract device handle for fsdp compute device. For now,
         # the compute device must implement cuda semantics used by fsdp
         self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
@@ -133,7 +152,7 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: List[_FSDPState] = []
         self._all_handles: List[flat_param_file.FlatParamHandle] = []
-        self._device_mesh: Optional[DeviceMesh] = None
+        self._fsdp_extension: Optional[FSDPExtensions] = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
@@ -255,7 +274,7 @@ def _named_parameters_with_duplicates(
     kwargs["remove_duplicate"] = False
     try:
         ret = list(module.named_parameters(**kwargs))
-    except AssertionError as e:
+    except AssertionError:
         kwargs.pop("remove_duplicate")
         ret = list(module.named_parameters(**kwargs))
     return ret
@@ -266,11 +285,24 @@ def _get_param_to_fqns(
     dedup_shared_params: bool = True,
 ) -> Dict[nn.Parameter, List[str]]:
     """
-    Constructs a mapping from parameter to a list of its FQNs. Each normal
-    parameter maps to a singleton list containing its FQN, while each
+    Constructs a mapping from parameter to a list of its \"canonical\" FQNs. Here,
+    we use canonical to mean the fully-qualified name assigned to the parameter
+    based on its position in the original nn.Module hierarchy before any wrapper
+    or parallelism has been applied to it. This is in contrast to FQNs that may be
+    generated after parallelisms or wrappers have been applied to the model.
+
+    Each normal parameter maps to a singleton list containing its FQN, while each
     ``FlatParameter`` maps to a list of its original parameter FQNs, which may
-    have length greater than one. All FQNs are prefixed starting from
-    ``model``.
+    have length greater than one.  All FQNs are prefixed starting from ``model``.
+
+    In the case where FSDP was applied with ``use_orig_params=True``, there should be no
+    ``FlatParameter`` s registered to the model's modules and this mapping will only
+    contain mappings from ``nn.Parameter`` s to singleton FQN lists.
+
+    It is only in the case where FSDP was applied with ``use_orig_params=False`` where
+    a ``FlatParameter`` will be registered in place of the original parameters and there
+    will be mappings from each ``FlatParameter`` to lists of FQNs corresponding to the
+    original parameters.
 
     Args:
         model (torch.nn.Module): Root module (which may or may not be a
@@ -331,6 +363,32 @@ def _get_param_to_fqns(
     )
 
 
+@no_type_check
+def _log_post_backward_hook(
+    state: _FSDPState, handle: "FlatParamHandle", logger: logging.Logger
+) -> None:
+    # Under TORCH_DISTRIBUTED_DEBUG=INFO, log the module names this hook fires for.
+    # Below logging of module names this post-bwd hook fires for can help debug certain
+    # cases where hooks don't fire, such as under certain activation checkpoint configs.
+    if state._use_orig_params and handle._debug_level == dist.DebugLevel.INFO:
+        param_fqns = _get_handle_fqns_from_root(state, handle)
+        logger.warning("FSDP firing post-backward hooks for parameters %s", param_fqns)
+
+
+@no_type_check
+def _get_handle_fqns_from_root(
+    state: _FSDPState, handle: "FlatParamHandle"
+) -> Optional[List[str]]:
+    if handle is None:
+        return None
+    param_to_fqn = state._exec_order_data.param_to_fqn
+    handle_params = handle.flat_param._params  # only populated for use_orig_params
+    param_fqns = [
+        fqn for fqn_list in [param_to_fqn[p] for p in handle_params] for fqn in fqn_list
+    ]
+    return param_fqns
+
+
 def _apply_to_modules(
     root_module: torch.nn.Module,
     module_fn: Callable,
@@ -368,25 +426,14 @@ def _apply_to_modules(
                     # ``named_children`` + `named_parameter(recurse=False)``.
                     # This hack is a must to make the traversal work.
                     # TODO: Remove this hack once DMP + FSDP is not supported.
+                    # It turns out that recursive wrapping may trigger this as
+                    # well.
                     if (
                         submodule_name == "_fsdp_wrapped_module"
                         or submodule_name == "_dmp_wrapped_module"
                     ):
-                        warnings.warn(
-                            "An unexpected prefix is detected. This case "
-                            " should only happen when using DMP with FSDP. "
-                            f"prefix = {prefix}, "
-                            f"submodule_name = {submodule_name}"
-                        )
                         new_prefix = prefix
                     elif submodule_name == "module":
-                        warnings.warn(
-                            "An unexpected prefix is detected. This case "
-                            " should only happen when DDP wraps the outer "
-                            " modules while FSDP wraps the inner ones."
-                            f"prefix = {prefix}, "
-                            f"submodule_name = {submodule_name}"
-                        )
                         new_prefix = prefix
             f(submodule, new_prefix, new_tree_level, *args, **kwargs)
 
@@ -485,3 +532,27 @@ def _override_module_mixed_precision(
             mod.register_forward_pre_hook(forward_pre_hook, prepend=False)
             mod.register_forward_hook(forward_post_hook, prepend=False)
     return overridden_module_classes
+
+
+def _no_dispatch_record_stream(tensor: torch.Tensor, stream: torch.Stream) -> None:
+    # FIXME record_stream doesn't work with non-cuda/mtia tensors
+    if tensor.device.type not in [
+        "cuda",
+        "mtia",
+        torch._C._get_privateuse1_backend_name(),
+    ]:
+        return
+
+    if torch.distributed._functional_collectives.is_torchdynamo_compiling():
+        return
+        # from @ezyang:
+        # The no_dispatch was added in https://github.com/pytorch/pytorch/pull/88014 cc @fegin
+        # Looking over the PR, it looks like this is because we don't actually support Stream arguments
+        # in torch dispatch, so it just chokes.
+        # If Dynamo is able to answer "are there any torch dispatch modes" active (it should answer False),
+        # a better version of this would just be to check if there are any modes before disabling dispatch.
+        # TODO(voz): Extend a dynamo util to answer the above, unify the codepaths here.
+        tensor.record_stream(stream)
+    else:
+        with no_dispatch():
+            tensor.record_stream(stream)

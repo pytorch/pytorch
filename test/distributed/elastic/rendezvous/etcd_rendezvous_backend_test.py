@@ -7,21 +7,26 @@
 # LICENSE file in the root directory of this source tree.
 
 import subprocess
+import threading
+import time
 from base64 import b64encode
-from typing import ClassVar, cast
+from typing import cast, ClassVar
 from unittest import TestCase
 
 from etcd import EtcdKeyNotFound  # type: ignore[import]
+from rendezvous_backend_test import RendezvousBackendTestMixin
 
-from torch.distributed.elastic.rendezvous import RendezvousConnectionError, RendezvousParameters
+from torch.distributed.elastic.rendezvous import (
+    RendezvousConnectionError,
+    RendezvousParameters,
+)
+from torch.distributed.elastic.rendezvous.api import RendezvousStoreInfo
 from torch.distributed.elastic.rendezvous.etcd_rendezvous_backend import (
-    EtcdRendezvousBackend,
     create_backend,
+    EtcdRendezvousBackend,
 )
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.rendezvous.etcd_store import EtcdStore
-
-from rendezvous_backend_test import RendezvousBackendTestMixin
 
 
 class EtcdRendezvousBackendTest(TestCase, RendezvousBackendTestMixin):
@@ -45,7 +50,9 @@ class EtcdRendezvousBackendTest(TestCase, RendezvousBackendTestMixin):
         except EtcdKeyNotFound:
             pass
 
-        self._backend = EtcdRendezvousBackend(self._client, "dummy_run_id", "/dummy_prefix")
+        self._backend = EtcdRendezvousBackend(
+            self._client, "dummy_run_id", "/dummy_prefix"
+        )
 
     def _corrupt_state(self) -> None:
         self._client.write("/dummy_prefix/dummy_run_id", "non_base64")
@@ -107,7 +114,9 @@ class CreateBackendTest(TestCase):
 
         self.test_create_backend_returns_backend()
 
-    def test_create_backend_returns_backend_if_read_timeout_is_not_specified(self) -> None:
+    def test_create_backend_returns_backend_if_read_timeout_is_not_specified(
+        self,
+    ) -> None:
         del self._params.config["read_timeout"]
 
         self._expected_read_timeout = 60
@@ -126,7 +135,9 @@ class CreateBackendTest(TestCase):
     def test_create_backend_raises_error_if_protocol_is_invalid(self) -> None:
         self._params.config["protocol"] = "dummy"
 
-        with self.assertRaisesRegex(ValueError, r"^The protocol must be HTTP or HTTPS.$"):
+        with self.assertRaisesRegex(
+            ValueError, r"^The protocol must be HTTP or HTTPS.$"
+        ):
             create_backend(self._params)
 
     def test_create_backend_raises_error_if_read_timeout_is_invalid(self) -> None:
@@ -138,3 +149,32 @@ class CreateBackendTest(TestCase):
                     ValueError, r"^The read timeout must be a positive integer.$"
                 ):
                     create_backend(self._params)
+
+    def test_get_waits_for_store_prefix_key(self) -> None:
+        def store_get(store, result_dict):
+            start_time = time.perf_counter()
+            result_dict["get_result"] = store.get(
+                RendezvousStoreInfo.MASTER_ADDR_KEY
+            ).decode(encoding="UTF-8")
+            end_time = time.perf_counter()
+            result_dict["time"] = end_time - start_time
+
+        def store_set(store):
+            time.sleep(2)
+            store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, b"foo")
+
+        backend, store = create_backend(self._params)
+        backend.set_state(b"dummy_state")
+        result_dict = {}
+
+        get_thread = threading.Thread(target=store_get, args=(store, result_dict))
+        set_thread = threading.Thread(target=store_set, args=(store,))
+
+        get_thread.start()
+        set_thread.start()
+
+        get_thread.join()
+        set_thread.join()
+
+        assert result_dict["get_result"] == "foo"
+        assert result_dict["time"] >= 2

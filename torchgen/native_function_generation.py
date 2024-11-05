@@ -1,6 +1,8 @@
-from collections import defaultdict
+from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+import string
+from collections import defaultdict
+from typing import Sequence
 
 import torchgen.api.dispatcher as dispatcher
 from torchgen.api.translate import translate
@@ -27,6 +29,7 @@ from torchgen.model import (
 )
 from torchgen.utils import concatMap
 
+
 # See Note: [Out ops with functional variants that don't get grouped properly]
 OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
     # This has a functional variant, but it's currently marked private.
@@ -50,6 +53,8 @@ MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
 FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_assert_async",  # no return
     "_assert_async.msg",  # no return
+    "_cslt_sparse_mm_search",  # returns an int
+    "_assert_scalar",  # no return
     "_dimI",  # returns an int
     "_dimV",  # returns an int
     "_has_same_storage_numel",  # returns a boolean
@@ -74,9 +79,13 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "record_stream",  # no return
     "sparse_dim",  # returns an int
     "sym_constrain_range",  # no return
+    "sym_constrain_range_for_size",  # no return
     "_nested_tensor_storage_offsets",  # returns a vector of ints
     "_chunk_grad_outputs_efficient_attention",  # returns a bool
     "_fused_sdp_choice",  # returns an int
+    "_print",  # no return
+    "_sink_tokens",  # no return
+    "_nested_get_ragged_idx",  # returns an int
 ]
 
 INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
@@ -95,9 +104,9 @@ INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
 # But have differing SchemaKinds.
 def pre_group_native_functions(
     native_functions: Sequence[NativeFunction],
-) -> Dict[FunctionSchema, Dict[SchemaKind, NativeFunction]]:
-    pre_grouped_native_functions: Dict[
-        FunctionSchema, Dict[SchemaKind, NativeFunction]
+) -> dict[FunctionSchema, dict[SchemaKind, NativeFunction]]:
+    pre_grouped_native_functions: dict[
+        FunctionSchema, dict[SchemaKind, NativeFunction]
     ] = defaultdict(dict)
     for f in native_functions:
         d = pre_grouped_native_functions[f.func.signature()]
@@ -107,7 +116,7 @@ def pre_group_native_functions(
 
 
 # Returns the out variant overload name given a base function overload name
-def get_expected_out_variant_overload_name(overload_name: Optional[str]) -> str:
+def get_expected_out_variant_overload_name(overload_name: str | None) -> str:
     return "out" if not overload_name else f"{overload_name}_out"
 
 
@@ -172,7 +181,7 @@ def functional_to_out_signature(func: FunctionSchema) -> FunctionSchema:
 # Helper function: given a function schema, generate corresponding out arguments, also the updated return annotations.
 def generate_out_args_from_schema(
     func: FunctionSchema,
-) -> Tuple[List[Return], List[Argument]]:
+) -> tuple[list[Return], list[Argument]]:
     # More of a sanity check - our existing restrictions on schemas should enforce that
     # mutable schema kinds never return their mutable arguments.
     assert not any(
@@ -186,17 +195,15 @@ def generate_out_args_from_schema(
         lambda a: [] if a.annotation is None else a.annotation.alias_set,
         func.arguments.flat_all,
     )
-    valid_annotations = [
-        x for x in "abcdefghijklmnopqrstuvwxyz" if x not in used_annotations
-    ]
+    valid_annotations = [x for x in string.ascii_lowercase if x not in used_annotations]
 
     all_rets_are_tensors = all(r.type == BaseType(BaseTy.Tensor) for r in func.returns)
 
-    new_out_args: List[Argument] = []
+    new_out_args: list[Argument] = []
     # The end result of new_returns is that:
     # - If every return is a plain tensor, then the new returns == the old returns, but with the out= alias annotations added.
     # - Otherwise, none of the out arguments show up in the returns (and we're only left with non-tensor-like returns, if any).
-    new_returns: List[Return] = []
+    new_returns: list[Return] = []
     for i, r in enumerate(func.returns):
         if r.type.is_tensor_like():
             new_out = Argument(
@@ -260,7 +267,7 @@ def mutable_to_out_signature(func: FunctionSchema) -> FunctionSchema:
 #   Details are in the function, but we only generate composite kernels (in some cases) today.
 def generate_function(
     f: NativeFunction, k: SchemaKind
-) -> Tuple[NativeFunction, Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]]:
+) -> tuple[NativeFunction, dict[DispatchKey, dict[OperatorName, BackendMetadata]]]:
     from torchgen.api import cpp
 
     if k == SchemaKind.functional:
@@ -322,7 +329,9 @@ def generate_function(
             )
         }
     }
-    tags = {"generated"} | set(f.tags & {"nondeterministic_seeded", "view_copy"})
+    tags = {"generated"} | set(
+        f.tags & {"nondeterministic_seeded", "view_copy", "pt2_compliant_tag"}
+    )
 
     return (
         NativeFunction(
@@ -367,11 +376,11 @@ def generate_function(
 # Note: this function *mutates* its two inputs,
 # adding the new NativeFunctions / BackendMetadata to them
 def add_generated_native_functions(
-    rs: List[NativeFunction],
-    indices: Dict[DispatchKey, Dict[OperatorName, BackendMetadata]],
+    rs: list[NativeFunction],
+    indices: dict[DispatchKey, dict[OperatorName, BackendMetadata]],
 ) -> None:
-    # The main code for gnerating new NativeFunctions
-    # First we group of NaitveFunctions by schema kind,
+    # The main code for generating new NativeFunctions
+    # First we group of NativeFunctions by schema kind,
     # then we detect which ones are missing and generate them.
     pre_grouped_native_functions = pre_group_native_functions(rs)
     for d in pre_grouped_native_functions.values():
@@ -390,7 +399,11 @@ def add_generated_native_functions(
             # Don't bother generating functions trio's for native functions that bypass the dispatcher.
             are_manual = all(f.manual_cpp_binding for f in d.values())
             # Don't bother generating functional + out= variants for view operators
-            has_view_ops = any(f.is_view_op for f in d.values())
+            # set_ is technically an inplace_view, but for now it is treated
+            # as a normal inplace op in the codegen
+            has_view_ops = any(
+                f.is_view_op and str(f.func.name.name) != "set_" for f in d.values()
+            )
             # Don't generate the other variants for CompositeImplicitAutograd operators.
             # We could probably do this, but the main benefit of generating the function triplets
             # is for transforms that need them, and transforms don't need to act directly
@@ -485,7 +498,7 @@ out= variant is not needed, please add the function name into FUNCTIONAL_OPS_THA
                 rs.append(fn)
 
 
-def return_str(rets: Tuple[Return, ...], names: List[str]) -> str:
+def return_str(rets: tuple[Return, ...], names: list[str]) -> str:
     assert len(rets) == len(names)
     if len(rets) == 0:
         return ""
@@ -495,9 +508,9 @@ def return_str(rets: Tuple[Return, ...], names: List[str]) -> str:
         return f"return {dispatcher.returns_type(rets).cpp_type()}({', '.join(names)});"
 
 
-# Given a function, and the name of a variable correponding to the output of that function,
+# Given a function, and the name of a variable corresponding to the output of that function,
 # gather up all of the individual returns that are not aliased
-def gather_nonaliased_inner_rets(func: FunctionSchema, out_var: str) -> List[str]:
+def gather_nonaliased_inner_rets(func: FunctionSchema, out_var: str) -> list[str]:
     aliased_rets = func.aliased_return_names()
     non_aliased_names = []
     is_out_var_a_tuple = len(func.returns) > 1
@@ -512,7 +525,7 @@ def gather_nonaliased_inner_rets(func: FunctionSchema, out_var: str) -> List[str
 # Generates functional kernels in terms of their inplace.mutable counterparts.
 # We only do this for "generated" NativeFunctions
 @with_native_function
-def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
+def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> str | None:
     # We should only be generating these for code-generated NativeFunctions
     if "generated" not in g.functional.tags:
         return None
@@ -529,7 +542,7 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
     sig = DispatcherSignature(g.functional.func)
     target_sig = DispatcherSignature(target_f.func)
 
-    context: List[Union[Binding, Expr]] = []
+    context: list[Binding | Expr] = []
     clone_mutable_inputs = []
     cloned_return_names = []
     # We can't just directly pass all of the arguments from the functional op into the mutating op.
@@ -575,7 +588,7 @@ def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
 # Generates out= kernels in terms of their functional counterparts.
 # We only do this for "generated" NativeFunctions
 @with_native_function
-def gen_composite_out_kernel(g: NativeFunctionsGroup) -> Optional[str]:
+def gen_composite_out_kernel(g: NativeFunctionsGroup) -> str | None:
     # We should only be generating these for code-generated NativeFunctions
     if "generated" not in g.out.tags:
         return None

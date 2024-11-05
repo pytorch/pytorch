@@ -9,7 +9,6 @@
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/utils/optimization_utils.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/utils/memory.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -21,8 +20,7 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 
 using Tensor = at::Tensor;
@@ -256,5 +254,4 @@ TORCH_API bool FrozenConcatLinear(std::shared_ptr<Graph>& graph) {
   return changed;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

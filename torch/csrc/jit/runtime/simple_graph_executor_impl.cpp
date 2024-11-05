@@ -1,12 +1,10 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
-#include <c10/util/Optional.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/simple_graph_executor_impl.h>
 #include <mutex>
+#include <optional>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 SimpleGraphExecutorImpl::SimpleGraphExecutorImpl(
     const std::shared_ptr<Graph>& graph,
@@ -15,7 +13,7 @@ SimpleGraphExecutorImpl::SimpleGraphExecutorImpl(
 
 const ExecutionPlan& SimpleGraphExecutorImpl::getPlanFor(
     Stack& stack,
-    c10::optional<size_t> remaining_bailout_depth) {
+    std::optional<size_t> remaining_bailout_depth) {
   std::lock_guard<std::mutex> lock(compile_mutex);
 
   // IMPORTANT: This is a hot path of calling a torchscript function. Try not to
@@ -39,5 +37,4 @@ GraphExecutorState SimpleGraphExecutorImpl::getDebugState() {
   return state;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

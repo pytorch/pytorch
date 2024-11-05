@@ -88,6 +88,9 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   Stream getDefaultStream(Device d) const override {
     return getDefaultHIPStreamMasqueradingAsCUDA(d.index());
   }
+  Stream getNewStream(Device d, int priority = 0) const override {
+    return getStreamFromPoolMasqueradingAsCUDA(priority, d.index());
+  }
   Stream getStreamFromGlobalPool(Device d, bool isHighPriority = false) const override {
     return getStreamFromPoolMasqueradingAsCUDA(isHighPriority, d.index());
   }
@@ -101,10 +104,6 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     int deviceCnt;
     hipError_t _err;
     _err = hipGetDeviceCount(&deviceCnt);
-#if defined(USE_ROCM) && (ROCM_VERSION < 50201)
-    if(_err == hipErrorInvalidDevice)
-        return 0;
-#endif
     if(_err != hipErrorNoDevice && _err != hipSuccess)
         C10_HIP_CHECK(_err);
     return deviceCnt;
@@ -120,11 +119,9 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     auto hip_flag = hipEventDefault;
     switch (flag) {
       case EventFlag::PYTORCH_DEFAULT:
-      case EventFlag::HIP_EVENT_DISABLE_TIMING:
         hip_flag = hipEventDisableTiming;
         break;
       case EventFlag::BACKEND_DEFAULT:
-      case EventFlag::HIP_EVENT_DEFAULT:
         hip_flag = hipEventDefault;
         break;
       default:
@@ -212,11 +209,44 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     hip_stream.synchronize();
   }
 
+  void synchronizeEvent(void* event) const override {
+    if (!event)
+      return;
+    hipEvent_t hip_event = static_cast<hipEvent_t>(event);
+    C10_HIP_CHECK(hipEventSynchronize(hip_event));
+  }
+
+  // Note: synchronizeDevice can be safely called from any device
+  void synchronizeDevice(const c10::DeviceIndex device_index) const override {
+    int orig_device{-1};
+    C10_HIP_CHECK(hipGetDevice(&orig_device));
+    C10_HIP_CHECK(hipSetDevice(device_index));
+    C10_HIP_CHECK(hipDeviceSynchronize());
+    C10_HIP_CHECK(hipSetDevice(orig_device));
+  }
+
   void recordDataPtrOnStream(
     const c10::DataPtr& data_ptr,
     const Stream& stream) const override {
     HIPStreamMasqueradingAsCUDA hip_stream{stream};
     HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA(data_ptr, hip_stream);
+  }
+
+  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
+      const override {
+    TORCH_CHECK(
+        event1 && event2,
+        "Both events must be recorded before calculating elapsed time.");
+    int orig_device;
+    C10_HIP_CHECK(hipGetDevice(&orig_device));
+    C10_HIP_CHECK(hipSetDevice(device_index));
+    hipEvent_t hip_event1 = static_cast<hipEvent_t>(event1);
+    hipEvent_t hip_event2 = static_cast<hipEvent_t>(event2);
+    float time_ms = 0;
+    // raise hipErrorNotReady if either event is recorded but not yet completed
+    C10_HIP_CHECK(hipEventElapsedTime(&time_ms, hip_event1, hip_event2));
+    C10_HIP_CHECK(hipSetDevice(orig_device));
+    return static_cast<double>(time_ms);
   }
 };
 
@@ -249,8 +279,8 @@ struct HIPGuardMasqueradingAsCUDA {
 
 struct OptionalHIPGuardMasqueradingAsCUDA {
   explicit OptionalHIPGuardMasqueradingAsCUDA() : guard_() {}
-  explicit OptionalHIPGuardMasqueradingAsCUDA(optional<Device> device_opt) : guard_(device_opt) {}
-  explicit OptionalHIPGuardMasqueradingAsCUDA(optional<DeviceIndex> device_index_opt) : guard_(device_index_opt) {}
+  explicit OptionalHIPGuardMasqueradingAsCUDA(std::optional<Device> device_opt) : guard_(device_opt) {}
+  explicit OptionalHIPGuardMasqueradingAsCUDA(std::optional<DeviceIndex> device_index_opt) : guard_(device_index_opt) {}
 
   OptionalHIPGuardMasqueradingAsCUDA(const OptionalHIPGuardMasqueradingAsCUDA&) = delete;
   OptionalHIPGuardMasqueradingAsCUDA& operator=(const OptionalHIPGuardMasqueradingAsCUDA&) = delete;
@@ -260,8 +290,8 @@ struct OptionalHIPGuardMasqueradingAsCUDA {
   void set_device(Device device) { guard_.set_device(device); }
   void reset_device(Device device) { guard_.reset_device(device); }
   void set_index(DeviceIndex device_index) { guard_.set_index(device_index); }
-  optional<Device> original_device() const { return guard_.original_device(); }
-  optional<Device> current_device() const { return guard_.current_device(); }
+  std::optional<Device> original_device() const { return guard_.original_device(); }
+  std::optional<Device> current_device() const { return guard_.current_device(); }
   void reset() { guard_.reset(); }
 
 private:
@@ -295,7 +325,7 @@ private:
 struct OptionalHIPStreamGuardMasqueradingAsCUDA {
   explicit OptionalHIPStreamGuardMasqueradingAsCUDA() : guard_() {}
   explicit OptionalHIPStreamGuardMasqueradingAsCUDA(Stream stream) : guard_(stream) {}
-  explicit OptionalHIPStreamGuardMasqueradingAsCUDA(optional<Stream> stream_opt) : guard_(stream_opt) {}
+  explicit OptionalHIPStreamGuardMasqueradingAsCUDA(std::optional<Stream> stream_opt) : guard_(stream_opt) {}
 
   OptionalHIPStreamGuardMasqueradingAsCUDA(const OptionalHIPStreamGuardMasqueradingAsCUDA&) = delete;
   OptionalHIPStreamGuardMasqueradingAsCUDA& operator=(const OptionalHIPStreamGuardMasqueradingAsCUDA&) = delete;
@@ -304,21 +334,21 @@ struct OptionalHIPStreamGuardMasqueradingAsCUDA {
 
   void reset_stream(Stream stream) { guard_.reset_stream(stream); }
 
-  optional<HIPStreamMasqueradingAsCUDA> original_stream() const {
+  std::optional<HIPStreamMasqueradingAsCUDA> original_stream() const {
     auto r = guard_.original_stream();
     if (r.has_value()) {
-      return make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
+      return std::make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 
-  optional<HIPStreamMasqueradingAsCUDA> current_stream() const {
+  std::optional<HIPStreamMasqueradingAsCUDA> current_stream() const {
     auto r = guard_.current_stream();
     if (r.has_value()) {
-      return make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
+      return std::make_optional(HIPStreamMasqueradingAsCUDA(HIPStreamMasqueradingAsCUDA::UNCHECKED, r.value()));
     } else {
-      return nullopt;
+      return std::nullopt;
     }
   }
 

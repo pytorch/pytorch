@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/Backtrace.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
 #include <c10/util/StringUtil.h>
@@ -126,7 +127,13 @@ constexpr bool IsUsingGoogleLogging() {
  */
 C10_API void ShowLogInfoToStderr();
 
-C10_API void SetStackTraceFetcher(std::function<string(void)> fetcher);
+C10_API void SetStackTraceFetcher(std::function<::c10::Backtrace()> fetcher);
+
+/**
+ * Convenience function for non-lazy stack trace fetchers. The Backtrace
+ * overload should be preferred when stringifying the backtrace is expensive.
+ */
+C10_API void SetStackTraceFetcher(std::function<std::string()> fetcher);
 
 using EnforceNotMet = ::c10::Error;
 
@@ -196,7 +203,7 @@ std::string enforceFailMsgImpl(const T1& x, const T2& y, const Args&... args) {
   return c10::str(x, " vs ", y, ". ", args...);
 }
 
-template <typename Pred, typename T1, typename T2, typename... Args>
+template <typename Pred, typename T1, typename T2, typename GetFailMsgFunc>
 void enforceThatImpl(
     Pred p,
     const T1& lhs,
@@ -205,23 +212,39 @@ void enforceThatImpl(
     int line,
     const char* expr,
     const void* caller,
-    const Args&... args) {
+    GetFailMsgFunc getFailMsg) {
   if (C10_UNLIKELY(!(p(lhs, rhs)))) {
-    ::c10::ThrowEnforceNotMet(
-        file,
-        line,
-        expr,
-        ::c10::enforce_detail::enforceFailMsgImpl(lhs, rhs, args...),
-        caller);
+    ::c10::ThrowEnforceNotMet(file, line, expr, getFailMsg(lhs, rhs), caller);
   }
 }
-#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...) \
-  ::c10::enforce_detail::enforceThatImpl(                \
-      op, lhs, rhs, __FILE__, __LINE__, expr, nullptr, ##__VA_ARGS__)
+
+#define CAFFE_ENFORCE_THAT_IMPL(op, lhs, rhs, expr, ...)  \
+  ::c10::enforce_detail::enforceThatImpl(                 \
+      op,                                                 \
+      (lhs),                                              \
+      (rhs),                                              \
+      __FILE__,                                           \
+      __LINE__,                                           \
+      expr,                                               \
+      nullptr,                                            \
+      [&](const auto& arg1, const auto& arg2) {           \
+        return ::c10::enforce_detail::enforceFailMsgImpl( \
+            arg1, arg2, ##__VA_ARGS__);                   \
+      })
 
 #define CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(op, lhs, rhs, expr, ...) \
   ::c10::enforce_detail::enforceThatImpl(                            \
-      op, (lhs), (rhs), __FILE__, __LINE__, expr, this, ##__VA_ARGS__)
+      op,                                                            \
+      (lhs),                                                         \
+      (rhs),                                                         \
+      __FILE__,                                                      \
+      __LINE__,                                                      \
+      expr,                                                          \
+      this,                                                          \
+      [&](const auto& arg1, const auto& arg2) {                      \
+        return ::c10::enforce_detail::enforceFailMsgImpl(            \
+            arg1, arg2, ##__VA_ARGS__);                              \
+      })
 
 } // namespace enforce_detail
 
@@ -264,6 +287,29 @@ void enforceThatImpl(
   CAFFE_ENFORCE_BINARY_OP_WITH_CALLER(          \
       std::greater<void>(), >, x, y, ##__VA_ARGS__)
 
+struct IValue;
+class C10_API EventSampledHandler {
+ public:
+  virtual void log(
+      std::string_view model_id,
+      const std::vector<c10::IValue>& args) = 0;
+  virtual ~EventSampledHandler() = default;
+};
+
+#define C10_LOG_EVENT_SAMPLED(event, ...)                                    \
+  static const std::unique_ptr<::c10::EventSampledHandler>&                  \
+      _##event##EventSampledHandler = ::c10::GetEventSampledHandler(#event); \
+  if (_##event##EventSampledHandler) {                                       \
+    _##event##EventSampledHandler->log(__VA_ARGS__);                         \
+  }
+
+// Must be called in the main thread before any other threads are spawned.
+C10_API void InitEventSampledHandlers(
+    std::vector<
+        std::pair<std::string_view, std::unique_ptr<EventSampledHandler>>>);
+C10_API const std::unique_ptr<EventSampledHandler>& GetEventSampledHandler(
+    std::string_view);
+
 /**
  * Very lightweight logging for the first time API usage. It's beneficial for
  * tracking of individual functionality usage in larger applications.
@@ -276,8 +322,8 @@ void enforceThatImpl(
  *   // Logs caller info with an arbitrary text event, if there is a usage.
  *   C10_LOG_API_USAGE_ONCE("my_api");
  */
-#define C10_LOG_API_USAGE_ONCE(...)                        \
-  C10_UNUSED static bool C10_ANONYMOUS_VARIABLE(logFlag) = \
+#define C10_LOG_API_USAGE_ONCE(...)                              \
+  [[maybe_unused]] static bool C10_ANONYMOUS_VARIABLE(logFlag) = \
       ::c10::detail::LogAPIUsageFakeReturn(__VA_ARGS__);
 
 // API usage logging capabilities
@@ -315,6 +361,9 @@ C10_API bool LogAPIUsageFakeReturn(const std::string& context);
 
 // Initializes the c10 logger.
 C10_API void initLogging();
+
+// Sets the rank, which will be included in log messages
+C10_API void SetGlobalRank(int64_t rank);
 
 } // namespace c10
 

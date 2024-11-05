@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # These functions are referenced from the pickle archives produced by
 # ScriptModule.save()
 
@@ -6,6 +7,7 @@
 # the type of the list for certain special types, but now all lists get
 # a type attached and restored via `restore_type_tag` below. The legacy
 # functions should stick around for backwards-compatibility.
+
 
 def build_intlist(data):
     return data

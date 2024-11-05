@@ -1,19 +1,23 @@
+# mypy: allow-untyped-defs
 import torch
 
-from torch._export.db.case import export_case
-from torch._export import dynamic_dim
+from torch.export import Dim
 
-x = torch.ones(3, 2)
-dynamic_constraint = dynamic_dim(x, 1)
+x = torch.randn(3, 2)
+dim1_x = Dim("dim1_x")
 
-@export_case(
-    example_inputs=(x,),
-    tags={"torch.dynamic-shape"},
-    constraints=[dynamic_constraint]
-)
-def scalar_output(x):
+class ScalarOutput(torch.nn.Module):
     """
     Returning scalar values from the graph is supported, in addition to Tensor
     outputs. Symbolic shapes are captured and rank is specialized.
     """
-    return x.shape[1] + 1
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, x):
+        return x.shape[1] + 1
+
+example_args = (x,)
+tags = {"torch.dynamic-shape"}
+dynamic_shapes = {"x": {1: dim1_x}}
+model = ScalarOutput()

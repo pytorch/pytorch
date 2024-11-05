@@ -1,15 +1,13 @@
 #include <torch/optim/optimizer.h>
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/ordered_dict.h>
 #include <torch/types.h>
 
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 bool OptimizerParamGroup::has_options() const {
   return options_ != nullptr;
@@ -17,12 +15,12 @@ bool OptimizerParamGroup::has_options() const {
 
 OptimizerOptions& OptimizerParamGroup::options() {
   TORCH_CHECK(has_options());
-  return *options_.get();
+  return *options_;
 }
 
 const OptimizerOptions& OptimizerParamGroup::options() const {
   TORCH_CHECK(has_options());
-  return *options_.get();
+  return *options_;
 }
 
 void OptimizerParamGroup::set_options(
@@ -109,7 +107,7 @@ void Optimizer::add_param_group(const OptimizerParamGroup& param_group) {
   }
   for (const auto& p : param_group_.params()) {
     TORCH_CHECK(
-        state_.count(c10::guts::to_string(p.unsafeGetTensorImpl())) == 0,
+        state_.count(p.unsafeGetTensorImpl()) == 0,
         "some parameters appear in more than one parameter group");
   }
   param_groups_.emplace_back(std::move(param_group_));
@@ -155,11 +153,11 @@ size_t Optimizer::size() const noexcept {
 }
 
 OptimizerOptions& Optimizer::defaults() noexcept {
-  return *defaults_.get();
+  return *defaults_;
 }
 
 const OptimizerOptions& Optimizer::defaults() const noexcept {
-  return *defaults_.get();
+  return *defaults_;
 }
 
 std::vector<OptimizerParamGroup>& Optimizer::param_groups() noexcept {
@@ -171,12 +169,12 @@ const std::vector<OptimizerParamGroup>& Optimizer::param_groups()
   return param_groups_;
 }
 
-ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
-Optimizer::state() noexcept {
+ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>& Optimizer::
+    state() noexcept {
   return state_;
 }
 
-const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
+const ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>&
 Optimizer::state() const noexcept {
   return state_;
 }
@@ -200,5 +198,4 @@ serialize::InputArchive& operator>>(
   return archive;
 }
 
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

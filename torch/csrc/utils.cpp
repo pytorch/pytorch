@@ -12,10 +12,10 @@
 
 #include <algorithm>
 #include <cstdarg>
+#include <cstring>
 #include <iterator>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 int THPUtils_getCallable(PyObject* arg, PyObject** result) {
@@ -105,7 +105,7 @@ void THPUtils_setError(const char* format, ...) {
 
 void THPUtils_addPyMethodDefs(
     std::vector<PyMethodDef>& vector,
-    PyMethodDef* methods) {
+    const PyMethodDef* methods) {
   if (!vector.empty()) {
     // remove nullptr terminator
     vector.pop_back();
@@ -216,34 +216,33 @@ void THPPointer<THPStorage>::free() {
     Py_DECREF(ptr);
 }
 
-void storage_fill(at::Storage self, uint8_t value) {
+void storage_fill(const at::Storage& self, uint8_t value) {
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   self_t.fill_(value);
 }
 
-void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value) {
+void storage_set(const at::Storage& self, ptrdiff_t idx, uint8_t value) {
   TORCH_CHECK(
       (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
       "out of bounds");
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   self_t[idx].fill_(value);
 }
 
-uint8_t storage_get(at::Storage self, ptrdiff_t idx) {
+uint8_t storage_get(const at::Storage& self, ptrdiff_t idx) {
   TORCH_CHECK(
       (idx >= 0) && (idx < static_cast<ptrdiff_t>(self.nbytes())),
       "out of bounds");
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
-  auto self_t = at::empty({0}, {}, options).set_(self);
+  auto self_t = at::empty({0}, options).set_(self);
   return self_t[idx].item<uint8_t>();
 }
 
 template class THPPointer<THPStorage>;
 
-namespace torch {
-namespace gdb {
+namespace torch::gdb {
 /* ~~~ misc debugging utilities ~~~
  *
  * torch::gdb::* functions are NOT meant to be called by general pytorch code,
@@ -258,16 +257,22 @@ namespace gdb {
 // call free than delete[] from withing gdb.
 // Currently the code for computing the repr of a tensor is written in Python,
 // so we need to wrap the Tensor into a Python object first.
-char* tensor_repr(at::Tensor tensor) {
+char* tensor_repr(const at::Tensor& tensor) {
   PyGILState_STATE gil = PyGILState_Ensure();
   PyObject* pytensor = nullptr;
   PyObject* repr = nullptr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  Py_ssize_t bufsize;
+  Py_ssize_t bufsize = 0;
   const char* buf = nullptr;
   char* result = nullptr;
 
-  pytensor = THPVariable_Wrap(at::Tensor(tensor));
+  // NB: It's important not to move the tensor into THPVariable_Wrap,
+  // because this function is only called from our gdb macros, and
+  // we want to avoid accidentally moving out the tensor.  In principle,
+  // the Tensor signature above should induce a copy, but we've
+  // observed that sometimes gdb passes the outer Tensor address exactly as is
+  // into this function.
+  // See https://github.com/pytorch/pytorch/issues/134762
+  pytensor = THPVariable_Wrap(tensor);
   if (!pytensor)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;
@@ -279,16 +284,16 @@ char* tensor_repr(at::Tensor tensor) {
   if (!buf)
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;
+  // account for the trailing \0
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-  result =
-      static_cast<char*>(malloc(bufsize + 1)); // account for the trailing \0
+  result = static_cast<char*>(malloc(bufsize + 1));
   if (!result) {
     fmt::print(stderr, "cannot allocate memory for the result\n");
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     goto error;
   }
-  // NOLINTNEXTLINE(clang-analyzer-security.insecureAPI.strcpy)
-  strcpy(result, buf);
+  std::strncpy(result, buf, bufsize);
+  result[bufsize] = '\0';
   Py_XDECREF(pytensor);
   Py_XDECREF(repr);
   PyGILState_Release(gil);
@@ -318,11 +323,9 @@ std::string dispatch_keyset_string(c10::DispatchKeySet keyset) {
   return ss.str();
 }
 
-} // namespace gdb
-} // namespace torch
+} // namespace torch::gdb
 
-namespace pybind11 {
-namespace detail {
+namespace pybind11::detail {
 
 bool type_caster<at::Tensor>::load(handle src, bool) {
   PyObject* obj = src.ptr();
@@ -436,5 +439,4 @@ handle type_caster<at::ArrayRef<c10::SymNode>>::cast(
   return t.release();
 }
 
-} // namespace detail
-} // namespace pybind11
+} // namespace pybind11::detail

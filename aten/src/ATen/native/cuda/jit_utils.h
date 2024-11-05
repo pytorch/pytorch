@@ -71,7 +71,7 @@ inline int can_vectorize_up_to(const KernelDescriptor &desc, c10::ArrayRef<char*
 
   // Deals with output
   auto result_size = c10::scalarTypeToTypeMeta(desc.result_type).itemsize();
-  int result = can_vectorize_up_to(result_size, pointers[0]);
+  auto result = can_vectorize_up_to(result_size, pointers[0]);
 
   // Incorporates input(s)
   auto input_size = c10::scalarTypeToTypeMeta(desc.f_inputs_type).itemsize();
@@ -191,6 +191,12 @@ template <> inline std::string typeName<at::Float8_e5m2>(){
 }
 template <> inline std::string typeName<at::Float8_e4m3fn>(){
     return "at::Float8_e4m3fn";
+}
+template <> inline std::string typeName<at::Float8_e5m2fnuz>() {
+    return "at::Float8_e5m2fnuz";
+}
+template <> inline std::string typeName<at::Float8_e4m3fnuz>() {
+    return "at::Float8_e4m3fnuz";
 }
 
 #define TYPE_NAME_CASE(ctype, scalartype)                    \

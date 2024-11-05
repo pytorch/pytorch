@@ -1,11 +1,9 @@
+# mypy: allow-untyped-defs
 from functools import partial
-
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import torch
-
 import torch._prims as prims
-
 import torch._prims_common as utils
 import torch._refs as refs
 import torch._refs.linalg as linalg
@@ -15,12 +13,27 @@ from torch._prims_common import (
     check_is_matrix,
     Dim,
     DimsType,
-    NumberType,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    IntLike,
     TensorLikeType,
 )
-from torch._prims_common.wrappers import _maybe_convert_to_dtype, out_wrapper
+from torch._prims_common.wrappers import (
+    _maybe_convert_to_dtype,
+    elementwise_type_promotion_wrapper,
+    out_wrapper,
+)
 
-__all__ = ["diagonal", "matrix_norm", "norm", "svd", "svdvals", "vector_norm"]
+
+__all__ = [
+    "diagonal",
+    "matrix_norm",
+    "norm",
+    "svd",
+    "svdvals",
+    "vector_norm",
+    "vecdot",
+    "cross",
+]
 
 
 def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_name: str):
@@ -47,8 +60,31 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
         )
 
 
+import operator
+
 # Utilities should come BEFORE this import
 from torch._decomp import register_decomposition
+from torch._decomp.decompositions import pw_cast_for_opmath
+
+
+@register_decomposition(torch._ops.ops.aten.linalg_cross)
+@out_wrapper()
+@pw_cast_for_opmath
+def cross(a: Tensor, b: Tensor, dim: int = -1):
+    torch._check(
+        a.ndim == b.ndim,
+        lambda: "linalg.cross: inputs must have the same number of dimensions.",
+    )
+    torch._check(
+        a.size(dim) == 3 and b.size(dim) == 3,
+        lambda: f"linalg.cross: inputs dim {dim} must have length 3, got {a.size(dim)} and {b.size(dim)}",
+    )
+    a, b = torch.broadcast_tensors(a, b)
+    dim = utils.canonicalize_dim(a.ndim, dim)
+    idx = torch.arange(3, device=a.device)
+    return a.index_select(dim, (idx + 1) % 3) * b.index_select(
+        dim, (idx + 2) % 3
+    ) - a.index_select(dim, (idx + 2) % 3) * b.index_select(dim, (idx + 1) % 3)
 
 
 def diagonal(
@@ -65,19 +101,21 @@ def diagonal(
 @out_wrapper(exact_dtype=True)
 def vector_norm(
     x: TensorLikeType,
-    ord: float = 2.0,
+    ord: Union[float, int] = 2,
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     # Checks
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
     if isinstance(dim, Dim):
         dim = [dim]  # type: ignore[assignment]
 
-    if x.numel() == 0 and (ord < 0.0 or ord == float("inf")):
+    if guard_size_oblivious(x.numel() == 0) and (ord < 0.0 or ord == float("inf")):
         torch._check(
             dim is not None and len(dim) != 0,
             lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
@@ -112,7 +150,8 @@ def vector_norm(
         x = _maybe_convert_to_dtype(x, computation_dtype)  # type: ignore[assignment]
         reduce_sum = partial(torch.sum, dim=dim, keepdim=keepdim)
 
-        if not (ord % 2.0 == 0.0 and utils.is_float_dtype(x.dtype)):
+        is_ord_even = ord % 2 == 0 if isinstance(ord, IntLike) else ord % 2.0 == 0.0
+        if not (is_ord_even and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
         return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]
 
@@ -127,7 +166,7 @@ def _backshift_permutation(dim0, dim1, ndim):
 
 def _inverse_permutation(perm):
     # Given a permutation, returns its inverse. It's equivalent to argsort on an array
-    return [i for i, j in sorted(enumerate(perm), key=lambda i_j: i_j[1])]
+    return [i for i, j in sorted(enumerate(perm), key=operator.itemgetter(1))]
 
 
 # CompositeImplicitAutograd
@@ -244,7 +283,7 @@ def norm(
     else:
         if ord is None:
             ord = 2.0
-        return vector_norm(A, ord, dim, keepdim, dtype=dtype)
+        return vector_norm(A, ord, dim, keepdim, dtype=dtype)  # type: ignore[arg-type]
 
 
 # CompositeImplicitAutograd
@@ -257,3 +296,14 @@ def svd(A: TensorLikeType, full_matrices: bool = True) -> Tuple[Tensor, Tensor, 
 @out_wrapper(exact_dtype=True)
 def svdvals(A: TensorLikeType) -> Tensor:
     return svd(A, full_matrices=False)[1]
+
+
+# CompositeImplicitAutograd
+@out_wrapper()
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("x", "y"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def vecdot(x: Tensor, y: Tensor, dim: int = -1) -> Tensor:
+    check_fp_or_complex(x.dtype, "linalg.vecdot")
+    return (x.conj() * y).sum(dim=dim)

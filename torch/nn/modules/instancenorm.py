@@ -1,12 +1,22 @@
+# mypy: allow-untyped-defs
 
 import warnings
+
+import torch.nn.functional as F
 from torch import Tensor
 
 from .batchnorm import _LazyNormBase, _NormBase
-from .. import functional as F
 
-__all__ = ['InstanceNorm1d', 'InstanceNorm2d', 'InstanceNorm3d', 'LazyInstanceNorm1d',
-           'LazyInstanceNorm2d', 'LazyInstanceNorm3d']
+
+__all__ = [
+    "InstanceNorm1d",
+    "InstanceNorm2d",
+    "InstanceNorm3d",
+    "LazyInstanceNorm1d",
+    "LazyInstanceNorm2d",
+    "LazyInstanceNorm3d",
+]
+
 
 class _InstanceNorm(_NormBase):
     def __init__(
@@ -17,11 +27,12 @@ class _InstanceNorm(_NormBase):
         affine: bool = False,
         track_running_stats: bool = False,
         device=None,
-        dtype=None
+        dtype=None,
     ) -> None:
-        factory_kwargs = {'device': device, 'dtype': dtype}
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__(
-            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs)
+            num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
+        )
 
     def _check_input_dim(self, input):
         raise NotImplementedError
@@ -34,38 +45,61 @@ class _InstanceNorm(_NormBase):
 
     def _apply_instance_norm(self, input):
         return F.instance_norm(
-            input, self.running_mean, self.running_var, self.weight, self.bias,
-            self.training or not self.track_running_stats, self.momentum, self.eps)
+            input,
+            self.running_mean,
+            self.running_var,
+            self.weight,
+            self.bias,
+            self.training or not self.track_running_stats,
+            self.momentum if self.momentum is not None else 0.0,
+            self.eps,
+        )
 
-    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
-                              missing_keys, unexpected_keys, error_msgs):
-        version = local_metadata.get('version', None)
+    def _load_from_state_dict(
+        self,
+        state_dict,
+        prefix,
+        local_metadata,
+        strict,
+        missing_keys,
+        unexpected_keys,
+        error_msgs,
+    ):
+        version = local_metadata.get("version", None)
         # at version 1: removed running_mean and running_var when
         # track_running_stats=False (default)
         if version is None and not self.track_running_stats:
             running_stats_keys = []
-            for name in ('running_mean', 'running_var'):
+            for name in ("running_mean", "running_var"):
                 key = prefix + name
                 if key in state_dict:
                     running_stats_keys.append(key)
             if len(running_stats_keys) > 0:
                 error_msgs.append(
-                    'Unexpected running stats buffer(s) {names} for {klass} '
-                    'with track_running_stats=False. If state_dict is a '
-                    'checkpoint saved before 0.4.0, this may be expected '
-                    'because {klass} does not track running stats by default '
-                    'since 0.4.0. Please remove these keys from state_dict. If '
-                    'the running stats are actually needed, instead set '
-                    'track_running_stats=True in {klass} to enable them. See '
-                    'the documentation of {klass} for details.'
-                    .format(names=" and ".join(f'"{k}"' for k in running_stats_keys),
-                            klass=self.__class__.__name__))
+                    "Unexpected running stats buffer(s) {names} for {klass} "
+                    "with track_running_stats=False. If state_dict is a "
+                    "checkpoint saved before 0.4.0, this may be expected "
+                    "because {klass} does not track running stats by default "
+                    "since 0.4.0. Please remove these keys from state_dict. If "
+                    "the running stats are actually needed, instead set "
+                    "track_running_stats=True in {klass} to enable them. See "
+                    "the documentation of {klass} for details.".format(
+                        names=" and ".join(f'"{k}"' for k in running_stats_keys),
+                        klass=self.__class__.__name__,
+                    )
+                )
                 for key in running_stats_keys:
                     state_dict.pop(key)
 
         super()._load_from_state_dict(
-            state_dict, prefix, local_metadata, strict,
-            missing_keys, unexpected_keys, error_msgs)
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        )
 
     def forward(self, input: Tensor) -> Tensor:
         self._check_input_dim(input)
@@ -75,11 +109,14 @@ class _InstanceNorm(_NormBase):
             if self.affine:
                 raise ValueError(
                     f"expected input's size at dim={feature_dim} to match num_features"
-                    f" ({self.num_features}), but got: {input.size(feature_dim)}.")
+                    f" ({self.num_features}), but got: {input.size(feature_dim)}."
+                )
             else:
-                warnings.warn(f"input's size at dim={feature_dim} does not match num_features. "
-                              "You can silence this warning by not passing in num_features, "
-                              "which is not used because affine=False")
+                warnings.warn(
+                    f"input's size at dim={feature_dim} does not match num_features. "
+                    "You can silence this warning by not passing in num_features, "
+                    "which is not used because affine=False"
+                )
 
         if input.dim() == self._get_no_batch_dim():
             return self._handle_no_batch_input(input)
@@ -88,8 +125,10 @@ class _InstanceNorm(_NormBase):
 
 
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 2D (unbatched) or 3D (batched) input
-    as described in the paper
+    r"""Applies Instance Normalization.
+
+    This operation applies Instance Normalization
+    over a 2D (unbatched) or 3D (batched) input as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization
     <https://arxiv.org/abs/1607.08022>`__.
 
@@ -159,15 +198,14 @@ class InstanceNorm1d(_InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (2, 3):
-            raise ValueError(f'expected 2D or 3D input (got {input.dim()}D input)')
+            raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
 
 class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
-    r"""A :class:`torch.nn.InstanceNorm1d` module with lazy initialization of
-    the ``num_features`` argument of the :class:`InstanceNorm1d` that is inferred
-    from the ``input.size(1)``.
-    The attributes that will be lazily initialized are `weight`, `bias`,
-    `running_mean` and `running_var`.
+    r"""A :class:`torch.nn.InstanceNorm1d` module with lazy initialization of the ``num_features`` argument.
+
+    The ``num_features`` argument of the :class:`InstanceNorm1d` is inferred from the ``input.size(1)``.
+    The attributes that will be lazily initialized are `weight`, `bias`, `running_mean` and `running_var`.
 
     Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
     on lazy modules and their limitations.
@@ -197,11 +235,14 @@ class LazyInstanceNorm1d(_LazyNormBase, _InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (2, 3):
-            raise ValueError(f'expected 2D or 3D input (got {input.dim()}D input)')
+            raise ValueError(f"expected 2D or 3D input (got {input.dim()}D input)")
 
 
 class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 4D input (a mini-batch of 2D inputs
+    r"""Applies Instance Normalization.
+
+    This operation applies Instance Normalization
+    over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization
     <https://arxiv.org/abs/1607.08022>`__.
@@ -273,13 +314,13 @@ class InstanceNorm2d(_InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (3, 4):
-            raise ValueError(f'expected 3D or 4D input (got {input.dim()}D input)')
+            raise ValueError(f"expected 3D or 4D input (got {input.dim()}D input)")
 
 
 class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
-    r"""A :class:`torch.nn.InstanceNorm2d` module with lazy initialization of
-    the ``num_features`` argument of the :class:`InstanceNorm2d` that is inferred
-    from the ``input.size(1)``.
+    r"""A :class:`torch.nn.InstanceNorm2d` module with lazy initialization of the ``num_features`` argument.
+
+    The ``num_features`` argument of the :class:`InstanceNorm2d` is inferred from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 
@@ -311,12 +352,14 @@ class LazyInstanceNorm2d(_LazyNormBase, _InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (3, 4):
-            raise ValueError(f'expected 3D or 4D input (got {input.dim()}D input)')
+            raise ValueError(f"expected 3D or 4D input (got {input.dim()}D input)")
 
 
 class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 5D input (a mini-batch of 3D inputs
-    with additional channel dimension) as described in the paper
+    r"""Applies Instance Normalization.
+
+    This operation applies Instance Normalization
+    over a 5D input (a mini-batch of 3D inputs with additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization
     <https://arxiv.org/abs/1607.08022>`__.
 
@@ -387,13 +430,13 @@ class InstanceNorm3d(_InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (4, 5):
-            raise ValueError(f'expected 4D or 5D input (got {input.dim()}D input)')
+            raise ValueError(f"expected 4D or 5D input (got {input.dim()}D input)")
 
 
 class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
-    r"""A :class:`torch.nn.InstanceNorm3d` module with lazy initialization of
-    the ``num_features`` argument of the :class:`InstanceNorm3d` that is inferred
-    from the ``input.size(1)``.
+    r"""A :class:`torch.nn.InstanceNorm3d` module with lazy initialization of the ``num_features`` argument.
+
+    The ``num_features`` argument of the :class:`InstanceNorm3d` is inferred from the ``input.size(1)``.
     The attributes that will be lazily initialized are `weight`, `bias`,
     `running_mean` and `running_var`.
 
@@ -425,4 +468,4 @@ class LazyInstanceNorm3d(_LazyNormBase, _InstanceNorm):
 
     def _check_input_dim(self, input):
         if input.dim() not in (4, 5):
-            raise ValueError(f'expected 4D or 5D input (got {input.dim()}D input)')
+            raise ValueError(f"expected 4D or 5D input (got {input.dim()}D input)")

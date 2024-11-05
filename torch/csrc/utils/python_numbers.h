@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/core/Device.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/python_headers.h>
@@ -11,6 +12,10 @@
 
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
+
+inline PyObject* THPUtils_packDeviceIndex(c10::DeviceIndex value) {
+  return PyLong_FromLong(value);
+}
 
 inline PyObject* THPUtils_packInt32(int32_t value) {
   return PyLong_FromLong(value);
@@ -52,8 +57,7 @@ inline bool THPUtils_checkLong(PyObject* obj) {
 }
 
 inline int32_t THPUtils_unpackInt(PyObject* obj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int overflow;
+  int overflow = 0;
   long value = PyLong_AsLongAndOverflow(obj, &overflow);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
@@ -69,8 +73,7 @@ inline int32_t THPUtils_unpackInt(PyObject* obj) {
 }
 
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int overflow;
+  int overflow = 0;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
@@ -174,8 +177,7 @@ inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
     return !(real_val == 0 && imag_val == 0);
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int overflow;
+  int overflow = 0;
   long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
   if (value == -1 && PyErr_Occurred()) {
     throw python_error();
@@ -183,4 +185,20 @@ inline bool THPUtils_unpackNumberAsBool(PyObject* obj) {
   // No need to check overflow, because when overflow occured, it should
   // return true in order to keep the same behavior of numpy.
   return (bool)value;
+}
+
+inline c10::DeviceIndex THPUtils_unpackDeviceIndex(PyObject* obj) {
+  int overflow = 0;
+  long value = PyLong_AsLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  if (overflow != 0) {
+    throw std::runtime_error("Overflow when unpacking DeviceIndex");
+  }
+  if (value > std::numeric_limits<c10::DeviceIndex>::max() ||
+      value < std::numeric_limits<c10::DeviceIndex>::min()) {
+    throw std::runtime_error("Overflow when unpacking DeviceIndex");
+  }
+  return (c10::DeviceIndex)value;
 }

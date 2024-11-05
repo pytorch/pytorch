@@ -18,7 +18,7 @@
 // This is a utility macro that can be used to throw an exception when a CoreML
 // API function produces a NSError. The exception will contain a message with
 // useful info extracted from the NSError.
-#define COREML_THROW_IF_ERROR(error, preamble, inputShapesStr)                   \
+#define COREML_THROW_IF_ERROR(error, preamble, ...)     \
   do {                                                                           \
     if C10_LIKELY(error) {                                                       \
       throw c10::Error(                                                          \
@@ -30,7 +30,7 @@
               " Domain: ", error.domain.UTF8String,                              \
               " Code: ", error.code,                                             \
               " User Info: ", error.userInfo.description.UTF8String,             \
-              " Input Shapes: ", inputShapesStr));                               \
+              ##__VA_ARGS__));                                                   \
     }                                                                            \
   } while (false)
 
@@ -48,7 +48,7 @@ struct CoreMLConfig {
   bool allow_low_precision = true;
 };
 
-std::string tensorListToShapesStr(GenericList tensors) {
+static std::string tensorListToShapesStr(const GenericList& tensors) {
   std::string str("[");
   for (const auto featureIdx : c10::irange(tensors.size())) {
     if (featureIdx > 0) {
@@ -68,7 +68,7 @@ std::string tensorListToShapesStr(GenericList tensors) {
   return str;
 }
 
-bool type_validity(const std::vector<TensorSpec>& specs) {
+static bool type_validity(const std::vector<TensorSpec>& specs) {
   for (const TensorSpec& spec : specs) {
     if (spec.dtype != c10::ScalarType::Float) {
       return false;
@@ -77,14 +77,14 @@ bool type_validity(const std::vector<TensorSpec>& specs) {
   return true;
 }
 
-void from_json(const nlohmann::json& j, TensorSpec& spec) {
+static void from_json(const nlohmann::json& j, TensorSpec& spec) {
   j[0].get_to(spec.name);
   std::string type_string;
   j[1].get_to(type_string);
   spec.dtype = scalar_type(type_string);
 }
 
-void from_json(const nlohmann::json& j, CoreMLConfig& config) {
+static void from_json(const nlohmann::json& j, CoreMLConfig& config) {
   j.at("backend").get_to(config.backend);
   std::string allow_low_precision_string;
   j.at("allow_low_precision").get_to(allow_low_precision_string);
@@ -155,10 +155,11 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       TORCH_CHECK(false, "Compiling MLModel failed");
     }
 
-    MLModel *cpuModel = [PTMCoreMLCompiler loadModel:modelID backend:"cpu" allowLowPrecision:NO];
+    NSError *error = nil;
+    MLModel *cpuModel = [PTMCoreMLCompiler loadModel:modelID backend:"cpu" allowLowPrecision:NO error:&error];
 
     if (!cpuModel) {
-      TORCH_CHECK(false, "Loading MLModel failed");
+      COREML_THROW_IF_ERROR(error, "Error loading MLModel", " Model spec: ", extra.c_str(), ", Model Hash: ", modelID.c_str());
     }
 
     NSMutableArray *orderedFeatures = [NSMutableArray array];
@@ -172,7 +173,9 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
     [executor autorelease];
 
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-      MLModel *configuredModel = [PTMCoreMLCompiler loadModel:modelID backend:config.backend allowLowPrecision:config.allow_low_precision];
+      NSError *error = nil;
+      MLModel *configuredModel = [PTMCoreMLCompiler loadModel:modelID backend:config.backend allowLowPrecision:config.allow_low_precision error:&error];
+      // If we fail to configure the model, fall back to CPU
       executor.model = configuredModel ?: cpuModel;
     });
 
@@ -194,10 +197,10 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       PTMCoreMLExecutor *executor = model_wrapper->executor;
       [executor setInputs:inputs];
 
-      NSError *error;
+      NSError *error = nil;
       id<MLFeatureProvider> outputsProvider = [executor forward:&error];
       if (!outputsProvider) {
-        COREML_THROW_IF_ERROR(error, "Error running CoreML inference", tensorListToShapesStr(inputs));
+        COREML_THROW_IF_ERROR(error, "Error running CoreML inference", " Input Shape:", tensorListToShapesStr(inputs));
       }
 
       return pack_outputs(model_wrapper->outputs, outputsProvider);

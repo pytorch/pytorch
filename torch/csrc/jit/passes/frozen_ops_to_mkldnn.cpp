@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/Utils.h>
 #include <ATen/core/symbol.h>
 #include <ATen/native/layer_norm.h>
@@ -43,8 +44,7 @@
 
 // clang-format on
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 #if AT_MKLDNN_ENABLED()
 
@@ -85,7 +85,7 @@ void merge_sets(
 }
 
 // no uses of tensors in container types
-void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
+void assertNonTensorTypeDoesNotContainTensors(const TypePtr& type) {
   if (type->cast<TensorType>()) {
     return;
   }
@@ -94,7 +94,7 @@ void assertNonTensorTypeDoesNotContainTensors(TypePtr type) {
   }
 }
 
-void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
+void InplaceMKLDNNSubgraph(const std::shared_ptr<Graph>& graph) {
   // This function first calculates aliasing sets,
   // then calculates the last node each aliasing set is alive for.
   // Then we go through each node, if it's a node which has an equivalent
@@ -110,7 +110,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
 
   // CALCULATE ALIASING SETS
 
-  auto aliasDb = torch::make_unique<AliasDb>(graph);
+  auto aliasDb = std::make_unique<AliasDb>(graph);
 
   // map from Value to its Aliasing Set
   std::unordered_map<Value*, ValueSetPtr> alias_mapping;
@@ -223,7 +223,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
   }
 }
 
-// This is a factory function that creates an Operation that that takes
+// This is a factory function that creates an Operation that takes
 // MKLDNN tensors and unpacks them into 1D contiguous tensors that we can
 // run aten operations on. The precondition for using this function is that the
 // aten operations in `aten_op` should be an identity for zero inputs. In other
@@ -234,7 +234,7 @@ void InplaceMKLDNNSubgraph(std::shared_ptr<Graph> graph) {
 // innermost dimension is padded with 0s. The precondition, `aten_op(0) == 0`
 // allows us to avoid any special casing of padded elements.
 Operation createUnaryOp(
-    std::function<void(at::Tensor output, at::Tensor input)> aten_op,
+    const std::function<void(at::Tensor output, at::Tensor input)>& aten_op,
     bool inplace = false) {
   return [aten_op, inplace](Stack& stack) {
     auto a = pop(stack).toTensor();
@@ -263,7 +263,7 @@ Operation createUnaryOp(
       TORCH_INTERNAL_ASSERT(it_empty.get_desc() == a_it.get_desc());
       out = at::native::new_with_itensor_mkldnn(
           std::move(it_empty),
-          optTypeMetaToScalarType(a.options().dtype_opt()),
+          c10::optTypeMetaToScalarType(a.options().dtype_opt()),
           a.options().device_opt());
 
       out_raw_data = at::native::itensor_from_mkldnn(out).get_data_handle();
@@ -299,12 +299,11 @@ void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
   auto shape = pop(stack).toDimVector();
   auto input = pop(stack).toTensor();
 
-  at::Tensor dst, mean, rstd;
-  std::tie(dst, mean, rstd) =
+  auto [dst, mean, rstd] =
       at::native::mkldnn_layer_norm_last_index_weight_bias_f32(
           input, shape, weight, bias, eps, inplace);
   push(stack, dst);
-};
+}
 
 Operation BroadOp(const Node* node) {
   return [](Stack& stack) {
@@ -378,13 +377,13 @@ Operation BroadOp(const Node* node) {
         auto a_options = exp_a.options();
         auto a_out = at::native::new_with_itensor_mkldnn(
             std::move(a_it),
-            optTypeMetaToScalarType(a_options.dtype_opt()),
+            c10::optTypeMetaToScalarType(a_options.dtype_opt()),
             a_options.device_opt());
         push(stack, a_out);
         auto b_options = exp_b.options();
         auto b_out = at::native::new_with_itensor_mkldnn(
             std::move(b_it),
-            optTypeMetaToScalarType(b_options.dtype_opt()),
+            c10::optTypeMetaToScalarType(b_options.dtype_opt()),
             b_options.device_opt());
         push(stack, b_out);
       };
@@ -396,7 +395,7 @@ static std::function<void(at::Tensor output, at::Tensor input)> hardtanh_helper(
     const Node* n) {
   auto min_val = n->f(attr::min_val);
   auto max_val = n->f(attr::max_val);
-  return [min_val, max_val](at::Tensor output, at::Tensor input) {
+  return [min_val, max_val](at::Tensor output, const at::Tensor& input) {
     at::cpu::hardtanh_out(output, input, min_val, max_val);
   };
 }
@@ -405,7 +404,7 @@ static std::function<void(at::Tensor output, at::Tensor input)> clamp_helper(
     const Node* n) {
   auto min_val = n->f(attr::min_val);
   auto max_val = n->f(attr::max_val);
-  return [min_val, max_val](at::Tensor output, at::Tensor input) {
+  return [min_val, max_val](at::Tensor output, const at::Tensor& input) {
     at::cpu::clamp_out(output, input, min_val, max_val);
   };
 }
@@ -416,7 +415,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSwish_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, const at::Tensor& input) {
               at::cpu::hardswish_out(output, input);
             },
             true),
@@ -424,7 +423,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSigmoid_(Tensor(a!) self) -> Tensor(a!)",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, const at::Tensor& input) {
               at::cpu::hardsigmoid_out(output, input);
             },
             true),
@@ -444,7 +443,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSwish(Tensor a) -> Tensor",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, const at::Tensor& input) {
               at::cpu::hardswish_out(output, input);
             },
             false),
@@ -452,7 +451,7 @@ const RegisterOperators MKLDNNHardSwishOpReg({
     torch::jit::Operator(
         "prim::MKLDNNHardSigmoid(Tensor a) -> Tensor",
         createUnaryOp(
-            [](at::Tensor output, at::Tensor input) {
+            [](at::Tensor output, const at::Tensor& input) {
               at::cpu::hardsigmoid_out(output, input);
             },
             false),
@@ -543,7 +542,7 @@ jit::RegisterOperators reg_fut_ops({
                 stack,
                 at::native::empty_mkldnn(
                     o,
-                    optTypeMetaToScalarType(input.options().dtype_opt()),
+                    c10::optTypeMetaToScalarType(input.options().dtype_opt()),
                     input.options().layout_opt(),
                     input.options().device_opt(),
                     input.options().pinned_memory_opt()));
@@ -575,7 +574,7 @@ jit::RegisterOperators reg_fut_ops({
           Tensor self = pop(stack).toTensor();
           auto out = at::native::empty_mkldnn(
               self.sizes(),
-              optTypeMetaToScalarType(self.options().dtype_opt()),
+              c10::optTypeMetaToScalarType(self.options().dtype_opt()),
               self.options().layout_opt(),
               self.options().device_opt(),
               self.options().pinned_memory_opt());
@@ -1099,13 +1098,13 @@ class MKLDNNSubgraphSlicer {
 
   // Try to merge `consumer` into `producer`. If successful, this destroys
   // `consumer` and returns the `producer` group.
-  c10::optional<Node*> tryMerge(Node* producer, Node* consumer) {
+  std::optional<Node*> tryMerge(Node* producer, Node* consumer) {
     AT_ASSERT(producer->kind() == prim::MKLDNNGroup);
     bool canMerge = shouldConsiderForMerge(consumer) &&
         aliasDb_.moveAfterTopologicallyValid(consumer, producer);
 
     if (!canMerge) {
-      return c10::nullopt;
+      return std::nullopt;
     }
 
     SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(
@@ -1179,5 +1178,4 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
 
 #endif
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

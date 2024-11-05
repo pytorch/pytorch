@@ -6,6 +6,7 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <ATen/cuda/CUDAGraph.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 
 // Cargo culted partially from csrc/distributed/c10d/init.cpp
 // and partially from csrc/cuda/Stream.cpp.
@@ -26,16 +27,45 @@ void THCPGraph_init(PyObject* module) {
 
   shared_ptr_class_<::at::cuda::CUDAGraph>(torch_C_m, "_CUDAGraph")
       .def(py::init<>())
-      // I'm not sure this is the correct order of all the arguments. Pybind11
-      // docs aren't clear. But it works.
       .def(
           "capture_begin",
-          torch::wrap_pybind_function_no_gil(
-              &at::cuda::CUDAGraph::capture_begin),
-          py::arg("pool") = c10::cuda::MempoolId_t{0, 0})
+          [](::at::cuda::CUDAGraph& self,
+             std::optional<c10::cuda::MempoolId_t> pool_opt,
+             const std::string& capture_error_mode) {
+            cudaStreamCaptureMode capture_mode{};
+            c10::cuda::MempoolId_t pool = pool_opt.has_value()
+                ? pool_opt.value()
+                : c10::cuda::MempoolId_t{0, 0};
+            if (capture_error_mode == "global") {
+              capture_mode = cudaStreamCaptureModeGlobal;
+            } else if (capture_error_mode == "thread_local") {
+              capture_mode = cudaStreamCaptureModeThreadLocal;
+            } else if (capture_error_mode == "relaxed") {
+              capture_mode = cudaStreamCaptureModeRelaxed;
+            } else {
+              TORCH_CHECK(
+                  false,
+                  "Unknown capture error mode. Expected `global`, `thread_local`, or `relaxed`, got ",
+                  capture_error_mode);
+            }
+            return self.capture_begin(pool, capture_mode);
+          },
+          py::arg("pool"),
+          py::arg("capture_error_mode"),
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "capture_end",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::capture_end))
+      .def(
+          "register_generator_state",
+          [](::at::cuda::CUDAGraph& self, py::handle raw_generator) {
+            auto generator = THPGenerator_Unwrap(raw_generator.ptr());
+            // We've unwrapped Python object to C++ object,
+            // so we could release GIL before calling into C++
+            py::gil_scoped_release release;
+            return self.register_generator_state(generator);
+          },
+          py::arg("generator"))
       .def(
           "replay",
           torch::wrap_pybind_function_no_gil(&at::cuda::CUDAGraph::replay))

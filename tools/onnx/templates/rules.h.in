@@ -1,12 +1,11 @@
 #pragma once
+#include <cstdint>
 
 /**
 ${generated_comment}
  */
 
-namespace torch {
-namespace onnx {
-namespace diagnostics {
+namespace torch::onnx::diagnostics {
 
 enum class Rule : uint32_t {
 ${rules}
@@ -16,6 +15,4 @@ static constexpr const char* const kPyRuleNames [] = {
 ${py_rule_names}
 };
 
-} // namespace diagnostics
-} // namespace onnx
-} // namespace torch
+} // namespace torch::onnx::diagnostics

@@ -1,12 +1,10 @@
 #include <torch/csrc/jit/passes/utils/memory_dag.h>
 
 #include <c10/util/flat_hash_map.h>
-#include <torch/csrc/utils/memory.h>
 #include <algorithm>
 #include <queue>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 
 void makePointerToImpl(Element* from, Element* to) {
@@ -233,5 +231,4 @@ void MemoryDAG::setWildcards(
 Element* MemoryDAG::unsafeMakeFreshValue(const Value* v) {
   return makeFreshValueImpl(v, indexToElementMap_);
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

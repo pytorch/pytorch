@@ -10,8 +10,7 @@
 #include <torch/csrc/lazy/ts_backend/ops/generic.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 struct TorchScriptIrBuilder : IrBuilder {
   NodePtr MakeDeviceData(
@@ -33,8 +32,8 @@ struct TorchScriptIrBuilder : IrBuilder {
   NodePtr MakeCast(
       const Value& input0,
       const at::ScalarType& dtype,
-      const c10::optional<at::ScalarType>& stype =
-          c10::nullopt) const override {
+      const std::optional<at::ScalarType>& stype =
+          std::nullopt) const override {
     return ReuseOrMakeNode<Cast>(input0, dtype, stype);
   }
   NodePtr MakeTensorList(const OpList& inputs) const override {
@@ -67,5 +66,4 @@ struct TorchScriptIrBuilder : IrBuilder {
   }
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

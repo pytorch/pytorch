@@ -10,6 +10,13 @@ inputs:
     description: Shard number for the current job
     required: false
     default: "0"
+  sha:
+    description: SHA for the commit
+    required: true
+  test_config:
+    description: Name of the test config
+    required: false
+    default: "default"
   job_identifier:
     description: Text that uniquely identifies a given job type within a workflow. All shards of a job should share the same job identifier.
     required: true
@@ -17,7 +24,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+    - uses: nick-fields/retry@v3.0.0
       name: Setup dependencies
       with:
         shell: bash
@@ -26,13 +33,15 @@ runs:
         retry_wait_seconds: 30
         command: |
           set -eu
-          python3 -m pip install boto3==1.19.12
+          python3 -m pip install boto3==1.35.42
 
     - name: Upload the cache
       shell: bash
       env:
         CACHE_DIR: ${{ inputs.cache_dir }}
         JOB_IDENTIFIER: ${{ inputs.job_identifier }}
+        SHA: ${{ inputs.sha }}
+        TEST_CONFIG: ${{ inputs.test_config }}
         SHARD: ${{ inputs.shard }}
         REPO: ${{ github.repository }}
       run: |
@@ -41,6 +50,8 @@ runs:
           --cache_dir $GITHUB_WORKSPACE/$CACHE_DIR \
           --pr_identifier $GITHUB_REF \
           --job_identifier $JOB_IDENTIFIER \
+          --sha $SHA \
+          --test_config $TEST_CONFIG \
           --shard $SHARD \
           --repo $REPO \
           --temp_dir $RUNNER_TEMP \

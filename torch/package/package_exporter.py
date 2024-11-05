@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import importlib.machinery
 import io
@@ -37,6 +38,7 @@ from ._stdlib import is_stdlib_module
 from .find_file_dependencies import find_files_source_depends_on
 from .glob_group import GlobGroup, GlobPattern
 from .importer import Importer, OrderedImporter, sys_importer
+
 
 __all__ = [
     "PackagingErrorReason",
@@ -122,8 +124,6 @@ class EmptyMatchError(Exception):
     ``allow_empty=False``, and is not matched with any module during packaging.
     """
 
-    pass
-
 
 class PackagingError(Exception):
     """This exception is raised when there is an issue with exporting a package.
@@ -166,7 +166,7 @@ class PackagingError(Exception):
                 if debug:
                     module_path = dependency_graph.first_path(module_name)
                     message.write(
-                        f"      A path to {module_name}: {' -> '.join(module_path)}"
+                        f"      A path to {module_name}: {' -> '.join(module_path)}\n"
                     )
         if not debug:
             message.write("\n")
@@ -427,7 +427,7 @@ class PackageExporter:
     def _import_module(self, module_name: str):
         try:
             return self.importer.import_module(module_name)
-        except ModuleNotFoundError as e:
+        except ModuleNotFoundError:
             if not is_mangled(module_name):
                 raise
             msg = (
@@ -662,7 +662,7 @@ class PackageExporter:
             memo: DefaultDict[int, str] = defaultdict(None)
             memo_count = 0
             # pickletools.dis(data_value)
-            for opcode, arg, pos in pickletools.genops(data_value):
+            for opcode, arg, _pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
                     if (
                         opcode.name == "SHORT_BINUNICODE"
@@ -705,9 +705,9 @@ class PackageExporter:
                 """ If an object happens to come from a mocked module, then we collect these errors and spit them
                     out with the other errors found by package exporter.
                 """
-                if module in mocked_modules:
-                    assert isinstance(module, str)
-                    fields = mocked_modules[module]
+                if module_name in mocked_modules:
+                    assert isinstance(module_name, str)
+                    fields = mocked_modules[module_name]
                     self.dependency_graph.add_node(
                         module_name,
                         action=_ModuleProviderAction.MOCK,
@@ -941,7 +941,7 @@ class PackageExporter:
                     storage = storage.cpu()
                 num_bytes = storage.nbytes()
                 self.zip_file.write_record(
-                    f".data/{storage_id}.storage", storage.data_ptr(), num_bytes
+                    f".data/{storage_id}.storage", storage, num_bytes
                 )
             return ("storage", storage_type, storage_id, location, storage_numel)
 
@@ -949,7 +949,7 @@ class PackageExporter:
             if _gate_torchscript_serialization and isinstance(
                 obj, torch.jit.RecursiveScriptModule
             ):
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     "Serializing ScriptModules directly into a package is a beta feature. "
                     "To use, set global "
                     "`torch.package.package_exporter._gate_torchscript_serialization` to `False`."

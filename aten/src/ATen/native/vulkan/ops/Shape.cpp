@@ -8,21 +8,27 @@ namespace native {
 namespace vulkan {
 namespace ops {
 
-Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
+static Tensor view_internal(const Tensor& self_arg, const IntArrayRef shape) {
   api::Context* const context = api::context();
 
   Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
   vTensor& v_self = convert(self);
 
   at::DimVector inferred_size = at::infer_size_dv(shape, self.numel());
+  IntArrayRef output_size(inferred_size);
 
   vTensor v_output{
       context,
-      inferred_size,
-      self_arg.scalar_type(),
+      output_size.vec(),
+      v_self.dtype(),
   };
+  if (v_self.is_quantized()) {
+    v_output.set_is_quantized();
+    v_output.set_scale(v_self.get_scale());
+    v_output.set_zero_point(v_self.get_zero_point());
+  }
 
-  api::StorageBuffer buffer(context, at::kFloat, v_self.gpu_numel(), true);
+  api::StorageBuffer buffer(context, api::kFloat, v_self.gpu_numel(), true);
 
   utils::pack_vtensor_to_staging(v_self, buffer.buffer());
 
@@ -46,7 +52,7 @@ inline Tensor view(const Tensor& self_arg, IntArrayRef shape) {
   return view_internal(self_arg, shape);
 }
 
-Tensor _reshape_alias(
+static Tensor _reshape_alias(
     const Tensor& self_arg,
     const IntArrayRef shape,
     const IntArrayRef strides) {

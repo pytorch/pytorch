@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -9,26 +10,28 @@
 import logging
 import os
 import time
-from concurrent.futures._base import Future
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
-from typing import Dict, List, TextIO
+from typing import Dict, List, Optional, TextIO, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from concurrent.futures._base import Future
 
 __all__ = ["tail_logfile", "TailLog"]
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def tail_logfile(
     header: str, file: str, dst: TextIO, finished: Event, interval_sec: float
 ):
-
     while not os.path.exists(file):
         if finished.is_set():
             return
         time.sleep(interval_sec)
 
-    with open(file) as fp:
+    with open(file, errors="replace") as fp:
         while True:
             line = fp.readline()
 
@@ -46,16 +49,18 @@ def tail_logfile(
 
 class TailLog:
     """
-    Tails the given log files. The log files do not have to exist when the
-    ``start()`` method is called. The tail-er will gracefully wait until the
-    log files are created by the producer and will tail the contents of the
+    Tail the given log files.
+
+    The log files do not have to exist when the ``start()`` method is called. The tail-er will gracefully wait until
+    the log files are created by the producer and will tail the contents of the
     log files until the ``stop()`` method is called.
 
     .. warning:: ``TailLog`` will wait indefinitely for the log file to be created!
 
     Each log file's line will be suffixed with a header of the form: ``[{name}{idx}]:``,
     where the ``name`` is user-provided and ``idx`` is the index of the log file
-    in the ``log_files`` mapping.
+    in the ``log_files`` mapping. ``log_line_prefixes`` can be used to override the
+    header for each log file.
 
     Usage:
 
@@ -86,6 +91,7 @@ class TailLog:
         name: str,
         log_files: Dict[int, str],
         dst: TextIO,
+        log_line_prefixes: Optional[Dict[int, str]] = None,
         interval_sec: float = 0.1,
     ):
         n = len(log_files)
@@ -99,6 +105,7 @@ class TailLog:
         self._name = name
         self._dst = dst
         self._log_files = log_files
+        self._log_line_prefixes = log_line_prefixes
         self._finished_events: Dict[int, Event] = {
             local_rank: Event() for local_rank in log_files.keys()
         }
@@ -111,10 +118,13 @@ class TailLog:
             return self
 
         for local_rank, file in self._log_files.items():
+            header = f"[{self._name}{local_rank}]:"
+            if self._log_line_prefixes and local_rank in self._log_line_prefixes:
+                header = self._log_line_prefixes[local_rank]
             self._futs.append(
                 self._threadpool.submit(
                     tail_logfile,
-                    header=f"[{self._name}{local_rank}]:",
+                    header=header,
                     file=file,
                     dst=self._dst,
                     finished=self._finished_events[local_rank],
@@ -131,10 +141,12 @@ class TailLog:
             try:
                 f.result()
             except Exception as e:
-                log.error(
+                logger.error(
                     "error in log tailor for %s%s. %s: %s",
-                    self._name, local_rank,
-                    e.__class__.__qualname__, e,
+                    self._name,
+                    local_rank,
+                    e.__class__.__qualname__,
+                    e,
                 )
 
         if self._threadpool:

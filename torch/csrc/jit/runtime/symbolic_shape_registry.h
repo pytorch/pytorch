@@ -5,8 +5,7 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /*
 ADDING A NEW SHAPE GRAPH:
@@ -53,12 +52,12 @@ struct BoundedShapeGraphs {
 
 TORCH_API void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
-    std::shared_ptr<Graph> g);
+    const std::shared_ptr<Graph>& g);
 
-TORCH_API c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
+TORCH_API std::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
     const FunctionSchema& schema);
 
-TORCH_API c10::optional<BoundedShapeGraphs> boundedGraphsForSchema(
+TORCH_API std::optional<BoundedShapeGraphs> boundedGraphsForSchema(
     const FunctionSchema& schema);
 
 TORCH_API std::vector<const FunctionSchema*> RegisteredShapeComputeSchemas();
@@ -67,5 +66,4 @@ TORCH_API void LintShapeComputeGraph(
     const FunctionSchema* schema,
     const std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

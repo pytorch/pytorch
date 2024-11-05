@@ -2,13 +2,12 @@
 
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/api/method.h>
+#include <optional>
 
 #include <utility>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
@@ -22,10 +21,12 @@ class ObjectAttributeError : public std::runtime_error {
   ObjectAttributeError(const std::string& what) : std::runtime_error(what) {}
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct TORCH_API Object {
   Object() = default;
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  Object(const Object&) = default;
+  Object& operator=(const Object&) = default;
+  Object(Object&&) noexcept = default;
+  Object& operator=(Object&&) noexcept = default;
   Object(ObjectPtr _ivalue) : _ivalue_(std::move(_ivalue)) {}
   Object(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Object(
@@ -45,7 +46,7 @@ struct TORCH_API Object {
   struct Property {
     std::string name;
     Method getter_func;
-    c10::optional<Method> setter_func;
+    std::optional<Method> setter_func;
   };
 
   void setattr(const std::string& name, c10::IValue v) {
@@ -107,7 +108,7 @@ struct TORCH_API Object {
     if (auto method = find_method(name)) {
       return *method;
     }
-    AT_ERROR("Method '", name, "' is not defined.");
+    TORCH_CHECK(false, "Method '", name, "' is not defined.");
   }
 
   const std::vector<Method> get_methods() const {
@@ -128,7 +129,7 @@ struct TORCH_API Object {
   const Property get_property(const std::string& name) const {
     for (const auto& prop : type()->properties()) {
       if (prop.name == name) {
-        c10::optional<Method> setter = c10::nullopt;
+        std::optional<Method> setter = std::nullopt;
         if (prop.setter) {
           setter = Method(_ivalue(), prop.setter);
         }
@@ -136,21 +137,23 @@ struct TORCH_API Object {
             prop.name, Method(_ivalue(), prop.getter), std::move(setter)};
       }
     }
-    AT_ERROR("Property '", name, "' is not defined.");
+    TORCH_CHECK(false, "Property '", name, "' is not defined.");
   }
 
   const std::vector<Property> get_properties() const {
     return c10::fmap(type()->properties(), [&](ClassType::Property prop) {
-      c10::optional<Method> setter = c10::nullopt;
+      std::optional<Method> setter = std::nullopt;
       if (prop.setter) {
         setter = Method(_ivalue(), prop.setter);
       }
       return Property{
-          prop.name, Method(_ivalue(), prop.getter), std::move(setter)};
+          std::move(prop.name),
+          Method(_ivalue(), prop.getter),
+          std::move(setter)};
     });
   }
 
-  c10::optional<Method> find_method(const std::string& basename) const;
+  std::optional<Method> find_method(const std::string& basename) const;
 
   /// Run a method from this module.
   ///
@@ -194,5 +197,4 @@ namespace script {
 // of the public API; new code should not use this type alias.
 using Object = ::torch::jit::Object;
 } // namespace script
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

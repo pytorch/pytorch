@@ -1,14 +1,38 @@
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <chrono>
 #include <list>
 #include <sstream>
 #include <utility>
 
+#ifdef FBCODE_CAFFE2
+#include <c10/util/static_tracepoint.h>
+#endif
+
 namespace c10 {
 
+#ifdef FBCODE_CAFFE2
+TORCH_SDT_DEFINE_SEMAPHORE(operator_start)
+TORCH_SDT_DEFINE_SEMAPHORE(operator_end)
+#endif
+
 bool show_dispatch_trace() {
-    static char const* temp = getenv("TORCH_SHOW_DISPATCH_TRACE");
-    return temp != nullptr;
+  static auto envar = std::getenv("TORCH_SHOW_DISPATCH_TRACE");
+
+  if (envar) {
+    if (strcmp(envar, "0") == 0) {
+      return false;
+    }
+    if (strcmp(envar, "1") == 0) {
+      return true;
+    }
+    TORCH_WARN(
+        "ignoring invalid value for TORCH_SHOW_DISPATCH_TRACE: ",
+        envar,
+        " valid values are 0 or 1.");
+  }
+
+  return false;
 }
 
 static thread_local int64_t dispatch_trace_nesting_value_;
@@ -43,7 +67,13 @@ public:
 private:
   std::list<std::unique_ptr<OpRegistrationListener>> listeners_;
 };
+
+void _print_dispatch_trace(const std::string& label, const std::string& op_name, const DispatchKeySet& dispatchKeySet) {
+  auto nesting_value = dispatch_trace_nesting_value();
+  for (int64_t i = 0; i < nesting_value; ++i) std::cerr << " ";
+  std::cerr << label << " op=[" << op_name << "], key=[" << toString(dispatchKeySet.highestPriorityTypeId()) << "]" << std::endl;
 }
+} // namespace detail
 
 OpRegistrationListener::~OpRegistrationListener()= default;
 
@@ -66,11 +96,11 @@ C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   return _singleton;
 }
 
-c10::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_name) {
-  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> c10::optional<OperatorHandle> {
+std::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_name) {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::optional<OperatorHandle> {
     auto found = operatorLookupTable.find(overload_name);
     if (found == operatorLookupTable.end()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     return found->second;
   });
@@ -83,7 +113,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
   using namespace std::chrono_literals;
   std::unique_lock<std::mutex> lock(guard_->mutex);
   bool r = cond_var_.wait_for(lock, 2s, [&]{
-    return findOp(schema.operator_name()) != c10::nullopt;
+    return findOp(schema.operator_name()) != std::nullopt;
   });
   TORCH_INTERNAL_ASSERT(r,
     "Expected main interpreter to define ", schema.operator_name(),
@@ -93,7 +123,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
     "the same dependencies.");
 }
 
-void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::DispatchKey> maybe_dk) {
+void Dispatcher::waitForImpl(const OperatorName& op_name, std::optional<c10::DispatchKey> maybe_dk) {
   using namespace std::chrono_literals;
   std::unique_lock<std::mutex> lock(guard_->mutex);
   auto dk = maybe_dk.value_or(DispatchKey::CompositeImplicitAutograd);
@@ -111,13 +141,13 @@ void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::Dis
     "the same dependencies.");
 }
 
-c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
+std::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
   auto it = findOp(overload_name);
   if (it.has_value()) {
     if (it->hasSchema()) {
       return it;
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   } else {
     return it;
@@ -154,7 +184,7 @@ const std::vector<OperatorName> Dispatcher::getAllOpNames() {
 // are done
 OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   const auto found = findOp(op_name);
-  if (found != c10::nullopt) {
+  if (found != std::nullopt) {
     return *found;
   }
 
@@ -254,11 +284,77 @@ void Dispatcher::deregisterDef_(
   cleanup(op, op_name);
 }
 
+namespace {
+
+// Maps OperatorName to (python module name, description) tuple.
+using PythonModuleMapType = std::unordered_map<at::OperatorName, std::pair<const char*, const char*>>;
+PythonModuleMapType& pythonModulesSingleton() {
+  static PythonModuleMapType _data;
+  return _data;
+}
+
+}
+
+std::optional<std::pair<const char*, const char*>> Dispatcher::getPyStub(OperatorName op_name) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  auto found = pythonModulesSingleton().find(op_name);
+  if (found == pythonModulesSingleton().end()) {
+    return std::nullopt;
+  }
+  return found->second;
+}
+
+RegistrationHandleRAII Dispatcher::registerPythonModule(
+  const OperatorName& op_name,
+  const char* pymodule,
+  const char* context
+) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  // If there are duplicates, we just let it through and warn about it.
+  // Throwing an error during static initialization causes a crash that
+  // doesn't give any sign of what happened.
+  auto found = pythonModulesSingleton().find(op_name);
+  if (found != pythonModulesSingleton().end()) {
+    TORCH_WARN(
+        "Tried to register an python registration stub (pystub) for ", op_name, " ",
+        "that specifies the Python module ", pymodule, " "
+        "but there already was a pystub that specifies the Python module ",
+        found->second.first, ". We will override the existing pystub.");
+  }
+  pythonModulesSingleton()[op_name] = std::make_pair(pymodule, context);
+  return RegistrationHandleRAII([guard = this->guard_, op_name] {
+    std::lock_guard<std::mutex> lock(guard->mutex);
+    if (!guard->alive.load()) {
+      return;
+    }
+    pythonModulesSingleton().erase(op_name);
+  });
+}
+
+void Dispatcher::throwIfHasPythonModule(OperatorName op_name) {
+  std::lock_guard<std::mutex> lock(guard_->mutex);
+  auto elt = pythonModulesSingleton().find(op_name);
+  if (elt == pythonModulesSingleton().end()) {
+    return;
+  }
+  const char* pymodule = elt->second.first;
+  const char* context = elt->second.second;
+  auto* interpreter = at::impl::PythonOpRegistrationTrampoline::getInterpreter();
+  TORCH_CHECK(
+      interpreter != nullptr,
+      op_name,
+      ": while attempting to run this operator with Meta Tensors: "
+      "Either there is no meta kernel for this operator, or it is located "
+      "in the python module ", pymodule, " which is not available "
+      "because Python isn't available.")
+  (*interpreter)->throw_abstract_impl_not_imported_error(toString(op_name), pymodule, context);
+}
+
 RegistrationHandleRAII Dispatcher::registerImpl(
   OperatorName op_name,
-  c10::optional<DispatchKey> dispatch_key,
+  std::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
-  c10::optional<impl::CppSignature> cpp_signature,
+  std::optional<impl::CppSignature> cpp_signature,
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
@@ -288,7 +384,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
   });
 }
 
-void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, impl::OperatorEntry::AnnotatedKernelContainerIterator handle) {
+void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, std::optional<DispatchKey> dispatch_key, impl::OperatorEntry::AnnotatedKernelContainerIterator handle) {
   op.operatorDef_->op.deregisterKernel_(*this, dispatch_key, handle);
 
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
@@ -410,7 +506,7 @@ std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
   });
 }
 
-std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const {
+std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(std::optional<DispatchKey> k) const {
   return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
     std::vector<OperatorName> op_names;
     for (const auto& op : operatorLookupTable) {
@@ -423,24 +519,55 @@ std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::option
   });
 }
 
-int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey) {
+int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey, DispatchKeySet dispatchKeySet) {
   int64_t seq_num = -1;
   // Setting sequence number in the Autograd case to associate
   // the forward range with the corresponding Autograd's node
-  if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
+
+  // Note: this records a sequence number for both Autograd keys, and for
+  // non-Autograd keys where the dispatchKeySet still contains an autograd key.
+  // This means that we might collect the same sequence nubmer two different
+  // events if they all occurred above Autograd and still had the Autograd
+  // dispatch key in the dispatch key set.
+  // However, this usually doesn't happen: normally the first call will
+  // go through the call() or callBoxed() path in the dispatcher, while
+  // subsequent redispatches go through redispatch() or redispatchBoxed().
+  // `call` has profiler instrumentation, whereas `redispatch` doesn't.
+  // So usually, we'll collect a sequence number on the first call() if the
+  // dispatch keys contain autograd, and not on subsequent redispatches.
+  bool dispatchHasAutograd = !(dispatchKeySet & autograd_dispatch_keyset).empty();
+
+  if (dispatchHasAutograd && at::GradMode::is_enabled()) {
     seq_num = at::sequence_number::peek();
   }
   return seq_num;
 }
 
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, c10::ArrayRef<const c10::IValue> args) {
-  guard.before(schema_ref, args, sequenceNumberForRunningRecordFunction(dispatchKey));
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, DispatchKeySet dispatchKeySet, c10::ArrayRef<const c10::IValue> args) {
+  guard.before(schema_ref, args, sequenceNumberForRunningRecordFunction(dispatchKey, dispatchKeySet));
 }
 
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey) {
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, DispatchKeySet dispatchKeySet) {
   // Setting sequence number in the Autograd case to associate
   // the forward range with the corresponding Autograd's node
-  guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey));
+  guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey, dispatchKeySet));
 }
+#ifdef FBCODE_CAFFE2
+bool Dispatcher::profilingOperatorEvents() {
+  return TORCH_SDT_IS_ENABLED(operator_start) || TORCH_SDT_IS_ENABLED(operator_end);
+}
+
+C10_NOINLINE void Dispatcher::fireOpStartUSDT(at::RecordFunction::schema_ref_t schema_ref) {
+  if (TORCH_SDT_IS_ENABLED(operator_start)) {
+    TORCH_SDT_WITH_SEMAPHORE(operator_start, schema_ref.get().name().c_str());
+  }
+}
+
+C10_NOINLINE void Dispatcher::fireOpEndUSDT(at::RecordFunction::schema_ref_t schema_ref) {
+  if (TORCH_SDT_IS_ENABLED(operator_end)) {
+    TORCH_SDT_WITH_SEMAPHORE(operator_end, schema_ref.get().name().c_str());
+  }
+}
+#endif
 
 }

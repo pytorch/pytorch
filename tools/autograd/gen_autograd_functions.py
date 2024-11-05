@@ -4,7 +4,10 @@
 #  Functions.h/cpp: subclasses of autograd::Node
 #  python_functions.h/cpp: Python bindings for the above classes
 #
-from typing import Dict, List, Sequence, Tuple
+
+from __future__ import annotations
+
+from typing import Sequence
 
 from torchgen.api.autograd import (
     Derivative,
@@ -35,6 +38,7 @@ from torchgen.api.types import (
     TENSOR_LIST_LIKE_CTYPES,
     tensorListT,
     tensorT,
+    VectorCType,
 )
 from torchgen.code_template import CodeTemplate
 from torchgen.model import Argument, FunctionSchema
@@ -42,9 +46,15 @@ from torchgen.utils import FileManager
 
 from .gen_inplace_or_view_type import VIEW_FUNCTIONS
 
+
 FUNCTION_DECLARATION = CodeTemplate(
     """\
+#ifdef _WIN32
+struct ${op} : public ${superclass} {
+  TORCH_API ${op}() = default;
+#else
 struct TORCH_API ${op} : public ${superclass} {
+#endif
   using ${superclass}::${superclass};
   variable_list apply(variable_list&& grads) override;
   std::string name() const override { return "${op}"; }
@@ -53,10 +63,8 @@ struct TORCH_API ${op} : public ${superclass} {
     ${release_variables}
   }
   ${will_release_variables}
-#ifdef TORCH_COMPILED_AUTOGRAD
   void compiled_args(CompiledNodeArgs& args) override;
   variable_list apply_with_saved(const variable_list& inputs, SwapSavedVariables& saved) override;
-#endif
   ${saved_variables}
   ${saved_list_sizes}
 };
@@ -83,7 +91,6 @@ variable_list ${op}::apply(variable_list&& grads) {
   ${body}
   return grad_inputs;
 }
-#ifdef TORCH_COMPILED_AUTOGRAD
 void ${op}::compiled_args(CompiledNodeArgs& args) {
     ${compiled_args}
 }
@@ -93,7 +100,6 @@ variable_list ${op}::apply_with_saved(const variable_list& grads, SwapSavedVaria
     ${apply_with_saved_after}
     return result;
 }
-#endif
 """
 )
 
@@ -441,8 +447,8 @@ UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 
 def get_infos_with_derivatives_list(
-    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]]
-) -> List[DifferentiabilityInfo]:
+    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]],
+) -> list[DifferentiabilityInfo]:
     diff_info_list = [
         info
         for diffinfo_dict in differentiability_infos.values()
@@ -454,7 +460,7 @@ def get_infos_with_derivatives_list(
 
 def gen_autograd_functions_lib(
     out: str,
-    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
+    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]],
     template_path: str,
 ) -> None:
     """Functions.h and Functions.cpp body
@@ -488,7 +494,7 @@ def gen_autograd_functions_lib(
 
 def gen_autograd_functions_python(
     out: str,
-    differentiability_infos: Dict[FunctionSchema, Dict[str, DifferentiabilityInfo]],
+    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]],
     template_path: str,
 ) -> None:
     fm = FileManager(install_dir=out, template_dir=template_path, dry_run=False)
@@ -534,17 +540,17 @@ def gen_autograd_functions_python(
 
 
 def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str:
-    saved_variables: List[str] = []
-    release_variables: List[str] = []
-    saved_list_sizes: List[str] = []
-    unpack: List[str] = []
-    asserts: List[str] = []
-    compute_index_ranges: List[str] = []
-    getter_definitions: List[str] = []
-    py_getsetdef_structs: List[str] = []
-    compiled_args: List[str] = []
-    apply_with_saved_before: List[str] = []
-    apply_with_saved_after: List[str] = []
+    saved_variables: list[str] = []
+    release_variables: list[str] = []
+    saved_list_sizes: list[str] = []
+    unpack: list[str] = []
+    asserts: list[str] = []
+    compute_index_ranges: list[str] = []
+    getter_definitions: list[str] = []
+    py_getsetdef_structs: list[str] = []
+    compiled_args: list[str] = []
+    apply_with_saved_before: list[str] = []
+    apply_with_saved_after: list[str] = []
 
     for arg in info.args_with_derivatives:
         if arg.type in TENSOR_LIST_LIKE_CTYPES:
@@ -560,6 +566,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         should_append_getsetdef = True
         should_append_raw_getsetdef = False
         visit_name = name
+        uses_cpp_saved_variable_cls = False
 
         if (
             type == BaseCType(tensorT)
@@ -567,6 +574,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             or type == MutRefCType(OptionalCType(BaseCType(tensorT)))
             or (type == BaseCType(scalarT) and is_output)
         ):
+            uses_cpp_saved_variable_cls = True
             saved_variables.append(f"SavedVariable {name}_;")
             release_variables.append(f"{name}_.reset_data();")
             ptr = "shared_from_this()" if is_output else ""
@@ -583,14 +591,32 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             )
             should_append_raw_getsetdef = True
             visit_name = f"{name}_"
-        elif type == BaseCType(tensorListT) or type == BaseCType(iTensorListRefT):
+        elif (
+            type == BaseCType(tensorListT)
+            or type == BaseCType(iTensorListRefT)
+            or type == VectorCType(BaseCType(tensorT))
+        ):
+            # note(crcrpar): [nuanced return type of out-of-place foreach functions]
+            # When an out-of-place foreach function whose return signature is `Tensor[]`
+            # spells out its backward definitions in `derivatives.yaml`, and some of them depend on
+            # `result`, `result`'s type is interpreted and treated as `std::vector<Tensor>`.
+            # An out-of-place foreach whose backwards rely on their output doesn't suffer from this
+            # difference if the definitions are codegen'ed.
+            # This special case is needed for `_foreach_pow.List` and `_foreach_pow.ScalarAndTensor`
+            # as of https://github.com/pytorch/pytorch/pull/105504.
+            if type == VectorCType(BaseCType(tensorT)):
+                assert (
+                    info.func.func.name.name.base.startswith("_foreach") and is_output
+                )
+            uses_cpp_saved_variable_cls = True
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
             # Just clear() is sufficient, we don't need to loop and clear each variable.
             # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
             release_variables.append(f"{name}_.clear();")
             release_variables.append(f"{name}_released_ = true;")
-            unpack.append(f"auto {name} = unpack_list({name}_);")
+            ptr = "shared_from_this()" if is_output else "nullptr"
+            unpack.append(f"auto {name} = unpack_list({name}_, {ptr});")
             asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
             getter_definitions.append(
                 GETTER_DEFINITION_VEC_SAVEDVAR.substitute(
@@ -605,6 +631,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             should_append_raw_getsetdef = True
             visit_name = f"{name}_"
         elif type == ListCType(OptionalCType(BaseCType(tensorT))):
+            uses_cpp_saved_variable_cls = True
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -696,7 +723,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
         elif type == OptionalCType(BaseCType(stringT)):
-            saved_variables.append(f"c10::optional<std::string> {name};")
+            saved_variables.append(f"std::optional<std::string> {name};")
             getter_definitions.append(
                 GETTER_DEFINITION_OPT.substitute(
                     op=info.op, name=name, body=GETTER_BODY_STRING
@@ -767,7 +794,12 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                 PY_RAW_GETSETDEF_STRUCT.substitute(op=info.op, name=name)
             )
 
-        compiled_args.append(f"args.collect({visit_name});")
+        if uses_cpp_saved_variable_cls:
+            compiled_args.append(
+                f"args.collect({visit_name}, {'true' if is_output else 'false'});"
+            )
+        else:
+            compiled_args.append(f"args.collect({visit_name});")
         apply_with_saved_before.append(f"saved.before({visit_name});")
         apply_with_saved_after.append(f"saved.after({visit_name});")
 
@@ -788,7 +820,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     else:
         will_release_variables = ""
 
-    body: List[str] = []
+    body: list[str] = []
 
     if uses_single_grad(info):
         body.append("const auto& grad = grads[0];")
@@ -802,7 +834,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     def emit_derivative(
         derivative: Derivative,
         args_with_derivatives: Sequence[Binding],
-    ) -> Tuple[bool, str]:
+    ) -> tuple[bool, str]:
         formula = derivative.formula
         var_names = derivative.var_names
         if len(var_names) == 1:
@@ -838,7 +870,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             else:
                 grad_input_mask = ""
             idx_ranges = ", ".join(f"{n}_ix" for n in var_names)
-            copy_ranges: List[str] = []
+            copy_ranges: list[str] = []
             for i, n in enumerate(var_names):
                 copy_ranges.append(DERIVATIVE_MULTI_COPY_RANGE.substitute(name=n, i=i))
             return False, DERIVATIVE_MULTI.substitute(

@@ -4,8 +4,7 @@
 
 namespace F = torch::nn::functional;
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 UpsampleImpl::UpsampleImpl(
     const UpsampleOptions& options_) // NOLINT(modernize-pass-by-value)
@@ -15,7 +14,7 @@ void UpsampleImpl::reset() {}
 
 void UpsampleImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Upsample(";
-  if (options.scale_factor() != c10::nullopt) {
+  if (options.scale_factor() != std::nullopt) {
     stream << "scale_factor=" << at::ArrayRef<double>(*options.scale_factor());
   } else {
     stream << "size=" << at::ArrayRef<int64_t>(*options.size());
@@ -25,15 +24,15 @@ void UpsampleImpl::pretty_print(std::ostream& stream) const {
 
 Tensor UpsampleImpl::forward(const Tensor& input) {
   F::InterpolateFuncOptions::mode_t mode;
-  if (c10::get_if<enumtype::kNearest>(&options.mode())) {
+  if (std::holds_alternative<enumtype::kNearest>(options.mode())) {
     mode = torch::kNearest;
-  } else if (c10::get_if<enumtype::kLinear>(&options.mode())) {
+  } else if (std::holds_alternative<enumtype::kLinear>(options.mode())) {
     mode = torch::kLinear;
-  } else if (c10::get_if<enumtype::kBilinear>(&options.mode())) {
+  } else if (std::holds_alternative<enumtype::kBilinear>(options.mode())) {
     mode = torch::kBilinear;
-  } else if (c10::get_if<enumtype::kBicubic>(&options.mode())) {
+  } else if (std::holds_alternative<enumtype::kBicubic>(options.mode())) {
     mode = torch::kBicubic;
-  } else if (c10::get_if<enumtype::kTrilinear>(&options.mode())) {
+  } else if (std::holds_alternative<enumtype::kTrilinear>(options.mode())) {
     mode = torch::kTrilinear;
   }
 
@@ -43,9 +42,8 @@ Tensor UpsampleImpl::forward(const Tensor& input) {
       options.scale_factor(),
       mode,
       options.align_corners(),
-      c10::nullopt,
+      std::nullopt,
       false);
 }
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

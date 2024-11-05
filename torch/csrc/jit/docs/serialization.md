@@ -291,7 +291,7 @@ The load process has the following steps:
 
 The unpickling process consists of a single call to unpickle the module
 object contained in `data.pkl`. The `Unpickler` is given a callback that lets it
-resolved any qualified names it encounters into `ClassType`s. This is done by
+resolve any qualified names it encounters into `ClassType`s. This is done by
 resolving the qualified name to the appropriate file in `code/`, then
 compiling that file and returning the appropriate `ClassType`.
 
@@ -328,7 +328,7 @@ For example:
 
 ```
 class M(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         self.a = torch.rand(2, 3)
         self.b = torch.nn.Linear(10, 10)
 

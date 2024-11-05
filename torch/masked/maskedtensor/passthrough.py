@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 """
 These are functions that should simply be applied to both mask and data.
@@ -9,6 +10,7 @@ a new MaskedTensor as a result.
 import torch
 
 from .core import _map_mt_args_kwargs, _wrap_result
+
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -28,6 +30,11 @@ PASSTHROUGH_FNS = [
     torch.ops.aten._reshape_alias,
     torch.ops.aten.cat,
     torch.ops.aten.unsqueeze,
+    torch.ops.aten.unfold,
+    torch.ops.aten.unfold_backward,
+    torch.ops.aten.im2col,
+    torch.ops.aten.col2im,
+    torch.ops.aten.stack,
 ]
 
 

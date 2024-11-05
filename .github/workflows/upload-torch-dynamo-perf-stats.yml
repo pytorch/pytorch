@@ -2,7 +2,7 @@ name: Upload torch dynamo performance stats
 
 on:
   workflow_run:
-    workflows: [inductor-A100-perf-nightly]
+    workflows: [inductor-A100-perf-nightly, inductor-perf-nightly-A10g, inductor-perf-nightly-aarch64, inductor-perf-nightly-x86]
     types:
       - completed
 
@@ -24,7 +24,10 @@ jobs:
     needs: get-conclusion
     if: github.event.workflow_run.conclusion == 'success' || needs.get-conclusion.outputs.conclusion == 'success' ||
         github.event.workflow_run.conclusion == 'failure' || needs.get-conclusion.outputs.conclusion == 'failure'
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: ubuntu-22.04
+    environment: upload-stats
+    permissions:
+      id-token: write
     name: Upload dynamo performance stats for ${{ github.event.workflow_run.id }}, attempt ${{ github.event.workflow_run.run_attempt }}
     steps:
       - name: Checkout PyTorch
@@ -33,8 +36,20 @@ jobs:
           submodules: false
           fetch-depth: 1
 
+      - name: Configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        continue-on-error: true
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-torch-test-stats
+          aws-region: us-east-1
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: pip
+
       - run: |
-          pip3 install requests==2.26 rockset==1.0.3 boto3==1.19.12
+          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.35.42
 
       - name: Upload torch dynamo performance stats to S3
         id: upload-s3
@@ -58,4 +73,4 @@ jobs:
           REPO_FULLNAME: ${{ github.event.workflow_run.repository.full_name }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          python3 -m tools.stats.upload_dynamo_perf_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}" --head-branch "${HEAD_BRANCH}"
+          python3 -m tools.stats.upload_dynamo_perf_stats --workflow-run-id "${WORKFLOW_RUN_ID}" --workflow-run-attempt "${WORKFLOW_RUN_ATTEMPT}" --repo "${REPO_FULLNAME}" --head-branch "${HEAD_BRANCH}" --rockset-collection torch_dynamo_perf_stats --rockset-workspace inductor --dynamodb-table torchci-dynamo-perf-stats --match-filename "^inductor_"

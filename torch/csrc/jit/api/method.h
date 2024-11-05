@@ -6,8 +6,7 @@
 #include <torch/csrc/api/include/torch/imethod.h>
 #include <torch/csrc/jit/api/function_impl.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 
@@ -24,6 +23,9 @@ struct TORCH_API Method : public torch::IMethod {
 
   // the module that contains this method.
   Module owner() const;
+  // the raw objectptr that owns this method, for when the method is owned by a
+  // torchbind object.
+  ObjectPtr raw_owner() const;
   void run(Stack& stack);
   void run(Stack&& stack) {
     run(stack);
@@ -79,5 +81,4 @@ namespace script {
 using Method = ::torch::jit::Method;
 } // namespace script
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

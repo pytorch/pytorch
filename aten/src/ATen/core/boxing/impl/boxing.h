@@ -10,6 +10,7 @@
 #include <ATen/core/boxing/BoxedKernel.h>
 
 #include <c10/util/Metaprogramming.h>
+#include <type_traits>
 
 namespace c10 {
 namespace impl {
@@ -38,7 +39,15 @@ template <class T, class Enable = void>
 struct has_ivalue_to : std::false_type {};
 
 template <class T>
-struct has_ivalue_to<T, guts::void_t<decltype(std::declval<IValue>().to<T>())>>
+struct ivalue_to_helper
+{
+    using type = decltype(std::declval<IValue>().template to<T>());
+};
+template <class T>
+using ivalue_to_helper_t = typename ivalue_to_helper<T>::type;
+
+template <class T>
+struct has_ivalue_to<T, std::void_t<ivalue_to_helper_t<T>>>
 : std::true_type
 {};
 
@@ -49,7 +58,7 @@ struct has_ivalue_to<T, guts::void_t<decltype(std::declval<IValue>().to<T>())>>
 // A boxable arg type is one that IValue has a constructor for.
 template <typename T>
 using can_box =
-  guts::disjunction<
+  std::disjunction<
     std::is_constructible<IValue, std::decay_t<T>>,
     // TensorOptions are not directly constructible into IValue,
     // but torch::jit::push knows how to handle them
@@ -57,18 +66,18 @@ using can_box =
   >;
 
 template <typename... Ts>
-using can_box_all = guts::conjunction<can_box<Ts>...>;
+using can_box_all = std::conjunction<can_box<Ts>...>;
 
 // an unboxable result is one that can be extracted from an IValue
 template <typename T>
 using can_unbox =
-  guts::conjunction<
-    guts::disjunction<
+   std::conjunction<
+    std::disjunction<
       has_ivalue_to<T>,
       // void returns are ok
       std::is_same<void, T>
     >,
-    guts::negation<std::is_lvalue_reference<T>>
+    std::negation<std::is_lvalue_reference<T>>
   >;
 
 //
@@ -84,7 +93,7 @@ torch::jit::Stack boxArgs(Args... args) {
 }
 
 template <class T>
-static inline constexpr size_t boxed_size_one() {
+inline constexpr size_t boxed_size_one() {
   static_assert(!std::is_same<std::decay_t<T>, c10::TensorOptions>::value, "need to patch this path to support TensorOptions passed by reference");
   return 1;
 }
@@ -374,7 +383,7 @@ struct BoxedKernelWrapper<
     // that the last RetCount elements are of type `Tensor&`.
     auto result = guts::tuple_take<ArgTuple, -RetCount>(ArgTuple{std::forward<Args>(args)...});
     static_assert(
-        std::is_same<Result, decltype(result)>::value,
+        std::is_same_v<Result, decltype(result)>,
         "The parameter list of an op returning a tuple of Tensor references "
             "must end with an equal number of Tensor reference parameters."
     );

@@ -266,6 +266,20 @@ class Vectorized<int32_t> {
 };
 
 template <>
+Vectorized<int32_t> inline operator<<(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+                vuint32 shift_vec0 = reinterpret_cast<vuint32>(b.vec0());
+                vuint32 shift_vec1 = reinterpret_cast<vuint32>(b.vec1()) ;
+          return Vectorized<int32_t>{vec_sl(a.vec0(), shift_vec0), vec_sl(a.vec1(), shift_vec1)};
+}
+
+template <>
+Vectorized<int32_t> inline operator>>(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+                vuint32 shift_vec0 = reinterpret_cast<vuint32>(b.vec0());
+                vuint32 shift_vec1 = reinterpret_cast<vuint32>(b.vec1()) ;
+          return Vectorized<int32_t>{vec_sr(a.vec0(), shift_vec0), vec_sr(a.vec1(), shift_vec1)};
+}
+
+template <>
 Vectorized<int32_t> inline maximum(
     const Vectorized<int32_t>& a,
     const Vectorized<int32_t>& b) {
@@ -277,6 +291,41 @@ Vectorized<int32_t> inline minimum(
     const Vectorized<int32_t>& a,
     const Vectorized<int32_t>& b) {
   return a.minimum(b);
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE operator+(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE operator-(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE operator*(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE operator/(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{a.vec0()/b.vec0(), a.vec1()/b.vec1()};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE operator&(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE operator|(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<int32_t> C10_ALWAYS_INLINE operator^(const Vectorized<int32_t>& a, const Vectorized<int32_t>& b) {
+  return Vectorized<int32_t>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
 }
 
 } // namespace

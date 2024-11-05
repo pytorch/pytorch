@@ -1,15 +1,15 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
-
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Mapping, Sequence
 
 import torch
 import torch.fx
 import torch.onnx
-
 import torch.onnx._internal.fx.passes as passes
-from torch.onnx._internal import _beartype, exporter, io_adapter
+from torch.onnx._internal import _exporter_legacy, io_adapter
+
 
 # Functions directly wrapped to produce torch.fx.Proxy so that symbolic
 # data can flow through those functions. Python functions (e.g., `torch.arange`)
@@ -17,7 +17,7 @@ from torch.onnx._internal import _beartype, exporter, io_adapter
 # they are not automatically patched by FX's Python dispatcher.
 # The list below means `torch.arange`, `torch.tensor`, and so on will be
 # patched.
-_TORCH_METHODS_TO_PATCH: Tuple[str, ...] = (
+_TORCH_METHODS_TO_PATCH: tuple[str, ...] = (
     "arange",
     "tensor",
     "finfo",
@@ -36,7 +36,6 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
     exporter.
     """
 
-    @_beartype.beartype
     def is_leaf_module(
         self, module: torch.nn.Module, module_qualified_name: str
     ) -> bool:
@@ -45,14 +44,13 @@ class ModuleExpansionTracer(torch.fx._symbolic_trace.Tracer):
         # torch.fx._symbolic_trace.Tracer.call_module.
         return False
 
-    @_beartype.beartype
     def to_bool(self, obj: torch.fx.Proxy) -> bool:
         # FIXME: This is a hack to tracing through if-else Python blocks.
         # It may generate incorrect ONNX graphs if the if-else block
         return False
 
 
-def _wrap_for_symbolic_trace(target: Callable) -> Tuple[Callable, Callable]:
+def _wrap_for_symbolic_trace(target: Callable) -> tuple[Callable, Callable]:
     """This function wraps ```target`` for symbolic tracing.
 
     This function wraps ```target``` so that its wrapper produces
@@ -81,10 +79,9 @@ def _wrap_for_symbolic_trace(target: Callable) -> Tuple[Callable, Callable]:
     return wrapper, target
 
 
-@_beartype.beartype
 def _module_expansion_symbolic_trace(
-    root: Union[torch.nn.Module, Callable[..., Any]],
-    concrete_args: Optional[Dict[str, Any]] = None,
+    root: torch.nn.Module | Callable[..., Any],
+    concrete_args: dict[str, Any] | None = None,
 ) -> torch.fx.GraphModule:
     """Trace a callable into FX graph.
 
@@ -124,7 +121,7 @@ def _module_expansion_symbolic_trace(
 
 # TODO: Migrate to `DynamoExporter` after fake model tracing is supported.
 # Proposal at https://github.com/pytorch/pytorch/issues/95900.
-class FXSymbolicTracer(exporter.FXGraphExtractor):
+class FXSymbolicTracer(_exporter_legacy.FXGraphExtractor):
     """Generates a FX GraphModule using torch.fx.symbolic_trace API
     Args:
         concrete_args: Inputs to be partially specialized
@@ -150,16 +147,17 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
                     for v in x.values():
                         out += v
                     return out
-                f = fx.symbolic_trace(f, concrete_args={'x': {'a': fx.PH, 'b': fx.PH, 'c': fx.PH}})
-                assert f({'a': 1, 'b': 2, 'c': 4}) == 7
+
+
+                f = fx.symbolic_trace(f, concrete_args={"x": {"a": fx.PH, "b": fx.PH, "c": fx.PH}})
+                assert f({"a": 1, "b": 2, "c": 4}) == 7
     """
 
-    def __init__(self, concrete_args: Optional[Dict[str, Any]] = None):
+    def __init__(self, concrete_args: dict[str, Any] | None = None):
         super().__init__()
         # TODO: plumb ``concrete_args`` to symbolic_trace call at ``generate_fx``
         self.concrete_args = concrete_args
 
-    @_beartype.beartype
     def _trace_into_fx_graph_via_fx_symbolic_trace(
         self, model, model_args, model_kwargs
     ) -> torch.fx.GraphModule:
@@ -169,7 +167,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
             torch.onnx.utils.model_signature(model)
         )
         self.input_adapter.append_step(bind_input_step)
-        _, named_args = bind_input_step.apply(model_args, model_kwargs)
+        _, named_args = bind_input_step.apply(model_args, model_kwargs, model=model)
 
         # Create inputs to call symbolic trace (torch.fx.symbolic_trace)
         # Example content of concrete_args:
@@ -186,14 +184,14 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
                 concrete_args[param_name] = param_value
 
         # Merge kwargs back into args since that is the format FX graph expects.
-        merge_kwargs_step = io_adapter.MergeKwargsIntoArgsStep()
+        merge_kwargs_step = io_adapter.MergeKwargsIntoArgsInputStep()
         self.input_adapter.append_step(merge_kwargs_step)
         return _module_expansion_symbolic_trace(model, concrete_args=concrete_args)
 
     def generate_fx(
         self,
-        options: exporter.ResolvedExportOptions,
-        model: Union[torch.nn.Module, Callable],
+        options: _exporter_legacy.ResolvedExportOptions,
+        model: torch.nn.Module | Callable,
         model_args: Sequence[Any],
         model_kwargs: Mapping[str, Any],
     ) -> torch.fx.GraphModule:
@@ -220,7 +218,7 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
         )
         graph_module = replace_get_attr_with_placeholder_pass.run()
         replaced_attrs = replace_get_attr_with_placeholder_pass.replaced_attrs
-        append_extra_input_step = io_adapter.LiftParametersAndBuffersIntoArgsStep(
+        append_extra_input_step = io_adapter.LiftParametersAndBuffersIntoArgsInputStep(
             replaced_attrs
         )
         self.input_adapter.append_step(append_extra_input_step)
@@ -231,4 +229,19 @@ class FXSymbolicTracer(exporter.FXGraphExtractor):
         # Finalize the graph editing.
         graph_module.recompile()
 
-        return graph_module
+        updated_model_args = self.input_adapter.apply(
+            *model_args, model=model, **model_kwargs
+        )
+
+        return self.pre_export_passes(options, model, graph_module, updated_model_args)  # type: ignore[return-value]
+
+    def pre_export_passes(
+        self,
+        options: _exporter_legacy.ResolvedExportOptions,
+        original_model: torch.nn.Module | Callable,
+        fx_module: torch.fx.GraphModule,
+        fx_module_args: Sequence[Any],
+    ):
+        return _exporter_legacy.common_pre_export_passes(
+            options, original_model, fx_module, fx_module_args
+        )

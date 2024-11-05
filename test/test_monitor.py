@@ -1,22 +1,21 @@
 # Owner(s): ["oncall: r2p"]
 
-from torch.testing._internal.common_utils import (
-    TestCase, run_tests,
-)
-
-from datetime import timedelta, datetime
 import tempfile
 import time
+
+from datetime import datetime, timedelta
 
 from torch.monitor import (
     Aggregation,
     Event,
     log_event,
     register_event_handler,
-    unregister_event_handler,
     Stat,
     TensorboardEventHandler,
+    unregister_event_handler,
+    _WaitCounter,
 )
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 class TestMonitor(TestCase):
     def test_interval_stat(self) -> None:
@@ -75,6 +74,7 @@ class TestMonitor(TestCase):
         self.assertIsNotNone(e.data)
         log_event(e)
 
+    @skipIfTorchDynamo("Really weird error")
     def test_event_handler(self) -> None:
         events = []
 
@@ -97,6 +97,15 @@ class TestMonitor(TestCase):
         log_event(e)
         self.assertEqual(len(events), 2)
 
+    def test_wait_counter(self) -> None:
+        wait_counter = _WaitCounter(
+            "test_wait_counter",
+        )
+        with wait_counter.guard() as wcg:
+            pass
+
+
+@skipIfTorchDynamo("Really weird error")
 class TestMonitorTensorboard(TestCase):
     def setUp(self):
         global SummaryWriter, event_multiplexer

@@ -3,19 +3,16 @@
 #include <ATen/core/function.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
-#include <torch/csrc/utils/memory.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct TORCH_API GraphFunction : public Function {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   GraphFunction(
       c10::QualifiedName name,
       std::shared_ptr<Graph> graph,
       std::function<void(GraphFunction&)> function_creator,
-      c10::optional<ExecutorExecutionMode> executor_execution_mode =
-          c10::nullopt)
+      std::optional<ExecutorExecutionMode> executor_execution_mode =
+          std::nullopt)
       : name_(std::move(name)),
         graph_(std::move(graph)),
         executor_execution_mode_(executor_execution_mode),
@@ -39,18 +36,7 @@ struct TORCH_API GraphFunction : public Function {
     return graph_;
   }
 
-  std::shared_ptr<Graph> optimized_graph() const {
-    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    auto& optimized_graph = optimized_graphs_[currentSpecialization()];
-    if (optimized_graph) {
-      return *optimized_graph;
-    }
-    optimized_graph = graph_->copy();
-    if (getGraphExecutorOptimize()) {
-      preoptimizeGraph(*optimized_graph, force_no_amp_);
-    }
-    return *optimized_graph;
-  }
+  std::shared_ptr<Graph> optimized_graph() const;
 
   const c10::QualifiedName& qualname() const override {
     return name_;
@@ -77,7 +63,7 @@ struct TORCH_API GraphFunction : public Function {
   }
 
   Function& setSchema(FunctionSchema schema) override {
-    schema_ = make_unique<FunctionSchema>(std::move(schema));
+    schema_ = std::make_unique<FunctionSchema>(std::move(schema));
     return *this;
   }
 
@@ -121,14 +107,14 @@ struct TORCH_API GraphFunction : public Function {
   using Function::call;
   bool call(
       Stack& stack,
-      c10::optional<size_t> bailOut,
+      std::optional<size_t> bailOut,
       c10::function_ref<void(const Code&)> f) override {
     f(get_executor().getPlanFor(stack, bailOut).code);
     return true;
   }
 
   void clear_optimized_graphs() {
-    optimized_graphs_.fill(c10::nullopt);
+    optimized_graphs_.fill(nullptr);
   }
 
  private:
@@ -152,15 +138,13 @@ struct TORCH_API GraphFunction : public Function {
 
   // allows users to specify Simple/Profiling Executor for function
   // TODO: add more executors
-  mutable c10::optional<ExecutorExecutionMode> executor_execution_mode_;
+  mutable std::optional<ExecutorExecutionMode> executor_execution_mode_;
 
   // if invoked on a graph that has already traced through amp
   // don't invoke amp pass
   mutable bool force_no_amp_ = false;
   // Optimized graph, computed lazily. Used for inlining.
-  mutable std::array<
-      c10::optional<std::shared_ptr<Graph>>,
-      SpecializationKey::TotalCount>
+  mutable std::array<std::shared_ptr<Graph>, SpecializationKey::TotalCount>
       optimized_graphs_;
 
   // GraphFunctions are invokable from multiple threads, so this lock needs to
@@ -174,7 +158,7 @@ struct TORCH_API GraphFunction : public Function {
   // executor_[1] - autocast cpu on
   // executor_[2] - autocast gpu on
   // executor_[3] - autocast cpu & gpu on
-  std::array<c10::optional<GraphExecutor>, SpecializationKey::TotalCount>
+  std::array<std::optional<GraphExecutor>, SpecializationKey::TotalCount>
       executors_;
 
   // an optional function that actually creates the method when
@@ -193,5 +177,4 @@ TORCH_API GraphFunction* tryToGraphFunction(Function&) noexcept;
 TORCH_API GraphFunction& toGraphFunction(Function&);
 TORCH_API const GraphFunction& toGraphFunction(const Function&);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

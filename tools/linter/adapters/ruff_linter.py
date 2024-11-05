@@ -14,6 +14,7 @@ import sys
 import time
 from typing import Any, BinaryIO
 
+
 LINTER_CODE = "RUFF"
 IS_WINDOWS: bool = os.name == "nt"
 
@@ -149,7 +150,7 @@ def add_default_options(parser: argparse.ArgumentParser) -> None:
 
 def explain_rule(code: str) -> str:
     proc = run_command(
-        ["ruff", "rule", "--format=json", code],
+        ["ruff", "rule", "--output-format=json", code],
         check=True,
     )
     rule = json.loads(str(proc.stdout, "utf-8").strip())
@@ -225,9 +226,10 @@ def check_files(
                 sys.executable,
                 "-m",
                 "ruff",
+                "check",
                 "--exit-zero",
                 "--quiet",
-                "--format=json",
+                "--output-format=json",
                 *([f"--config={config}"] if config else []),
                 *filenames,
             ],
@@ -307,6 +309,7 @@ def check_file_for_fixes(
                     sys.executable,
                     "-m",
                     "ruff",
+                    "check",
                     "--fix-only",
                     "--exit-zero",
                     *([f"--config={config}"] if config else []),

@@ -4,6 +4,22 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
+#include <torch/csrc/utils/python_compat.h>
+
+
+// Many APIs have changed/don't exist anymore
+#if IS_PYTHON_3_12_PLUS
+
+#include "dim.h"
+
+// Re-enable this some day
+PyObject* Dim_init() {
+    PyErr_SetString(PyExc_RuntimeError, "First class dim doesn't work with python 3.12");
+    return nullptr;
+}
+
+#else
+
 #include "minpybind.h"
 #include <frameobject.h>
 #include <opcode.h>
@@ -12,7 +28,6 @@
 #include <iostream>
 #include <vector>
 //#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/Export.h>
 #include <ATen/functorch/BatchedTensorImpl.h>
 #include <ATen/functorch/DynamicLayer.h>
@@ -94,10 +109,10 @@ void initializeGlobals(Arena & A) {
     torch_Tensor = (PyTypeObject*) torch.attr("Tensor").ptr();
     torch_Tensor___mul__ = torch.attr("Tensor").attr("__mul__");
 
-    torch_Tensor_expand = torch.attr("_C").attr("_TensorBase").attr("expand");
-    torch_Tensor_split = torch.attr("_C").attr("_TensorBase").attr("split");
+    torch_Tensor_expand = torch.attr("_C").attr("TensorBase").attr("expand");
+    torch_Tensor_split = torch.attr("_C").attr("TensorBase").attr("split");
     torch_Tensor_copy_ = torch.attr("Tensor").attr("copy_");
-    auto py_TensorBase = torch.attr("_C").attr("_TensorBase");
+    auto py_TensorBase = torch.attr("_C").attr("TensorBase");
     auto TensorBase = (PyTypeObject*) py_TensorBase.ptr();
     THPVariable_getitem = TensorBase->tp_as_mapping->mp_subscript;
     THPVariable_setitem = TensorBase->tp_as_mapping->mp_ass_subscript;
@@ -210,17 +225,6 @@ struct DimEntry {
 private:
     int64_t data_;
 };
-
-std::ostream& operator<<(std::ostream& ss, DimEntry entry) {
-    if (entry.is_none()) {
-        ss << "None";
-    } else if (entry.is_positional()) {
-        ss << entry.position();
-    } else {
-        ss << entry.dim();
-    }
-    return ss;
-}
 
 // Dim wrapper methods
 DimEntry _wrap_dim(mpy::handle d, size_t N, bool keepdim) {
@@ -735,7 +739,7 @@ public:
 
     static mpy::obj<Tensor> create() {
         if (!TensorType) {
-            TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").ptr();
+            TensorType = (PyTypeObject*) mpy::import("functorch.dim").attr("Tensor").release();
         }
         return Tensor::alloc(TensorType);
     }
@@ -863,7 +867,7 @@ mpy::object Tensor::from_positional(Arena & A, at::Tensor tensor, Slice<DimEntry
     }
     AT_ASSERT(last == 0 || last == -1);
     if (!seen_dims) {
-        return mpy::object::steal(THPVariable_Wrap(std::move(tensor)));
+        return mpy::object::steal(THPVariable_Wrap(tensor));
     }
 
     mpy::obj<Tensor> self = Tensor::create();
@@ -880,7 +884,7 @@ mpy::obj<Tensor> Tensor::create_delayed(mpy::object op, mpy::vector_args args, S
     mpy::obj<Tensor> self = Tensor::create();
     self->capture_levels(levels);
     self->has_device_ = has_device;
-    self->delayed_ = std::make_unique<DelayedOperator>(op, args);
+    self->delayed_ = std::make_unique<DelayedOperator>(std::move(op), args);
     return self;
 }
 
@@ -1082,7 +1086,7 @@ PyObject* py_tree_flatten(PyObject *self,
 
 
 
-mpy::object tree_map(Arena& A, std::function<mpy::handle(mpy::handle)> fn, mpy::handle agg) {
+mpy::object tree_map(Arena& A, const std::function<mpy::handle(mpy::handle)>& fn, mpy::handle agg) {
     Slice<mpy::handle> elements;
     auto unflatten = tree_flatten(A, agg, elements);
     for (auto i : elements.enumerate()) {
@@ -1108,8 +1112,8 @@ int64_t _Tensor_ndim(mpy::handle h) {
 
 mpy::handle handle_from_tensor(Arena& A, TensorRef t) {
     // fast case: tensor is live in python
-    c10::optional<PyObject*> mb_obj =
-        t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
+    std::optional<PyObject*> mb_obj =
+        t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter(), /*ignore_hermetic_tls=*/false);
     if (mb_obj.has_value() && !t->unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
         return *mb_obj;
     }
@@ -1503,14 +1507,14 @@ struct PyInstDecoder {
     // On Windows, _PyOpcode_Caches and _PyOpcode_Deopt are private symbols
     // See https://github.com/pytorch/pytorch/issues/93854
     void next() {
-    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
+    #if IS_PYTHON_3_11_PLUS
         offset_ += _PyOpcode_Caches[opcode()];
     #endif
         offset_ += 1;
     }
     int opcode() {
         auto r = _Py_OPCODE(code_[offset_]);
-    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
+    #if IS_PYTHON_3_11_PLUS
         r = _PyOpcode_Deopt[r];
     #endif
         return r;
@@ -1625,16 +1629,6 @@ static PyObject* _dims(PyObject *self,
     PY_END(nullptr)
 }
 
-static int64_t dim_index(const std::vector<mpy::obj<Dim>>& dims, mpy::hdl<Dim> dim) {
-    for (int64_t i = 0, N  = dims.size(); i < N; ++i) {
-        if (dims[i].ptr() == dim.ptr()) {
-            return i;
-        }
-    }
-    return -1;
-}
-
-
 struct DotPart {
     Slice<DimEntry> dims;
     size_t total_size = 1;
@@ -1699,7 +1693,7 @@ static mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry>
     DotPart ro_dims;
     DotPart lr_dims;
 
-    auto insert_dim = [&] (mpy::hdl<Dim> d, at::optional<int> lhs_idx, at::optional<int> rhs_idx) {
+    auto insert_dim = [&] (mpy::hdl<Dim> d, std::optional<int> lhs_idx, std::optional<int> rhs_idx) {
         bool reduced = sum.contains(d);
         int64_t lhs_stride = lhs_idx ? lhs_strides[*lhs_idx] : 0;
         int64_t rhs_stride = rhs_idx ? rhs_strides[*rhs_idx] : 0;
@@ -1738,7 +1732,7 @@ static mpy::object dot(Arena& A, TensorInfo lhs, TensorInfo rhs, Slice<DimEntry>
             continue;
         }
         auto d = rhs.levels[i];
-        insert_dim(d.dim(), at::nullopt, i);
+        insert_dim(d.dim(), std::nullopt, i);
     }
 
     if (lr_dims.dims.size() != sum.size()) {
@@ -3179,7 +3173,7 @@ PyObject* _patch_tensor_class(PyObject * self_,
     PY_BEGIN
 
     auto torch = mpy::import("torch");
-    auto py_TensorBase = torch.attr("_C").attr("_TensorBase");
+    auto py_TensorBase = torch.attr("_C").attr("TensorBase");
     replaceMappingIfMatches(py_TensorBase);
 
     Py_RETURN_NONE;
@@ -3252,3 +3246,5 @@ PyObject* Dim_init() {
         return nullptr;
     }
 }
+
+#endif

@@ -1,7 +1,8 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <stdexcept>
+#include <chrono>
+#include <mutex>
 #include <vector>
 
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
@@ -33,6 +34,14 @@ enum class OpType : std::uint8_t {
   UNKNOWN = 100,
 };
 
+// TODO: support different types of failures/errors
+enum class WorkResult : std::uint8_t {
+  SUCCESS = 0,
+  TIMEOUT = 1,
+  COMM_ERROR = 2,
+  UNKNOWN = 100,
+};
+
 // Converts OpType to human readable string.
 TORCH_API std::string opTypeToString(OpType opType);
 
@@ -49,8 +58,8 @@ class TORCH_API Work : public torch::CustomClassHolder {
       int rank = -1,
       OpType opType = OpType::UNKNOWN,
       const char* profilingTitle = nullptr,
-      const c10::optional<std::vector<at::Tensor>>& inputTensors =
-          c10::nullopt);
+      const std::optional<std::vector<at::Tensor>>& inputTensors =
+          std::nullopt);
 
   ~Work() override;
 
@@ -107,7 +116,16 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // work. Only NCCL backend is currently supported.
   virtual c10::intrusive_ptr<c10::ivalue::Future> getFuture();
 
-  OpType retrieveOpType();
+  // Get a Future object that would be marked as either success or failure
+  // This API can be used by the user to track the completion of the work
+  // and hanlde the exception if any.
+  virtual c10::intrusive_ptr<c10::ivalue::Future> getFutureResult();
+
+  virtual float getDuration() const;
+
+  virtual uint64_t getSequencenumber() const;
+
+  OpType retrieveOpType() const;
 
   static c10::intrusive_ptr<Work> create_from_future(
       const c10::intrusive_ptr<c10::ivalue::Future>&);
@@ -135,6 +153,26 @@ class TORCH_API Work : public torch::CustomClassHolder {
   // When profiling, the callback to record end of operation event. This
   // callback needs to be called when collective operation is complete.
   std::function<void()> recordFunctionEndCallback_;
+};
+
+struct TORCH_API WorkInfo {
+  WorkInfo(
+      const OpType& opType,
+      const uint64_t seq,
+      const std::chrono::time_point<std::chrono::system_clock>& timeStarted,
+      const std::chrono::time_point<std::chrono::system_clock>& timeFinished,
+      const std::chrono::duration<float>& activeDuration)
+      : opType(opType),
+        seq(seq),
+        timeStarted(timeStarted),
+        timeFinished(timeFinished),
+        activeDuration(activeDuration) {}
+
+  OpType opType;
+  uint64_t seq;
+  std::chrono::time_point<std::chrono::system_clock> timeStarted;
+  std::chrono::time_point<std::chrono::system_clock> timeFinished;
+  std::chrono::duration<float> activeDuration;
 };
 
 } // namespace c10d

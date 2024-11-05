@@ -1,6 +1,9 @@
 #pragma once
+#include <cstddef>
 #include <memory>
+#include <utility>
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 
 namespace c10 {
@@ -66,7 +69,7 @@ class UniqueVoidPtr {
   std::unique_ptr<void, DeleterFnPtr>&& move_context() {
     return std::move(ctx_);
   }
-  C10_NODISCARD bool compare_exchange_deleter(
+  [[nodiscard]] bool compare_exchange_deleter(
       DeleterFnPtr expected_deleter,
       DeleterFnPtr new_deleter) {
     if (get_deleter() != expected_deleter)

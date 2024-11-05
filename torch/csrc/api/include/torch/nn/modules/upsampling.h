@@ -11,14 +11,13 @@
 #include <cstddef>
 #include <ostream>
 
-namespace torch {
-namespace nn {
+namespace torch::nn {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Upsample ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D
 /// (volumetric) data.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Upsample to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Upsample to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::UpsampleOptions` class to learn what
@@ -51,5 +50,4 @@ class TORCH_API UpsampleImpl : public Cloneable<UpsampleImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(Upsample);
 
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn

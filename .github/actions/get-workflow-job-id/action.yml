@@ -11,18 +11,20 @@ outputs:
   job-id:
     description: The retrieved workflow job id
     value: ${{ steps.get-job-id.outputs.job-id }}
+  job-name:
+    description: The retrieved workflow job name
+    value: ${{ steps.get-job-id.outputs.job-name }}
 
 runs:
   using: composite
   steps:
-    - name: Get jobid or fail
+    - name: Get job id and name or fail
       # timeout-minutes is unsupported for composite workflows, see https://github.com/actions/runner/issues/1979
       # timeout-minutes: 10
       shell: bash
       id: get-job-id
       run: |
         set -eux
-        GHA_WORKFLOW_JOB_ID=$(python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}")
-        echo "job-id=${GHA_WORKFLOW_JOB_ID}" >> "${GITHUB_OUTPUT}"
+        python3 .github/scripts/get_workflow_job_id.py "${GITHUB_RUN_ID}" "${RUNNER_NAME}"
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}

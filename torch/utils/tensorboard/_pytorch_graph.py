@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections import OrderedDict
 import contextlib
 from typing import Dict, Any
@@ -119,8 +120,7 @@ class NodePyOP(NodePy):
 
 
 class GraphPy:
-    """Helper class to convert torch.nn.Module to GraphDef proto and visualization
-    with TensorBoard.
+    """Helper class to convert torch.nn.Module to GraphDef proto and visualization with TensorBoard.
 
     GraphDef generation operates in two passes:
 
@@ -213,10 +213,7 @@ class GraphPy:
                 ]
 
     def to_proto(self):
-        """
-        Converts graph representation of GraphPy object to TensorBoard
-        required format.
-        """
+        """Convert graph representation of GraphPy object to TensorBoard required format."""
         # TODO: compute correct memory usage and CPU time once
         # PyTorch supports it
         nodes = []
@@ -234,9 +231,9 @@ class GraphPy:
 
 
 def parse(graph, trace, args=None, omit_useless_nodes=True):
-    """This method parses an optimized PyTorch model graph and produces
-    a list of nodes and node stats for eventual conversion to TensorBoard
-    protobuf format.
+    """Parse an optimized PyTorch model graph and produces a list of nodes and node stats.
+
+    Useful for eventual conversion to TensorBoard protobuf format.
 
     Args:
       graph (PyTorch module): The model graph to be parsed.
@@ -244,9 +241,6 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
       args (tuple): input tensor[s] for the model.
       omit_useless_nodes (boolean): Whether to remove nodes from the graph.
     """
-    n_inputs = len(args)
-
-    scope = {}
     nodes_py = GraphPy()
     for node in graph.inputs():
         if omit_useless_nodes:
@@ -267,7 +261,6 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
             if (
                 parent.kind() == GETATTR_KIND
             ):  # If the parent node is not the top-level "self" node
-                parent_attr_name = parent.s("name")
                 parent_attr_key = parent.output().debugName()
                 parent_scope = attr_to_scope[parent_attr_key]
                 attr_scope = parent_scope.split("/")[-1]
@@ -318,8 +311,7 @@ def parse(graph, trace, args=None, omit_useless_nodes=True):
 
 def graph(model, args, verbose=False, use_strict_trace=True):
     """
-    This method processes a PyTorch model and produces a `GraphDef` proto
-    that can be logged to TensorBoard.
+    Process a PyTorch model and produces a `GraphDef` proto that can be logged to TensorBoard.
 
     Args:
       model (PyTorch module): The model to be parsed.
@@ -363,7 +355,7 @@ def graph(model, args, verbose=False, use_strict_trace=True):
 
 @contextlib.contextmanager
 def _set_model_to_eval(model):
-    """A context manager to temporarily set the training mode of ``model`` to eval."""
+    """Context manager to temporarily set the training mode of ``model`` to eval."""
     if not isinstance(model, torch.jit.ScriptFunction):
         originally_training = model.training
         model.train(False)
@@ -380,6 +372,6 @@ def _set_model_to_eval(model):
 
 
 def _node_get(node: torch._C.Node, key: str):
-    """Gets attributes of a node which is polymorphic over return type."""
+    """Get attributes of a node which is polymorphic over return type."""
     sel = node.kindOf(key)
     return getattr(node, sel)(key)

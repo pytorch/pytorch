@@ -1,12 +1,9 @@
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 
 #include <unistd.h>
-#include <cerrno>
 #include <cstdint>
 
 #include <chrono>
-#include <cstdio>
-#include <system_error>
 
 #include <c10/util/Exception.h>
 
@@ -51,8 +48,7 @@ std::vector<uint8_t> HashStore::get(const std::string& key) {
     cv_.wait(lock, pred);
   } else {
     if (!cv_.wait_for(lock, timeout_, pred)) {
-      throw std::system_error(
-          ETIMEDOUT, std::system_category(), "Wait timeout");
+      C10_THROW_ERROR(DistStoreError, "Wait timeout");
     }
   }
   return map_[key];
@@ -78,8 +74,7 @@ void HashStore::wait(
     cv_.wait(lock, pred);
   } else {
     if (!cv_.wait_until(lock, end, pred)) {
-      throw std::system_error(
-          ETIMEDOUT, std::system_category(), "Wait timeout");
+      C10_THROW_ERROR(DistStoreError, "Wait timeout");
     }
   }
 }
@@ -102,7 +97,7 @@ int64_t HashStore::add(const std::string& key, int64_t i) {
 
 int64_t HashStore::getNumKeys() {
   std::unique_lock<std::mutex> lock(m_);
-  return map_.size();
+  return static_cast<int64_t>(map_.size());
 }
 
 bool HashStore::deleteKey(const std::string& key) {
@@ -151,8 +146,7 @@ std::vector<std::vector<uint8_t>> HashStore::multiGet(
         cv_.wait(lock, pred);
       } else {
         if (!cv_.wait_until(lock, deadline, pred)) {
-          throw std::system_error(
-              ETIMEDOUT, std::system_category(), "Wait timeout");
+          C10_THROW_ERROR(DistStoreError, "Wait timeout");
         }
       }
       res.emplace_back(map_[key]);

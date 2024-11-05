@@ -18,11 +18,12 @@ import sys
 import time
 
 import numpy as np
+import torchvision
+
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.optim as optim
-import torchvision
 
 
 def allgather_object(obj):
@@ -225,17 +226,17 @@ def main():
         print("-----------------------------------")
         print("PyTorch distributed benchmark suite")
         print("-----------------------------------")
-        print("")
+        print()
         print(f"* PyTorch version: {torch.__version__}")
         print(f"* CUDA version: {torch.version.cuda}")
         print(f"* Distributed backend: {args.distributed_backend}")
         print(f"* Maximum bucket size: {args.bucket_size}MB")
-        print("")
+        print()
         print("--- nvidia-smi topo -m ---")
-        print("")
+        print()
         print(output[0])
         print("--------------------------")
-        print("")
+        print()
 
     torch.cuda.set_device(dist.get_rank() % 8)
     device = torch.device("cuda:%d" % (dist.get_rank() % 8))

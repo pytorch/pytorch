@@ -1,5 +1,7 @@
+# mypy: allow-untyped-defs
 import _warnings
 import os.path
+
 
 # note: implementations
 # copied from cpython's import code
@@ -44,9 +46,7 @@ def _sanity_check(name, package, level):
         if not isinstance(package, str):
             raise TypeError("__package__ not set to a string")
         elif not package:
-            raise ImportError(
-                "attempted relative import with no known parent " "package"
-            )
+            raise ImportError("attempted relative import with no known parent package")
     if not name and level == 0:
         raise ValueError("Empty module name")
 

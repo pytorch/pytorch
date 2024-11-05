@@ -13,13 +13,13 @@ namespace at::native {
 // scope the MPS's internal methods to not expose them to at::native
 namespace mps {
 
-void addc_mul_div_out_mps(const Tensor& self,
-                          const Tensor& tensor1,
-                          const Tensor& tensor2,
-                          const Scalar& value_opt, // default value = 1.0
-                          const Tensor& output,
-                          const bool is_div,
-                          const string op_name) {
+static void addc_mul_div_out_mps(const Tensor& self,
+                                 const Tensor& tensor1,
+                                 const Tensor& tensor2,
+                                 const Scalar& value_opt, // default value = 1.0
+                                 const Tensor& output,
+                                 const bool is_div,
+                                 const string op_name) {
   if (value_opt.toDouble() == 0.0) {
     output.copy_(self);
     return;
@@ -38,6 +38,12 @@ void addc_mul_div_out_mps(const Tensor& self,
   };
 
   @autoreleasepool {
+    bool contiguousOutput = !needsGather(output);
+    Tensor output_ = output;
+    if (!contiguousOutput) {
+      output_ = at::empty_like(self, MemoryFormat::Contiguous);
+    }
+
     string key = op_name + getTensorsStringKey({self, tensor1, tensor2});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
@@ -75,7 +81,7 @@ void addc_mul_div_out_mps(const Tensor& self,
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor, self);
     Placeholder tensor1Placeholder = Placeholder(cachedGraph->firstTensor, tensor1);
     Placeholder tensor2Placeholder = Placeholder(cachedGraph->secondTensor, tensor2);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, !contiguousOutput ? output_ : output);
     MPSScalar value_scalar = getMPSScalar(value_opt, self.scalar_type());
 
     // Create dictionary of inputs and outputs
@@ -86,10 +92,11 @@ void addc_mul_div_out_mps(const Tensor& self,
       cachedGraph->valueTensor : getMPSGraphTensorFromScalar(mpsStream, value_scalar),
     };
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
+    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, outputPlaceholder);
 
-    runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
+    if (!contiguousOutput) {
+      output.copy_(output_);
+    }
   }
 }
 

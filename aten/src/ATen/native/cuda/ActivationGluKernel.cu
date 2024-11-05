@@ -68,7 +68,7 @@ void glu_jvp_kernel(TensorIteratorBase& iter) {
 template <typename T>
 __device__ T* byte_offset(T* ptr, int64_t offset) {
   using byte_ptr_t = typename std::
-      conditional<std::is_const<T>::value, const char*, char*>::type;
+      conditional_t<std::is_const_v<T>, const char*, char*>;
   return reinterpret_cast<T*>(reinterpret_cast<byte_ptr_t>(ptr) + offset);
 }
 
@@ -135,7 +135,7 @@ void launch_glu_backward_kernel(
       });
 }
 
-REGISTER_DISPATCH(glu_stub, &glu_kernel);
-REGISTER_DISPATCH(glu_jvp_stub, &glu_jvp_kernel);
+REGISTER_DISPATCH(glu_stub, &glu_kernel)
+REGISTER_DISPATCH(glu_jvp_stub, &glu_jvp_kernel)
 
 } // namespace at::native

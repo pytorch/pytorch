@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+
 # String representing the host platform (e.g. Linux, Darwin).
 HOST_PLATFORM = platform.system()
 HOST_PLATFORM_ARCH = platform.system() + "-" + platform.processor()
@@ -205,7 +206,7 @@ if __name__ == "__main__":
     # If the host platform is not in platform_to_hash, it is unsupported.
     if host_platform not in config:
         logging.error("Unsupported platform: %s/%s", HOST_PLATFORM, HOST_PLATFORM_ARCH)
-        exit(1)
+        sys.exit(1)
 
     url = config[host_platform]["download_url"]
     hash = config[host_platform]["hash"]

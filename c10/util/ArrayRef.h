@@ -15,13 +15,18 @@
 
 #pragma once
 
-#include <c10/util/C++17.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
 #include <iterator>
+#include <ostream>
+#include <type_traits>
 #include <vector>
 
 namespace c10 {
@@ -56,7 +61,7 @@ class ArrayRef final {
   void debugCheckNullptrInvariant() {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         Data != nullptr || Length == 0,
-        "created ArrayRef with nullptr and non-zero length! c10::optional relies on this being illegal");
+        "created ArrayRef with nullptr and non-zero length! std::optional relies on this being illegal");
   }
 
  public:
@@ -71,13 +76,13 @@ class ArrayRef final {
   constexpr ArrayRef(const T& OneElt) : Data(&OneElt), Length(1) {}
 
   /// Construct an ArrayRef from a pointer and length.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef(const T* data, size_t length)
+  constexpr ArrayRef(const T* data, size_t length)
       : Data(data), Length(length) {
     debugCheckNullptrInvariant();
   }
 
   /// Construct an ArrayRef from a range.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef(const T* begin, const T* end)
+  constexpr ArrayRef(const T* begin, const T* end)
       : Data(begin), Length(end - begin) {
     debugCheckNullptrInvariant();
   }
@@ -93,9 +98,9 @@ class ArrayRef final {
 
   template <
       typename Container,
-      typename = std::enable_if_t<std::is_same<
+      typename = std::enable_if_t<std::is_same_v<
           std::remove_const_t<decltype(std::declval<Container>().data())>,
-          T*>::value>>
+          T*>>>
   /* implicit */ ArrayRef(const Container& container)
       : Data(container.data()), Length(container.size()) {
     debugCheckNullptrInvariant();
@@ -109,7 +114,7 @@ class ArrayRef final {
   /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
       : Data(Vec.data()), Length(Vec.size()) {
     static_assert(
-        !std::is_same<T, bool>::value,
+        !std::is_same_v<T, bool>,
         "ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
   }
 
@@ -120,6 +125,7 @@ class ArrayRef final {
 
   /// Construct an ArrayRef from a C array.
   template <size_t N>
+  // NOLINTNEXTLINE(*c-arrays*)
   /* implicit */ constexpr ArrayRef(const T (&Arr)[N]) : Data(Arr), Length(N) {}
 
   /// Construct an ArrayRef from a std::initializer_list.
@@ -156,6 +162,11 @@ class ArrayRef final {
     return reverse_iterator(begin());
   }
 
+  /// Check if all elements in the array satisfy the given expression
+  constexpr bool allMatch(const std::function<bool(const T&)>& pred) const {
+    return std::all_of(cbegin(), cend(), pred);
+  }
+
   /// empty - Check if the array is empty.
   constexpr bool empty() const {
     return Length == 0;
@@ -171,14 +182,14 @@ class ArrayRef final {
   }
 
   /// front - Get the first element.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA const T& front() const {
+  constexpr const T& front() const {
     TORCH_CHECK(
         !empty(), "ArrayRef: attempted to access front() of empty list");
     return Data[0];
   }
 
   /// back - Get the last element.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA const T& back() const {
+  constexpr const T& back() const {
     TORCH_CHECK(!empty(), "ArrayRef: attempted to access back() of empty list");
     return Data[Length - 1];
   }
@@ -189,8 +200,7 @@ class ArrayRef final {
   }
 
   /// slice(n, m) - Take M elements of the array starting at element N
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef<T> slice(size_t N, size_t M)
-      const {
+  constexpr ArrayRef<T> slice(size_t N, size_t M) const {
     TORCH_CHECK(
         N + M <= size(),
         "ArrayRef: invalid slice, N = ",
@@ -203,7 +213,7 @@ class ArrayRef final {
   }
 
   /// slice(n) - Chop off the first N elements of the array.
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef<T> slice(size_t N) const {
+  constexpr ArrayRef<T> slice(size_t N) const {
     TORCH_CHECK(
         N <= size(), "ArrayRef: invalid slice, N = ", N, "; size = ", size());
     return slice(N, size() - N);
@@ -217,7 +227,7 @@ class ArrayRef final {
   }
 
   /// Vector compatibility
-  C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA const T& at(size_t Index) const {
+  constexpr const T& at(size_t Index) const {
     TORCH_CHECK(
         Index < Length,
         "ArrayRef: invalid index Index = ",
@@ -232,16 +242,17 @@ class ArrayRef final {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type&
-  operator=(U&& Temporary) = delete;
+  std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
+      // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
+      U&& Temporary) = delete;
 
   /// Disallow accidental assignment from a temporary.
   ///
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, ArrayRef<T>>::type&
-  operator=(std::initializer_list<U>) = delete;
+  std::enable_if_t<std::is_same_v<U, T>, ArrayRef<T>>& operator=(
+      std::initializer_list<U>) = delete;
 
   /// @}
   /// @name Expensive Operations
@@ -325,6 +336,7 @@ ArrayRef<T>& makeArrayRef(ArrayRef<T>& Vec) {
 
 /// Construct an ArrayRef from a C array.
 template <typename T, size_t N>
+// NOLINTNEXTLINE(*c-arrays*)
 ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
   return ArrayRef<T>(Arr);
 }

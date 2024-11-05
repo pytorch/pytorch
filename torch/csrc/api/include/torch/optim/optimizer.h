@@ -29,11 +29,15 @@ class InputArchive;
 } // namespace torch
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
-namespace torch {
-namespace optim {
+namespace torch::optim {
 
 class TORCH_API OptimizerParamState {
  public:
+  OptimizerParamState() = default;
+  OptimizerParamState(const OptimizerParamState&) = default;
+  OptimizerParamState& operator=(const OptimizerParamState&) = default;
+  OptimizerParamState(OptimizerParamState&&) noexcept = default;
+  OptimizerParamState& operator=(OptimizerParamState&&) noexcept = default;
   virtual std::unique_ptr<OptimizerParamState> clone() const;
   virtual void serialize(torch::serialize::InputArchive& archive);
   virtual void serialize(torch::serialize::OutputArchive& archive) const;
@@ -49,6 +53,11 @@ class OptimizerCloneableParamState : public OptimizerParamState {
 
 class TORCH_API OptimizerOptions {
  public:
+  OptimizerOptions() = default;
+  OptimizerOptions(const OptimizerOptions&) = default;
+  OptimizerOptions& operator=(const OptimizerOptions&) = default;
+  OptimizerOptions(OptimizerOptions&&) noexcept = default;
+  OptimizerOptions& operator=(OptimizerOptions&&) noexcept = default;
   virtual std::unique_ptr<OptimizerOptions> clone() const;
   virtual void serialize(torch::serialize::InputArchive& archive);
   virtual void serialize(torch::serialize::OutputArchive& archive) const;
@@ -83,6 +92,8 @@ class TORCH_API OptimizerParamGroup {
       std::unique_ptr<OptimizerOptions> options)
       : params_(std::move(params)), options_(std::move(options)) {}
 
+  OptimizerParamGroup& operator=(const OptimizerParamGroup& param_group) =
+      delete;
   bool has_options() const;
   OptimizerOptions& options();
   const OptimizerOptions& options() const;
@@ -103,7 +114,7 @@ class TORCH_API Optimizer {
   Optimizer(Optimizer&& optimizer) = default;
 
   explicit Optimizer(
-      std::vector<OptimizerParamGroup> param_groups,
+      const std::vector<OptimizerParamGroup>& param_groups,
       std::unique_ptr<OptimizerOptions> defaults)
       : defaults_(std::move(defaults)) {
     for (const auto& param_group : param_groups) {
@@ -117,7 +128,7 @@ class TORCH_API Optimizer {
       std::unique_ptr<OptimizerOptions> defaults)
       : Optimizer(
             {OptimizerParamGroup(std::move(parameters))},
-            std::move(defaults)){};
+            std::move(defaults)) {}
 
   /// Adds the given param_group to the optimizer's param_group list.
   void add_param_group(const OptimizerParamGroup& param_group);
@@ -156,12 +167,12 @@ class TORCH_API Optimizer {
   const std::vector<OptimizerParamGroup>& param_groups() const noexcept;
 
   /// Provides a reference to the state this optimizer holds
-  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
+  ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>&
   state() noexcept;
 
   /// Provides a const reference to the state this optimizer holds
-  const ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>>&
-  state() const noexcept;
+  const ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>>& state()
+      const noexcept;
 
   /// Serializes the optimizer state into the given `archive`.
   virtual void save(serialize::OutputArchive& archive) const;
@@ -171,27 +182,27 @@ class TORCH_API Optimizer {
 
  protected:
   std::vector<OptimizerParamGroup> param_groups_;
-  ska::flat_hash_map<std::string, std::unique_ptr<OptimizerParamState>> state_;
+  ska::flat_hash_map<void*, std::unique_ptr<OptimizerParamState>> state_;
   std::unique_ptr<OptimizerOptions> defaults_;
 };
 
 /* How do we decide whether to serialize undefined tensors or
-  c10::nullopt values into the output archive?
+  std::nullopt values into the output archive?
 Answer: we strictly follow the behavior of Python API. To be more specific:
 
 For optimizer options:
 a) For undefined tensor: currently no tensor is used as an options argument in
-Python API, so we don't need to worry about it now. b) For c10::nullopt value:
-we serialize c10::nullopt values into the output archive, to follow the exact
+Python API, so we don't need to worry about it now. b) For std::nullopt value:
+we serialize std::nullopt values into the output archive, to follow the exact
 same behavior as Python API.
 
 For optimizer param state:
 a) For undefined tensor: in param state, undefined tensor in C++ impl is
 equivalent to missing key in Python impl. Since we don't serialize missing keys
 in Python API, we skip undefined tensors when serializing the param state. b)
-For c10::nullopt value: in param state, c10::nullopt value in C++ impl is
+For std::nullopt value: in param state, std::nullopt value in C++ impl is
 equivalent to missing key in Python impl. Since we don't serialize missing keys
-in Python API, we skip c10::nullopt values when serializing the param state. */
+in Python API, we skip std::nullopt values when serializing the param state. */
 
 /// Serializes an `Optimizer` into an `OutputArchive`.
 TORCH_API serialize::OutputArchive& operator<<(
@@ -203,5 +214,4 @@ TORCH_API serialize::InputArchive& operator>>(
     serialize::InputArchive& archive,
     Optimizer& optimizer);
 
-} // namespace optim
-} // namespace torch
+} // namespace torch::optim

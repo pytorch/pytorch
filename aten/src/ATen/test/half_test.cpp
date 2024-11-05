@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/test/test_assert.h>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <sstream>
-#include <cmath>
 #include <type_traits>
-#include <ATen/test/test_assert.h>
 
 using namespace at;
 
@@ -86,11 +86,11 @@ TEST(TestHalf, HalfNumericLimits) {
 // Check the declared type of members of numeric_limits<Half> matches
 // the declared type of that member on numeric_limits<float>
 
-#define ASSERT_SAME_TYPE(name)                                \
-  static_assert(                                              \
-      std::is_same<                                           \
-          decltype(std::numeric_limits<Half>::name),          \
-          decltype(std::numeric_limits<float>::name)>::value, \
+#define ASSERT_SAME_TYPE(name)                         \
+  static_assert(                                       \
+      std::is_same_v<                                  \
+          decltype(std::numeric_limits<Half>::name),   \
+          decltype(std::numeric_limits<float>::name)>, \
       "decltype(" #name ") differs")
 
 ASSERT_SAME_TYPE(is_specialized);
@@ -118,7 +118,9 @@ ASSERT_SAME_TYPE(traps);
 ASSERT_SAME_TYPE(tinyness_before);
 
 TEST(TestHalf, CommonMath) {
+#ifndef NDEBUG
   float threshold = 0.00001;
+#endif
   assert(std::abs(std::lgamma(Half(10.0)) - std::lgamma(10.0f)) <= threshold);
   assert(std::abs(std::exp(Half(1.0)) - std::exp(1.0f)) <= threshold);
   assert(std::abs(std::log(Half(1.0)) - std::log(1.0f)) <= threshold);

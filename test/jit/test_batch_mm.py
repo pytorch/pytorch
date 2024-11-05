@@ -4,6 +4,7 @@ import torch
 from torch.testing import FileCheck
 from torch.testing._internal.jit_utils import JitTestCase
 
+
 if __name__ == "__main__":
     raise RuntimeError(
         "This test file is not meant to be run directly, use:\n\n"
@@ -55,7 +56,6 @@ class TestBatchMM(JitTestCase):
 
         actual = test_batch_mm_scripted(*tensors)
         self.assertEqual(expected, actual, atol=1e-9, rtol=1e-9)
-
 
     def test_batch_mm_permitted_mutation(self):
         def test_batch_mm(

@@ -189,13 +189,13 @@ void MPSProfiler::initialize() {
       currentSigint.sa_flags = SA_RESTART;
       sigfillset(&currentSigint.sa_mask);
       if (sigaction(SIGINT, &currentSigint, &previousSigint) == -1) {
-        AT_ERROR("Cannot install SIGINT handler for MPSProfiler.");
+        TORCH_CHECK(false, "Cannot install SIGINT handler for MPSProfiler.");
       }
     }
   }
 }
 
-void MPSProfiler::StartTrace(const string& mode, bool waitUntilCompleted) {
+void MPSProfiler::StartTrace(const std::string& mode, bool waitUntilCompleted) {
   TORCH_CHECK(m_profile_options == ProfileOptions::OPTIONS_NONE, "Tracing Signposts is already enabled ");
 
   std::stringstream ss(mode);
@@ -207,7 +207,7 @@ void MPSProfiler::StartTrace(const string& mode, bool waitUntilCompleted) {
       } else if (token == "event") {
         m_profile_options |= ProfileOptions::ALL_SIGNPOST_EVENTS;
       } else {
-        AT_ERROR("Invalid Signpost trace mode: ", token);
+        TORCH_CHECK(false, "Invalid Signpost trace mode: ", token);
       }
     }
   }
@@ -504,7 +504,7 @@ void MPSProfiler::logOperationsProfilingStats(std::FILE* f) const {
                opInfo->runCount,
                fmt::format("{:.3f}", opInfo->totalSchedulingTime / double(opInfo->runCount)),
                fmt::format("{:.3f}", opInfo->totalGpuTime / double(opInfo->runCount)),
-               fmt::format("{:.3f}", opInfo->totalGpuTime),
+               fmt::format("{:.3f}", opInfo->totalGpuTime.load()),
                opInfo->strKey);
   }
 }
@@ -556,7 +556,7 @@ void MPSProfiler::logCPUFallbackProfilingStats(std::FILE* f) const {
                cpuFbInfo->profileId,
                cpuFbInfo->runCount,
                fmt::format("{:.3f}", cpuFbInfo->totalSchedulingTime / double(cpuFbInfo->runCount)),
-               fmt::format("{:.3f}", cpuFbInfo->totalSchedulingTime),
+               fmt::format("{:.3f}", cpuFbInfo->totalSchedulingTime.load()),
                getIMPSAllocator()->formatSize(cpuFbInfo->totalCopyOverhead),
                cpuFbInfo->opName);
   }
@@ -607,8 +607,8 @@ void MPSProfiler::logCopyProfilingStats(std::FILE* f) const {
           copyStat.kindStr,
           copyStat.totalCount,
           getIMPSAllocator()->formatSize(copyStat.length),
-          fmt::format("{:.3f}", copyStat.totalSchedulingTime),
-          fmt::format("{:.3f}", copyStat.totalGpuTime),
+          fmt::format("{:.3f}", copyStat.totalSchedulingTime.load()),
+          fmt::format("{:.3f}", copyStat.totalGpuTime.load()),
           copyStat.scalarsCount,
           fmt::format("{:.2f} %",
                       copyStat.totalGpuTime > 0.0
@@ -654,7 +654,7 @@ bool MPSProfiler::isProfileInfoLoggingEnabled(BaseInfo::Type infoType, bool isEx
       isInfoLoggingEnabled = (m_log_options & LogOptions::CPU_FALLBACK_INFO);
       break;
     default:
-      AT_ERROR("invalid profiling info type");
+      TORCH_CHECK(false, "invalid profiling info type");
   }
   if (!isInfoLoggingEnabled) {
     return false;
@@ -685,7 +685,7 @@ void MPSProfiler::emitSignpostEvent(SignpostTypes signpost_type,
       os_signpost_event_emit(m_os_log_events, signpost_id, kEvtSignpostCPUFallbacksStr, "%s", msg);
       break;
     default:
-      AT_ERROR("unknown SignpostType in MPS profiler");
+      TORCH_CHECK(false, "unknown SignpostType in MPS profiler");
   }
 }
 
@@ -709,7 +709,7 @@ void MPSProfiler::beginSignpostInterval(SignpostTypes signpost_type,
       os_signpost_interval_begin(m_os_log_intervals, signpost_id, kIntSignpostCPUFallbacksStr, "%s", msg);
       break;
     default:
-      AT_ERROR("unknown SignpostType in MPS profiler");
+      TORCH_CHECK(false, "unknown SignpostType in MPS profiler");
   }
 }
 
@@ -728,7 +728,7 @@ void MPSProfiler::endSignpostInterval(SignpostTypes signpost_type, os_signpost_i
       os_signpost_interval_end(m_os_log_intervals, signpost_id, kIntSignpostCPUFallbacksStr);
       break;
     default:
-      AT_ERROR("unknown SignpostType in MPS profiler");
+      TORCH_CHECK(false, "unknown SignpostType in MPS profiler");
   }
 }
 
@@ -750,7 +750,7 @@ MPSProfiler::SignpostTypes MPSProfiler::getSignpostType(BaseInfo::Type infoType)
     case BaseInfo::Type::CPU_FALLBACK:
       return SignpostTypes::CPU_FALLBACK;
     default:
-      AT_ERROR("invalid profiling info type");
+      TORCH_CHECK(false, "invalid profiling info type");
   }
 }
 
@@ -764,6 +764,41 @@ void MPSProfiler::handleIntSignal(int signal) {
 // used to capture sigint signal to log profiling stats
 struct sigaction MPSProfiler::currentSigint {};
 struct sigaction MPSProfiler::previousSigint {};
+
+bool MPSProfiler::isCapturing() const {
+  return [captureManager isCapturing];
+}
+
+bool MPSProfiler::isCaptureEnabled() const {
+  if (captureManager == nil) {
+    captureManager = [MTLCaptureManager sharedCaptureManager];
+  }
+  static bool isEnabled = [this]() {
+    return [captureManager supportsDestination:MTLCaptureDestinationGPUTraceDocument];
+  }();
+  return isEnabled;
+}
+
+void MPSProfiler::startCapture(const std::string& name, MPSStream* stream) {
+  if (captureManager == nil) {
+    captureManager = [MTLCaptureManager sharedCaptureManager];
+  }
+  NSError* err = nil;
+  NSString* fname = [NSString stringWithFormat:@"%04d-%s.gputrace", captureCount++, name.c_str()];
+  MTLCaptureDescriptor* captureDescriptor = [MTLCaptureDescriptor new];
+  captureDescriptor.captureObject = stream ? (id)stream->commandQueue() : (id)MPSDevice::getInstance()->device();
+  captureDescriptor.destination = MTLCaptureDestinationGPUTraceDocument;
+  captureDescriptor.outputURL = [NSURL fileURLWithPath:fname];
+  auto rc = [captureManager startCaptureWithDescriptor:captureDescriptor error:&err];
+  TORCH_CHECK(rc, "Failed to start capture of ", [fname UTF8String], " error ", [[err description] UTF8String]);
+}
+
+void MPSProfiler::stopCapture(MPSStream* stream) {
+  if (stream) {
+    stream->synchronize(SyncType::COMMIT);
+  }
+  [captureManager stopCapture];
+}
 
 } // namespace Profiler
 

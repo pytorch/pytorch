@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import io
 import logging
@@ -8,11 +9,13 @@ import subprocess
 import sys
 import tempfile
 import traceback
+from typing import Optional
 from unittest.mock import patch
 
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+from torch._dynamo.trace_rules import _as_posix_path
 from torch.utils._traceback import report_compile_source_on_error
 
 
@@ -22,9 +25,9 @@ class MinifierTestResult:
     repro_code: str
 
     def _get_module(self, t):
-        r = re.search(r"class Repro\(torch\.nn\.Module\):\s+([ ].*\n| *\n)+", t).group(
-            0
-        )
+        match = re.search(r"class Repro\(torch\.nn\.Module\):\s+([ ].*\n| *\n)+", t)
+        assert match is not None, "failed to find module"
+        r = match.group(0)
         r = re.sub(r"\s+$", "\n", r, flags=re.MULTILINE)
         r = re.sub(r"\n{3,}", "\n\n", r)
         return r.strip()
@@ -42,12 +45,12 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._exit_stack.enter_context(
+        cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             torch._dynamo.config.patch(debug_dir_root=cls.DEBUG_DIR)
         )
         # These configurations make new process startup slower.  Disable them
         # for the minification tests to speed them up.
-        cls._exit_stack.enter_context(
+        cls._exit_stack.enter_context(  # type: ignore[attr-defined]
             torch._inductor.config.patch(
                 {
                     # https://github.com/pytorch/pytorch/issues/100376
@@ -66,7 +69,7 @@ class MinifierTestBase(torch._dynamo.test_case.TestCase):
             shutil.rmtree(cls.DEBUG_DIR)
         else:
             print(f"test_minifier_common tmpdir kept at: {cls.DEBUG_DIR}")
-        cls._exit_stack.close()
+        cls._exit_stack.close()  # type: ignore[attr-defined]
 
     def _gen_codegen_fn_patch_code(self, device, bug_type):
         assert bug_type in ("compile_error", "runtime_error", "accuracy")
@@ -97,16 +100,17 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
 
             # NB: Can't use save_config because that will omit some fields,
             # but we must save and reset ALL fields
-            dynamo_config = torch._dynamo.config._config.copy()
-            inductor_config = torch._inductor.config._config.copy()
+            dynamo_config = torch._dynamo.config.get_config_copy()
+            inductor_config = torch._inductor.config.get_config_copy()
             try:
                 stderr = io.StringIO()
                 log_handler = logging.StreamHandler(stderr)
                 log = logging.getLogger("torch._dynamo")
                 log.addHandler(log_handler)
                 try:
-                    prev_cwd = os.getcwd()
+                    prev_cwd = _as_posix_path(os.getcwd())
                     if cwd is not None:
+                        cwd = _as_posix_path(cwd)
                         os.chdir(cwd)
                     with patch("sys.argv", args), report_compile_source_on_error():
                         exec(code, {"__name__": "__main__", "__compile_source__": code})
@@ -117,13 +121,13 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 finally:
                     log.removeHandler(log_handler)
                     if cwd is not None:
-                        os.chdir(prev_cwd)
+                        os.chdir(prev_cwd)  # type: ignore[possibly-undefined]
                     # Make sure we don't leave buggy compiled frames lying
                     # around
                     torch._dynamo.reset()
             finally:
-                object.__setattr__(torch._dynamo.config, "_config", dynamo_config)
-                object.__setattr__(torch._inductor.config, "_config", inductor_config)
+                torch._dynamo.config.load_config(dynamo_config)
+                torch._inductor.config.load_config(inductor_config)
 
             # TODO: return a more appropriate data structure here
             return subprocess.CompletedProcess(
@@ -133,7 +137,9 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 stderr.getvalue().encode("utf-8"),
             )
         else:
-            return subprocess.run(args, capture_output=True, cwd=cwd)
+            if cwd is not None:
+                cwd = _as_posix_path(cwd)
+            return subprocess.run(args, capture_output=True, cwd=cwd, check=False)
 
     # Run `code` in a separate python process.
     # Returns the completed process state and the directory containing the
@@ -155,7 +161,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # Runs the minifier launcher script in `repro_dir`
     def _run_minifier_launcher(self, repro_dir, isolate, *, minifier_args=()):
         self.assertIsNotNone(repro_dir)
-        launch_file = os.path.join(repro_dir, "minifier_launcher.py")
+        launch_file = _as_posix_path(os.path.join(repro_dir, "minifier_launcher.py"))
         with open(launch_file) as f:
             launch_code = f.read()
         self.assertTrue(os.path.exists(launch_file))
@@ -174,7 +180,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # Runs the repro script in `repro_dir`
     def _run_repro(self, repro_dir, *, isolate=True):
         self.assertIsNotNone(repro_dir)
-        repro_file = os.path.join(repro_dir, "repro.py")
+        repro_file = _as_posix_path(os.path.join(repro_dir, "repro.py"))
         with open(repro_file) as f:
             repro_code = f.read()
         self.assertTrue(os.path.exists(repro_file))
@@ -194,11 +200,11 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
         return f"""\
 import torch
 import torch._dynamo
-{torch._dynamo.config.codegen_config()}
-{torch._inductor.config.codegen_config()}
+{_as_posix_path(torch._dynamo.config.codegen_config())}
+{_as_posix_path(torch._inductor.config.codegen_config())}
 torch._dynamo.config.repro_after = "{repro_after}"
 torch._dynamo.config.repro_level = {repro_level}
-torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
+torch._dynamo.config.debug_dir_root = "{_as_posix_path(self.DEBUG_DIR)}"
 {run_code}
 """
 
@@ -213,7 +219,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
     # crash the process
     def _run_full_test(
         self, run_code, repro_after, expected_error, *, isolate, minifier_args=()
-    ):
+    ) -> Optional[MinifierTestResult]:
         if isolate:
             repro_level = 3
         elif expected_error is None or expected_error == "AccuracyError":
@@ -227,7 +233,7 @@ torch._dynamo.config.debug_dir_root = "{self.DEBUG_DIR}"
             # Just check that there was no error
             self.assertEqual(test_proc.returncode, 0)
             self.assertIsNone(repro_dir)
-            return
+            return None
         # NB: Intentionally do not test return code; we only care about
         # actually generating the repro, we don't have to crash
         self.assertIn(expected_error, test_proc.stderr.decode("utf-8"))

@@ -3,25 +3,24 @@
 import sys
 
 import torch
-
 from torch.distributed._shard.sharded_tensor import (
     Shard,
-    ShardMetadata,
     ShardedTensor,
     ShardedTensorMetadata,
+    ShardMetadata,
 )
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
-
-from torch.testing._internal.common_utils import (
-    TestCase,
-    TEST_WITH_DEV_DBG_ASAN,
-    run_tests,
-)
-from torch.distributed.checkpoint.utils import find_state_dict_object
+from torch.distributed.c10d_logger import _c10d_logger
+from torch.distributed.checkpoint.logger import _dcp_logger
 from torch.distributed.checkpoint.metadata import MetadataIndex
-from torch.testing._internal.distributed.distributed_utils import (
-    with_fake_comms
+from torch.distributed.checkpoint.utils import find_state_dict_object
+from torch.testing._internal.common_utils import (
+    run_tests,
+    TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
 )
+from torch.testing._internal.distributed.distributed_utils import with_fake_comms
+
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -30,30 +29,32 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
+
 def create_sharded_tensor(rank, world_size, shards_per_rank):
     shards_metadata = []
     local_shards = []
     for idx in range(0, world_size * shards_per_rank):
         shard_rank = idx // shards_per_rank
-        shard_md = ShardMetadata(shard_offsets=[idx * 8], shard_sizes=[8], placement=f"rank:{shard_rank}/cpu")
+        shard_md = ShardMetadata(
+            shard_offsets=[idx * 8], shard_sizes=[8], placement=f"rank:{shard_rank}/cpu"
+        )
         shards_metadata.append(shard_md)
         if shard_rank == rank:
             shard = Shard.from_tensor_and_offsets(
                 torch.rand(*shard_md.shard_sizes),
                 shard_offsets=shard_md.shard_offsets,
-                rank=rank
+                rank=rank,
             )
             local_shards.append(shard)
 
     sharded_tensor_md = ShardedTensorMetadata(
         shards_metadata=shards_metadata,
         size=torch.Size([8 * len(shards_metadata)]),
-        tensor_properties=TensorProperties.create_from_tensor(torch.zeros(1))
+        tensor_properties=TensorProperties.create_from_tensor(torch.zeros(1)),
     )
 
     return ShardedTensor._init_from_local_shards_and_global_metadata(
-        local_shards=local_shards,
-        sharded_tensor_metadata=sharded_tensor_md
+        local_shards=local_shards, sharded_tensor_metadata=sharded_tensor_md
     )
 
 
@@ -121,6 +122,10 @@ class TestMedatadaIndex(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Could not find shard"):
             find_state_dict_object(state_dict, MetadataIndex("st", [1]))
+
+    def test_dcp_logger(self):
+        self.assertTrue(_c10d_logger is not _dcp_logger)
+        self.assertEqual(1, len(_c10d_logger.handlers))
 
 
 if __name__ == "__main__":

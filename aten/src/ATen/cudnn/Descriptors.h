@@ -18,7 +18,11 @@
 #include <ATen/ops/empty.h>
 #endif
 
-namespace at { namespace native {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8907
+#define USE_CUDNN_RNN_V8_API
+#endif
+
+namespace at::native {
 
 std::string cudnnTypeToString(cudnnDataType_t dtype);
 
@@ -27,9 +31,7 @@ std::string cudnnTypeToString(cudnnDataType_t dtype);
 inline int dataSize(cudnnDataType_t dataType)
 {
   switch (dataType) {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8200
     case CUDNN_DATA_BFLOAT16:
-#endif
     case CUDNN_DATA_HALF: return 2;
     case CUDNN_DATA_FLOAT: return 4;
     default: return 8;
@@ -90,6 +92,7 @@ struct DescriptorDeleter {
 // initialized the first time you call set() or any other initializing
 // function.
 template <typename T, cudnnStatus_t (*ctor)(T**), cudnnStatus_t (*dtor)(T*)>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_CUDA_CPP_API Descriptor {
  public:
   // TODO: Figure out why const-correctness doesn't work here
@@ -109,13 +112,25 @@ class TORCH_CUDA_CPP_API Descriptor {
 protected:
   void init() {
     if (desc_ == nullptr) {
-      T* raw_desc;
+      T* raw_desc = nullptr;
       AT_CUDNN_CHECK(ctor(&raw_desc));
       desc_.reset(raw_desc);
     }
   }
 private:
   std::unique_ptr<T, DescriptorDeleter<T, dtor>> desc_;
+};
+
+class TORCH_CUDA_CPP_API RNNDataDescriptor : public Descriptor<
+                                       cudnnRNNDataStruct,
+                                       &cudnnCreateRNNDataDescriptor,
+                                       &cudnnDestroyRNNDataDescriptor> {
+public:
+  void set(const at::Tensor &t, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray);
+private:
+  void set(cudnnDataType_t dataType, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray) {
+    AT_CUDNN_CHECK(cudnnSetRNNDataDescriptor(mut_desc(), dataType, layout, maxSeqLength, batchSize, vectorSize, seqLengthArray, nullptr));
+  }
 };
 
 class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
@@ -151,8 +166,9 @@ private:
   void set(cudnnDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
 
   void set(cudnnDataType_t dataType, int dim, int* size, int* stride, bool nhwc) {
-    fixSizeOneDimStride<int>(dim, size, stride, nhwc);
-    AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, stride));
+    std::vector<int> strides_copy(stride, stride + dim);
+    fixSizeOneDimStride<int>(dim, size, strides_copy.data(), nhwc);
+    AT_CUDNN_CHECK(cudnnSetTensorNdDescriptor(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
 
@@ -194,9 +210,7 @@ struct TORCH_CUDA_CPP_API ConvolutionDescriptor
     if(dataType == CUDNN_DATA_HALF) {
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_TENSOR_OP_MATH));
     } else if (dataType == CUDNN_DATA_FLOAT && !allow_tf32) {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_FMA_MATH));
-#endif
     }
   }
 };
@@ -211,6 +225,7 @@ struct TORCH_CUDA_CPP_API SpatialTransformerDescriptor
   }
 };
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_CUDA_CPP_API DropoutDescriptor
     : public Descriptor<
           cudnnDropoutStruct,
@@ -222,7 +237,7 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
   // WARNING: This function is very expensive, avoid calling this function!
   void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed, const TensorOptions& options) {
     TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
-    size_t state_size;
+    size_t state_size = 0;
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
     AT_ASSERT(options.device().type() == kCUDA);
     AT_ASSERT(options.dtype() == kByte);
@@ -231,9 +246,8 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
   }
 
   // Restore a dropout descriptor given a dropout probability and existing RNG state.
-  void set(cudnnHandle_t handle, float dropout, at::Tensor state_) {
+  void set(cudnnHandle_t handle, float dropout, const at::Tensor& state) {
     TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
-    state = state_;
     void *state_ptr = state.data_ptr();
     size_t state_size = state.size(0);
     // NB: The seed doesn't actually matter, so we give a dummy value
@@ -255,11 +269,16 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
                                              &cudnnCreateRNNDescriptor,
                                              &cudnnDestroyRNNDescriptor> {
   DropoutDescriptor dropout_desc_;
-  void set(cudnnHandle_t handle, int hidden_size, int proj_size, int num_layers, DropoutDescriptor&& dropout_desc,
+  void set(cudnnHandle_t handle,
+#ifdef USE_CUDNN_RNN_V8_API
+       int input_size,
+       bool packed,
+#endif
+       int hidden_size, int proj_size, int num_layers, DropoutDescriptor&& dropout_desc,
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
            cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo, bool allow_tf32) {
     dropout_desc_ = std::move(dropout_desc);
-
+#ifndef USE_CUDNN_RNN_V8_API
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
           mut_desc(),
@@ -283,17 +302,42 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
       if (input_type == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
       }
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
       else if (input_type == CUDNN_DATA_FLOAT && !allow_tf32) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_FMA_MATH);
       }
-#endif
       else {
         // Technically, as the default it's not necessary to explicitly
         // set this.
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_DEFAULT_MATH);
       }
     }
+#else
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    auto math_type = CUDNN_DEFAULT_MATH;
+    if (prop->major >= 7) {
+      if (input_type == CUDNN_DATA_HALF) {
+        math_type = CUDNN_TENSOR_OP_MATH;
+      } else if (!allow_tf32) {
+        math_type = CUDNN_FMA_MATH;
+      }
+    }
+    AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v8(
+          mut_desc(),
+          algo,
+          mode,
+          CUDNN_RNN_DOUBLE_BIAS,
+          bidirectional,
+          input_mode,
+          input_type,
+          datatype,
+          math_type,
+          input_size,
+          hidden_size,
+          proj_size ? proj_size : hidden_size,
+          num_layers,
+          dropout_desc_.desc(),
+          packed ? CUDNN_RNN_PADDED_IO_DISABLED : CUDNN_RNN_PADDED_IO_ENABLED));
+#endif
   }
 };
 
@@ -305,7 +349,6 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
   void set(cudnnDataType_t datatype) {
     AT_CUDNN_CHECK(cudnnSetCTCLossDescriptor(mut_desc(), datatype));
   }
-#if CUDNN_VERSION >= 7600
   void setEx(
       cudnnDataType_t datatype,
       cudnnLossNormalizationMode_t normMode,
@@ -313,7 +356,24 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
     AT_CUDNN_CHECK(
         cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
   }
+  void set_v8_v9(
+      cudnnDataType_t datatype,
+      cudnnLossNormalizationMode_t normMode,
+      cudnnNanPropagation_t gradMode,
+      int maxLabelLength) {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 90000
+    auto gradModev9 = CUDNN_CTC_ZERO_OOB_GRADIENTS;
+    if (gradMode == cudnnNanPropagation_t::CUDNN_PROPAGATE_NAN) {
+      gradModev9 = CUDNN_CTC_SKIP_OOB_GRADIENTS;
+    }
+    AT_CUDNN_CHECK(
+        cudnnSetCTCLossDescriptor_v9(mut_desc(), datatype, normMode, gradModev9, maxLabelLength));
+#else
+    AT_CUDNN_CHECK(
+        cudnnSetCTCLossDescriptor_v8(mut_desc(), datatype, normMode, gradMode, maxLabelLength));
 #endif
+  }
+
 };
 
 struct TORCH_CUDA_CPP_API ActivationDescriptor
@@ -346,4 +406,4 @@ union Constant
   }
 };
 
-}}  // namespace
+} // namespace

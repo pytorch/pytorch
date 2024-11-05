@@ -7,17 +7,14 @@
 
 namespace {
 float float_from_bytes(uint32_t sign, uint32_t exponent, uint32_t fraction) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  uint32_t bytes;
-  bytes = 0;
+  uint32_t bytes = 0;
   bytes |= sign;
   bytes <<= 8;
   bytes |= exponent;
   bytes <<= 23;
   bytes |= fraction;
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float res;
+  float res = 0;
   std::memcpy(&res, &bytes, sizeof(res));
   return res;
 }
@@ -41,7 +38,7 @@ TEST(BFloat16Conversion, FloatToBFloat16AndBack) {
 
     // The relative error should be less than 1/(2^7) since BFloat16
     // has 7 bits mantissa.
-    EXPECT_LE(fabs(out[i] - in[i]) / in[i], 1.0 / 128);
+    EXPECT_LE(std::fabs(out[i] - in[i]) / in[i], 1.0 / 128);
   }
 }
 
@@ -64,7 +61,7 @@ TEST(BFloat16Conversion, FloatToBFloat16RNEAndBack) {
 
     // The relative error should be less than 1/(2^7) since BFloat16
     // has 7 bits mantissa.
-    EXPECT_LE(fabs(out[i] - in[i]) / in[i], 1.0 / 128);
+    EXPECT_LE(std::fabs(out[i] - in[i]) / in[i], 1.0 / 128);
   }
 }
 
@@ -160,8 +157,7 @@ TEST(BFloat16Math, NextAfterZero) {
 }
 
 float BinaryToFloat(uint32_t bytes) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  float res;
+  float res = 0;
   std::memcpy(&res, &bytes, sizeof(res));
   return res;
 }
@@ -181,7 +177,7 @@ TEST_P(BFloat16Test, BFloat16RNETest) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    BFloat16Test_Instantiation,
+    BFloat16TestInstantiation,
     BFloat16Test,
     ::testing::Values(
         BFloat16TestParam{0x3F848000, 0x3F84},

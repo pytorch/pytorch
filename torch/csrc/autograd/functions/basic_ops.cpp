@@ -10,11 +10,21 @@
 #include <memory>
 #include <utility>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 auto Error::apply(variable_list&& inputs) -> variable_list {
   throw std::runtime_error(msg);
+}
+
+void Error::compiled_args(CompiledNodeArgs& args) {
+  // throw the error durring collect, the graph won't get compiled
+  apply(variable_list());
+}
+
+variable_list Error::apply_with_saved(
+    const variable_list& inputs,
+    SwapSavedVariables& saved) {
+  TORCH_INTERNAL_ASSERT(false, "unreachable");
 }
 
 auto DelayedError::apply(variable_list&& inputs) -> variable_list {
@@ -56,7 +66,6 @@ auto Identity::apply(variable_list&& grads) -> variable_list {
   return std::move(grads);
 }
 
-#ifdef TORCH_COMPILED_AUTOGRAD
 void GraphRoot::compiled_args(CompiledNodeArgs& args) {
   args.collect(outputs);
 }
@@ -68,7 +77,5 @@ variable_list GraphRoot::apply_with_saved(
   saved.after(outputs);
   return result;
 }
-#endif
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

@@ -1,4 +1,7 @@
 """Key enums and structs used to handle data flow within the benchmark."""
+
+# mypy: ignore-errors
+
 import dataclasses
 import enum
 import itertools as it
@@ -7,6 +10,7 @@ import textwrap
 from typing import Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 from worker.main import WorkerTimerArgs
+
 
 if TYPE_CHECKING:
     # Benchmark utils are only partially strict compliant, so MyPy won't follow
@@ -401,7 +405,7 @@ class GroupedBenchmark:
 
         # NB:
         #   In python we invoke __call__, however C++ doesn't have an analogous
-        #   method so we invoke `forward` instead. This means that that Python
+        #   method so we invoke `forward` instead. This means that Python
         #   is doing extra work (e.g. checking hooks) compared to C++; however
         #   because this is the default user experience that's acceptable.
         py_invocation = f"{py_prefix}{model_name}({', '.join(signature_args)})"

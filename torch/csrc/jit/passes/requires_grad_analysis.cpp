@@ -2,15 +2,12 @@
 
 #include <ATen/core/jit_type.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/operator.h>
 
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 
@@ -158,5 +155,4 @@ void PropagateRequiresGrad(Block* block) {
 void PropagateRequiresGrad(std::shared_ptr<Graph>& graph) {
   PropagateRequiresGrad(graph->block());
 }
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

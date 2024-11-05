@@ -10,12 +10,8 @@ import parameterized
 import PIL
 import pytorch_test_common
 import test_models
-
-import torch
 import torchvision
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
-from torch import nn
-from torch.testing._internal import common_utils
 from torchvision import ops
 from torchvision.models.detection import (
     faster_rcnn,
@@ -26,6 +22,10 @@ from torchvision.models.detection import (
     rpn,
     transform,
 )
+
+import torch
+from torch import nn
+from torch.testing._internal import common_utils
 
 
 def exportTest(
@@ -175,9 +175,7 @@ def _init_test_roi_heads_faster_rcnn():
 
     resolution = box_roi_pool.output_size[0]
     representation_size = 1024
-    box_head = faster_rcnn.TwoMLPHead(
-        out_channels * resolution**2, representation_size
-    )
+    box_head = faster_rcnn.TwoMLPHead(out_channels * resolution**2, representation_size)
 
     representation_size = 1024
     box_predictor = faster_rcnn.FastRCNNPredictor(representation_size, num_classes)
@@ -347,7 +345,7 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipScriptTest()
     def test_roi_heads(self):
         class RoIHeadsModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.transform = _init_test_generalized_rcnn_transform()
                 self.rpn = _init_test_rpn()
@@ -420,7 +418,7 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()
     def test_shufflenet_v2_dynamic_axes(self):
-        model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
+        model = torchvision.models.shufflenet_v2_x0_5(weights=None)
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
         test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
         self.run_test(

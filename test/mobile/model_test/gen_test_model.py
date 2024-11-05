@@ -1,53 +1,52 @@
 import io
 import sys
-import torch
+
 import yaml
 from android_api_module import AndroidAPIModule
-from builtin_ops import (
-    TSBuiltinOpsModule,
-    TSCollectionOpsModule,
-)
+from builtin_ops import TSBuiltinOpsModule, TSCollectionOpsModule
 from math_ops import (
-    PointwiseOpsModule,
-    ReductionOpsModule,
+    BlasLapackOpsModule,
     ComparisonOpsModule,
     OtherMathOpsModule,
+    PointwiseOpsModule,
+    ReductionOpsModule,
     SpectralOpsModule,
-    BlasLapackOpsModule,
 )
 from nn_ops import (
-    NNConvolutionModule,
-    NNPoolingModule,
-    NNPaddingModule,
-    NNNormalizationModule,
     NNActivationModule,
-    NNRecurrentModule,
-    NNTransformerModule,
-    NNLinearModule,
-    NNDropoutModule,
-    NNSparseModule,
+    NNConvolutionModule,
     NNDistanceModule,
+    NNDropoutModule,
+    NNLinearModule,
     NNLossFunctionModule,
-    NNVisionModule,
+    NNNormalizationModule,
+    NNPaddingModule,
+    NNPoolingModule,
+    NNRecurrentModule,
     NNShuffleModule,
+    NNSparseModule,
+    NNTransformerModule,
     NNUtilsModule,
+    NNVisionModule,
 )
-from quantization_ops import (
-    GeneralQuantModule,
-    # DynamicQuantModule,
-    StaticQuantModule,
-    FusedQuantModule,
-)
+from quantization_ops import FusedQuantModule, GeneralQuantModule, StaticQuantModule
 from sampling_ops import SamplingOpsModule
 from tensor_ops import (
-    TensorOpsModule,
     TensorCreationOpsModule,
     TensorIndexingOpsModule,
+    TensorOpsModule,
     TensorTypingOpsModule,
     TensorViewOpsModule,
 )
+from torchvision_models import (
+    MobileNetV2Module,
+    MobileNetV2VulkanModule,
+    Resnet18Module,
+)
+
+import torch
 from torch.jit.mobile import _load_for_lite_interpreter
-from torchvision_models import MobileNetV2Module
+
 
 test_path_ios = "ios/TestApp/models/"
 test_path_android = "android/pytorch_android/src/androidTest/assets/"
@@ -98,6 +97,8 @@ all_modules = {
     "torchscript_collection_ops": TSCollectionOpsModule(),
     # vision
     "mobilenet_v2": MobileNetV2Module(),
+    "mobilenet_v2_vulkan": MobileNetV2VulkanModule(),
+    "resnet18": Resnet18Module(),
     # android api module
     "android_api_module": AndroidAPIModule(),
 }
@@ -119,15 +120,23 @@ def calcOpsCoverage(ops):
 
     # weighted coverage (take op occurances into account)
     total_occurances = sum(production_ops_dict["root_operators"].values())
-    covered_ops_dict = {op: production_ops_dict["root_operators"][op] for op in covered_ops}
-    uncovered_ops_dict = {op: production_ops_dict["root_operators"][op] for op in uncovered_ops}
+    covered_ops_dict = {
+        op: production_ops_dict["root_operators"][op] for op in covered_ops
+    }
+    uncovered_ops_dict = {
+        op: production_ops_dict["root_operators"][op] for op in uncovered_ops
+    }
     covered_occurances = sum(covered_ops_dict.values())
     occurances_coverage = round(100 * covered_occurances / total_occurances, 2)
 
     print(f"\n{len(uncovered_ops)} uncovered ops: {uncovered_ops}\n")
     print(f"Generated {len(all_generated_ops)} ops")
-    print(f"Covered {len(covered_ops)}/{len(production_ops)} ({coverage}%) production ops")
-    print(f"Covered {covered_occurances}/{total_occurances} ({occurances_coverage}%) occurances")
+    print(
+        f"Covered {len(covered_ops)}/{len(production_ops)} ({coverage}%) production ops"
+    )
+    print(
+        f"Covered {covered_occurances}/{total_occurances} ({occurances_coverage}%) occurances"
+    )
     print(f"pytorch ver {torch.__version__}\n")
 
     with open(coverage_out_path, "w") as f:

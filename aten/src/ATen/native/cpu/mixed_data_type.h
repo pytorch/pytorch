@@ -2,7 +2,7 @@
 
 #include <ATen/core/Tensor.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 inline ScalarType first_type() {
   return ScalarType::Undefined;
@@ -21,9 +21,9 @@ inline bool is_mixed_type(const Tensor& input, const Args&... parameters) {
 }
 
 // currently on CPU, mixed data type is only supported
-// when input is 'BFloat16' and parameters are 'Float'
+// when input is 'BFloat16' or 'Half' and parameters are 'Float'
 inline void check_mixed_data_type(const Tensor& input) {
-  TORCH_CHECK(input.scalar_type() == ScalarType::BFloat16,
+  TORCH_CHECK(at::isReducedFloatingType(input.scalar_type()),
       "mixed dtype (CPU): all inputs must share same datatype.");
 }
 
@@ -38,4 +38,4 @@ inline ScalarType param_scalar_type(const Tensor& t, bool is_mixed_type) {
   return is_mixed_type ? ScalarType::Float : t.scalar_type();
 }
 
-}}  // namespace at::native
+} // namespace at::native

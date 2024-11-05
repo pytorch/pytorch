@@ -38,9 +38,10 @@ TypePtr ScriptTypeParser::subscriptToType(
       // here. See https://docs.python.org/3/library/typing.html#typing.Tuple
       auto tup_literal = TupleLiteral(subscript.subscript_exprs()[0]);
       if (!tup_literal.inputs().empty()) {
-        throw ErrorReport(tup_literal.range())
+        throw(
+            ErrorReport(tup_literal.range())
             << "Tuple literal in Tuple type annotation must not "
-            << "have any elements!";
+            << "have any elements!");
       }
       return TupleType::create({});
     }
@@ -118,7 +119,7 @@ TypePtr ScriptTypeParser::subscriptToType(
   }
 }
 
-c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
+std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
     const Expr& expr) const {
   // Alias torch.nn._common_types._size_?_t to BroadcastingList?[int]
   if (expr.kind() == TK_VAR) {
@@ -137,10 +138,10 @@ c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   }
 
   if (expr.kind() != TK_SUBSCRIPT)
-    return c10::nullopt;
+    return std::nullopt;
   auto subscript = Subscript(expr);
   if (subscript.value().kind() != TK_VAR)
-    return c10::nullopt;
+    return std::nullopt;
   auto var = Var(subscript.value());
   auto subscript_exprs = subscript.subscript_exprs();
 
@@ -151,10 +152,10 @@ c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
       TypePtr opt_type = OptionalType::create(broadcast_list->first);
       return std::pair<TypePtr, int32_t>(opt_type, broadcast_list->second);
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   } else if (var.name().name().find("BroadcastingList") != 0) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   if (subscript_exprs.size() != 1)
@@ -179,19 +180,19 @@ c10::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   TypePtr list_ptr = ListType::create(elem_ptr->second);
 
   const char* len_c = len.c_str();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  char* end;
+  char* end = nullptr;
   size_t len_v = strtoull(len_c, &end, 10);
   if (end != len_c + len.size()) {
-    throw ErrorReport(subscript.subscript_exprs().range())
-        << "subscript of Broadcastable list must be a positive integer";
+    throw(
+        ErrorReport(subscript.subscript_exprs().range())
+        << "subscript of Broadcastable list must be a positive integer");
   }
   return std::pair<TypePtr, int32_t>(list_ptr, len_v);
 }
 
 // gets the base type name given namespaces where the types live
 // turns torch.Tensor -> Tensor, X -> X
-c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
+std::optional<std::string> ScriptTypeParser::parseBaseTypeName(
     const Expr& expr) const {
   switch (expr.kind()) {
     case TK_VAR: {
@@ -226,13 +227,17 @@ c10::optional<std::string> ScriptTypeParser::parseBaseTypeName(
       }
     } break;
   }
-  return at::nullopt;
+  return std::nullopt;
 }
 
 TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
   // the resolver needs to recursively resolve the expression, so to avoid
   // resolving all type expr subtrees we only use it for the top level
   // expression and base type names.
+  if (expr.kind() == '|') {
+    auto converted = pep604union_to_union(expr);
+    return parseTypeFromExpr(converted);
+  }
   if (resolver_) {
     if (auto typePtr =
             resolver_->resolveType(expr.range().text().str(), expr.range())) {
@@ -243,6 +248,10 @@ TypePtr ScriptTypeParser::parseTypeFromExpr(const Expr& expr) const {
 }
 
 TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
+  if (expr.kind() == '|') {
+    auto converted = pep604union_to_union(expr);
+    return parseTypeFromExprImpl(converted);
+  }
   if (expr.kind() == TK_SUBSCRIPT) {
     auto subscript = Subscript(expr);
     auto value_name = parseBaseTypeName(subscript.value());
@@ -344,7 +353,7 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
 
   CompilationUnit cu;
   cu.define(
-      c10::nullopt,
+      std::nullopt,
       /*properties=*/{},
       /*propResolvers=*/{},
       {def},
@@ -354,7 +363,16 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   // XXX: We need to turn optimization off here because otherwise we try to
   // recursively initialize stuff in DecomposeOps.
   GraphOptimizerEnabledGuard guard(false);
-  cu.get_function(def.name().name()).run(stack);
+  auto& f = cu.get_function(def.name().name());
+  auto* gf = dynamic_cast<GraphFunction*>(&f);
+  TORCH_INTERNAL_ASSERT(gf);
+  // 2024.08.14: Since we are starting to deprecate Torchscript usages,
+  // we are going to log all the calls for GraphFunction::run. The logging was
+  // noisy we also call GraphFunction::run for the default value evaluation
+  // which generates a lot of useless log samples. Therefore as a workaround we
+  // just directly use the executor API which avoids this placing producing
+  // un-necessary log entries.
+  gf->get_executor().run(stack);
   return stack.at(0).toTupleRef().elements().vec();
 }
 
@@ -399,7 +417,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
     auto decl_arg = *it;
 
     TypePtr type;
-    c10::optional<int32_t> N = c10::nullopt;
+    std::optional<int32_t> N = std::nullopt;
     if (!decl_arg.type().present()) {
       // If this param doesn't have a type, default to "tensor"
       type = TensorType::getInferred();
@@ -413,7 +431,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
         type = parseTypeFromExpr(decl_arg.type().get());
       }
     }
-    c10::optional<IValue> default_value = c10::nullopt;
+    std::optional<IValue> default_value = std::nullopt;
     if (decl_arg.defaultValue().present()) {
       default_value = *defaults_it++;
     }
@@ -423,7 +441,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
         N,
         default_value,
         decl_arg.kwarg_only(),
-        /*alias_info=*/c10::nullopt);
+        /*alias_info=*/std::nullopt);
     retval.push_back(arg);
   }
   return retval;
@@ -447,8 +465,8 @@ std::vector<Argument> ScriptTypeParser::parseReturnFromDecl(const Decl& decl) {
   return {Argument(
       "",
       parsed_type,
-      /*N =*/c10::nullopt,
-      /*default_value =*/c10::nullopt,
+      /*N =*/std::nullopt,
+      /*default_value =*/std::nullopt,
       /*kwarg_only =*/false)};
 }
 FunctionSchema ScriptTypeParser::parseSchemaFromDef(

@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <initializer_list>
 
 #include <c10/core/impl/FakeGuardImpl.h>
 #include <c10/core/impl/InlineDeviceGuard.h>
@@ -18,7 +19,7 @@ static Device dev(DeviceIndex index) {
 using TestGuard = InlineDeviceGuard<TestGuardImpl>;
 
 TEST(InlineDeviceGuard, Constructor) {
-  for (DeviceIndex i : {-1, 0, 1}) {
+  for (DeviceIndex i : std::initializer_list<DeviceIndex>{-1, 0, 1}) {
     DeviceIndex init_i = 0;
     TestGuardImpl::setDeviceIndex(init_i);
     auto test_body = [&](TestGuard& g) -> void {
@@ -43,7 +44,7 @@ TEST(InlineDeviceGuard, Constructor) {
     /*
     {
       // Optional constructor
-      TestGuard g(make_optional(dev(i)));
+      TestGuard g(std::make_optional(dev(i)));
       test_body(g);
     }
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), init_i);
@@ -60,9 +61,9 @@ TEST(InlineDeviceGuard, ConstructorError) {
 TEST(InlineDeviceGuard, SetDevice) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
-  DeviceIndex i = init_i + 1;
+  DeviceIndex i = 1;
   TestGuard g(i);
-  DeviceIndex i2 = init_i + 2;
+  DeviceIndex i2 = 2;
   g.set_device(dev(i2));
   ASSERT_EQ(g.original_device(), dev(init_i));
   ASSERT_EQ(g.current_device(), dev(i2));
@@ -76,9 +77,9 @@ TEST(InlineDeviceGuard, SetDevice) {
 TEST(InlineDeviceGuard, ResetDevice) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
-  DeviceIndex i = init_i + 1;
+  DeviceIndex i = 1;
   TestGuard g(i);
-  DeviceIndex i2 = init_i + 2;
+  DeviceIndex i2 = 2;
   g.reset_device(dev(i2));
   ASSERT_EQ(g.original_device(), dev(init_i));
   ASSERT_EQ(g.current_device(), dev(i2));
@@ -92,9 +93,9 @@ TEST(InlineDeviceGuard, ResetDevice) {
 TEST(InlineDeviceGuard, SetIndex) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
-  DeviceIndex i = init_i + 1;
+  DeviceIndex i = 1;
   TestGuard g(i);
-  DeviceIndex i2 = init_i + 2;
+  DeviceIndex i2 = 2;
   g.set_index(i2);
   ASSERT_EQ(g.original_device(), dev(init_i));
   ASSERT_EQ(g.current_device(), dev(i2));
@@ -111,7 +112,7 @@ TEST(InlineDeviceGuard, SetIndex) {
 using MaybeTestGuard = InlineOptionalDeviceGuard<TestGuardImpl>;
 
 TEST(InlineOptionalDeviceGuard, Constructor) {
-  for (DeviceIndex i : {-1, 0, 1}) {
+  for (DeviceIndex i : std::initializer_list<DeviceIndex>{-1, 0, 1}) {
     DeviceIndex init_i = 0;
     TestGuardImpl::setDeviceIndex(init_i);
     auto test_body = [&](MaybeTestGuard& g) -> void {
@@ -135,7 +136,7 @@ TEST(InlineOptionalDeviceGuard, Constructor) {
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), init_i);
     {
       // Optional constructor
-      MaybeTestGuard g(make_optional(dev(i)));
+      MaybeTestGuard g(std::make_optional(dev(i)));
       test_body(g);
     }
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), init_i);
@@ -146,8 +147,8 @@ TEST(InlineOptionalDeviceGuard, NullaryConstructor) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
   auto test_body = [&](MaybeTestGuard& g) -> void {
-    ASSERT_EQ(g.original_device(), nullopt);
-    ASSERT_EQ(g.current_device(), nullopt);
+    ASSERT_EQ(g.original_device(), std::nullopt);
+    ASSERT_EQ(g.current_device(), std::nullopt);
     ASSERT_EQ(TestGuardImpl::getDeviceIndex(), init_i);
   };
   {
@@ -157,7 +158,7 @@ TEST(InlineOptionalDeviceGuard, NullaryConstructor) {
   {
     // If you want nullopt directly to work, define a nullopt_t
     // overload.  But I don't really see why you'd want this lol.
-    optional<Device> dev_opt = nullopt;
+    std::optional<Device> dev_opt = std::nullopt;
     MaybeTestGuard g(dev_opt);
     test_body(g);
   }
@@ -167,28 +168,28 @@ TEST(InlineOptionalDeviceGuard, SetDevice) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
   MaybeTestGuard g;
-  DeviceIndex i = init_i + 1;
+  DeviceIndex i = 1;
   g.set_device(dev(i));
-  ASSERT_EQ(g.original_device(), make_optional(dev(init_i)));
-  ASSERT_EQ(g.current_device(), make_optional(dev(i)));
+  ASSERT_EQ(g.original_device(), std::make_optional(dev(init_i)));
+  ASSERT_EQ(g.current_device(), std::make_optional(dev(i)));
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
   g.set_device(dev(i));
-  ASSERT_EQ(g.original_device(), make_optional(dev(init_i)));
-  ASSERT_EQ(g.current_device(), make_optional(dev(i)));
+  ASSERT_EQ(g.original_device(), std::make_optional(dev(init_i)));
+  ASSERT_EQ(g.current_device(), std::make_optional(dev(i)));
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
 }
 
 TEST(InlineOptionalDeviceGuard, SetIndex) {
   DeviceIndex init_i = 0;
   TestGuardImpl::setDeviceIndex(init_i);
-  DeviceIndex i = init_i + 1;
+  DeviceIndex i = 1;
   MaybeTestGuard g;
   g.set_index(i);
-  ASSERT_EQ(g.original_device(), make_optional(dev(init_i)));
-  ASSERT_EQ(g.current_device(), make_optional(dev(i)));
+  ASSERT_EQ(g.original_device(), std::make_optional(dev(init_i)));
+  ASSERT_EQ(g.current_device(), std::make_optional(dev(i)));
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
   g.set_index(i);
-  ASSERT_EQ(g.original_device(), make_optional(dev(init_i)));
-  ASSERT_EQ(g.current_device(), make_optional(dev(i)));
+  ASSERT_EQ(g.original_device(), std::make_optional(dev(init_i)));
+  ASSERT_EQ(g.current_device(), std::make_optional(dev(i)));
   ASSERT_EQ(TestGuardImpl::getDeviceIndex(), i);
 }

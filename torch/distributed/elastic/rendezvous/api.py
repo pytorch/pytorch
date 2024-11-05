@@ -1,13 +1,34 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import socket
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, ClassVar, Dict, Optional
 
 from torch.distributed import Store
+from torch.distributed.elastic.utils.distributed import get_free_port
+
+
+__all__ = [
+    "RendezvousClosedError",
+    "RendezvousConnectionError",
+    "RendezvousError",
+    "RendezvousGracefulExitError",
+    "RendezvousHandler",
+    "RendezvousHandlerCreator",
+    "RendezvousHandlerRegistry",
+    "RendezvousInfo",
+    "RendezvousParameters",
+    "RendezvousStateError",
+    "RendezvousStoreInfo",
+    "RendezvousTimeoutError",
+    "rendezvous_handler_registry",
+]
 
 
 class RendezvousError(Exception):
@@ -30,6 +51,90 @@ class RendezvousStateError(RendezvousError):
     """Raised when the state of a rendezvous is corrupt."""
 
 
+class RendezvousGracefulExitError(RendezvousError):
+    """Raised when node wasn't not included in rendezvous and gracefully exits.
+
+    Exception is a mechanism to exit the stack, however does not mean a failure.
+    """
+
+
+@dataclass
+class RendezvousStoreInfo:
+    """Store address and port that can be used to bootstrap trainer distributed comms"""
+
+    MASTER_ADDR_KEY: ClassVar[str] = "MASTER_ADDR"
+    MASTER_PORT_KEY: ClassVar[str] = "MASTER_PORT"
+    master_addr: str
+    master_port: int
+
+    @staticmethod
+    def build(
+        rank: int,
+        store: Store,
+        local_addr: Optional[str],
+        server_port: Optional[int] = None,
+    ) -> "RendezvousStoreInfo":
+        """Factory method, finds unused new port on rank0 host and addr/port info with all ranks.
+
+        If master_addr/master_port is knowns (useful when sharing existing tcp store server) use the constructor.
+
+        Args:
+            rank: rank of the current node
+            store: store to use for rendezvous
+            local_addr: address of the current node, if not provided will be resolved from hostname
+            server_port: port of the TCPStore server, when the TCPStore is shared.
+        """
+        # TODO swap to collectives comms API
+        if rank == 0:
+            addr = local_addr or socket.getfqdn()
+            # When TCPStore is not shared, we fallback to get_free_port.
+            port = server_port or get_free_port()
+            store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, addr.encode(encoding="UTF-8"))  # type: ignore[arg-type]
+            store.set(RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8"))  # type: ignore[arg-type]
+
+        addr = store.get(RendezvousStoreInfo.MASTER_ADDR_KEY).decode(encoding="UTF-8")
+        port = int(
+            store.get(RendezvousStoreInfo.MASTER_PORT_KEY).decode(encoding="UTF-8")
+        )
+        return RendezvousStoreInfo(master_addr=addr, master_port=port)
+
+
+class RendezvousInfo:
+    """Holds the information about the rendezvous."""
+
+    def __init__(
+        self,
+        store: Store,
+        rank: int,
+        world_size: int,
+        bootstrap_store_info: RendezvousStoreInfo,
+    ):
+        self._store = store
+        self._rank = rank
+        self._world_size = world_size
+        self._bootstrap_store_info = bootstrap_store_info
+
+    @property
+    def store(self) -> Store:
+        """Store used by torchelastic control plane"""
+        return self._store
+
+    @property
+    def rank(self) -> int:
+        """Rank within a group"""
+        return self._rank
+
+    @property
+    def world_size(self) -> int:
+        """Global group size"""
+        return self._world_size
+
+    @property
+    def bootstrap_store_info(self) -> Optional[RendezvousStoreInfo]:
+        """Store information that can used by trainer code to bootstrap distributed comms."""
+        return self._bootstrap_store_info
+
+
 class RendezvousHandler(ABC):
     """Main rendezvous interface.
 
@@ -41,12 +146,20 @@ class RendezvousHandler(ABC):
 
     @abstractmethod
     def get_backend(self) -> str:
-        """Returns the name of the rendezvous backend."""
+        """Return the name of the rendezvous backend."""
+
+    @property
+    def use_agent_store(self) -> bool:
+        """Indicates that store reference returned by :py:meth:`next_rendezvous` can be shared with user
+        applications and will be available during application lifecyle.
+
+        Rendezous handler impl will share store details as instance of :py:class:`RendezvousStoreInfo`.
+        Applications as a convention use `MASTER_ADDR`/`MASTER_PORT` env variables to lookup the store.
+        """
+        return False
 
     @abstractmethod
-    def next_rendezvous(
-        self,
-    ) -> Tuple[Store, int, int]:
+    def next_rendezvous(self) -> RendezvousInfo:
         """Main entry-point into the rendezvous barrier.
 
         Blocks until the rendezvous is complete and the current process is
@@ -54,8 +167,7 @@ class RendezvousHandler(ABC):
         rendezvous was marked closed.
 
         Returns:
-            A tuple of :py:class:`torch.distributed.Store`, ``rank``, and
-            ``world size``.
+            Instance of :py:class:`RendezvousInfo`.
 
         Raises:
             RendezvousClosedError:
@@ -70,7 +182,7 @@ class RendezvousHandler(ABC):
 
     @abstractmethod
     def is_closed(self) -> bool:
-        """Checks whether the rendezvous has been closed.
+        """Check whether the rendezvous has been closed.
 
         A closed rendezvous means all future attempts to re-rendezvous within
         same job will fail.
@@ -84,11 +196,11 @@ class RendezvousHandler(ABC):
 
     @abstractmethod
     def set_closed(self):
-        """Marks the rendezvous as closed."""
+        """Mark the rendezvous as closed."""
 
     @abstractmethod
     def num_nodes_waiting(self) -> int:
-        """Returns the number of nodes who arrived late at the rendezvous
+        """Return the number of nodes who arrived late at the rendezvous
         barrier, hence were not included in the current worker group.
 
         Callers should periodically call this method to check whether new
@@ -98,7 +210,7 @@ class RendezvousHandler(ABC):
 
     @abstractmethod
     def get_run_id(self) -> str:
-        """Returns the run id of the rendezvous.
+        """Return the run id of the rendezvous.
 
         The run id is a user-defined id that uniquely identifies an instance of
         a distributed application. It typically maps to a job id and is used to
@@ -107,7 +219,7 @@ class RendezvousHandler(ABC):
 
     @abstractmethod
     def shutdown(self) -> bool:
-        """Closes all resources that were open for the rendezvous.
+        """Close all resources that were open for the rendezvous.
 
         Example::
 
@@ -120,7 +232,7 @@ class RendezvousHandler(ABC):
 
 
 class RendezvousParameters:
-    """Holds the parameters to construct a :py:class:`RendezvousHandler`.
+    """Hold the parameters to construct a :py:class:`RendezvousHandler`.
 
     Args:
         backend:
@@ -171,11 +283,11 @@ class RendezvousParameters:
         self.local_addr = local_addr
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Returns the value for ``key`` if ``key`` exists, else ``default``."""
+        """Return the value for ``key`` if ``key`` exists, else ``default``."""
         return self.config.get(key, default)
 
     def get_as_bool(self, key: str, default: Optional[bool] = None) -> Optional[bool]:
-        """Returns the value for ``key`` as a ``bool``."""
+        """Return the value for ``key`` as a ``bool``."""
         value = self.get(key, default)
         if value is None or isinstance(value, bool):
             return value
@@ -194,7 +306,7 @@ class RendezvousParameters:
         )
 
     def get_as_int(self, key: str, default: Optional[int] = None) -> Optional[int]:
-        """Returns the value for ``key`` as an ``int``."""
+        """Return the value for ``key`` as an ``int``."""
         value = self.get(key, default)
         if value is None:
             return value
@@ -211,7 +323,7 @@ RendezvousHandlerCreator = Callable[[RendezvousParameters], RendezvousHandler]
 
 
 class RendezvousHandlerRegistry:
-    """Represents a registry of :py:class:`RendezvousHandler` backends."""
+    """Represent a registry of :py:class:`RendezvousHandler` backends."""
 
     _registry: Dict[str, RendezvousHandlerCreator]
 
@@ -219,7 +331,7 @@ class RendezvousHandlerRegistry:
         self._registry = {}
 
     def register(self, backend: str, creator: RendezvousHandlerCreator) -> None:
-        """Registers a new rendezvous backend.
+        """Register a new rendezvous backend.
 
         Args:
             backend:
@@ -246,7 +358,7 @@ class RendezvousHandlerRegistry:
         self._registry[backend] = creator
 
     def create_handler(self, params: RendezvousParameters) -> RendezvousHandler:
-        """Creates a new :py:class:`RendezvousHandler`."""
+        """Create a new :py:class:`RendezvousHandler`."""
         try:
             creator = self._registry[params.backend]
         except KeyError as e:

@@ -1,7 +1,6 @@
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 
-namespace at {
-namespace impl {
+namespace at::impl {
 
 // The strategy is that all python interpreters attempt to register themselves
 // as the main interpreter, but only one wins.  Only that interpreter is
@@ -9,9 +8,15 @@ namespace impl {
 // logic on that interpreter, we do so hermetically, never setting pyobj field
 // on Tensor.
 
-std::atomic<c10::impl::PyInterpreter*> PythonOpRegistrationTrampoline::interpreter_{nullptr};
+std::atomic<c10::impl::PyInterpreter*>
+    PythonOpRegistrationTrampoline::interpreter_{nullptr};
 
-bool PythonOpRegistrationTrampoline::registerInterpreter(c10::impl::PyInterpreter* interp) {
+c10::impl::PyInterpreter* PythonOpRegistrationTrampoline::getInterpreter() {
+  return PythonOpRegistrationTrampoline::interpreter_.load();
+}
+
+bool PythonOpRegistrationTrampoline::registerInterpreter(
+    c10::impl::PyInterpreter* interp) {
   c10::impl::PyInterpreter* expected = nullptr;
   interpreter_.compare_exchange_strong(expected, interp);
   if (expected != nullptr) {
@@ -24,5 +29,4 @@ bool PythonOpRegistrationTrampoline::registerInterpreter(c10::impl::PyInterprete
   }
 }
 
-} // namespace impl
-} // namespace at
+} // namespace at::impl

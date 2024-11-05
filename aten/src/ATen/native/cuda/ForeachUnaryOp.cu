@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
+#include <c10/util/TypeSafeSignMath.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -28,6 +29,7 @@
 #include <ATen/ops/_foreach_reciprocal_native.h>
 #include <ATen/ops/_foreach_round_native.h>
 #include <ATen/ops/_foreach_sigmoid_native.h>
+#include <ATen/ops/_foreach_sign_native.h>
 #include <ATen/ops/_foreach_sin_native.h>
 #include <ATen/ops/_foreach_sinh_native.h>
 #include <ATen/ops/_foreach_sqrt_native.h>
@@ -235,7 +237,7 @@ void floating_half_bfloat16_(TensorList tensors) {
   OP_CUSTOM_FUNCTOR(function, op_name, functor_name);
 
 OP(floating_half_bfloat16, erfc, Erfc);
-OP(floating_half, lgamma, Lgamma);
+OP(floating_half_bfloat16, lgamma, Lgamma);
 OP(floating_half_bfloat16, trunc, Truncf);
 OP(floating_half_bfloat16, floor, Floor);
 OP(floating_half_bfloat16, ceil, Ceil);
@@ -295,10 +297,18 @@ struct Reciprocal {
   }
 };
 
-OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sigmoid, Sigmoid)
+template <typename T>
+struct Sign {
+  C10_DEVICE T operator()(T t) const {
+    return c10::signum<T>(t);
+  }
+};
+
+OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, sigmoid, Sigmoid)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, round, Round)
 OP_CUSTOM_FUNCTOR(floating_half_bfloat16, frac, Trunc)
 OP_CUSTOM_FUNCTOR(floating_complex_half_bfloat16, reciprocal, Reciprocal)
+OP_CUSTOM_FUNCTOR(floating_half_bfloat16, sign, Sign)
 
 // note(mkozuki): tensor dtype checks of `neg` kernels.
 // Since `check_foreach_api_restrictions` don't require all the tensors to have
@@ -378,9 +388,10 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
   tensor_lists.emplace_back(tensors.vec());
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       ScalarType::Half,
       ScalarType::BFloat16,
+      ScalarType::Bool,
       tensors[0].scalar_type(),
       "foreach_zero_cuda_",
       [&]() {

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -8,14 +9,27 @@
 
 import abc
 import time
-import warnings
 from collections import namedtuple
 from functools import wraps
 from typing import Dict, Optional
+from typing_extensions import deprecated
 
-__all__ = ['MetricsConfig', 'MetricHandler', 'ConsoleMetricHandler', 'NullMetricHandler', 'MetricStream',
-           'configure', 'getStream', 'prof', 'profile', 'put_metric', 'publish_metric', 'get_elapsed_time_ms',
-           'MetricData']
+
+__all__ = [
+    "MetricsConfig",
+    "MetricHandler",
+    "ConsoleMetricHandler",
+    "NullMetricHandler",
+    "MetricStream",
+    "configure",
+    "getStream",
+    "prof",
+    "profile",
+    "put_metric",
+    "publish_metric",
+    "get_elapsed_time_ms",
+    "MetricData",
+]
 
 MetricData = namedtuple("MetricData", ["timestamp", "group_name", "name", "value"])
 
@@ -58,7 +72,7 @@ class MetricStream:
         )
 
 
-_metrics_map = {}
+_metrics_map: Dict[str, MetricHandler] = {}
 _default_metrics_handler: MetricHandler = NullMetricHandler()
 
 
@@ -96,11 +110,10 @@ def _get_metric_name(fn):
 
 def prof(fn=None, group: str = "torchelastic"):
     r"""
-    @profile decorator publishes duration.ms, count, success, failure
-    metrics for the function that it decorates. The metric name defaults
-    to the qualified name (``class_name.def_name``) of the function.
-    If the function does not belong to a class, it uses the leaf module name
-    instead.
+    @profile decorator publishes duration.ms, count, success, failure metrics for the function that it decorates.
+
+    The metric name defaults to the qualified name (``class_name.def_name``) of the function.
+    If the function does not belong to a class, it uses the leaf module name instead.
 
     Usage
 
@@ -127,7 +140,7 @@ def prof(fn=None, group: str = "torchelastic"):
                 put_metric(f"{key}.failure", 1, group)
                 raise
             finally:
-                put_metric(f"{key}.duration.ms", get_elapsed_time_ms(start), group)
+                put_metric(f"{key}.duration.ms", get_elapsed_time_ms(start), group)  # type: ignore[possibly-undefined]
             return result
 
         return wrapper
@@ -138,6 +151,7 @@ def prof(fn=None, group: str = "torchelastic"):
         return wrap
 
 
+@deprecated("Deprecated, use `@prof` instead", category=FutureWarning)
 def profile(group=None):
     """
     @profile decorator adds latency and success/failure metrics to any given function.
@@ -149,7 +163,6 @@ def profile(group=None):
      @metrics.profile("my_metric_group")
      def some_function(<arguments>):
     """
-    warnings.warn("Deprecated, use @prof instead", DeprecationWarning)
 
     def wrap(func):
         @wraps(func)
@@ -165,7 +178,7 @@ def profile(group=None):
                 publish_metric(
                     group,
                     f"{func.__name__}.duration.ms",
-                    get_elapsed_time_ms(start_time),
+                    get_elapsed_time_ms(start_time),  # type: ignore[possibly-undefined]
                 )
             return result
 
@@ -176,7 +189,7 @@ def profile(group=None):
 
 def put_metric(metric_name: str, metric_value: int, metric_group: str = "torchelastic"):
     """
-    Publishes a metric data point.
+    Publish a metric data point.
 
     Usage
 
@@ -185,21 +198,19 @@ def put_metric(metric_name: str, metric_value: int, metric_group: str = "torchel
      put_metric("metric_name", 1)
      put_metric("metric_name", 1, "metric_group_name")
     """
-
     getStream(metric_group).add_value(metric_name, metric_value)
 
 
+@deprecated(
+    "Deprecated, use `put_metric(metric_group)(metric_name, metric_value)` instead",
+    category=FutureWarning,
+)
 def publish_metric(metric_group: str, metric_name: str, metric_value: int):
-    warnings.warn(
-        "Deprecated, use put_metric(metric_group)(metric_name, metric_value) instead"
-    )
     metric_stream = getStream(metric_group)
     metric_stream.add_value(metric_name, metric_value)
 
 
 def get_elapsed_time_ms(start_time_in_seconds: float):
-    """
-    Returns the elapsed time in millis from the given start time.
-    """
+    """Return the elapsed time in millis from the given start time."""
     end_time = time.time()
     return int((end_time - start_time_in_seconds) * 1000)

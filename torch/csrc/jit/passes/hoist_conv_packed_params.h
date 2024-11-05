@@ -3,10 +3,8 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void HoistConvPackedParams(script::Module& m);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

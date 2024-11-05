@@ -11,8 +11,9 @@
 #include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
-namespace at {
-namespace functorch {
+#include <iostream>
+
+namespace at::functorch {
 
 void dumpTensor(std::ostream& ss, const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
@@ -49,7 +50,7 @@ void TensorWrapper::refreshMetadata() {
 void dumpTensorCout(const Tensor& tensor) {
   dumpTensor(std::cout, tensor);
 
-  std::cout << std::endl;
+  std::cout << '\n';
 }
 
 static c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, const std::shared_ptr<bool>& life_handle) {
@@ -80,6 +81,11 @@ static Tensor unsafeMakeTensorWrapper(
   auto result = at::detail::make_tensor<TensorWrapper>(
       key_set, tensor, level, life_handle, is_immutable);
   TORCH_INTERNAL_ASSERT(result.key_set().has(DispatchKey::FuncTorchGradWrapper));
+
+  if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
+    result.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
+
   return result;
 }
 
@@ -189,7 +195,7 @@ static void dead_tensor_wrapper_fallback(const c10::OperatorHandle& op, torch::j
     return wrapped->value();
   };
 
-  foreachTensorInplace(*stack, stack->size() - args_size, stack->size(), unwrapIfDeadAndIncrement);
+  foreachTensorInplace(*stack, static_cast<int64_t>(stack->size() - args_size), static_cast<int64_t>(stack->size()), unwrapIfDeadAndIncrement);
   TORCH_INTERNAL_ASSERT(unwrapped_count > 0, "Should have at least one dead wrapper");
 
   // re-dispatch
@@ -202,5 +208,4 @@ TORCH_LIBRARY_IMPL(_, FuncTorchGradWrapper, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dead_tensor_wrapper_fallback>());
 }
 
-}
-} // namespace at
+} // namespace at::functorch

@@ -84,9 +84,9 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }
     deviceType_ = deviceJniCodeToDeviceType(device);
     module_ = torch::jit::_load_for_mobile(
-        std::move(modelPath->toStdString()), c10::nullopt, extra_files);
+        std::move(modelPath->toStdString()), std::nullopt, extra_files);
     torch::jit::_load_extra_only_for_mobile(
-        std::move(modelPath->toStdString()), c10::nullopt, extra_files);
+        std::move(modelPath->toStdString()), std::nullopt, extra_files);
     if (has_extra) {
       static auto putMethod =
           facebook::jni::JMap<facebook::jni::JString, facebook::jni::JString>::
@@ -132,7 +132,7 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     }
     LiteJITCallGuard guard;
     module_ =
-        torch::jit::_load_for_mobile(torch::make_unique<MemoryReadAdapter>(
+        torch::jit::_load_for_mobile(std::make_unique<MemoryReadAdapter>(
             assetBuffer, AAsset_getLength(asset)));
     AAsset_close(asset);
     deviceType_ = deviceJniCodeToDeviceType(device);

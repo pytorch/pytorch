@@ -1,13 +1,16 @@
 # Owner(s): ["module: unknown"]
 
 import io
-import numpy as np
 import os
 import shutil
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+
 import expecttest
+import numpy as np
+
 
 TEST_TENSORBOARD = True
 try:
@@ -23,15 +26,6 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-TEST_CAFFE2 = True
-try:
-    import caffe2.python.caffe2_pybind11_state as _caffe2_pybind11_state  # noqa: F401
-    from caffe2.python import brew, cnn, core, workspace
-    from caffe2.python.model_helper import ModelHelper
-except ImportError:
-    TEST_CAFFE2 = False
-skipIfNoCaffe2 = unittest.skipIf(not TEST_CAFFE2, "no caffe2")
-
 TEST_MATPLOTLIB = True
 try:
     import matplotlib
@@ -43,7 +37,17 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_CROSSREF
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_MACOS,
+    IS_WINDOWS,
+    parametrize,
+    run_tests,
+    TEST_WITH_CROSSREF,
+    TestCase,
+    skipIfTorchDynamo,
+)
+
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -76,17 +80,16 @@ class BaseTestCase(TestCase):
 
 
 if TEST_TENSORBOARD:
-    from tensorboard.compat.proto.graph_pb2 import GraphDef
-    from torch.utils.tensorboard import summary, SummaryWriter
-    from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
-    from tensorboard.compat.proto.types_pb2 import DataType
-    from torch.utils.tensorboard.summary import tensor_proto
-    from torch.utils.tensorboard._convert_np import make_np
-    from torch.utils.tensorboard._pytorch_graph import graph
     from google.protobuf import text_format
     from PIL import Image
-if TEST_TENSORBOARD and TEST_CAFFE2:
-    from torch.utils.tensorboard import _caffe2_graph as c2_graph
+    from tensorboard.compat.proto.graph_pb2 import GraphDef
+    from tensorboard.compat.proto.types_pb2 import DataType
+
+    from torch.utils.tensorboard import summary, SummaryWriter
+    from torch.utils.tensorboard._convert_np import make_np
+    from torch.utils.tensorboard._pytorch_graph import graph
+    from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
+    from torch.utils.tensorboard.summary import int_to_half, tensor_proto
 
 class TestTensorBoardPyTorchNumpy(BaseTestCase):
     def test_pytorch_np(self):
@@ -122,6 +125,7 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
         with self.createSummaryWriter() as w:
             w.add_histogram('float histogram', torch.rand((50,)))
             w.add_histogram('int histogram', torch.randint(0, 100, (50,)))
+            w.add_histogram('bfloat16 histogram', torch.rand(50, dtype=torch.bfloat16))
 
     def test_pytorch_histogram_raw(self):
         with self.createSummaryWriter() as w:
@@ -291,9 +295,8 @@ class TestTensorBoardSummaryWriter(BaseTestCase):
         self.assertTrue(passed)
 
     def test_pathlib(self):
-        import pathlib
         with tempfile.TemporaryDirectory(prefix="test_tensorboard_pathlib") as d:
-            p = pathlib.Path(d)
+            p = Path(d)
             with SummaryWriter(p) as writer:
                 writer.add_scalar('test', 1)
 
@@ -406,18 +409,23 @@ class TestTensorBoardSummary(BaseTestCase):
         summary.video('dummy', np.random.rand(16, 48, 1, 28, 28))
         summary.video('dummy', np.random.rand(20, 7, 1, 8, 8))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_audio(self):
         self.assertTrue(compare_proto(summary.audio('dummy', tensor_N(shape=(42,))), self))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_text(self):
         self.assertTrue(compare_proto(summary.text('dummy', 'text 123'), self))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_histogram_auto(self):
         self.assertTrue(compare_proto(summary.histogram('dummy', tensor_N(shape=(1024,)), bins='auto', max_bins=5), self))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_histogram_fd(self):
         self.assertTrue(compare_proto(summary.histogram('dummy', tensor_N(shape=(1024,)), bins='fd', max_bins=5), self))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_histogram_doane(self):
         self.assertTrue(compare_proto(summary.histogram('dummy', tensor_N(shape=(1024,)), bins='doane', max_bins=5), self))
 
@@ -433,61 +441,8 @@ class TestTensorBoardSummary(BaseTestCase):
         }
         summary.custom_scalars(layout)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
-    def test_hparams_smoke(self):
-        hp = {'lr': 0.1, 'bsize': 4}
-        mt = {'accuracy': 0.1, 'loss': 10}
-        summary.hparams(hp, mt)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
-        hp = {'use_magic': True, 'init_string': "42"}
-        mt = {'accuracy': 0.1, 'loss': 10}
-        summary.hparams(hp, mt)
-
-        mt = {'accuracy': torch.zeros(1), 'loss': torch.zeros(1)}
-        summary.hparams(hp, mt)
-
-    def test_hparams_wrong_parameter(self):
-        with self.assertRaises(TypeError):
-            summary.hparams([], {})
-        with self.assertRaises(TypeError):
-            summary.hparams({}, [])
-        with self.assertRaises(ValueError):
-            res = summary.hparams({'pytorch': [1, 2]}, {'accuracy': 2.0})
-        # metric data is used in writer.py so the code path is different, which leads to different exception type.
-        with self.assertRaises(NotImplementedError):
-            with self.createSummaryWriter() as writer:
-                writer.add_hparams({'pytorch': 1.0}, {'accuracy': [1, 2]})
-
-    def test_hparams_number(self):
-        hp = {'lr': 0.1}
-        mt = {'accuracy': 0.1}
-        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
-
-    def test_hparams_bool(self):
-        hp = {'bool_var': True}
-        mt = {'accuracy': 0.1}
-        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
-
-    def test_hparams_string(self):
-        hp = {'string_var': "hi"}
-        mt = {'accuracy': 0.1}
-        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
-
-    def test_hparams_domain_discrete(self):
-        hp = {"lr": 0.1, "bool_var": True, "string_var": "hi"}
-        mt = {"accuracy": 0.1}
-        hp_domain = {"lr": [0.1], "bool_var": [True], "string_var": ["hi"]}
-
-        # hparam_domain_discrete keys needs to be subset of hparam_dict keys
-        with self.assertRaises(TypeError):
-            summary.hparams(hp, mt, hparam_domain_discrete={"wrong_key": []})
-
-        # hparam_domain_discrete values needs to be same type as hparam_dict values
-        with self.assertRaises(TypeError):
-            summary.hparams(hp, mt, hparam_domain_discrete={"lr": [True]})
-
-        # only smoke test. Because protobuf map serialization is nondeterministic.
-        summary.hparams(hp, mt, hparam_domain_discrete=hp_domain)
-
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_mesh(self):
         v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
         c = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 0, 255]]], dtype=int)
@@ -495,6 +450,7 @@ class TestTensorBoardSummary(BaseTestCase):
         mesh = summary.mesh('my_mesh', vertices=v, colors=c, faces=f, config_dict=None)
         self.assertTrue(compare_proto(mesh, self))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_scalar_new_style(self):
         scalar = summary.scalar('test_scalar', 1.0, new_style=True)
         self.assertTrue(compare_proto(scalar, self))
@@ -564,7 +520,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         dummy_input = (torch.zeros(1, 3),)
 
         class myLinear(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
@@ -641,7 +597,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
     def test_pytorch_graph_dict_input(self):
         class Model(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
@@ -649,7 +605,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
                 return self.l(x)
 
         class ModelDict(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
@@ -684,7 +640,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         # However, it should not raise an error during
         # the add_graph call and still continue.
         class myMLP(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.input_len = 1 * 28 * 28
                 self.fc1 = torch.nn.Linear(self.input_len, 1200)
@@ -777,6 +733,8 @@ class TestTensorBoardFigure(BaseTestCase):
         writer.close()
 
 class TestTensorBoardNumpy(BaseTestCase):
+    @unittest.skipIf(IS_WINDOWS, "Skipping on windows, see https://github.com/pytorch/pytorch/pull/109349 ")
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_scalar(self):
         res = make_np(1.1)
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
@@ -789,82 +747,33 @@ class TestTensorBoardNumpy(BaseTestCase):
         res = make_np(np.int64(100000000000))
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
 
-    @skipIfNoCaffe2
-    def test_caffe2_np(self):
-        workspace.FeedBlob("testBlob", tensor_N(shape=(1, 3, 64, 64)))
-        self.assertIsInstance(make_np('testBlob'), np.ndarray)
-
-    @skipIfNoCaffe2
-    def test_caffe2_np_expect_fail(self):
-        with self.assertRaises(RuntimeError):
-            res = make_np('This_blob_does_not_exist')
-
     def test_pytorch_np_expect_fail(self):
         with self.assertRaises(NotImplementedError):
             res = make_np({'pytorch': 1.0})
 
-    @skipIfNoCaffe2
-    @unittest.skipIf(TEST_WITH_ASAN, "Caffe2 failure with ASAN")
-    def test_caffe2_simple_model(self):
-        model = ModelHelper(name="mnist")
-        # how come those inputs don't break the forward pass =.=a
-        workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
-        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(int))
 
-        with core.NameScope("conv1"):
-            conv1 = brew.conv(model, "data", 'conv1', dim_in=1, dim_out=20, kernel=5)
-            # Image size: 24 x 24 -> 12 x 12
-            pool1 = brew.max_pool(model, conv1, 'pool1', kernel=2, stride=2)
-            # Image size: 12 x 12 -> 8 x 8
-            conv2 = brew.conv(model, pool1, 'conv2', dim_in=20, dim_out=100, kernel=5)
-            # Image size: 8 x 8 -> 4 x 4
-            pool2 = brew.max_pool(model, conv2, 'pool2', kernel=2, stride=2)
-        with core.NameScope("classifier"):
-            # 50 * 4 * 4 stands for dim_out from previous layer multiplied by the image size
-            fc3 = brew.fc(model, pool2, 'fc3', dim_in=100 * 4 * 4, dim_out=500)
-            relu = brew.relu(model, fc3, fc3)
-            pred = brew.fc(model, relu, 'pred', 500, 10)
-            softmax = brew.softmax(model, pred, 'softmax')
-            xent = model.LabelCrossEntropy([softmax, "label"], 'xent')
-            # compute the expected loss
-            loss = model.AveragedLoss(xent, "loss")
-        model.net.RunAllOnMKL()
-        model.param_init_net.RunAllOnMKL()
-        model.AddGradientOperators([loss], skip=1)
-        blob_name_tracker = {}
-        graph = c2_graph.model_to_graph_def(
-            model,
-            blob_name_tracker=blob_name_tracker,
-            shapes={},
-            show_simplified=False,
-        )
-        compare_proto(graph, self)
-
-    @skipIfNoCaffe2
-    def test_caffe2_simple_cnnmodel(self):
-        model = cnn.CNNModelHelper("NCHW", name="overfeat")
-        workspace.FeedBlob("data", np.random.randn(1, 3, 64, 64).astype(np.float32))
-        workspace.FeedBlob("label", np.random.randn(1, 1000).astype(int))
-        with core.NameScope("conv1"):
-            conv1 = model.Conv("data", "conv1", 3, 96, 11, stride=4)
-            relu1 = model.Relu(conv1, conv1)
-            pool1 = model.MaxPool(relu1, "pool1", kernel=2, stride=2)
-        with core.NameScope("classifier"):
-            fc = model.FC(pool1, "fc", 4096, 1000)
-            pred = model.Softmax(fc, "pred")
-            xent = model.LabelCrossEntropy([pred, "label"], "xent")
-            loss = model.AveragedLoss(xent, "loss")
-
-        blob_name_tracker = {}
-        graph = c2_graph.model_to_graph_def(
-            model,
-            blob_name_tracker=blob_name_tracker,
-            shapes={},
-            show_simplified=False,
-        )
-        compare_proto(graph, self)
 
 class TestTensorProtoSummary(BaseTestCase):
+    @parametrize(
+        "tensor_type,proto_type",
+        [
+            (torch.float16, DataType.DT_HALF),
+            (torch.bfloat16, DataType.DT_BFLOAT16),
+        ],
+    )
+    @skipIfTorchDynamo("Unsuitable test for Dynamo, behavior changes with version")
+    def test_half_tensor_proto(self, tensor_type, proto_type):
+        float_values = [1.0, 2.0, 3.0]
+        actual_proto = tensor_proto(
+            "dummy",
+            torch.tensor(float_values, dtype=tensor_type),
+        ).value[0].tensor
+        self.assertSequenceEqual(
+            [int_to_half(x) for x in actual_proto.half_val],
+            float_values,
+        )
+        self.assertTrue(actual_proto.dtype == proto_type)
+
     def test_float_tensor_proto(self):
         float_values = [1.0, 2.0, 3.0]
         actual_proto = (
@@ -901,6 +810,8 @@ class TestTensorProtoSummary(BaseTestCase):
     def test_empty_tensor_proto(self):
         actual_proto = tensor_proto("dummy", torch.empty(0)).value[0].tensor
         self.assertEqual(actual_proto.float_val, [])
+
+instantiate_parametrized_tests(TestTensorProtoSummary)
 
 if __name__ == '__main__':
     run_tests()

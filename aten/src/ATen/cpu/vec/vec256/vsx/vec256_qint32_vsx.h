@@ -121,6 +121,20 @@ struct Vectorized<c10::qint32> {
         vec_madd(scale_vec1, float_vals1, scale_zp_premul1)}};
   }
 
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    vfloat32 float_vals0 = vec_float(_vec0);
+    vfloat32 float_vals1 = vec_float(_vec1);
+    vfloat32 scale_vec0 = scale.vec0();
+    vfloat32 scale_vec1 = scale.vec1();
+    vfloat32 zero_point0 = zero_point.vec0();
+    vfloat32 zero_point1 = zero_point.vec1();
+    return {Vectorized<float>{
+        (float_vals0 - zero_point0) * scale_vec0,
+        (float_vals1 - zero_point1) * scale_vec1}};
+  }
+
   static Vectorized<c10::qint32> quantize(
       const float_vec_return_type& rhs,
       float scale,
@@ -226,6 +240,42 @@ Vectorized<c10::qint32> inline minimum(
     const Vectorized<c10::qint32>& b) {
   return a.minimum(b);
 }
+
+template <>
+Vectorized<c10::qint32> C10_ALWAYS_INLINE operator+(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+  return Vectorized<c10::qint32>{vec_add(a.vec0(), b.vec0()), vec_add(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::qint32> C10_ALWAYS_INLINE operator-(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+  return Vectorized<c10::qint32>{vec_sub(a.vec0(), b.vec0()), vec_sub(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::qint32> C10_ALWAYS_INLINE operator*(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+  return Vectorized<c10::qint32>{vec_mul(a.vec0(), b.vec0()), vec_mul(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::qint32> C10_ALWAYS_INLINE operator/(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+  return Vectorized<c10::qint32>{a.vec0()/b.vec0(), a.vec1()/b.vec1()};
+}
+
+template <>
+Vectorized<c10::qint32> C10_ALWAYS_INLINE operator&(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+  return Vectorized<c10::qint32>{vec_and(a.vec0(), b.vec0()), vec_and(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::qint32> C10_ALWAYS_INLINE operator|(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+  return Vectorized<c10::qint32>{vec_or(a.vec0(), b.vec0()), vec_or(a.vec1(), b.vec1())};
+}
+
+template <>
+Vectorized<c10::qint32> C10_ALWAYS_INLINE operator^(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+  return Vectorized<c10::qint32>{vec_xor(a.vec0(), b.vec0()), vec_xor(a.vec1(), b.vec1())};
+}
+
 } // namespace
 } // namespace vec
 } // namespace at

@@ -17,7 +17,7 @@ from torch.testing._internal.common_quantized import supported_qengines
 
 
 class SimpleModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.layer1 = torch.nn.Linear(16, 64)
         self.relu1 = torch.nn.ReLU()
@@ -34,7 +34,7 @@ class SimpleModel(torch.nn.Module):
 
 
 class QuantModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.quant = torch.ao.quantization.QuantStub()
         self.dequant = torch.ao.quantization.DeQuantStub()
@@ -48,7 +48,7 @@ class QuantModel(torch.nn.Module):
 
 
 class ModelWithLists(torch.nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.rt = [torch.zeros(1)]
         self.ot = [torch.zeros(1), None]
@@ -223,7 +223,7 @@ class TestModelDump(TestCase):
 
         # Make sure we can handle a model with both constants and data tensors.
         class ComposedModule(torch.nn.Module):
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.w1 = torch.zeros(1, 2)
                 self.w2 = torch.ones(2, 2)

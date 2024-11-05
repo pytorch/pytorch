@@ -1,6 +1,8 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
+#include <iostream>
+#include <regex>
 
 namespace torch::jit {
 
@@ -51,6 +53,20 @@ size_t StringCordView::find(const std::string& tok, size_t start) const {
     }
   }
   return std::string::npos;
+}
+
+size_t StringCordView::find_regex(const std::string& tok, size_t start) const {
+  if (tok.empty()) {
+    return 0;
+  }
+
+  const std::string& target = this->substr(start, this->size()).str();
+  std::smatch sm;
+  const std::regex re(tok);
+
+  auto regex_found = std::regex_search(target, sm, re);
+
+  return regex_found ? sm.position(0) : std::string::npos;
 }
 
 StringCordView StringCordView::substr(size_t start, size_t size) const {
@@ -136,10 +152,10 @@ size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
       std::hash<size_t>()(key.start()) ^ std::hash<size_t>()(key.end()));
 }
 
-c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
+std::optional<SourceRange> Source::findSourceRangeThatGenerated(
     const SourceRange& range) {
   if (!gen_ranges_) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   return gen_ranges_->findSourceRangeThatGenerated(range);
 }
@@ -252,10 +268,7 @@ void SourceRange::print_with_context(
 
   // print out location information
   if (auto flc = file_line_col()) {
-    std::string filename;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t line, col;
-    std::tie(filename, line, col) = *flc;
+    auto [filename, line, col] = *flc;
     out << "  File \"" << filename << "\", line " << line;
     if (!funcname.empty()) {
       out << ", in " << funcname;

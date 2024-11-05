@@ -1,5 +1,6 @@
 #ifdef USE_C10D_UCC
 
+#include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
 
@@ -32,9 +33,9 @@ void ProcessGroupUCCLogger::flushComms(int rank, int world_size) {
   }
 
   std::string fullpath = "/tmp/" + dirname;
-  char* user_path = std::getenv("TORCH_UCC_COMMS_TRACE_OUTPUT_DIR");
-  if (user_path) {
-    fullpath = user_path;
+  auto user_path = c10::utils::get_env("TORCH_UCC_COMMS_TRACE_OUTPUT_DIR");
+  if (user_path.has_value()) {
+    fullpath = std::move(user_path.value());
   }
   std::string trace_filename = c10::str(fullpath, "/rank", rank, ".json");
   std::ofstream _outfile;
@@ -85,8 +86,8 @@ void CommTraceLogger::recordComms(
     const int world_size,
     const std::vector<at::Tensor>& inputTensors,
     const std::vector<at::Tensor>& outputTensors) {
-  auto inSize = (!inputTensors.empty()) ? inputTensors[0].numel() : 0;
-  auto outSize = (!outputTensors.empty()) ? outputTensors[0].numel() : 0;
+  auto inNelems = (!inputTensors.empty()) ? inputTensors[0].numel() : 0;
+  auto outNelems = (!outputTensors.empty()) ? outputTensors[0].numel() : 0;
   auto dtype =
       (!outputTensors.empty()) ? outputTensors[0].scalar_type() : at::kByte;
   auto devType = (!outputTensors.empty()) ? outputTensors[0].device().type()
@@ -116,14 +117,14 @@ void CommTraceLogger::recordComms(
       ",\n\t\t\"world_size\": ",
       world_size);
 
-  if (inSize > 0 || outSize > 0) {
+  if (inNelems > 0 || outNelems > 0) {
     // for most collectives - append msg sizes, data type, device type
     cur_trace_ = c10::str(
         cur_trace_,
         ",\n\t\t\"in_msg_size\": ",
-        inSize,
+        inNelems,
         ",\n\t\t\"out_msg_size\": ",
-        outSize,
+        outNelems,
         ",\n\t\t\"dtype\": \"",
         at::toString(dtype),
         "\",\n\t\t\"devType\": \"",
@@ -149,15 +150,18 @@ void CommTraceLogger::recordComms(
 
   // record the trace to kineto trace if applicable
   RECORD_PARAM_COMMS(
-      static_cast<int64_t>(seqnum), // seq
-      0, // process group ptr
+      std::make_tuple(static_cast<int64_t>(seqnum), false), // (seq, isP2P)
+      std::make_tuple("0", ""), // pg_name tuple
       rank,
       commName.c_str(),
-      inSize,
-      outSize,
+      inNelems,
+      outNelems,
       dtype,
       curInSplitSizes_,
-      curOutSplitSizes_);
+      curOutSplitSizes_,
+      -1,
+      -1,
+      world_size);
 
   ++seqnum;
 

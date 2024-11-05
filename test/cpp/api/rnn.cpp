@@ -750,7 +750,7 @@ TEST_F(RNNTest, UsePackedSequenceAsInput) {
         std::get<0>(rnn_output).data(), expected_output, 1e-05, 2e-04));
 
     // Test passing optional argument to `LSTM::forward_with_packed_input`
-    rnn_output = m->forward_with_packed_input(packed_input, torch::nullopt);
+    rnn_output = m->forward_with_packed_input(packed_input, std::nullopt);
     ASSERT_TRUE(torch::allclose(
         std::get<0>(rnn_output).data(), expected_output, 1e-05, 2e-04));
   }
@@ -772,4 +772,41 @@ TEST_F(RNNTest, UsePackedSequenceAsInput) {
     ASSERT_TRUE(torch::allclose(
         std::get<0>(rnn_output).data(), expected_output, 1e-05, 2e-04));
   }
+}
+
+TEST_F(RNNTest, CheckErrorInfos) {
+  {
+    auto options = torch::nn::RNNOptions(1, 0).num_layers(1);
+    ASSERT_THROWS_WITH(RNN(options), "hidden_size must be greater than zero");
+
+    options = torch::nn::RNNOptions(1, 1).num_layers(0);
+    ASSERT_THROWS_WITH(RNN(options), "num_layers must be greater than zero");
+  }
+  {
+    auto options = torch::nn::LSTMOptions(1, 0).num_layers(1);
+    ASSERT_THROWS_WITH(LSTM(options), "hidden_size must be greater than zero");
+
+    options = torch::nn::LSTMOptions(1, 1).num_layers(0);
+    ASSERT_THROWS_WITH(LSTM(options), "num_layers must be greater than zero");
+  }
+  {
+    auto options = torch::nn::GRUOptions(1, 0).num_layers(1);
+    ASSERT_THROWS_WITH(GRU(options), "hidden_size must be greater than zero");
+
+    options = torch::nn::GRUOptions(1, 1).num_layers(0);
+    ASSERT_THROWS_WITH(GRU(options), "num_layers must be greater than zero");
+  }
+}
+
+// This test assures that pad_packed_sequence does not crash when packed with
+// cuda tensors, https://github.com/pytorch/pytorch/issues/115027
+TEST_F(RNNTest, CheckPadPackedSequenceWithCudaTensors_CUDA) {
+  // Create input on the GPU, sample 5x5
+  auto input = torch::randn({5, 5}).to(at::ScalarType::Float).cuda();
+  auto lengths = torch::full({5}, 5);
+
+  auto packed =
+      torch::nn::utils::rnn::pack_padded_sequence(input, lengths, false, false);
+
+  auto error = torch::nn::utils::rnn::pad_packed_sequence(packed);
 }

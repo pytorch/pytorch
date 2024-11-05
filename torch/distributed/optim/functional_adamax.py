@@ -1,11 +1,13 @@
+# mypy: allow-untyped-defs
 from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.optim._functional as F
-
 from torch import Tensor
 
+
 __all__: List[str] = []
+
 
 # Define a TorchScript compatible Functional Adamax Optimizer
 # where we use these optimizer in a functional way.
@@ -73,8 +75,10 @@ class _FunctionalAdamax:
                 + f"Gradients length: {len(gradients)}"
             )
 
+        has_complex = False
         for param, gradient in zip(self.param_group["params"], gradients):
             if gradient is not None:
+                has_complex |= torch.is_complex(param)
                 params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization
@@ -111,4 +115,5 @@ class _FunctionalAdamax:
                 weight_decay=self.defaults["weight_decay"],
                 foreach=self.foreach,
                 maximize=self.maximize,
+                has_complex=has_complex,
             )

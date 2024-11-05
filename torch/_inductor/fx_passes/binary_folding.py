@@ -1,19 +1,88 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 
 import torch
+
+from ..._dynamo.utils import counters
 from ..pattern_matcher import Arg, CallFunction, KeywordArg
 from .freezing_patterns import register_binary_folding_pattern
 
+
 aten = torch.ops.aten
+prims = torch.ops.prims
+
+
+def mark_mixed_dtype_conv(conv):
+    conv_dtype = conv.meta["val"].dtype
+    if conv_dtype not in (torch.float16, torch.bfloat16):
+        return
+
+    if not len(conv.users) == 1:
+        return
+
+    conv_user = next(iter(conv.users.keys()))
+    if not isinstance(conv_user.meta["val"], torch.Tensor):
+        return
+
+    if not conv_user.meta["val"].dtype == torch.float32:
+        return
+
+    while conv_user.target in _binary_ops:
+        if not len(conv_user.users) == 1:
+            return
+
+        conv_user = next(iter(conv_user.users.keys()))
+
+    if conv_user.target != prims.convert_element_type.default:
+        return
+
+    conv.meta["_allow_conv_mixed_dtype_folding"] = conv_dtype
+
+
+def mark_mixed_dtype_allowed_convs(gm):
+    """
+    Mark convolutions which we will binary fold even with mixed precision constants. We constant fold in the higher precision
+    for better accuracy and then recover the original precision after.
+    """
+    for node in gm.graph.find_nodes(
+        op="call_function", target=aten.convolution.default
+    ):
+        mark_mixed_dtype_conv(node)
+
+
+def recover_original_precision_folded_convs(gm):
+    """
+    After binary folding conv weights and biases to a higher dtype, recover the original precision they were in.
+    """
+    graph = gm.graph
+    for node in graph.find_nodes(op="call_function", target=aten.convolution.default):
+        orig_dtype = node.meta.get("_allow_conv_mixed_dtype_folding", None)
+        if orig_dtype is None:
+            continue
+
+        with graph.inserting_before(node):
+            for idx in [1, 2]:
+                old_input = node.args[idx]
+                if old_input is None:
+                    continue
+
+                new_input = graph.create_node(
+                    "call_function",
+                    prims.convert_element_type.default,
+                    (old_input, orig_dtype),
+                )
+                node.replace_input_with(old_input, new_input)
+
+
+_binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
 
 
 @functools.lru_cache(None)
 def binary_folding_init():
     _conv_args = [Arg() for _ in range(9)]
     _computation_ops = [aten.convolution.default]
-    _binary_ops = [aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor, aten.div.Tensor]
-    _computation_calls = [CallFunction(aten.convolution.default, *_conv_args)]
+    _computation_calls = [CallFunction(aten.convolution.default, *_conv_args, _users=1)]
 
     """
     In order to fuse add/sub/mul/div with conv, the dimensions of its
@@ -39,11 +108,20 @@ def binary_folding_init():
         other_shape = other_tensor.shape
         if len(weight_shape) < len(other_shape):
             return False
-        for i in reversed(range(len(other_shape))):
-            if i == 1 and weight_shape[0] == other_shape[i]:
-                continue
-            if other_shape[i] != 1:
-                return False
+        if len(weight_shape) == len(other_shape) + 1:
+            # weight shape is [o, i, *], other_shape is [o, 1...].
+            for i in reversed(range(len(other_shape))):
+                if i == 0 and weight_shape[0] == other_shape[i]:
+                    continue
+                if other_shape[i] != 1:
+                    return False
+        else:
+            # weight shape is [o, i, *], other_shape is [1, i, *]
+            for i in reversed(range(len(other_shape))):
+                if i == 1 and weight_shape[0] == other_shape[i]:
+                    continue
+                if other_shape[i] != 1:
+                    return False
         return True
 
     def _check_conv_and_broadcast_op(conv_node, other):
@@ -61,6 +139,9 @@ def binary_folding_init():
         ):
             return False
 
+        if not len(conv_node.args[1].users) == 1:
+            return False
+
         weight_meta_value = conv_node.args[1].meta.get("val")
         if weight_meta_value is None:
             return False
@@ -70,13 +151,21 @@ def binary_folding_init():
             return False
         if isinstance(other, torch.fx.Node) and other.op == "get_attr":
             other_meta_value = other.meta.get("val")
-            if not other_meta_value.is_floating_point():
+            if not other_meta_value.is_floating_point():  # type: ignore[union-attr]
                 return False
             if (
-                torch.promote_types(other_meta_value.dtype, weight_meta_value.dtype)
+                torch.promote_types(other_meta_value.dtype, weight_meta_value.dtype)  # type: ignore[union-attr]
                 != weight_meta_value.dtype
             ):
-                return False
+                if not conv_node.meta.get("_allow_conv_mixed_dtype_folding", False):
+                    return False
+
+                if (
+                    other_meta_value.dtype != torch.float  # type: ignore[union-attr]
+                    and weight_meta_value.dtype not in (torch.float16, torch.bfloat16)
+                ):
+                    return False
+
             if not _op_not_broadcasting_with_conv(weight_meta_value, other_meta_value):
                 return False
         else:
@@ -166,6 +255,7 @@ def binary_folding_init():
             extra_check=_is_foldable_pattern,
         )
         def folded_op(match, *args, **kwargs):
+            counters["inductor"]["binary_folding"] += 1
             other = kwargs.get("other")
             binary_node = match.output_node()
             computation_node = (
@@ -180,8 +270,7 @@ def binary_folding_init():
                 new_computation_node = _create_new_conv_node(
                     graph, computation_node, binary_node, other
                 )
-
                 binary_node.replace_all_uses_with(new_computation_node)
-                new_computation_node.meta.update(binary_node.meta)
+                new_computation_node.meta.update(computation_node.meta)
                 graph.erase_node(binary_node)
                 graph.erase_node(computation_node)

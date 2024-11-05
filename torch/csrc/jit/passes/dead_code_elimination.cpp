@@ -4,12 +4,10 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <unordered_map>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace prim {
 using namespace ::c10::prim;
@@ -253,7 +251,6 @@ class DeadCodeEliminator {
       curNode = curNode->owningBlock()->owningNode();
     }
 
-    // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
     for (const auto input : node->inputs()) {
       if (liveValues_.count(input)) {
         continue;
@@ -459,5 +456,4 @@ void EliminateDeadCode(
   eliminator.run(block, /*recurse=*/true);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

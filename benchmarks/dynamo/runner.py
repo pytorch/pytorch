@@ -23,7 +23,6 @@ If you want to test float16
 
 """
 
-
 import argparse
 import dataclasses
 import functools
@@ -44,15 +43,15 @@ from os.path import abspath, exists
 from random import randint
 
 import matplotlib.pyplot as plt
-
 import numpy as np
 import pandas as pd
-import torch
-
-import torch._dynamo
 from matplotlib import rcParams
 from scipy.stats import gmean
 from tabulate import tabulate
+
+import torch
+import torch._dynamo
+
 
 rcParams.update({"figure.autolayout": True})
 plt.rc("axes", axisbelow=True)
@@ -225,6 +224,14 @@ def parse_args():
         default=False,
         help="Log operator inputs",
     )
+    parser.add_argument(
+        "--include-slowdowns",
+        "--include_slowdowns",
+        action="store_true",
+        default=False,
+        help="Include slowdowns in geomean performance speedup report. By default, slowdowns are ignored. "
+        "This is because one can always use eager if compile is not speeding things up",
+    )
 
     parser.add_argument(
         "--extra-args", default="", help="Append commandline with these args"
@@ -361,7 +368,7 @@ def get_mode(args):
     return "training"
 
 
-def get_skip_tests(suite, is_training: bool):
+def get_skip_tests(suite, device, is_training: bool):
     """
     Generate -x seperated string to skip the unusual setup training tests
     """
@@ -370,10 +377,16 @@ def get_skip_tests(suite, is_training: bool):
     module = importlib.import_module(suite)
     os.chdir(original_dir)
 
-    if hasattr(module, "SKIP"):
-        skip_tests.update(module.SKIP)
-    if is_training and hasattr(module, "SKIP_TRAIN"):
-        skip_tests.update(module.SKIP_TRAIN)
+    if suite == "torchbench":
+        skip_tests.update(module.TorchBenchmarkRunner().skip_models)
+        if is_training:
+            skip_tests.update(
+                module.TorchBenchmarkRunner().skip_not_suitable_for_training_models
+            )
+        if device == "cpu":
+            skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cpu)
+        elif device == "cuda":
+            skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cuda)
 
     skip_tests = (f"-x {name}" for name in skip_tests)
     skip_str = " ".join(skip_tests)
@@ -420,8 +433,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                     if args.enable_cpu_launcher:
                         launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.cpu_launcher_args}"
                     cmd = f"{launcher_cmd} benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
-                    cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
-                    skip_tests_str = get_skip_tests(suite, args.training)
+                    cmd = f"{cmd} {base_cmd} {args.extra_args} --dashboard"
+                    skip_tests_str = get_skip_tests(suite, device, args.training)
                     cmd = f"{cmd} {skip_tests_str}"
 
                     if args.log_operator_inputs:
@@ -617,10 +630,24 @@ class Parser:
 
 class ParsePerformanceLogs(Parser):
     def __init__(
-        self, suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+        self,
+        suites,
+        devices,
+        dtypes,
+        compilers,
+        flag_compilers,
+        mode,
+        output_dir,
+        include_slowdowns=False,
     ):
         super().__init__(
-            suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+            suites,
+            devices,
+            dtypes,
+            compilers,
+            flag_compilers,
+            mode,
+            output_dir,
         )
         self.parsed_frames = defaultdict(lambda: defaultdict(None))
         self.untouched_parsed_frames = defaultdict(lambda: defaultdict(None))
@@ -632,6 +659,7 @@ class ParsePerformanceLogs(Parser):
         ]
         self.bottom_k = 50
         self.parse()
+        self.include_slowdowns = include_slowdowns
 
     def plot_graph(self, df, title):
         labels = df.columns.values.tolist()
@@ -741,12 +769,18 @@ class ParsePerformanceLogs(Parser):
                         if not perf_row.empty:
                             if acc_row.empty:
                                 perf_row[compiler] = 0.0
+                            elif acc_row[compiler].iloc[0] in (
+                                "model_fail_to_load",
+                                "eager_fail_to_run",
+                            ):
+                                perf_row = pd.DataFrame()
                             elif acc_row[compiler].iloc[0] not in (
                                 "pass",
                                 "pass_due_to_skip",
                             ):
                                 perf_row[compiler] = 0.0
-                    perf_rows.append(perf_row)
+                    if not perf_row.empty:
+                        perf_rows.append(perf_row)
                 df = pd.concat(perf_rows)
             df = df.sort_values(by=list(reversed(self.compilers)), ascending=False)
 
@@ -766,7 +800,9 @@ class ParsePerformanceLogs(Parser):
         return f"{df.mean():.2f}"
 
     def geomean(self, compiler, df):
-        cleaned_df = self.get_passing_entries(compiler, df).clip(1)
+        cleaned_df = self.get_passing_entries(compiler, df)
+        if not self.include_slowdowns:
+            cleaned_df = cleaned_df.clip(1)
         if cleaned_df.empty:
             return "0.0x"
         return f"{gmean(cleaned_df):.2f}x"
@@ -979,10 +1015,18 @@ class ParsePerformanceLogs(Parser):
 def parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir):
     mode = get_mode(args)
     build_summary(args)
+    include_slowdowns = args.include_slowdowns
 
     parser_class = ParsePerformanceLogs
     parser = parser_class(
-        suites, devices, dtypes, compilers, flag_compilers, mode, output_dir
+        suites,
+        devices,
+        dtypes,
+        compilers,
+        flag_compilers,
+        mode,
+        output_dir,
+        include_slowdowns,
     )
     parser.gen_summary_files()
     return
@@ -1408,7 +1452,7 @@ class DashboardUpdater:
             try:
                 RegressionTracker(self.args).diff()
             except Exception as e:
-                logging.exception(e)
+                logging.exception("")
                 with open(f"{self.args.output_dir}/gh_regression.txt", "w") as gh_fh:
                     gh_fh.write("")
 

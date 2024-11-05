@@ -4,6 +4,7 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
+#include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/debug.h>
 
 #include <algorithm>
@@ -19,15 +20,15 @@ namespace detail {
 namespace {
 
 DebugLevel loadDebugLevelFromEnvironment() {
-  char* env_value = std::getenv("TORCH_DISTRIBUTED_DEBUG");
+  auto env_value = c10::utils::get_env("TORCH_DISTRIBUTED_DEBUG");
 
-  if (env_value == nullptr) {
+  if (!env_value.has_value()) {
     return DebugLevel::Off;
   }
 
   DebugLevel level{};
 
-  std::string level_str{env_value};
+  std::string level_str = std::move(env_value.value());
 
   std::transform(
       level_str.begin(),
@@ -42,8 +43,8 @@ DebugLevel loadDebugLevelFromEnvironment() {
   } else if (level_str == "DETAIL") {
     level = DebugLevel::Detail;
   } else {
-    throw C10dError{
-        "The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL."};
+    throw std::invalid_argument(
+        "The value of TORCH_DISTRIBUTED_DEBUG must be OFF, INFO, or DETAIL.");
   }
 
   C10D_INFO("The debug level is set to {}.", level_str);

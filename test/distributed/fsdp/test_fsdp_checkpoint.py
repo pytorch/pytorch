@@ -17,7 +17,6 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
 )
-
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import _maybe_wrap_fsdp, FSDPTest
 from torch.testing._internal.common_utils import (
@@ -27,6 +26,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
 )
 from torch.utils.checkpoint import checkpoint
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -100,7 +100,7 @@ class TestFSDPCheckpoint(FSDPTest):
                 l3 = ckpt_wrapper(l3)
 
             fsdp_wrapper = partial(
-                _maybe_wrap_fsdp, wrap_fsdp=wrap_fsdp, *fsdp_args, **fsdp_kwargs
+                _maybe_wrap_fsdp, *fsdp_args, wrap_fsdp=wrap_fsdp, **fsdp_kwargs
             )
             self.ffn = nn.Sequential(
                 fsdp_wrapper(l1),

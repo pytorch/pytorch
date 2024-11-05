@@ -9,17 +9,19 @@ import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
 from torch.distributed._composable import fully_shard
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import BackwardPrefetch, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import _is_fsdp_flattened, clean_tensor_name
-from torch.distributed.fsdp.wrap import _FSDPPolicy, ModuleWrapPolicy
+from torch.distributed.fsdp.wrap import _Policy, CustomPolicy, ModuleWrapPolicy
 from torch.testing._internal.common_dist_composable import (
     CompositeParamModel,
+    FakeSequential,
     NestedSequentialModel,
     UnitModule,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -43,18 +45,27 @@ class TestInitialization(FSDPTest):
     @skip_if_lt_x_gpu(2)
     def test_policy(self):
         """Tests passing a ``policy`` for pseudo-auto-wrapping."""
+
+        def lambda_fn(module: nn.Module):
+            if isinstance(module, nn.Sequential):
+                return True
+            elif isinstance(module, FakeSequential):
+                return {"backward_prefetch": BackwardPrefetch.BACKWARD_POST}
+            return False
+
         self.run_subtests(
             {
                 "policy": [
                     None,
                     ModuleWrapPolicy({UnitModule}),
                     ModuleWrapPolicy({nn.Sequential}),
+                    CustomPolicy(lambda_fn),
                 ],
             },
             self._test_policy,
         )
 
-    def _test_policy(self, policy: Optional[_FSDPPolicy]):
+    def _test_policy(self, policy: Optional[_Policy]):
         use_nested_sequential_model = "Sequential" in getattr(
             policy, "_module_classes_str", ""
         )
@@ -134,11 +145,27 @@ class TestInitialization(FSDPTest):
         # Check that the composable module does not add any wrapper class
         local_module_classes = set()
         composable_module_classes = set()
-        for submodule in local_model.modules():
-            local_module_classes.add(type(submodule))
-        for submodule in composable_module.modules():
-            composable_module_classes.add(type(submodule))
+        local_module_classes.update(
+            type(submodule) for submodule in local_model.modules()
+        )
+        composable_module_classes.update(
+            type(submodule) for submodule in composable_module.modules()
+        )
         self.assertEqual(local_module_classes, composable_module_classes)
+
+        # Check that the composable module has the same FSDP states with the
+        # same attributes (mainly checking backward prefetch since the lambda
+        # wrap policy overrides it for `FakeSequential`)
+        wrapper_states = traversal_utils._get_fsdp_states(fsdp_wrapped_model)
+        composable_states = traversal_utils._get_fsdp_states(composable_module)
+        self.assertEqual(len(wrapper_states), len(composable_states))
+        for wrapper_state, composable_state in zip(wrapper_states, composable_states):
+            self.assertEqual(
+                wrapper_state.sharding_strategy, composable_state.sharding_strategy
+            )
+            self.assertEqual(
+                wrapper_state.backward_prefetch, composable_state.backward_prefetch
+            )
 
     @skip_if_lt_x_gpu(2)
     def test_device_id(self):
@@ -286,15 +313,26 @@ class TestInitialization(FSDPTest):
         ]
         for data_structure_name in data_structure_names:
             all_structures = set()
-            for module in (
-                composable_module.u1,
-                composable_module.u2,
-                composable_module,
-            ):
-                all_structures.add(
-                    id(getattr(fully_shard.state(module), data_structure_name))
+            all_structures.update(
+                id(getattr(fully_shard.state(module), data_structure_name))
+                for module in (
+                    composable_module.u1,
+                    composable_module.u2,
+                    composable_module,
                 )
+            )
             self.assertEqual(len(all_structures), 1)
+
+    @skip_if_lt_x_gpu(2)
+    def test_raise_scalar_parameter(self):
+        """Tests raising an exception when the model has scalar parameters."""
+        device = torch.device("cuda")
+        model = CompositeParamModel(device=device)
+        model.register_parameter("scalar_p", nn.Parameter(torch.tensor(1.0).cuda()))
+        with self.assertRaisesRegex(
+            ValueError, "Change scalar_p to a 1D tensor with numel equal to 1."
+        ):
+            fully_shard(model)
 
 
 if __name__ == "__main__":

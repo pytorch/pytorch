@@ -1,26 +1,22 @@
+from __future__ import annotations
+
 import argparse
 import os
 import sys
 import xml.etree.ElementTree as ET
+from multiprocessing import cpu_count, Pool
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
+from tools.stats.test_dashboard import upload_additional_info
 from tools.stats.upload_stats_lib import (
-    download_gha_artifacts,
     download_s3_artifacts,
+    get_job_id,
+    remove_nan_inf,
     unzip,
     upload_workflow_stats_to_s3,
 )
-
-
-def get_job_id(report: Path) -> int:
-    # [Job id in artifacts]
-    # Retrieve the job id from the report path. In our GHA workflows, we append
-    # the job id to the end of the report name, so `report` looks like:
-    #     unzipped-test-reports-foo_5596745227/test/test-reports/foo/TEST-foo.xml
-    # and we want to get `5596745227` out of it.
-    return int(report.parts[0].rpartition("_")[2])
 
 
 def parse_xml_report(
@@ -28,18 +24,14 @@ def parse_xml_report(
     report: Path,
     workflow_id: int,
     workflow_run_attempt: int,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Convert a test report xml file into a JSON-serializable list of test cases."""
     print(f"Parsing {tag}s for test report: {report}")
 
-    try:
-        job_id = get_job_id(report)
-        print(f"Found job id: {job_id}")
-    except Exception:
-        job_id = None
-        print("Failed to find job id")
+    job_id = get_job_id(report)
+    print(f"Found job id: {job_id}")
 
-    test_cases: List[Dict[str, Any]] = []
+    test_cases: list[dict[str, Any]] = []
 
     root = ET.parse(report)
     for test_case in root.iter(tag):
@@ -64,9 +56,9 @@ def parse_xml_report(
     return test_cases
 
 
-def process_xml_element(element: ET.Element) -> Dict[str, Any]:
+def process_xml_element(element: ET.Element) -> dict[str, Any]:
     """Convert a test suite element into a JSON-serializable dict."""
-    ret: Dict[str, Any] = {}
+    ret: dict[str, Any] = {}
 
     # Convert attributes directly into dict elements.
     # e.g.
@@ -121,24 +113,7 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
     return ret
 
 
-def get_pytest_parallel_times() -> Dict[Any, Any]:
-    pytest_parallel_times: Dict[Any, Any] = {}
-    for report in Path(".").glob("**/python-pytest/**/*.xml"):
-        invoking_file = report.parent.name
-
-        root = ET.parse(report)
-
-        assert len(list(root.iter("testsuite"))) == 1
-        for test_suite in root.iter("testsuite"):
-            pytest_parallel_times[
-                (invoking_file, get_job_id(report))
-            ] = test_suite.attrib["time"]
-    return pytest_parallel_times
-
-
-def get_tests(
-    workflow_run_id: int, workflow_run_attempt: int
-) -> Tuple[List[Dict[str, Any]], Dict[Any, Any]]:
+def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> list[dict[str, Any]]:
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
         os.chdir(temp_dir)
@@ -150,32 +125,31 @@ def get_tests(
         for path in s3_paths:
             unzip(path)
 
-        artifact_paths = download_gha_artifacts(
-            "test-report", workflow_run_id, workflow_run_attempt
-        )
-        for path in artifact_paths:
-            unzip(path)
-
         # Parse the reports and transform them to JSON
         test_cases = []
+        mp = Pool(cpu_count())
         for xml_report in Path(".").glob("**/*.xml"):
-            test_cases.extend(
-                parse_xml_report(
-                    "testcase",
-                    xml_report,
-                    workflow_run_id,
-                    workflow_run_attempt,
+            test_cases.append(
+                mp.apply_async(
+                    parse_xml_report,
+                    args=(
+                        "testcase",
+                        xml_report,
+                        workflow_run_id,
+                        workflow_run_attempt,
+                    ),
                 )
             )
-
-        pytest_parallel_times = get_pytest_parallel_times()
-
-        return test_cases, pytest_parallel_times
+        mp.close()
+        mp.join()
+        test_cases = [tc.get() for tc in test_cases]
+        flattened = [item for sublist in test_cases for item in sublist]
+        return flattened
 
 
 def get_tests_for_circleci(
     workflow_run_id: int, workflow_run_attempt: int
-) -> Tuple[List[Dict[str, Any]], Dict[Any, Any]]:
+) -> list[dict[str, Any]]:
     # Parse the reports and transform them to JSON
     test_cases = []
     for xml_report in Path(".").glob("**/test/test-reports/**/*.xml"):
@@ -185,53 +159,16 @@ def get_tests_for_circleci(
             )
         )
 
-    pytest_parallel_times = get_pytest_parallel_times()
-
-    return test_cases, pytest_parallel_times
+    return test_cases
 
 
-def get_invoking_file_times(
-    test_case_summaries: List[Dict[str, Any]], pytest_parallel_times: Dict[Any, Any]
-) -> List[Dict[str, Any]]:
-    def get_key(summary: Dict[str, Any]) -> Any:
-        return (
-            summary["invoking_file"],
-            summary["job_id"],
-        )
-
-    def init_value(summary: Dict[str, Any]) -> Any:
-        return {
-            "job_id": summary["job_id"],
-            "workflow_id": summary["workflow_id"],
-            "workflow_run_attempt": summary["workflow_run_attempt"],
-            "invoking_file": summary["invoking_file"],
-            "time": 0.0,
-        }
-
-    ret = {}
-    for summary in test_case_summaries:
-        key = get_key(summary)
-        if key not in ret:
-            ret[key] = init_value(summary)
-        ret[key]["time"] += summary["time"]
-
-    for key, val in ret.items():
-        # when running in parallel in pytest, adding the test times will not give the correct
-        # time used to run the file, which will make the sharding incorrect, so if the test is
-        # run in parallel, we take the time reported by the testsuite
-        if key in pytest_parallel_times:
-            val["time"] = pytest_parallel_times[key]
-
-    return list(ret.values())
-
-
-def summarize_test_cases(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def summarize_test_cases(test_cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Group test cases by classname, file, and job_id. We perform the aggregation
     manually instead of using the `test-suite` XML tag because xmlrunner does
     not produce reliable output for it.
     """
 
-    def get_key(test_case: Dict[str, Any]) -> Any:
+    def get_key(test_case: dict[str, Any]) -> Any:
         return (
             test_case.get("file"),
             test_case.get("classname"),
@@ -242,7 +179,7 @@ def summarize_test_cases(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any
             test_case["invoking_file"],
         )
 
-    def init_value(test_case: Dict[str, Any]) -> Dict[str, Any]:
+    def init_value(test_case: dict[str, Any]) -> dict[str, Any]:
         return {
             "file": test_case.get("file"),
             "classname": test_case.get("classname"),
@@ -313,13 +250,11 @@ if __name__ == "__main__":
     print(f"Workflow id is: {args.workflow_run_id}")
 
     if args.circleci:
-        test_cases, pytest_parallel_times = get_tests_for_circleci(
+        test_cases = get_tests_for_circleci(
             args.workflow_run_id, args.workflow_run_attempt
         )
     else:
-        test_cases, pytest_parallel_times = get_tests(
-            args.workflow_run_id, args.workflow_run_attempt
-        )
+        test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
 
     # Flush stdout so that any errors in Rockset upload show up last in the logs.
     sys.stdout.flush()
@@ -327,22 +262,12 @@ if __name__ == "__main__":
     # For PRs, only upload a summary of test_runs. This helps lower the
     # volume of writes we do to Rockset.
     test_case_summary = summarize_test_cases(test_cases)
-    invoking_file_times = get_invoking_file_times(
-        test_case_summary, pytest_parallel_times
-    )
 
     upload_workflow_stats_to_s3(
         args.workflow_run_id,
         args.workflow_run_attempt,
         "test_run_summary",
-        test_case_summary,
-    )
-
-    upload_workflow_stats_to_s3(
-        args.workflow_run_id,
-        args.workflow_run_attempt,
-        "invoking_file_times",
-        invoking_file_times,
+        remove_nan_inf(test_case_summary),
     )
 
     # Separate out the failed test cases.
@@ -357,11 +282,16 @@ if __name__ == "__main__":
         args.workflow_run_id,
         args.workflow_run_attempt,
         "failed_test_runs",
-        failed_tests_cases,
+        remove_nan_inf(failed_tests_cases),
     )
 
     if args.head_branch == "main" and args.head_repository == "pytorch/pytorch":
         # For jobs on main branch, upload everything.
         upload_workflow_stats_to_s3(
-            args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
+            args.workflow_run_id,
+            args.workflow_run_attempt,
+            "test_run",
+            remove_nan_inf(test_cases),
         )
+
+    upload_additional_info(args.workflow_run_id, args.workflow_run_attempt, test_cases)

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Torch
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
 import torch.nn.functional as F
@@ -7,7 +9,7 @@ import torch.jit
 import torch.jit._logging
 import torch.jit.frontend
 from torch.testing._internal.common_nn import module_tests, new_module_tests
-from torch.testing._internal.common_utils import is_iterable_of_tensors
+from torch.testing._internal.common_utils import is_iterable_of_tensors, noncontiguous_like
 
 import collections
 from copy import deepcopy
@@ -115,6 +117,7 @@ nn_functional_tests = [
     ('max_unpool3d', torch.tensor([[[[[2., 4]]]]]), (torch.tensor([[[[[1, 3]]]]]), 2, 2, 0)),
     ('lp_pool1d', (S, S, S), (2., 3, 2,)),
     ('lp_pool2d', (S, S, S, S), (2., 3, 2,)),
+    ('lp_pool3d', (S, S, S, S, S), (2., 3, 2,)),
     ('adaptive_max_pool1d', (S, S, S), (5,)),
     ('adaptive_max_pool2d', (S, S, S, S), ([5, 7],)),
     ('adaptive_max_pool3d', (S, S, S, S, S), ([3, 2, 2],)),
@@ -330,7 +333,7 @@ def value_to_literal(value):
 def get_call(method_name, func_type, args, kwargs):
     kwargs_str = ', '.join([k + '=' + value_to_literal(v) for k, v in kwargs.items()])
     self_arg = args[0]
-    if(func_type == 'method'):
+    if func_type == 'method':
         args = args[1:]
 
     argument_str = ', '.join(args)
@@ -505,19 +508,16 @@ def get_nn_functional_compiled_fn_and_inputs(name, self_size, args, variant_name
     if variant_name != '':
         test_name = test_name + '_' + variant_name
 
-    no_grad = variant_name == 'inplace'
-
     self_variable = create_input((self_size,))[0][0]
-    kwargs = None
 
     # need to record this because methods can change the size (e.g. unsqueeze)
-    args_variable, kwargs_variable = create_input(args)
+    args_variable, _kwargs_variable = create_input(args)
 
     self_tensor = deepcopy(self_variable.data)
     args_tensor = deepcopy(unpack_variables(args_variable))
 
     f_args_variable = (self_variable,) + args_variable
-    f_args_tensor = (self_tensor,) + args_tensor
+    f_args_tensor = (self_tensor,) + args_tensor  # noqa: F841
     with torch._jit_internal._disable_emit_hooks():
         script_fn, inputs = gen_script_fn_and_args(name, "nn_functional", *f_args_variable)
     return script_fn, inputs
@@ -571,6 +571,12 @@ EXCLUDE_SCRIPT_MODULES = {
 
     # Doesn't use future division, so this is not supported
     'test_nn_CrossMapLRN2d',
+    # Derivative for aten::_scaled_dot_product_flash_attention_backward is not implemented
+    'test_nn_TransformerDecoderLayer_gelu_activation',
+    'test_nn_TransformerDecoderLayer_relu_activation',
+    'test_nn_TransformerEncoderLayer_gelu_activation',
+    'test_nn_TransformerEncoderLayer_relu_activation',
+    'test_nn_Transformer_multilayer_coder',
 }
 
 script_method_template = '''
@@ -580,7 +586,7 @@ def forward({}):
 
 def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
     def script_module(*args, **kwargs):
-        formals, tensors, actuals = get_script_args(args)
+        _formals, tensors, actuals = get_script_args(args)
 
         method_args = ', '.join(['self'] + actuals)
         call_args_str = ', '.join(actuals)
@@ -595,7 +601,7 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
         class TheModule(torch.jit.ScriptModule):
             __constants__ = submodule_constants
 
-            def __init__(self):
+            def __init__(self) -> None:
                 super().__init__()
                 self.submodule = nn_module(*constructor_args)
 
@@ -700,11 +706,14 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
             input = (input,)
         input = input + (kwargs['target_fn'](),)
 
-    args_variable, kwargs_variable = create_input(input, dtype=input_dtype)
+    args_variable, _kwargs_variable = create_input(input, dtype=input_dtype)
     f_args_variable = deepcopy(unpack_variables(args_variable))
     out_var = deepcopy(f_args_variable)
 
-    args, mod = f_args_variable, create_script_module(None, nn_module, constructor_args, *f_args_variable)(*f_args_variable)
+
+    _args, mod = f_args_variable, create_script_module(
+        None, nn_module, constructor_args, *f_args_variable
+    )(*f_args_variable)
 
     return mod, out_var
 

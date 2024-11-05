@@ -8,42 +8,57 @@
     CUresult __err = EXPR;                                                 \
     if (__err != CUDA_SUCCESS) {                                           \
       const char* err_str;                                                 \
-      CUresult get_error_str_err C10_UNUSED =                              \
+      CUresult get_error_str_err [[maybe_unused]] =                        \
           c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str); \
       if (get_error_str_err != CUDA_SUCCESS) {                             \
-        AT_ERROR("CUDA driver error: unknown error");                      \
+        TORCH_CHECK(false, "CUDA driver error: unknown error");            \
       } else {                                                             \
-        AT_ERROR("CUDA driver error: ", err_str);                          \
+        TORCH_CHECK(false, "CUDA driver error: ", err_str);                \
       }                                                                    \
     }                                                                      \
   } while (0)
 
-#define C10_FORALL_DRIVER_LIBRARIES(_) \
-  _("libcuda.so", 0)                   \
-  _("libnvidia-ml.so.1", 1)
+#define C10_LIBCUDA_DRIVER_API(_)   \
+  _(cuDeviceGetAttribute)           \
+  _(cuMemAddressReserve)            \
+  _(cuMemRelease)                   \
+  _(cuMemMap)                       \
+  _(cuMemAddressFree)               \
+  _(cuMemSetAccess)                 \
+  _(cuMemUnmap)                     \
+  _(cuMemCreate)                    \
+  _(cuMemGetAllocationGranularity)  \
+  _(cuMemExportToShareableHandle)   \
+  _(cuMemImportFromShareableHandle) \
+  _(cuStreamWriteValue32)           \
+  _(cuGetErrorString)
 
-#define C10_FORALL_DRIVER_API(_)         \
-  _(cuMemAddressReserve, 0)              \
-  _(cuMemRelease, 0)                     \
-  _(cuMemMap, 0)                         \
-  _(cuMemAddressFree, 0)                 \
-  _(cuMemSetAccess, 0)                   \
-  _(cuMemUnmap, 0)                       \
-  _(cuMemCreate, 0)                      \
-  _(cuGetErrorString, 0)                 \
-  _(nvmlInit_v2, 1)                      \
-  _(nvmlDeviceGetHandleByPciBusId_v2, 1) \
-  _(nvmlDeviceGetComputeRunningProcesses, 1)
+#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)
+#define C10_LIBCUDA_DRIVER_API_12030(_) \
+  _(cuMulticastAddDevice)               \
+  _(cuMulticastBindMem)                 \
+  _(cuMulticastCreate)
+#else
+#define C10_LIBCUDA_DRIVER_API_12030(_)
+#endif
 
-namespace c10 {
-namespace cuda {
+#define C10_NVML_DRIVER_API(_)           \
+  _(nvmlInit_v2)                         \
+  _(nvmlDeviceGetHandleByPciBusId_v2)    \
+  _(nvmlDeviceGetNvLinkRemoteDeviceType) \
+  _(nvmlDeviceGetNvLinkRemotePciInfo_v2) \
+  _(nvmlDeviceGetComputeRunningProcesses)
+
+namespace c10::cuda {
 
 struct DriverAPI {
-#define CREATE_MEMBER(name, n) decltype(&name) name##_;
-  C10_FORALL_DRIVER_API(CREATE_MEMBER)
+#define CREATE_MEMBER(name) decltype(&name) name##_;
+  C10_LIBCUDA_DRIVER_API(CREATE_MEMBER)
+  C10_LIBCUDA_DRIVER_API_12030(CREATE_MEMBER)
+  C10_NVML_DRIVER_API(CREATE_MEMBER)
 #undef CREATE_MEMBER
   static DriverAPI* get();
+  static void* get_nvml_handle();
 };
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

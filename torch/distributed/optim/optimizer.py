@@ -1,5 +1,6 @@
+# mypy: allow-untyped-decorators
+# mypy: allow-untyped-defs
 import logging
-
 from collections import defaultdict
 from threading import Lock
 from typing import List, Optional
@@ -11,7 +12,9 @@ import torch.jit as jit
 import torch.nn as nn
 from torch import Tensor
 from torch.distributed.rpc import RRef
+
 from .utils import functional_optim_map
+
 
 __all__ = ["DistributedOptimizer"]
 
@@ -204,7 +207,7 @@ class DistributedOptimizer:
                 "(i.e. Distributed Model Parallel training on CPU) due to the Python's "
                 "Global Interpreter Lock (GIL). Please file an issue if you need this "
                 "optimizer in TorchScript. ",
-                optimizer_class
+                optimizer_class,
             )
             optimizer_new_func = _new_local_optimizer
 
@@ -236,10 +239,11 @@ class DistributedOptimizer:
         """
         dist_autograd._is_valid_context(context_id)
 
-        if self.is_functional_optim:
-            optimizer_step_func = _script_local_optimizer_step
-        else:
-            optimizer_step_func = _local_optimizer_step
+        optimizer_step_func = (
+            _script_local_optimizer_step
+            if self.is_functional_optim
+            else _local_optimizer_step
+        )
 
         rpc_futs = []
         for optimizer in self.remote_optimizers:

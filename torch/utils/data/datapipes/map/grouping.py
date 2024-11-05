@@ -1,18 +1,23 @@
+# mypy: allow-untyped-defs
+from typing import List, Sized, Type, TypeVar
+
 from torch.utils.data.datapipes._decorator import functional_datapipe
-from torch.utils.data.datapipes.datapipe import MapDataPipe, DataChunk
-from typing import List, Sized, TypeVar
-
-__all__ = ["BatcherMapDataPipe", ]
-
-T = TypeVar('T')
+from torch.utils.data.datapipes.datapipe import DataChunk, MapDataPipe
 
 
-@functional_datapipe('batch')
+__all__ = ["BatcherMapDataPipe"]
+
+
+_T = TypeVar("_T")
+
+
+@functional_datapipe("batch")
 class BatcherMapDataPipe(MapDataPipe[DataChunk]):
     r"""
-    Create mini-batches of data (functional name: ``batch``). An outer dimension will be added as
-    ``batch_size`` if ``drop_last`` is set to ``True``, or ``length % batch_size`` for the
-    last batch if ``drop_last`` is set to ``False``.
+    Create mini-batches of data (functional name: ``batch``).
+
+    An outer dimension will be added as ``batch_size`` if ``drop_last`` is set to ``True``,
+    or ``length % batch_size`` for the last batch if ``drop_last`` is set to ``False``.
 
     Args:
         datapipe: Iterable DataPipe being batched
@@ -27,16 +32,18 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
         >>> list(batch_dp)
         [[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]]
     """
+
     datapipe: MapDataPipe
     batch_size: int
     drop_last: bool
 
-    def __init__(self,
-                 datapipe: MapDataPipe[T],
-                 batch_size: int,
-                 drop_last: bool = False,
-                 wrapper_class=DataChunk,
-                 ) -> None:
+    def __init__(
+        self,
+        datapipe: MapDataPipe[_T],
+        batch_size: int,
+        drop_last: bool = False,
+        wrapper_class: Type[DataChunk] = DataChunk,
+    ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
         self.datapipe = datapipe

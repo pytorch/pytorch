@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 namespace {
 std::mutex lock;
 const std::vector<std::string> functions = {
@@ -1557,12 +1556,12 @@ static void loadModule(const CompilationUnit& module) {
     Node* forward_tuple = pair.forward->outputs().at(0)->node();
 
     if (forward_tuple->kind() != prim::TupleConstruct) {
-      throw ErrorReport(forward_tuple->sourceRange())
-          << "gradient must return literal a tuple";
+      throw(
+          ErrorReport(forward_tuple->sourceRange())
+          << "gradient must return literal a tuple");
     }
 
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Value* context;
+    Value* context = nullptr;
     std::tie(pair.backward, context) =
         extractClosure(forward_tuple->inputs().back());
 
@@ -1610,12 +1609,12 @@ static void loadModule(const CompilationUnit& module) {
 
 static void loadFunctions() {
   for (const std::string& str : functions) {
-    compilation_unit.define(c10::nullopt, str, nativeResolver(), nullptr);
+    compilation_unit.define(std::nullopt, str, nativeResolver(), nullptr);
   }
   loadModule(compilation_unit);
 }
 
-c10::optional<GradientPair> gradientInfoForSchema(
+std::optional<GradientPair> gradientInfoForSchema(
     const FunctionSchema& schema) {
   std::lock_guard<std::mutex> guard(lock);
   if (schema_to_graphs.empty()) {
@@ -1636,12 +1635,11 @@ c10::optional<GradientPair> gradientInfoForSchema(
       return sym_script_it->second;
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 bool hasGradientInfoForSchema(const FunctionSchema& schema) {
   return gradientInfoForSchema(schema).has_value();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

@@ -1,26 +1,27 @@
-import heapq
-import json
+from __future__ import annotations
+
 import math
 import os
 import subprocess
 from pathlib import Path
+from typing import Callable, Sequence
 
-from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
-from warnings import warn
+from tools.stats.import_test_stats import get_disabled_tests
+from tools.testing.test_run import ShardedTest, TestRun
 
-from tools.shared.logging_utils import duration_to_str, pluralize
 
-from tools.stats.import_test_stats import get_disabled_tests, get_slow_tests
-from tools.stats.upload_stats_lib import emit_metric
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 IS_MEM_LEAK_CHECK = os.getenv("PYTORCH_TEST_CUDA_MEM_LEAK_CHECK", "0") == "1"
+BUILD_ENVIRONMENT = os.getenv("BUILD_ENVIRONMENT", "")
+USE_3_PROCS = "sm86" in BUILD_ENVIRONMENT or "cuda" not in BUILD_ENVIRONMENT
 
 # NUM_PROCS_FOR_SHARDING_CALC must remain consistent across all shards of a job
 # to ensure that sharding is consistent, NUM_PROCS is the actual number of procs
 # used to run tests.  If they are not equal, the only consequence should be
 # unequal shards.
 IS_ROCM = os.path.exists("/opt/rocm")
-NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 2
+NUM_PROCS = 1 if IS_MEM_LEAK_CHECK else 3 if USE_3_PROCS else 2
 NUM_PROCS_FOR_SHARDING_CALC = NUM_PROCS if not IS_ROCM or IS_MEM_LEAK_CHECK else 2
 THRESHOLD = 60 * 10  # 10 minutes
 
@@ -40,31 +41,19 @@ if IS_ROCM and not IS_MEM_LEAK_CHECK:
                 count += 1
         assert count > 0  # there must be at least 1 GPU
         # Limiting to 8 GPUs(PROCS)
-        NUM_PROCS = 8 if count > 8 else count
+        NUM_PROCS = min(count, 8)
     except subprocess.CalledProcessError as e:
         # The safe default for ROCm GHA runners is to run tests serially.
         NUM_PROCS = 1
 
 
-class ShardedTest(NamedTuple):
-    name: str
-    shard: int
-    num_shards: int
-    time: Optional[float]  # In seconds
-
-    def __str__(self) -> str:
-        return f"{self.name} {self.shard}/{self.num_shards}"
-
-    def get_time(self) -> float:
-        return self.time or 0
-
-
 class ShardJob:
     def __init__(self) -> None:
-        self.serial: List[ShardedTest] = []
-        self.parallel: List[ShardedTest] = []
+        self.serial: list[ShardedTest] = []
+        self.parallel: list[ShardedTest] = []
 
     def get_total_time(self) -> float:
+        """Default is the value for which to substitute if a test has no time"""
         procs = [0.0 for _ in range(NUM_PROCS_FOR_SHARDING_CALC)]
         for test in self.parallel:
             min_index = procs.index(min(procs))
@@ -72,17 +61,21 @@ class ShardJob:
         time = max(procs) + sum(test.get_time() for test in self.serial)
         return time
 
-    def convert_to_tuple(self) -> Tuple[float, List[ShardedTest]]:
+    def convert_to_tuple(self) -> tuple[float, list[ShardedTest]]:
         return (self.get_total_time(), self.serial + self.parallel)
 
 
 def get_with_pytest_shard(
-    tests: List[str], test_file_times: Dict[str, float]
-) -> List[ShardedTest]:
-    sharded_tests: List[ShardedTest] = []
+    tests: Sequence[TestRun],
+    test_file_times: dict[str, float],
+    test_class_times: dict[str, dict[str, float]] | None,
+) -> list[ShardedTest]:
+    sharded_tests: list[ShardedTest] = []
+
     for test in tests:
-        duration = test_file_times[test]
-        if duration > THRESHOLD:
+        duration = get_duration(test, test_file_times, test_class_times or {})
+
+        if duration and duration > THRESHOLD:
             num_shards = math.ceil(duration / THRESHOLD)
             for i in range(num_shards):
                 sharded_tests.append(
@@ -93,256 +86,176 @@ def get_with_pytest_shard(
     return sharded_tests
 
 
-def calculate_shards(
-    num_shards: int,
-    tests: List[str],
-    test_file_times: Dict[str, float],
-    must_serial: Optional[Callable[[str], bool]] = None,
-) -> List[Tuple[float, List[ShardedTest]]]:
-    must_serial = must_serial or (lambda x: True)
+def get_duration(
+    test: TestRun,
+    test_file_times: dict[str, float],
+    test_class_times: dict[str, dict[str, float]],
+) -> float | None:
+    """Calculate the time for a TestRun based on the given test_file_times and
+    test_class_times.  Returns None if the time is unknown."""
+    file_duration = test_file_times.get(test.test_file, None)
+    if test.is_full_file():
+        return file_duration
 
-    known_tests = [x for x in tests if x in test_file_times]
-    unknown_tests: List[str] = [x for x in tests if x not in known_tests]
+    def get_duration_for_classes(
+        test_file: str, test_classes: frozenset[str]
+    ) -> float | None:
+        duration: float = 0
 
-    sorted_tests = sorted(
-        get_with_pytest_shard(known_tests, test_file_times),
-        key=lambda j: j.get_time(),
-        reverse=True,
-    )
+        for test_class in test_classes:
+            class_duration = test_class_times.get(test_file, {}).get(test_class, None)
+            if class_duration is None:
+                return None
+            duration += class_duration
+        return duration
 
-    sharded_jobs: List[ShardJob] = [ShardJob() for _ in range(num_shards)]
-    for test in sorted_tests:
-        if must_serial(test.name):
-            min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
+    included = test.included()
+    excluded = test.excluded()
+    included_classes_duration = get_duration_for_classes(test.test_file, included)
+    excluded_classes_duration = get_duration_for_classes(test.test_file, excluded)
+
+    if included_classes_duration is None or excluded_classes_duration is None:
+        # Didn't get the time for all classes, so time is unknown
+        return None
+
+    if included:
+        return included_classes_duration
+    assert (
+        excluded
+    ), f"TestRun {test} is not full file but doesn't have included or excluded classes"
+    if file_duration is None:
+        return None
+    return file_duration - excluded_classes_duration
+
+
+def shard(
+    sharded_jobs: list[ShardJob],
+    pytest_sharded_tests: Sequence[ShardedTest],
+    estimated_time_limit: float | None = None,
+    serial: bool = False,
+) -> None:
+    # Modifies sharded_jobs in place
+    if len(sharded_jobs) == 0:
+        assert (
+            len(pytest_sharded_tests) == 0
+        ), "No shards provided but there are tests to shard"
+        return
+
+    round_robin_index = 0
+
+    def _get_min_sharded_job(
+        sharded_jobs: list[ShardJob], test: ShardedTest
+    ) -> ShardJob:
+        if test.time is None:
+            nonlocal round_robin_index
+            job = sharded_jobs[round_robin_index % len(sharded_jobs)]
+            round_robin_index += 1
+            return job
+        return min(sharded_jobs, key=lambda j: j.get_total_time())
+
+    def _shard_serial(
+        tests: Sequence[ShardedTest], sharded_jobs: list[ShardJob]
+    ) -> None:
+        assert estimated_time_limit is not None, "Estimated time limit must be provided"
+        new_sharded_jobs = sharded_jobs
+        for test in tests:
+            if (
+                len(sharded_jobs) > 1
+                and sharded_jobs[-1].get_total_time() > estimated_time_limit
+            ):
+                new_sharded_jobs = sharded_jobs[:-1]
+            min_sharded_job = _get_min_sharded_job(new_sharded_jobs, test)
             min_sharded_job.serial.append(test)
-        else:
-            min_sharded_job = min(sharded_jobs, key=lambda j: j.get_total_time())
+
+    def _shard_parallel(
+        tests: Sequence[ShardedTest], sharded_jobs: list[ShardJob]
+    ) -> None:
+        for test in tests:
+            min_sharded_job = _get_min_sharded_job(sharded_jobs, test)
             min_sharded_job.parallel.append(test)
 
-    # Round robin the unknown jobs starting with the smallest shard
-    index = min(range(num_shards), key=lambda i: sharded_jobs[i].get_total_time())
-    for unknown_test in unknown_tests:
-        sharded_jobs[index].serial.append(ShardedTest(unknown_test, 1, 1, None))
-        index = (index + 1) % num_shards
+    if serial:
+        _shard_serial(pytest_sharded_tests, sharded_jobs)
+    else:
+        _shard_parallel(pytest_sharded_tests, sharded_jobs)
+
+    return
+
+
+def calculate_shards(
+    num_shards: int,
+    tests: Sequence[TestRun],
+    test_file_times: dict[str, float],
+    test_class_times: dict[str, dict[str, float]] | None,
+    must_serial: Callable[[str], bool] | None = None,
+    sort_by_time: bool = True,
+) -> list[tuple[float, list[ShardedTest]]]:
+    must_serial = must_serial or (lambda x: True)
+    test_class_times = test_class_times or {}
+
+    # Divide tests into pytest shards
+    if sort_by_time:
+        known_tests = [
+            x
+            for x in tests
+            if get_duration(x, test_file_times, test_class_times) is not None
+        ]
+        unknown_tests = [x for x in tests if x not in known_tests]
+
+        pytest_sharded_tests = sorted(
+            get_with_pytest_shard(known_tests, test_file_times, test_class_times),
+            key=lambda j: j.get_time(),
+            reverse=True,
+        ) + get_with_pytest_shard(unknown_tests, test_file_times, test_class_times)
+    else:
+        pytest_sharded_tests = get_with_pytest_shard(
+            tests, test_file_times, test_class_times
+        )
+    del tests
+
+    serial_tests = [test for test in pytest_sharded_tests if must_serial(test.name)]
+    parallel_tests = [test for test in pytest_sharded_tests if test not in serial_tests]
+
+    serial_time = sum(test.get_time() for test in serial_tests)
+    parallel_time = sum(test.get_time() for test in parallel_tests)
+    total_time = serial_time + parallel_time / NUM_PROCS_FOR_SHARDING_CALC
+    estimated_time_per_shard = total_time / num_shards
+    # Separate serial tests from parallel tests as much as possible to maximize
+    # parallelism by putting all the serial tests on the first num_serial_shards
+    # shards. The estimated_time_limit is the estimated time it should take for
+    # the least filled serial shard. Ex if we have 8 min of serial tests, 20 min
+    # of parallel tests, 6 shards, and 2 procs per machine, we would expect each
+    # machine to take 3 min and should aim for 3 serial shards, with shards 1
+    # and 2 taking 3 min and shard 3 taking 2 min.  The estimated time limit
+    # would be 2 min. This ensures that the first few shard contains as many
+    # serial tests as possible and as few parallel tests as possible. The least
+    # filled/last (in the example, the 3rd) shard may contain a lot of both
+    # serial and parallel tests.
+    estimated_time_limit = 0.0
+    if estimated_time_per_shard != 0:
+        estimated_time_limit = serial_time % estimated_time_per_shard
+    if estimated_time_limit <= 0.01:
+        estimated_time_limit = estimated_time_per_shard
+    if total_time == 0:
+        num_serial_shards = num_shards
+    else:
+        num_serial_shards = max(math.ceil(serial_time / total_time * num_shards), 1)
+
+    sharded_jobs = [ShardJob() for _ in range(num_shards)]
+    shard(
+        sharded_jobs=sharded_jobs[:num_serial_shards],
+        pytest_sharded_tests=serial_tests,
+        estimated_time_limit=estimated_time_limit,
+        serial=True,
+    )
+    shard(
+        sharded_jobs=sharded_jobs,
+        pytest_sharded_tests=parallel_tests,
+        serial=False,
+    )
+
     return [job.convert_to_tuple() for job in sharded_jobs]
 
 
-def _query_changed_test_files() -> List[str]:
-    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
-    merge_base = (
-        subprocess.check_output(["git", "merge-base", default_branch, "HEAD"])
-        .decode()
-        .strip()
-    )
-
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode().strip()
-
-    base_commit = merge_base
-    if base_commit == head:
-        # We are on the default branch, so check for changes since the last commit
-        base_commit = "HEAD^"
-
-    proc = subprocess.run(
-        ["git", "diff", "--name-only", base_commit, "HEAD"], capture_output=True
-    )
-
-    if proc.returncode != 0:
-        raise RuntimeError("Unable to get changed files")
-
-    lines = proc.stdout.decode().strip().split("\n")
-    lines = [line.strip() for line in lines]
-    return lines
-
-
-def _get_previously_failing_tests() -> Set[str]:
-    PYTEST_FAILED_TESTS_CACHE_FILE_PATH = Path(".pytest_cache/v/cache/lastfailed")
-
-    if not PYTEST_FAILED_TESTS_CACHE_FILE_PATH.exists():
-        warn(
-            f"No pytorch cache found at {PYTEST_FAILED_TESTS_CACHE_FILE_PATH.absolute()}"
-        )
-        return set()
-
-    with open(PYTEST_FAILED_TESTS_CACHE_FILE_PATH) as f:
-        last_failed_tests = json.load(f)
-
-    prioritized_tests = _parse_prev_failing_test_files(last_failed_tests)
-    return _python_test_file_to_test_name(prioritized_tests)
-
-
-def _parse_prev_failing_test_files(last_failed_tests: Dict[str, bool]) -> Set[str]:
-    prioritized_tests = set()
-
-    # The keys are formatted as "test_file.py::test_class::test_method[params]"
-    # We just need the test_file part
-    for test in last_failed_tests:
-        parts = test.split("::")
-        if len(parts) > 1:
-            test_file = parts[0]
-            prioritized_tests.add(test_file)
-
-    return prioritized_tests
-
-
-def _get_modified_tests() -> Set[str]:
-    try:
-        changed_files = _query_changed_test_files()
-    except Exception as e:
-        warn(f"Can't query changed test files due to {e}")
-        # If unable to get changed files from git, quit without doing any sorting
-        return set()
-
-    return _python_test_file_to_test_name(set(changed_files))
-
-
-def _python_test_file_to_test_name(tests: Set[str]) -> Set[str]:
-    prefix = f"test{os.path.sep}"
-    valid_tests = {f for f in tests if f.startswith(prefix) and f.endswith(".py")}
-    valid_tests = {f[len(prefix) : -len(".py")] for f in valid_tests}
-
-    return valid_tests
-
-
-class PoolTimes:
-    def __init__(self, num_procs: int) -> None:
-        self.pool_times = [0.0 for _ in range(num_procs)]
-        self.serial_times = 0.0
-
-    def next_test_start_time(self, serial: bool) -> float:
-        if serial:
-            # Serial tests are run after all parallel tests complete
-            return max(self.pool_times) + self.serial_times
-
-        return self.pool_times[0]
-
-    def schedule_test(self, test: ShardedTest, serial: bool) -> None:
-        if serial:
-            self.serial_times += test.get_time()
-        else:
-            # pool_times[0] is always the thread with the least amount of time scheduled
-            heapq.heappushpop(self.pool_times, self.pool_times[0] + test.get_time())
-
-
-def log_time_savings(
-    selected_tests: List[ShardedTest],
-    prioritized_tests: List[ShardedTest],
-    is_serial_test_fn: Callable[[str], bool],
-    num_procs: int = NUM_PROCS,  # make this customizable for testing
-) -> float:
-    # The tests will be run in [num_procs] parallel threads, so we assume each test
-    # is allocated to the thread that'll free up first.
-    # This isn't an exact match (since other factors could change which thread
-    # pool a test gets scheduled on) but it's a good approximation.
-
-    # Simulates the scheduled tests on each thread pool
-    default_pool = PoolTimes(num_procs)  # originally scheduled run
-    prioritized_pool = PoolTimes(num_procs)  # run for prioritized tests
-    max_time_savings_sec = 0.0
-
-    # It's easier to look up prioritized tests by name
-    prioritized_test_names = {test.name for test in prioritized_tests}
-
-    for test in selected_tests:
-        serial = is_serial_test_fn(test.name)
-        if test.name in prioritized_test_names:
-            # Successive tests will always have a greater time savings
-            max_time_savings_sec = default_pool.next_test_start_time(
-                serial
-            ) - prioritized_pool.next_test_start_time(serial)
-
-            # "schedule" this test on the prioritized pool to get time savings for future prioritized tests
-            prioritized_pool.schedule_test(test, serial)
-
-        # always schedule on the default pool to know what the unprioritized timeline would've looked like
-        default_pool.schedule_test(test, serial)
-
-    print(
-        f"Prioritized tests will run about {duration_to_str(max_time_savings_sec)} sooner than they would've otherwise"
-    )
-
-    emit_metric(
-        "test_reordering_time_savings",
-        {
-            "time_savings_sec": max_time_savings_sec,
-        },
-    )
-
-    # Return value used by tests
-    return max_time_savings_sec
-
-
-def get_reordered_tests(
-    tests: List[ShardedTest],
-) -> Tuple[List[ShardedTest], List[ShardedTest]]:
-    """
-    Get the reordered test filename list based on github PR history or git changed file.
-    We prioritize running test files that were changed.
-    """
-
-    def print_tests(tests: Set[str], test_group_description: str) -> None:
-        if not tests:
-            return
-
-        print(f"{test_group_description}:")
-        for test in tests:
-            print(f"  {test}")
-
-    prioritized_tests: Set[str] = set()
-
-    pri_test = _get_previously_failing_tests()
-    print_tests(
-        pri_test, "If run, these tests will prioritized because they previously failed"
-    )
-    prioritized_tests |= pri_test
-
-    pri_test |= _get_modified_tests()
-    print_tests(
-        pri_test, "If run, these tests will be prioritized because they were modified"
-    )
-    prioritized_tests |= pri_test
-
-    bring_to_front = []
-    the_rest = []
-
-    for test in tests:
-        if test.name in prioritized_tests:
-            bring_to_front.append(test)
-        else:
-            the_rest.append(test)
-
-    if len(tests) != len(bring_to_front) + len(the_rest):
-        print(
-            f"Something went wrong in CI reordering, expecting total of {len(tests)}:\n"
-            f"but found prioritized: {len(bring_to_front)}\nthe rest: {len(the_rest)}\n"
-        )
-        return ([], tests)
-
-    prioritized_test_names = []
-    remaining_test_names = []
-    if bring_to_front:
-        test_cnt_str = pluralize(len(tests), "test")
-        print(f"Reordering tests: Prioritizing {len(bring_to_front)} of {test_cnt_str}")
-
-        prioritized_test_names = [t.name for t in bring_to_front]
-        print(f"Prioritized: {prioritized_test_names}")
-        remaining_test_names = [t.name for t in the_rest]
-        print(f"The Rest: {remaining_test_names}")
-    else:
-        print("Didn't find any tests to prioritize")
-
-    emit_metric(
-        "test_reordering_prioritized_tests",
-        {
-            "prioritized_test_cnt": len(bring_to_front),
-            "total_test_cnt": len(tests),
-            "prioritized_tests": prioritized_test_names,
-            "remaining_tests": remaining_test_names,
-        },
-    )
-
-    return (bring_to_front, the_rest)
-
-
 def get_test_case_configs(dirpath: str) -> None:
-    get_slow_tests(dirpath=dirpath)
     get_disabled_tests(dirpath=dirpath)

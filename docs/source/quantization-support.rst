@@ -31,7 +31,7 @@ Preparing model for quantization
     :nosignatures:
     :template: classtemplate.rst
 
-    fuse_modules
+    fuse_modules.fuse_modules
     QuantStub
     DeQuantStub
     QuantWrapper
@@ -48,6 +48,7 @@ Utility functions
     swap_module
     propagate_qconfig_
     default_eval_fn
+
 
 torch.ao.quantization.quantize_fx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -120,12 +121,44 @@ This module contains a few CustomConfig classes that's used in both eager mode a
     ConvertCustomConfig
     StandaloneModuleConfigEntry
 
-torch.ao.quantization.pt2e (quantization in pytorch 2.0 export)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+torch.ao.quantization.quantizer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: torch.ao.quantization.quantizer
+
+torch.ao.quantization.pt2e (quantization in pytorch 2.0 export implementation)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.ao.quantization.pt2e
-.. automodule:: torch.ao.quantization.pt2e.quantizer
 .. automodule:: torch.ao.quantization.pt2e.representation
+
+torch.ao.quantization.pt2e.export_utils
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.ao.quantization.pt2e.export_utils
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    model_is_exported
+
+.. currentmodule:: torch.ao.quantization
+
+PT2 Export (pt2e) Numeric Debugger
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    generate_numeric_debug_handle
+    CUSTOM_KEY
+    NUMERIC_DEBUG_HANDLE_KEY
+    prepare_for_propagation_comparison
+    extract_results_from_loggers
+    compare_results
 
 torch (quantization related functions)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

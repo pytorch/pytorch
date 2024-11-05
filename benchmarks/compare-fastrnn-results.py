@@ -2,6 +2,7 @@ import argparse
 import json
 from collections import namedtuple
 
+
 Result = namedtuple("Result", ["name", "base_time", "diff_time"])
 
 

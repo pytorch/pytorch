@@ -6,16 +6,16 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
-namespace at {
-namespace vec {
+namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 
 template <> class Vectorized<float> {
 private:
@@ -35,6 +35,8 @@ public:
          float val5, float val6, float val7, float val8) {
     values = _mm256_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8);
   }
+  Vectorized(const float (&arr)[8])
+      : Vectorized(arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7]) {}
   operator __m256() const {
     return values;
   }
@@ -107,6 +109,12 @@ public:
   Vectorized<float> isnan() const {
     return _mm256_cmp_ps(values, _mm256_set1_ps(0.0f), _CMP_UNORD_Q);
   }
+
+  bool has_inf_nan() const {
+    __m256 self_sub  = _mm256_sub_ps(values, values);
+    return (_mm256_movemask_epi8(_mm256_castps_si256(self_sub)) & 0x77777777) != 0;
+  }
+
   Vectorized<float> map(float (*const f)(float)) const {
     __at_align__ float tmp[size()];
     store(tmp);
@@ -143,11 +151,17 @@ public:
   Vectorized<float> acos() const {
     return Vectorized<float>(Sleef_acosf8_u10(values));
   }
+  Vectorized<float> acosh() const {
+    return Vectorized<float>(Sleef_acoshf8_u10(values));
+  }
   Vectorized<float> asin() const {
     return Vectorized<float>(Sleef_asinf8_u10(values));
   }
   Vectorized<float> atan() const {
     return Vectorized<float>(Sleef_atanf8_u10(values));
+  }
+  Vectorized<float> atanh() const {
+    return Vectorized<float>(Sleef_atanhf8_u10(values));
   }
   Vectorized<float> atan2(const Vectorized<float> &b) const {
     return Vectorized<float>(Sleef_atan2f8_u10(values, b));
@@ -202,6 +216,68 @@ public:
   Vectorized<float> expm1() const {
     return Vectorized<float>(Sleef_expm1f8_u10(values));
   }
+  Vectorized<float> exp_u20() const {
+    // A faster version of exp with ULP=20
+    const __m256 vec_factorial_1 =
+        _mm256_set1_ps(0.999999701f); // 1/factorial(1)
+    const __m256 vec_factorial_2 =
+        _mm256_set1_ps(0.499991506f); // 1/factorial(2)
+    const __m256 vec_factorial_3 =
+        _mm256_set1_ps(0.166676521f); // 1/factorial(3)
+    const __m256 vec_factorial_4 =
+        _mm256_set1_ps(0.0418978221f); // 1/factorial(4)
+    const __m256 vec_factorial_5 =
+        _mm256_set1_ps(0.00828929059f); // 1/factorial(5)
+    const __m256 vec_exp_log2ef =
+        _mm256_castsi256_ps(_mm256_set1_epi32(0x3fb8aa3b)); // log2(e)
+    const __m256 vec_half = _mm256_set1_ps(0.5f);
+    const __m256 vec_one = _mm256_set1_ps(1.f);
+    const __m256 vec_zero = _mm256_set1_ps(0.f);
+    const __m256 vec_two = _mm256_set1_ps(2.f);
+    const __m256 vec_ln2f = _mm256_castsi256_ps(_mm256_set1_epi32(0x3f317218)); // ln(2)
+    const __m256 vec_ln_flt_min = _mm256_castsi256_ps(_mm256_set1_epi32(0xc2aeac50));
+    const __m256 vec_ln_flt_max = _mm256_castsi256_ps(_mm256_set1_epi32(0x42b17218));
+    const __m256i vec_127 = _mm256_set1_epi32(0x0000007f);
+    const int n_mantissa_bits = 23;
+
+    // exp(x) =
+    // = exp(n * ln(2) + r) // divide x by ln(2) and get quot and rem
+    // = 2^n * exp(r) // simplify the exp(n*ln(2)) expression
+
+    auto less_ln_flt_min_mask =
+        _mm256_cmp_ps(values, vec_ln_flt_min, 1 /*_CMP_LT_OS*/);
+    auto vec_src = _mm256_min_ps(values, vec_ln_flt_max);
+    vec_src = _mm256_max_ps(vec_src, vec_ln_flt_min);
+
+    // fx = floorf(x * log2ef + 0.5)
+    auto vec_fx = _mm256_fmadd_ps(vec_src, vec_exp_log2ef, vec_half);
+    vec_fx = _mm256_floor_ps(vec_fx);
+
+    // x = x - fx * ln2
+    auto vec_exp_poly = _mm256_fnmadd_ps(vec_fx, vec_ln2f, vec_src);
+
+    // compute polynomial
+    auto vec_res =
+        _mm256_fmadd_ps(vec_exp_poly, vec_factorial_5, vec_factorial_4);
+    vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_factorial_3);
+    vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_factorial_2);
+    vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_factorial_1);
+    vec_res = _mm256_fmadd_ps(vec_exp_poly, vec_res, vec_one);
+
+    // compute 2^(n-1)
+    auto vec_exp_number = _mm256_sub_ps(vec_fx, vec_one);
+    auto vec_exp_number_i = _mm256_cvtps_epi32(vec_exp_number);
+    auto vec_two_pow_n_i = _mm256_add_epi32(vec_exp_number_i, vec_127);
+    vec_two_pow_n_i = _mm256_slli_epi32(vec_two_pow_n_i, n_mantissa_bits);
+    auto vec_two_pow_n = _mm256_castsi256_ps(vec_two_pow_n_i);
+    vec_two_pow_n =
+        _mm256_blendv_ps(vec_two_pow_n, vec_zero, less_ln_flt_min_mask);
+
+    // y = y * 2^n
+    vec_res = _mm256_mul_ps(vec_res, vec_two_pow_n);
+    vec_res = _mm256_mul_ps(vec_res, vec_two);
+    return vec_res;
+  }
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     return Vectorized<float>(Sleef_fmodf8(values, q));
   }
@@ -244,6 +320,9 @@ public:
   }
   Vectorized<float> i0e() const {
     return map(calc_i0e);
+  }
+  Vectorized<float> digamma() const {
+    return map(calc_digamma);
   }
   Vectorized<float> igamma(const Vectorized<float> &x) const {
     __at_align__ float tmp[size()];
@@ -435,11 +514,15 @@ inline Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) c
 template <>
 inline void convert(const float* src, float* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
     _mm256_storeu_ps(dst + i, _mm256_loadu_ps(src + i));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = src[i];
   }
@@ -555,6 +638,21 @@ inline void transpose_mxn<float, 8, 8>(
   _mm256_storeu_ps(&dst[7 * ld_dst], th);
 }
 
+template<>
+inline void transpose_mxn<float, 16, 16>(
+    const float* src,
+    int64_t ld_src,
+    float* dst,
+    int64_t ld_dst) {
+  transpose_mxn<float, 8, 8>(
+          src , ld_src, dst, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8, ld_src, dst + 8 * ld_dst, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8 * ld_src, ld_src, dst + 8, ld_dst);
+  transpose_mxn<float, 8, 8>(
+          src + 8 * ld_src + 8, ld_src, dst + 8 * ld_dst + 8, ld_dst);
+}
 #endif
 
-}}}
+}} // namespace at::vec::CPU_CAPABILITY

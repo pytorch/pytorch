@@ -1,5 +1,8 @@
 #ifdef USE_C10D_UCC
 
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+#include <c10/util/env.h>
+#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
@@ -11,7 +14,6 @@
 namespace c10d {
 
 namespace {
-constexpr int64_t kBusyWaitMillis = 10;
 
 const std::map<c10::DeviceType, ucc_memory_type_t> ucc_mtype_map = {
     {c10::kCPU, UCC_MEMORY_TYPE_HOST},
@@ -44,7 +46,7 @@ ucc_datatype_t to_ucc_dType(at::Tensor _tensor) {
   }
   try {
     return ucc_dtype_map.at(_tensor.scalar_type());
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     TORCH_CHECK(false, "Not supported data type for UCC");
   }
 }
@@ -77,7 +79,7 @@ ucc_reduction_op_t to_ucc_reduceOp(
 
   try {
     return ucc_op_map.at(_op);
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     TORCH_CHECK(false, "Not supported ReduceOp for UCC");
   }
 }
@@ -157,11 +159,10 @@ void read_config() {
   torch_ucc_config.enable_comms_logger = false;
 
   // read all torch_ucc env. variables and update the map
-  char* env;
-  for (auto& torch_ucc_env : torch_ucc_envs_map) {
-    env = std::getenv(torch_ucc_env.first.c_str());
-    if (env) {
-      torch_ucc_envs_map[torch_ucc_env.first] = std::string(env);
+  for (auto& [env_name, value] : torch_ucc_envs_map) {
+    auto env = c10::utils::get_env(env_name.c_str());
+    if (env.has_value()) {
+      value = std::move(env.value());
     }
   }
 
@@ -186,22 +187,22 @@ void read_config() {
 
 void check_device(c10::Device dev1, c10::Device dev2) {
   if (dev1.is_cuda() && dev2.is_cuda() && dev1 != dev2) {
-    throw std::runtime_error("ProcessGroupUCC multidevice is not supported");
+    throw std::invalid_argument("ProcessGroupUCC multidevice is not supported");
   }
 }
 
 void check_tensor(const std::vector<at::Tensor>& tensors) {
   if (tensors.size() != 1) {
-    throw std::runtime_error(
+    throw std::invalid_argument(
         "ProcessGroupUCC takes 1 tensor. Got " +
         std::to_string(tensors.size()) + ". ");
   }
   if (!tensors[0].is_contiguous()) {
-    throw std::runtime_error(
+    throw std::invalid_argument(
         "ProcessGroupUCC input tensor has to be contiguous");
   }
   if (tensors[0].is_sparse()) {
-    throw std::runtime_error("ProcessGroupUCC input tensor has to be dense");
+    throw std::invalid_argument("ProcessGroupUCC input tensor has to be dense");
   }
   // TODO: check cuda case
 }
@@ -272,6 +273,11 @@ bool ProcessGroupUCC::WorkUCC::wait(std::chrono::milliseconds /* unused */) {
   if (Work::recordFunctionEndCallback_) {
     Work::recordFunctionEndCallback_();
     Work::recordFunctionEndCallback_ = nullptr;
+  }
+  if (c10d::allow_inflight_collective_as_graph_input()) {
+    c10d::unregister_work(
+        c10::intrusive_ptr<
+            ProcessGroupUCC::WorkUCC>::unsafe_reclaim_from_nonowning(this));
   }
   return true;
 }
@@ -401,7 +407,7 @@ std::shared_ptr<Comm> Comm::get_comm(
               is_health_check ? TORCH_UCC_HEALTH_CHECK : TORCH_UCC_INIT,
               "ucc communicator was initialized with different cuda device,"
               "multi device is not supported");
-          throw std::runtime_error(ucc_status_string(UCC_ERR_NOT_SUPPORTED));
+          throw std::invalid_argument(ucc_status_string(UCC_ERR_NOT_SUPPORTED));
         }
         shared_comm->cuda_device_index = dev.index();
       }
@@ -528,6 +534,13 @@ void Comm::progress_loop() {
 #ifdef USE_CUDA
     if ((!device_set) && (cuda_device_index != TORCH_UCC_DEVICE_NOT_SET)) {
       c10::cuda::set_device(cuda_device_index);
+      CUcontext pctx = nullptr;
+      at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
+      if (C10_UNLIKELY(!pctx)) {
+        at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(
+            &pctx, cuda_device_index);
+        at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
+      }
       device_set = true;
     }
 #endif
@@ -618,6 +631,8 @@ ProcessGroupUCC::~ProcessGroupUCC() {
     try {
       if (cuda_ee) {
         ucc_ee_destroy(cuda_ee);
+        ucc_ee_destroy(cuda_ee_p2p[0]);
+        ucc_ee_destroy(cuda_ee_p2p[1]);
       }
     } catch (std::exception& ex) {
       TORCH_UCC_LOG_INFO(
@@ -699,7 +714,7 @@ void ProcessGroupUCC::runHealthCheck() {
         if (is_last_device) {
           healthCheckData.healthCheckCv.notify_one();
         }
-      } catch (const std::exception& e) {
+      } catch (const std::exception&) {
         // Populate exception ptr.
         healthCheckData.healthCheckException = std::current_exception();
         // Unblock waiting main thread which will report exception.
@@ -796,17 +811,30 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
 #ifdef USE_CUDA
     case c10::DeviceType::CUDA: {
       auto cuda_ev = getPooledEvent();
+      at::cuda::CUDAStream* op_stream;
+      ucc_ee_h* op_ee;
+      if (opType == OpType::SEND) {
+        op_stream = stream_p2p[0].get();
+        op_ee = &cuda_ee_p2p[0];
+      } else if (opType == OpType::RECV) {
+        op_stream = stream_p2p[1].get();
+        op_ee = &cuda_ee_p2p[1];
+      } else {
+        op_stream = stream.get();
+        op_ee = &cuda_ee;
+      }
+
       cuda_ev->record(at::cuda::getCurrentCUDAStream(dev.index()));
-      cuda_ev->block(*stream);
-      at::cuda::CUDAStreamGuard guard(*stream);
+      cuda_ev->block(*op_stream);
+      at::cuda::CUDAStreamGuard guard(*op_stream);
       preproc();
-      comm->enqueue_cuda_collective(std::move(data), work, coll, team, cuda_ee);
+      comm->enqueue_cuda_collective(std::move(data), work, coll, team, *op_ee);
       postproc();
-      cuda_ev->record(*stream);
+      cuda_ev->record(*op_stream);
       work->fence = std::move(cuda_ev);
       work->ep = &ep;
       if (torch_ucc_config.use_future) {
-        c10::cuda::CUDAMultiStreamGuard streamGuard(*stream);
+        c10::cuda::CUDAMultiStreamGuard streamGuard(*op_stream);
         std::vector<c10::Device> devList{dev};
         work->future_ = c10::make_intrusive<at::ivalue::Future>(
             c10::ListType::create(c10::TensorType::get()), devList);
@@ -825,7 +853,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::collective_post(
     default: {
       TORCH_UCC_LOG_ERROR(
           TORCH_UCC_COLL_POST, c10::str("unsupported device type ", dev.str()));
-      throw std::runtime_error(ucc_status_string(UCC_ERR_NOT_SUPPORTED));
+      throw std::invalid_argument(ucc_status_string(UCC_ERR_NOT_SUPPORTED));
     }
   }
 }
@@ -1009,7 +1037,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::allreduce(
 c10::intrusive_ptr<Work> ProcessGroupUCC::allreduce_coalesced(
     std::vector<at::Tensor>& /* unused */,
     const AllreduceCoalescedOptions& /* unused */) {
-  throw std::runtime_error(
+  throw std::invalid_argument(
       "ProcessGroupUCC does not support allreduce_coalesced");
 }
 
@@ -1497,7 +1525,7 @@ c10::intrusive_ptr<Work> ProcessGroupUCC::scatter(
       coll,
       std::unique_ptr<WorkData>(data),
       tensor.device(),
-      inputTensors[0],
+      (getRank() == opts.rootRank) ? inputTensors[0] : outputTensors,
       outputTensors,
       "ucc:scatter");
 }
@@ -1610,7 +1638,7 @@ void ProcessGroupUCC::initComm(c10::Device dev) {
             TORCH_UCC_INIT,
             "ucc communicator was initialized with different cuda device,"
             "multi device is not supported");
-        throw std::runtime_error(ucc_status_string(UCC_ERR_NOT_SUPPORTED));
+        throw std::invalid_argument(ucc_status_string(UCC_ERR_NOT_SUPPORTED));
       }
       comm->cuda_device_index = dev.index();
     }
@@ -1627,6 +1655,17 @@ void ProcessGroupUCC::initComm(c10::Device dev) {
     TORCH_UCC_CHECK(
         ucc_ee_create(team, &params, &cuda_ee),
         "failed to create UCC execution engine");
+    for (int i = 0; i < 2; i++) {
+      stream_p2p[i] = std::make_unique<at::cuda::CUDAStream>(
+          at::cuda::getStreamFromPool(true, dev.index()));
+      ucc_ee_params_t params;
+      params.ee_type = UCC_EE_CUDA_STREAM;
+      params.ee_context = (void*)stream_p2p[i]->stream();
+      params.ee_context_size = sizeof(cudaStream_t);
+      TORCH_UCC_CHECK(
+          ucc_ee_create(team, &params, &cuda_ee_p2p[i]),
+          "failed to create UCC P2P execution engine");
+    }
   }
 #endif
 }

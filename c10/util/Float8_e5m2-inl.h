@@ -17,9 +17,8 @@ namespace c10 {
 
 /// Constructors
 
-inline C10_HOST_DEVICE Float8_e5m2::Float8_e5m2(float value) {
-  x = detail::fp8e5m2_from_fp32_value(value);
-}
+inline C10_HOST_DEVICE Float8_e5m2::Float8_e5m2(float value)
+    : x(detail::fp8e5m2_from_fp32_value(value)) {}
 
 /// Implicit conversions
 
@@ -236,7 +235,7 @@ class numeric_limits<c10::Float8_e5m2> {
   static constexpr bool is_specialized = true;
   static constexpr bool is_exact = false;
   static constexpr bool has_infinity = true;
-  static constexpr bool has_quiet_NaN = false;
+  static constexpr bool has_quiet_NaN = true;
   static constexpr bool has_signaling_NaN = false;
   static constexpr auto has_denorm = true;
   static constexpr auto has_denorm_loss = true;
@@ -273,6 +272,9 @@ class numeric_limits<c10::Float8_e5m2> {
   }
   static constexpr c10::Float8_e5m2 infinity() {
     return c10::Float8_e5m2(0x7C, c10::Float8_e5m2::from_bits());
+  }
+  static constexpr c10::Float8_e5m2 quiet_NaN() {
+    return c10::Float8_e5m2(0x7F, c10::Float8_e5m2::from_bits());
   }
   static constexpr c10::Float8_e5m2 denorm_min() {
     return c10::Float8_e5m2(0x01, c10::Float8_e5m2::from_bits());

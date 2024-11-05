@@ -1,12 +1,17 @@
+# mypy: allow-untyped-defs
 from contextlib import contextmanager
+
 
 try:
     from torch._C import _itt
 except ImportError:
+
     class _ITTStub:
         @staticmethod
         def _fail(*args, **kwargs):
-            raise RuntimeError("ITT functions not installed. Are you sure you have a ITT build?")
+            raise RuntimeError(
+                "ITT functions not installed. Are you sure you have a ITT build?"
+            )
 
         @staticmethod
         def is_available():
@@ -19,7 +24,7 @@ except ImportError:
     _itt = _ITTStub()  # type: ignore[assignment]
 
 
-__all__ = ['is_available', 'range_push', 'range_pop', 'mark', 'range']
+__all__ = ["is_available", "range_push", "range_pop", "mark", "range"]
 
 
 def is_available():

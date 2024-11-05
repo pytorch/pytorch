@@ -5,7 +5,15 @@ from typing import Callable, Dict, List, Sequence, Tuple, Union
 
 import torch
 from functorch._C import dim as _C
-from ._parsing import AnonymousAxis, _ellipsis, comma_separate, parse_pattern, validate_rearrange_expressions
+
+from ._parsing import (
+    _ellipsis,
+    AnonymousAxis,
+    comma_separate,
+    parse_pattern,
+    validate_rearrange_expressions,
+)
+
 
 __all__ = ["rearrange"]
 
@@ -79,24 +87,32 @@ def _create_rearrange_callable(
                 dims_i += 1
         elif dimension == _ellipsis:
             identifier = _ellipsis
-            identifier_dim_map[identifier] = tuple(first_class_dims[dims_i + j] for j in range(n_ellipsis_dims))
+            identifier_dim_map[identifier] = tuple(
+                first_class_dims[dims_i + j] for j in range(n_ellipsis_dims)
+            )
             dims_i += n_ellipsis_dims
         else:
-            raise ValueError(f'Unexpected dimension: {dimension}')
+            raise ValueError(f"Unexpected dimension: {dimension}")
 
     def composition_to_dims(
-        composition: Sequence[Union[List[Union[str, AnonymousAxis]], str]]
+        composition: Sequence[Union[List[Union[str, AnonymousAxis]], str]],
     ) -> List[Union[str, Tuple[str, ...]]]:
         """Convert a `ParsedExpression.composition` into a `Tensor.__getitem__` index of strings representing first
         class dims."""
         dim_composition: List[Union[str, Tuple[str, ...]]] = []
         for dimension in composition:
             if isinstance(dimension, list):
-                dim_composition.append(tuple(dim for identifier in dimension for dim in identifier_dim_map[identifier]))
+                dim_composition.append(
+                    tuple(
+                        dim
+                        for identifier in dimension
+                        for dim in identifier_dim_map[identifier]
+                    )
+                )
             elif dimension == _ellipsis:
                 dim_composition.extend(identifier_dim_map[_ellipsis])
             else:
-                raise ValueError(f'Unexpected dimension: {dimension}')
+                raise ValueError(f"Unexpected dimension: {dimension}")
         return dim_composition
 
     left_dims = composition_to_dims(left.composition)
@@ -108,16 +124,22 @@ def _create_rearrange_callable(
 
     custom_rearrange_callable_name = "do_rearrange"
     custom_rearrange_callable_code = (
-        f"def {custom_rearrange_callable_name}(tensor):\n"
-        f"    {comma_separate(first_class_dims)} = dims({n_dims})\n"
+        (
+            f"def {custom_rearrange_callable_name}(tensor):\n"
+            f"    {comma_separate(first_class_dims)} = dims({n_dims})\n"
+        )
         + (
-            "".join(f"    {dim}.size = {length}\n" for (dim, length) in specified_lengths)
-            if specified_lengths else ""
+            "".join(
+                f"    {dim}.size = {length}\n" for (dim, length) in specified_lengths
+            )
+            if specified_lengths
+            else ""
         )
         + f"    tensor = tensor[{comma_separate(left_dims)}].order({comma_separate(right_dims)})\n"
         + (
             f"    return tensor.sum({comma_separate([anon_dims])}, keepdim=False)\n"
-            if anon_dims else "    return tensor\n"
+            if anon_dims
+            else "    return tensor\n"
         )
     )
 
@@ -126,7 +148,9 @@ def _create_rearrange_callable(
 
 
 def rearrange(
-    tensor: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]], pattern: str, **axes_lengths: int
+    tensor: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]],
+    pattern: str,
+    **axes_lengths: int,
 ) -> torch.Tensor:
     r"""A native implementation of `einops.rearrange`, a reader-friendly smart element reordering for multidimensional
     tensors. This operation includes functionality of transpose (axes permutation), reshape (view), squeeze, unsqueeze,
@@ -147,36 +171,38 @@ def rearrange(
         >>> images = torch.randn((32, 30, 40, 3))
 
         >>> # stack along first (batch) axis, output is a single array
-        >>> rearrange(images, 'b h w c -> b h w c').shape
+        >>> rearrange(images, "b h w c -> b h w c").shape
         torch.Size([32, 30, 40, 3])
 
         >>> # concatenate images along height (vertical axis), 960 = 32 * 30
-        >>> rearrange(images, 'b h w c -> (b h) w c').shape
+        >>> rearrange(images, "b h w c -> (b h) w c").shape
         torch.Size([960, 40, 3])
 
         >>> # concatenated images along horizontal axis, 1280 = 32 * 40
-        >>> rearrange(images, 'b h w c -> h (b w) c').shape
+        >>> rearrange(images, "b h w c -> h (b w) c").shape
         torch.Size([30, 1280, 3])
 
         >>> # reordered axes to "b c h w" format for deep learning
-        >>> rearrange(images, 'b h w c -> b c h w').shape
+        >>> rearrange(images, "b h w c -> b c h w").shape
         torch.Size([32, 3, 30, 40])
 
         >>> # flattened each image into a vector, 3600 = 30 * 40 * 3
-        >>> rearrange(images, 'b h w c -> b (c h w)').shape
+        >>> rearrange(images, "b h w c -> b (c h w)").shape
         torch.Size([32, 3600])
 
         >>> # split each image into 4 smaller (top-left, top-right, bottom-left, bottom-right), 128 = 32 * 2 * 2
-        >>> rearrange(images, 'b (h1 h) (w1 w) c -> (b h1 w1) h w c', h1=2, w1=2).shape
+        >>> rearrange(images, "b (h1 h) (w1 w) c -> (b h1 w1) h w c", h1=2, w1=2).shape
         torch.Size([128, 15, 20, 3])
 
         >>> # space-to-depth operation
-        >>> rearrange(images, 'b (h h1) (w w1) c -> b h w (c h1 w1)', h1=2, w1=2).shape
+        >>> rearrange(images, "b (h h1) (w w1) c -> b h w (c h1 w1)", h1=2, w1=2).shape
         torch.Size([32, 15, 20, 12])
     """
     if not isinstance(tensor, torch.Tensor):
         tensor = torch.stack(tensor)
 
-    rearrange_callable = _create_rearrange_callable(tensor.ndim, pattern, **axes_lengths)
+    rearrange_callable = _create_rearrange_callable(
+        tensor.ndim, pattern, **axes_lengths
+    )
 
     return rearrange_callable(tensor)

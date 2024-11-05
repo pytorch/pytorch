@@ -2,9 +2,7 @@
 
 #include <torch/nn/options/instancenorm.h>
 
-namespace torch {
-namespace nn {
-namespace functional {
+namespace torch::nn::functional {
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
 namespace detail {
@@ -32,7 +30,7 @@ inline Tensor instance_norm(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.instance_norm
+/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.instance_norm
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::InstanceNormFuncOptions`
@@ -58,6 +56,4 @@ inline Tensor instance_norm(
       options.eps());
 }
 
-} // namespace functional
-} // namespace nn
-} // namespace torch
+} // namespace torch::nn::functional

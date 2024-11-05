@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import gc
 import sys
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
@@ -205,9 +206,9 @@ FRAME_FILENAME_LIMIT = 32
 
 def object_annotation(obj):
     """
-    Return a string to be used for Graphviz nodes.  The string
-    should be short but as informative as possible.
+    Return a string to be used for Graphviz nodes.
 
+    The string should be short but as informative as possible.
     """
 
     def format_sequence(obj):
@@ -278,7 +279,6 @@ def create_graph(objects, *, context=None, filter=None):
             tidx = id_to_node.get(rid, None)
             if tidx is None:
                 continue
-            t = nodes[tidx]
             labels = references.get(rid, ["?"])
             node_referrers[tidx].append(fidx)
             for label in labels:
@@ -310,7 +310,7 @@ def escape(n):
 
 
 def is_cuda_tensor(obj):
-    return isinstance(obj, torch.Tensor) and obj.is_cuda
+    return isinstance(obj, torch.Tensor) and obj.is_cuda and not isinstance(obj, torch._subclasses.FakeTensor)
 
 def cuda_allocation_context():
     snapshot = torch.cuda.memory._snapshot()
@@ -319,7 +319,7 @@ def cuda_allocation_context():
         addr = seg['address']
         for blk in seg['blocks']:
             if blk['state'] == 'active_allocated':
-                frames, real_size = _block_extra(blk)
+                frames, _real_size = _block_extra(blk)
                 addr_to_frame[addr] = frames
             addr += blk['size']
 
@@ -427,15 +427,16 @@ def observe_tensor_cycles(callback):
 
 def warn_tensor_cycles():
     """
+    Install a warning that reports whenever a cycle that is holding CUDA memory is observed.
+
+    The warning produces an .html file that visualizes the cycle,
+    and links it to the stack frame that allocted the CUDA tensor.
+
     Reference cycles are freed by the cycle collector rather than being cleaned up
     when the objects in the cycle first become unreachable. If a cycle points to a tensor,
     the CUDA memory for that tensor will not be freed until garbage collection runs.
     Accumulation of CUDA allocations can lead to out of memory errors (OOMs), as well as
     non-deterministic allocation behavior which is harder to debug.
-
-    This function installs a warning that is reports whenever a cycle that is holding CUDA
-    memory is observed. The warning produces a html file that visualizes the cycle,
-    and links it to the stack frame that allocted the CUDA tensor.
     """
     logger.info("Watching Python reference cycles for CUDA Tensors.")
 

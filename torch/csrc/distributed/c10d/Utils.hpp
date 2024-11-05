@@ -1,7 +1,9 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 
@@ -20,25 +22,27 @@ typedef SSIZE_T ssize_t;
 
 #include <sys/types.h>
 
-#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
-#include <limits>
 #include <string>
-#include <system_error>
-#include <tuple>
 #include <vector>
 
 namespace c10d {
 
-TORCH_API std::string parse_env(const char* env_var_name);
+TORCH_API size_t getTensorsNumel(const std::vector<at::Tensor>& tensors);
 
 // Retrieve tensor shapes from a given tensor.
-TORCH_API std::vector<at::Tensor> getTensorShapes(const std::vector<at::Tensor>& tensors);
+TORCH_API std::vector<at::Tensor> getTensorShapes(
+    const std::vector<at::Tensor>& tensors);
 
 // Use -2 to represent unset state of env vars
 #define C10D_ENV_NOT_SET -2
+
+#define WARN_ENV_VAR_ONCE(deprecated_env, new_env)                        \
+  TORCH_WARN_ONCE(                                                        \
+      "Environment variable " + deprecated_env + " is deprecated; use " + \
+      new_env + " instead");
 
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
@@ -68,12 +72,15 @@ inline void assertSameType(
       const std::string expected = type.toString();
       const std::string actual = tensors[i].toString();
       throw std::invalid_argument(
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
           "mixed types (" + expected + " and " + actual + ")");
     }
   }
 }
 
-inline std::vector<std::string> split(char separator, const std::string& string) {
+inline std::vector<std::string> split(
+    char separator,
+    const std::string& string) {
   std::vector<std::string> pieces;
   std::stringstream ss(string);
   std::string item;
@@ -83,46 +90,100 @@ inline std::vector<std::string> split(char separator, const std::string& string)
   return pieces;
 }
 
-inline int parseEnvVarInt(const char* envVarName) {
-  char* stringValue = std::getenv(envVarName);
-  if (stringValue != nullptr) {
-    int val;
+inline std::string getCvarString(
+    const std::vector<std::string>& env,
+    const char* def) {
+  std::string ret(def);
+
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
+  }
+
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
+    auto val = c10::utils::get_env(env[i].c_str());
+    if (!val) {
+      continue;
+    } else if (i) {
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
+    }
+
+    ret = val.value();
+  }
+
+  return ret;
+}
+
+inline int getCvarInt(const std::vector<std::string>& env, int def) {
+  int ret = def;
+
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
+  }
+
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
+    char* val = std::getenv(env[i].c_str());
+    if (val == nullptr) {
+      continue;
+    } else if (i) {
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
+    }
+
     try {
-      val = std::stoi(stringValue);
-    } catch (std::exception& e) {
-      TORCH_CHECK(false,
-          "Invalid value for environment variable: " + std::string(envVarName));
+      ret = std::stoi(val);
+    } catch (std::exception&) {
+      TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
     }
-    return val;
   }
-  return C10D_ENV_NOT_SET;
+
+  return ret;
 }
 
-inline const char* parseEnvVarString(const char* envVarName, const char* default_val) {
-  const char* val = std::getenv(envVarName);
-  if (val == nullptr) {
-    val = default_val;
+inline bool getCvarBool(const std::vector<std::string>& env, bool def) {
+  bool ret = def;
+
+  if (env.empty()) {
+    TORCH_CHECK(false, "No environment variables passed");
+    return ret;
   }
-  return val;
-}
 
-inline int parseEnvVarIntDefault(const char* envVarName, int defaultVal) {
-    int val = parseEnvVarInt(envVarName);
-    if (val == C10D_ENV_NOT_SET)
-      return defaultVal;
-    return val;
-}
-
-inline bool parseEnvVarFlag(const char* envVarName) {
-    int val = parseEnvVarInt(envVarName);
-    if (val == 1) {
-      return true;
-    } else if (val == 0 || val == C10D_ENV_NOT_SET) {
-      return false;
+  /* parse environment variable in reverse order, so the early
+   * versions of a variable get higher priority than the latter
+   * versions of the same variable */
+  for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
+    auto val = c10::utils::get_env(env[i].c_str());
+    if (!val.has_value()) {
+      continue;
+    } else if (i) {
+      WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
-    TORCH_CHECK(false,
-        "Invalid value for environment variable: " + std::string(envVarName));
-    return false;
+
+    for (auto& x : val.value()) {
+      // NOLINTNEXTLINE(*-narrowing-conversions)
+      x = std::tolower(x);
+    }
+
+    if (val == "y" || val == "yes" || val == "1" || val == "t" ||
+        val == "true") {
+      ret = true;
+    } else if (
+        val == "n" || val == "no" || val == "0" || val == "f" ||
+        val == "false") {
+      ret = false;
+    } else {
+      TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
+      return ret;
+    }
+  }
+
+  return ret;
 }
 
 inline void assertSameSizes(
@@ -133,6 +194,7 @@ inline void assertSameSizes(
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
       throw std::invalid_argument(
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
           "mixed sizes (" + expected + " and " + actual + ")");
     }
   }
@@ -152,6 +214,7 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
       const auto expected = toString(options);
       const auto actual = toString(tensors[i].options());
       throw std::invalid_argument(
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
           "argument contains mixed types (" + expected + " and " + actual +
           ")");
     }
@@ -159,14 +222,15 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
       const auto expected = toString(sizes);
       const auto actual = toString(tensors[i].sizes());
       throw std::invalid_argument(
-          "argument contains mixed sizes (" + expected + " and " + actual +
+          // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
+          "argument contains mixed types (" + expected + " and " + actual +
           ")");
     }
   }
 }
 
 inline void assertTypeMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::DeprecatedTypeProperties& type,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -177,7 +241,7 @@ inline void assertTypeMatch(
 }
 
 inline void assertTypeMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::TensorOptions& options,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -188,7 +252,7 @@ inline void assertTypeMatch(
 }
 
 inline void assertSizesMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::IntArrayRef& sizes,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -199,7 +263,7 @@ inline void assertSizesMatch(
 }
 
 inline void assertLayoutMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const c10::Layout& expected,
     const at::ArrayRef<at::Tensor> tensors,
     size_t index) {
@@ -211,7 +275,7 @@ inline void assertLayoutMatch(
 }
 
 inline void assertLayoutMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& layout = tensors[0].layout();
   for (const auto i : c10::irange(1, tensors.size())) {
@@ -220,7 +284,7 @@ inline void assertLayoutMatch(
 }
 
 inline void assertNonEmpty(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.empty()) {
     fn("requires non-empty tensor list");
@@ -228,7 +292,7 @@ inline void assertNonEmpty(
 }
 
 inline void assertSingleElement(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element tensor list");
@@ -236,7 +300,7 @@ inline void assertSingleElement(
 }
 
 inline void assertSingleElementInput(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element input tensor list");
@@ -244,7 +308,7 @@ inline void assertSingleElementInput(
 }
 
 inline void assertSingleElementOutput(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() != 1) {
     fn("requires a single-element output tensor list");
@@ -252,25 +316,25 @@ inline void assertSingleElementOutput(
 }
 
 inline void assertRootRank(
-    std::function<void(const std::string&)> fn,
-    int rank,
-    int size) {
+    const std::function<void(const std::string&)>& fn,
+    int64_t rank,
+    int64_t size) {
   if (rank < 0 || rank >= size) {
     fn("invalid root rank: " + std::to_string(rank));
   }
 }
 
 inline void assertRootTensor(
-    std::function<void(const std::string&)> fn,
-    int rank,
-    int size) {
+    const std::function<void(const std::string&)>& fn,
+    int64_t rank,
+    int64_t size) {
   if (rank < 0 || rank >= size) {
     fn("invalid root tensor: " + std::to_string(rank));
   }
 }
 
 inline void assertDense(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& layout = tensors[0].layout();
   if (layout != at::kStrided) {
@@ -279,7 +343,7 @@ inline void assertDense(
 }
 
 inline void assertCPU(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& device = tensors[0].device();
   if (device.type() != at::kCPU) {
@@ -288,7 +352,7 @@ inline void assertCPU(
 }
 
 inline void assertSameDevice(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   if (tensors.size() < 2) {
     return;
@@ -302,7 +366,7 @@ inline void assertSameDevice(
 }
 
 inline void assertTypeAndSizesMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors,
     const at::DeprecatedTypeProperties& type,
     const at::IntArrayRef& sizes) {
@@ -313,7 +377,7 @@ inline void assertTypeAndSizesMatch(
 }
 
 inline void assertTypeAndSizesMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors,
     const at::TensorOptions& options,
     const at::IntArrayRef& sizes) {
@@ -324,7 +388,7 @@ inline void assertTypeAndSizesMatch(
 }
 
 inline void assertTypeAndSizesMatch(
-    std::function<void(const std::string&)> fn,
+    const std::function<void(const std::string&)>& fn,
     const at::ArrayRef<at::Tensor> tensors) {
   const auto& options = tensors[0].options();
   const auto sizes = tensors[0].sizes();
@@ -376,7 +440,7 @@ inline at::Tensor newLikeFlat(
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
   return at::empty_strided(
-      sizes, strides, t.options().memory_format(c10::nullopt));
+      sizes, strides, t.options().memory_format(std::nullopt));
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
@@ -403,6 +467,7 @@ inline std::vector<int> getDevices(const std::vector<at::Tensor>& tensors) {
   std::vector<int> devices(tensors.size(), -1);
   if (tensors[0].device().is_cuda()) {
     for (const auto i : c10::irange(tensors.size())) {
+      // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       devices[i] = tensors[i].storage().device().index();
     }
   }
@@ -466,7 +531,7 @@ size_t computeLengthsAndOffsets(
     equal_splits = true;
     split_size = tensor.size(0) / group_size;
   }
-  for(const auto i : c10::irange(group_size)) {
+  for (const auto i : c10::irange(group_size)) {
     size_t length = row_size * (equal_splits ? split_size : split_sizes[i]);
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
@@ -483,7 +548,7 @@ size_t computeLengthsAndOffsets(
     std::vector<T>* offsets) {
   size_t group_size = lengths->size();
   size_t offset = 0;
-  for(const auto i : c10::irange(group_size)) {
+  for (const auto i : c10::irange(group_size)) {
     size_t length = tensors[i].numel();
     (*lengths)[i] = length;
     (*offsets)[i] = offset;
@@ -514,30 +579,30 @@ using SizeType = uint64_t;
         continue;                                                         \
       } else if (                                                         \
           errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK) { \
-        TORCH_CHECK(false, "Socket Timeout");                       \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");              \
       } else {                                                            \
-        throw std::system_error(errno_local, std::system_category());     \
+        C10_THROW_ERROR(DistNetworkError, std::strerror(errno_local));    \
       }                                                                   \
     } else {                                                              \
       break;                                                              \
     }                                                                     \
   }
 #else
-#define SYSCHECK(expr, success_cond)                            \
-  while (true) {                                                \
-    auto __output = (expr);                                     \
-    (void)__output;                                             \
-    if (!(success_cond)) {                                      \
-      if (errno == EINTR) {                                     \
-        continue;                                               \
-      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {     \
-        TORCH_CHECK(false, "Socket Timeout");             \
-      } else {                                                  \
-        throw std::system_error(errno, std::system_category()); \
-      }                                                         \
-    } else {                                                    \
-      break;                                                    \
-    }                                                           \
+#define SYSCHECK(expr, success_cond)                             \
+  while (true) {                                                 \
+    auto __output = (expr);                                      \
+    (void)__output;                                              \
+    if (!(success_cond)) {                                       \
+      if (errno == EINTR) {                                      \
+        continue;                                                \
+      } else if (errno == EAGAIN || errno == EWOULDBLOCK) {      \
+        C10_THROW_ERROR(DistNetworkError, "Socket Timeout");     \
+      } else {                                                   \
+        C10_THROW_ERROR(DistNetworkError, std::strerror(errno)); \
+      }                                                          \
+    } else {                                                     \
+      break;                                                     \
+    }                                                            \
   }
 #endif
 
@@ -560,8 +625,7 @@ void sendBytes(
     return;
   }
 
-  auto bytes = reinterpret_cast<const uint8_t*>(buffer);
-  uint8_t* currentBytes = const_cast<uint8_t*>(bytes);
+  auto currentBytes = reinterpret_cast<const char*>(buffer);
 
   int flags = 0;
 
@@ -577,12 +641,11 @@ void sendBytes(
 #endif
 
   while (bytesToSend > 0) {
-    ssize_t bytesSent;
+    ssize_t bytesSent = 0;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesSent =
-            ::send(socket, (const char*)currentBytes, bytesToSend, flags))
+        bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      throw std::system_error(ECONNRESET, std::system_category());
+      C10_THROW_ERROR(DistNetworkError, "failed to send, sent 0 bytes");
     }
 
     bytesToSend -= bytesSent;
@@ -597,15 +660,14 @@ void recvBytes(int socket, T* buffer, size_t length) {
     return;
   }
 
-  auto bytes = reinterpret_cast<uint8_t*>(buffer);
-  uint8_t* currentBytes = bytes;
+  auto currentBytes = reinterpret_cast<char*>(buffer);
 
   while (bytesToReceive > 0) {
-    ssize_t bytesReceived;
+    ssize_t bytesReceived = 0;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesReceived = recv(socket, (char*)currentBytes, bytesToReceive, 0))
+        bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      throw std::system_error(ECONNRESET, std::system_category());
+      C10_THROW_ERROR(DistNetworkError, "failed to recv, got 0 bytes");
     }
 
     bytesToReceive -= bytesReceived;
@@ -624,7 +686,7 @@ void sendVector(int socket, const std::vector<T>& vec, bool moreData = false) {
 // receive a vector as sent in sendVector
 template <typename T>
 std::vector<T> recvVector(int socket) {
-  SizeType valueSize;
+  SizeType valueSize = 0;
   recvBytes<SizeType>(socket, &valueSize, 1);
   std::vector<T> value(valueSize);
   recvBytes<T>(socket, value.data(), value.size());
@@ -656,7 +718,7 @@ inline void sendString(
 
 // receive a string as sent in sendString
 inline std::string recvString(int socket) {
-  SizeType valueSize;
+  SizeType valueSize = 0;
   recvBytes<SizeType>(socket, &valueSize, 1);
   std::vector<char> value(valueSize);
   recvBytes<char>(socket, value.data(), value.size());

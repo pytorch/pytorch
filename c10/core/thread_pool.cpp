@@ -1,12 +1,39 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/Logging.h>
+#include <c10/util/thread_name.h>
+#if !defined(__powerpc__) && !defined(__s390x__)
+#include <cpuinfo.h>
+#endif
 
 namespace c10 {
+
+size_t TaskThreadPoolBase::defaultNumThreads() {
+  size_t num_threads = 0;
+#if !defined(__powerpc__) && !defined(__s390x__)
+  if (cpuinfo_initialize()) {
+    // In cpuinfo parlance cores are physical ones and processors are virtual
+    // ThreadPool should be defaulted to number of physical cores
+    size_t num_cores = cpuinfo_get_cores_count();
+    num_threads = cpuinfo_get_processors_count();
+    if (num_cores > 0 && num_cores < num_threads) {
+      return num_cores;
+    }
+    if (num_threads > 0) {
+      return num_threads;
+    }
+  }
+#endif
+  num_threads = std::thread::hardware_concurrency();
+  if (num_threads == 0) {
+    num_threads = 1;
+  }
+  return num_threads;
+}
 
 ThreadPool::ThreadPool(
     int pool_size,
     int numa_node_id,
-    std::function<void()> init_thread)
+    const std::function<void()>& init_thread)
     : threads_(pool_size < 0 ? defaultNumThreads() : pool_size),
       running_(true),
       complete_(true),
@@ -15,6 +42,7 @@ ThreadPool::ThreadPool(
       numa_node_id_(numa_node_id) {
   for (std::size_t i = 0; i < threads_.size(); ++i) {
     threads_[i] = std::thread([this, i, init_thread]() {
+      c10::setThreadName("pt_thread_pool");
       if (init_thread) {
         init_thread();
       }
@@ -34,6 +62,7 @@ ThreadPool::~ThreadPool() {
   for (auto& t : threads_) {
     try {
       t.join();
+      // NOLINTNEXTLINE(bugprone-empty-catch)
     } catch (const std::exception&) {
     }
   }
