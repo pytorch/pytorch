@@ -326,7 +326,7 @@ def check_overlapping(overlapping, non_overlapping):
                 overlapping_indices.add(i)
                 overlapping_indices.add(j)
 
-    return all(i in overlapping_indices for i in range(len(overlapping)))
+    return overlapping_indices == set(range(len(overlapping)))
 
 
 _CLOSURE_VARS: Optional[Dict[str, object]] = None
