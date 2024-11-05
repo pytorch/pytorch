@@ -146,9 +146,14 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
-
+            # "cuda" has .ptx and .cubin file, but xpu only has .spv file
+            save_kernel_count = 6 if device == "xpu" else 7
+            read_and_emit_kernel_count = 6 if device == "xpu" else 7
             if bundle_triton and device != "cpu":
-                self.assertEqual(counters["inductor"]["triton_bundler_save_kernel"], 7)
+                self.assertEqual(
+                    counters["inductor"]["triton_bundler_save_kernel"],
+                    save_kernel_count,
+                )
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"], 0
                 )
@@ -167,9 +172,13 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
             if bundle_triton and device != "cpu":
-                self.assertEqual(counters["inductor"]["triton_bundler_save_kernel"], 7)
                 self.assertEqual(
-                    counters["inductor"]["triton_bundler_read_and_emit_kernel"], 7
+                    counters["inductor"]["triton_bundler_save_kernel"],
+                    save_kernel_count,
+                )
+                self.assertEqual(
+                    counters["inductor"]["triton_bundler_read_and_emit_kernel"],
+                    read_and_emit_kernel_count,
                 )
 
     @requires_triton()
