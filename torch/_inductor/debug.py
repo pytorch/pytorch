@@ -16,7 +16,7 @@ from unittest.mock import patch
 import torch
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 from torch import fx as fx
-from torch._dynamo.repro.after_aot import save_graph_repro, wrap_compiler_debug
+from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
@@ -111,6 +111,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     FusionMeta = collections.namedtuple("FusionMeta", ["group", "snode", "type"])
 
     buf_to_fx_node = {}
+    node_to_fx_node = {}
     graph = torch.fx.Graph()
     first_node = None
 
@@ -144,7 +145,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         kwargs = {}
         if hasattr(snode, "get_device"):
             kwargs = {"device": snode.get_device()}
-        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)
+        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)  # type: ignore[arg-type]
 
         def in_output(snode: Union[BaseSchedulerNode, FusedSchedulerNode]) -> bool:
             if isinstance(snode, FusedSchedulerNode):
@@ -162,10 +163,9 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
 
         fx_node.meta["fusion_meta"] = FusionMeta(group, snode, node_type)
 
-        if isinstance(snode, FusedSchedulerNode):
-            for x in snode.snodes:
-                buf_to_fx_node[x.get_name()] = fx_node
-        buf_to_fx_node[name] = fx_node
+        node_to_fx_node[name] = fx_node
+        for buf in snode.get_outputs():
+            buf_to_fx_node[buf.get_name()] = fx_node
 
         if first_node is None:
             first_node = fx_node
@@ -175,7 +175,7 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         name = snode.get_name()
         deps = snode.read_writes.reads
 
-        fx_node = buf_to_fx_node[name]
+        fx_node = node_to_fx_node[name]
         new_args = []
         for dep in deps:
             if dep.name in buf_to_fx_node:
@@ -184,6 +184,8 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
                 with graph.inserting_before(first_node):
                     dep_node = graph.placeholder(dep.name)
                     buf_to_fx_node[dep.name] = dep_node
+            if dep_node == fx_node:  # to avoid cycles
+                continue
             new_args.append(dep_node)
 
         fx_node.args = tuple(new_args)
@@ -304,15 +306,6 @@ def enable_aot_logging() -> Iterator[None]:
 
 class DebugContext:
     _counter = itertools.count()
-
-    @staticmethod
-    def wrap(fn: Callable[..., Any]) -> Callable[..., Any]:
-        @functools.wraps(fn)
-        def inner(*args: Any, **kwargs: Any) -> Any:
-            with DebugContext():
-                return fn(*args, **kwargs)
-
-        return wrap_compiler_debug(inner, compiler_name="inductor")
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
@@ -480,7 +473,26 @@ class DebugFormatter:
         inputs: List[torch.Tensor],
     ) -> None:
         with self.fopen("fx_graph_runnable.py") as fd:
-            save_graph_repro(fd, gm, inputs, "inductor")
+            save_dir = None
+            if torch._inductor.config.trace.save_real_tensors:
+                inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
+                save_dir = os.path.dirname(fd.name)
+
+            # dont try to use stable hash torchinductor compilation if saving real tensors
+            # and avoid recursively trying to save real tensors inside of the inductor compilation
+            # regardless
+            stable_hash = torch._inductor.config.trace.save_real_tensors
+            with torch._inductor.config.patch(
+                {"trace.enabled": False, "trace.save_real_tensors": False}
+            ):
+                save_graph_repro(
+                    fd,
+                    gm,
+                    inputs,
+                    "inductor",
+                    save_dir=save_dir,
+                    stable_hash=stable_hash,
+                )
 
         with self.fopen("fx_graph_readable.py") as fd:
             fd.write(gm.print_readable(print_output=False))

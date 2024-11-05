@@ -347,8 +347,7 @@ struct ConstantPropagator {
   }
 
   bool supportedNode(Node* n) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    bool no_mutation;
+    bool no_mutation = false;
     if (aliasing_types_) {
       no_mutation = !getOrCreateAliasDb()->hasWriters(n);
     } else {

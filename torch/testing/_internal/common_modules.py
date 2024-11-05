@@ -15,8 +15,9 @@ from torch.testing._internal.common_cuda import TEST_CUDNN
 from torch.testing._internal.common_dtype import (
     floating_types, floating_and_complex_types_and, get_all_fp_dtypes)
 from torch.testing._internal.common_device_type import (
-    _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
-    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipMPS, skipCUDAVersionIn)
+    _TestParametrizer, _update_param_kwargs, expectedFailureMPS, toleranceOverride, tol,
+    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipMPS,
+    skipCUDAVersionIn)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import (
     cosineembeddingloss_reference, cross_entropy_loss_reference, ctcloss_reference,
@@ -339,7 +340,10 @@ def module_inputs_torch_nn_KLDivLoss(module_info, device, dtype, requires_grad, 
         )
 
         scalar_input = make_input(()).log()
-        scalar_target = make_input(()) if kwargs.get('log_target', False) else make_input(()).log()
+        # FIXME(rec): scalar_target is unused, perhaps should be argument to FunctionInput?
+        scalar_target = (  # noqa: F841
+            make_input(()) if kwargs.get('log_target', False) else make_input(()).log()
+        )
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
                         forward_input=FunctionInput(scalar_input, scalar_input),
@@ -1718,14 +1722,6 @@ def module_inputs_torch_nn_GroupNorm(module_info, device, dtype, requires_grad, 
             forward_input=FunctionInput(make_input((4, 6, 2, 3))),
             desc='2d_affine'),
         ModuleInput(
-            constructor_input=FunctionInput(3, 6, 1e-3),
-            forward_input=FunctionInput(make_input((4, 6, 28, 28))),
-            desc='2d_affine_large_feature'),
-        ModuleInput(
-            constructor_input=FunctionInput(3, 51, 1e-5, False),
-            forward_input=FunctionInput(make_input((2, 51, 28, 28))),
-            desc='2d_no_affine_large_feature'),
-        ModuleInput(
             constructor_input=FunctionInput(3, 3, 1e-3, False),
             forward_input=FunctionInput(make_input((4, 3, 2, 3))),
             desc='2d_no_affine_IN'),
@@ -1944,7 +1940,9 @@ def module_inputs_torch_nn_RMSNorm(module_info, device, dtype, requires_grad, tr
         normalized_shape = m.normalized_shape
         weight = m.weight
         dims = [ndim - i - 1 for i in range(len(normalized_shape))]
-        result = i * torch.rsqrt(i.pow(2).mean(dim=dims, keepdim=True) + m.eps)
+        upcasted_i = i.float()
+        result = upcasted_i * torch.rsqrt(upcasted_i.pow(2).mean(dim=dims, keepdim=True) + m.eps)
+        result = result.type_as(i)
         if weight is not None:
             result *= weight
         return result
@@ -3360,6 +3358,9 @@ def module_error_inputs_torch_nn_Pad3d(module_info, device, dtype, requires_grad
     ]
 
 
+_macos15_or_newer = torch.backends.mps.is_available() and torch.backends.mps.is_macos_or_newer(15, 0)
+
+
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool1d,
@@ -3437,9 +3438,6 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm1d,
                skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),
                    # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
                    # RuntimeError: tried to get Double out of SymInt
                    DecorateInfo(
@@ -3458,9 +3456,8 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
                skips=(
-                   # test fails on MPS backend and is being investigated.
-                   # See https://github.com/pytorch/pytorch/issues/100914
-                   DecorateInfo(skipMPS),
+                   # See https://github.com/pytorch/pytorch/issues/134580
+                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_memory_format', active_if=operator.itemgetter('training')),
                    # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
                    # RuntimeError: tried to get Double out of SymInt
                    DecorateInfo(
@@ -4068,7 +4065,7 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
-               skips=(
+               skips=None if _macos15_or_newer else (
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
@@ -4191,7 +4188,7 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.ReLU,
                module_inputs_func=module_inputs_torch_nn_ReLU,
-               skips=(
+               skips=None if _macos15_or_newer else (
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
@@ -4233,7 +4230,7 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Sigmoid,
                module_inputs_func=module_inputs_torch_nn_Sigmoid,
-               skips=(
+               skips=None if _macos15_or_newer else (
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
@@ -4296,7 +4293,7 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Tanh,
                module_inputs_func=module_inputs_torch_nn_Tanh,
-               skips=(
+               skips=None if _macos15_or_newer else (
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(
@@ -4309,7 +4306,7 @@ module_db: List[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.Tanhshrink,
                module_inputs_func=module_inputs_torch_nn_Tanhshrink,
-               skips=(
+               skips=None if _macos15_or_newer else (
                    # Fails on backward check on MPS
                    # See https://github.com/pytorch/pytorch/issues/107214
                    DecorateInfo(

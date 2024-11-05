@@ -36,7 +36,6 @@ struct ArgumentInfo {
     return requires_grad_;
   }
   int dim() const {
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return dim_;
   }
   at::ScalarType type() const {
@@ -65,7 +64,7 @@ struct ArgumentInfo {
 };
 
 static_assert(
-    std::is_standard_layout<ArgumentInfo>::value,
+    std::is_standard_layout_v<ArgumentInfo>,
     "ArgumentInfo is to be a POD struct");
 static_assert(
     sizeof(ArgumentInfo) == sizeof(ArgumentInfo::plain_data_type),
@@ -104,11 +103,10 @@ struct ArgumentSpec {
     if (arg.defined_) {
       arg.requires_grad_ = with_grad && autograd::Variable(*t).requires_grad();
       arg.dim_ = t->dim();
-      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       at::Device device = t->device();
       arg.dev_type_ =
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-          static_cast<std::underlying_type<DeviceType>::type>(device.type());
+          static_cast<std::underlying_type_t<DeviceType>>(device.type());
       // NOLINTNEXTLINE(bugprone-signed-char-misuse)
       arg.device_ = device.index();
       arg.type_ = static_cast<unsigned>(t->scalar_type());
@@ -117,8 +115,7 @@ struct ArgumentSpec {
   }
 
   void combineHash(const ArgumentInfo& arg) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    ArgumentInfo::plain_data_type arg_data;
+    ArgumentInfo::plain_data_type arg_data = 0;
     std::memcpy(&arg_data, &arg, sizeof(ArgumentInfo));
     hash_code = c10::hash_combine(hash_code, arg_data);
   }
@@ -242,12 +239,10 @@ static_assert(
 struct CompleteArgumentInfo;
 
 struct CompleteArgumentSpec {
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CompleteArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
       : hash_code(0), ninputs(inputs.size()) {
     int32_t all_dims = 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    const int32_t num_inputs = inputs.size();
+    const auto num_inputs = inputs.size();
     for (const auto i : c10::irange(num_inputs)) {
       if (!inputs[i].isTensor())
         continue;
@@ -258,7 +253,6 @@ struct CompleteArgumentSpec {
     data.resize(ninputs + all_dims * 2);
 
     // and reinterpret our data array as these structs
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     auto* pods = reinterpret_cast<CompleteArgumentInfoPOD*>(data.data());
     int64_t* next_dim = sizes_strides();
     int32_t total_dims = 0;
@@ -270,11 +264,10 @@ struct CompleteArgumentSpec {
         pod.defined = t.defined();
         if (pod.defined) {
           pod.type = static_cast<int>(t.scalar_type());
-          // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
           at::Device device = t.device();
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-          pod.dev_type = static_cast<std::underlying_type<DeviceType>::type>(
-              device.type());
+          pod.dev_type =
+              static_cast<std::underlying_type_t<DeviceType>>(device.type());
           // NOLINTNEXTLINE(bugprone-signed-char-misuse)
           pod.device = device.index();
           pod.requires_grad = with_grad && t.requires_grad();
@@ -394,7 +387,6 @@ struct CompleteArgumentInfo {
   int sizes_strides_offset(int j) const {
     if (j == 0)
       return 0;
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     return 2 * pod(j - 1).total_dims;
   }
   const CompleteArgumentInfoPOD& pod(int j) const {

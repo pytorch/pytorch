@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import warnings
-
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -66,8 +65,8 @@ from torch.jit._trace import (
     TracerWarning,
     TracingCheckError,
 )
-
 from torch.utils import set_module
+
 
 __all__ = [
     "Attribute",
@@ -258,7 +257,6 @@ class strict_fusion:
     def __init__(self) -> None:
         if not torch._jit_internal.is_scripting():
             warnings.warn("Only works in script mode")
-        pass
 
     def __enter__(self):
         pass

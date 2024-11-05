@@ -85,8 +85,8 @@ Other useful stuff:
 
 .. code:: python
 
-    from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
-    with maybe_disable_fake_tensor_mode():
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
+    with unset_fake_temporarily():
         # fake mode is disabled here, you can do real tensor compute
 
 When might you want to disable fake tensor mode? Usually you don't want to do this. One niche case where we've found it useful is to implement constant propagation on fake tensors: in this case, we need to do some actual tensor computation even though we're in a fake tensor mode.

@@ -32,7 +32,7 @@ RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  MINICONDA_ARCH=aarch64  ;; \
          *)              MINICONDA_ARCH=x86_64   ;; \
     esac && \
-    curl -fsSL -v -o ~/miniconda.sh -O  "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${MINICONDA_ARCH}.sh"
+    curl -fsSL -v -o ~/miniconda.sh -O  "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-${MINICONDA_ARCH}.sh"
 COPY requirements.txt .
 # Manually invoke bash on miniconda script per https://github.com/conda/conda/issues/10431
 RUN chmod +x ~/miniconda.sh && \
@@ -61,19 +61,19 @@ RUN --mount=type=cache,target=/opt/ccache \
 
 FROM conda as conda-installs
 ARG PYTHON_VERSION=3.11
-ARG CUDA_VERSION=12.1
+ARG CUDA_PATH=cu121
 ARG CUDA_CHANNEL=nvidia
-ARG INSTALL_CHANNEL=pytorch-nightly
+ARG INSTALL_CHANNEL=whl/nightly
 # Automatically set by buildx
 RUN /opt/conda/bin/conda update -y -n base -c defaults conda
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
+RUN /opt/conda/bin/conda install -y python=${PYTHON_VERSION}
 
 ARG TARGETPLATFORM
 
-# On arm64 we can only install wheel packages.
+# INSTALL_CHANNEL whl - release, whl/nightly - nightly, whle/test - test channels
 RUN case ${TARGETPLATFORM} in \
          "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
-         *)              /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -c "${CUDA_CHANNEL}" -y "python=${PYTHON_VERSION}" pytorch torchvision torchaudio "pytorch-cuda=$(echo $CUDA_VERSION | cut -d'.' -f 1-2)"  ;; \
+         *)              pip install --index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH#.}/ torch torchvision torchaudio ;; \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic

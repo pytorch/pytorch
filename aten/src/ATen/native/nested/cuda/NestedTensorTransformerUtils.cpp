@@ -1,11 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorTransformerUtils.h>
-#include <iostream>
 #include <tuple>
-namespace at {
-namespace native {
-namespace preprocessing {
+
+namespace at::native::preprocessing {
 
 namespace {
 
@@ -15,7 +13,7 @@ namespace {
  * on device. And all we need on CPU to launch the kernel is NNz. We could refactor the
  * the below function but it adds more complexity than I think is needed.
  */
-int64_t get_nnz(Tensor nestedtensor) {
+int64_t get_nnz(const Tensor& nestedtensor) {
   auto* nt_impl = get_nested_tensor_impl(nestedtensor);
   const auto& sizes = nt_impl->get_nested_sizes();
   auto size_tensor_stride = sizes.stride(0);
@@ -39,7 +37,7 @@ int64_t get_nnz(Tensor nestedtensor) {
    * @return A tuple of cumulative sequence lengths and the maximum sequence
    * length, and the last element in the cumulative_sequence_lengths
    */
-  std::tuple<Tensor, int64_t, int64_t> cumulative_and_max_seq_len_nnz(Tensor qkv) {
+  std::tuple<Tensor, int64_t, int64_t> cumulative_and_max_seq_len_nnz(const Tensor& qkv) {
     TORCH_CHECK(
         qkv.is_nested(),
         "QKV must be nested for flash cumulative_seq_len calculation.")
@@ -54,14 +52,14 @@ int64_t get_nnz(Tensor nestedtensor) {
     auto* sizes_ptr = sizes.data_ptr<int64_t>();
     auto* cumulative_seqlen_ptr = cumulative_seqlen.data_ptr<int32_t>();
 
-    int32_t sum = 0;
+    int64_t sum = 0;
     int64_t max_seqlen = -1;
-    cumulative_seqlen_ptr[0] = sum;
+    cumulative_seqlen_ptr[0] = static_cast<int32_t>(sum);
     for (const auto i : c10::irange(batch_size)) {
       // Calculate the cumulative sum of the sequence lengths
       auto current_seq_len = sizes_ptr[(i * size_tensor_stride)];
       sum += current_seq_len;
-      cumulative_seqlen_ptr[i + 1] = sum;
+      cumulative_seqlen_ptr[i + 1] = static_cast<int32_t>(sum);
 
       // Find the max element while we traverse
       max_seqlen = std::max(max_seqlen, current_seq_len);
@@ -91,7 +89,7 @@ int64_t get_nnz(Tensor nestedtensor) {
     const Tensor& tensor_strides = tensor->get_nested_strides();
 
     const int64_t n_tensors = tensor_strides.size(0);
-    constexpr int64_t n_dims = 3;
+    constexpr int n_dims = 3;
     // This is safe since head_dim is assured to be consistent
     const int64_t num_heads = tensor -> opt_size(2).value();
     const int64_t tensor_stride_0 = tensor_strides.stride(0);
@@ -122,7 +120,7 @@ int64_t get_nnz(Tensor nestedtensor) {
         }
       }
       // Check that each tensor i in the nested tensor has the same strides
-      for (int i{1}; i < n_tensors; i++) {
+      for (int64_t i{1}; i < n_tensors; i++) {
         for (const int64_t j : c10::irange(n_dims)) {
           if (previous_tensor_stride[j] !=
               previous_tensor_stride[i * tensor_stride_0 + j]) {
@@ -546,6 +544,4 @@ sdpa_nested_preprocessing_backward(
       output_buffer_reshaped);
 }
 
-} // namespace preprocessing
-} // namespace native
-} // namespace at
+} // namespace at::native::preprocessing

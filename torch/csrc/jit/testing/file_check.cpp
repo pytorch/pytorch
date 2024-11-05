@@ -23,10 +23,7 @@
 #include <sstream>
 #include <string>
 
-namespace torch {
-namespace jit {
-
-namespace testing {
+namespace torch::jit::testing {
 
 enum CheckType {
   CHECK,
@@ -48,7 +45,7 @@ struct Check {
 
   Check(
       CheckType type,
-      c10::string_view str,
+      std::string_view str,
       std::optional<size_t> count = std::nullopt)
       : Check(type, std::string(str.begin(), str.end()), count) {}
 
@@ -228,6 +225,7 @@ struct FileCheckImpl {
         groups.push_back({check});
       }
     }
+    checks.push_back(check);
     has_run = false;
   }
 
@@ -505,13 +503,10 @@ struct FileCheckImpl {
         end_range = start_range + check.search_str_.size();
         break;
       }
-      case CHECK_DAG: {
-        AT_ERROR();
-      } break;
-      case CHECK_NOT: {
-        AT_ERROR();
-      } break;
+      default:
+        TORCH_CHECK(false);
     }
+
     return SourceRange(source, start_range, end_range);
   }
 
@@ -635,6 +630,4 @@ FileCheck* FileCheck::check_regex(const std::string& str) {
   return this;
 }
 
-} // namespace testing
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::testing

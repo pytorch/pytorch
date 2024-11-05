@@ -257,17 +257,22 @@ def einsum(*args: Any) -> Tensor:
 
     .. note::
 
-        This function uses opt_einsum (https://optimized-einsum.readthedocs.io/en/stable/) to speed up computation or to
-        consume less memory by optimizing contraction order. This optimization occurs when there are at least three
-        inputs, since the order does not matter otherwise. Note that finding _the_ optimal path is an NP-hard problem,
-        thus, opt_einsum relies on different heuristics to achieve near-optimal results. If opt_einsum is not available,
-        the default order is to contract from left to right.
+        Please install opt-einsum (https://optimized-einsum.readthedocs.io/en/stable/) in order to enroll into a more
+        performant einsum. You can install when installing torch like so: `pip install torch[opt-einsum]` or by itself
+        with `pip install opt-einsum`.
 
-        To bypass this default behavior, add the following line to disable the usage of opt_einsum and skip path
-        calculation: `torch.backends.opt_einsum.enabled = False`
+        If opt-einsum is available, this function will automatically speed up computation and/or consume less memory
+        by optimizing contraction order through our opt_einsum backend :mod:`torch.backends.opt_einsum` (The _ vs - is
+        confusing, I know). This optimization occurs when there are at least three inputs, since the order does not matter
+        otherwise. Note that finding `the` optimal path is an NP-hard problem, thus, opt-einsum relies on different
+        heuristics to achieve near-optimal results. If opt-einsum is not available, the default order is to contract
+        from left to right.
+
+        To bypass this default behavior, add the following to disable opt_einsum and skip path calculation:
+        ``torch.backends.opt_einsum.enabled = False``
 
         To specify which strategy you'd like for opt_einsum to compute the contraction path, add the following line:
-        `torch.backends.opt_einsum.strategy = 'auto'`. The default strategy is 'auto', and we also support 'greedy' and
+        ``torch.backends.opt_einsum.strategy = 'auto'``. The default strategy is 'auto', and we also support 'greedy' and
         'optimal'. Disclaimer that the runtime of 'optimal' is factorial in the number of inputs! See more details in
         the opt_einsum documentation (https://optimized-einsum.readthedocs.io/en/stable/path_finding.html).
 
@@ -1456,12 +1461,12 @@ def cdist(x1, x2, p=2.0, compute_mode="use_mm_for_euclid_dist_if_necessary"):
 
     Example:
 
-        >>> a = torch.tensor([[0.9041,  0.0196], [-0.3108, -2.4423], [-0.4821,  1.059]])
+        >>> a = torch.tensor([[0.9041, 0.0196], [-0.3108, -2.4423], [-0.4821, 1.059]])
         >>> a
         tensor([[ 0.9041,  0.0196],
                 [-0.3108, -2.4423],
                 [-0.4821,  1.0590]])
-        >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986,  1.3702]])
+        >>> b = torch.tensor([[-2.1763, -0.4713], [-0.6986, 1.3702]])
         >>> b
         tensor([[-2.1763, -0.4713],
                 [-0.6986,  1.3702]])
@@ -1592,7 +1597,7 @@ def atleast_3d(*tensors):
         >>> torch.atleast_3d(x)
         tensor([[[1]]])
         >>> x = torch.tensor(0.5)
-        >>> y = torch.tensor(1.)
+        >>> y = torch.tensor(1.0)
         >>> torch.atleast_3d((x, y))
         (tensor([[[0.5000]]]), tensor([[[1.]]]))
     """

@@ -83,14 +83,26 @@ const std::map<c10::string_view, ideep::algorithm>& fusion_unary_alg_map();
 const std::map<c10::string_view, ideep::algorithm>& fusion_binary_alg_map();
 
 #endif // AT_MKLDNN_ENABLED()
-};
+}
 
 #if defined(__aarch64__)
 inline bool mkldnn_bf16_device_check_arm() {
   return cpuinfo_initialize() && cpuinfo_has_arm_bf16();
 }
+
+inline bool is_arm_neoverse() {
+  return (cpuinfo_initialize() && cpuinfo_get_uarchs_count() == 1 &&
+          (cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v1 ||
+           cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_v2 ||
+           cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_n1 ||
+           cpuinfo_get_uarch(0)->uarch == cpuinfo_uarch_neoverse_n2));
+}
 #else
 constexpr bool mkldnn_bf16_device_check_arm() {
+  return false;
+}
+
+constexpr bool is_arm_neoverse() {
   return false;
 }
 #endif

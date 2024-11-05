@@ -447,7 +447,7 @@ UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 
 def get_infos_with_derivatives_list(
-    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]]
+    differentiability_infos: dict[FunctionSchema, dict[str, DifferentiabilityInfo]],
 ) -> list[DifferentiabilityInfo]:
     diff_info_list = [
         info
@@ -566,6 +566,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
         should_append_getsetdef = True
         should_append_raw_getsetdef = False
         visit_name = name
+        uses_cpp_saved_variable_cls = False
 
         if (
             type == BaseCType(tensorT)
@@ -573,6 +574,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             or type == MutRefCType(OptionalCType(BaseCType(tensorT)))
             or (type == BaseCType(scalarT) and is_output)
         ):
+            uses_cpp_saved_variable_cls = True
             saved_variables.append(f"SavedVariable {name}_;")
             release_variables.append(f"{name}_.reset_data();")
             ptr = "shared_from_this()" if is_output else ""
@@ -606,6 +608,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 assert (
                     info.func.func.name.name.base.startswith("_foreach") and is_output
                 )
+            uses_cpp_saved_variable_cls = True
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -628,6 +631,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             should_append_raw_getsetdef = True
             visit_name = f"{name}_"
         elif type == ListCType(OptionalCType(BaseCType(tensorT))):
+            uses_cpp_saved_variable_cls = True
             saved_variables.append(f"std::vector<SavedVariable> {name}_;")
             saved_variables.append(f"bool {name}_released_ = false;")
             # Just clear() is sufficient, we don't need to loop and clear each variable.
@@ -719,7 +723,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                 )
             )
         elif type == OptionalCType(BaseCType(stringT)):
-            saved_variables.append(f"c10::optional<std::string> {name};")
+            saved_variables.append(f"std::optional<std::string> {name};")
             getter_definitions.append(
                 GETTER_DEFINITION_OPT.substitute(
                     op=info.op, name=name, body=GETTER_BODY_STRING
@@ -790,7 +794,12 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
                 PY_RAW_GETSETDEF_STRUCT.substitute(op=info.op, name=name)
             )
 
-        compiled_args.append(f"args.collect({visit_name});")
+        if uses_cpp_saved_variable_cls:
+            compiled_args.append(
+                f"args.collect({visit_name}, {'true' if is_output else 'false'});"
+            )
+        else:
+            compiled_args.append(f"args.collect({visit_name});")
         apply_with_saved_before.append(f"saved.before({visit_name});")
         apply_with_saved_after.append(f"saved.after({visit_name});")
 

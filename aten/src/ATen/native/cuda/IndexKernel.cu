@@ -457,24 +457,32 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       flip_kernel_impl<dtype>(iter);
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-                                           iter.dtype(), "flip_cuda",
-    [&] {
-      using dtype = OpaqueType<sizeof(scalar_t)>;
-      flip_kernel_impl<dtype>(iter);
-    });
+    AT_DISPATCH_V2(
+      iter.dtype(),
+      "flip_cuda",
+      AT_WRAP([&] {
+        using dtype = OpaqueType<sizeof(scalar_t)>;
+        flip_kernel_impl<dtype>(iter);
+      }),
+      AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+      AT_EXPAND(AT_FLOAT8_TYPES),
+      AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+      kComplexHalf,
+      kHalf,
+      kBool,
+      kBFloat16);
   }
 }
 
 
-REGISTER_DISPATCH(index_stub, &index_kernel);
-REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
-REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-REGISTER_DISPATCH(put_stub, &put_kernel);
-REGISTER_DISPATCH(take_stub, &take_kernel);
-REGISTER_DISPATCH(flip_stub, &flip_kernel);
+REGISTER_DISPATCH(index_stub, &index_kernel)
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel)
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel)
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel)
+REGISTER_DISPATCH(put_stub, &put_kernel)
+REGISTER_DISPATCH(take_stub, &take_kernel)
+REGISTER_DISPATCH(flip_stub, &flip_kernel)
 
-REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda);
+REGISTER_CUDA_DISPATCH(index_put_kernel_quantized_stub, &index_put_kernel_quantized_cuda)
 
 } // namespace at::native

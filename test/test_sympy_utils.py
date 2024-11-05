@@ -1,30 +1,37 @@
 # Owner(s): ["oncall: pt2"]
 
+import functools
 import itertools
 import math
 import sys
+from typing import Callable, List, Tuple, Type
+import pickle
 
 import sympy
-from typing import Callable, List, Tuple, Type
+
+import torch
+import torch.fx as fx
+from sympy.core.relational import is_ge, is_gt, is_le, is_lt
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
-    TEST_Z3,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_Z3,
     TestCase,
 )
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import FloorDiv, simple_floordiv_gcd
+from torch.utils._sympy.interp import sympy_interp
+from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
+from torch.utils._sympy.reference import (
+    PythonReferenceAnalysis,
+    ReferenceAnalysis,
+    TensorReferenceAnalysis,
+)
+from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
-from torch.utils._sympy.reference import ReferenceAnalysis, PythonReferenceAnalysis
-from torch.utils._sympy.interp import sympy_interp
-from torch.utils._sympy.singleton_int import SingletonInt
-from torch.utils._sympy.numbers import int_oo, IntInfinity, NegativeIntInfinity
-from sympy.core.relational import is_ge, is_le, is_gt, is_lt
-import functools
-import torch.fx as fx
-
+from torch.utils._sympy.functions import OpaqueUnaryFn_cos
 
 
 UNARY_OPS = [
@@ -39,10 +46,18 @@ UNARY_OPS = [
     "ceil",
 ]
 BINARY_OPS = [
-    "truediv", "floordiv",
+    "truediv",
+    "floordiv",
     # "truncdiv",  # TODO
     # NB: pow is float_pow
-    "add", "mul", "sub", "pow", "pow_by_natural", "minimum", "maximum", "mod"
+    "add",
+    "mul",
+    "sub",
+    "pow",
+    "pow_by_natural",
+    "minimum",
+    "maximum",
+    "mod",
 ]
 
 UNARY_BOOL_OPS = ["not_"]
@@ -152,12 +167,12 @@ class TestNumbers(TestCase):
         self.assertIs(-(-int_oo), int_oo)  # noqa: B002
         self.assertIs(abs(int_oo), int_oo)
         self.assertIs(abs(-int_oo), int_oo)
-        self.assertIs(int_oo ** 2, int_oo)
+        self.assertIs(int_oo**2, int_oo)
         self.assertIs((-int_oo) ** 2, int_oo)
         self.assertIs((-int_oo) ** 3, -int_oo)
-        self.assertEqual(int_oo ** -1, 0)
+        self.assertEqual(int_oo**-1, 0)
         self.assertEqual((-int_oo) ** -1, 0)
-        self.assertIs(int_oo ** int_oo, int_oo)
+        self.assertIs(int_oo**int_oo, int_oo)
         self.assertTrue(int_oo == int_oo)
         self.assertFalse(int_oo != int_oo)
         self.assertTrue(-int_oo == -int_oo)
@@ -325,7 +340,9 @@ class TestValueRanges(TestCase):
 
 
 class TestSympyInterp(TestCase):
-    @parametrize("fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS)
+    @parametrize(
+        "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
+    )
     def test_interp(self, fn):
         # SymPy does not implement truncation for Expressions
         if fn in ("div", "truncdiv", "minimum", "maximum", "mod"):
@@ -335,8 +352,8 @@ class TestSympyInterp(TestCase):
         if fn == "pow_by_natural":
             is_integer = True
 
-        x = sympy.Dummy('x', integer=is_integer)
-        y = sympy.Dummy('y', integer=is_integer)
+        x = sympy.Dummy("x", integer=is_integer)
+        y = sympy.Dummy("y", integer=is_integer)
 
         vals = CONSTANTS
         if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
@@ -358,10 +375,14 @@ class TestSympyInterp(TestCase):
                 ref_r = getattr(ReferenceAnalysis, fn)(*sargs)
                 # Yes, I know this is a longwinded way of saying xreplace; the
                 # point is to test sympy_interp
-                r = sympy_interp(ReferenceAnalysis, dict(zip(symbols, sargs)), sympy_expr)
+                r = sympy_interp(
+                    ReferenceAnalysis, dict(zip(symbols, sargs)), sympy_expr
+                )
                 self.assertEqual(ref_r, r)
 
-    @parametrize("fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS)
+    @parametrize(
+        "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
+    )
     def test_python_interp_fx(self, fn):
         # These never show up from symbolic_shapes
         if fn in ("log", "exp"):
@@ -383,8 +404,8 @@ class TestSympyInterp(TestCase):
         if fn == "pow_by_natural":
             is_integer = True
 
-        x = sympy.Dummy('x', integer=is_integer)
-        y = sympy.Dummy('y', integer=is_integer)
+        x = sympy.Dummy("x", integer=is_integer)
+        y = sympy.Dummy("y", integer=is_integer)
 
         symbols = [x]
         if arity == 2:
@@ -411,26 +432,125 @@ class TestSympyInterp(TestCase):
                     sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
 
                 if arity == 1:
+
                     def trace_f(px):
-                        return sympy_interp(PythonReferenceAnalysis, {x: px}, sympy_expr)
+                        return sympy_interp(
+                            PythonReferenceAnalysis, {x: px}, sympy_expr
+                        )
+
                 else:
+
                     def trace_f(px, py):
-                        return sympy_interp(PythonReferenceAnalysis, {x: px, y: py}, sympy_expr)
+                        return sympy_interp(
+                            PythonReferenceAnalysis, {x: px, y: py}, sympy_expr
+                        )
 
                 gm = fx.symbolic_trace(trace_f)
 
                 self.assertEqual(
-                    sympy_interp(PythonReferenceAnalysis, dict(zip(symbols, args)), sympy_expr),
-                    gm(*args)
+                    sympy_interp(
+                        PythonReferenceAnalysis, dict(zip(symbols, args)), sympy_expr
+                    ),
+                    gm(*args),
                 )
+
+    @parametrize(
+        "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
+    )
+    def test_tensor_interp(self, fn):
+        # Skip operations not implemented or not applicable for tensors
+        if fn in ("div", "truncdiv", "int_truediv", "mod", "round_decimal"):
+            return
+
+        is_integer = None
+        if fn == "pow_by_natural":
+            is_integer = True
+
+        x = sympy.Symbol("x", integer=is_integer)
+        y = sympy.Symbol("y", integer=is_integer)
+
+        vals = CONSTANTS
+        if fn in {*UNARY_BOOL_OPS, *BINARY_BOOL_OPS}:
+            vals = [True, False]
+
+        arity = 1
+        if fn in {*BINARY_OPS, *BINARY_BOOL_OPS, *COMPARE_OPS}:
+            arity = 2
+
+        symbols = [x]
+        if arity == 2:
+            symbols = [x, y]
+
+        for args in itertools.product(vals, repeat=arity):
+            if arity == 1 and not valid_unary(fn, *args):
+                continue
+            elif arity == 2 and not valid_binary(fn, *args):
+                continue
+
+            with self.subTest(args=args):
+                tensor_args = [
+                    torch.tensor(
+                        a, dtype=torch.double if isinstance(a, float) else torch.int64
+                    )
+                    for a in args
+                ]
+
+                try:
+                    tensor_fn = getattr(TensorReferenceAnalysis, fn)
+                    sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
+                    direct_result = tensor_fn(*tensor_args)
+                    interp_result = sympy_interp(
+                        TensorReferenceAnalysis,
+                        dict(zip(symbols, tensor_args)),
+                        sympy_expr,
+                    )
+
+                    # Ensure both results are of the same dtype for comparison
+                    if direct_result.dtype != interp_result.dtype:
+                        if (
+                            direct_result.dtype == torch.bool
+                            or interp_result.dtype == torch.bool
+                        ):
+                            direct_result = direct_result.to(torch.bool)
+                            interp_result = interp_result.to(torch.bool)
+                        else:
+                            direct_result = direct_result.to(torch.double)
+                            interp_result = interp_result.to(torch.double)
+
+                    self.assertTrue(
+                        torch.allclose(
+                            direct_result, interp_result, rtol=1e-5, atol=1e-8
+                        ),
+                        f"Mismatch for {fn}{args}: direct={direct_result}, interp={interp_result}",
+                    )
+
+                    if fn in UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS:
+                        self.assertEqual(direct_result.dtype, torch.bool)
+                        self.assertEqual(interp_result.dtype, torch.bool)
+
+                    if fn in (
+                        "floor_to_int",
+                        "ceil_to_int",
+                        "round_to_int",
+                        "trunc_to_int",
+                    ):
+                        self.assertEqual(direct_result.dtype, torch.int64)
+                        self.assertEqual(interp_result.dtype, torch.int64)
+
+                except NotImplementedError:
+                    print(f"Operation {fn} not implemented for TensorReferenceAnalysis")
+                except Exception as e:
+                    self.fail(f"Unexpected error for {fn}{args}: {str(e)}")
 
 
 def type_name_fn(type: Type) -> str:
     return type.__name__
 
+
 def parametrize_relational_types(*types):
     def wrapper(f: Callable):
         return parametrize("op", types or RELATIONAL_TYPES, name_fn=type_name_fn)(f)
+
     return wrapper
 
 
@@ -492,7 +612,13 @@ class TestSympySolve(TestCase):
         self.assertEqual(r_expr, mirror(rhs, lhs))
         self.assertEqual(r_rhs, lhs)
 
-    def _test_cases(self, cases: List[Tuple[sympy.Basic, sympy.Basic]], thing: sympy.Basic, op: Type[sympy.Rel], **kwargs):
+    def _test_cases(
+        self,
+        cases: List[Tuple[sympy.Basic, sympy.Basic]],
+        thing: sympy.Basic,
+        op: Type[sympy.Rel],
+        **kwargs,
+    ):
         for source, expected in cases:
             r = try_solve(source, thing, **kwargs)
 
@@ -563,7 +689,7 @@ class TestSympySolve(TestCase):
 
     @parametrize_relational_types()
     def test_floordiv(self, op):
-        from sympy import Eq, Ne, Gt, Ge, Lt, Le
+        from sympy import Eq, Ge, Gt, Le, Lt, Ne
 
         a, b, c = sympy.symbols("a b c")
         pos = sympy.Symbol("pos", positive=True)
@@ -603,10 +729,12 @@ class TestSympySolve(TestCase):
             r_op = op
 
         self._test_cases([special_case, *cases], a, r_op)
-        self._test_cases([(special_case[0], None), *cases], a, r_op, floordiv_inequality=False)
+        self._test_cases(
+            [(special_case[0], None), *cases], a, r_op, floordiv_inequality=False
+        )
 
     def test_floordiv_eq_simplify(self):
-        from sympy import Eq, Lt, Le
+        from sympy import Eq, Le, Lt
 
         a = sympy.Symbol("a", positive=True, integer=True)
 
@@ -666,6 +794,31 @@ class TestSympySolve(TestCase):
         # i.e. the transformation is sound.
         r = solver.check()
         self.assertEqual(r, z3.unsat)
+
+    def test_simple_floordiv_gcd(self):
+        x, y, z = sympy.symbols("x y z")
+
+        # positive tests
+        self.assertEqual(simple_floordiv_gcd(x, x), x)
+        self.assertEqual(simple_floordiv_gcd(128 * x, 2304), 128)
+        self.assertEqual(simple_floordiv_gcd(128 * x + 128 * y, 2304), 128)
+        self.assertEqual(simple_floordiv_gcd(128 * x + 128 * y + 8192 * z, 9216), 128)
+        self.assertEqual(simple_floordiv_gcd(49152 * x, 96 * x), 96 * x)
+        self.assertEqual(simple_floordiv_gcd(96 * x, 96 * x), 96 * x)
+        self.assertEqual(simple_floordiv_gcd(x * y, x), x)
+        self.assertEqual(simple_floordiv_gcd(384 * x * y, x * y), x * y)
+        self.assertEqual(simple_floordiv_gcd(256 * x * y, 8 * x), 8 * x)
+
+        # negative tests
+        self.assertEqual(simple_floordiv_gcd(x * y + x + y + 1, x + 1), 1)
+
+
+class TestSympyFunctions(TestCase):
+    def test_pickle(self):
+        x = OpaqueUnaryFn_cos(sympy.Symbol('a'))
+        r = pickle.loads(pickle.dumps(x))
+        self.assertEqual(x, r)
+
 
 class TestSingletonInt(TestCase):
     def test_basic(self):

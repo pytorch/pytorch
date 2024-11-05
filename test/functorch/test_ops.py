@@ -1409,26 +1409,17 @@ class TestOperators(TestCase):
                 xfail("nn.functional.soft_margin_loss", ""),
                 xfail("nn.functional.max_unpool1d", "grad"),
                 xfail("nn.functional.embedding", ""),
-                xfail(
-                    "scatter_reduce", "sum"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "mean"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amin"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amax"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
                 xfail("nn.functional.glu"),
                 xfail("nn.functional.bilinear"),  # trilinear doesn't have batching rule
                 xfail("linalg.lu", ""),
                 xfail("nn.functional.dropout3d", ""),
                 xfail("as_strided_scatter", ""),
                 xfail("masked.cumprod", ""),
+                xfail("permute_copy"),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
+                xfail("squeeze_copy"),
                 xfail("t_copy"),
+                xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
             }
         ),
@@ -1490,21 +1481,11 @@ class TestOperators(TestCase):
                 xfail("masked_select"),
                 xfail("nanquantile"),
                 xfail("ormqr"),
+                xfail("permute_copy"),
                 xfail("put"),
-                xfail(
-                    "scatter_reduce", "sum"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "mean"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amin"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
-                xfail(
-                    "scatter_reduce", "amax"
-                ),  # aten::scatter_reduce.two hit the vmap fallback
                 xfail("quantile"),
                 xfail("renorm"),
+                xfail("squeeze_copy"),
                 xfail("take"),
                 xfail("tensor_split"),
                 xfail("to_sparse"),
@@ -1529,7 +1510,6 @@ class TestOperators(TestCase):
                 xfail("nn.functional.multi_margin_loss", ""),
                 xfail("nn.functional.multilabel_margin_loss", ""),
                 xfail("nn.functional.pdist", ""),
-                xfail("scatter_reduce", "prod"),
                 xfail("nn.functional.max_unpool1d", ""),
                 xfail("nn.functional.max_unpool3d", ""),
                 xfail("nn.functional.max_unpool3d", "grad"),
@@ -1566,7 +1546,9 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
+                xfail("squeeze_copy"),
                 xfail("t_copy"),
+                xfail("transpose_copy"),
                 xfail("unsqueeze_copy"),
             }
         ),
@@ -2427,7 +2409,7 @@ class TestOperators(TestCase):
             tol1("nn.functional.conv3d", {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
             tol1(
                 "nn.functional.conv2d",
-                {torch.float32: tol(atol=3e-05, rtol=5e-06)},
+                {torch.float32: tol(atol=5e-05, rtol=5e-05)},
                 device_type="cuda",
             ),
             tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),

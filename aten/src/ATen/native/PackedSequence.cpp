@@ -51,7 +51,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
       // NB: enforce_sorted is implemented at a Python level, but the sortedness
       // check lives here. If enforce_sorted=False then this error should never
       // get called.
-      AT_ERROR("`lengths` array must be sorted in decreasing order when "
+      TORCH_CHECK(false, "`lengths` array must be sorted in decreasing order when "
                "`enforce_sorted` is True. You can pass `enforce_sorted=False` "
                "to pack_padded_sequence and/or pack_sequence to sidestep this "
                "requirement if you do not need ONNX exportability.");
@@ -188,7 +188,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
     }
     int64_t dec = prev_batch_size - batch_size;
     if (dec > 0) {
-      for (C10_UNUSED const auto j : c10::irange(dec)) {
+      for ([[maybe_unused]] const auto j : c10::irange(dec)) {
         (*lengths--) = i;
       }
     }
@@ -202,9 +202,11 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   return std::make_tuple(output, lengths_t);
 }
 
-Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value) {
+Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value, const c10::string_view padding_side) {
   const int64_t sequences_size = sequences.size();
   TORCH_CHECK(sequences_size > 0, "received an empty list of sequences");
+  TORCH_CHECK(padding_side == "left" || padding_side == "right",
+              "Expected padding_side to be one of left or right, but got ", padding_side, ".");
   IntArrayRef max_size = sequences[0].sizes();
   IntArrayRef trailing_dims = max_size.slice(1);
   int64_t max_len = std::max_element(
@@ -227,11 +229,12 @@ Tensor pad_sequence(TensorList sequences, bool batch_first, double padding_value
   for (const auto i : c10::irange(sequences_size)) {
     const Tensor& currseq = sequences[i];
     const int64_t length_i = currseq.size(0);
+    const int64_t start = padding_side == "left" ? max_len - length_i : 0;
     // use index notation to prevent duplicate references to the tensor
     if (batch_first) {
-      out.select(0, i).narrow(0, 0, length_i).copy_(currseq);
+      out.select(0, i).narrow(0, start, length_i).copy_(currseq);
     } else {
-      out.narrow(0, 0, length_i).select(1, i).copy_(currseq);
+      out.narrow(0, start, length_i).select(1, i).copy_(currseq);
     }
   }
   return out;

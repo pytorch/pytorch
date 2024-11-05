@@ -14,6 +14,7 @@ import math
 import operator
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
@@ -34,16 +35,33 @@ from typing import (
     Protocol,
     Sequence,
     Set,
+    Tuple,
     TypeVar,
     Union,
     ValuesView,
 )
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, dataclass_transform, ParamSpec
 from unittest import mock
 
 import sympy
 
 import torch
+from torch.utils._pytree import tree_map_only
+
+
+GPU_TYPES = ["cuda", "xpu"]
+
+
+# defines here before import torch._dynamo is for avoiding circular import
+# when get_gpu_type is imported from dynamo
+@functools.lru_cache(None)
+def get_gpu_type():
+    avail_gpus = [x for x in GPU_TYPES if getattr(torch, x).is_available()]
+    assert len(avail_gpus) <= 1
+    gpu_type = "cuda" if len(avail_gpus) == 0 else avail_gpus.pop()
+    return gpu_type
+
+
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -70,7 +88,7 @@ log = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
-InputType = Union[torch.Tensor, int]
+InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
 
 GPU_ALIGN_BYTES = 16
@@ -216,7 +234,7 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
 
 
 def sympy_product(it):
-    return functools.reduce(operator.mul, it, sympy.Integer(1))
+    return functools.reduce(operator.mul, it, sympy.S.One)
 
 
 def sympy_dot(seq1, seq2):
@@ -342,25 +360,24 @@ def is_pointwise_use(
 
 def gen_gm_and_inputs(target, args, kwargs):
     g = torch.fx.Graph()
-    g_args = []
-    a_args = []
-    for n, arg in enumerate(args):
-        if isinstance(arg, torch.Tensor):
-            g_args.append(g.placeholder(f"arg{n}"))
-            a_args.append(arg)
-        else:
-            g_args.append(arg)
-    assert all(not isinstance(x, torch.Tensor) for x in kwargs.values())
-    node = g.call_function(target, tuple(g_args), kwargs)
+    graph_args = []
+
+    def add_tensor_arg(arg):
+        graph_args.append(arg)
+        return g.placeholder(f"arg{len(graph_args)}")
+
+    node = g.call_function(
+        target, *tree_map_only(torch.Tensor, add_tensor_arg, (args, kwargs))
+    )
     if (
         len(target._schema.returns) == 1
         and str(target._schema.returns[0].type) == "Tensor"
     ):
-        node = (node,)
+        node = (node,)  # type: ignore[assignment]
     g.output(node)
 
     gm = torch.fx.GraphModule({}, g)
-    return gm, a_args
+    return gm, graph_args
 
 
 def synchronize(device: str = "cuda"):
@@ -449,13 +466,24 @@ class CachedMethod(Protocol, Generic[P, RV]):
 
 # See https://github.com/python/mypy/issues/13222#issuecomment-1193073470 to understand the type signature
 def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
-    key = f"__{fn.__name__}_cache"
+    name = fn.__name__
+    key = f"__{name}_cache"
 
-    @functools.wraps(fn)
-    def wrapper(self):
-        if not hasattr(self, key):
-            setattr(self, key, fn(self))
-        return getattr(self, key)
+    # wrapper is likely on the hot path, compile a specialized version of it
+    ctx = {"fn": fn}
+    exec(
+        f"""\
+        def {name}_cache_on_self(self):
+            try:
+                return self.{key}
+            except AttributeError:
+                rv = fn(self)
+                object.__setattr__(self, "{key}", rv)
+                return rv
+        """.lstrip(),
+        ctx,
+    )
+    wrapper = functools.wraps(fn)(ctx[f"{name}_cache_on_self"])
 
     def clear_cache(self):
         if hasattr(self, key):
@@ -523,6 +551,25 @@ def get_kernel_metadata(node_schedule, wrapper):
 
     from_node_dict = collections.defaultdict(list)
     original_aten_dict = collections.defaultdict(list)
+
+    # Attempt to sort `inductor_nodes` topologically. Note that the case
+    # where `inductor_nodes` contains nodes from multiple graph instances
+    # is not supported. An example of this is conditional statements.
+    single_graph = None
+    if len(inductor_nodes):
+        unique_graphs = {n.graph for n in inductor_nodes}
+        if len(unique_graphs) == 1:
+            single_graph = inductor_nodes[0].graph
+            # create a map of idx -> node and cache it
+            if not hasattr(single_graph, "_inductor_kernel_metadata_node_to_idx_map"):
+                node_to_idx_map = {}
+                for idx, n in enumerate(single_graph.nodes):
+                    node_to_idx_map[n] = idx
+                single_graph._inductor_kernel_metadata_node_to_idx_map = node_to_idx_map
+            inductor_nodes.sort(
+                key=lambda n: single_graph._inductor_kernel_metadata_node_to_idx_map[n]
+            )
+
     for node in inductor_nodes:
         if "original_aten" in node.meta and node.meta["original_aten"] is not None:
             key = str(node.meta["original_aten"]._overloadpacket)
@@ -530,16 +577,27 @@ def get_kernel_metadata(node_schedule, wrapper):
         if "from_node" in node.meta:
             key = node.meta["from_node"][0][0]
             from_node_dict[key].append(node.name)
+    sort_str = "Topologically Sorted" if single_graph is not None else "Unsorted"
     metadata = (
-        f"{wrapper.comment} Source Nodes: [{', '.join(sorted(from_node_dict.keys()))}], "
-        f"Original ATen: [{', '.join(sorted(original_aten_dict.keys()))}]"
+        f"{wrapper.comment} {sort_str} Source Nodes: [{', '.join(from_node_dict.keys())}], "
+        f"Original ATen: [{', '.join(original_aten_dict.keys())}]"
     )
+
     # trace back to original node here
-    detailed_metadata = []
+    detailed_metadata = [f"{wrapper.comment} Source node to ATen node mapping:"]
     for original_node, nodes in sorted(from_node_dict.items()):
         detailed_metadata.append(
-            f"{wrapper.comment} {original_node} => {', '.join(sorted(nodes))}"
+            f"{wrapper.comment}   {original_node} => {', '.join(sorted(nodes))}"
         )
+
+    # print the aot_autograd graph fragment
+    if single_graph is not None:
+        detailed_metadata.append(f"{wrapper.comment} Graph fragment:")
+        for n in inductor_nodes:
+            # TODO(future): maybe refactor torch/fx/graph.py to make it easy to
+            # generate python code for graph fragments
+            detailed_metadata.append(f"{wrapper.comment}   {n.format_node()}")
+
     return metadata, "\n".join(detailed_metadata)
 
 
@@ -673,7 +731,9 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def get_first_incompatible_cudagraph_node(gm):
+def get_first_incompatible_cudagraph_node(
+    gm: torch.fx.GraphModule,
+) -> Optional[torch.fx.Node]:
     from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
     forbidden_set = {
@@ -714,10 +774,6 @@ def get_first_incompatible_cudagraph_node(gm):
         if (val := node.meta.get("val")) is not None and free_unbacked_symbols(val):
             return node
     return None
-
-
-def has_incompatible_cudagraph_ops(gm):
-    return get_first_incompatible_cudagraph_node(gm) is not None
 
 
 def output_node(gm: torch.fx.GraphModule):
@@ -799,6 +855,42 @@ def argsort(seq) -> List[int]:
     getter = seq.__getitem__
     a_r = range(len(seq))
     return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
+
+
+def argsort_sym(
+    shape_env, seq: Sequence[Union[int, torch.SymInt, sympy.Expr]]
+) -> List[int]:
+    def cmp(a, b):
+        a_idx, a_val = a
+        b_idx, b_val = b
+
+        def evaluate(expr):
+            if isinstance(expr, bool):
+                return expr
+            return shape_env.evaluate_expr(expr, size_oblivious=True)
+
+        if evaluate(a_val < b_val):
+            return -1
+        if evaluate(a_val > b_val):
+            return 1
+        # If strides are the same, prefer the original order.
+        # (this matches argsort's algorithm).
+        # For strides = [2048, 2048, 16, 1], this is
+        # [3, 2, 1, 0].
+        if a_idx < b_idx:
+            return 1
+        if a_idx > b_idx:
+            return -1
+        return 0
+
+    # Strategy: convert all symints to sympy.Expr, then use a custom comparator
+    exprs = [
+        (idx, s.node.expr if isinstance(s, torch.SymInt) else s)
+        for idx, s in enumerate(seq)
+    ]
+    exprs = sorted(exprs, key=functools.cmp_to_key(cmp))
+    result = [idx for idx, _ in exprs]
+    return result
 
 
 @functools.lru_cache(8)
@@ -995,6 +1087,21 @@ class DeferredLineBase:
         return len(self.line)
 
 
+class DelayReplaceLine(DeferredLineBase):
+    """At end of codegen call `line.replace(key, value_fn())`"""
+
+    def __init__(self, key: str, value_fn: Callable[[], str], line: str):
+        super().__init__(line)
+        self.key = key
+        self.value_fn = value_fn
+
+    def __call__(self) -> str:
+        return self.line.replace(self.key, self.value_fn())
+
+    def _new_line(self, line: str) -> DelayReplaceLine:
+        return DelayReplaceLine(self.key, self.value_fn, line)
+
+
 @functools.lru_cache(None)
 def is_big_gpu(index) -> bool:
     min_sms = 68  # 3080
@@ -1016,8 +1123,7 @@ def use_max_autotune() -> bool:
 
 def _use_template_for_cuda(layout, allowed_layout_dtypes: List[torch.dtype]) -> bool:
     return (
-        use_max_autotune()
-        and layout.device.type == "cuda"
+        layout.device.type == "cuda"
         and layout.dtype in allowed_layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
@@ -1044,7 +1150,14 @@ def use_triton_template(layout, *, enable_int32=False, enable_float8=False):
     if enable_float8:
         layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
     return (
-        _use_template_for_cuda(layout, layout_dtypes)
+        (
+            (
+                layout.device.type == "cuda"
+                and _use_template_for_cuda(layout, layout_dtypes)
+            )
+            or (layout.device.type == "cpu" and layout.dtype in layout_dtypes)
+        )
+        and use_max_autotune()
         and _use_autotune_backend("TRITON")
         and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
     )
@@ -1063,8 +1176,10 @@ def use_cutlass_template(layout, m, n, k):
         return False
 
     layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
-    res = _use_template_for_cuda(layout, layout_dtypes) and _use_autotune_backend(
-        "CUTLASS"
+    res = (
+        _use_template_for_cuda(layout, layout_dtypes)
+        and use_max_autotune()
+        and _use_autotune_backend("CUTLASS")
     )
 
     if res:
@@ -1111,12 +1226,9 @@ def try_import_ck_lib():
     return package_dirname, gen_ops_library, gen_ops_preselected, CKGemmOperation
 
 
-def use_ck_template(layout, m, n, k):
+def use_ck_template(layout):
     # config knobs check 1
     if not use_max_autotune():
-        return False
-    # config knobs check 2
-    if not _use_autotune_backend("CK"):
         return False
     # platform check
     if not torch.version.hip:
@@ -1131,27 +1243,23 @@ def use_ck_template(layout, m, n, k):
         native_arch.split(":")[0]: native_arch
     }
     requested_supported_archs = [
-        requested_archs[k] for k in requested_archs.keys() & config.rocm.supported_arch
+        requested_archs[k]
+        for k in requested_archs.keys() & config.rocm.ck_supported_arch
     ]
     if not requested_supported_archs:
         return False
     # supported input dtypes
-    if layout.dtype not in [torch.float16, torch.bfloat16]:
+    if layout.dtype not in [torch.float16, torch.bfloat16, torch.float32]:
         return False
-    # TBD: investigate if we need to disable backend based on number of available CUs similar to `is_big_gpu`
-    # check if shape is static and gemm size is not 0
-    from .virtualized import V
-
-    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
-    if gemm_size <= 0:
-        return False
-    # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
 
     ck_package_dirname, _, _, _ = try_import_ck_lib()
 
     if not ck_package_dirname:
         log.warning("Please pip install Composable Kernel package")
         return False
+
+    if config.is_fbcode():
+        config.rocm.ck_dir = ck_package_dirname
 
     if not config.rocm.ck_dir:
         log.warning("Please set TORCHINDUCTOR_CK_DIR env variable")
@@ -1164,11 +1272,25 @@ def use_ck_template(layout, m, n, k):
     return True
 
 
+def use_ck_gemm_template(layout, m, n, k):
+    from .virtualized import V
+
+    return (
+        use_ck_template(layout)
+        and _use_autotune_backend("CK")
+        and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
+    )
+
+
+def use_ck_conv_template(layout):
+    return use_ck_template(layout) and _use_conv_autotune_backend("CK")
+
+
 def _use_template_for_cpu(layout):
     return use_max_autotune() and layout.device.type == "cpu"
 
 
-def use_cpp_packed_gemm_template(layout, mat1, mat2):
+def use_cpp_packed_gemm_template(layout, mat1, mat2, mat2_transposed=False):
     from . import ir
     from .codegen.cpp_micro_gemm import create_micro_gemm
     from .codegen.cpp_utils import get_gemm_template_output_and_compute_dtype
@@ -1183,8 +1305,12 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     int8_gemm = mat1.get_dtype() == torch.uint8
     layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
     m, n, k, layout, mat1, mat2 = mm_args(
-        mat1, mat2, out_dtype=layout.dtype if int8_gemm else None
+        mat1,
+        mat2,
+        out_dtype=layout.dtype if int8_gemm else None,
+        mat2_transposed=mat2_transposed,
     )
+
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
         return False
@@ -1202,10 +1328,15 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
         output_dtype=output_dtype,
         num_threads=parallel_num_threads(),
     )
+
+    def is_last_dim_stride1(x):
+        x.freeze_layout()
+        return x.get_stride()[-1] == 1
+
     return (
         layout.dtype in layout_dtypes
         and micro_gemm is not None
-        and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
+        and is_last_dim_stride1(mat1)  # TODO(jgong5): support transposed input
         and isinstance(mat2, ir.StorageBox)
         and mat2.is_module_buffer()
     )
@@ -1232,7 +1363,7 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs):
+def run_and_get_code(fn, *args, **kwargs) -> Tuple[Any, List[str]]:
     from .graph import GraphLowering
 
     source_codes: List[str] = []
@@ -1310,6 +1441,25 @@ def run_and_get_triton_code(fn, *args, **kwargs):
         1 <= len(source_codes) <= 2
     ), f"expected one or two code outputs got {len(source_codes)}"
     return source_codes[0]
+
+
+def run_and_get_graph_lowering(fn, *args, **kwargs):
+    from torch._inductor.codecache import CompiledFxGraph
+    from torch._inductor.graph import GraphLowering
+
+    real_init = CompiledFxGraph.__init__
+    graph_lowerings = []
+
+    def fake_init(*args, **kwargs):
+        real_init(*args, **kwargs)
+        graph = args[2]
+        assert isinstance(graph, GraphLowering)
+        graph_lowerings.append(graph)
+
+    with mock.patch.object(CompiledFxGraph, "__init__", fake_init):
+        result = fn(*args, **kwargs)
+
+    return result, graph_lowerings
 
 
 @contextlib.contextmanager
@@ -1485,6 +1635,10 @@ def is_linux() -> bool:
     return platform.system() == "Linux"
 
 
+def is_windows():
+    return sys.platform == "win32"
+
+
 def has_free_symbols(itr: Iterable[Any]):
     return any(isinstance(x, sympy.Expr) and not x.is_number for x in itr)
 
@@ -1535,7 +1689,7 @@ def pass_execution_and_save(func, gm, inp, msg):
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
-        with GraphTransformObserver(gm, msg, config.trace.log_url_for_graph_xform):
+        with GraphTransformObserver(gm, msg):
             func(gm.graph)
         time_elapsed = datetime.now() - start_time
         # recompile graph
@@ -1703,16 +1857,18 @@ class BoxedBool:
 
 @contextlib.contextmanager
 def collect_defined_kernels(kernel_list):
-    from .codegen.wrapper import WrapperCodeGen
+    from .codegen.wrapper import PythonWrapperCodegen
 
-    orig_define_kernel = WrapperCodeGen.define_kernel
+    orig_define_kernel = PythonWrapperCodegen.define_kernel
 
     def new_define_kernel(wrapper, name, kernel_code, metadata, *args, **kwargs):
         nonlocal kernel_list
         kernel_list.append(kernel_code)
         return orig_define_kernel(wrapper, name, kernel_code, metadata, *args, **kwargs)
 
-    with unittest.mock.patch.object(WrapperCodeGen, "define_kernel", new_define_kernel):
+    with unittest.mock.patch.object(
+        PythonWrapperCodegen, "define_kernel", new_define_kernel
+    ):
         yield
 
 
@@ -1722,7 +1878,7 @@ def get_cloned_parameter_buffer_name(name: str):
 
 def is_gpu(device: str):
     assert isinstance(device, str) or device is None, device
-    return device in ["cuda", "xpu"]
+    return device in GPU_TYPES
 
 
 def device_need_guard(device: str):
@@ -1812,9 +1968,11 @@ def tensor_is_aligned(tensor: torch.Tensor):
     # but symbolic storage_offsets are. For consistency, we suppress guard creation
     # upon performing this check: that ensures that we don't add recompiles when we
     # add this logic.
-    return (
-        tensor.storage_offset() * get_dtype_size(tensor.dtype)
-    ) % GPU_ALIGN_BYTES == 0
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
+    return statically_known_true(
+        (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % GPU_ALIGN_BYTES == 0
+    )
 
 
 def should_assume_input_aligned(example_input: torch.Tensor):
@@ -1866,7 +2024,7 @@ def run_and_get_cpp_code(fn, *args, **kwargs):
     return result, s
 
 
-def shape_env_from_inputs(inputs: List[torch.Tensor]):
+def shape_env_from_inputs(inputs: Sequence[InputType]):
     shape_env = None
     fake_mode = detect_fake_mode(inputs)
 
@@ -1902,9 +2060,13 @@ def align_inputs_from_check_idxs(
 
 
 def clone_preserve_strides(x: torch.Tensor):
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-    )
+    if 0 in x.size():
+        # Short-circuits if the shape has no elements
+        needed_size = 0
+    else:
+        needed_size = (
+            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        )
     buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
     return torch.as_strided(buffer, x.size(), x.stride())
 
@@ -1920,9 +2082,9 @@ def copy_misaligned_inputs(
 
 
 def remove_unaligned_input_idxs(
-    inputs: List[InputType],
+    inputs: Sequence[InputType],
     static_input_idxs: Sequence[int],
-):
+) -> Sequence[int]:
     """
     We require all inputs to be aligned, so introduce a copy for any
     that aren't.
@@ -1935,6 +2097,21 @@ def remove_unaligned_input_idxs(
     if len(aligned_static_input_idxs) != len(static_input_idxs):
         return aligned_static_input_idxs
     return static_input_idxs
+
+
+def expr_fits_within_32bit(e: sympy.Expr):
+    from .virtualized import V
+
+    int_max = torch.iinfo(torch.int32).max
+    size_hint = V.graph.sizevars.size_hint
+    has_hint = V.graph.sizevars.shape_env.has_hint
+
+    # Allow for unhinted e as long as we can still statically prove
+    # (e.g., via ValueRanges) that it is still in bounds
+    if V.graph.sizevars.is_expr_static_and_true(e <= int_max):
+        return True
+    # Otherwise, the hint MUST exist and be in range
+    return has_hint(e) and size_hint(e) <= int_max
 
 
 def set_tracing_context_output_strides(example_inputs, compiled_graph):
@@ -1957,3 +2134,63 @@ def set_tracing_context_output_strides(example_inputs, compiled_graph):
                         for e in exprs
                     )
                 )
+
+
+def should_use_remote_fx_graph_cache():
+    if config.fx_graph_remote_cache is not None:
+        return config.fx_graph_remote_cache
+    if not config.is_fbcode():
+        return False
+
+    if torch._utils_internal.is_fb_unit_test():
+        return False
+
+    try:
+        from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
+    except ModuleNotFoundError:
+        return False
+
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:fx_graph_memcache_version"
+    )
+
+
+def normalize_name(name: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_]", "_", name)
+
+
+def is_same_tensor(data: torch.Tensor, value: torch.Tensor):
+    return (
+        not data.is_mkldnn
+        and data.size() == value.size()
+        and data.stride() == value.stride()
+        and data.dtype == value.dtype
+        and data.device == value.device
+        and data.untyped_storage().data_ptr() == value.untyped_storage().data_ptr()
+        and data.storage_offset() == value.storage_offset()
+    )
+
+
+def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
+    return (
+        data.is_mkldnn
+        and data.size() == value.size()
+        and data.dtype == value.dtype
+        and data.device == value.device
+        and torch.ops.mkldnn.data_ptr(data) == torch.ops.mkldnn.data_ptr(value)
+    )
+
+
+@dataclass_transform(frozen_default=True)
+def ir_dataclass(cls=None, /, *, frozen: bool = True):
+    def wrap(cls: _T) -> _T:
+        if sys.version_info >= (3, 10):
+            return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
+        else:
+            # Polyfill for python=3.9. kw_only simply introduces an extra check
+            # that only kwargs are used (and is not available on 3.9)
+            return dataclasses.dataclass(cls, frozen=frozen)
+
+    if cls is None:
+        return wrap
+    return wrap(cls)
