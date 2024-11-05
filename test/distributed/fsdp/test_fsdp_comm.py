@@ -52,7 +52,7 @@ class TestCommunication(FSDPTest):
         sharding_strategy: ShardingStrategy,
     ):
         fsdp_kwargs = {"sharding_strategy": sharding_strategy,
-                       "device_id": device,} if TEST_HPU else {"sharding_strategy": sharding_strategy}
+                       "device_id": device if TEST_HPU else self.rank}
         if nested_model:
             model = NestedWrappedModule.init(
                 self.process_group,
@@ -210,11 +210,12 @@ class TestCommunication(FSDPTest):
             sharding_strategy (Optional[ShardingStrategy]): Configures the
                 FSDP algorithm.
         """
+        device_type = device if TEST_HPU else self.device_type
         # Enable execution order checking
         dist.set_debug_level(dist.DebugLevel.DETAIL)
         # Initialize the model and inputs
-        fsdp_model = self._init_model(device if TEST_HPU else self.device_type, nested_model, sharding_strategy)
-        batch = fsdp_model.module.get_input(device if TEST_HPU else self.device_type)
+        fsdp_model = self._init_model(device_type, nested_model, sharding_strategy)
+        batch = fsdp_model.module.get_input(device_type)
         # Count the number of FSDP instances that manage parameters since the
         # number of collectives are a function of this number
         num_fsdp = sum(
@@ -321,10 +322,16 @@ class TestExplicitUnshard(FSDPTest):
                 if isinstance(self.mlps.mlp3, FSDP):
                     self.mlps.mlp3._unshard(async_op=True)
                 return self.mlps([y1, y2, y3], [work1, work2, work3])
+        if TEST_HPU:
+            device_type = device
+            device_id = device
+        else:
+            device_type = self.device_type
+            device_id = self.rank
         group = self.process_group
         batch_size, dim = 2, 8
         torch.manual_seed(42)
-        ref_model = DDP(ReduceModel(dim, group).to(device if TEST_HPU else self.rank), device_ids=[self.rank])
+        ref_model = DDP(ReduceModel(dim, group).to(device_id), device_ids=[self.rank])
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         torch.manual_seed(42)
         model = ReduceModel(dim, group)
@@ -332,17 +339,17 @@ class TestExplicitUnshard(FSDPTest):
             model.mlps,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             auto_wrap_policy=ModuleWrapPolicy((MLP,)),
-            device_id=device if TEST_HPU else self.rank,
+            device_id=device_id,
             use_orig_params=use_orig_params,
         )
         model.mlps.check_is_root()
         mlp_params = set(model.mlps.parameters())
         mlp_param_names = {n for n, p in model.named_parameters() if p in mlp_params}
         DDP._set_params_and_buffers_to_ignore_for_model(model, mlp_param_names)
-        model = DDP(model.to(device if TEST_HPU else self.rank), device_ids=[self.rank])
+        model = DDP(model.to(device_id), device_ids=[self.rank])
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
-        inp = torch.randn((batch_size, dim), device=device if TEST_HPU else self.device_type)
+        inp = torch.randn((batch_size, dim), device=device_type)
         for _ in range(10):
             losses: List[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
