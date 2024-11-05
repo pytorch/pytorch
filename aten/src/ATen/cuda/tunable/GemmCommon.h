@@ -74,6 +74,11 @@ static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t siz
 
 }
 
+// Note on GetSizeA et al.
+// Tensors can be dense or arbitrarily strided. We only need our copies to be large enough.
+// Our copies must be at least as large as the m n k shapes dictate, but could be larger
+// depending on the lda ldb ldc values. Similarly for the batched case.
+
 template <typename T>
 struct GemmParams : OpParams {
   GemmParams() {
@@ -85,15 +90,21 @@ struct GemmParams : OpParams {
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+    size_t size_stride = lda * ((transa == 'n' || transa == 'N') ? k : m);
+    size_t size_dense = m * k;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    size_t size_stride = ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    size_t size_dense = k * n;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * ldc * n;
+    size_t size_stride = ldc * n;
+    size_t size_dense = m * n;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -135,7 +146,7 @@ struct GemmParams : OpParams {
 
   TuningStatus NumericalCheck(GemmParams<T> *other) {
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, ldc*n) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
   }
 
   char transa;
@@ -166,15 +177,21 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m) * batch;
+    size_t size_stride = std::min(lda, stride_a) * ((transa == 'n' || transa == 'N') ? k : m) * batch;
+    size_t size_dense = m * k * batch;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k) * batch;
+    size_t size_stride = std::min(ldb, stride_b) * ((transb == 'n' || transb == 'N') ? n : k) * batch;
+    size_t size_dense = k * n * batch;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * ldc * n * batch;
+    size_t size_stride = std::min(ldc, stride_c) * n * batch;
+    size_t size_dense = m * n * batch;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -216,7 +233,7 @@ struct GemmStridedBatchedParams : OpParams {
 
   TuningStatus NumericalCheck(GemmStridedBatchedParams<T> *other) {
     auto c_dtype = c10::CppTypeToScalarType<T>::value;
-    return detail::NumericalCheck(c_dtype, c, other->c, batch*stride_c) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
   }
 
   char transa;
@@ -251,15 +268,21 @@ struct ScaledGemmParams : OpParams {
   }
 
   size_t GetSizeA() const {
-    return sizeof(T) * lda * ((transa == 'n' || transa == 'N') ? k : m);
+    size_t size_stride = lda * ((transa == 'n' || transa == 'N') ? k : m);
+    size_t size_dense = m * k;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeB() const {
-    return sizeof(T) * ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    size_t size_stride = ldb * ((transb == 'n' || transb == 'N') ? n : k);
+    size_t size_dense = k * n;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSizeC() const {
-    return sizeof(T) * ldc * n;
+    size_t size_stride = ldc * n;
+    size_t size_dense = m * n;
+    return sizeof(T) * (size_stride > size_dense ? size_stride : size_dense);
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -300,7 +323,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   TuningStatus NumericalCheck(ScaledGemmParams<T> *other) {
-    return detail::NumericalCheck(c_dtype, c, other->c, ldc*n) ? OK : FAIL;
+    return detail::NumericalCheck(c_dtype, c, other->c, GetSizeC()/sizeof(T)) ? OK : FAIL;
   }
 
   char transa;
