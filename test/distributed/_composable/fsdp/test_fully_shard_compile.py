@@ -651,9 +651,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             def forward(self, x):
                 # Intentionally reusing all layers a few times,
                 # to test "multiple all-gathers for the same parameter" case.
+                # Case 1: rerun the same layer twice
                 for layer_id in range(len(self.layers)):
                     for _ in range(2):
                         x = self.layers[layer_id](x)
+                # Case 2: iterate through all layers twice
                 for layer in self.layers:
                     x = layer(x)
                 for layer in self.layers:
