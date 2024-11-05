@@ -704,24 +704,26 @@ Tensor scaled_dot_product_attention(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
+  using sdp::SDPBackend;
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (_fused_sdp_choice_stub.is_device_supported(query_.device().type())) {
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
           query_, key, value, attn_mask_, dropout_p, is_causal, scale, enable_gqa);
   }
-  sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
+  const auto query_device_type = query_.device().type();
+  const auto backend = static_cast<SDPBackend>(choice_int);
+  const auto convert_attn_func = backend != SDPBackend::cudnn_attention ? convert_boolean_attn_mask : convert_boolean_attn_mask_cudnn;
+  auto attn_mask = convert_attn_func(attn_mask_, query_.dtype());
   switch (backend) {
-    case sdp::SDPBackend::cudnn_attention: {
-      std::optional<Tensor> attn_mask = convert_boolean_attn_mask_cudnn(attn_mask_, query_.dtype());
+    case SDPBackend::cudnn_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       auto out_lse_softmax = at::_scaled_dot_product_cudnn_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);
     }
-    case sdp::SDPBackend::flash_attention: {
-      std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
-      if(query_.device().type() == DeviceType::CUDA){
+    case SDPBackend::flash_attention: {
+      if(query_device_type == DeviceType::CUDA){
         c10::SymInt og_size = query_.sym_size(-1);
         Tensor query_padded = pad_last_dim<8, false>(query_);
         Tensor key_padded = pad_last_dim<8, false>(key);
@@ -736,8 +738,7 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
     }
-    case sdp::SDPBackend::efficient_attention: {
-      std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
+    case SDPBackend::efficient_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
       if (attn_mask.has_value()) {
         attn_mask.value() = preprocess_mask(attn_mask.value(), query_, key, value);;
@@ -746,18 +747,19 @@ Tensor scaled_dot_product_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(out_and_lse);
     }
-    case sdp::SDPBackend::overrideable: {
-      std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
+    case SDPBackend::overrideable: {
       auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(
           query_, key, value, attn_mask, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);
     }
-    case sdp::SDPBackend::math: {
-      std::optional<Tensor> attn_mask = convert_boolean_attn_mask(attn_mask_, query_.dtype());
-      if ((!GradMode::is_enabled() || (!query_.requires_grad() && !key.requires_grad() && !value.requires_grad()))
-          && query_.device().type() == DeviceType::MPS && dropout_p == 0.0
-          && query_.is_contiguous() && key.is_contiguous() && value.is_contiguous()
-          && !query_.is_nested() && !key.is_nested() && !value.is_nested()) {
+    case SDPBackend::math: {
+      const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
+      const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
+      const auto all_contiguous = query_.is_contiguous() && key.is_contiguous() && value.is_contiguous();
+      if (query_device_type == DeviceType::MPS && dropout_p == 0.0
+          && !(GradMode::is_enabled() && any_inputs_require_grad)
+          && all_contiguous
+          && !any_nested) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
             key,
