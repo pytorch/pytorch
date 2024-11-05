@@ -1828,8 +1828,6 @@ class Module:
 
             return result
 
-        from torch.compiler import is_compiling
-
         # This is technically not behavior equivalent when compiling, but it's
         # incredibly unlikely we will ever support throwing an exception in NN
         # module, and then catching it here, and then reraising it, and then
@@ -1837,7 +1835,7 @@ class Module:
         # The reraise here just gunks up our exception handling for no good
         # reason.  Don't try to run the always called hooks in event of
         # exception.
-        if is_compiling():
+        if torch.compiler.is_compiling():
             return inner()
 
         try:
@@ -2630,7 +2628,7 @@ class Module:
             <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
 
         """
-        for name, param in self.named_parameters(recurse=recurse):
+        for _name, param in self.named_parameters(recurse=recurse):
             yield param
 
     def named_parameters(
@@ -2725,7 +2723,7 @@ class Module:
         Yields:
             Module: a child module
         """
-        for name, module in self.named_children():
+        for _name, module in self.named_children():
             yield module
 
     def named_children(self) -> Iterator[Tuple[str, "Module"]]:

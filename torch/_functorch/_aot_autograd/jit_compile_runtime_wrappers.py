@@ -607,7 +607,9 @@ def aot_dispatch_autograd(
                 payload_fn=lambda: bw_module_str,
             )
 
-        with track_graph_compiling(aot_config, "forward"):
+        # AMP is already traced out in joint graph. we do not wish to reapply it accidentally
+        # in the compiler.
+        with track_graph_compiling(aot_config, "forward"), torch._C._DisableAutocast():
             # flat_args at this point might still be subclasses-
             # make sure to pass the unwrapped fake tensors into the compiler!
             adjusted_flat_args = joint_inputs[0]
@@ -672,7 +674,7 @@ def aot_dispatch_autograd(
         # NB: It's important to compile backwards ahead of time, as this may
         # add extra guards which we need to apply to the Dynamo cache at
         # forwards
-        with track_graph_compiling(aot_config, "backward"):
+        with track_graph_compiling(aot_config, "backward"), torch._C._DisableAutocast():
             placeholder_list = fx_placeholder_vals(bw_module)
 
             forward_saved_for_backwards_strides = None
@@ -724,28 +726,24 @@ def aot_dispatch_autograd(
 
             compiled_bw_func = None
             if num_symints_saved_for_bw > 0:
-                context = torch._C._DisableAutocast if disable_amp else nullcontext
-                with context():
-                    try:
-                        compiled_bw_func = aot_config.bw_compiler(
-                            bw_module, placeholder_list
-                        )
-                    except Exception as e:
-                        exc = e
-                        trace_structured(
-                            "artifact",
-                            metadata_fn=lambda: {
-                                "name": "eager_compile_backwards_failure",
-                                "encoding": "string",
-                            },
-                            payload_fn=lambda: "\n".join(
-                                traceback.format_exception(exc)
-                            ),
-                        )
-                        log.warning(
-                            "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
-                            exc_info=True,
-                        )
+                try:
+                    compiled_bw_func = aot_config.bw_compiler(
+                        bw_module, placeholder_list
+                    )
+                except Exception as e:
+                    exc = e
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "eager_compile_backwards_failure",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: "\n".join(traceback.format_exception(exc)),
+                    )
+                    log.warning(
+                        "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
+                        exc_info=True,
+                    )
             # Compiled autograd will run the bw_module in the backward pass,
             # so recompilation need happen anyway if the backward pass is ever
             # called.

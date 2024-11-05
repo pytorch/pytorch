@@ -75,7 +75,7 @@ class NCCLTest : public NCCLTestBase {
       int inputDim = 3)
       : NCCLTestBase(path, pgTimeout), rank_(rank), worldSize_(worldSize) {
     // Each device has a single tensor to perf the NCCL op
-    ::at::globalContext().lazyInitCUDA();
+    ::at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
     tensors_.resize(numDevices_);
     inputs_.resize(numDevices_);
     outputs_.resize(numDevices_);

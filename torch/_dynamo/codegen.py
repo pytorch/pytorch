@@ -51,6 +51,7 @@ class PyCodegen:
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
         tempvars=None,
+        overridden_sources=None,
     ) -> None:
         self.root = root
         self.top_of_stack: Optional[VariableTracker] = None
@@ -65,6 +66,10 @@ class PyCodegen:
         self.new_var = self.tx.output.new_var
         self.mutable_side_effects_from_source = False
         self.value_from_source: bool = True
+        # This serves as a way for codegen to use a different source; we need
+        # this because sometimes we can't easily modify the original source
+        # without affecting other components, e.g., guards.
+        self.overridden_sources: Dict[Source, Source] = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
         prior = self.mutable_side_effects_from_source
@@ -116,7 +121,9 @@ class PyCodegen:
     def __call__(self, value, allow_cache=True):
         """Generate code such that top-of-stack (TOS) is set to value"""
         if isinstance(value, Source):
-            self.call_reconstruct(value)
+            # If the source needs to be overridden, use the new one.
+            source = self.overridden_sources.get(value, value)
+            self.call_reconstruct(source)
             self.clear_tos()
             return
 
@@ -130,27 +137,25 @@ class PyCodegen:
 
         if self.mutable_side_effects_from_source:
             # this is needed to get aliasing relationships right
-            # value.mutable_local.source will get mutated to hold `value`
+            # value.source will get mutated to hold `value`
             # mutable_side_effects_from_source=False is used to codegen the mutation
             # mutable_side_effects_from_source=True is used to codegen a reference
             from .side_effects import MutableSideEffects
 
             if isinstance(value.mutable_local, MutableSideEffects):
-                self(value.mutable_local.source)
+                self(value.source)
                 return
 
         if allow_cache:
-            if value.mutable_local and value.mutable_local in self.tempvars:
-                output.append(self.create_load(self.tempvars[value.mutable_local]))
-                self.top_of_stack = value
-                return
             if self.tempvars.get(value) is not None:
                 output.append(self.create_load(self.tempvars[value]))
                 self.top_of_stack = value
                 return
 
         if value.source is not None and allow_cache and self.value_from_source:
-            self.call_reconstruct(value.source)
+            # If the source needs to be overridden, use the new one.
+            source = self.overridden_sources.get(value.source, value.source)
+            self.call_reconstruct(source)
         elif value.is_python_constant() and is_safe_constant(
             value.as_python_constant()
         ):
@@ -180,7 +185,9 @@ class PyCodegen:
             # NB: It works to add_graph_output on a computed expression
             # as_tensor here, because we memoize as_tensor calls on
             # SymNodeVariable!
-            graph_outputs_key = self.add_graph_output(value.as_tensor(self.tx))
+            graph_outputs_key = self.add_graph_output(
+                value.as_tensor(self.tx, torch.float64)
+            )
 
             def gen_fn():
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)
@@ -254,8 +261,6 @@ class PyCodegen:
     def add_cache(self, value):
         var = self.new_var()
         self.tempvars[value] = var
-        if value.mutable_local:
-            self.tempvars[value.mutable_local] = var
         self._output.append(self.create_store(var))
 
     def foreach(self, items):

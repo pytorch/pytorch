@@ -203,10 +203,13 @@ class ConstDictVariable(VariableTracker):
             ]
         )
 
-    def _maybe_realize(self, item):
-        return item.realize() if item else item
-
     def reconstruct(self, codegen):
+        def is_new_item(value, other):
+            # compare the id of the realized values if both values are not lazy VTs
+            if value and value.is_realized() and other.is_realized():
+                return id(value.realize()) != id(other.realize())
+            return id(value) != id(other)
+
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.add_push_null(
@@ -221,11 +224,8 @@ class ConstDictVariable(VariableTracker):
         num_args = 0
         for key, value in self.items.items():
             # We can safely call realize() here as it won't introduce any new guards
-            is_new_item = (
-                self._maybe_realize(self.original_items.get(key.vt)) != value.realize()
-            )
-
-            if is_new_item or self.should_reconstruct_all:
+            item = self.original_items.get(key.vt)
+            if is_new_item(item, value) or self.should_reconstruct_all:
                 codegen(key.vt)
                 codegen(value)
                 num_args += 1
@@ -984,12 +984,10 @@ class HFPretrainedConfigVariable(VariableTracker):
         assert self.is_matching_cls(type(obj))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        from .builder import VariableBuilder
-
         try:
             attr_value = getattr(self.obj, name)
-            attr_source = AttrSource(self.source, name)
-            return VariableBuilder(tx, attr_source)(attr_value)
+            source = self.source and AttrSource(self.source, name)
+            return VariableTracker.build(tx, attr_value, source)
 
         except AttributeError:
             unimplemented(f"getattr({self.value}, {name})")
@@ -1053,15 +1051,11 @@ class PythonSysModulesVariable(VariableTracker):
         key: VariableTracker,
         default: Optional[VariableTracker] = None,
     ):
-        from .builder import VariableBuilder
-
         k, has_key = self._contains_helper(tx, key)
 
         if has_key:
-            return VariableBuilder(
-                tx,
-                GetItemSource(self.source, k),
-            )(sys.modules[k])
+            source = self.source and GetItemSource(self.source, k)
+            return VariableTracker.build(tx, sys.modules[k], source)
 
         if default is not None:
             return default
@@ -1069,10 +1063,6 @@ class PythonSysModulesVariable(VariableTracker):
         return ConstantVariable.create(value=None)
 
     def call_getitem(self, tx: "InstructionTranslator", key: VariableTracker):
-        from .builder import VariableBuilder
-
         k, has_key = self._contains_helper(tx, key)
-        return VariableBuilder(
-            tx,
-            GetItemSource(self.source, k),
-        )(sys.modules[k])
+        source = self.source and GetItemSource(self.source, k)
+        return VariableTracker.build(tx, sys.modules[k], source)

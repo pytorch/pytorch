@@ -66,8 +66,7 @@ namespace at {
       } else if (ivalue.isTensorList()) {
         auto tensors = std::move(ivalue).toTensorList();
         for(const auto j : c10::irange(tensors.size())) {
-          const auto& tensor_ref = tensors[j];
-          const Tensor& tensor = tensor_ref;
+          const Tensor& tensor = tensors[j];
           if (tensor._is_zerotensor()) {
             // TODO: assert requires_grad=False
             //_like should not propagate zerotensor dispatch key
