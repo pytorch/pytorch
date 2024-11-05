@@ -19,6 +19,7 @@ class FailureType(IntEnum):
     MISSING_FAKE_KERNEL = 1
     DATA_DEPENDENT_ERROR = 2
     CONSTRAINT_VIOLATION_ERROR = 3
+    MISMATCHED_FAKE_KERNEL = 4
 
     def __str__(self) -> str:
         return self.name
@@ -111,6 +112,16 @@ class FailureReport:
     Please refer to https://docs.google.com/document/d/1kZ_BbB3JnoLbUZleDT6635dHs88ZVYId8jT-yTFgf3A/edit#heading=h.boi2xurpqa0o for more details.
 """  # noqa: B950
 
+        elif self.failure_type == FailureType.MISMATCHED_FAKE_KERNEL:
+            op = self.data["op"]
+            reason = self.data["reason"]
+            return f"""Mismatched fake kernel.
+    torch.ops.{op} has a fake kernel implementation, but it has incorrect behavior, based on the real kernel.
+    The reason for the mismatch is: {reason}.
+
+    Please refer to https://docs.google.com/document/d/1_W62p8WJOQQUzPsJYa7s701JXt0qf2OfLub2sbkHOaU/edit#heading=h.ahugy69p2jmz for more detailed instructions on how to write a meta implementation.
+"""  # noqa: B950
+
         else:
             raise ValueError(f"Unknown failure type: {self.failure_type}")
 
@@ -200,7 +211,7 @@ def draft_export(
     dynamic_shapes = dynamic_shapes or {}
 
     capture_structured_log = CaptureStructuredTrace(
-        ["str", "propagate_real_tensors", "guard_added", "generated_fake_kernel"]
+        ["str", "propagate_real_tensors", "guard_added", "missing_fake_kernel", "mismatched_fake_kernel"]
     )
 
     with torch._functorch.config.patch(
@@ -234,7 +245,7 @@ def draft_export(
 
         str_to_filename: Dict[str, str] = {}
         failures: List[FailureReport] = []
-        custom_ops_logs: Dict[str, Dict[str, Any]] = {}  # Dedup custom ops
+        custom_ops_logs: Dict[str, Tuple[Dict[str, Any], FailureType]] = {}  # Dedup custom ops
 
         for log_name, log_contents in capture_structured_log.logs:
             if log_name == "propagate_real_tensors":
@@ -261,8 +272,15 @@ def draft_export(
                     log_contents["stack"], str_to_filename
                 )
                 log_contents["new_dynamic_shapes"] = new_shapes
-            elif log_name == "generated_fake_kernel":
-                custom_ops_logs[log_contents["op"]] = log_contents
+            elif log_name in [
+                "missing_fake_kernel",
+                "mismatched_fake_kernel",
+            ]:
+                if log_name == "missing_fake_kernel":
+                    failure_type = FailureType.MISSING_FAKE_KERNEL
+                else:
+                    failure_type = FailureType.MISMATCHED_FAKE_KERNEL
+                custom_ops_logs[log_contents["op"]] = (log_contents, failure_type)
                 continue
             else:
                 raise RuntimeError(f"Unknown log name: {log_name}")
@@ -274,13 +292,8 @@ def draft_export(
                 )
             )
 
-        for custom_op_log in custom_ops_logs.values():
-            failures.append(
-                FailureReport(
-                    FailureType.MISSING_FAKE_KERNEL,
-                    custom_op_log,
-                )
-            )
+        for custom_op_log, failure_type in custom_ops_logs.values():
+            failures.append(FailureReport(failure_type, custom_op_log))
 
         report = DraftExportReport(failures, str_to_filename)
 

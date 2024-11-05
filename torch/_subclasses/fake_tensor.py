@@ -2136,6 +2136,13 @@ class FakeTensorMode(TorchDispatchMode):
                             )
                         except MetadataMismatchError as exc:
                             if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                                dtrace_structured(
+                                    "mismatched_fake_kernel",
+                                    metadata_fn=lambda: {
+                                        "op": str(func),
+                                        "reason": exc.reason,
+                                    },
+                                )
                                 return _make_fake(self, func, real)
                             raise MetadataMismatchError(
                                 f"Real tensor propagation found a metadata mismatch between "
@@ -2150,6 +2157,13 @@ class FakeTensorMode(TorchDispatchMode):
                                 _check_fake_real_vals(s_fake, s_real)
                             except MetadataMismatchError as exc:
                                 if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                                    dtrace_structured(
+                                        "mismatched_fake_kernel",
+                                        metadata_fn=lambda: {
+                                            "op": str(func),
+                                            "reason": exc.reason,
+                                        },
+                                    )
                                     return _make_fake(self, func, real)
                                 raise MetadataMismatchError(
                                     f"Real tensor propagation found an output size mismatch between "
@@ -2167,16 +2181,34 @@ class FakeTensorMode(TorchDispatchMode):
                             ) from exc
                     return fake
 
-                try:
-                    fake_out = tree_map_with_path(_xcheck_fake_real, fake_out, real_out)
-                except ValueError as exc:
-                    if (
-                        torch._functorch.config.generate_fake_kernels_from_real_mismatches
-                        and tree_structure(fake_out) != tree_structure(real_out)
-                    ):
+                # check fake/real tensor properies, sizes & output values
+                fake_paths_leaves, fake_spec = pytree.tree_flatten_with_path(fake_out)
+                real_leaves, real_spec = pytree.tree_flatten(real_out)
+                if len(fake_paths_leaves) != len(real_leaves):
+                    if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                        dtrace_structured(
+                            "mismatched_fake_kernel",
+                            metadata_fn=lambda: {
+                                "op": str(func),
+                                "reason": (
+                                    f"Mismatched output structure between fake kernel with output TreeSpec: {fake_spec} "
+                                    f"and real kernel with output TreeSpec: {real_spec}"
+                                ),
+                            },
+                        )
                         fake_out = tree_map(lambda x: _make_fake(self, func, x), real_out)
                     else:
-                        raise exc
+                        raise MetadataMismatchError(
+                            f"Real tensor propagation found an output structure mismatch between "
+                            f"fake output TreeSpec: {fake_spec} and real output TreeSpec: {real_spec}, "
+                            f"for func: {func}"
+                        )
+                else:
+                    fake_leaves = [
+                        _xcheck_fake_real(_fake_path, _fake_out, _real_out)
+                        for (_fake_path, _fake_out), _real_out in zip(fake_paths_leaves, real_leaves)
+                    ]
+                    fake_out = pytree.tree_unflatten(fake_leaves, fake_spec)
 
                 if (
                     not isinstance(fake_out, Tensor)
@@ -2265,7 +2297,7 @@ class FakeTensorMode(TorchDispatchMode):
                 result = inferred_fake_kernel_from_real_out(self, func, real_out)
 
                 dtrace_structured(
-                    "generated_fake_kernel",
+                    "missing_fake_kernel",
                     metadata_fn=lambda: {
                         "op": str(func),
                     },

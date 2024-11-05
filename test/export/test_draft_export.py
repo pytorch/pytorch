@@ -11,6 +11,7 @@ from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
+from torch.utils._pytree import tree_leaves
 
 
 class TestDraftExport(TestCase):
@@ -274,10 +275,14 @@ class TestDraftExport(TestCase):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 export(mod, inputs)
 
-        ep, _ = draft_export(mod, inputs)
+        ep, report = draft_export(mod, inputs)
         for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
             self.assertTrue(torch.allclose(ep_out, eager_out))
             self.assertEqual(ep_out.dtype, eager_out.dtype)
+
+        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL)
+        self.assertEqual(report.failures[0].data["reason"], "Dtypes torch.float32 and torch.bfloat16 are not equal!")
 
     def test_override_pytree_mismatched_fake_kernels(self):
         class M(torch.nn.Module):
@@ -293,10 +298,9 @@ class TestDraftExport(TestCase):
 
         @foo.register_fake
         def foo_fake_impl(a):
-            x = torch.empty_like(a)  # good
-            y = torch.empty_like(a)  # size mismatch
-            z = torch.empty_like(a)  # dtype mismatch
-            return [x, [y, z]]
+            x = torch.empty_like(a)
+            y = torch.empty_like(a)
+            return [x, y]  # mismatch on num outputs
 
         mod = M()
         inputs = (torch.randn(3, 3),)
@@ -304,7 +308,18 @@ class TestDraftExport(TestCase):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 export(mod, inputs)
 
-        ep, _ = draft_export(mod, inputs)
+        ep, report = draft_export(mod, inputs)
+        for ep_out, eager_out in zip(
+            tree_leaves(ep.module()(*inputs)), tree_leaves(mod(*inputs))
+        ):
+            self.assertTrue(torch.allclose(ep_out, eager_out))
+            self.assertEqual(ep_out.dtype, eager_out.dtype)
+
+        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL)
+        self.assertTrue(
+            "Mismatched output structure between fake kernel with output TreeSpec:" in report.failures[0].data["reason"]
+        )
 
 if __name__ == "__main__":
     run_tests()
