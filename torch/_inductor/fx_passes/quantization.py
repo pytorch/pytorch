@@ -555,7 +555,7 @@ def _is_valid_quantized_op_binary_optimization_pattern(
     # * If extra_input_from_dequant is True and the two inputs of binary node have the same shape,
     #   extra input of binary node should come from dequant pattern
     # * the two inputs of binary node should have attribute "meta" and should be tensors
-    # * the two inputs of binary node should have the same dimensions
+    # * the two inputs of binary node should have the same dimensions, and only supports extra_input for broadcasting
     # * All users of the extra input in this pattern should be
     #   ancestor nodes of the compute node, except for the binary node
     #   connected to the compute node.
@@ -576,10 +576,24 @@ def _is_valid_quantized_op_binary_optimization_pattern(
             and isinstance(binary_node_inputs[1].meta.get("val", None), torch.Tensor)  # type: ignore[union-attr]
         ):
             return False
-        # the two inputs of binary node should have the same dimensions
+
+        extra_input_of_pattern = (
+            match.kwargs["other"]
+            if "other" in match.kwargs
+            else (
+                match.kwargs["accum"]
+                if output_dtype == torch.uint8 or (not extra_input_from_dequant)
+                else match.kwargs["accum_after_dequant"]
+            )
+        )
+        # the two inputs of binary node should have the same dimensions, and only supports extra_input for broadcasting
         if (
             binary_node_inputs[0].meta["val"].dim()  # type: ignore[union-attr]
             != binary_node_inputs[1].meta["val"].dim()  # type: ignore[union-attr]
+        ) or not all(
+            binary_node_inputs[0].meta["val"].size(i) == binary_node_inputs[1].meta["val"].size(i)  # type: ignore[union-attr]
+            or extra_input_of_pattern.meta["val"].size(i) == 1  # type: ignore[union-attr]
+            for i in range(binary_node_inputs[0].meta["val"].dim())  # type: ignore[union-attr]
         ):
             return False
 
@@ -613,15 +627,6 @@ def _is_valid_quantized_op_binary_optimization_pattern(
 
         from .mkldnn_fusion import _get_remaining_users
 
-        extra_input_of_pattern = (
-            match.kwargs["other"]
-            if "other" in match.kwargs
-            else (
-                match.kwargs["accum"]
-                if output_dtype == torch.uint8 or (not extra_input_from_dequant)
-                else match.kwargs["accum_after_dequant"]
-            )
-        )
         if (
             len(_get_remaining_users(extra_input_of_pattern, compute_node)) > 1
             or extra_input_of_pattern == compute_node.args[0]
