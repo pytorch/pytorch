@@ -1108,8 +1108,8 @@ graph():
             # catch concrete inequality
             with self.assertRaisesRegex(
                 error_type,
-                "Real tensor propagation found an output size mismatch between fake shape 8 and real shape 4, "
-                "at output index 0, dimension 0 for func: mylib.foo.default",
+                r"Real tensor propagation found an output size mismatch between fake shape 8 and real shape 4, "
+                r"at output\.size\(0\), for func: mylib.foo.default",
             ):
                 export(
                     M(),
@@ -1128,8 +1128,8 @@ graph():
             )
             with self.assertRaisesRegex(
                 error_type,
-                "Real tensor propagation found an output size mismatch between fake shape s1 and real shape 4, "
-                "at output index 0, dimension 0 for func: mylib.foo.default",
+                r"Real tensor propagation found an output size mismatch between fake shape s1 and real shape 4, "
+                r"at output\.size\(0\), for func: mylib.foo.default",
             ):
                 export(
                     M(),
@@ -1188,7 +1188,7 @@ graph():
             with self.assertRaisesRegex(
                 error_type,
                 r"Real tensor propagation found a metadata mismatch between fake tensor (.*\n)*.* "
-                r"and real tensor (.*\n)*.* at output index 0, for func: mylib.foo_dtype.default",
+                r"and real tensor (.*\n)*.* at output, for func: mylib.foo_dtype.default",
             ):
                 ep = export(N(), (torch.randn(4, 4),))
 

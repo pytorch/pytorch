@@ -204,7 +204,8 @@ def draft_export(
     )
 
     with torch._functorch.config.patch(
-        fake_tensor_propagate_real_tensors=True
+        fake_tensor_propagate_real_tensors=True,
+        generate_fake_kernels_from_real_mismatches=True,
     ), capture_structured_log:
         try:
             new_shapes = None

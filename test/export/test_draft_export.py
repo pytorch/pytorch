@@ -1,8 +1,9 @@
 # Owner(s): ["oncall: export"]
 import copy
+from typing import List
 
 import torch
-from torch.export import Dim
+from torch.export import Dim, export
 from torch.export._draft_export import draft_export, FailureType
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -248,6 +249,63 @@ class TestDraftExport(TestCase):
         self.assertEqual(tq3.size(), 2)
         self.assertEqual(tq.size(), 2)
 
+    def test_override_size_and_dtype_mismatched_fake_kernels(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                return torch.ops.mylib.foo(a)
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(a: torch.Tensor) -> List[torch.Tensor]:
+            x = a * 2
+            y = a.repeat(2, 2)
+            z = a.to(torch.bfloat16)
+            return [x, y, z]
+
+        @foo.register_fake
+        def foo_fake_impl(a):
+            x = torch.empty_like(a)  # good
+            y = torch.empty_like(a)  # size mismatch
+            z = torch.empty_like(a)  # dtype mismatch
+            return [x, y, z]
+
+        mod = M()
+        inputs = (torch.randn(3, 3),)
+        with self.assertRaises(RuntimeError):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                export(mod, inputs)
+
+        ep, _ = draft_export(mod, inputs)
+        for ep_out, eager_out in zip(ep.module()(*inputs), mod(*inputs)):
+            self.assertTrue(torch.allclose(ep_out, eager_out))
+            self.assertEqual(ep_out.dtype, eager_out.dtype)
+
+    def test_override_pytree_mismatched_fake_kernels(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                return torch.ops.mylib.foo(a)
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(a: torch.Tensor) -> List[torch.Tensor]:
+            x = a * 2
+            y = a * 2
+            z = a * 2
+            return [x, y, z]  # type: ignore[return-value]
+
+        @foo.register_fake
+        def foo_fake_impl(a):
+            x = torch.empty_like(a)  # good
+            y = torch.empty_like(a)  # size mismatch
+            z = torch.empty_like(a)  # dtype mismatch
+            return [x, [y, z]]
+
+        mod = M()
+        inputs = (torch.randn(3, 3),)
+        with self.assertRaises(RuntimeError):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                export(mod, inputs)
+
+        ep, _ = draft_export(mod, inputs)
+        breakpoint()
 
 if __name__ == "__main__":
     run_tests()

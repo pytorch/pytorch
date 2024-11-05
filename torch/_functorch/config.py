@@ -205,6 +205,11 @@ donated_buffer = False
 # Supported formats are defined here https://graphviz.org/docs/outputs/
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
 
+# Valid only if fake_tensor_propagate_real_tensors = True; if a fake-real
+# kernel mismatch is detected, bypasses by making a fake kernel from the
+# real tensor outputs.
+generate_fake_kernels_from_real_mismatches = False
+
 
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests

@@ -61,7 +61,15 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils._pytree import PyTree, tree_map, tree_map_, TreeSpec
+from torch.utils._pytree import (
+    keystr,
+    PyTree,
+    tree_map,
+    tree_map_,
+    tree_map_with_path,
+    TreeSpec,
+    tree_structure,
+)
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 
@@ -104,7 +112,6 @@ aten = torch._ops.ops.aten
 CONSTANT_NUMEL_LIMIT = 1
 
 RECURSION_COUNT = 0
-
 
 # Small helper that increments recursion count, and
 # resets it when the object goes out of scope.  Useful
@@ -2095,21 +2102,6 @@ class FakeTensorMode(TorchDispatchMode):
                         )
 
             if real_out is not nil:
-                if (
-                    not isinstance(fake_out, Tensor)
-                    and not isinstance(real_out, Tensor)
-                    and type(fake_out) != type(real_out)
-                ):
-                    # This can happen when decompositions have different return types,
-                    # e.g. namedtuple vs. tuple vs. list.
-                    tree_map_(
-                        go,
-                        tuple(pytree.tree_flatten(fake_out)),
-                        tuple(pytree.tree_flatten(real_out)),
-                    )
-                else:
-                    tree_map_(go, fake_out, real_out)
-
                 # check fake/real alias info
                 try:
                     _check_alias_info(
@@ -2126,15 +2118,14 @@ class FakeTensorMode(TorchDispatchMode):
                         f" for func: {func}"
                     ) from exc
 
-                # check fake/real tensor properies, sizes & output values
-                for i, (_real_out, _fake_out) in enumerate(
-                    zip(pytree.tree_leaves(real_out), pytree.tree_leaves(fake_out))
-                ):
-                    if isinstance(_fake_out, torch.Tensor):
+                # check fake/real tensor properies, sizes & output values,
+                # and create new fake vals if mismatched.
+                def _xref_and_maybe_replace_fake_val(path, fake, real):
+                    if isinstance(fake, torch.Tensor):
                         try:
                             _check_fake_real_tensors(
-                                _fake_out,
-                                _real_out,
+                                fake,
+                                real,
                                 context="Real tensor propagation found",
                                 sizes=False,  # manual check below
                                 strides=False,  # skip strides
@@ -2142,32 +2133,60 @@ class FakeTensorMode(TorchDispatchMode):
                                 requires_grad=False,  # issues with FakeTensorConverter preserving requires_grad
                             )
                         except MetadataMismatchError as exc:
+                            if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                                return _make_fake(self, func, real)
                             raise MetadataMismatchError(
                                 f"Real tensor propagation found a metadata mismatch between "
-                                f"fake tensor {_fake_out} and real tensor {_real_out}, "
-                                f" at output index {i}, for func: {func}"
+                                f"fake tensor {fake} and real tensor {real}, "
+                                f" at output{keystr(path)}, for func: {func}"
                             ) from exc
 
                         for j, (s_fake, s_real) in enumerate(
-                            zip(_fake_out.size(), _real_out.size())
+                            zip(fake.size(), real.size())
                         ):
                             try:
                                 _check_fake_real_vals(s_fake, s_real)
                             except MetadataMismatchError as exc:
+                                if torch._functorch.config.generate_fake_kernels_from_real_mismatches:
+                                    return _make_fake(self, func, real)
                                 raise MetadataMismatchError(
                                     f"Real tensor propagation found an output size mismatch between "
-                                    f"fake shape {s_fake} and real shape {s_real}, at output "
-                                    f"index {i}, dimension {j} for func: {func}"
+                                    f"fake shape {s_fake} and real shape {s_real}, "
+                                    f"at output{keystr(path)}.size({j}), for func: {func}"
                                 ) from exc
                     else:
                         try:
-                            _check_fake_real_vals(_fake_out, _real_out)
+                            _check_fake_real_vals(fake, real)
                         except MetadataMismatchError as exc:
                             raise MetadataMismatchError(
                                 f"Real tensor propagation found an output value mismatch between "
-                                f"fake output value {_fake_out} and real output value {_real_out}, "
-                                f" at output index {i}, for func: {func}"
+                                f"fake output value {fake} and real output value {real}, "
+                                f"at output{keystr(path)}, for func: {func}"
                             ) from exc
+                    return fake
+
+                if (
+                    torch._functorch.config.generate_fake_kernels_from_real_mismatches
+                    and tree_structure(fake_out) != tree_structure(real_out)
+                ):
+                    fake_out = tree_map(lambda x: _make_fake(self, func, x), real_out)
+                else:
+                    fake_out = tree_map_with_path(_xref_and_maybe_replace_fake_val, fake_out, real_out)
+
+                if (
+                    not isinstance(fake_out, Tensor)
+                    and not isinstance(real_out, Tensor)
+                    and type(fake_out) != type(real_out)
+                ):
+                    # This can happen when decompositions have different return types,
+                    # e.g. namedtuple vs. tuple vs. list.
+                    tree_map_(
+                        go,
+                        tuple(pytree.tree_flatten(fake_out)),
+                        tuple(pytree.tree_flatten(real_out)),
+                    )
+                else:
+                    tree_map_(go, fake_out, real_out)
 
                 # If a data-dependent op is used in a decomposition, we
                 # may need to get the unbacked settings "early"
@@ -2715,6 +2734,64 @@ def dump_cache_stats() -> None:
             log.info("    %-*s %s", width + 1, f"{k}:", v)
 
 
+def _make_fake(mode: FakeTensorMode, op: torch._ops.Overload, real_out: torch.Tensor) -> torch.Tensor:
+    def unsupported(reason: str) -> None:
+        raise RuntimeError(
+            f"propagate_real_tensors: we cannot infer a Fake kernel "
+            f"(meta kernel) for operator {op._name} because {reason}. "
+            f"Please use torch.library.register_fake to add a Fake kernel."
+        )
+
+    if real_out.storage_offset() != 0:
+        unsupported(
+            f"a return has a non-zero storage offset {real_out.storage_offset()}"
+        )
+
+    # Since PT2 is rank specialized, there's no such thing as a symbolic
+    # output rank. So we can assume the fake tensor has the same number of
+    # dimensions as the real tensor output.
+    #
+    # We shouldn't assume the Fake sizes/strides are exactly what we see on
+    # the real tensor output (perhaps we should give users a lever to toggle
+    # this). This is because there's a good amount of operators that return
+    # outputs with data-dependent output shape.
+    # So we infer the output sizes to all be unbacked symints
+    fake_shape = [
+        torch._library.fake_impl.allocate_size(mode.shape_env)
+        for _ in range(real_out.dim())
+    ]
+
+    # We infer what the strides are. We had a couple of options for this:
+    # - assume the strides are computable from the sizes
+    # - use new fresh unbacked symints in the strides
+    #   This doesn't work that well (PT2 doesn't support unbacked symint strides well)
+    # - use the real strides
+    #   This can only be used if we assume the strides are static.
+    # We went with the first option.
+    fake_strides = [-1] * real_out.dim()
+    strides = [(s, idx) for idx, s in enumerate(real_out.stride())]
+    strides.sort()
+    expected = 1
+    fake_stride = expected
+    for s, idx in strides:
+        if s != expected:
+            unsupported(
+                f"a return was not dense in memory (sizes {real_out.shape} strides {real_out.stride()})"
+            )
+        fake_strides[idx] = fake_stride
+        expected = expected * real_out.shape[idx]
+        fake_stride = fake_stride * fake_shape[idx]
+
+    with mode:
+        return torch.empty_strided(
+            fake_shape,
+            fake_strides,
+            device=real_out.device,
+            dtype=real_out.dtype,
+            layout=real_out.layout,
+        )
+
+
 def inferred_fake_kernel_from_real_out(
     mode: FakeTensorMode, op: torch._ops.OpOverload, real_out: Any
 ) -> Any:
@@ -2730,62 +2807,5 @@ def inferred_fake_kernel_from_real_out(
             f"non-Tensors. Got {op._schema}"
         )
 
-    def make_fake(real_out: torch.Tensor) -> torch.Tensor:
-        def unsupported(reason: str) -> None:
-            raise RuntimeError(
-                f"propagate_real_tensors: we cannot infer a Fake kernel "
-                f"(meta kernel) for operator {op._name} because {reason}. "
-                f"Please use torch.library.register_fake to add a Fake kernel."
-            )
-
-        if real_out.storage_offset() != 0:
-            unsupported(
-                f"a return has a non-zero storage offset {real_out.storage_offset()}"
-            )
-
-        # Since PT2 is rank specialized, there's no such thing as a symbolic
-        # output rank. So we can assume the fake tensor has the same number of
-        # dimensions as the real tensor output.
-        #
-        # We shouldn't assume the Fake sizes/strides are exactly what we see on
-        # the real tensor output (perhaps we should give users a lever to toggle
-        # this). This is because there's a good amount of operators that return
-        # outputs with data-dependent output shape.
-        # So we infer the output sizes to all be unbacked symints
-        fake_shape = [
-            torch._library.fake_impl.allocate_size(mode.shape_env)
-            for _ in range(real_out.dim())
-        ]
-
-        # We infer what the strides are. We had a couple of options for this:
-        # - assume the strides are computable from the sizes
-        # - use new fresh unbacked symints in the strides
-        #   This doesn't work that well (PT2 doesn't support unbacked symint strides well)
-        # - use the real strides
-        #   This can only be used if we assume the strides are static.
-        # We went with the first option.
-        fake_strides = [-1] * real_out.dim()
-        strides = [(s, idx) for idx, s in enumerate(real_out.stride())]
-        strides.sort()
-        expected = 1
-        fake_stride = expected
-        for s, idx in strides:
-            if s != expected:
-                unsupported(
-                    f"a return was not dense in memory (sizes {real_out.shape} strides {real_out.stride()})"
-                )
-            fake_strides[idx] = fake_stride
-            expected = expected * real_out.shape[idx]
-            fake_stride = fake_stride * fake_shape[idx]
-
-        with mode:
-            return torch.empty_strided(
-                fake_shape,
-                fake_strides,
-                device=real_out.device,
-                dtype=real_out.dtype,
-                layout=real_out.layout,
-            )
-
-    fake_flat_out = [make_fake(t) for t in real_flat_out]
+    fake_flat_out = [_make_fake(t) for t in real_flat_out]
     return pytree.tree_unflatten(fake_flat_out, spec)
