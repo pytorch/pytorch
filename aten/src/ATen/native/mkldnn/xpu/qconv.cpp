@@ -78,7 +78,7 @@ class QConvoneDNNXPU final {
     Tensor output = at::empty(
         dst_tz, device(c10::kXPU).dtype(output_dtype).memory_format(mfmt));
 
-    return quantized_convolution_pt2(
+    return quantized_convolution(
         act,
         act_scale,
         act_zero_point,
