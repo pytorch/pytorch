@@ -96,8 +96,8 @@ device_tma = r"""
     stride_bn = {{stride("B", 1)}}
 
     if SCALING_ROWWISE:
-        stride_scale_m = 1
-        stride_scale_n = 1
+        stride_a_scale_m = 1
+        stride_b_scale_n = 1
     else:
         stride_a_scale_m = 0
         stride_b_scale_n = 0
