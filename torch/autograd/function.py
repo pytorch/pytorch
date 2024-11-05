@@ -337,7 +337,7 @@ class FunctionMeta(type):
         backward_fn._bw_module = None  # type: ignore[attr-defined]
         if "_lazy_backward_info" in attrs:
             info = attrs.get("_lazy_backward_info")
-            backward_fn._bw_module = info.bw_module # type: ignore[attr-defined]
+            backward_fn._bw_module = info.bw_module  # type: ignore[attr-defined]
         cls._backward_cls = backward_fn
 
         super().__init__(name, bases, attrs)

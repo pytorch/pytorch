@@ -19,7 +19,6 @@ import torch.utils._pytree as pytree
 from torch import fx
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx._compatibility import compatibility
-from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.proxy_tensor import py_sym_types
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
@@ -115,12 +114,12 @@ def insert_deferred_runtime_asserts(
     ras_by_symbol = shape_env.deferred_runtime_asserts.copy()
     graph = gm.graph
     tracer = fx.proxy.GraphAppendingTracer(graph)
-    graph_code_log.debug(
-        "%s",
-        lazy_format_graph_code(
-            f"pre insert_deferred_runtime_asserts {name}", gm, colored=True
-        ),
-    )
+    # graph_code_log.debug(
+    #     "%s",
+    #     lazy_format_graph_code(
+    #         f"pre insert_deferred_runtime_asserts {name}", gm, colored=True
+    #     ),
+    # )
 
     # We are going to mutate the dict
     expr_to_proxy: Dict[sympy.Expr, fx.Proxy] = {}

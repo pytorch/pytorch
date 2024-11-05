@@ -73,7 +73,7 @@ class FakeBackwardCFunction:
     ) -> None:
         self.real = real
         self.saved_tensors = saved_tensors
-        self.aot_symints = real._get_compiled_autograd_symints()  # type: ignore[attr-defined]
+        self.symints = real._get_compiled_autograd_symints()  # type: ignore[attr-defined]
         self.bw_module = real._bw_module  # type: ignore[attr-defined]
 
     def __getattr__(self, name: str) -> Any:
@@ -103,7 +103,7 @@ def call_aot_bwd_impl(
     # doesn't work with backward state
     all_args = args[0]
     bw_module = fakectx.bw_module
-    symints = fakectx.aot_symints
+    symints = fakectx.symints
     all_args[: len(symints)] = symints
     out = bw_module(*all_args)
     return normalize_as_list(out)

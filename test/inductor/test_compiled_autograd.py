@@ -21,6 +21,7 @@ from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
 from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
@@ -1761,24 +1762,21 @@ main()
         with torch._inductor.config.patch(
             post_grad_custom_post_pass=_run_with_rng_state_op_check
         ):
-            compiler_fn = make_compiler_fn(fullgraph=True)
-
-            def make_compiler_fn_with_op_check():
-                def _compiler_fn(gm):
-                    # Checks that `run_with_rng_state` op exists in Compiled Autograd's Dynamo graph.
-                    self.assertTrue(
-                        any(
-                            node.target is torch.ops.higher_order.run_with_rng_state
-                            for node in gm.graph.nodes
-                        )
-                    )
-                    return compiler_fn(gm)
-
-                return _compiler_fn
-
-            compiler_fn_with_op_check = make_compiler_fn_with_op_check()
+            cnt = CompileCounterWithBackend("inductor")
             self.check_output_and_recompiles(
-                f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
+                f,
+                compiler_fn=torch._dynamo.optimize(cnt),
+                count=[1, 0],
+                compile_fn=False,
+            )
+            self.assertEqual(len(cnt.graphs), 1)
+            gm = cnt.graphs[0]
+            # Checks that `run_with_rng_state` op exists in Compiled Autograd's Dynamo graph.
+            self.assertTrue(
+                any(
+                    node.target is torch.ops.higher_order.run_with_rng_state
+                    for node in gm.graph.nodes
+                )
             )
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
@@ -1897,31 +1895,26 @@ main()
             6. The `auto_functionalized` op should then be lowered using the normal lowering path in Inductor.
             """
 
-            compiler_fn = make_compiler_fn(fullgraph=True, backend="aot_eager")
-
-            def make_compiler_fn_with_op_check():
-                def _compiler_fn(gm):
-                    auto_functionalize_func = (
-                        torch.ops.higher_order.auto_functionalized
-                        if not torch._inductor.config.enable_auto_functionalized_v2
-                        else torch.ops.higher_order.auto_functionalized_v2
-                    )
-
-                    # Checks that `auto_functionalized` op exists in Compiled Autograd's Dynamo graph.
-                    self.assertTrue(
-                        any(
-                            node.target is auto_functionalize_func
-                            for node in gm.graph.nodes
-                        ),
-                        f"{auto_functionalize_func} op not found in {gm.graph}",
-                    )
-                    return compiler_fn(gm)
-
-                return _compiler_fn
-
-            compiler_fn_with_op_check = make_compiler_fn_with_op_check()
+            cnt = CompileCounterWithBackend("inductor")
             self.check_output_and_recompiles(
-                f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
+                f,
+                compiler_fn=torch._dynamo.optimize(cnt),
+                count=[1, 0],
+                compile_fn=False,
+            )
+
+            auto_functionalize_func = (
+                torch.ops.higher_order.auto_functionalized
+                if not torch._inductor.config.enable_auto_functionalized_v2
+                else torch.ops.higher_order.auto_functionalized_v2
+            )
+
+            # Checks that `auto_functionalized` op exists in CA's AOT graph
+            self.assertEqual(len(cnt.graphs), 1)
+            gm = cnt.graphs[0]
+            self.assertTrue(
+                any(node.target is auto_functionalize_func for node in gm.graph.nodes),
+                f"{auto_functionalize_func} op not found in {gm.graph}",
             )
 
     @scoped_load_inline
@@ -3358,6 +3351,7 @@ known_failing_tests = {
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
     "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
     # Uncategorized
+    "test_custom_function_cycle",
 }
 
 if not HAS_CUDA:

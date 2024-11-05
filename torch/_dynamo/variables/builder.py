@@ -781,11 +781,14 @@ class VariableBuilder:
                 fake_tensor=None,
                 is_tensor=False,
             )
-            return AutogradFunctionContextVariable(
+            return self.tx.output.side_effects.track_object_existing(
                 value,
-                source=self.source,
-                saved_tensors=SavedTensorBox([]),  # never used
-                proxy=pctx,
+                AutogradFunctionContextVariable(
+                    value,
+                    source=self.source,
+                    saved_tensors=SavedTensorBox([]),  # never used
+                    proxy=pctx,
+                ),
             )
         elif isinstance(value, torch.autograd.function.FunctionCtx):
             assert not torch._dynamo.compiled_autograd.in_compiled_autograd_region
