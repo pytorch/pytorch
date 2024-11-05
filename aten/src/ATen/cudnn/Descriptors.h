@@ -92,6 +92,7 @@ struct DescriptorDeleter {
 // initialized the first time you call set() or any other initializing
 // function.
 template <typename T, cudnnStatus_t (*ctor)(T**), cudnnStatus_t (*dtor)(T*)>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_CUDA_CPP_API Descriptor {
  public:
   // TODO: Figure out why const-correctness doesn't work here
@@ -128,7 +129,7 @@ public:
   void set(const at::Tensor &t, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray);
 private:
   void set(cudnnDataType_t dataType, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray) {
-    AT_CUDNN_CHECK(cudnnSetRNNDataDescriptor(mut_desc(), dataType, layout, maxSeqLength, batchSize, vectorSize, seqLengthArray, NULL));
+    AT_CUDNN_CHECK(cudnnSetRNNDataDescriptor(mut_desc(), dataType, layout, maxSeqLength, batchSize, vectorSize, seqLengthArray, nullptr));
   }
 };
 
@@ -224,6 +225,7 @@ struct TORCH_CUDA_CPP_API SpatialTransformerDescriptor
   }
 };
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 struct TORCH_CUDA_CPP_API DropoutDescriptor
     : public Descriptor<
           cudnnDropoutStruct,
@@ -244,9 +246,8 @@ struct TORCH_CUDA_CPP_API DropoutDescriptor
   }
 
   // Restore a dropout descriptor given a dropout probability and existing RNG state.
-  void set(cudnnHandle_t handle, float dropout, at::Tensor state_) {
+  void set(cudnnHandle_t handle, float dropout, const at::Tensor& state) {
     TORCH_INTERNAL_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
-    state = state_;
     void *state_ptr = state.data_ptr();
     size_t state_size = state.size(0);
     // NB: The seed doesn't actually matter, so we give a dummy value

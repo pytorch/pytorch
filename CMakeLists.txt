@@ -262,6 +262,7 @@ else()
   cmake_dependent_option(USE_CUFILE "Use cuFile" OFF "USE_CUDA AND NOT WIN32" OFF)
 endif()
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
+option(USE_X86_SIMD_SORT "Use x86-simd-sort to accelerate sorting and topk for AVX2/AVX512" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
 option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
@@ -384,7 +385,12 @@ option(USE_MIMALLOC "Use mimalloc" OFF)
 option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
 if(WIN32)
   set(USE_MIMALLOC ON)
-  set(USE_MIMALLOC_ON_MKL ON)
+
+  # Not enable USE_MIMALLOC_ON_MKL due to it caused issue:
+  # https://github.com/pytorch/pytorch/issues/138994
+  # Will turn on when we can fix USE_STATIC_MKL lost functionality:
+  # https://github.com/pytorch/pytorch/pull/138996
+  # set(USE_MIMALLOC_ON_MKL ON)
 endif()
 
 if(USE_CCACHE)
@@ -896,6 +902,13 @@ endif(DEBUG_CUDA)
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
+endif()
+
+if(USE_X86_SIMD_SORT)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_X86_SIMD_SORT")
+  if(USE_XSS_OPENMP)
+    string(APPEND CMAKE_CXX_FLAGS " -DXSS_USE_OPENMP")
+  endif()
 endif()
 
 if(USE_PYTORCH_QNNPACK)
