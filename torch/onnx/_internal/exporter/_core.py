@@ -14,9 +14,6 @@ import traceback
 import typing
 from typing import Any, Callable, Literal, Sequence
 
-import onnx
-import onnx.helper as oh
-
 import onnxscript
 import onnxscript.evaluator
 from onnxscript import ir
@@ -462,53 +459,31 @@ def _handle_call_function_node_with_lowering(
         false_function = ir.Function(
             LOCAL_FUNCTION_DOMAIN, false_graph.name, graph=false_program.model.graph, attributes={}
         )
-        #model.functions[LOCAL_FUNCTION_DOMAIN, true_graph.name, ""] = true_function
-        #model.functions[LOCAL_FUNCTION_DOMAIN, false_graph.name, ""] = false_function
-        # source = node.all_input_nodes[0]
-        # source_outputs = node_name_to_values[source.name]
+
         inputs = [node_name_to_values[n.name] for n in graph_args]
-        onnx_inputs = [i.name for i in inputs]
-        # TODO: needs more tests to handle multiple outputs.
-        # The fx.graph only contains one outputs. If there are multiple,
-        # this node will be followed by getitem nodes.
-        outputs = [node.name]
-        onnx_outputs = outputs
 
-        def mkv(name):
-            value_info_proto = onnx.ValueInfoProto()
-            value_info_proto.name = name
-            return value_info_proto
+        onnx_outputs_then = [ir.Value(name=node.name)]
+        onnx_outputs_else = [ir.Value(name=node.name)]
 
-        if_node = oh.make_node(
+        then_node = ir.Node(LOCAL_FUNCTION_DOMAIN, true_graph.name, inputs, outputs=onnx_outputs_then)
+        then_graph = ir.Graph([], onnx_outputs_then, nodes=[then_node], name="then_graph")
+        else_node = ir.Node(LOCAL_FUNCTION_DOMAIN, false_graph.name, inputs, outputs=onnx_outputs_else)
+        else_graph = ir.Graph([], onnx_outputs_else, nodes=[else_node], name="else_graph")
+        if_node = ir.Node(
+            "",
             "If",
-            [cond.name],
-            outputs,
-            then_branch=oh.make_graph(
-                [oh.make_node(true_graph.name, onnx_inputs, onnx_outputs, domain=LOCAL_FUNCTION_DOMAIN)],
-                true_graph.name,
-                [],
-                [mkv(o) for o in outputs],
-            ),
-            else_branch=oh.make_graph(
-                [oh.make_node(false_graph.name, onnx_inputs, onnx_outputs, domain=LOCAL_FUNCTION_DOMAIN)],
-                false_graph.name,
-                [],
-                [mkv(o) for o in outputs],
-            ),
+            [ir.Value(name=cond.name)],
+            outputs=[ir.Value(name=node.name)],
+            attributes=[
+                ir.Attr("then_branch", ir.AttributeType.GRAPH, then_graph),
+                ir.Attr("else_branch", ir.AttributeType.GRAPH, else_graph),
+            ]
         )
-        atts = [ir.from_proto(att) for att in if_node.attribute]
-        ir_node = ir.Node(
-            if_node.domain,
-            if_node.op_type,
-            [node_name_to_values[cond.name]],
-            atts,
-            graph=model.graph
-        )
-        #model.graph.append(ir_node)
-        outputs = ir_node.outputs
+
+        outputs = if_node.outputs
 
         tracer = _building.OpRecorder(opset, constant_farm)
-        tracer.nodes.append(ir_node)
+        tracer.nodes.append(if_node)
         tracer.functions[LOCAL_FUNCTION_DOMAIN, true_graph.name, ""] = true_function
         tracer.functions[LOCAL_FUNCTION_DOMAIN, false_graph.name, ""] = false_function
 
