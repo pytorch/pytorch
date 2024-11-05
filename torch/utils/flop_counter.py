@@ -725,21 +725,21 @@ class FlopCounterMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
-        # Skip non-decomposoable ops from non-standard dispatch_sizes_strides_policy such as NJT
-        if func in [torch.ops.aten.is_contiguous.default,
-            torch.ops.aten.is_contiguous.memory_format,
-            torch.ops.aten.is_strides_like_format.default,
-            torch.ops.aten.is_non_overlapping_and_dense.default,
-            torch.ops.aten.size.default,
-            torch.ops.aten.sym_size.default,
-            torch.ops.aten.stride.default,
-            torch.ops.aten.sym_stride.default,
-            torch.ops.aten.storage_offset.default,
-            torch.ops.aten.sym_storage_offset.default,
-            torch.ops.aten.numel.default,
-            torch.ops.aten.sym_numel.default,
-            torch.ops.aten.dim.default, 
-            torch.ops.prim.layout.default]:
+        # Skip ops from non-standard dispatch_sizes_strides_policy such as NJT
+        if func in {torch.ops.aten.is_contiguous.default,
+                    torch.ops.aten.is_contiguous.memory_format,
+                    torch.ops.aten.is_strides_like_format.default,
+                    torch.ops.aten.is_non_overlapping_and_dense.default,
+                    torch.ops.aten.size.default,
+                    torch.ops.aten.sym_size.default,
+                    torch.ops.aten.stride.default,
+                    torch.ops.aten.sym_stride.default,
+                    torch.ops.aten.storage_offset.default,
+                    torch.ops.aten.sym_storage_offset.default,
+                    torch.ops.aten.numel.default,
+                    torch.ops.aten.sym_numel.default,
+                    torch.ops.aten.dim.default,
+                    torch.ops.prim.layout.default}:
 
             return NotImplemented
 
