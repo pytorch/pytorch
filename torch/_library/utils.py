@@ -2,12 +2,22 @@
 import dataclasses
 import inspect
 import sys
+import warnings
 from typing import Any, Callable, Dict, Iterable, Iterator, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch import _C, _utils_internal
 from torch._ops import OpOverload
+
+
+def warn_deploy(stacklevel=3):
+    warnings.warn(
+        "Python torch.library APIs do nothing under torch::deploy (multipy). "
+        "Please instead use C++ custom operator registration APIs.",
+        RuntimeWarning,
+        stacklevel=stacklevel,
+    )
 
 
 @dataclasses.dataclass
@@ -387,6 +397,7 @@ class MutationChecker:
         ]
         was_mutated = [
             not torch.equal(pre, post)
+            and not (pre.isnan().all() and post.isnan().all())
             if isinstance(pre, torch.Tensor) and isinstance(post, torch.Tensor)
             else None
             for pre, post in zip(self.real_pre_hashes, real_post_hashes)

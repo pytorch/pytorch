@@ -11385,8 +11385,8 @@ class CommonTemplate:
             x_view = x.view(dtype=torch.int32)
             return x_view.mul(2)
 
-        a = torch.ones(4, dtype=torch.float32, device=self.device)
-        b = torch.ones(4, dtype=torch.float32, device=self.device)
+        a = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
+        b = 0.5 * torch.ones(4, dtype=torch.float32, device=self.device)
         ref = fn(a, b)
         actual = torch.compile(fn)(a, b)
         self.assertEqual(ref, actual)
@@ -11882,14 +11882,20 @@ if HAS_GPU and not TEST_WITH_ASAN:
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x.sin() + x.cos()
 
+            def get_divisible_by_16(cfg):
+                # attribute was renamed between triton versions, from "divisible_by_16" to "divisibility_16"
+                if hasattr(cfg, "divisibility_16"):
+                    return cfg.divisibility_16
+                return cfg.divisible_by_16
+
             # We want code that assumes alignment if the initial input is 16-byte aligned
             for offset in (0, 1, 2, 3, 4):
                 base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
                 inps = torch.as_strided(base, (64, 64), (64, 1), offset)
                 torch._dynamo.reset()
                 kernels = self.get_kernels(fn, [inps])
-                arguments_that_are_divisible_by_16 = (
-                    kernels[0].triton_meta["configs"][0].divisible_by_16
+                arguments_that_are_divisible_by_16 = get_divisible_by_16(
+                    kernels[0].triton_meta["configs"][0]
                 )
 
                 #             NO_ALIGN ALIGN     ALIGN
@@ -11905,8 +11911,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
             torch._dynamo.reset()
             inp = torch.randn((64, 64), device=GPU_TYPE)
             kernels = self.get_kernels(fn, [inp])
-            arguments_that_are_divisible_by_16 = (
-                kernels[0].triton_meta["configs"][0].divisible_by_16
+            arguments_that_are_divisible_by_16 = get_divisible_by_16(
+                kernels[0].triton_meta["configs"][0]
             )
             self.assertEqual(arguments_that_are_divisible_by_16, (0, 1, 2))
 

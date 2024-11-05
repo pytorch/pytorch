@@ -1367,7 +1367,7 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
-static PyMethodDef TorchMethods[] = { // NOLINT
+static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
@@ -1703,7 +1703,7 @@ PyObject* initModule() {
   if (!(cmd))            \
   return nullptr
 
-  THPUtils_addPyMethodDefs(methods, TorchMethods);
+  THPUtils_addPyMethodDefs(methods, std::data(TorchMethods));
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
   THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
   THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
@@ -1848,7 +1848,8 @@ PyObject* initModule() {
   at::init();
 
   // Automatically translate errors thrown from pybind11 functions
-  py::register_exception_translator([](std::exception_ptr e) { // NOLINT
+  // NOLINTNEXTLINE(performance-unnecessary-value-param)
+  py::register_exception_translator([](std::exception_ptr e) {
     try {
       if (e) {
         std::rethrow_exception(e);
