@@ -1015,7 +1015,7 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
 
         if not self.source:
-            if not compiled_autograd.enabled():
+            if not compiled_autograd.compiled_autograd_enabled:
                 # TODO(voz):
                 # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
                 # python state.
@@ -1448,6 +1448,6 @@ class DataPtrVariable(VariableTracker):
         self.from_tensor = from_tensor
 
     def reconstruct(self, codegen):
-        codegen(self.from_tensor, allow_cache=False)
+        codegen(self.from_tensor)
         codegen.load_method("data_ptr")
         codegen.call_method(0)
