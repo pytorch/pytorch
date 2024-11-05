@@ -435,12 +435,7 @@ class BaseSchedulerNode:
             and hasattr(V.kernel, "args")
         ):
             return
-        fused_nodes = {
-            node.get_name()
-            for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
-        }
 
-        ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
         # NOTE remove V.graph.removed_operations once deps issue is fixed
         inconsequential_nodes = (
             self.ancestors
@@ -472,11 +467,6 @@ class BaseSchedulerNode:
                     and not isinstance(input_buf.defining_op, NopKernelSchedulerNode)
                 ):
                     assert input_buf.users is not None
-                    completed_operations = (
-                        local_completed_operations
-                        if local_completed_operations
-                        else self.scheduler.completed_operations
-                    )
                     remaining_uses = [
                         x
                         for x in input_buf.users
