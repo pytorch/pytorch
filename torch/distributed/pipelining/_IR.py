@@ -1003,7 +1003,7 @@ class Pipe(torch.nn.Module):
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
         try:
-            ep = torch.export.export(
+            ep = torch.export.export_for_training(
                 mod,
                 example_args,
                 example_kwargs,
