@@ -781,16 +781,16 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(index_stub, &index_kernel);
-REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
-REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-REGISTER_DISPATCH(put_stub, &put_kernel);
-REGISTER_DISPATCH(take_stub, &take_kernel);
-REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
-REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
-REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
-REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
-REGISTER_DISPATCH(flip_stub, &flip_kernel);
+REGISTER_DISPATCH(index_stub, &index_kernel)
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel)
+REGISTER_DISPATCH(index_copy_stub, &index_copy_kernel)
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel)
+REGISTER_DISPATCH(put_stub, &put_kernel)
+REGISTER_DISPATCH(take_stub, &take_kernel)
+REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel)
+REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel)
+REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel)
+REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel)
+REGISTER_DISPATCH(flip_stub, &flip_kernel)
 
 } // namespace at::native

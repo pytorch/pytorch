@@ -122,6 +122,6 @@ void sort_cuda_kernel(
 // TODO: we should handle this accordingly when we start using REGISTER_HIP_DISPATCH,
 // since REGISTER_DISPATCH won't work in this cpp file.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_CUDA_DISPATCH(sort_stub, &sort_cuda_kernel);
+REGISTER_CUDA_DISPATCH(sort_stub, &sort_cuda_kernel)
 
 }  // namespace at::native
