@@ -503,7 +503,7 @@ def with_comms(func=None):
     return wrapper
 
 
-class TestCollectivesWithNCCL(DistributedTestBase):
+class TestCollectivesWithDistributedBackend(DistributedTestBase):
     @with_comms()
     def test_all_gather_into_tensor_coalesced(self, device):
         exit_if_lt_x_accelerators(self.world_size)
@@ -594,7 +594,7 @@ class TestCollectivesWithNCCL(DistributedTestBase):
         allreduce(torch.randn(8, device=device), pg=dist.group.WORLD)
 
 
-class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
+class TestDistributedBackendCollectivesWithWorldSize4(TestCollectivesWithDistributedBackend):
     @property
     def world_size(self):
         return 4
@@ -763,7 +763,7 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             self.assertEqual(input_tensor.grad, torch.full(output_size, fill_value=1.0))
 
 
-class TestFunctionalAutogradWithNCCL(DistributedTestBase):
+class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
     @with_comms()
     def test_all_to_all_single(self, device) -> None:
         group = self.pg
@@ -782,12 +782,12 @@ class TestFunctionalAutogradWithNCCL(DistributedTestBase):
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
 
-instantiate_device_type_tests(TestCollectivesWithNCCL, globals(), only_for=DEVICE)
+instantiate_device_type_tests(TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE)
 instantiate_device_type_tests(
-    TestNCCLCollectivesWithWorldSize4, globals(), only_for=DEVICE
+    TestDistributedBackendCollectivesWithWorldSize4, globals(), only_for=DEVICE
 )
 instantiate_device_type_tests(
-    TestFunctionalAutogradWithNCCL, globals(), only_for=DEVICE
+    TestFunctionalAutogradWithDistributedBackend, globals(), only_for=DEVICE
 )
 
 if __name__ == "__main__":
