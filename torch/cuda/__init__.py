@@ -1055,12 +1055,20 @@ def _get_amdsmi_temperature(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+    socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
+    if socket_power != "N/A":
+        return socket_power
+    else:
+        return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
 
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)["cur_clk"]
+    clock_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
+    if "cur_clk" in clock_info:  # ROCm 6.2 deprecation
+        return clock_info["cur_clk"]
+    else:
+        return clock_info["clk"]
 
 
 def memory_usage(device: Optional[Union[Device, int]] = None) -> int:
