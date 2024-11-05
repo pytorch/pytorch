@@ -55,7 +55,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -126,15 +125,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: nightly-for-win-arm64
           submodules: recursive
-          repository: pytorch/builder
+          repository: iremyux/pytorch-builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean iremyux/pytorch-builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -183,7 +182,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -259,15 +257,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: nightly-for-win-arm64
           submodules: recursive
-          repository: pytorch/builder
+          repository: iremyux/pytorch-builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean iremyux/pytorch-builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -307,7 +305,6 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -333,7 +330,6 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -404,15 +400,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: nightly-for-win-arm64
           submodules: recursive
-          repository: pytorch/builder
+          repository: iremyux/pytorch-builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean iremyux/pytorch-builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -462,7 +458,6 @@ jobs:
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -538,15 +533,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: nightly-for-win-arm64
           submodules: recursive
-          repository: pytorch/builder
+          repository: iremyux/pytorch-builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean iremyux/pytorch-builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -587,7 +582,6 @@ jobs:
       DESIRED_CUDA: cu118
       GPU_ARCH_VERSION: 11.8
       GPU_ARCH_TYPE: cuda
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -613,7 +607,6 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -684,15 +677,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: nightly-for-win-arm64
           submodules: recursive
-          repository: pytorch/builder
+          repository: iremyux/pytorch-builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean iremyux/pytorch-builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -742,7 +735,6 @@ jobs:
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -818,15 +810,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: nightly-for-win-arm64
           submodules: recursive
-          repository: pytorch/builder
+          repository: iremyux/pytorch-builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean iremyux/pytorch-builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -867,7 +859,6 @@ jobs:
       DESIRED_CUDA: cu121
       GPU_ARCH_VERSION: 12.1
       GPU_ARCH_TYPE: cuda
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -893,7 +884,6 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -964,15 +954,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: nightly-for-win-arm64
           submodules: recursive
-          repository: pytorch/builder
+          repository: iremyux/pytorch-builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean iremyux/pytorch-builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1022,7 +1012,6 @@ jobs:
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
       SKIP_ALL_TESTS: 1
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
@@ -1098,15 +1087,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: nightly-for-win-arm64
           submodules: recursive
-          repository: pytorch/builder
+          repository: iremyux/pytorch-builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean iremyux/pytorch-builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1147,7 +1136,6 @@ jobs:
       DESIRED_CUDA: cu124
       GPU_ARCH_VERSION: 12.4
       GPU_ARCH_TYPE: cuda
-      LIBTORCH_CONFIG: release
       LIBTORCH_VARIANT: shared-with-deps
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
