@@ -275,9 +275,6 @@ WINDOWS_BINARY_BUILD_WORKFLOWS = [
             isolated_workflow=True,
         ),
     ),
-]
-
-WINDOWS_ARM64_BINARY_BUILD_WORKFLOWS = [
     BinaryBuildWorkflow(
         os=OperatingSystem.WINDOWS_ARM64,
         package_type="wheel",
@@ -321,7 +318,6 @@ WINDOWS_ARM64_BINARY_BUILD_WORKFLOWS = [
         ),
     ),
 ]
-
 
 WINDOWS_BINARY_SMOKE_WORKFLOWS = [
     BinaryBuildWorkflow(
