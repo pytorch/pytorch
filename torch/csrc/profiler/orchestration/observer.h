@@ -104,7 +104,7 @@ struct TORCH_API ProfilerConfig {
       bool with_flops = false,
       bool with_modules = false,
       ExperimentalConfig experimental_config = ExperimentalConfig(),
-      const std::string& trace_id = "");
+      std::string trace_id = "");
 
   bool disabled() const;
   bool global() const;

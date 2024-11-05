@@ -380,6 +380,21 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
         return expr
 
 
+def _guard_sizes_oblivious(
+    lhs_sizes: Sequence[Union[torch.SymInt, bool]],
+    rhs_sizes: Sequence[Union[torch.SymInt, bool]],
+) -> bool:
+    """
+    Leverage guard_size_oblivious to compare if two lists of int/symint are equal.
+    Useful to compare sizes, strides etc.
+    """
+
+    return len(lhs_sizes) == len(rhs_sizes) and all(
+        guard_size_oblivious(lhs_item == rhs_item)
+        for lhs_item, rhs_item in zip(lhs_sizes, rhs_sizes)
+    )
+
+
 def check_consistent(new: _T, old: _T) -> None:
     """
     Test that two "meta" values (typically either Tensor or SymInt) have
@@ -1982,6 +1997,16 @@ SYMPY_INTERP = {
     "IntTrueDiv": operator.truediv,
     "FloatTrueDiv": operator.truediv,
     "ToFloat": builtins.float,
+    "OpaqueUnaryFn_cos": math.cos,
+    "OpaqueUnaryFn_cosh": math.cosh,
+    "OpaqueUnaryFn_acos": math.acos,
+    "OpaqueUnaryFn_sin": math.sin,
+    "OpaqueUnaryFn_sinh": math.sinh,
+    "OpaqueUnaryFn_asin": math.asin,
+    "OpaqueUnaryFn_tan": math.tan,
+    "OpaqueUnaryFn_tanh": math.tanh,
+    "OpaqueUnaryFn_atan": math.atan,
+    "OpaqueUnaryFn_sqrt": math.sqrt,
 }
 
 
@@ -3054,7 +3079,7 @@ class ShapeEnv:
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, sympy.Symbol] = {}
         if specialize_zero_one:
-            self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
+            self.val_to_var = {0: sympy.S.Zero, 1: sympy.S.One}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
         # Similar to guards, but these MUST evaluate to true and can
@@ -5338,8 +5363,8 @@ class ShapeEnv:
         could then potentially guard on.
 
         Use compute_hint == True if you are trying to compute a non-binding
-        hint for the particular hint values of backed SymInts, e.g., if
-        s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
+        hint for the particular hint values of backed and unbacked SymInts,
+        e.g., if s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
         """
 
         # axioms with compute hint NYE
@@ -5348,7 +5373,7 @@ class ShapeEnv:
         expr = self.simplify(expr)
 
         if compute_hint:
-            expr = expr.xreplace(self.var_to_val)
+            expr = expr.xreplace(self.var_to_val).xreplace(self.unbacked_var_to_val)
 
         expr = canonicalize_bool_expr(expr)
 
@@ -6140,6 +6165,8 @@ class ShapeEnv:
         #   1. 'translation_validation' is set
         #   2. the corresponding 'fx_node' is not 'None'
         #   3. the guard should not be suppressed
+        #   4. the guard doesn't contain backed symfloat symbols
+        #      since z3 can't handle floats
         #
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
@@ -6150,6 +6177,7 @@ class ShapeEnv:
             and fx_node is not None
             and not self._suppress_guards_tls()
             and not size_oblivious
+            and not any(symbol_is_type(s, SymT.FLOAT) for s in orig_expr.free_symbols)
         ):
             # TODO: does this even worked with unbacked :think:
             concrete_val = compute_concrete_val()
@@ -6599,7 +6627,7 @@ def _suggest_torch_checks(
         f"torch._check({printer.doprint(sympy.Not(cond))})",
     ]
     for i, fix in enumerate(suggested_fixes):
-        msg += f"\n  {i+1}. {fix}"
+        msg += f"\n  {i + 1}. {fix}"
     src_mapped = ", ".join(
         f"`{s}` with {' or '.join(src_map[s])}"
         for s in sorted(s.name for s in cond.free_symbols)
