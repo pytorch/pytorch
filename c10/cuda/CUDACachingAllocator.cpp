@@ -880,17 +880,27 @@ struct MempoolIdHash {
   }
 };
 
-cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
+cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
+  auto active_pool = MemPoolContext::getActiveMemPool();
+  if (active_pool && active_pool->allocator() && p.pool->owner_PrivatePool) {
+    *ptr = active_pool->allocator()->raw_alloc(size);
+    return *ptr ? cudaSuccess : cudaErrorMemoryAllocation;
+  } else {
+    return C10_CUDA_ERROR_HANDLED(cudaMalloc(ptr, size));
+  }
+}
+
+cudaError_t cudaMallocMaybeCapturing(void** ptr, size_t size, AllocParams& p) {
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() ==
       at::cuda::CaptureStatus::None) {
-    return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
+    return allocPrimitive(ptr, size, p);
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those
     // addresses before replay.
     // Capturing cudaMalloc behaves nicely: it gives the graph new VA,
     // but is ignored (won't leakily allocate new memory) in replays.
     at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-    return C10_CUDA_ERROR_HANDLED(cudaMalloc(p, size));
+    return allocPrimitive(ptr, size, p);
   }
 }
 
@@ -2707,19 +2717,21 @@ class DeviceCachingAllocator {
       }
       return bool(p.block);
     } else {
+      auto active_pool = MemPoolContext::getActiveMemPool();
+      if (active_pool && active_pool->allocator() &&
+          p.pool->owner_PrivatePool) {
+        // Ensure that active_pool and p.pool are the same
+        auto pp = get_private_pool(active_pool->id());
+        TORCH_INTERNAL_ASSERT(pp == p.pool->owner_PrivatePool);
+      }
       if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
         // At scope exit, acquire the lock again. This provides safety against
         // any potential exceptions in the cudaMallocMaybeCapturing function.
         auto sg = c10::make_scope_exit([&]() { lock.lock(); });
         lock.unlock();
-      }
-      auto active_pool = MemPoolContext::getActiveMemPool();
-      if (active_pool && active_pool->allocator() &&
-          p.pool->owner_PrivatePool) {
-        ptr = active_pool->allocator()->raw_alloc(size);
-        p.err = ptr ? cudaSuccess : cudaErrorMemoryAllocation;
+        p.err = cudaMallocMaybeCapturing(&ptr, size, p);
       } else {
-        p.err = cudaMallocMaybeCapturing(&ptr, size);
+        p.err = cudaMallocMaybeCapturing(&ptr, size, p);
       }
       if (CUDAAllocatorConfig::release_lock_on_cudamalloc()) {
         TORCH_CHECK(
