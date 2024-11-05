@@ -3374,15 +3374,14 @@ class TilingSelect:
                             group[tiling_indices[0]],
                         ]
                     )
-                    and group[tiling_indices[0]] < tiling_factor / 2
+                    and group[tiling_indices[0]] < tiling_factor / 4
+                    and op_num < 10
                 ):
-                    # For case of Multi Thread AMP Static shape of pyhpc_isoneutral_mixing,
-                    # the inner loop range doesn't have enough elements to do vectorization
-                    # explicitly and found that `#pragma GCC ivdep` has better performance than
-                    # `#pragma omp simd simdlen(8)`. Disable vectorization for this case.
-                    # <TODO> Leslie: maybe we can always disable vectorization when loop range is less
-                    # than tiling factor and enable `#pragma omp simd simdlen(8)` for scalar kernel
-                    # when needed.
+                    # We found that when the number of elements in the inner loop range is
+                    # relatively small(< tiling_factor / 4) and the number of operations is
+                    # not large(< 10), vectorization is not efficient.
+                    # And found that `#pragma GCC ivdep` has better performance than
+                    # `#pragma omp simd simdlen(8)` for these cases.
                     return [], []
 
             if dtype in DTYPE_LOWP_FP:
@@ -3744,7 +3743,6 @@ class CppKernelProxy(CppKernel):
                     tail_loop.simd_vec = True
                 else:
                     tail_loop.set_kernel(scalar_kernel)
-                    tail_loop.simd_omp = True
                 # We chop the loop into two cubes by the nelements - main loop and tail loop.
                 # Regarding the main loop, it is straightforward that it could be vectorized with
                 # nelements. But for the tail loop, it still could be vectorized. For example,

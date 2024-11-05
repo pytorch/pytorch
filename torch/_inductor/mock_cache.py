@@ -1,4 +1,5 @@
-# Owner(s): ["module: inductor"]
+# mypy: ignore-errors
+
 from __future__ import annotations
 
 import contextlib
