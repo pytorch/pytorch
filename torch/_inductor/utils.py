@@ -2129,8 +2129,10 @@ def is_same_mkldnn_tensor(data: torch.Tensor, value: torch.Tensor):
 
 
 @dataclass_transform(frozen_default=True)
-def ir_dataclass(cls=None, /, *, frozen: bool = True):
-    def wrap(cls: _T) -> _T:
+def ir_dataclass(
+    cls: Optional[type[_T]] = None, /, *, frozen: bool = True
+) -> Callable[[type[_T]], type[_T]] | type[_T]:
+    def wrap(cls: type[_T]) -> type[_T]:
         if sys.version_info >= (3, 10):
             return dataclasses.dataclass(cls, kw_only=True, frozen=frozen)  # type: ignore[call-overload]
         else:
