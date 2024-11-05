@@ -366,26 +366,27 @@ variable_list PyNode::apply_with_saved(
   saved.before(f->input_info);
   f->compiled_autograd_tracing = true;
   variable_list result;
-  if (!compiled_autograd_should_lift()) {
-    if (_backward_state_idx.has_value()) {
-      PyObject* r = PyObject_CallMethod(
-          saved.get_py_compiler(),
-          "bind_backward_state",
-          "i",
-          *_backward_state_idx);
-      if (r == nullptr) {
-        throw python_error();
-      }
-      THPObjectPtr prior(f->compiled_autograd_backward_state);
-      f->compiled_autograd_backward_state = r;
-      result = apply(variable_list(inputs));
-      Py_CLEAR(f->compiled_autograd_backward_state);
-      f->compiled_autograd_backward_state = prior.release();
-    } else {
-      result = apply(variable_list(inputs));
+  THPObjectPtr prior;
+  if (_backward_state_idx.has_value()) {
+    PyObject* r = PyObject_CallMethod(
+        saved.get_py_compiler(),
+        "bind_backward_state",
+        "i",
+        *_backward_state_idx);
+    if (r == nullptr) {
+      throw python_error();
     }
-  } else {
+    prior = f->compiled_autograd_backward_state;
+    f->compiled_autograd_backward_state = r;
+  }
+  if (compiled_autograd_should_lift()) {
     result = defer_to_dynamo(variable_list(inputs), saved.get_py_compiler());
+  } else {
+    result = apply(variable_list(inputs));
+  }
+  if (_backward_state_idx.has_value()) {
+    Py_CLEAR(f->compiled_autograd_backward_state);
+    f->compiled_autograd_backward_state = prior.release();
   }
   f->compiled_autograd_tracing = false;
   saved.after(f->compiled_autograd_symints);

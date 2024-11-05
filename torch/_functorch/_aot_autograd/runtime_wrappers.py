@@ -1522,9 +1522,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             def forward(ctx, *deduped_flat_tensor_args):
                 args = deduped_flat_tensor_args
                 if backward_state_indices:
+                    ctx._backward_state_indices = backward_state_indices
                     bw_state = args[backward_state_indices[0]]
                     assert isinstance(bw_state, BackwardState)
                     ctx._compiled_autograd_backward_state = bw_state
+
+                ctx._disable_amp = disable_amp
 
                 # There is a pretty complicated calling convention around what the compiled fw returns.
                 # The full list of outputs and their relative order is:

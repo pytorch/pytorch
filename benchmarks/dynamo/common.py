@@ -3984,6 +3984,7 @@ def parse_args(args=None):
         "--compiled-autograd",
         action="store_true",
         help="Enables compiled autograd on compiled benchmark",
+        default=True,
     )
 
     parser.add_argument(

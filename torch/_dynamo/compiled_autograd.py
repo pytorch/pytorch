@@ -165,7 +165,23 @@ class AutogradCompilerInstance:
             fakectx: FakeBackwardCFunction,
             *args: Any,
         ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
-            return fakectx._forward_cls._backward_prologue(fakectx, *args)  # type: ignore[attr-defined]
+            forward_cls = fakectx._forward_cls  # type: ignore[attr-defined]
+            all_args = forward_cls._backward_prologue(fakectx, *args)
+
+            # non-traceable calls originally in call_aot_bwd_impl
+            if forward_cls._lazy_backward_info is None:
+                raise RuntimeError(
+                    """This compiled backward function was saved by AOTAutogradCache, which does not support
+                compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
+                )
+
+            assert fakectx.symints is not None
+            assert fakectx.bw_module is not None
+            if hasattr(forward_cls, "_backward_state_indices"):
+                assert fakectx._compiled_autograd_backward_state.proxy is not None
+                all_args.append(fakectx._compiled_autograd_backward_state)
+
+            return all_args
 
         def call_aot_bwd_epilogue(
             fakectx: FakeBackwardCFunction,
