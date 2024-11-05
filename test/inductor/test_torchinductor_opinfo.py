@@ -342,7 +342,7 @@ inductor_expected_failures_single_sample["xpu"] = {
     "cholesky_solve": {f64},
     "cholesky_inverse": {f64},
     # could not create a primitive
-    "addbmm": {f16, f32, f64},
+    "addbmm": {f64},
     "addmm": {f16, f32, f64},
     "addmv": {f32, f64},
     # could not create a primitive descriptor for

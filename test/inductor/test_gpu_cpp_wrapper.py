@@ -7,11 +7,12 @@ from typing import NamedTuple
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import is_gpu
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 try:
@@ -38,29 +39,47 @@ except unittest.SkipTest:
     raise
 
 
-_desired_test_bases = get_desired_device_type_test_bases()
-RUN_CUDA = (
-    HAS_CUDA
-    and any(getattr(x, "device_type", "") == "cuda" for x in _desired_test_bases)
+_desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
+RUN_GPU = (
+    HAS_GPU
+    and any(is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases)
     and not TEST_WITH_ASAN
 )
 
 
-class CudaWrapperTemplate:
+class GpuWrapperTemplate:
     pass
 
 
-class TestCudaWrapper(InductorTestCase):
-    device = "cuda"
+class TestGpuWrapper(InductorTestCase):
+    device = GPU_TYPE
 
 
-class DynamicShapesCudaWrapperCudaTests(InductorTestCase):
-    device = "cuda"
+class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
+    device = GPU_TYPE
 
 
-test_failures_cuda_wrapper = {
+test_failures_gpu_wrapper = {
     "test_mm_plus_mm2_cuda_dynamic_shapes": test_torchinductor.TestFailure(
-        ("cuda_wrapper",), is_skip=True
+        ("gpu_wrapper",), is_skip=True
+    ),
+    "test_randint_xpu": test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=False),
+    "test_randint_xpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("gpu_wrapper",), is_skip=False
+    ),
+    # ATen ops: bernoulli1 not implemented on XPU.
+    "test_bernoulli1_xpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("gpu_wrapper",), is_skip=False
+    ),
+    "test_bernoulli1_xpu": test_torchinductor.TestFailure(
+        ("gpu_wrapper",), is_skip=False
+    ),
+    # ATen ops: scaled_dot_product_efficient_attention not implemented on XPU.
+    "test_scaled_dot_product_efficient_attention_xpu": test_torchinductor.TestFailure(
+        ("gpu_wrapper",), is_skip=False
+    ),
+    "test_scaled_dot_product_efficient_attention_xpu_dynamic_shapes": test_torchinductor.TestFailure(
+        ("gpu_wrapper",), is_skip=False
     ),
 }
 
@@ -114,19 +133,33 @@ def make_test_case(
     fn.__dict__ = copy.deepcopy(func.__dict__)
     if condition:
         setattr(
-            CudaWrapperTemplate,
+            GpuWrapperTemplate,
             test_name,
             fn,
         )
 
 
-if RUN_CUDA:
+if RUN_GPU:
 
     class BaseTest(NamedTuple):
         name: str
-        device: str = "cuda"
+        device: str = GPU_TYPE
         tests: InductorTestCase = test_torchinductor.GPUTests()
         check_code: bool = True
+
+    # XPU Not implemented yet
+    XPU_BASE_TEST_SKIP = [
+        "test_foreach_cpp_wrapper",
+        "test_enable_dynamic_shapes_cpp_wrapper",
+        "test_dynamic_shapes_persistent_reduction_mixed_x_dim",
+        "test_cat_slice_cat",
+        "test_mm_plus_mm2",
+        "test_mm_plus_mm3",
+        "test_addmm",
+        "test_linear_relu",
+        "test_fft_real_input",
+        "test_fft_real_input_real_output",
+    ]
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
@@ -236,40 +269,41 @@ if RUN_CUDA:
             tests=test_select_algorithm.TestSelectAlgorithm(),
         ),
     ]:
+        if item.device == "xpu" and item.name in XPU_BASE_TEST_SKIP:
+            continue
         make_test_case(item.name, item.device, item.tests, check_code=item.check_code)
 
     from torch._inductor.utils import is_big_gpu
 
-    if is_big_gpu(0):
+    if GPU_TYPE == "cuda" and is_big_gpu(0):
         skip_list = ["test_addmm", "test_linear_relu"]
         # need to skip instead of omit, otherwise fbcode ci can be flaky
         for test_name in skip_list:
-            test_failures_cuda_wrapper[
+            test_failures_gpu_wrapper[
                 f"{test_name}_cuda"
-            ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
-            test_failures_cuda_wrapper[
-                f"{test_name}_cuda_dynamic_shapes"
-            ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
+            ] = test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
+            test_failures_gpu_wrapper[
+                f"{test_name}_gpu_dynamic_shapes"
+            ] = test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
 
     test_torchinductor.copy_tests(
-        CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper", test_failures_cuda_wrapper
+        GpuWrapperTemplate, TestGpuWrapper, "gpu_wrapper", test_failures_gpu_wrapper
     )
 
-    DynamicShapesCudaWrapperTemplate = (
-        test_torchinductor_dynamic_shapes.make_dynamic_cls(CudaWrapperTemplate)
+    DynamicShapesGpuWrapperTemplate = (
+        test_torchinductor_dynamic_shapes.make_dynamic_cls(GpuWrapperTemplate)
     )
 
     test_torchinductor.copy_tests(
-        DynamicShapesCudaWrapperTemplate,
-        DynamicShapesCudaWrapperCudaTests,
-        "cuda_wrapper",
-        test_failures_cuda_wrapper,
+        DynamicShapesGpuWrapperTemplate,
+        DynamicShapesGpuWrapperGpuTests,
+        "gpu_wrapper",
+        test_failures_gpu_wrapper,
         xfail_prop="_expected_failure_dynamic_wrapper",
     )
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    print(f"FS: run_cuda {RUN_CUDA}")
-    if RUN_CUDA:
+    if RUN_GPU:
         run_tests(needs="filelock")
