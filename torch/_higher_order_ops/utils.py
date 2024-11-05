@@ -476,3 +476,8 @@ def get_dummy_aot_autograd_config():
         aot_id=0,
         keep_inference_input_mutations=False,
     )
+
+
+# Slices off the first element of a given dimension
+def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
+    return torch.select_copy(t, dim, 0)
