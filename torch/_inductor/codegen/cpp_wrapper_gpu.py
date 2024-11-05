@@ -185,6 +185,10 @@ class CppWrapperGpu(CppWrapperCpu):
             maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         )
 
+    @functools.lru_cache(None)  # noqa: B019
+    def write_tma_descriptor_helpers_once(self):
+        self.header.splice(self.device_codegen.tma_descriptor_helpers())
+
     def write_get_raw_stream(self, index, graph=None):
         name = f"stream{index}"
         self.writeline(
@@ -251,7 +255,29 @@ class CppWrapperGpu(CppWrapperCpu):
         )
 
     def generate_tma_descriptor(self, desc):
-        raise NotImplementedError("Host-side TMA descriptors NYI in C++ wrapper.")
+        self.write_tma_descriptor_helpers_once()
+
+        # generate data pointer for the source tensor
+        source = self.generate_args_decl(
+            call_args=[self.val_to_arg_str(desc.tensor)],
+            arg_types=[desc.tensor.get_dtype()],
+            arg_signatures=[None],
+        )
+
+        desc_name = desc.name
+        self.writeline(f"alignas(64) CUtensorMap {desc_name};")
+
+        # `source` is in the form of `&var_x`, where `var_x` is the data pointer
+        # (CUdeviceptr); we dereference `source` and cast to `void*` to pass to
+        # the data pointer of the source tensor ot the helper function
+        # `init{1,2}DTMADescriptor`
+        ptr = f"reinterpret_cast<void*>(*({source}))"
+        dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.dims)
+        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.block_dims)
+        element_size = self.val_to_arg_str(desc.element_size)
+        fn = f"init{desc.rank}DTMADescriptor"
+        args = f"&{desc_name}, {ptr}, {dims}, {block_dims}, {element_size}"
+        self.writeline(f"{fn}({args});")
 
     @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
@@ -292,7 +318,9 @@ class CppWrapperGpu(CppWrapperCpu):
 
         def process_args(arg, arg_type, arg_signature=None):
             var_name = f"var_{next(self.arg_var_id)}"
-            if isinstance(arg_type, torch_dtype):
+            # ignore nvTmaDesc, as host-side TMA descriptors need
+            # to be passed to the compiled Triton kernel by value
+            if isinstance(arg_type, torch_dtype) and arg_signature != "nvTmaDesc":
                 if arg.endswith(".item()"):
                     # Need to declare a scalar in this case
                     arg = arg[:-7]

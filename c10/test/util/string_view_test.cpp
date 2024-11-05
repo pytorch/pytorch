@@ -37,17 +37,13 @@ using testutils::expectThrows;
 using testutils::string_equal;
 
 namespace test_typedefs {
-static_assert(std::is_same<char, string_view::value_type>::value, "");
-static_assert(std::is_same<char*, string_view::pointer>::value, "");
-static_assert(std::is_same<const char*, string_view::const_pointer>::value, "");
-static_assert(std::is_same<char&, string_view::reference>::value, "");
-static_assert(
-    std::is_same<const char&, string_view::const_reference>::value,
-    "");
-static_assert(std::is_same<std::size_t, string_view::size_type>::value, "");
-static_assert(
-    std::is_same<std::ptrdiff_t, string_view::difference_type>::value,
-    "");
+static_assert(std::is_same_v<char, string_view::value_type>, "");
+static_assert(std::is_same_v<char*, string_view::pointer>, "");
+static_assert(std::is_same_v<const char*, string_view::const_pointer>, "");
+static_assert(std::is_same_v<char&, string_view::reference>, "");
+static_assert(std::is_same_v<const char&, string_view::const_reference>, "");
+static_assert(std::is_same_v<std::size_t, string_view::size_type>, "");
+static_assert(std::is_same_v<std::ptrdiff_t, string_view::difference_type>, "");
 } // namespace test_typedefs
 
 namespace test_default_constructor {
@@ -84,6 +80,20 @@ TEST(StringViewTest, testStringConstructor) {
 }
 } // namespace test_string_constructor
 
+namespace test_std_string_view_constructor {
+void test_std_string_view_conversion_is_implicit(c10::string_view a) {}
+TEST(StringViewTest, testStringViewConstructor) {
+  std::string_view empty;
+  EXPECT_EQ(0, c10::string_view(empty).size());
+  std::string_view hello_std_sv = "hello";
+  c10::string_view hello_sv = hello_std_sv;
+  EXPECT_EQ(5, hello_sv.size());
+  EXPECT_TRUE(string_equal("hello", hello_sv.data(), hello_sv.size()));
+
+  test_std_string_view_conversion_is_implicit(hello_std_sv);
+}
+} // namespace test_std_string_view_constructor
+
 namespace test_conversion_to_string {
 TEST(StringViewTest, testConversionToString) {
   string_view empty;
@@ -94,6 +104,17 @@ TEST(StringViewTest, testConversionToString) {
   EXPECT_EQ(std::string("hello"), hello_str);
 }
 } // namespace test_conversion_to_string
+
+namespace test_conversion_to_std_string_view {
+TEST(StringViewTest, testConversionToStringView) {
+  c10::string_view empty;
+  EXPECT_EQ(0, std::string_view(empty).size());
+  c10::string_view hello_sv = "hello";
+  std::string_view hello_str(hello_sv);
+  EXPECT_EQ(5, hello_str.size());
+  EXPECT_EQ(std::string_view("hello"), hello_str);
+}
+} // namespace test_conversion_to_std_string_view
 
 namespace test_copy_constructor {
 constexpr string_view hello = "hello";
