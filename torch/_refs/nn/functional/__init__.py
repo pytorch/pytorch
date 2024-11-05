@@ -512,7 +512,7 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     )
     # We implement this in one torch.where to generate better code in the backward
     # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
-    # If none of the expressions pass we multiply by 0 for dealing with nans and infs
+    # We multiply by 0 for dealing with nans
     return torch.where(torch.abs(a) > lambd, a - torch.sign(a) * lambd, a * 0)
 
 
