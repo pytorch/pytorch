@@ -348,9 +348,6 @@ class DTensorTestBase(MultiProcessTestCase):
         # For nccl backend, bind the device to the process if device_id is not None
         # so the nccl communicator is immediately formed and we can use `ncclCommSplit`
         # for form subgroup to avoid unnecesssary overhead.
-        if TEST_HPU:
-            import habana_frameworks.torch.distributed.hccl as hccl
-            hccl.initialize_distributed_hpu(self.world_size, self.rank, self.rank)
         dist.init_process_group(
             backend=self.backend,
             world_size=self.world_size,
