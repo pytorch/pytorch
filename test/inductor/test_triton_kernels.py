@@ -3379,25 +3379,20 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
 
     @requires_gpu
     def test_autotune_no_pre_or_post_hook(self):
-        import triton
-        import triton.language as tl
-
         def init_to_zero(name):
             return lambda nargs: nargs[name].zero_()
 
         # pre_hook requires running arbitrary code at runtime, which we cannot handle at this time
         # https://github.com/pytorch/pytorch/issues/139059
-        def get_default_config():
-            config = triton.Config(
-                {"BLOCK_SIZE": 1024},
-                num_warps=4,
-                num_stages=2,
-                pre_hook=init_to_zero("output_ptr"),
-            )
-            return [config]
-
         @triton.autotune(
-            configs=get_default_config(),
+            configs=[
+                triton.Config(
+                    {"BLOCK_SIZE": 1024},
+                    num_warps=4,
+                    num_stages=2,
+                    pre_hook=init_to_zero("output_ptr"),
+                )
+            ],
             key=["n_elements"],
         )
         @triton.jit
@@ -3420,8 +3415,8 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
             add_kernel[grid](x, y, output, n_elements)
             return output
 
-        x = torch.ones((4096,), device="cuda:0", dtype=torch.float16)
-        y = torch.ones((4096,), device="cuda:0", dtype=torch.float16)
+        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
 
         # should always pass
         assert add(x, y).mean() == 2, "Problem with add kernel"
