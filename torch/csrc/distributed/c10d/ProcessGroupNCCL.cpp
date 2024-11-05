@@ -1924,6 +1924,8 @@ void ProcessGroupNCCL::watchdogHandler() {
           pgStatus_->lastCompletedNumelIn;
       data.integers["last_completed_numel_out"] =
           pgStatus_->lastCompletedNumelOut;
+      data.integers["last_started_numel_in"] = pgStatus_->lastStartedNumelIn;
+      data.integers["last_started_numel_out"] = pgStatus_->lastStartedNumelOut;
       // logging strings
       data.strings["last_enqueued_work_name"] = pgStatus_->lastEnqueuedWorkName;
       data.strings["last_started_work_name"] = pgStatus_->lastStartedWorkName;
@@ -2062,6 +2064,8 @@ void ProcessGroupNCCL::watchdogHandler() {
           work.isStarted()) {
         pgStatus_->lastStartedSeq = static_cast<int64_t>(work.seq_);
         pgStatus_->lastStartedWorkName = opTypeToString(work.opType_);
+        pgStatus_->lastStartedNumelIn = work.numelIn_;
+        pgStatus_->lastStartedNumelOut = work.numelOut_;
       }
 
       // Clean up completed work
