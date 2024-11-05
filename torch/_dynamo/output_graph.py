@@ -936,7 +936,7 @@ class OutputGraph:
             if not (
                 (
                     x not in self.side_effects.store_attr_mutations
-                    or isinstance(x.mutable_local, AttributeMutationExisting)
+                    or isinstance(x.mutation_type, AttributeMutationExisting)
                 )
                 and isinstance(x.source, GetItemSource)
                 and isinstance(x.source.base, LocalSource)
@@ -1066,10 +1066,8 @@ class OutputGraph:
         }
         root = FakeRootModule(nn_modules_proxies)
         # Add all the local vars to the "stack" so restore at the end
-        restore_vars = []
+        restore_vars: List[str] = []
         val_to_names: Dict[VariableTracker, List[str]] = {}
-        if stack_values:
-            val_to_names[stack_values[-1]] = []
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
         # symbolic_locals will be empty at this point, as prune_dead_locals
         # will clear out all of symbolic_locals because RETURN_VALUE is the

@@ -144,6 +144,29 @@ class TestDraftExport(TestCase):
             inp = (torch.randn(3, 3), torch.randn(3, 3), torch.tensor(2))
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
+    def test_dedup_data_dependent_failure(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                res = 0
+                for v in [x, y]:
+                    if v.item() > 10:
+                        res += v * v
+                    else:
+                        res += v + v
+
+                return z * res
+
+        inp = (torch.tensor(5), torch.tensor(3), torch.tensor(2))
+
+        ep, report = draft_export(M(), inp)
+        self.assertTrue(len(report.failures) > 0)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+        )
+
+        inp = (torch.tensor(4), torch.tensor(2), torch.tensor(6))
+        self.assertEqual(ep.module()(*inp), M()(*inp))
+
     def test_offsets(self):
         class M(torch.nn.Module):
             def forward(self, x):
@@ -258,14 +281,14 @@ class TestDraftExport(TestCase):
         @torch.library.custom_op("mylib::foo", mutates_args={})
         def foo(a: torch.Tensor) -> List[torch.Tensor]:
             x = a * 2
-            y = a.repeat(2, 2)
+            y = a + 2
             z = a.to(torch.bfloat16)
             return [x, y, z]
 
         @foo.register_fake
         def foo_fake_impl(a):
             x = torch.empty_like(a)  # good
-            y = torch.empty_like(a)  # size mismatch
+            y = torch.empty_like(a)  # good
             z = torch.empty_like(a)  # dtype mismatch
             return [x, y, z]
 
