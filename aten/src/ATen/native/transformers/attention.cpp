@@ -753,7 +753,7 @@ Tensor scaled_dot_product_attention(
     }
     case SDPBackend::math: {
       const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
-      const bool any_inputs_require_grad = query.requires_grad() || key.requires_grad() || value.requires_grad();
+      const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
       const auto all_contiguous = query_.is_contiguous() && key.is_contiguous() && value.is_contiguous();
       if (query_device_type == DeviceType::MPS && dropout_p == 0.0
           && !(GradMode::is_enabled() && any_inputs_require_grad)
