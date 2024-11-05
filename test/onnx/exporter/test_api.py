@@ -317,6 +317,13 @@ class TestFakeTensorExport(common_utils.TestCase):
             # The tensors need to be replaced with real tensors
             _ = onnx_program.model_proto
 
+        # If we replace with concrete tensors, the serialization will succeed
+        onnx_program.apply_weights({"weight": torch.tensor(42.0)})
+        onnx_model = ir.serde.deserialize_model(onnx_program.model_proto)
+        np.testing.assert_allclose(
+            onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
+        )
+
     def test_onnx_program_save_raises_when_model_initialized_in_fake_mode(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -334,6 +341,13 @@ class TestFakeTensorExport(common_utils.TestCase):
         with self.assertRaises(Exception):
             # The tensors need to be replaced with real tensors
             _ = onnx_program.model_proto
+
+        # If we replace with concrete tensors, the serialization will succeed
+        onnx_program.apply_weights({"weight": torch.tensor(42.0)})
+        onnx_model = ir.serde.deserialize_model(onnx_program.model_proto)
+        np.testing.assert_allclose(
+            onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
+        )
 
     def test_onnx_program_save_succeeds_when_export_and_save_in_fake_mode(self):
         class Model(torch.nn.Module):
