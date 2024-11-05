@@ -2050,6 +2050,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             ref_out.backward(ref_grad)
 
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
+            print(f'{memory_format}')
             self.assertTrue(ref_out.is_contiguous(memory_format=torch.contiguous_format))
 
             self.assertEqual(out, ref_out)
