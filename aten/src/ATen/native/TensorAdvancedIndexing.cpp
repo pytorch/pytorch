@@ -1898,8 +1898,7 @@ TORCH_IMPL_FUNC(scatter_add)
 
   // See Note [Enabling Deterministic Operations]
   // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
-  if (globalContext().deterministicAlgorithms() && \
-      (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU)) {
+  if (globalContext().deterministicAlgorithms() && (self.device().type() == DeviceType::CUDA || self.device().type() == DeviceType::XPU)) {
     _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/true);
   } else {
     if (can_use_expanded_index_path(mut_out, dim, index, src, /*is_scatter_like*/true)) {
