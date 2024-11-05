@@ -284,7 +284,7 @@ def gather_unique_untuned_gemm_from_files(filename_pattern: str) -> set[str]:
     unique_gemm_entries = set()  # set will avoid duplicates
 
     for file_path in glob.glob(filename_pattern):
-        with open(file_path, "r") as file:
+        with open(file_path) as file:
             for line in file:
                 if line.startswith("Gemm"):
                     unique_gemm_entries.add(line)
@@ -315,7 +315,7 @@ def gather_tunableop_results() -> None:
     matching_files = glob.glob(filename_pattern)
     num_matching_files = len(matching_files)
     for file_path in matching_files:
-        with open(file_path, "r") as file:
+        with open(file_path) as file:
             for line in file:
                 if line.startswith("Validator"):
                     if not (FirstFile):
