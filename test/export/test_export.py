@@ -1066,15 +1066,6 @@ graph():
         model = Foo()
         inputs = (torch.zeros(64), torch.ones(64))
         with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
-            # ep = torch.export.export_for_training(model, inputs)
-            # # This seems to be a bug with old export because when we pass in x, x
-            # # as input, runtime assertion should fail. This is because we would create
-            # # guard on y.shape[0] > x.shape[0] but somehow in old export, we dce this
-            # # assertion.
-            # print("EEEEPPP", ep.graph_module)
-            # with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed for"):
-            #     ep.module()(torch.zeros(64), torch.zeros(64))
-
             ep = export(model, inputs)
 
         self.assertEqual(ep.module()(*inputs), model(*inputs))
