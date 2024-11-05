@@ -119,6 +119,7 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
 template <
     typename func_t,
     typename array_t,
+    int elems_per_thread,
     typename inp_calc_t,
     typename out_calc_t,
     typename loader_t,
@@ -134,7 +135,7 @@ __global__ void unrolled_elementwise_kernel(
     storer_t s) {
   int remaining = N - block_work_size() * blockIdx.x;
   auto policy = memory::policies::
-      unroll<array_t, inp_calc_t, out_calc_t, loader_t, storer_t, thread_work_size()>(
+      unroll<array_t, inp_calc_t, out_calc_t, loader_t, storer_t, elems_per_thread>(
           data, remaining, ic, oc, l, s);
   elementwise_kernel_helper(f, policy);
 }
@@ -168,7 +169,7 @@ static inline void launch_vectorized_kernel(
       auto output_calc = TrivialOffsetCalculator<1>();
       auto loader = memory::LoadWithoutCast();
       auto storer = memory::StoreWithoutCast();
-      unrolled_elementwise_kernel<func_t, array_t>
+      unrolled_elementwise_kernel<func_t, array_t, elems_per_thread<io_size>()>
           <<<grid, num_threads(), 0, stream>>>(
               N, f, data, input_calc, output_calc, loader, storer);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -197,7 +198,7 @@ static inline void launch_unrolled_kernel(
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   int64_t grid = (N + block_work_size() - 1) / block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
-  unrolled_elementwise_kernel<func_t, array_t>
+  unrolled_elementwise_kernel<func_t, array_t, thread_work_size()>
       <<<grid, num_threads(), 0, stream>>>(N, f, data, ic, oc, l, s);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
