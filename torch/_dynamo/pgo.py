@@ -19,7 +19,6 @@ import torch.compiler.config
 import torch.distributed as dist
 from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once
 from torch._environment import is_fbcode
-from torch._inductor.remote_cache import create_cache
 from torch._logging._internal import trace_structured_artifact
 
 
@@ -462,6 +461,8 @@ def should_use_remote_dynamo_pgo_cache() -> bool:
 
 
 def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
+    from torch._inductor.remote_cache import create_cache
+
     if not should_use_remote_dynamo_pgo_cache():
         return None
 
@@ -540,6 +541,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
             with open(path, "rb") as f:
                 try:
                     _CODE_STATE = pickle.load(f)
+                    chromium_log.add_event_data(name, cache_size_bytes=f.tell())
                 except Exception:
                     log.warning(
                         "get_code_state failed while reading %s", path, exc_info=True
@@ -568,6 +570,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
                         data = cache_data["data"]
                         assert isinstance(data, str)
                         payload = base64.b64decode(data)
+                        chromium_log.add_event_data(name, cache_size_bytes=len(payload))
                         _CODE_STATE = pickle.loads(payload)
                     except Exception:
                         log.warning(
@@ -630,6 +633,7 @@ def put_local_code_state(cache_key: str) -> None:
         with FileLock(lock_path, timeout=LOCK_TIMEOUT):
             with open(tmp_path, "wb") as f:
                 pickle.dump(_CODE_STATE, f)
+                chromium_log.add_event_data(name, cache_size_bytes=f.tell())
             os.rename(tmp_path, path)
             log.info(
                 "put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE)
@@ -654,6 +658,7 @@ def put_remote_code_state(cache_key: str) -> None:
             return
 
         content = pickle.dumps(_CODE_STATE)
+        chromium_log.add_event_data(name, cache_size_bytes=len(content))
         cache_data: JsonDataTy = {
             "data": base64.b64encode(content).decode("ascii"),
         }

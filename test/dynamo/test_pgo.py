@@ -1,24 +1,14 @@
 # Owner(s): ["module: dynamo"]
 
 import contextlib
-import importlib
 import os
-import sys
 
 import torch._dynamo.config
 import torch._dynamo.test_case
+import torch._inductor.mock_cache as mock_cache
 import torch.compiler.config
 from torch._dynamo.testing import CompileCounter
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
-
-
-# LOL.  https://github.com/pytorch/pytorch/issues/139252
-spec = importlib.util.spec_from_file_location(
-    "mock_cache", os.path.join(os.path.dirname(__file__), "../inductor/mock_cache.py")
-)
-mock_cache = importlib.util.module_from_spec(spec)
-sys.modules["mock_cache"] = mock_cache
-spec.loader.exec_module(mock_cache)
 
 
 class PgoTest(torch._dynamo.test_case.TestCase):
