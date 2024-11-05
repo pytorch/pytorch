@@ -24,7 +24,7 @@ from typing import (
 )
 
 from torch._higher_order_ops.utils import autograd_not_implemented
-from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -74,6 +74,7 @@ from .graph_signature import (  # noqa: F401
     InputSpec,
     OutputKind,
     OutputSpec,
+    SymBoolArgument,
     SymIntArgument,
     SymFloatArgument,
     TensorArgument,
@@ -346,18 +347,24 @@ def _decompose_and_get_gm_with_new_signature_constants(
 
     if not _is_joint_ir_decomp(ep, joint_loss_index):
         mod = ep.module()
-
-        fake_args = []
-        for node in mod.graph.nodes:
-            if node.op == "placeholder":
-                fake_args.append(node.meta["val"])
-
-        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
         # TODO T204030333
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
+        fake_args = []
+        for node in mod.graph.nodes:
+            if node.op == "placeholder":
+                if isinstance(node.meta["val"], CustomObjArgument):
+                    real_script_obj = None
+                    if node.meta["val"].fake_val is None:
+                        real_script_obj = ep.constants[node.meta["val"].name]
+                    else:
+                        real_script_obj = node.meta["val"].fake_val.real_obj
+                    fake_args.append(maybe_to_fake_obj(fake_mode, real_script_obj))
+                else:
+                    fake_args.append(node.meta["val"])
 
+        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
@@ -463,6 +470,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
             return SymIntArgument(name=new_ph.name)
         elif isinstance(old_arg, SymFloatArgument):
             return SymFloatArgument(name=new_ph.name)
+        elif isinstance(old_arg, SymBoolArgument):
+            return SymBoolArgument(name=new_ph.name)
         raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
 
     new_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]

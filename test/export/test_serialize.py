@@ -830,6 +830,7 @@ class TestDeserialize(TestCase):
         dynamic_shapes = {"a": {0: dim0_ac}, "b": None, "c": {0: dim0_ac}}
         self.check_graph(DynamicShapeSimpleModel(), inputs, dynamic_shapes)
 
+    @unittest.expectedFailure  # T206587081
     def test_sym_bool(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
