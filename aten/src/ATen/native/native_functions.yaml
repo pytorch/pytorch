@@ -8015,6 +8015,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: masked_scatter
+  tags: core
 
 - func: masked_scatter_backward(Tensor grad_output, Tensor mask, SymInt[] sizes) -> Tensor
   dispatch:

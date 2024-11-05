@@ -36,7 +36,7 @@ std::vector<IValue> boxInputs(const ProcessedNode& pnode) {
 
 } // namespace
 
-C10_DEFINE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
+C10_DEFINE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor)
 
 bool nativeOpIsRegistered(const c10::Symbol& op_name) {
   const std::string name(op_name.toQualString());
@@ -1175,8 +1175,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           p_node->Output(0) = future->value();
           return;
         }
-        auto tuple_ref = future->value().toTupleRef();
-        auto& elems = tuple_ref.elements();
+        auto& elems = future->value().toTupleRef().elements();
         TORCH_DCHECK_EQ(elems.size(), p_node->num_outputs());
         for (const auto i : c10::irange(elems.size())) {
           p_node->Output(i) = elems[i];

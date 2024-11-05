@@ -4,19 +4,7 @@ import inspect
 import logging
 import weakref
 from contextlib import contextmanager
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -314,36 +302,18 @@ class CustomOpDef:
                 if device_type not in self._backend_fns:
 
                     def backend_impl(*args, **kwargs):
-                        # Checks the assumption that outputs cannot alias
-                        # inputs or other outputs.
-                        storages = {
-                            id(tensor.untyped_storage())
-                            for tensor in iter_tensors(args, kwargs)
-                        }
-
                         result = self._backend_fns[device_type](*args, **kwargs)
 
-                        tuple_result = result
-                        if not isinstance(result, tuple):
-                            tuple_result = (result,)
-                        for tensor in iter_tensors(tuple_result, {}):
-                            key = id(tensor.untyped_storage())
-                            if id(tensor.untyped_storage()) in storages:
-                                fn = self._backend_fns[device_type]
-                                module = inspect.getmodule(fn)
-                                raise RuntimeError(
-                                    f"{self._name} (with implementation in {module}): "
-                                    f"The output of this custom operator (1) must not "
-                                    f"also be an input to this custom operator and "
-                                    f"(2) may not alias any inputs to this custom operator "
-                                    f"or other returns. "
-                                    f"The most common way to trigger this error is if "
-                                    f"we have y = custom_op(x) and y and x are the same Tensor. "
-                                    f"Please instead return a clone of the offending output "
-                                    f"tensor(s) (e.g. return x.clone()) or refactor the custom "
-                                    f"operator to not return y."
-                                )
-                            storages.add(key)
+                        def get_module():
+                            fn = self._backend_fns[device_type]
+                            return inspect.getmodule(fn)
+
+                        utils.check_aliasing_constraint(
+                            self._name,
+                            utils.iter_tensors(args, kwargs),
+                            result,
+                            get_module,
+                        )
                         return result
 
                     if device_type is None:
@@ -583,6 +553,10 @@ class CustomOpDef:
         self._setup_context_fn = setup_context
 
     def _register_to_dispatcher(self) -> None:
+        if torch._running_with_deploy():
+            utils.warn_deploy(stacklevel=5)
+            return
+
         lib = self._lib
         schema_str = self._name + self._schema
         cpp_schema = _C.parse_schema(schema_str)
@@ -805,21 +779,6 @@ def get_library_allowing_overwrite(
     lib = torch.library.Library(namespace, "FRAGMENT")  # noqa: TOR901
     OPDEF_TO_LIB[qualname] = lib
     return lib
-
-
-def iter_tensors(
-    args: Tuple[Any], kwargs: Dict[str, Any], allowed_nesting: int = 1
-) -> Iterator[Tensor]:
-    def check(arg):
-        if isinstance(arg, Tensor):
-            yield arg
-        elif allowed_nesting > 0 and isinstance(arg, (tuple, list)):
-            yield from iter_tensors(tuple(arg), {}, allowed_nesting - 1)
-
-    for arg in args:
-        yield from check(arg)
-    for kwarg in kwargs.values():
-        yield from check(kwarg)
 
 
 def _maybe_get_opdef(

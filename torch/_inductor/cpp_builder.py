@@ -712,9 +712,7 @@ def _setup_standard_sys_libs(
         cflags.append("nostdinc")
         # Note that the order of include paths do matter, as a result
         # we need to have several branches interleaved here
-        if torch.version.hip is None:
-            # TODO(T203136598): Is there any harm in including sleef_include in the hip path?
-            include_dirs.append(build_paths.sleef_include)
+        include_dirs.append(build_paths.sleef_include)
         include_dirs.append(build_paths.openmp_include)
         include_dirs.append(build_paths.python_include)
         include_dirs.append(build_paths.cc_include)
@@ -781,7 +779,7 @@ def _get_torch_related_args(
         if not aot_mode:
             libraries.append("torch_python")
 
-    if _IS_WINDOWS:
+    if _IS_WINDOWS and platform.machine().lower() != "arm64":
         libraries.append("sleef")
 
     return include_dirs, libraries_dirs, libraries

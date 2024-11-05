@@ -135,10 +135,8 @@ class BaseListVariable(VariableTracker):
             assert not kwargs
             return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
-            from .builder import SourcelessBuilder
-
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfills.index),
+                VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
                 kwargs,
             )
@@ -454,11 +452,33 @@ class ListVariable(CommonListMethodsVariable):
 
 
 class DequeVariable(CommonListMethodsVariable):
+    def __init__(self, items, maxlen=None, **kwargs) -> None:
+        if maxlen is None:
+            maxlen = ConstantVariable.create(None)
+        assert (
+            maxlen.is_python_constant()
+        ), f"maxlen must be a constant, got: {maxlen.debug_repr()}"
+        self.maxlen = maxlen
+        items = list(items)
+        if self.maxlen.as_python_constant() is not None:
+            items = items[-maxlen.as_python_constant() :]
+        super().__init__(items, **kwargs)
+
     def python_type(self):
         return collections.deque
 
     def debug_repr(self):
+        if self.maxlen.as_python_constant() is None:
+            return self.debug_repr_helper(
+                "deque([", "], maxlen=" + self.maxlen.debug_repr() + ")"
+            )
         return self.debug_repr_helper("deque([", "])")
+
+    def as_python_constant(self):
+        return self.python_type()(
+            [x.as_python_constant() for x in self.items],
+            maxlen=self.maxlen.as_python_constant(),
+        )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         assert "deque" not in codegen.tx.f_globals
@@ -468,12 +488,14 @@ class DequeVariable(CommonListMethodsVariable):
             )
         )
         codegen.foreach(self.items)
-        codegen.extend_output(
-            [
-                create_instruction("BUILD_LIST", arg=len(self.items)),
-                *create_call_function(1, False),
-            ]
-        )
+        codegen.extend_output([create_instruction("BUILD_LIST", arg=len(self.items))])
+        codegen(self.maxlen)
+        codegen.extend_output(codegen.create_call_function_kw(2, ("maxlen",), False))
+
+    def var_getattr(self, tx: "InstructionTranslator", name):
+        if name == "maxlen":
+            return self.maxlen
+        return super().var_getattr(tx, name)
 
     def call_method(
         self,
@@ -488,41 +510,56 @@ class DequeVariable(CommonListMethodsVariable):
             and args
             and args[0].is_python_constant()
         ):
+            assert len(args) == 2
             assert not kwargs
             key, value = args
-            assert key.is_python_constant() and isinstance(
-                key.as_python_constant(), int
-            )
+            assert key.is_python_constant()
+            assert isinstance(key.as_python_constant(), int)
             tx.output.side_effects.mutation(self)
             self.items[key.as_python_constant()] = value
             return ConstantVariable.create(None)
-        elif (
+
+        maxlen = self.maxlen.as_python_constant()
+        if maxlen is not None:
+            slice_within_maxlen = slice(-maxlen, None)
+        else:
+            slice_within_maxlen = None
+
+        if (
             name == "extendleft"
             and self.mutable_local
+            and len(args) > 0
             and args[0].has_force_unpack_var_sequence(tx)
         ):
+            assert len(args) == 1
             assert not kwargs
-
-            (arg,) = args
-            prefix = arg.force_unpack_var_sequence(tx)
-            prefix.reverse()
+            prefix = args[0].force_unpack_var_sequence(tx)
             tx.output.side_effects.mutation(self)
-            self.items = prefix + list(self.items)
-            return ConstantVariable.create(None)
+            self.items[:] = [*reversed(prefix), *self.items]
+            slice_within_maxlen = slice(None, maxlen)
+            result = ConstantVariable.create(None)
         elif name == "popleft" and self.mutable_local:
             assert not args
             assert not kwargs
-            item = self.items[0]
             tx.output.side_effects.mutation(self)
-            self.items = self.items[1:]
-            return item
-        elif name == "appendleft" and self.mutable_local:
+            result, *self.items[:] = self.items
+        elif name == "appendleft" and len(args) > 0 and self.mutable_local:
+            assert len(args) == 1
             assert not kwargs
             tx.output.side_effects.mutation(self)
-            self.items = [args[0]] + list(self.items)
-            return ConstantVariable.create(None)
+            self.items[:] = [args[0], *self.items]
+            slice_within_maxlen = slice(None, maxlen)
+            result = ConstantVariable.create(None)
         else:
-            return super().call_method(tx, name, args, kwargs)
+            result = super().call_method(tx, name, args, kwargs)
+
+        if (
+            slice_within_maxlen is not None
+            and maxlen is not None
+            and len(self.items) > maxlen
+        ):
+            self.items[:] = self.items[slice_within_maxlen]
+        return result
 
 
 class TupleVariable(BaseListVariable):
