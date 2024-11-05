@@ -26,7 +26,7 @@ DistributedRandomSampler::DistributedRandomSampler(
 std::optional<std::vector<size_t>> DistributedRandomSampler::next(
     size_t batch_size) {
   if (sample_index_ == end_index_) {
-    return nullopt;
+    return std::nullopt;
   }
 
   size_t end = sample_index_ + batch_size;
@@ -109,7 +109,7 @@ DistributedSequentialSampler::DistributedSequentialSampler(
 std::optional<std::vector<size_t>> DistributedSequentialSampler::next(
     size_t batch_size) {
   if (sample_index_ == end_index_) {
-    return nullopt;
+    return std::nullopt;
   }
 
   size_t end = sample_index_ + batch_size;
