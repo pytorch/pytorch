@@ -71,19 +71,19 @@ Below is an example of a graph break due to the function ``copy.deepcopy`` from 
     @torch.compile
     def fn(x):
         x = x + 1
-        y = eval("x + 1")
-        return y + 1
+        with open("test.txt", "r") as f:
+            return x + len(f.read())
 
     fn(torch.ones(3, 3))
 
 ::
 
     $TORCH_LOGS="graph_breaks" python playground.py
-    Graph break in user code at /data/users/williamwen/pytorch/playground.py:6
-    Reason: Unsupported: builtin: eval [<class 'torch._dynamo.variables.constant.ConstantVariable'>] False
+    Graph break in user code at /data/users/williamwen/pytorch/playground.py:7
+    Reason: Unsupported: builtin: open [<class 'torch._dynamo.variables.constant.ConstantVariable'>, <class 'torch._dynamo.variables.constant.ConstantVariable'>] False
     User code traceback:
-    File "/data/users/williamwen/pytorch/playground.py", line 6, in fn
-        y = eval("x + 1")
+    File "/data/users/williamwen/pytorch/playground.py", line 7, in fn
+        with open("test.txt", "r") as f:
     Traceback (most recent call last):
     File "/data/users/williamwen/pytorch/torch/_dynamo/symbolic_convert.py", line 635, in wrapper
         return inner_fn(self, inst)
@@ -103,7 +103,7 @@ Below is an example of a graph break due to the function ``copy.deepcopy`` from 
                             ^^^^^^^^^^^^^^^^^^^^^^^^
     File "/data/users/williamwen/pytorch/torch/_dynamo/exc.py", line 313, in unimplemented
         raise Unsupported(msg, case_name=case_name)
-    torch._dynamo.exc.Unsupported: builtin: eval [<class 'torch._dynamo.variables.constant.ConstantVariable'>] False
+    torch._dynamo.exc.Unsupported: builtin: open [<class 'torch._dynamo.variables.constant.ConstantVariable'>, <class 'torch._dynamo.variables.constant.ConstantVariable'>] False
 
 Guards
 ------
