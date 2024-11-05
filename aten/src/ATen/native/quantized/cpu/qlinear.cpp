@@ -1120,6 +1120,7 @@ namespace at::native {
       torch::List<std::optional<at::Scalar>> post_op_args,
       c10::string_view post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
+    // act_zero_point.numel() == 0 for symmetric quantization
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() <= 1,
         "onednn int8 linear: act scale/zp size should be 1/<=1");
     static std::optional<at::Tensor> other = std::nullopt;
@@ -1157,6 +1158,7 @@ namespace at::native {
       torch::List<std::optional<at::Scalar>> unary_post_op_args,
       c10::string_view unary_post_op_algorithm) {
 #if AT_MKLDNN_ENABLED()
+    // act_zero_point.numel() == 0 for symmetric quantization
     TORCH_CHECK(act_scale.numel() == 1 && act_zero_point.numel() <= 1,
         "onednn int8 linear: act scale/zp size should be 1/<=1");
     int64_t act_zp = act_zero_point.numel() == 1 ? act_zero_point.item().toLong() : 0;

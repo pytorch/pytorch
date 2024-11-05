@@ -2580,9 +2580,6 @@ def _register_smooth_quant_int_mm_pattern():
     )
 
     def _validate_pattern(match: Match):
-        for n in match.nodes:
-            if len(n.users) != 1 and n != match.output_node():
-                return False
         return len(match.nodes) in [7, 10]
 
     for pattern in [pattern_with_bias, pattern_no_bias]:
