@@ -18,7 +18,7 @@ from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
-from .. import config, compile_utils
+from .. import config
 from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
@@ -38,6 +38,7 @@ from .utils import (
     root_module_when_exporting_non_strict,
     unlift_tokens,
 )
+from .comms import raise_fsdp2_backward_all_gather_ops
 
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
@@ -178,24 +179,14 @@ def aot_dispatch_base_graph(
 
         hook.remove()  # type: ignore[possibly-undefined]
 
+    if not torch._dynamo.config.skip_fsdp_hooks:
+        fw_module.graph = raise_fsdp2_backward_all_gather_ops(fw_module.graph)
+
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.
     copy_count = assert_functional_graph(fw_module.graph)
     fw_module.graph.eliminate_dead_code()
     fw_module.recompile()
-
-    if not torch._dynamo.config.skip_fsdp_hooks:
-        torch._logging.trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "aot_inference_graph_before_raise_fsdp2_backward_all_gather_ops",
-                "encoding": "string",
-            },
-            payload_fn=lambda: fw_module.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
-        )
-        fw_module.graph = torch._inductor.comms.raise_fsdp2_backward_all_gather_ops(fw_module.graph)
 
     copy_count2 = assert_functional_graph(fw_module.graph)
     propagate_input_mutation_stacktraces(fw_module.graph)
@@ -208,7 +199,7 @@ def aot_dispatch_base_graph(
             saved_updated_flat_args_subclasses_desugared[num_tokens:]
         )
 
-    assert copy_count == copy_count2, f"{copy_count} vs. {copy_count2}"
+    assert copy_count == copy_count2
 
     if aot_config.enable_log:
         aot_graphs_log.info(

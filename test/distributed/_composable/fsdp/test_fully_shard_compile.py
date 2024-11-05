@@ -171,6 +171,16 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
+    def _get_resize_count_in_fx_graph(self, graph: torch.fx.Graph):
+        resize_count = 0
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target == torch.ops.inductor.resize_storage_bytes_.default
+            ):
+                resize_count += 1
+        return resize_count
+
     def _assert_no_aliased_unsharded_params_in_graph_inputs(
         self, model, graph: torch.fx.Graph
     ) -> None:
@@ -212,9 +222,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         self.assertTrue(no_aliased_unsharded_params_in_graph_inputs, err_msg)
 
     def _remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
-        self, model, fwd_fullgraph
+        self, model, *, bwd_resize_count_before_pass=None, fwd_fullgraph=False
     ):
         def _run_with_checks(graph, orig_fn):
+            if (
+                self._is_bwd_fx_graph(graph)
+                and bwd_resize_count_before_pass is not None
+            ):
+                self.assertEqual(
+                    bwd_resize_count_before_pass,
+                    self._get_resize_count_in_fx_graph(graph),
+                )
             self._assert_no_aliased_unsharded_params_in_graph_inputs(model, graph)
             orig_fn(graph)
 
@@ -312,6 +330,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             return True
         else:
             return False
+
+    def _is_bwd_fx_graph(self, graph):
+        for node in graph.nodes:
+            if (
+                node.op == "call_function"
+                and node.target
+                == torch.ops._c10d_functional.reduce_scatter_tensor.default
+            ):
+                return True
+        return False
 
     def _maybe_run_decide_global_ordering_of_comms_with_checks(self, fwd_fullgraph):
         def _check_fsdp_ops_in_snodes(snodes, is_fwd_graph, expect=True):
@@ -443,6 +471,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         input_creation_fn,
         backend,
         fwd_fullgraph,
+        *,
+        bwd_resize_count_before_inductor=None,
     ):
         def fwd_bwd(model, inp):
             out = model(inp)
@@ -459,16 +489,10 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             torch.manual_seed(42)
             losses = []
             for i in range(n_iter):
-                print(f"iter: {i}")
                 # eager warmup for 1 iteration, so that all FSDP2 lazy-initialization is done in eager
                 torch.compiler.set_stance("force_eager" if i < 1 else "default")
                 inp = input_creation_fn()
-                if compiled_autograd_backend is not None:
-                    ctx = torch._dynamo.compiled_autograd.enable(torch.compile(backend=compiled_autograd_backend, fullgraph=True))
-                else:
-                    ctx = contextlib.nullcontext()
-                with ctx:
-                    loss = fwd_bwd_func(inp)
+                loss = fwd_bwd_func(inp)
                 losses.append(loss.item())
                 optim.step()
                 optim.zero_grad(set_to_none=True)
@@ -476,26 +500,30 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         def test_compiled():
             model, optim = model_init_fn()
-            model_compiled = torch.compile(
-                model,
-                backend=backend,
-                fullgraph=True,
-            )
-            fwd_bwd_fn = functools.partial(fwd_bwd, model_compiled)
+            fwd_bwd_fn = functools.partial(fwd_bwd, model)
 
             counters.clear()
-            # with self._remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
-            #     model, fwd_fullgraph
-            # ):
-            with contextlib.nullcontext():
-                res = run_iters(
+            with self._remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
+                model,
+                bwd_resize_count_before_pass=bwd_resize_count_before_inductor,
+                fwd_fullgraph=fwd_fullgraph,
+            ):
+                fwd_bwd_fn_compiled = torch.compile(
                     fwd_bwd_fn,
+                    backend=backend,
+                    # NOTE: we can't set `fullgraph=True` here because we will always graph-break
+                    # on `loss.backward()` call in `fwd_bwd()`. This is okay as long as
+                    # it's the only graph-break in forward pass.
+                    fullgraph=False,
+                )
+                res = run_iters(
+                    fwd_bwd_fn_compiled,
                     optim,
                     compiled_autograd_backend=backend,
                 )
                 if fwd_fullgraph:
-                    self.assertEqual(len(counters["graph_break"]), 0)
-                    # self.assertIn("Tensor.backward", counters["graph_break"])
+                    self.assertEqual(len(counters["graph_break"]), 1)
+                    self.assertIn("Tensor.backward", counters["graph_break"])
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
                 return res
@@ -510,10 +538,10 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         torch._dynamo.reset()
         torch._dynamo.compiled_autograd.reset()
         with torch._dynamo.config.patch(
-            # compiled_autograd=True,
-            # compiled_autograd_kwargs_override={
-            #     "fullgraph": True,
-            # },
+            compiled_autograd=True,
+            compiled_autograd_kwargs_override={
+                "fullgraph": True,
+            },
             inline_inbuilt_nn_modules=True,
             skip_fsdp_hooks=False,
         ), torch._functorch.config.patch(
@@ -623,9 +651,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             def forward(self, x):
                 # Intentionally reusing all layers a few times,
                 # to test "multiple all-gathers for the same parameter" case.
+                # Case 1: rerun the same layer twice
                 for layer_id in range(len(self.layers)):
                     for _ in range(2):
                         x = self.layers[layer_id](x)
+                # Case 2: iterate through all layers twice
                 for layer in self.layers:
                     x = layer(x)
                 for layer in self.layers:
@@ -681,8 +711,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
-        # TODO: add test to show that bwd all-gathers are indeed raise to top of mutation region
-        # TODO: see if we can trace post-backward hook, to be able to add a stronger version of this test
         self.skipTestForOldSm()
         for fwd_fullgraph in [True]:
             with self._reinplace_all_gather_with_optional_checks(
@@ -694,8 +722,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     self._check_fsdp_copy_and_resize_ops_count_in_graph,
                     fwd_copy_count=0,
                     fwd_resize_count=0,
-                    bwd_copy_count=9,
-                    bwd_resize_count=12,
+                    bwd_copy_count=0,
+                    bwd_resize_count=0,
                 )
                 if fwd_fullgraph
                 else None
@@ -707,75 +735,76 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         ),
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
+                        bwd_resize_count_before_inductor=48 if fwd_fullgraph else None,
                     )
                 )
-            # if fwd_fullgraph:
-            #     self.assertEqual(
-            #         len(triton_codes),
-            #         2,
-            #         "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
-            #     )
-            #     fwd_code = triton_codes[0]
-            #     file_check = FileCheck().check("def call(args):")
-            #     for fwd_ag_block_info in [
-            #         dict(overlapped_compute_op_str=None),
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #             last_all_gather=True,
-            #         ),
-            #     ]:
-            #         file_check = self.inductor_code_check_fsdp_all_gather(
-            #             file_check, **fwd_ag_block_info
-            #         )
-            #     file_check.run(fwd_code)
+            if fwd_fullgraph:
+                self.assertEqual(
+                    len(triton_codes),
+                    2,
+                    "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
+                )
+                fwd_code = triton_codes[0]
+                file_check = FileCheck().check("def call(args):")
+                for fwd_ag_block_info in [
+                    dict(overlapped_compute_op_str=None),
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        last_all_gather=True,
+                    ),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **fwd_ag_block_info
+                    )
+                file_check.run(fwd_code)
 
-            #     bwd_code = triton_codes[1]
-            #     file_check = FileCheck().check("def call(args):")
-            #     for bwd_ag_block_info in [
-            #         dict(overlapped_compute_op_str=None),
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #             last_all_gather=True,
-            #         ),
-            #     ]:
-            #         file_check = self.inductor_code_check_fsdp_all_gather(
-            #             file_check, **bwd_ag_block_info
-            #         )
-            #     for bwd_rs_block_info in [
-            #         dict(overlapped_compute_op_str="extern_kernels.addmm("),
-            #         dict(
-            #             overlapped_compute_op_str=None
-            #         ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
-            #         dict(overlapped_compute_op_str=None),
-            #     ]:
-            #         file_check = self.inductor_code_check_fsdp_reduce_scatter(
-            #             file_check, **bwd_rs_block_info
-            #         )
-            #     file_check.run(bwd_code)
+                bwd_code = triton_codes[1]
+                file_check = FileCheck().check("def call(args):")
+                for bwd_ag_block_info in [
+                    dict(overlapped_compute_op_str=None),
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                        last_all_gather=True,
+                    ),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **bwd_ag_block_info
+                    )
+                for bwd_rs_block_info in [
+                    dict(overlapped_compute_op_str="extern_kernels.addmm("),
+                    dict(
+                        overlapped_compute_op_str=None
+                    ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
+                    dict(overlapped_compute_op_str=None),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                        file_check, **bwd_rs_block_info
+                    )
+                file_check.run(bwd_code)
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
     @skipIfRocm
@@ -897,7 +926,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
     def test_transformer_backend_inductor_fullgraph_True(self):
-        # TODO: add test to show that bwd all-gathers are indeed raise to top of mutation region
         self.skipTestForOldSm()
         for (
             fwd_fullgraph,
@@ -907,97 +935,98 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             log.warning(
                 f"fwd_fullgraph={fwd_fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001, B950
             )
-            # with self._reinplace_all_gather_with_optional_checks(
-            #     fwd_fullgraph
-            # ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
-            #     fwd_fullgraph
-            # ), torch._inductor.config.patch(
-            #     post_grad_custom_post_pass=functools.partial(
-            #         self._check_fsdp_copy_and_resize_ops_count_in_graph,
-            #         # NOTE: For the root unsharded params, we don't reshard after forward since for training,
-            #         # the parameters would be freed and all-gathered immediately. Hence we still have
-            #         # their resize and copy ops in the graph.
-            #         fwd_copy_count=4,
-            #         fwd_resize_count=4,
-            #         bwd_copy_count=0,
-            #         bwd_resize_count=4,
-            #     )
-            #     if fwd_fullgraph
-            #     else None
-            # ):
-            _, triton_codes = run_and_get_code(
-                lambda: self._test_traceable_fsdp(
-                    *self._create_transformer_factory_fns(
-                        all_requires_grad=all_requires_grad,
-                        activation_checkpoint=activation_checkpoint,
-                    ),
-                    "inductor",
-                    fwd_fullgraph=fwd_fullgraph,
+            with self._reinplace_all_gather_with_optional_checks(
+                fwd_fullgraph
+            ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
+                fwd_fullgraph
+            ), torch._inductor.config.patch(
+                post_grad_custom_post_pass=functools.partial(
+                    self._check_fsdp_copy_and_resize_ops_count_in_graph,
+                    # NOTE: For the root unsharded params, we don't reshard after forward since for training,
+                    # the parameters would be freed and all-gathered immediately. Hence we still have
+                    # their resize and copy ops in the graph.
+                    fwd_copy_count=4,
+                    fwd_resize_count=4,
+                    bwd_copy_count=0,
+                    bwd_resize_count=4,
                 )
-            )
-            # if fwd_fullgraph:
-            #     self.assertEqual(
-            #         len(triton_codes),
-            #         2,
-            #         "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
-            #     )
-            #     fwd_code = triton_codes[0]
-            #     file_check = FileCheck().check("def call(args):")
-            #     for fwd_ag_block_info in [
-            #         dict(
-            #             overlapped_compute_op_str="triton_"
-            #             if all_requires_grad
-            #             else None,
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten.native_dropout.",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
-            #             last_all_gather=True,
-            #         ),
-            #     ]:
-            #         file_check = self.inductor_code_check_fsdp_all_gather(
-            #             file_check, **fwd_ag_block_info
-            #         )
-            #     file_check.run(fwd_code)
+                if fwd_fullgraph
+                else None
+            ):
+                _, triton_codes = run_and_get_code(
+                    lambda: self._test_traceable_fsdp(
+                        *self._create_transformer_factory_fns(
+                            all_requires_grad=all_requires_grad,
+                            activation_checkpoint=activation_checkpoint,
+                        ),
+                        "inductor",
+                        fwd_fullgraph=fwd_fullgraph,
+                        bwd_resize_count_before_inductor=76 if fwd_fullgraph else None,
+                    )
+                )
+            if fwd_fullgraph:
+                self.assertEqual(
+                    len(triton_codes),
+                    2,
+                    "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
+                )
+                fwd_code = triton_codes[0]
+                file_check = FileCheck().check("def call(args):")
+                for fwd_ag_block_info in [
+                    dict(
+                        overlapped_compute_op_str="triton_"
+                        if all_requires_grad
+                        else None,
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten.native_dropout.",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention.",
+                        last_all_gather=True,
+                    ),
+                ]:
+                    file_check = self.inductor_code_check_fsdp_all_gather(
+                        file_check, **fwd_ag_block_info
+                    )
+                file_check.run(fwd_code)
 
-            #     bwd_code = triton_codes[1]
-            #     file_check = FileCheck().check("def call(args):")
-            #     for bwd_ag_block_info in [
-            #         dict(
-            #             overlapped_compute_op_str="extern_kernels.mm(",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-            #         ),
-            #         dict(
-            #             overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
-            #             last_all_gather=True,
-            #         ),
-            #     ]:
-            #         if bwd_ag_block_info is not None:
-            #             file_check = self.inductor_code_check_fsdp_all_gather(
-            #                 file_check, **bwd_ag_block_info
-            #             )
-            #     for bwd_rs_block_info in [
-            #         dict(overlapped_compute_op_str="extern_kernels.mm(")
-            #         if all_requires_grad
-            #         else None,
-            #         dict(
-            #             overlapped_compute_op_str=None
-            #         ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
-            #         dict(overlapped_compute_op_str=None),
-            #         dict(overlapped_compute_op_str=None) if all_requires_grad else None,
-            #     ]:
-            #         if bwd_rs_block_info is not None:
-            #             file_check = self.inductor_code_check_fsdp_reduce_scatter(
-            #                 file_check, **bwd_rs_block_info
-            #             )
-            #     file_check.run(bwd_code)
+                bwd_code = triton_codes[1]
+                file_check = FileCheck().check("def call(args):")
+                for bwd_ag_block_info in [
+                    dict(
+                        overlapped_compute_op_str="extern_kernels.mm(",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                    ),
+                    dict(
+                        overlapped_compute_op_str="aten._scaled_dot_product_efficient_attention_backward.",
+                        last_all_gather=True,
+                    ),
+                ]:
+                    if bwd_ag_block_info is not None:
+                        file_check = self.inductor_code_check_fsdp_all_gather(
+                            file_check, **bwd_ag_block_info
+                        )
+                for bwd_rs_block_info in [
+                    dict(overlapped_compute_op_str="extern_kernels.mm(")
+                    if all_requires_grad
+                    else None,
+                    dict(
+                        overlapped_compute_op_str=None
+                    ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
+                    dict(overlapped_compute_op_str=None),
+                    dict(overlapped_compute_op_str=None) if all_requires_grad else None,
+                ]:
+                    if bwd_rs_block_info is not None:
+                        file_check = self.inductor_code_check_fsdp_reduce_scatter(
+                            file_check, **bwd_rs_block_info
+                        )
+                file_check.run(bwd_code)
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
     @skipIfRocm
