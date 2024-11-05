@@ -330,7 +330,7 @@ void gemv_fast_path<at::Half>(
       y,
       *incy);
 }
-INSTANTIATE(c10::BFloat16);
+INSTANTIATE(c10::BFloat16)
 #else
 template <>
 bool scal_use_fast_path<at::Half>(
