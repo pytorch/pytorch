@@ -99,7 +99,8 @@ class ArrayRef final {
   template <
       typename Container,
       typename U = decltype(std::declval<Container>().data()),
-      typename = std::enable_if_t<(std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
+      typename = std::enable_if_t<
+          (std::is_same_v<U, T*> || std::is_same_v<U, T const*>)>>
   /* implicit */ ArrayRef(const Container& container)
       : Data(container.data()), Length(container.size()) {
     debugCheckNullptrInvariant();
