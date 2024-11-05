@@ -131,7 +131,7 @@ else:
         pass
 
 
-def supported_dtype_of_cpp_wrapper(dtype: torch.device, device_type: str) -> bool:
+def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool:
     supported_dtype = {
         torch.float32,
         torch.float64,
