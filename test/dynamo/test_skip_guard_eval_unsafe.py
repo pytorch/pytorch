@@ -114,6 +114,31 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
                 dt["x"] = x
                 opt_fn(dt)
 
+    def test_cache_line_pickup(self):
+        def fn(x, a=None, b=None):
+            x = torch.sin(x)
+            if a:
+                x = torch.sin(x)
+            if b:
+                x = torch.sin(x)
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+
+        ref1 = opt_fn(x, a=None, b=None)
+        ref2 = opt_fn(x, a=True, b=None)
+        ref3 = opt_fn(x, a=True, b=True)
+
+        with torch.compiler.skip_guard_eval_unsafe():
+            res1 = opt_fn(x, a=None, b=None)
+            res2 = opt_fn(x, a=True, b=None)
+            res3 = opt_fn(x, a=True, b=True)
+
+        self.assertEqual(ref1, res1)
+        self.assertEqual(ref2, res2)
+        self.assertEqual(ref3, res3)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
