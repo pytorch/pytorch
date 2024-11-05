@@ -865,6 +865,17 @@ graph():
         ep_res = torch.export.export(M(), input).module()(*input)
         self.assertEqual(orig_res, ep_res)
 
+    def test_symfloat_item(self):
+        class M(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        input = (torch.tensor([3.14], dtype=torch.float),)
+
+        orig_res = M()(*input)
+        ep_res = torch.export.export(M(), input).module()(*input)
+        self.assertEqual(orig_res, ep_res)
+
     def test_unbacked_to_cond(self):
         class M(torch.nn.Module):
             def forward(self, a):
