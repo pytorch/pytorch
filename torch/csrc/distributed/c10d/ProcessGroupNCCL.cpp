@@ -690,6 +690,34 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
       " milliseconds before timing out.");
 
   LOG(ERROR) << exceptionMsg;
+
+  // Get the stack trace of the work at call time
+  // First step we get the corresponding record entry from FR, based on work's
+  // trace_id_
+  std::optional<NCCLTraceBuffer::Entry> entry =
+      NCCLTraceBuffer::get()->getEntry(trace_id_);
+  if (entry.has_value()) {
+    auto entryVal = entry.value();
+    // Get stack trace from FR entry, in string format
+    // Note: `getTraceback` call below invokes `torch::symbolize`, which may
+    // need to acquire the GIL. In order for watchdog to be block-free, we make
+    // the call with std::async.
+    auto future = std::async(
+        std::launch::async, [&entryVal]() { return entryVal.getTraceback(); });
+    // Wait for the future to complete or timeout
+    auto status = future.wait_for(std::chrono::seconds(8));
+    if (status == std::future_status::ready) {
+      std::string tracebackStr = future.get();
+      LOG(ERROR) << "Stack trace of the timedout collective operation: \n"
+                 << tracebackStr;
+    } // else, symbolizer probably timed out, we skip logging the stack trace.
+  } else {
+    LOG(ERROR)
+        << "Stack trace of the timedout collective not found, "
+        << "potentially because FlightRecorder is disabled. "
+        << "You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.";
+  }
+
   std::exception_ptr exception_ptr =
       std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exceptionMsg));
   setException(exception_ptr);
@@ -1243,8 +1271,8 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
     try {
       bool result = fut.get();
       if (result) {
-        LOG(INFO) << logPrefix()
-                  << "future is successfully executed for: " << futDescription;
+        VLOG(2) << logPrefix()
+                << "future is successfully executed for: " << futDescription;
         if (log) {
           data.strings["status"] = "SUCCESS";
         }
@@ -1311,8 +1339,9 @@ void ProcessGroupNCCL::abortCommsFromMap(
       // TODO: fix `getIndexFromDeviceKey` or fix `DeviceKey`
       gpuGuard.set_index(deviceIndex);
     }
-    LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
-              << ncclComm->repr() << " on CUDA device: " << devName;
+
+    VLOG(2) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
+            << ncclComm->repr() << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
     // Note that we don't remove the aborted communicators from the
     // cache. The reason is that if we do remove the communicator
@@ -1324,8 +1353,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
-    LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroyed "
-              << " communicator on CUDA device: " << devName;
+    VLOG(2) << logPrefix() << "ProcessGroupNCCL destroyed "
+            << " communicator on CUDA device: " << devName;
   }
 }
 
@@ -1391,7 +1420,7 @@ void ProcessGroupNCCL::shutdown() {
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
+  VLOG(2) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
   if (!terminateProcessGroup_.load()) {
     if (rank_ % localDeviceCount_ == 0) {
@@ -1413,19 +1442,19 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   if (!blockingWait_) {
     if (ncclCommWatchdogThread_.joinable()) {
       ncclCommWatchdogThread_.join();
-      LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
+      VLOG(2) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
     }
     if (ncclHeartbeatMonitorThread_.joinable()) {
       ncclHeartbeatMonitorThread_.join();
-      LOG(INFO) << logPrefix()
-                << "ProcessGroupNCCL heart beat monitor thread joined.";
+      VLOG(2) << logPrefix()
+              << "ProcessGroupNCCL heart beat monitor thread joined.";
     }
   }
 #endif
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
-    LOG(INFO) << logPrefix()
-              << "ProcessGroupNCCL onCompletionHookThread thread joined.";
+    VLOG(2) << logPrefix()
+            << "ProcessGroupNCCL onCompletionHookThread thread joined.";
   }
 }
 
@@ -1673,7 +1702,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           << "Could not acquire GIL within 300 ms on exit, possible GIL induced hang";
     }
   } else {
-    LOG(INFO)
+    VLOG(2)
         << logPrefix()
         << "GIL checker was not registered, perhaps this is a no-python build?";
   }
@@ -1748,7 +1777,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
   } catch (std::exception& e) {
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
-      LOG(INFO)
+      VLOG(2)
           << logPrefix()
           << "main process destroyed cuda before watchdog loop exited, terminating watchdog."
           << " (Watchdog caught exception: " << e.what();
@@ -2481,9 +2510,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
       globalRankStride, // globalRankStride
       size_); // worldSize
 
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->repr()
-            << " on CUDA device: " << static_cast<int>(deviceIndex);
+  VLOG(2) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
+          << ncclComm->repr()
+          << " on CUDA device: " << static_cast<int>(deviceIndex);
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
