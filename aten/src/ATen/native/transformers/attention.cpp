@@ -524,35 +524,29 @@ inline void validate_sdpa_input(
 // the math and memory efficient attn_mask implementation
 //  Args:
 //    attn_mask: attn_mask of shape (B, L, S) or (L, S) or (B, N_heads, L, S)
-std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
+std::optional<Tensor> convert_boolean_attn_mask_(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype, double neg_inf) {
   // Pass through
-  if(!attn_mask.has_value()){
+  if(!attn_mask.has_value()) {
     return std::nullopt;
   }
   // Convert boolean mask to additive mask; need to invert mask to indicate what
   // to mask *out*.
   if (attn_mask->dtype() == at::kBool) {
-    return at::where(attn_mask->logical_not(), -std::numeric_limits<double>::infinity(), at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
+    return at::where(attn_mask->logical_not(), neg_inf, at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
   }
   // Otherwise, attn_mask represents an additive attention tensor
   return attn_mask;
 }
 
+std::optional<Tensor> convert_boolean_attn_mask(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
+  return convert_boolean_attn_mask_(attn_mask, dtype, -std::numeric_limits<double>::infinity());
+}
+
 // alternate version to workaround -inf issue with cuDNN
 // TODO(eqy): delete this when cuDNN -inf issue is resolved
 std::optional<Tensor> convert_boolean_attn_mask_cudnn(const std::optional<Tensor>& attn_mask, caffe2::TypeMeta dtype) {
-  // Pass through
-  if(!attn_mask.has_value()){
-    return std::nullopt;
-  }
-  // Convert boolean mask to additive mask; need to invert mask to indicate what
-  // to mask *out*.
-  if (attn_mask->dtype() == at::kBool) {
-    // TODO Use the max type of the input and output
-    return at::where(attn_mask->logical_not(), -65504.0, at::scalar_tensor(0.0, at::TensorOptions().dtype(dtype).device(attn_mask->device())));
-  }
-  // Otherwise, attn_mask represents an additive attention tensor
-  return attn_mask;
+  // TODO Use the max type of the input and output
+  return convert_boolean_attn_mask_(attn_mask, dtype, -65504.0);
 }
 
 // Memory Efficient Attention requires a padded attn mask bias
