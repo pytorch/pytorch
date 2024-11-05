@@ -96,6 +96,7 @@ class CapabilityBasedPartitioner:
             int, Partition
         ] = {}  # mapping from partition_id to partition
         new_partition_id = itertools.count()
+        invalid_partition_id = -1
 
         # try to merge partition other_id into partition self_id
         # merge only happens if the end graph doesn't contain cyclic dependency
@@ -207,13 +208,18 @@ class CapabilityBasedPartitioner:
             #
             # I don't see a need to add a knob to disable horizontal fusion yet, we can short-cut
             # the fusion by adding an `else` block here to skip horizontal fusion.
-            if self.__is_node_supported(node) and node not in assignment:
-                partition_id = next(new_partition_id)
+            if node not in assignment:
+                partition_id = (
+                    next(new_partition_id)
+                    if self.__is_node_supported(node)
+                    else invalid_partition_id
+                )
                 merge_single_node(node, partition_id)
                 merge_candidates[partition_id] = None
 
             # merge all possible partitions
             merge_candidates.update(dict.fromkeys(partitions_by_id))
+            del merge_candidates[invalid_partition_id]
 
             merge_candidates_list = list(merge_candidates.keys())
             if len(merge_candidates_list) > 1:
@@ -245,6 +251,8 @@ class CapabilityBasedPartitioner:
                         nodes_reassignment[user] = id  # type: ignore[assignment]
         for node, id in nodes_reassignment.items():
             merge_single_node(node, id)
+
+        del partitions_by_id[invalid_partition_id]
 
         # filter out single node partitions
         if not self.allows_single_node_partition:
