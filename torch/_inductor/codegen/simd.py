@@ -1323,14 +1323,6 @@ class SIMDScheduling(BaseScheduling):
             stack = contextlib.ExitStack()
             all_indexing = {}
 
-            # Consider op1 and op2 that both can inplace update a buf. When there is
-            # dependency op1 -> op2, we expect op2 to inplace update buf since op1 has
-            # completed. However, if op1 and op2 are in the same FusedSchedulerNode,
-            # both op1 and op2 will not inplace update buf since scheduler.completed_operations
-            # is updated only if all snodes are processed. Thus we create local_completed_operations
-            # to track completed operations for each snode.
-            local_completed_operations = None
-
             # First pass to collect indexing and decide inplace updates
             for node in node_schedule:
                 if node is DisableReduction:
@@ -1338,18 +1330,13 @@ class SIMDScheduling(BaseScheduling):
                 elif node is EnableReduction:
                     stack.close()
                 else:
-                    if not local_completed_operations:
-                        local_completed_operations = (
-                            node.scheduler.completed_operations.copy()
-                        )
-                    node.decide_inplace_update(local_completed_operations)
+                    node.decide_inplace_update()
                     index_vars = kernel.split_and_set_ranges(node.get_ranges())
                     all_indexing.update(
                         dict.fromkeys(
                             node._body.indexing_from_args(index_vars).values()
                         )
                     )
-                    local_completed_operations.add(node.get_name())
 
             kernel.finalize_indexing(all_indexing.keys())
 

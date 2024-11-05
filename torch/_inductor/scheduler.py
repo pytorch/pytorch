@@ -414,9 +414,7 @@ class BaseSchedulerNode:
     def has_side_effects(self) -> bool:
         return False
 
-    def decide_inplace_update(
-        self, local_completed_operations: Optional[OrderedSet[str]] = None
-    ) -> None:
+    def decide_inplace_update(self) -> None:
         """
         Decide if there should be inplace updates for the node
         and record the decision in the active kernel.
