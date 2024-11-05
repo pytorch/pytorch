@@ -62,6 +62,7 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import (
+    KeyPath,
     keystr,
     PyTree,
     tree_map,
@@ -112,6 +113,7 @@ aten = torch._ops.ops.aten
 CONSTANT_NUMEL_LIMIT = 1
 
 RECURSION_COUNT = 0
+
 
 # Small helper that increments recursion count, and
 # resets it when the object goes out of scope.  Useful
@@ -2120,7 +2122,7 @@ class FakeTensorMode(TorchDispatchMode):
 
                 # check fake/real tensor properies, sizes & output values,
                 # and create new fake vals if mismatched.
-                def _xref_and_maybe_replace_fake_val(path, fake, real):
+                def _xcheck_fake_real(path: KeyPath, fake: object, real: object):
                     if isinstance(fake, torch.Tensor):
                         try:
                             _check_fake_real_tensors(
@@ -2165,13 +2167,16 @@ class FakeTensorMode(TorchDispatchMode):
                             ) from exc
                     return fake
 
-                if (
-                    torch._functorch.config.generate_fake_kernels_from_real_mismatches
-                    and tree_structure(fake_out) != tree_structure(real_out)
-                ):
-                    fake_out = tree_map(lambda x: _make_fake(self, func, x), real_out)
-                else:
-                    fake_out = tree_map_with_path(_xref_and_maybe_replace_fake_val, fake_out, real_out)
+                try:
+                    fake_out = tree_map_with_path(_xcheck_fake_real, fake_out, real_out)
+                except ValueError as exc:
+                    if (
+                        torch._functorch.config.generate_fake_kernels_from_real_mismatches
+                        and tree_structure(fake_out) != tree_structure(real_out)
+                    ):
+                        fake_out = tree_map(lambda x: _make_fake(self, func, x), real_out)
+                    else:
+                        raise exc
 
                 if (
                     not isinstance(fake_out, Tensor)
@@ -2734,7 +2739,7 @@ def dump_cache_stats() -> None:
             log.info("    %-*s %s", width + 1, f"{k}:", v)
 
 
-def _make_fake(mode: FakeTensorMode, op: torch._ops.Overload, real_out: torch.Tensor) -> torch.Tensor:
+def _make_fake(mode: FakeTensorMode, op: torch._ops.OpOverload, real_out: torch.Tensor) -> torch.Tensor:
     def unsupported(reason: str) -> None:
         raise RuntimeError(
             f"propagate_real_tensors: we cannot infer a Fake kernel "
@@ -2807,5 +2812,5 @@ def inferred_fake_kernel_from_real_out(
             f"non-Tensors. Got {op._schema}"
         )
 
-    fake_flat_out = [_make_fake(t) for t in real_flat_out]
+    fake_flat_out = [_make_fake(mode, op, t) for t in real_flat_out]
     return pytree.tree_unflatten(fake_flat_out, spec)

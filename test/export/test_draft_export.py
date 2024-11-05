@@ -305,7 +305,6 @@ class TestDraftExport(TestCase):
                 export(mod, inputs)
 
         ep, _ = draft_export(mod, inputs)
-        breakpoint()
 
 if __name__ == "__main__":
     run_tests()
