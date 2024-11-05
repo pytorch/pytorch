@@ -3199,7 +3199,7 @@ elements of :attr:`input` in the dimension :attr:`dim`.
 For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
 
     .. math::
-        \text{{logcumsumexp}}(x)_{{ij}} = \log \sum\limits_{{j=0}}^{{i}} \exp(x_{{ij}})
+        \text{{logcumsumexp}}(x)_{{ij}} = \log \sum\limits_{{k=0}}^{{j}} \exp(x_{{ik}})
 
 Args:
     {input}
