@@ -251,6 +251,13 @@ def register_ops_with_aoti_compile(ns, op_set, dispatch_key, torch_compile_op_li
                 continue
 
 
+def get_divisible_by_16(cfg):
+    # attribute was renamed between triton versions, from "divisible_by_16" to "divisibility_16"
+    if hasattr(cfg, "divisibility_16"):
+        return cfg.divisibility_16
+    return cfg.divisible_by_16
+
+
 class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
@@ -11870,8 +11877,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertEqual(len(kernels), 2)
 
             for kernel_id, expected in expected_divisible.items():
-                divisible_by_16 = (
-                    kernels[kernel_id].triton_meta["configs"][0].divisible_by_16
+                divisible_by_16 = get_divisible_by_16(
+                    kernels[kernel_id].triton_meta["configs"][0]
                 )
                 self.assertEqual(divisible_by_16, expected)
 
@@ -11881,12 +11888,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
         def test_codegen_config_option_dont_assume_alignment(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x.sin() + x.cos()
-
-            def get_divisible_by_16(cfg):
-                # attribute was renamed between triton versions, from "divisible_by_16" to "divisibility_16"
-                if hasattr(cfg, "divisibility_16"):
-                    return cfg.divisibility_16
-                return cfg.divisible_by_16
 
             # We want code that assumes alignment if the initial input is 16-byte aligned
             for offset in (0, 1, 2, 3, 4):
