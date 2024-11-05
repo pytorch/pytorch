@@ -806,7 +806,7 @@ def _interpolate_warning(interpolate_mode):
 
 
 def _unsqueeze_helper(g: jit_utils.GraphContext, input, axes_i):
-    if len(axes_i)==0:
+    if len(axes_i) == 0:
         # unnecessary unsqueeze if axes length==0
         return input
     elif _is_constant(axes_i[0]):
