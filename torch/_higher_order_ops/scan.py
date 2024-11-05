@@ -191,7 +191,7 @@ doesn't match the length of the pytree of the init {len(leaves_init)}"
             combine_fn, leaves_init, leaves_xs, dim, reverse, additional_inputs=[]
         )
 
-    if not torch.compiler.is_compiling():
+    if not torch._dynamo.is_compiling():
         from torch._dynamo.backends.debugging import (
             make_eager_backend_with_torch_function_mode,
         )
