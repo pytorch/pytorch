@@ -5717,9 +5717,9 @@ class ResizeStorageBytes(MutatingFirstArgExternKernel):
 
 class SetSourceTensorKernel(ExternKernelAlloc):
     def __init__(self, self_tensor, storage_tensor) -> None:  # type: ignore[no-untyped-def]
-        self_tensor.freeze_layout()
+        storage_tensor.freeze_layout()
         super().__init__(
-            self_tensor.get_layout(),
+            storage_tensor.get_layout(),
             [self_tensor, storage_tensor],
             python_kernel_name="torch.ops.aten.set_.source_Tensor",
             op_overload=torch.ops.aten.set_.source_Tensor,
