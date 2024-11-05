@@ -21,7 +21,8 @@ if TEST_WITH_DEV_DBG_ASAN:
 class InnerModel(Module):
     def __init__(self, device):
         super().__init__()
-        self.layers = Sequential(FSDP(Linear(5, 5), device_id=device)) if TEST_HPU else Sequential(FSDP(Linear(5, 5)))
+        device_id = "hpu:0" if TEST_HPU else torch.cuda.current_device()
+        self.layers = Sequential(FSDP(Linear(5, 5), device_id=device_id))
     def forward(self, x):
         return self.layers(x)
 class TestMultipleWrapping(FSDPTest):
@@ -33,27 +34,24 @@ class TestMultipleWrapping(FSDPTest):
         contains nested FSDP wrappers within the module.
         """
         inner_model = InnerModel(device)
-        model = FSDP(inner_model).to(device if TEST_HPU else self.rank) #cuda()
-        #model = FSDP(inner_model, device_id=device if TEST_HPU else self.rank)
+        device_id = device if TEST_HPU else self.rank
+        model = FSDP(inner_model).to(device_id)
         optim = SGD(model.parameters(), lr=0.1)
         for i in range(3):
-            input = torch.rand((1, 5), dtype=torch.float).to(device if TEST_HPU else self.rank)
-            #input = torch.rand((1, 5), dtype=torch.float).to(device if TEST_HPU else self.rank)
+            input = torch.rand((1, 5), dtype=torch.float).to(device_id)
             input.requires_grad = True
             output = model(input)
             output.sum().backward()
             optim.step()
             optim.zero_grad()
-        input = torch.rand((1, 5), dtype=torch.float).to(device if TEST_HPU else self.rank)
-        #input = torch.rand((1, 5), dtype=torch.float).to(device if TEST_HPU else self.rank)
+        input = torch.rand((1, 5), dtype=torch.float).to(device_id)
         output = model(input)
         # second time to rewrap the inner model
         #rewrapped_model = FSDP(inner_model, device_id=device)
-        rewrapped_model = FSDP(inner_model).to(device if TEST_HPU else self.rank)
+        rewrapped_model = FSDP(inner_model).to(device_id)
         rewrapped_output = rewrapped_model(input)
         self.assertEqual(output, rewrapped_output)
 devices = ("hpu" if TEST_HPU else "cuda")
 instantiate_device_type_tests(TestMultipleWrapping, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
-
