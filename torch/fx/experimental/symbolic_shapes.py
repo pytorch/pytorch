@@ -380,6 +380,21 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
         return expr
 
 
+def _guard_sizes_oblivious(
+    lhs_sizes: Sequence[Union[torch.SymInt, bool]],
+    rhs_sizes: Sequence[Union[torch.SymInt, bool]],
+) -> bool:
+    """
+    Leverage guard_size_oblivious to compare if two lists of int/symint are equal.
+    Useful to compare sizes, strides etc.
+    """
+
+    return len(lhs_sizes) == len(rhs_sizes) and all(
+        guard_size_oblivious(lhs_item == rhs_item)
+        for lhs_item, rhs_item in zip(lhs_sizes, rhs_sizes)
+    )
+
+
 def check_consistent(new: _T, old: _T) -> None:
     """
     Test that two "meta" values (typically either Tensor or SymInt) have
@@ -5348,8 +5363,8 @@ class ShapeEnv:
         could then potentially guard on.
 
         Use compute_hint == True if you are trying to compute a non-binding
-        hint for the particular hint values of backed SymInts, e.g., if
-        s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
+        hint for the particular hint values of backed and unbacked SymInts,
+        e.g., if s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
         """
 
         # axioms with compute hint NYE
@@ -5358,7 +5373,7 @@ class ShapeEnv:
         expr = self.simplify(expr)
 
         if compute_hint:
-            expr = expr.xreplace(self.var_to_val)
+            expr = expr.xreplace(self.var_to_val).xreplace(self.unbacked_var_to_val)
 
         expr = canonicalize_bool_expr(expr)
 
@@ -6150,6 +6165,8 @@ class ShapeEnv:
         #   1. 'translation_validation' is set
         #   2. the corresponding 'fx_node' is not 'None'
         #   3. the guard should not be suppressed
+        #   4. the guard doesn't contain backed symfloat symbols
+        #      since z3 can't handle floats
         #
         # If all of the above check, we create an FX node representing the
         # actual expression to be guarded.
@@ -6160,6 +6177,7 @@ class ShapeEnv:
             and fx_node is not None
             and not self._suppress_guards_tls()
             and not size_oblivious
+            and not any(symbol_is_type(s, SymT.FLOAT) for s in orig_expr.free_symbols)
         ):
             # TODO: does this even worked with unbacked :think:
             concrete_val = compute_concrete_val()
