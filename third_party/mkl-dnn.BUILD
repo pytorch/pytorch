@@ -85,7 +85,7 @@ template_rule(
     name = "include_dnnl_version_hash",
     src = "include/oneapi/dnnl/dnnl_version_hash.h.in",
     out = "include/oneapi/dnnl/dnnl_version_hash.h",
-    substitutions = {"@DNNL_VERSION_HASH@": "1794c3452f1bf814339fcffe521d5984e6e64b94",}
+    substitutions = {"@DNNL_VERSION_HASH@": "7f476cbbdbb171e4a394f66fd83eb7a86755ab04",}
 )
 
 cc_library(
