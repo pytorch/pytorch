@@ -193,14 +193,14 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
   at::Tensor v_t = v_padded.permute({0,2,1,3});
   at::Tensor output_t = out.permute({0,2,1,3});
 
-  at::Tensor M = at::empty({batch_size * num_heads, seqlen_q}, at::dtype(at::kFloat).device(q.device())); // aka softmax_lse
+  auto opts = q.options();
+  at::Tensor M = at::empty({batch_size * num_heads, seqlen_q}, opts.dtype(at::kFloat)); // aka softmax_lse
 
   at::Tensor softmax_fa_t;
   if (return_softmax) {
-    softmax_fa_t = at::empty({batch_size, num_heads, seqlen_q, seqlen_k},
-                             at::dtype(q.dtype()).device(q.device()));
+    softmax_fa_t = at::empty({batch_size, num_heads, seqlen_q, seqlen_k}, opts);
   } else {
-    softmax_fa_t = at::empty({ 0, 0, 0, 0 }, at::dtype(q.dtype()).device(q.device()));
+    softmax_fa_t = at::empty({ 0, 0, 0, 0 }, opts);
   }
 
   hipError_t err; // TODO: Error handling
@@ -232,7 +232,7 @@ mha_fwd_aot(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x 
                  is_causal,
                  stream);
 
-  return {out, q_padded, k_padded, v_padded, M, seed_t, offset_t, softmax_fa_t};
+  return {out, q_padded, k_padded, v_padded, M.view({batch_size, num_heads, seqlen_q}), seed_t, offset_t, softmax_fa_t};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -517,8 +517,8 @@ mha_bwd_aot(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x hea
   at::Tensor dv_t = dv.permute({0,2,1,3});
   at::Tensor dout_t = dout.permute({0,2,1,3});
 
-  at::Tensor softmax_lse_cont = softmax_lse.contiguous();
-  at::Tensor delta = at::empty_like(softmax_lse).contiguous();
+  at::Tensor softmax_lse_cont = softmax_lse.view({batch_size * num_heads, seqlen_q}).contiguous();
+  at::Tensor delta = at::empty_like(softmax_lse_cont).contiguous();
 
   int d_head = head_size_og;
   hipError_t err; // TODO: Error handling
