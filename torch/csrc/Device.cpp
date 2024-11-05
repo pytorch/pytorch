@@ -219,14 +219,12 @@ typedef PyObject* (*getter)(PyObject*, void*);
 
 // NB: If you edit these properties/methods, update torch/_C/__init__.pyi.in
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static struct PyGetSetDef THPDevice_properties[] = {
+static const std::initializer_list<PyGetSetDef> THPDevice_properties = {
     {"type", (getter)THPDevice_type, nullptr, nullptr, nullptr},
     {"index", (getter)THPDevice_index, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
-static PyMethodDef THPDevice_methods[] = {
+static const std::initializer_list<PyMethodDef> THPDevice_methods = {
     {"__reduce__", THPDevice_reduce, METH_NOARGS, nullptr},
     {"__enter__", THPDevice_enter, METH_NOARGS, nullptr},
     {"__exit__", THPDevice_exit, METH_VARARGS, nullptr},
@@ -266,9 +264,11 @@ PyTypeObject THPDeviceType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPDevice_methods, /* tp_methods */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyMethodDef*>(std::data(THPDevice_methods)), /* tp_methods */
     nullptr, /* tp_members */
-    THPDevice_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyGetSetDef*>(std::data(THPDevice_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */

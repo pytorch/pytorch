@@ -13,16 +13,19 @@ using namespace metal;
 // The following solution uses sqrt directly for most cases, and would only
 // special handle it if there is indeed precision loss.
 inline int64_t resolve_root_int(
-    int64_t b, int64_t cX4, int64_t x, int32_t sign) {
-  int64_t bXb_cX4 = b*b - cX4;
+    int64_t b,
+    int64_t cX4,
+    int64_t x,
+    int32_t sign) {
+  int64_t bXb_cX4 = b * b - cX4;
   // precision loss could occur here when casting int64_t (63 bits
   // precision) to float (23 bits precision)
   float sr = sqrt((float)bXb_cX4);
-  int64_t res = floor((-b + sign * sr)/2);
+  int64_t res = floor((-b + sign * sr) / 2);
 
   // have to cast double to int64_t, otherwise it would only compare up to the
   // precision of a double variable, ignoring the precision loss
-  if (bXb_cX4 != (int64_t) (sr * sr)) {
+  if (bXb_cX4 != (int64_t)(sr * sr)) {
     // handle precision loss by using binary search
     int64_t llsr = floor(sr);
     // Use the following math to reduce search space.
@@ -93,10 +96,13 @@ inline int64_t resolve_root_int(
 //                   row = floor((-b + sqrt(b^2 - 4c)) / 2)
 //                   col = x - (f + f + row - 1) * row / 2
 inline void get_coordinate_in_tril_trapezoid(
-    int64_t f, int64_t x, thread int64_t & row, thread int64_t & col) {
+    int64_t f,
+    int64_t x,
+    thread int64_t& row,
+    thread int64_t& col) {
   f <<= 1; // all statements use 2f, so only calculate it once here.
   auto b = f - 1;
-  auto cX4 = - (x << 3); // 4 * c = 4 * (-2x) = -8x;
+  auto cX4 = -(x << 3); // 4 * c = 4 * (-2x) = -8x;
   row = resolve_root_int(b, cX4, x, 1);
   col = x - ((f + row - 1) * row >> 1);
 }
@@ -136,7 +142,10 @@ inline void get_coordinate_in_tril_trapezoid(
 //                   row = floor((-b - sqrt(b^2 - 4c)) / 2)
 //                   col = x - (f + f - row + 1) * row / 2
 inline void get_coordinate_in_triu_trapezoid(
-    int64_t f, int64_t x, thread int64_t & row, thread int64_t & col) {
+    int64_t f,
+    int64_t x,
+    thread int64_t& row,
+    thread int64_t& col) {
   f <<= 1; // all statements use 2f, so only calculate it once here.
   auto b = -1 - f;
   auto cX4 = x << 3; // 4 * c = 4 * (2x) = 8x;
@@ -145,13 +154,14 @@ inline void get_coordinate_in_triu_trapezoid(
 }
 
 template <typename scalar_t>
-kernel void tril_indices(device scalar_t * tensor,
-                         constant int64_t& row_offset,
-                         constant int64_t& m_first_row,
-                         constant int64_t& col,
-                         constant int64_t& trapezoid_size,
-                         constant int64_t& tril_size,
-                         uint linear_index [[thread_position_in_grid]]) {
+kernel void tril_indices(
+    device scalar_t* tensor,
+    constant int64_t& row_offset,
+    constant int64_t& m_first_row,
+    constant int64_t& col,
+    constant int64_t& trapezoid_size,
+    constant int64_t& tril_size,
+    uint linear_index [[thread_position_in_grid]]) {
   int64_t r, c;
   if (linear_index < trapezoid_size) {
     // the coordinate is within the top trapezoid
@@ -170,13 +180,14 @@ kernel void tril_indices(device scalar_t * tensor,
 }
 
 template <typename scalar_t>
-kernel void triu_indices(device scalar_t * tensor,
-                         constant int64_t& col_offset,
-                         constant int64_t& m_first_row,
-                         constant int64_t& col,
-                         constant int64_t& rectangle_size,
-                         constant int64_t& triu_size,
-                         uint linear_index [[thread_position_in_grid]]) {
+kernel void triu_indices(
+    device scalar_t* tensor,
+    constant int64_t& col_offset,
+    constant int64_t& m_first_row,
+    constant int64_t& col,
+    constant int64_t& rectangle_size,
+    constant int64_t& triu_size,
+    uint linear_index [[thread_position_in_grid]]) {
   int64_t r, c;
   if (linear_index < rectangle_size) {
     // the coordinate is within the top rectangle
@@ -185,7 +196,7 @@ kernel void triu_indices(device scalar_t * tensor,
   } else {
     // the coordinate falls in the bottom trapezoid
     get_coordinate_in_triu_trapezoid(
-      m_first_row, linear_index - rectangle_size, r, c);
+        m_first_row, linear_index - rectangle_size, r, c);
     r += rectangle_size / col;
   }
 
@@ -196,14 +207,14 @@ kernel void triu_indices(device scalar_t * tensor,
 
 #define INSTANTIATE_TRI_INDICES(NAME, DTYPE)                   \
   template [[host_name(#NAME "_indices_" #DTYPE)]] kernel void \
-  NAME ## _indices<DTYPE>(                                     \
-      device DTYPE * tensor,                                   \
-      constant int64_t& col_offset,                            \
-      constant int64_t& m_first_row,                           \
-      constant int64_t& col,                                   \
-      constant int64_t& rectangle_size,                        \
-      constant int64_t& triu_size,                             \
-      uint linear_index [[thread_position_in_grid]])
+      NAME##_indices<DTYPE>(                                   \
+          device DTYPE * tensor,                               \
+          constant int64_t & col_offset,                       \
+          constant int64_t & m_first_row,                      \
+          constant int64_t & col,                              \
+          constant int64_t & rectangle_size,                   \
+          constant int64_t & triu_size,                        \
+          uint linear_index [[thread_position_in_grid]])
 
 INSTANTIATE_TRI_INDICES(triu, long);
 INSTANTIATE_TRI_INDICES(triu, int);
