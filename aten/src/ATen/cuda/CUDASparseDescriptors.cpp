@@ -8,6 +8,7 @@
 namespace at::cuda::sparse {
 
 cusparseStatus_t destroyConstDnMat(const cusparseDnMatDescr* dnMatDescr) {
+  // NOLINTNEXTLINE(*const-cast)
   return cusparseDestroyDnMat(const_cast<cusparseDnMatDescr*>(dnMatDescr));
 }
 
@@ -83,6 +84,7 @@ cusparseDnMatDescr_t createRawDnMatDescriptor(const Tensor& input, int64_t batch
 #endif
 
   auto batch_stride = ndim > 2 && batch_offset >= 0 ? input_strides[ndim - 3] : 0;
+  // NOLINTNEXTLINE(*const-cast)
   void* data_ptr = is_const ? const_cast<void*>(input.const_data_ptr()) : input.data_ptr();
   void* values_ptr = static_cast<char*>(data_ptr) +
       batch_offset * batch_stride * input.itemsize();
