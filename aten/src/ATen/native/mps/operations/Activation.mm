@@ -1428,13 +1428,12 @@ TORCH_IMPL_FUNC(softshrink_out_mps)
                                                                                         name:nil]
                                     falsePredicateTensor:outputTensor
                                                     name:nil];
-      MPSGraphTensor *isNanTensor = [mpsGraph isNaNWithTensor:inputTensor 
-                                                   name:nil];
+      MPSGraphTensor* isNanTensor = [mpsGraph isNaNWithTensor:inputTensor name:nil];
 
       outputTensor = [mpsGraph selectWithPredicateTensor:isNanTensor
-                                  truePredicateTensor:inputTensor
-                                  falsePredicateTensor:outputTensor
-                                                  name:nil];
+                                     truePredicateTensor:inputTensor
+                                    falsePredicateTensor:outputTensor
+                                                    name:nil];
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
