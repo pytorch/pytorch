@@ -146,7 +146,7 @@ class TensorVariable(VariableTracker):
         self.device = device
         self.layout = layout
         self.ndim = ndim
-        self.size = size
+        self._size = size  # this is accessed as a property for validation
         self.stride = stride
         self.requires_grad = requires_grad
         self.is_quantized = is_quantized
@@ -502,6 +502,11 @@ class TensorVariable(VariableTracker):
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
         ]
+
+    @property
+    def size(self):
+        assert self._size, "accessing None size in TensorVariable"
+        return self._size
 
     def _strict_mode_banned_ops(self):
         return torch._dynamo.config._autograd_backward_strict_mode_banned_ops
