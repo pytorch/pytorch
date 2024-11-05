@@ -17,8 +17,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_WITH_DEV_DBG_ASAN
 
-device_id = "hpu:0"
-device_type = "hpu"
 
 NUM_ITERS = 2
 DECODER_PARAM_FQNS = [
@@ -74,6 +72,8 @@ class TestBackwardPrefetch(FSDPTest):
     def world_size(self):
         return 2
     def _dist_train(self, backward_prefetch=BackwardPrefetch.BACKWARD_PRE):
+        device_type = "hpu" if TEST_HPU else "cuda"
+        device_id = "hpu:0" if TEST_HPU else torch.cuda.current_device()
         rank = self.rank
         orig_get_handle_to_prefetch = _get_handle_to_prefetch
         torch.manual_seed(0)
@@ -81,8 +81,8 @@ class TestBackwardPrefetch(FSDPTest):
             {nn.TransformerEncoderLayer, nn.TransformerDecoderLayer}
         )
         model = FSDP(
-            nn.Transformer(d_model=1024, nhead=8, device=device_type if TEST_HPU else "cuda"),
-            device_id=device_id if TEST_HPU else torch.cuda.current_device(),
+            nn.Transformer(d_model=1024, nhead=8, device=device_type),
+            device_id=device_id,
             auto_wrap_policy=policy,
             use_orig_params=True,
             backward_prefetch=backward_prefetch,
@@ -90,8 +90,8 @@ class TestBackwardPrefetch(FSDPTest):
         optim = torch.optim.SGD(model.parameters(), lr=1e-2)
         # prepare input
         torch.manual_seed(rank + 1)
-        src = torch.randn((10, 1, 1024), device=device_type if TEST_HPU else "cuda")
-        tgt = torch.randn((20, 1, 1024), device=device_type if TEST_HPU else "cuda")
+        src = torch.randn((10, 1, 1024), device=device_type)
+        tgt = torch.randn((20, 1, 1024), device=device_type)
         # monkey patch
         all_handle_fqns: List[List[str]] = []
         def patched_get_handle_to_prefetch(*args, **kwargs):
