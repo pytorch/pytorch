@@ -7,6 +7,7 @@ import itertools
 import logging
 import textwrap
 import traceback
+import typing
 from contextlib import nullcontext
 from enum import Enum
 from functools import partial
@@ -23,12 +24,13 @@ from typing import (
     Optional,
     overload,
     Sequence,
+    Set,
     Tuple,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias
+from typing_extensions import Never, TypeAlias
 from unittest.mock import patch
 
 import sympy
@@ -68,6 +70,7 @@ from torch.utils._sympy.symbol import SymT
 from . import config, dependencies
 from .codegen.common import BackendFeature, index_prevent_reordering
 from .dependencies import (
+    Dep,
     extract_free_unbacked_symbols,
     extract_input_node_reduction_ranges,
     extract_read_writes,
@@ -99,13 +102,24 @@ from .virtualized import ops, OpsValue, V
 
 
 if TYPE_CHECKING:
+    from torch.fx.node import Node
+
+    from .codegen.cuda.cuda_template import CUDATemplate
     from .graph import GraphLowering
+    from .utils import IndentedBuffer
+
+else:
+    CUDATemplate: TypeAlias = object
+
 
 _T = TypeVar("_T")
 _U = TypeVar("_U")
 _V = TypeVar("_V")
 
 _IntLike: TypeAlias = Union[int, Expr]
+_NumLike: TypeAlias = Union[int, float, Expr]
+
+_AnyLayout: TypeAlias = Union["Layout", "MultiOutputLayout", "NoneLayout"]
 
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
@@ -300,7 +314,7 @@ def ir_node_to_tensor(
     size = [shape_fn(s) for s in x.get_size()]
     stride: StrideType
     if is_storage_and_layout(x):
-        stride = [shape_fn(s) for s in x.get_layout().stride]
+        stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[union-attr]
     else:
         stride = FlexibleLayout.contiguous_strides(size)
     dtype = x.get_dtype()
@@ -351,9 +365,7 @@ class IRNode:
 
     @staticmethod
     @contextlib.contextmanager
-    def current_origins(
-        origins: OrderedSet[torch.fx.Node],
-    ) -> Generator[None, None, None]:
+    def current_origins(origins: OrderedSet[Node]) -> Generator[None, None, None]:
         old = IRNode._current_origins
         IRNode._current_origins = old | origins
         try:
@@ -386,15 +398,17 @@ class IRNode:
     def get_defining_op(self) -> Optional[Operation]:
         raise NotImplementedError
 
-    def common_repr(self, shorten=True):  # type: ignore[no-untyped-def]
+    def common_repr(self, shorten: bool = True) -> Sequence[str]:
         origins = f"origins={getattr(self, 'origins', '')}"
         if shorten and len(origins) > 64:
             # this can get *very* long
             origins = f"{origins[:61]}..."
         return [origins]
 
-    def str_helper(self, lines, shorten=True, multiline=True) -> str:  # type: ignore[no-untyped-def]
-        lines = lines + self.common_repr(shorten)
+    def str_helper(
+        self, lines: Sequence[object], shorten: bool = True, multiline: bool = True
+    ) -> str:
+        lines = list(lines) + list(self.common_repr(shorten))
         lines = list(map(str, lines))
         if multiline:
             new_lines = indent(",\n".join(lines))
@@ -405,23 +419,23 @@ class IRNode:
     def get_dtype(self) -> torch.dtype:
         return self.dtype
 
-    def get_layout(self):  # type: ignore[no-untyped-def]
+    def get_layout(self) -> _AnyLayout:
         raise NotImplementedError(f"get_layout() is not implemented by {type(self)}!")
 
-    def get_size(self):  # type: ignore[no-untyped-def]
+    def get_size(self) -> Sequence[_IntLike]:
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
 
     @property
-    def shape(self):  # type: ignore[no-untyped-def]
+    def shape(self) -> Union[_IntLike, sympy.Rel, Sequence[_IntLike]]:
         return self.get_size()
 
-    def get_numel(self):  # type: ignore[no-untyped-def]
+    def get_numel(self) -> Expr:
         return sympy_product(self.get_size())
 
-    def is_zero_elements(self):  # type: ignore[no-untyped-def]
+    def is_zero_elements(self) -> bool:
         return V.graph.sizevars.is_expr_static_and_true(sympy.Eq(self.get_numel(), 0))
 
-    def realize(self):  # type: ignore[no-untyped-def]
+    def realize(self) -> Optional[str]:
         """
         If the IRNode refers to data which has not been materialized (e.g.,
         it is a Pointwise/Reduction that could potentially have more
@@ -439,25 +453,32 @@ class IRNode:
         """
         raise NotImplementedError(f"realize NYI on {type(self)}")
 
-    def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
+    def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         raise NotImplementedError(f"codegen_reference NYI on {type(self)}")
 
     # The abstract method declarations below serve to convince mypy that all IRNode instances have these functions
     # defined, while having no effect at runtime. We cannot create stub implementations here because other parts of
     # the code dynamically check for defined attributes.
     get_device: Callable[[], torch.device]
-    dtype: torch.dtype
     get_name: Callable[[], str]
     get_reads: Callable[[], Any]
     num_reads: Callable[[], int]
     get_stride: Callable[[], Any]
-    get_storage_numel: Callable[[], Any]
+    get_storage_numel: Callable[[], _IntLike]
     has_exceeded_max_reads: Callable[[], bool]
-    make_loader: Callable[[], Callable[[Any], Any]]
-    make_indexer: Callable[[], Callable[[Any], Any]]
-    mark_reuse: Callable[[int], None]
+    make_loader: Callable[[], Callable[[Sequence[_IntLike]], OpsValue]]
+    make_indexer: Callable[[], Callable[[Sequence[_IntLike]], _IntLike]]
     realize_hint: Callable[[], None]
-    get_unbacked_symbol_uses: Callable[[], OrderedSet[sympy.Symbol]]
+    get_unbacked_symbol_uses: Callable[[], OrderedSet[Symbol]]
+
+    if TYPE_CHECKING:
+
+        @property
+        def dtype(self) -> torch.dtype:
+            ...
+
+        def mark_reuse(self, users: int) -> None:
+            ...
 
 
 @ir_dataclass(frozen=False)
@@ -533,16 +554,16 @@ class Operation:
 class Loops(IRNode):
     device: torch.device
     dtype: torch.dtype
-    inner_fn: Callable[..., Any]
-    ranges: List[Expr]
+    inner_fn: Callable[..., OpsValue]
+    ranges: Sequence[_IntLike]
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
         return OrderedSet().union(
             *(free_unbacked_symbols(e) for e in self.ranges),
             self.inner_fn_free_unbacked_symbols(),
         )
 
-    def __str__(self, names=("ranges",)) -> str:  # type: ignore[no-untyped-def]
+    def __str__(self, names: Tuple[str] = ("ranges",)) -> str:
         return self.str_helper(
             [
                 f"'{self.device.type}'",
@@ -558,16 +579,16 @@ class Loops(IRNode):
 
     __repr__ = __str__
 
-    def get_device(self):  # type: ignore[no-untyped-def]
+    def get_device(self) -> torch.device:
         return self.device
 
-    def get_origin_node(self):  # type: ignore[no-untyped-def]
+    def get_origin_node(self) -> Optional[Node]:
         return self.origin_node
 
-    def get_size(self):  # type: ignore[no-untyped-def]
+    def get_size(self) -> Sequence[_IntLike]:
         return self.ranges
 
-    def get_pointwise_size(self):  # type: ignore[no-untyped-def]
+    def get_pointwise_size(self) -> Sequence[_IntLike]:
         return self.ranges
 
     def is_extern(self) -> bool:
@@ -588,7 +609,7 @@ class Loops(IRNode):
         return TensorBox.create(r)
 
     @staticmethod
-    def _index(ranges, prefix=SymT.INDEX):  # type: ignore[no-untyped-def]
+    def _index(ranges: Sequence[_IntLike], prefix: SymT = SymT.INDEX) -> Sequence[Expr]:
         return [
             sympy.S.Zero if s == 1 else sympy_index_symbol_with_prefix(prefix, n)
             for n, s in enumerate(ranges)
@@ -603,37 +624,37 @@ class Loops(IRNode):
             self.inner_fn(*self.inner_fn_args())
             return opcounter.getvalue()
 
-    def inner_fn_args(self):  # type: ignore[no-untyped-def]
+    def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
         return (self._index(self.ranges),)
 
     @cache_on_self
-    def inner_fn_str(self):  # type: ignore[no-untyped-def]
+    def inner_fn_str(self) -> str:
         return V.KernelFormatterHandler.ir_to_string(
             self.inner_fn, *self.inner_fn_args()
         )
 
-    def has_large_inner_fn(self, threshold=None):  # type: ignore[no-untyped-def]
+    def has_large_inner_fn(self, threshold=None) -> bool:  # type: ignore[no-untyped-def]
         if threshold is None:
             threshold = 0
         threshold = max(threshold, config.realize_opcount_threshold)
         return self.inner_fn_opcount().num_ops > threshold
 
-    def inner_fn_free_unbacked_symbols(self):  # type: ignore[no-untyped-def]
+    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
         index = self._index(self.ranges)
         return extract_free_unbacked_symbols(self.inner_fn, index)
 
-    def get_reads(self):  # type: ignore[no-untyped-def]
+    def get_reads(self) -> Set[Dep]:
         with patch.object(FlexibleLayout, "allow_indexing", True):
             if self.get_reduction_type():
                 return extract_read_writes(
                     self.make_loader(),
-                    self.get_size(),
-                    self.get_reduction_size(),
+                    self.get_size(),  # type: ignore[arg-type]
+                    self.get_reduction_size(),  # type: ignore[arg-type]
                 ).reads
             else:
                 return extract_read_writes(
                     self.make_loader(),
-                    self.get_size(),
+                    self.get_size(),  # type: ignore[arg-type]
                 ).reads
 
     def get_read_names(self) -> OrderedSet[str]:
@@ -642,17 +663,17 @@ class Loops(IRNode):
     def num_reads(self):  # type: ignore[no-untyped-def]
         return len(self.inner_fn_opcount().read_buffers)
 
-    def get_reduction_size(self):  # type: ignore[no-untyped-def]
+    def get_reduction_size(self) -> Sequence[_IntLike]:
         raise NotImplementedError(
             f"get_reduction_size() is not implemented by {type(self)}!"
         )
 
-    def get_reduction_type(self):  # type: ignore[no-untyped-def]
+    def get_reduction_type(self) -> Optional[str]:
         raise NotImplementedError(
             f"get_reduction_type() is not implemented by {type(self)}!"
         )
 
-    def constant_to_device(self, device):  # type: ignore[no-untyped-def]
+    def constant_to_device(self, device: torch.device) -> IRNode:
         raise NotImplementedError(
             f"constant_to_device() is not implemented by {type(self)}!"
         )
@@ -667,24 +688,29 @@ def nop_loader_fn(idx: Union[Expr, Sequence[Expr]], *, dtype: torch.dtype) -> Op
 
 @ir_dataclass
 class Pointwise(Loops):
-    def make_loader(self):  # type: ignore[no-untyped-def]
+    def make_loader(self) -> Callable[[Sequence[_IntLike]], OpsValue]:
         # Make zero-element loops into a no-op
         if self.is_zero_elements():
             return partial(nop_loader_fn, dtype=self.dtype)
 
         return self.inner_fn
 
-    def get_reduction_size(self):  # type: ignore[no-untyped-def]
+    def get_reduction_size(self) -> Sequence[_IntLike]:
         return []
 
-    def get_reduction_type(self):  # type: ignore[no-untyped-def]
+    def get_reduction_type(self) -> Optional[str]:
         return None
 
-    def store_output(self, output_name, indexer, vars):  # type: ignore[no-untyped-def]
+    def store_output(
+        self,
+        output_name: Optional[str],
+        indexer: Callable[[Sequence[Expr]], Never],
+        vars: Sequence[Expr],
+    ) -> OpsValue:
         loader = self.make_loader()
         return ops.store(output_name, indexer(vars), loader(vars))
 
-    def constant_to_device(self, device):  # type: ignore[no-untyped-def]
+    def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
@@ -695,10 +721,10 @@ class Pointwise(Loops):
 
 @ir_dataclass
 class Scatter(Pointwise):
-    output_indexer: Callable[[List[Expr]], Expr]
+    output_indexer: Callable[[Sequence[Expr]], Expr]
     scatter_mode: Optional[str] = None
 
-    def constant_to_device(self, device):  # type: ignore[no-untyped-def]
+    def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
@@ -711,7 +737,12 @@ class Scatter(Pointwise):
             scatter_mode=self.scatter_mode,
         )
 
-    def store_output(self, output_name, indexer, vars):  # type: ignore[no-untyped-def]
+    def store_output(
+        self,
+        output_name: Optional[str],
+        indexer: Callable[[Sequence[Expr]], Never],
+        vars: Sequence[Expr],
+    ) -> OpsValue:
         loader = self.make_loader()
         return ops.store(
             output_name,
@@ -812,7 +843,7 @@ def significant_strides_equal(
 
 @ir_dataclass
 class Reduction(Loops):
-    reduction_ranges: List[Expr]
+    reduction_ranges: Sequence[_IntLike]
     reduction_type: str
     # self.dtype represents the dst dtype
     src_dtype: torch.dtype
@@ -826,18 +857,24 @@ class Reduction(Loops):
     def __repr__(self) -> str:  # type: ignore[override]
         return self.__str__()
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
         return super().get_unbacked_symbol_uses() | OrderedSet().union(
             *(free_unbacked_symbols(e) for e in self.reduction_ranges)
         )
 
-    def get_reduction_size(self):  # type: ignore[no-untyped-def]
+    def get_reduction_size(self) -> Sequence[_IntLike]:
         return self.reduction_ranges
 
-    def get_reduction_type(self):  # type: ignore[no-untyped-def]
+    def get_reduction_type(self) -> Optional[str]:
         return self.reduction_type
 
-    def store_reduction(self, output_name, indexer, vars, reduction_vars):  # type: ignore[no-untyped-def]
+    def store_reduction(
+        self,
+        output_name: Optional[str],
+        indexer: Callable[[Sequence[Expr]], Never],
+        vars: Sequence[Expr],
+        reduction_vars: Sequence[Symbol],
+    ) -> OpsValue:
         value = ops.reduction(
             self.dtype,
             self.src_dtype,
@@ -849,17 +886,17 @@ class Reduction(Loops):
     def index_length(self) -> int:
         return len(self.ranges) + len(self.reduction_ranges)
 
-    def inner_fn_args(self):  # type: ignore[no-untyped-def]
+    def inner_fn_args(self) -> Sequence[Sequence[Expr]]:
         index = self._index(self.ranges)
         rindex = self._index(self.reduction_ranges, SymT.RINDEX)
         return (index, rindex)
 
-    def inner_fn_free_unbacked_symbols(self):  # type: ignore[no-untyped-def]
+    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
         index = self._index(self.ranges)
         rindex = self._index(self.reduction_ranges, SymT.RINDEX)
         return extract_free_unbacked_symbols(self.inner_fn, index, rindex)
 
-    def constant_to_device(self, device):  # type: ignore[no-untyped-def]
+    def constant_to_device(self, device: torch.device) -> IRNode:
         """Move this to a given device. Requires that all reads are to constants."""
         loader = self.make_loader()
         loader = patch.object(ConstantBuffer, "override_device", device)(loader)
@@ -875,19 +912,19 @@ class Reduction(Loops):
         )
 
     @staticmethod
-    def num_splits(  # type: ignore[no-untyped-def]  # type: ignore[no-untyped-def]
-        device,
-        dst_dtype,
-        src_dtype,
-        inner_fn,
-        ranges,
-        reduction_ranges,
-        reduction_type,
-        reduction_numel,
+    def num_splits(
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., OpsValue],
+        ranges: Sequence[_IntLike],
+        reduction_ranges: Sequence[_IntLike],
+        reduction_type: str,
+        reduction_numel: Expr,
         input_node: Optional[IRNode] = None,
-    ):
-        def _is_static(x):  # type: ignore[no-untyped-def]
-            return isinstance(x, (int, sympy.Integer))
+    ) -> Tuple[ReductionHint, _IntLike]:
+        def _is_static(x: object) -> bool:
+            return isinstance(x, (int, Integer))
 
         reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
@@ -905,7 +942,9 @@ class Reduction(Loops):
             # We don't support unbacked symints
             return ReductionHint.DEFAULT, 1
 
-        device_interface = get_interface_for_device(get_device_type(device))  # type: ignore[arg-type]
+        dtype = get_device_type(device)
+        assert dtype is not None
+        device_interface = get_interface_for_device(dtype)
         device_properties = device_interface.Worker.get_device_properties(device)
         if get_device_type(device) == "xpu":
             num_sm = device_properties.gpu_subslice_count
@@ -919,7 +958,7 @@ class Reduction(Loops):
         min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
 
-        def inner_reduction_splits(reduction_numel_hint, numel_hint):  # type: ignore[no-untyped-def]
+        def inner_reduction_splits(reduction_numel_hint: _IntLike, numel_hint: _IntLike):  # type: ignore[no-untyped-def]
             if not should_split:
                 return 1
             # do heuristics that's close to eager mode for split inner reduction
@@ -1040,7 +1079,7 @@ class Reduction(Loops):
             reduction_hint=ReductionHint.DEFAULT,
         )
 
-        def get_read_indices(r):  # type: ignore[no-untyped-def]
+        def get_read_indices(r: Reduction) -> Tuple[Sequence[Expr], bool]:
             cb = ComputedBuffer(
                 name=None,
                 layout=FlexibleLayout(
@@ -1054,10 +1093,11 @@ class Reduction(Loops):
             # try finding the full size producer
             # TODO this will fail for something like ((1, N) * (N, 1)).sum()
             # this would also possibly be wrong for producers with the different contiguity but we hope those cases are rare
+            assert read_writes.range_vars is not None
             range_vars = [
                 r
                 for r in read_writes.range_vars
-                if isinstance(r, sympy.Expr) and not isinstance(r, sympy.Number)
+                if isinstance(r, Expr) and not isinstance(r, sympy.Number)
             ]
             indices = []
             changed = False
@@ -1066,9 +1106,9 @@ class Reduction(Loops):
                     indices.append(md.index)
                     if md.name in V.graph.name_to_buffer:
                         buf = V.graph.name_to_buffer[md.name]
-                        original_stride = buf.layout.stride
+                        original_stride = getattr(buf.layout, "stride", None)
                         buf.decide_layout()
-                        if buf.layout.stride != original_stride:
+                        if getattr(buf.layout, "stride", None) != original_stride:
                             changed = True
             return indices, changed
 
@@ -1080,14 +1120,14 @@ class Reduction(Loops):
             # TODO determine splits when all inputs are broadcast
             return ReductionHint.DEFAULT, 1
 
-        (_, reduction_vars), ranges = dependencies.index_vars_squeeze(
-            r.get_size(), r.get_reduction_size()
+        (_, reduction_vars), ranges1 = dependencies.index_vars_squeeze(
+            r.get_size(), r.get_reduction_size()  # type: ignore[arg-type]
         )
         num_outer = 0
         num_inner = 0
         for i in indices:
-            i = V.graph.sizevars.simplify_with_ranges(i, ranges)
-            strides = V.graph.sizevars.stride_hints(i, reduction_vars, ranges.keys())
+            j = V.graph.sizevars.simplify_with_ranges(i, ranges1)
+            strides = V.graph.sizevars.stride_hints(j, reduction_vars, ranges1.keys())
             outer = all(s > 1 for s in strides)
             if outer:
                 num_outer += 1
@@ -1143,32 +1183,33 @@ class Reduction(Loops):
             return fn
 
     @classmethod
-    def create(  # type: ignore[no-untyped-def]
+    def create(
         cls,
         device: torch.device,
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
         inner_fn: Callable[..., Any],
-        ranges: List[Expr],
-        reduction_ranges: List[Expr],
+        ranges: Sequence[Expr],
+        reduction_ranges: Sequence[Expr],
         reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         input_node: Optional[IRNode] = None,
-    ):
+    ) -> TensorBox:
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         if reduction_numel == 0:
             # N.B. This is a hack to generate the literal of the given type
             # Ideally, we should be fixing `def constant` in triton.py
             # but it breaks due to hardcoded dtypes in other places
-            def py_cnst(val):  # type: ignore[no-untyped-def]
-                return (
-                    bool(val)
-                    if dst_dtype == torch.bool
-                    else float(val)
-                    if dst_dtype.is_floating_point
-                    else int(val)
-                )
+            def py_cnst(val: object) -> Union[bool, float, int]:
+                if dst_dtype == torch.bool:
+                    return bool(val)
+                elif dst_dtype.is_floating_point:
+                    assert isinstance(val, typing.SupportsFloat)
+                    return float(val)
+                else:
+                    assert isinstance(val, typing.SupportsInt)
+                    return int(val)
 
             rtypes_to_inits = {
                 "sum": py_cnst(0),
@@ -1182,7 +1223,7 @@ class Reduction(Loops):
                 reduction_type in rtypes_to_inits.keys()
             ), f"{reduction_type} not supported for zero-dimension tensors!"
 
-            def const_fn(index):  # type: ignore[no-untyped-def]
+            def const_fn(index: int) -> OpsValue:
                 return ops.constant(rtypes_to_inits[reduction_type], dst_dtype)
 
             return Pointwise.create(
@@ -1196,12 +1237,12 @@ class Reduction(Loops):
             # this reduction is actually a pointwise op
             if reduction_type in ("argmin", "argmax"):
 
-                def fn(index):  # type: ignore[no-untyped-def]
+                def fn(index: int) -> OpsValue:
                     return ops.constant(0, dst_dtype)
 
             else:
 
-                def fn(index):  # type: ignore[no-untyped-def]
+                def fn(index: int) -> OpsValue:
                     reduction_index = [sympy.S.Zero for _ in reduction_ranges]
                     return inner_fn(index, reduction_index)
 
@@ -1210,7 +1251,7 @@ class Reduction(Loops):
             )
 
         if (
-            isinstance(reduction_numel, sympy.Integer)
+            isinstance(reduction_numel, Integer)
             and V.graph.sizevars.size_hint(reduction_numel)
             < config.unroll_reductions_threshold
             and sympy_product(ranges) != 1
@@ -1288,7 +1329,9 @@ class Reduction(Loops):
         )
 
     @staticmethod
-    def default_accumulator(reduction_type, dtype):  # type: ignore[no-untyped-def]
+    def default_accumulator(
+        reduction_type: str, dtype: torch.dtype
+    ) -> Union[_NumLike, Sequence[_NumLike]]:
         if reduction_type in ("max", "argmax"):
             if is_float_dtype(dtype):
                 return float("-inf")
@@ -1314,14 +1357,16 @@ class Reduction(Loops):
         }[reduction_type]
 
     @staticmethod
-    def default_value(reduction_type, dtype):  # type: ignore[no-untyped-def]
+    def default_value(
+        reduction_type: str, dtype: torch.dtype
+    ) -> Union[_NumLike, Sequence[_NumLike]]:
         if reduction_type == "welford_reduce":
             return 0
         return Reduction.default_accumulator(reduction_type, dtype)
 
     @staticmethod
     def _multilayer_second_step_hint(
-        split: int, numel_hint: int, reduction_hint: ReductionHint
+        split: _IntLike, numel_hint: int, reduction_hint: ReductionHint
     ) -> ReductionHint:
         if split == -1:
             return reduction_hint
@@ -1337,26 +1382,28 @@ class Reduction(Loops):
         return reduction_hint
 
     @classmethod
-    def _multilayer_wrap_loader(  # type: ignore[no-untyped-def]
+    def _multilayer_wrap_loader(
         cls,
-        loader,
-        reduction_ranges,
-        reduction_numel,
-        split,
-        block_size,
-        default,
-    ):
+        loader: Callable[..., OpsValue],
+        reduction_ranges: Sequence[_IntLike],
+        reduction_numel: _IntLike,
+        split: _IntLike,
+        block_size: _IntLike,
+        default: Union[_NumLike, Sequence[_NumLike]],
+    ) -> Callable[..., object]:
         reindex = View.dynamic_reshape_indexer(reduction_ranges, [reduction_numel])
         need_mask = not V.graph.sizevars.is_expr_static_and_true(
             sympy.Eq(reduction_numel % split, 0)
         )
 
-        def wrapper_fn(index, reduction_index):  # type: ignore[no-untyped-def]
+        def wrapper_fn(
+            index: Sequence[Symbol], reduction_index: Sequence[Symbol]
+        ) -> OpsValue:
             (reduction_index,) = reduction_index
             *new_index, reduction_block = index
             indices = block_size * reduction_block + reduction_index
 
-            def body():  # type: ignore[no-untyped-def]
+            def body() -> OpsValue:
                 return loader(new_index, reindex([indices]))
 
             if need_mask:
@@ -1398,20 +1445,20 @@ class Reduction(Loops):
         return wrapper_fn
 
     @classmethod
-    def create_multilayer_helper(  # type: ignore[no-untyped-def]
+    def create_multilayer_helper(
         cls,
         device: torch.device,
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
         wrapper_fn: Callable[..., Any],
-        original_ranges: List[Expr],
-        original_reduction_ranges: List[Expr],
+        original_ranges: Sequence[Expr],
+        original_reduction_ranges: Sequence[Expr],
         new_ranges: List[Expr],
-        new_reduction_ranges: List[Expr],
+        new_reduction_ranges: List[Integer],
         reduction_type: str,
-        split: int,
+        split: _IntLike,
         reduction_hint: ReductionHint,
-    ):
+    ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1437,7 +1484,9 @@ class Reduction(Loops):
         intermediate.realize()
         intermediate_loader = intermediate.make_loader()
 
-        def intermediate_fn(index, reduction_index):  # type: ignore[no-untyped-def]
+        def intermediate_fn(
+            index: Sequence[_IntLike], reduction_index: Sequence[_IntLike]
+        ) -> OpsValue:
             return intermediate_loader([*index, *reduction_index])
 
         numel_hint = V.graph.sizevars.size_hint(sympy_product(original_ranges))
@@ -1460,18 +1509,18 @@ class Reduction(Loops):
         )
 
     @classmethod
-    def create_multilayer(  # type: ignore[no-untyped-def]
+    def create_multilayer(
         cls,
         device: torch.device,
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
         inner_fn: Callable[..., Any],
-        ranges: List[Expr],
-        reduction_ranges: List[Expr],
+        ranges: Sequence[Expr],
+        reduction_ranges: Sequence[Expr],
         reduction_type: str,
-        split: int,
+        split: _IntLike,
         reduction_hint: ReductionHint,
-    ):
+    ) -> TensorBox:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1505,10 +1554,10 @@ class Reduction(Loops):
         dst_dtype: torch.dtype,
         src_dtype: torch.dtype,
         inner_fn: Callable[..., Any],
-        original_ranges: List[Expr],
-        original_reduction_ranges: List[Expr],
-        new_ranges: List[Expr],
-        new_reduction_ranges: List[Expr],
+        original_ranges: Sequence[Expr],
+        original_reduction_ranges: Sequence[Expr],
+        new_ranges: List[Integer],
+        new_reduction_ranges: List[Integer],
         reduction_type: str,
         reduction_hint: ReductionHint,
     ):
@@ -1543,16 +1592,16 @@ class Reduction(Loops):
 class WelfordReduction(Reduction):
     output_index: int
 
-    def __init__(  # type: ignore[no-untyped-def]
+    def __init__(
         self,
-        device,
-        dtype,
-        inner_fns,
-        ranges,
-        reduction_ranges,
-        reduction_type,
-        reduction_hint,
-        output_index,
+        device: torch.device,
+        dtype: torch.dtype,
+        inner_fns: Sequence[Callable[..., Any]],
+        ranges: Sequence[Integer],
+        reduction_ranges: Sequence[Integer],
+        reduction_type: str,
+        reduction_hint: ReductionHint,
+        output_index: int,
     ) -> None:
         if len(inner_fns) == 1:
             loader = inner_fns[0]
@@ -1573,7 +1622,13 @@ class WelfordReduction(Reduction):
         )
         self.output_index = output_index
 
-    def store_reduction(self, output_name, indexer, vars, reduction_vars):  # type: ignore[no-untyped-def]
+    def store_reduction(
+        self,
+        output_name: Optional[str],
+        indexer: Callable[[Sequence[Expr]], Never],
+        vars: Sequence[Expr],
+        reduction_vars: Sequence[Symbol],
+    ) -> OpsValue:
         values = ops.reduction(
             self.dtype,
             self.src_dtype,
@@ -1584,16 +1639,16 @@ class WelfordReduction(Reduction):
         return ops.store_reduction(output_name, indexer(vars), value)
 
     @classmethod
-    def create(  # type: ignore[override, no-untyped-def]
+    def create(  # type: ignore[override]
         cls,
         device: torch.device,
         dtype: torch.dtype,
         inner_fns: Sequence[Callable[..., Any]],
-        ranges: List[Expr],
-        reduction_ranges: List[Expr],
+        ranges: List[Integer],
+        reduction_ranges: List[Integer],
         reduction_type: str,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
-    ):
+    ) -> Sequence[TensorBox]:
         assert reduction_type in ("welford_reduce", "welford_combine")
 
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
@@ -1639,7 +1694,7 @@ class WelfordReduction(Reduction):
 
         # TODO: Unrolled reduction
         # if (
-        #     isinstance(reduction_numel, sympy.Integer)
+        #     isinstance(reduction_numel, Integer)
         #     and V.graph.sizevars.size_hint(reduction_numel)
         #     < config.unroll_reductions_threshold
         #     and sympy_product(ranges) != 1
@@ -1702,21 +1757,23 @@ class WelfordReduction(Reduction):
         return results
 
     @staticmethod
-    def default_value(reduction_type, dtype):  # type: ignore[no-untyped-def]
+    def default_value(
+        reduction_type: str, dtype: torch.dtype
+    ) -> Union[_NumLike, Sequence[_NumLike]]:
         return (0, 0, 0)
 
     @classmethod
-    def create_multilayer(  # type: ignore[override, no-untyped-def]
+    def create_multilayer(  # type: ignore[override]
         cls,
         device: torch.device,
         dtype: torch.dtype,
         inner_fns: Sequence[Callable[..., Any]],
-        ranges: List[Expr],
-        reduction_ranges: List[Expr],
+        ranges: List[Integer],
+        reduction_ranges: List[Integer],
         reduction_type: str,
-        split: int,
+        split: _IntLike,
         reduction_hint: ReductionHint,
-    ):
+    ) -> Sequence[TensorBox]:
         """
         Break a large reduction up into multiple smaller reductions
         recursively
@@ -1797,10 +1854,10 @@ class WelfordReduction(Reduction):
 
 @ir_dataclass
 class Scan(Loops):
-    scan_ranges: List[Expr]
-    size: List[Expr]
+    scan_ranges: List[Integer]
+    size: List[Integer]
     combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]]
-    reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
+    reindex: Callable[[Sequence[_IntLike], Sequence[_IntLike]], Sequence[_IntLike]]
     reduction_hint: ReductionHint
     output_index: int
     # output_index indexes the following tuples
@@ -1809,7 +1866,7 @@ class Scan(Loops):
 
     # HACK we mimick reduction
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
         # TODO: Can combine_fn/reindex close over unbacked symbols? If so, we
         # need to explicitly represent the closure so we can pull out unbacked
         # symbols here
@@ -1823,35 +1880,41 @@ class Scan(Loops):
         assert len(self.ranges) + len(self.scan_ranges) == len(self.size)
         super().__post_init__()
 
-    def store_reduction(self, output_name, indexer, vars, scan_vars):  # type: ignore[no-untyped-def]
+    def store_reduction(
+        self,
+        output_name: Optional[str],
+        indexer: Callable[[Sequence[_IntLike]], Never],
+        vars: Sequence[Expr],
+        scan_vars: Sequence[Symbol],
+    ) -> OpsValue:
         idx = self.reindex(vars, scan_vars)
         values = [inner_fn(idx) for inner_fn in self.inner_fns]
         result = ops.scan(self.dtypes, self.combine_fn, values)
         return ops.store(output_name, indexer(idx), result[self.output_index])
 
-    def get_reduction_type(self):  # type: ignore[no-untyped-def]
+    def get_reduction_type(self) -> Optional[str]:
         # return self.scan_op
         return "custom"
 
-    def get_reduction_size(self):  # type: ignore[no-untyped-def]
+    def get_reduction_size(self) -> Sequence[_IntLike]:
         return self.scan_ranges
 
-    def get_size(self):  # type: ignore[no-untyped-def]
+    def get_size(self) -> Sequence[_IntLike]:
         return self.size
 
-    def get_pointwise_size(self):  # type: ignore[no-untyped-def]
+    def get_pointwise_size(self) -> Sequence[_IntLike]:
         return self.ranges
 
     def index_length(self) -> int:
         return len(self.ranges) + len(self.scan_ranges)
 
-    def inner_fn_args(self):  # type: ignore[no-untyped-def]
+    def inner_fn_args(self) -> Sequence[Sequence[_IntLike]]:
         index = self._index(self.ranges)
         rindex = self._index(self.scan_ranges, SymT.RINDEX)
         idx = self.reindex(index, rindex)
         return (idx,)
 
-    def inner_fn_free_unbacked_symbols(self):  # type: ignore[no-untyped-def]
+    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
         index = self._index(self.ranges)
         rindex = self._index(self.scan_ranges, SymT.RINDEX)
         idx = self.reindex(index, rindex)
@@ -1863,7 +1926,7 @@ class Scan(Loops):
         device: torch.device,
         dtypes: Tuple[torch.dtype, ...],
         inner_fns: Tuple[Callable[[List[Expr]], Any], ...],
-        size: List[Expr],
+        size: List[Integer],
         axis: int,
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
@@ -1871,7 +1934,7 @@ class Scan(Loops):
         # Whether we have the option to fallback to aten
         can_fallback_to_aten: bool = True,
         **kwargs,
-    ) -> List[Optional[TensorBox]]:
+    ) -> Sequence[Optional[TensorBox]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
@@ -1960,8 +2023,8 @@ class Scan(Loops):
         dtype: torch.dtype,
         inner_fn: Callable[[List[Expr]], Any],
         axis: int,
-        pointwise_ranges: List[Expr],
-        scan_ranges: List[Expr],
+        pointwise_ranges: List[Integer],
+        scan_ranges: List[Integer],
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
         scan_numel: Expr,
     ):
@@ -1990,9 +2053,9 @@ class SplitScan(Scan):
 @ir_dataclass
 class Sort(Loops):
     # Sorts a tuple of key, value pairs
-    sort_ranges: List[Expr]
-    size: List[Expr]
-    reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
+    sort_ranges: List[Integer]
+    size: List[Integer]
+    reindex: Callable[[Sequence[Expr], Sequence[Expr]], Sequence[Expr]]
     reduction_hint: ReductionHint
     output_index: int
     # output_index indexes the following tuples
@@ -2004,7 +2067,7 @@ class Sort(Loops):
 
     # HACK we mimick reduction
 
-    def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
+    def get_unbacked_symbol_uses(self) -> OrderedSet[Symbol]:
         return (
             super().get_unbacked_symbol_uses()
             | OrderedSet().union(*(free_unbacked_symbols(e) for e in self.sort_ranges))
@@ -2021,28 +2084,28 @@ class Sort(Loops):
         result = ops.sort(self.dtypes, values, self.stable, self.descending)
         return ops.store(output_name, indexer(idx), result[self.output_index])
 
-    def get_reduction_type(self):  # type: ignore[no-untyped-def]
+    def get_reduction_type(self) -> Optional[str]:
         return "sort"
 
-    def get_reduction_size(self):  # type: ignore[no-untyped-def]
+    def get_reduction_size(self) -> Sequence[_IntLike]:
         return self.sort_ranges
 
-    def get_size(self):  # type: ignore[no-untyped-def]
+    def get_size(self) -> Sequence[_IntLike]:
         return self.size
 
-    def get_pointwise_size(self):  # type: ignore[no-untyped-def]
+    def get_pointwise_size(self) -> Sequence[_IntLike]:
         return self.ranges
 
     def index_length(self) -> int:
         return len(self.ranges) + len(self.sort_ranges)
 
-    def inner_fn_args(self):  # type: ignore[no-untyped-def]
+    def inner_fn_args(self) -> Sequence[Sequence[Expr]]:
         index = self._index(self.ranges)
         rindex = self._index(self.sort_ranges, SymT.RINDEX)
         idx = self.reindex(index, rindex)
         return (idx,)
 
-    def inner_fn_free_unbacked_symbols(self):  # type: ignore[no-untyped-def]
+    def inner_fn_free_unbacked_symbols(self) -> Set[Symbol]:
         index = self._index(self.ranges)
         rindex = self._index(self.sort_ranges, SymT.RINDEX)
         idx = self.reindex(index, rindex)
@@ -2054,13 +2117,13 @@ class Sort(Loops):
         device: torch.device,
         dtypes: Tuple[torch.dtype, ...],
         inner_fns: Tuple[Callable[[List[Expr]], Any], ...],
-        size: List[Expr],
+        size: List[Integer],
         axis: int,
         stable: bool,
         descending: bool,
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs,
-    ) -> List[Optional[TensorBox]]:
+    ) -> Sequence[Optional[TensorBox]]:
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         sort_ranges = [size[axis]]
 
@@ -2288,7 +2351,7 @@ class BaseView(IRNode):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
                 self.make_loader(),
-                self.get_size(),
+                self.get_size(),  # type: ignore[arg-type]
             ).reads
 
     def unwrap_view(self):  # type: ignore[no-untyped-def]
@@ -2726,7 +2789,7 @@ class ReinterpretView(BaseView):
     def get_layout(self):  # type: ignore[no-untyped-def]
         return self.layout
 
-    def freeze_layout(self) -> None:
+    def freeze_layout(self):  # type: ignore[no-untyped-def]
         pass
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -2960,7 +3023,7 @@ class Layout(IRNode):
             stride
         ), f"size={size}, stride={stride}"
         self.device = device
-        self.dtype = dtype
+        self.dtype = dtype  # type: ignore[misc]
         assert all(isinstance(s, (Expr, int)) for s in size)
         self.size = size
         self._stride = stride
@@ -3106,7 +3169,7 @@ class Layout(IRNode):
         metrics.num_comprehensive_padding += 1
         return new_strides
 
-    def pad_strides(self) -> None:
+    def pad_strides(self):  # type: ignore[no-untyped-def]
         assert isinstance(self, FlexibleLayout)
         assert self._stride is not None
         self._stride = self._pad_strides(self._stride, self.size, self.dtype)
@@ -3417,7 +3480,7 @@ class MutationLayoutSHOULDREMOVE(Layout):
         super().__init__(
             target.get_device(),
             target.get_dtype(),
-            target.get_size(),
+            target.get_size(),  # type: ignore[arg-type]
             None,
         )
         self.target = target
@@ -3541,7 +3604,7 @@ class Buffer(IRNode):
     def is_extern(self) -> bool:
         return False
 
-    def freeze_layout(self) -> None:
+    def freeze_layout(self):  # type: ignore[no-untyped-def]
         if not isinstance(self.layout, (MultiOutputLayout, NonOwningLayout)):
             self.layout = self.layout.as_fixed()
 
@@ -3580,7 +3643,7 @@ class Buffer(IRNode):
     def codegen_reference(self, writer=None):  # type: ignore[no-untyped-def]
         return self.get_name()
 
-    def decide_layout(self) -> None:
+    def decide_layout(self):  # type: ignore[no-untyped-def]
         pass
 
     def get_inputs_that_alias_output(self):  # type: ignore[no-untyped-def]
@@ -3694,13 +3757,13 @@ class ComputedBuffer(OperationBuffer):
             if self.data.get_reduction_type():
                 return extract_read_writes(
                     self.get_store_function(),
-                    self.data.get_pointwise_size(),
-                    self.data.get_reduction_size(),
+                    self.data.get_pointwise_size(),  # type: ignore[arg-type]
+                    self.data.get_reduction_size(),  # type: ignore[arg-type]
                 )
             else:
                 return extract_read_writes(
                     self.get_store_function(),
-                    self.data.get_size(),
+                    self.data.get_size(),  # type: ignore[arg-type]
                 )
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:
@@ -3757,7 +3820,7 @@ class ComputedBuffer(OperationBuffer):
         """
         if isinstance(self.layout, FlexibleLayout):
             (index_vars, reduction_vars), _ = dependencies.index_vars_squeeze(
-                self.data.get_pointwise_size(), self.data.get_reduction_size()
+                self.data.get_pointwise_size(), self.data.get_reduction_size()  # type: ignore[arg-type]
             )
             reads = self.get_read_writes().reads
             # only consider reads to buffer of same size
@@ -3786,7 +3849,7 @@ class ComputedBuffer(OperationBuffer):
 
         return None
 
-    def decide_layout(self) -> None:
+    def decide_layout(self):  # type: ignore[no-untyped-def]
         if isinstance(self.layout, FlexibleLayout):
             order = self.get_fill_order()
             if order:
@@ -3797,7 +3860,7 @@ class ComputedBuffer(OperationBuffer):
     @cache_on_self
     def get_default_sizes_body(self):  # type: ignore[no-untyped-def]
         args, var_ranges = dependencies.index_vars_squeeze(
-            self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
+            self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"  # type: ignore[arg-type]
         )
         with patch.object(ConstantBuffer, "override_device", self.get_device()):
             body = LoopBody(
@@ -4217,7 +4280,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         inputs,
         make_kernel_render,
         workspace_size: int,
-        template: CUDATemplate,  # type: ignore[name-defined]  # noqa: F821
+        template: CUDATemplate,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
         # Global memory (in bytes) needed for this template.
@@ -4526,7 +4589,7 @@ class ExternKernel(InputsKernel):
     def get_unbacked_symbol_defs(self) -> OrderedSet[sympy.Symbol]:
         return OrderedSet()
 
-    def collect_arg_kwarg_properties(self) -> None:
+    def collect_arg_kwarg_properties(self):  # type: ignore[no-untyped-def]
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
         # information for args and kwargs, e.g. type and default value, to help with the cpp wrapper codegen
         self.arg_properties = (
@@ -4561,7 +4624,7 @@ class ExternKernel(InputsKernel):
                 x for x in self.op_overload._schema.arguments if x.kwarg_only
             ]
 
-    def decide_layout(self) -> None:
+    def decide_layout(self):  # type: ignore[no-untyped-def]
         if isinstance(self.layout, FlexibleLayout):
             self.apply_constraint()
             self.freeze_layout()
@@ -4784,7 +4847,7 @@ class ExternKernel(InputsKernel):
             x_unwrap_view.freeze_layout()
 
         index_args, var_ranges = dependencies.index_vars_squeeze(
-            x.get_size(), prefix="r"
+            x.get_size(), prefix="r"  # type: ignore[arg-type]
         )
         range_vars = index_args[0]
         index = x.make_indexer()(range_vars)
@@ -4808,7 +4871,7 @@ class ExternKernel(InputsKernel):
             layout=FixedLayout(
                 device=x.get_device(),
                 dtype=x.get_dtype(),
-                size=x.get_size(),
+                size=x.get_size(),  # type: ignore[arg-type]
                 stride=strides,
                 offset=offset,
             ),
@@ -4858,7 +4921,7 @@ class ExternKernel(InputsKernel):
         return cls.copy_input(x)
 
     @classmethod
-    def require_strides(  # type: ignore[no-untyped-def]  # type: ignore[no-untyped-def]
+    def require_strides(  # type: ignore[no-untyped-def]
         cls,
         x,
         order: Optional[Sequence[int]] = None,
@@ -5660,7 +5723,7 @@ class InplaceCopyFallback(ExternKernel):
         V.graph.register_operation(self)
 
     @classmethod
-    def create(cls, dst, src, non_blocking: bool = False):  # type: ignore[no-untyped-def]  # type: ignore[no-untyped-def]
+    def create(cls, dst, src, non_blocking: bool = False):  # type: ignore[no-untyped-def]
         inputs = [cls.realize_input(t) for t in [dst, src]]
         constant_args = (non_blocking,)
         result = InplaceCopyFallback(
@@ -6761,9 +6824,9 @@ class InvokeSubgraph(ExternKernel):
                 FixedLayout(
                     device=output.get_device(),
                     dtype=output.get_dtype(),
-                    size=output.get_size(),
+                    size=output.get_size(),  # type: ignore[arg-type]
                     stride=output.get_stride(),
-                    offset=output.get_layout().offset,
+                    offset=output.get_layout().offset,  # type: ignore[union-attr]
                 ),
                 invoke_subgraph,
                 [(list, i)],
