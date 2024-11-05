@@ -1196,7 +1196,7 @@ class TestSerialization(TestCase, SerializationMixin):
             f.seek(0)
             if unsafe_global:
                 with self.assertRaisesRegex(pickle.UnpicklingError,
-                                            r"use `torch.serialization.add_safe_globals\(\[TwoTensor\]\)` to allowlist"):
+                                            r"use `torch.serialization.add_safe_globals\(\[TwoTensor\]\)` or .* to allowlist"):
                     torch.load(f, weights_only=True)
             else:
                 with self.assertRaisesRegex(pickle.UnpicklingError,

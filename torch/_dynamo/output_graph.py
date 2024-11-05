@@ -1741,6 +1741,9 @@ class OutputGraph:
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
+        self.input_source_to_var.clear()
+        self.unspec_variable_map.clear()
+        self.backward_state.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled
