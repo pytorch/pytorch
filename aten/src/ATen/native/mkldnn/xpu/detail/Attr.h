@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <oneapi/dnnl/dnnl.hpp>
-#include <oneapi/dnnl/dnnl_types.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
+#include <oneapi/dnnl/dnnl.hpp>
+#include <oneapi/dnnl/dnnl_types.h>
 
 namespace at::native::onednn {
 /* oneDNN quantization usage:
@@ -75,7 +75,12 @@ to oneDNN doc.
 using kind_t = dnnl::primitive::kind;
 struct PostOpParam {
   // eltwise post op constructor
-  PostOpParam(float scale, float alpha, float beta, dnnl::algorithm algo, kind_t kind)
+  PostOpParam(
+      float scale,
+      float alpha,
+      float beta,
+      dnnl::algorithm algo,
+      kind_t kind)
       : scale_(scale), alpha_(alpha), beta_(beta), algo_(algo), kind_(kind) {}
   // sum post op constructor
   PostOpParam(float scale, kind_t kind) : scale_(scale), kind_(kind) {}
@@ -95,7 +100,11 @@ struct PostOpParam {
   PostOpParam(int mask, kind_t kind) : mask_(mask), kind_(kind) {}
 
   // post sum or binary with scale post op constructor
-  PostOpParam(at::Tensor& binary, float scale, dnnl::algorithm algo, kind_t kind)
+  PostOpParam(
+      at::Tensor& binary,
+      float scale,
+      dnnl::algorithm algo,
+      kind_t kind)
       : scale_(scale), binary_(binary), algo_(algo), kind_(kind) {}
 
   // for int8 sum/eltwise
@@ -182,8 +191,9 @@ class Attr {
   // append binary post op
   Attr& append_post_binary(dnnl::algorithm algo, const at::Tensor& binary) {
     auto binary_ = binary.is_quantized() ? at::dequantize(binary) : binary;
-    bool binary_is_channels_last = (binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
-                                      binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d);
+    bool binary_is_channels_last =
+        (binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast ||
+         binary_.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d);
 
     binary_ = binary_is_channels_last ? binary_ : binary_.contiguous();
     dnnl::memory::desc md = get_onednn_md(binary_);
@@ -233,8 +243,8 @@ class Attr {
             dnnl::memory::format_tag::abcde);
         break;
       default:
-        TORCH_INTERNAL_ASSERT(0,
-            "XPU only supports append_bias for Conv1d, Conv2d and Conv3d.");
+        TORCH_INTERNAL_ASSERT(
+            0, "XPU only supports append_bias for Conv1d, Conv2d and Conv3d.");
     }
     // In this case, expected_md = binary_md
     ops_params_.push_back(PostOpParam(
@@ -248,7 +258,7 @@ class Attr {
     return *this;
   }
 
-  dnnl::post_ops extract_post_ops(const at::Tensor& dst){
+  dnnl::post_ops extract_post_ops(const at::Tensor& dst) {
     // this function is used to extract post ops params from the ops_params_
     // and put them into onednn post ops
     for (size_t i = 0; i < ops_params_.size(); ++i) {
@@ -332,8 +342,8 @@ class Attr {
     // [1, C, 1, 1], channel broadcast
     // [dst.shape], no broadcast and eltwise-wise binary operations on dst
 
-    auto engine =
-        GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
+    auto engine = GpuEngineManager::Instance().get_engine(
+        {c10::kXPU, c10::xpu::current_device()});
     for (size_t i = 0; i < ops_params_.size(); ++i) {
       kind_t kind = ops_params_[i].kind_;
       if (kind == kind_t::binary) {
@@ -346,8 +356,7 @@ class Attr {
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
 
         binary_m = at::native::onednn::make_onednn_memory(
-          md, engine, binary.data_ptr()
-        );
+            md, engine, binary.data_ptr());
 
         args.insert(
             {DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1, binary_m});
