@@ -388,6 +388,7 @@ def generate_wheels_matrix(
                 or os == "macos-arm64"
                 or os == "linux-aarch64"
                 or os == "windows"
+                or os == "linux-aarch64"
             ) and python_version == "3.13t":
                 continue
 
