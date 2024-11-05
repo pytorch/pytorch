@@ -377,8 +377,9 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
 }
 
 // Returns the traceback of current entry, in string form.
-// Note: `getTraceback` call below invokes `torch::symbolize`.
-// According to @fduwjj, `torch::symbolize` may need to acquire the GIL.
+// Note: `getTraceback` invokes `torch::symbolize`, which may need to acquire
+// the GIL. If you don't want to block the current thread or take the risk of a
+// GIL deadlock, you can use an asynchronous calling mechanism like std::async.
 std::string NCCLTraceBuffer::Entry::getTraceback() {
   torch::CapturedTraceback* traceback = traceback_.get();
   torch::SymbolizedTracebacks s_tbs = torch::symbolize({traceback});

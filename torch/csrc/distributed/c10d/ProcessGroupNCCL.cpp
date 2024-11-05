@@ -695,13 +695,13 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
   if (entry.has_value()) {
     auto entryVal = entry.value();
     // Get stack trace from FR entry, in string format
-    // Note: `getTraceback` call below invokes `torch::symbolize`.
-    // According to @fduwjj, `torch::symbolize` may need to acquire the GIL. In
-    // order for watchdog to be block-free, we make the call with std::async.
+    // Note: `getTraceback` call below invokes `torch::symbolize`, which may
+    // need to acquire the GIL. In order for watchdog to be block-free, we make
+    // the call with std::async.
     auto future = std::async(
         std::launch::async, [&entryVal]() { return entryVal.getTraceback(); });
     // Wait for the future to complete or timeout
-    auto status = future.wait_for(std::chrono::seconds(5));
+    auto status = future.wait_for(std::chrono::seconds(8));
     if (status == std::future_status::ready) {
       std::string tracebackStr = future.get();
       LOG(ERROR) << "Stack trace of the timedout collective operation: \n"
