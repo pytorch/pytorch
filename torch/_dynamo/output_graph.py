@@ -2398,7 +2398,7 @@ class SubgraphTracer(fx.Tracer):
 
     # Lookup the proxy in current tracer for each symbol in expressions of s,
     # See Note [Auto lift basic free symbols when create_graph_input]
-    def lookup_unbounded_symbols(self, s: torch.SymInt) -> Set[sympy.Symbol]:
+    def lookup_unbound_symbols(self, s: torch.SymInt) -> Set[sympy.Symbol]:
         free_symbols = s.node.expr.free_symbols
         if len(free_symbols) == 0:
             return set()
@@ -2428,7 +2428,7 @@ class SubgraphTracer(fx.Tracer):
             return
 
         assert isinstance(s, torch.SymInt)
-        self_to_be_bound = self.lookup_unbounded_symbols(s)
+        self_to_be_bound = self.lookup_unbound_symbols(s)
         if len(self_to_be_bound) == 0:
             return
 

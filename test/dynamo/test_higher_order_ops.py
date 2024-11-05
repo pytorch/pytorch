@@ -924,19 +924,19 @@ class GraphModule(torch.nn.Module):
         cat: "i64[u0 + u1, 1]" = torch.cat((c, d));  c = d = None
 
         wrap_body_1 = self.wrap_body_1
-        wrap = torch.ops.higher_order.wrap(wrap_body_1, sym_size_int_2, sym_size_int_3, cat, l_x_);  wrap_body_1 = sym_size_int_2 = sym_size_int_3 = cat = l_x_ = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_1, sym_size_int_3, sym_size_int_2, cat, l_x_);  wrap_body_1 = sym_size_int_3 = sym_size_int_2 = cat = l_x_ = None
         getitem: "f32[3]" = wrap[0];  wrap = None
         return (getitem,)
 
     class wrap_body_1(torch.nn.Module):
-        def forward(self, u0: "Sym(u0)", u1: "Sym(u1)", cat: "i64[u0 + u1, 1]", l_x_: "f32[3]"):
+        def forward(self, u1: "Sym(u1)", u0: "Sym(u0)", cat: "i64[u0 + u1, 1]", l_x_: "f32[3]"):
             wrap_body_0 = self.wrap_body_0
-            wrap = torch.ops.higher_order.wrap(wrap_body_0, u0, u1, cat, l_x_);  wrap_body_0 = u0 = u1 = cat = l_x_ = None
+            wrap = torch.ops.higher_order.wrap(wrap_body_0, u1, u0, cat, l_x_);  wrap_body_0 = u1 = u0 = cat = l_x_ = None
             getitem: "f32[3]" = wrap[0];  wrap = None
             return (getitem,)
 
         class wrap_body_0(torch.nn.Module):
-            def forward(self, u0: "Sym(u0)", u1: "Sym(u1)", cat: "i64[u0 + u1, 1]", l_x_: "f32[3]"):
+            def forward(self, u1: "Sym(u1)", u0: "Sym(u0)", cat: "i64[u0 + u1, 1]", l_x_: "f32[3]"):
                 sum_1: "i64[]" = cat.sum();  cat = None
                 add: "f32[3]" = sum_1 + l_x_;  sum_1 = l_x_ = None
                 return (add,)
