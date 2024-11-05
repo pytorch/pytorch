@@ -55,6 +55,7 @@ import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
     add_remote_cache_time_saved,
+    codecache_metrics,
     counters,
     dynamo_timed,
     get_chromium_event_logger,
@@ -1151,6 +1152,8 @@ class FxGraphCache:
                     logger.add_event_data(
                         "inductor_compile", cached_kernel_names=meta.cached_kernel_names
                     )
+                if len(meta.cached_kernel_names) > 0:
+                    codecache_metrics["num_triton_bundles"] += 1
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
