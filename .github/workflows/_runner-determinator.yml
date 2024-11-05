@@ -40,6 +40,8 @@ on:
 
 jobs:
   runner-determinator:
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     outputs:
       label-type: ${{ steps.set-condition.outputs.label-type }}

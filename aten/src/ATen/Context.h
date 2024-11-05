@@ -11,6 +11,7 @@
 #include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/HPUHooksInterface.h>
 #include <ATen/detail/IPUHooksInterface.h>
 #include <ATen/detail/MAIAHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
@@ -43,9 +44,21 @@ class TORCH_API Context {
 
     if (device_type == at::kCPU) {
       return at::detail::getDefaultCPUGenerator();
+    } else if (device_type == at::kCUDA) {
+      return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
+    } else if (device_type == at::kMPS) {
+      return at::detail::getMPSHooks().getDefaultMPSGenerator();
+    } else if (device_type == at::kXPU) {
+      return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
+    } else if (device_type == at::kIPU) {
+      return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
+    } else if (device_type == at::kHPU) {
+      return at::detail::getHPUHooks().getDefaultHPUGenerator(device.index());
+    } else if (device_type == at::kPrivateUse1) {
+      return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
+          device.index());
     } else {
-      return getAcceleratorHooksInterface(device_type)
-          .getDefaultGenerator(device.index());
+      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
     }
   }
 
@@ -66,6 +79,8 @@ class TORCH_API Context {
       return at::detail::getMTIAHooks();
     } else if (device_type == at::kHIP) {
       return at::detail::getHIPHooks();
+    } else if (device_type == at::kHPU) {
+      return at::detail::getHPUHooks();
     } else {
       TORCH_CHECK(
           false,
@@ -165,6 +180,10 @@ class TORCH_API Context {
   static bool hasMAIA() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
   }
+  static bool hasHPU() {
+    return detail::getHPUHooks().hasHPU();
+  }
+
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
   }
@@ -486,6 +505,10 @@ inline bool hasMAIA() {
 
 inline bool hasXPU() {
   return globalContext().hasXPU();
+}
+
+inline bool hasHPU() {
+  return globalContext().hasHPU();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.

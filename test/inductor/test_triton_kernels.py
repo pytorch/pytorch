@@ -54,10 +54,19 @@ if HAS_GPU:
                 fast_dividef as my_fast_dividef,
             )
 
+    def _triton_get_ast_equal_to_str(params):
+        try:
+            from triton.backends.compiler import AttrsDescriptor  # noqa: F401
+
+            return f"'tt.equal_to': {params}"
+        except ImportError:
+            return f"equal_to_1={params}"
+
     # Define shared triton constants here.
     CONSTANT_C: tl.constexpr = 4
     STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
     BOOL_CONSTANT_C: tl.constexpr = True
+    FLOAT_CONSTANT_C = tl.constexpr(3.14)  # intentionally un-annotated
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
@@ -1259,9 +1268,9 @@ def forward(self, x_1, output_1):
         if dynamic:
             # when half_n_elements passed to the Triton kernel is
             # dynamic, equal_to_1 specializaiton can't be enforced
-            self.assertTrue("equal_to_1=()" in sources[0])
+            self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
         else:
-            self.assertTrue("equal_to_1=(3,)" in sources[0])
+            self.assertTrue(_triton_get_ast_equal_to_str((3,)) in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
@@ -1290,7 +1299,7 @@ def forward(self, x_1, output_1):
 
         # float 1.0 (both literal or symbolic)
         # should not be added to equal_to_1
-        self.assertTrue("equal_to_1=()" in sources[0])
+        self.assertTrue(_triton_get_ast_equal_to_str(()) in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_gpu
@@ -1667,7 +1676,7 @@ def forward(self, x_1, output_1):
         a = torch.randn(301, device=GPU_TYPE)
         b = torch.randn(301, device=GPU_TYPE)
 
-        backend = torch._dynamo.testing.AOTEagerAndRecordGraphs()
+        backend = torch._dynamo.testing.AotEagerAndRecordGraphs()
         torch.compile(
             f,
             fullgraph=True,
@@ -2150,7 +2159,7 @@ def forward(self, arg0_1, arg1_1):
             n_elements = out.numel()
             sin_kernel[(n_elements,)](x, out, n_elements)
 
-        x = torch.randn(65, device="cuda")
+        x = torch.randn(65, device=GPU_TYPE)
         out = torch.empty_like(x)
         out_compiled = torch.empty_like(x)
         sin_triton_compiled = torch.compile(fullgraph=True)(sin_triton)
@@ -2162,6 +2171,33 @@ def forward(self, arg0_1, arg1_1):
         sin_triton(None, out)
         sin_triton_compiled(None, out_compiled)
         self.assertEqual(out, out_compiled)
+
+    @requires_gpu
+    def test_triton_kernel_global_constexpr(self):
+        @triton.jit
+        def triton_(in_ptr, out_ptr, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            x = tl.load(in_ptr + offsets)
+            output = x + FLOAT_CONSTANT_C
+            tl.store(out_ptr + offsets, output)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            BLOCK_SIZE = 256
+            grid = (triton.cdiv(x.numel(), BLOCK_SIZE),)
+            triton_[grid](x, y, BLOCK_SIZE)
+            return y
+
+        # make sure FLOAT_CONSTANT_C is NOT annotated
+        self.assertFalse("FLOAT_CONSTANT_C" in globals().get("__annotations__", {}))
+        # sanity check: STRING_CONSTANT_C _should_ be annotated
+        self.assertTrue("STRING_CONSTANT_C" in globals().get("__annotations__", {}))
+
+        x = torch.randn(512, device=GPU_TYPE)
+        expected = x + 3.14
+        actual = torch.compile(fn)(x)
+        self.assertEqual(expected, actual)
 
 
 def make_mutation_test(fn):
