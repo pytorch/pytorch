@@ -349,8 +349,8 @@ class FSDPParamGroup:
             compiled_autograd_enabled()
             and self._training_state == TrainingState.PRE_BACKWARD
         ):
-            # Traceable FSDP2 cannot trigger the param group's post-backward immediately after param usage;
-            # instead it relies on this to trigger the previously pending post-backward.
+            # Traceable FSDP2 cannot trigger the param group's `post_backward` immediately after param usage;
+            # instead it relies on this to trigger the previously unexecuted `post_backward`.
             self.post_backward()
         if self._training_state == TrainingState.PRE_BACKWARD:
             return
@@ -686,7 +686,7 @@ class RegisterPostBackwardFunction(torch.autograd.Function):
             msg = """\
 When Traceable FSDP2 is enabled, we should not be calling into `RegisterPostBackwardFunction`.
 Instead, we rely on the param group's next `pre_backward` hook to trigger its previously unexecuted
-`post_backward` hook, and we rely on FSDPState's `root_post_backward_callback` to trigger the resharding
+`post_backward`, and we rely on FSDPState's `root_post_backward_callback` to trigger the resharding
 of any leftover unsharded param groups.
 If you are here, it means the forward part of this FSDP2 instance is not compiled, and you must also
 compile the forward part if you want to use Traceable FSDP2."""
