@@ -354,7 +354,9 @@ class TestFakeTensorExport(common_utils.TestCase):
             assert onnx_program is not None
             # Convert to model proto and back to trigger to_bytes method which serializes the tensor
             # Note that even though we are calling .model_proto (equivalently .save()) in fake mode,
-            # the concrete tensors are maintained
+            # the concrete tensors are maintained.
+            # This is due to the usage of torch._subclasses.fake_tensor.unset_fake_temporarily() in
+            # TorchTensor.tobytes()
             onnx_model = ir.serde.deserialize_model(onnx_program.model_proto)
 
         np.testing.assert_allclose(
