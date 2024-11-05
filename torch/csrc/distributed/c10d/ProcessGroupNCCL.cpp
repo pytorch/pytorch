@@ -699,7 +699,7 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     // According to @fduwjj, `torch::symbolize` may need to acquire the GIL. In
     // order for watchdog to be block-free, we make the call with std::async.
     auto future = std::async(
-        std::launch::async, [&entryVal]() {  return entryVal.getTraceback(); });
+        std::launch::async, [&entryVal]() { return entryVal.getTraceback(); });
     // Wait for the future to complete or timeout
     auto status = future.wait_for(std::chrono::seconds(5));
     if (status == std::future_status::ready) {
