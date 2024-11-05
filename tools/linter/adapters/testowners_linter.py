@@ -51,6 +51,8 @@ def get_pytorch_labels() -> Any:
     try:
         labels = urlopen(url).read().decode("utf-8")
     except urllib.error.URLError:
+        # This is an FB-only hack, if the json isn't available we may
+        # need to use a forwarding proxy to get out
         proxy_url = "http://fwdproxy:8080"
         proxy_handler = urllib.request.ProxyHandler(
             {"http": proxy_url, "https": proxy_url}
