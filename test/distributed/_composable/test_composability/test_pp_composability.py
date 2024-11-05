@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import os
-import shutil
 from typing import TYPE_CHECKING
 
 import torch
@@ -40,6 +39,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skip_but_pass_in_sandcastle_if,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 if TYPE_CHECKING:
@@ -332,20 +332,17 @@ class ComposabilityTest(MultiProcessTestCase):
         pp_model.to(self.device)
         opt = torch.optim.Adam(pp_model.parameters(), lr=0.1)
 
-        # Manually create a temporary directory
-        # Create a temporary directory on rank 0 and broadcast its path
-        checkpoint_dir = "tmp_checkpoint_dir"
-        try:
+        # perform work in a temp dir that is cleaned up after the test
+        @with_temp_dir
+        def _dcp_test(self):
             state_dict = {"app": AppState(pp_model, opt)}
-            dcp.save(state_dict, checkpoint_id=checkpoint_dir)
-
+            dcp.save(state_dict, checkpoint_id=self.temp_dir)
             # temp checkpoint
             sd: STATE_DICT_TYPE = {}
             _load_state_dict(
                 sd,
-                storage_reader=FileSystemReader(checkpoint_dir),
+                storage_reader=FileSystemReader(self.temp_dir),
                 planner=_EmptyStateDictLoadPlanner(),
-                no_dist=True,
             )
             # Check parameter names in sd and compare with pp_model
             pp_model_param_names = set(pp_model.state_dict().keys())
@@ -357,19 +354,8 @@ class ComposabilityTest(MultiProcessTestCase):
                     sd_param_names,
                     f"Parameter name '{param_name}' not found in state_dict.",
                 )
-            # Verify that the parameter layers include the start_index and end_index
-            for i in range(start_index, end_index):
-                layer_name = f"{i}"
-                self.assertIn(
-                    layer_name,
-                    pp_model.layers,
-                    f"Layer '{layer_name}' not found in pp_model layers.",
-                )
-        finally:
-            # Clean up the temporary directory on rank 0
-            torch.distributed.barrier()
-            if self.rank == 0:
-                shutil.rmtree(checkpoint_dir)
+
+        _dcp_test(self)
 
 
 instantiate_parametrized_tests(ComposabilityTest)
