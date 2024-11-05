@@ -24,6 +24,7 @@ from torch._inductor.codecache import (
 )
 from torch._inductor.custom_graph_pass import CustomGraphPass, get_hash_for_files
 from torch._inductor.graph import GraphLowering
+from torch._inductor.mock_cache import global_stats, PatchCaches, Stats
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
@@ -43,12 +44,6 @@ from torch.testing._internal.inductor_utils import (
     requires_triton,
 )
 from torch.testing._internal.triton_utils import requires_cuda
-
-
-try:
-    from .mock_cache import global_stats, PatchCaches, Stats
-except ImportError:
-    from mock_cache import global_stats, PatchCaches, Stats  # @manual
 
 
 if HAS_TRITON:
@@ -160,11 +155,12 @@ class TestFxGraphCache(TestCase):
 
             # A second call should hit. (First reset so in-memory guards
             # don't prevent compilation).
-            for m in torch._inductor.codecache.PyCodeCache.cache.values():
-                os.remove(m.__file__)
-            # Clean triton kernels
-            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
             self.reset()
+
+            # Clean PyCodeCache and triton kernels
+            PyCodeCache.cache_clear()
+            shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
+
             self.assertEqual(fn(a, b), compiled_fn(a, b))
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
@@ -381,6 +377,24 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
+        # Now pretend the constants are frozen params.
+        counters.clear()
+        self.reset()
+
+        with mock.patch(
+            "torch._inductor.codecache.has_frozen_params", return_value=True
+        ):
+            # A call to fn1 should miss in the cache since we do not consider
+            # the constant values.
+            self.assertEqual(fn1(a), compiled_fn1(a))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+            # A call to fn2 should hit for the same reason.
+            self.assertEqual(fn2(a), compiled_fn2(a))
+            self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+            self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
     @requires_cuda
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
@@ -417,8 +431,6 @@ class TestFxGraphCache(TestCase):
 
         # A second call should hit. (First reset so in-memory guards
         # don't prevent compilation).
-        for m in torch._inductor.codecache.PyCodeCache.cache.values():
-            os.remove(m.__file__)
         self.reset()
         self.assertEqual(fn(a, b, c), compiled_fn(a, b, c), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
@@ -426,8 +438,6 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
 
         # A third call with different score_mod should have a cache miss
-        for m in torch._inductor.codecache.PyCodeCache.cache.values():
-            os.remove(m.__file__)
         self.reset()
         self.assertEqual(fn2(a, b, c), compiled_fn2(a, b, c), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
@@ -647,14 +657,80 @@ class TestFxGraphCache(TestCase):
 
         self.assertNotEqual(a, b)
 
+    @config.patch({"fx_graph_cache": True})
+    @config.patch({"fx_graph_remote_cache": False})
+    @config.patch({"freezing": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    def test_freezing(self, device):
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        class MM(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(8, 8))
+
+            def forward(self, x):
+                return x @ self.param
+
+        dtype = torch.float16
+
+        # Populate a cache entry.
+        mod1 = MM().to(device=device, dtype=dtype)
+        with torch.no_grad():
+            x = torch.rand(8, 8).to(device=device, dtype=dtype)
+            out0 = mod1(x)
+            out1 = torch.compile(mod1)(x)
+            self.assertEqual(out0, out1)
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        counters.clear()
+        self.reset()
+
+        # Same nn.Module, but with different parameters should cache hit.
+        mod2 = MM().to(device=device, dtype=dtype)
+        self.assertNotEqual(mod1.param, mod2.param)
+
+        with torch.no_grad():
+            x = torch.rand(8, 8).to(device=device, dtype=dtype)
+            out0 = mod2(x)
+            out1 = torch.compile(mod2)(x)
+            self.assertEqual(out0, out1)
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
 
 class TestFxGraphCacheHashing(TestCase):
     def test_tensor_constants(self):
         """
         Test the hashing of tensor constants.
         """
-        data = FxGraphCachePickler().dumps(torch.tensor(list(range(9))))
+        small = torch.tensor(list(range(8)))
+        large = torch.tensor(list(range(32)))
+
+        self.assertTrue(GraphLowering.can_inline_constant(small))
+        self.assertFalse(GraphLowering.can_inline_constant(large))
+
+        # By default, we hash the metadata and values independent of the size.
+        pickler = FxGraphCachePickler()
+
+        data = pickler.dumps(small)
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
+        data = pickler.dumps(large)
+        self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
+
+        # If include_non_inlined=False, we only hash the values of small tensors.
+        pickler = FxGraphCachePickler(False)
+
+        data = pickler.dumps(small)
+        self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
+        data = pickler.dumps(large)
+        self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
     def test_hash_fake_tensors(self):
         """
@@ -1133,13 +1209,13 @@ class TestUtils(TestCase):
         b = torch.rand(10)
 
         with fresh_inductor_cache():
-            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            self.assertEqual(len(PyCodeCache.modules), 0)
             res1 = torch.compile(fn)(a, b)
             cache_dir1 = cache_dir()
 
         torch._dynamo.reset()
         with fresh_inductor_cache():
-            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            self.assertEqual(len(PyCodeCache.modules), 0)
             res2 = torch.compile(fn)(a, b)
             cache_dir2 = cache_dir()
 

@@ -1143,26 +1143,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Stores communicators for all collectives run inside a coalescing block
   std::shared_ptr<NCCLComm> coalescedComm_ = nullptr;
 
-  // map from the key: "group name + pg counter (ID)" to the
-  // unique NCCL ID count. This needs to be group and pg specific
-  //
-  // For each process group, we need a uniform unique NCCL ID counter to ensure
-  // that NCCL operation in this process group can be completed successfully.
-  // Since each process group ID belongs to a group name, the key to this map
-  // is a combination of group name and ProcessGroupNCCL ID.
-  static std::unordered_map<std::string, ssize_t> pgUniqueNCCLIDCnt_;
-
-  // map from group name to the pg counter (ID) within that group
-  //
-  // For each group with the "group name" (which is the key), we need to
-  // keep track of a unique process group ID when creating a new
-  // ProcessGroupNCCL for this "group name". Therefore, the value of this
-  // map keeps the unique ProcessGroupNCCL's ID for a specific group with
-  // the "group name". The reason we need a per-group process group ID counter
-  // is that different group can have different ranks and we need ensure that
-  // each group has its own uniform process group ID for all its ranks.
-  static std::unordered_map<std::string, ssize_t> processGroupCounterMap_;
-
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
   bool blockingWait_ = false;
@@ -1205,12 +1185,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Whether the NCCL watchdog should rethrow CUDA errors.
   bool rethrowCUDAErrors_ = false;
-
-  // Set of communicators that this process group has aborted and their
-  // ncclUniqueId has been written to the store. We don't need a lock
-  // for this map since only the watchdog thread accesses this set. The
-  // set contains the string representation of ncclUniqueId.
-  std::unordered_set<std::string> abortedComms_;
 
   // The number of active ncclGroupStart() calls. This counter will be increased
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()

@@ -25,6 +25,7 @@ from torch._dynamo.debug_utils import (
     backend_accuracy_fails,
     BuckTargetWriter,
     cast_to_fp64,
+    extra_deps,
     extra_imports,
     generate_config_string,
     helper_for_dump_minify,
@@ -228,13 +229,16 @@ def wrap_compiler_debug(
 
 def maybe_fbcode_instructions():
     if is_fbcode:
-        return """\
+        extra_deps_formatted = "\n".join([f'        "{dep}",' for dep in extra_deps])
+        if len(extra_deps_formatted) > 0:
+            extra_deps_formatted = "\n" + extra_deps_formatted
+        return f"""\
 \"\"\"
 To run this script in fbcode:
-- Create a directory (//scripts/{your_unixname}/repro)
-- Put this file in scripts/{your_unixname}/repro/fx_graph_runnable.py
+- Create a directory (//scripts/{{your_unixname}}/repro)
+- Put this file in scripts/{{your_unixname}}/repro/fx_graph_runnable.py
 - Add a TARGETS file that looks like the following
-- `buck2 run //scripts/{unixname}/repro:repro`
+- `buck2 run //scripts/{{your_unixname}}/repro:repro`
 
 NOTE: you may need additional deps to actually be able to run the script.
 ```
@@ -245,7 +249,7 @@ python_binary(
     name = "repro",
     main_src = "fx_graph_runnable.py",
     deps = [
-        "//caffe2:torch",
+        "//caffe2:torch",{extra_deps_formatted}
     ],
 )
 ```
