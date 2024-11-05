@@ -5,7 +5,6 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
-#include <ATen/mps/MPSDevice.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/TensorIndexing.h>
@@ -705,7 +704,7 @@ Tensor scaled_dot_product_attention(
     bool is_causal,
     std::optional<double> scale,
     bool enable_gqa) {
-  using namespace sdp;
+  using sdp::SDPBackend;
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (_fused_sdp_choice_stub.is_device_supported(query_.device().type())) {
@@ -730,7 +729,7 @@ Tensor scaled_dot_product_attention(
         Tensor key_padded = pad_last_dim<8, false>(key);
         Tensor value_padded = pad_last_dim<8, false>(value);
         // We need to calculate the scale based off the OG head dim size
-        auto og_scale = calculate_scale(query_, scale);
+        auto og_scale = sdp::calculate_scale(query_, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
             query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
@@ -754,13 +753,12 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case SDPBackend::math: {
-#ifdef USE_MPS
       const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
       const auto all_contiguous = query_.is_contiguous() && key.is_contiguous() && value.is_contiguous();
       if (query_device_type == DeviceType::MPS && dropout_p == 0.0
           && !(GradMode::is_enabled() && any_inputs_require_grad)
-          && (all_contiguous || mps::is_macos_13_or_newer(mps::MacOSVersion::MACOS_VER_15_0_PLUS))
+          && all_contiguous
           && !any_nested) {
         return std::get<0>(at::_scaled_dot_product_attention_math_for_mps(
             query_,
@@ -772,7 +770,6 @@ Tensor scaled_dot_product_attention(
             std::nullopt, /*dropout_mask*/
             scale));
       }
-#endif
       return std::get<0>(at::_scaled_dot_product_attention_math(
           query_,
           key,
