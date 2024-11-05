@@ -9,7 +9,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._utils_internal import justknobs_check
 
 from .runtime.runtime_utils import triton_cache_dir
-from .utils import GPU_KERNEL_BINS
+from .utils import GPU_KERNEL_BIN_EXTS
 
 
 log = logging.getLogger(__name__)
@@ -160,8 +160,9 @@ class TritonBundler:
                             counters["inductor"]["triton_bundler_save_kernel"] += 1
                         except Exception:
                             log.debug("failed to collect triton kernel", exc_info=True)
-                        file_extension = os.path.splitext(filename)
-                        if file_extension in GPU_KERNEL_BINS.values():
+                        file_extension = os.path.splitext(filename)[1]
+                        if file_extension in GPU_KERNEL_BIN_EXTS.values():
+                            print(file_extension)
                             # Each kernel has bunch of files like .cubin(for cuda), .spv(for xpu), .json, .ttir
                             # Just append one of them without the extension
                             kernel_names.append(Path(filename).stem)
@@ -233,8 +234,8 @@ class TritonBundler:
                             )
                         file.write(payload)
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"] += 1
-                    file_extension = os.path.splitext(artifact.filename)
-                    if file_extension in GPU_KERNEL_BINS.values():
+                    file_extension = os.path.splitext(artifact.filename)[1]
+                    if file_extension in GPU_KERNEL_BIN_EXTS.values():
                         # Each kernel has bunch of files like .cubin(for cuda), .spv(for xpu), .json, .ttir
                         # Just append one of them without the extension
                         kernel_names.append(Path(artifact.filename).stem)
