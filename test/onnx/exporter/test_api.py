@@ -353,6 +353,8 @@ class TestFakeTensorExport(common_utils.TestCase):
 
             assert onnx_program is not None
             # Convert to model proto and back to trigger to_bytes method which serializes the tensor
+            # Note that even though we are calling .model_proto (equivalently .save()) in fake mode,
+            # the concrete tensors are maintained
             onnx_model = ir.serde.deserialize_model(onnx_program.model_proto)
 
         np.testing.assert_allclose(
