@@ -273,6 +273,7 @@ struct NcclCommList {
         devices.data()));
   }
   NcclCommList(NcclCommList&& foo) = default;
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~NcclCommList() {
     if (comms) {
       for (const auto i : c10::irange(ndevices)) {
@@ -457,6 +458,7 @@ AutoNcclGroup::AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking)
 #endif
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   if (comm_nonblocking_ && comm_ != nullptr) {
