@@ -5,6 +5,7 @@ import threading
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
 from typing import Union
+from typing_extensions import deprecated
 
 import torch
 from torch._namedtensor_internals import check_serializing_named_tensor
@@ -150,6 +151,47 @@ def rebuild_meta_tensor(
         t.requires_grad = requires_grad
 
     return t
+
+
+@deprecated(
+    "`torch.multiprocessing.reductions.rebuild_cuda_tensor` is deprecated."
+    "Please use `torch.multiprocessing.reductions.rebuild_device_tensor` instead.",
+    category=FutureWarning,
+)
+def rebuild_cuda_tensor(
+    tensor_cls,
+    tensor_size,
+    tensor_stride,
+    tensor_offset,
+    storage_cls,
+    dtype,
+    storage_device,
+    storage_handle,
+    storage_size_bytes,
+    storage_offset_bytes,
+    requires_grad,
+    ref_counter_handle,
+    ref_counter_offset,
+    event_handle,
+    event_sync_required,
+):
+    return rebuild_device_tensor(
+        tensor_cls,
+        tensor_size,
+        tensor_stride,
+        tensor_offset,
+        storage_cls,
+        dtype,
+        storage_device,
+        storage_handle,
+        storage_size_bytes,
+        storage_offset_bytes,
+        requires_grad,
+        ref_counter_handle,
+        ref_counter_offset,
+        event_handle,
+        event_sync_required,
+    )
 
 
 def rebuild_device_tensor(
