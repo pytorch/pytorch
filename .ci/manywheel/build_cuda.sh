@@ -118,9 +118,8 @@ DEPS_SONAME=(
     "libgomp.so.1"
 )
 
-# only CUDA 11.8 ships the libcusparseLt.so.0 with the binary
-# since nvidia-cusparselt-cu12 is available and
-# nvidia-cusparselt-cu11 is not available
+# CUDA 11.8 have to ship the libcusparseLt.so.0 with the binary
+# since nvidia-cusparselt-cu11 is not available in PYPI
 if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
         DEPS_SONAME+=(
             "libcusparseLt.so.0"
