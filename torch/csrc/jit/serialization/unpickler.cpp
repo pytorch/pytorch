@@ -555,7 +555,6 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.size(),
           " elements, at least 2 expected");
 
-
       // In the OrderedDict case, the id has already been materialized
       // and added to the stack, thus there's no <functor_idx> but a Dict
       // there, in this case we can just pop the functor args and break.
@@ -565,7 +564,7 @@ PickleOpCode Unpickler::readInstruction() {
         stack_.pop_back();
         break;
       }
-      
+
       std::swap(*(stack_.end() - 2), *(stack_.end() - 1));
       size_t idx = stack_.back().toInt();
       stack_.pop_back();

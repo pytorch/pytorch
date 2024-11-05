@@ -38,32 +38,31 @@ void testEvalModeForLoadedModule() {
 void testLoadStateDict() {
   if (isSandcastle())
     return; // The module file to load is not generated in Sandcastle
-  
-   // Requires the state_dict that should have been written in tests_setup.py
-   // Refer: StateDictSerializationInterop in test/cpp/jit/tests_setup.py
-   caffe2::serialize::PyTorchStreamReader reader("state_dict.pt");
-   auto dict = torch::jit::readArchiveAndTensors(
+
+  // Requires the state_dict that should have been written in tests_setup.py
+  // Refer: StateDictSerializationInterop in test/cpp/jit/tests_setup.py
+  caffe2::serialize::PyTorchStreamReader reader("state_dict.pt");
+  auto dict = torch::jit::readArchiveAndTensors(
       "data",
       /*pickle_prefix=*/"",
       /*tensor_prefix=*/"",
       /*type_resolver=*/c10::nullopt,
       /*obj_loader=*/c10::nullopt,
       /*device=*/c10::nullopt,
-      reader
-    );
+      reader);
 
-   for (auto& el : dict.toGenericDict()) {
-     auto key = el.key().toStringRef();
-     auto ten = el.value().toTensor();
-     if (key == "weight") {
-       AT_ASSERT(ten.eq(2.0).all().item().toBool());
-     } else if (key == "bias") {
-       AT_ASSERT(ten.eq(3.0).all().item().toBool());
-     } else {
-       AT_ASSERT(false);
-     }
-   }
- }
+  for (auto& el : dict.toGenericDict()) {
+    auto key = el.key().toStringRef();
+    auto ten = el.value().toTensor();
+    if (key == "weight") {
+      AT_ASSERT(ten.eq(2.0).all().item().toBool());
+    } else if (key == "bias") {
+      AT_ASSERT(ten.eq(3.0).all().item().toBool());
+    } else {
+      AT_ASSERT(false);
+    }
+  }
+}
 
 // TODO: this test never ran before and is broken.
 // void testSerializationInterop() {
