@@ -1145,9 +1145,12 @@ class FxGraphCache:
             triton_bundler_meta = TritonBundler.read_and_emit(bundle)
             if (meta := triton_bundler_meta) is not None:
                 cache_info["triton_bundler_meta"] = str(meta)
-                get_chromium_event_logger().add_event_data(
-                    "inductor_compile", cached_kernel_names=meta.cached_kernel_names
-                )
+                logger = get_chromium_event_logger()
+                if "inductor_compile" in logger.get_stack():
+                    # TODO: Clean up autograd cache integration
+                    logger.add_event_data(
+                        "inductor_compile", cached_kernel_names=meta.cached_kernel_names
+                    )
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
@@ -1504,13 +1507,20 @@ class FxGraphCache:
             assert compiled_graph is None
             assert key_info is not None
             start_time = cache_info["cache_event_time"]
-            compiled_graph = compile_fx_fn(
-                gm, example_inputs, inputs_to_check, fx_kwargs
-            )
-            compiled_graph._time_taken_ns = time_ns() - start_time
-            cache_key = key_info[0]
-            compiled_graph._fx_graph_cache_key = cache_key
-            compiled_graph._triton_bundle, triton_bundler_meta = TritonBundler.collect()
+            TritonBundler.begin_compile()
+            try:
+                compiled_graph = compile_fx_fn(
+                    gm, example_inputs, inputs_to_check, fx_kwargs
+                )
+                compiled_graph._time_taken_ns = time_ns() - start_time
+                cache_key = key_info[0]
+                compiled_graph._fx_graph_cache_key = cache_key
+                (
+                    compiled_graph._triton_bundle,
+                    triton_bundler_meta,
+                ) = TritonBundler.collect()
+            finally:
+                TritonBundler.end_compile()
             if triton_bundler_meta is not None:
                 cache_info["triton_bundler_meta"] = str(triton_bundler_meta)
             cache_info["time_taken_ns"] = compiled_graph._time_taken_ns

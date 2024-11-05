@@ -97,7 +97,6 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .scheduler import BaseSchedulerNode
 from .sizevars import SizeVarAllocator
-from .triton_bundler import TritonBundler
 from .utils import (
     convert_shape_to_inductor,
     gather_origins,
@@ -1966,7 +1965,6 @@ class GraphLowering(torch.fx.Interpreter):
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
-        TritonBundler.begin_compile()
 
         try:
             linemap = [(line_no, node.stack_trace) for line_no, node in linemap]  # type: ignore[misc]
