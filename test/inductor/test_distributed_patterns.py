@@ -395,6 +395,11 @@ class DistributedPatternTests(TestCase):
         self._assert_same_grad(r1, r2)
         self._assert_same_grad(p1, p2)
 
+    # TODO: fix fw_metadata.num_forward in dynamo.
+    # While fn returns two user outputs, dynamo only marks one user outputs
+    # p.sin(). This leads to p being wrongly marked as donated buffer
+    # and inplace updated.
+    @torch._functorch.config.patch(donated_buffer=False)
     def test_nn_param_return3(self):
         def fn(x):
             p = torch.nn.Parameter(x + 123)
