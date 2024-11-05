@@ -308,12 +308,12 @@ class ConstDictVariable(VariableTracker):
         elif name == "__len__":
             assert not (args or kwargs)
             return ConstantVariable.create(len(self.items))
-        elif name == "__setitem__" and arg_hashable and self.mutation_type:
+        elif name == "__setitem__" and arg_hashable and self.is_mutable():
             assert not kwargs and len(args) == 2
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
-        elif name == "__delitem__" and arg_hashable and self.mutation_type:
+        elif name == "__delitem__" and arg_hashable and self.is_mutable():
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.__delitem__(Hashable(args[0]))
@@ -324,7 +324,7 @@ class ConstDictVariable(VariableTracker):
                 return ConstantVariable(None)
             else:
                 return args[1]
-        elif name == "pop" and arg_hashable and self.mutation_type:
+        elif name == "pop" and arg_hashable and self.is_mutable():
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             return self.items.pop(Hashable(args[0]))
@@ -333,7 +333,7 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
-        elif name == "update" and self.mutation_type:
+        elif name == "update" and self.is_mutable():
             is_args_supported = len(args) == 1 and isinstance(
                 args[0],
                 (
@@ -368,7 +368,7 @@ class ConstDictVariable(VariableTracker):
             return self.getitem_const(tx, args[0])
         elif name == "__contains__" and len(args) == 1:
             return ConstantVariable.create(args[0] in self)
-        elif name == "setdefault" and arg_hashable and self.mutation_type:
+        elif name == "setdefault" and arg_hashable and self.is_mutable():
             assert not kwargs
             assert len(args) <= 2
             value = self.maybe_getitem_const(args[0])
@@ -547,7 +547,7 @@ class SetVariable(ConstDictVariable):
                     TupleVariable,
                 ),
             )
-            and self.mutation_type
+            and self.is_mutable()
         ):
             if isinstance(args[0], (ListVariable, TupleVariable)):
                 arg = SetVariable(args[0].unpack_var_sequence(tx))
