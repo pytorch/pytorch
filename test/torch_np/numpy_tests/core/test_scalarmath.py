@@ -822,7 +822,6 @@ class TestScalarOpsMisc(TestCase):
         with pytest.warns(RuntimeWarning, match="overflow encountered"):
             operation(min, max)
 
-    @skip(reason="integer overflow UB: crashes pytorch under ASAN")
     @parametrize("dtype", "bhil")
     @parametrize(
         "operation",
