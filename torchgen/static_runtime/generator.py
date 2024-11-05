@@ -623,7 +623,7 @@ REGISTER_OPERATOR_FUNCTOR(
       {body}
       LogAndDumpSchema(n);
       return nullptr;
-    }});
+    }})
 """
         return generated
 
