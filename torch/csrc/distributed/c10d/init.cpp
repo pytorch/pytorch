@@ -397,7 +397,7 @@ static PyObject* reduceopmeta___instancecheck__(
   if (Py_TYPE(self) == Py_TYPE(args)) {
     Py_RETURN_TRUE;
   }
-  if (c10::string_view(args->ob_type->tp_name).find("RedOpType") !=
+  if (std::string_view(args->ob_type->tp_name).find("RedOpType") !=
       c10::string_view::npos) {
     Py_RETURN_TRUE;
   }
@@ -1093,6 +1093,13 @@ This class does not support ``__members__`` property.)");
           py::arg("rank"),
           py::arg("sizes"),
           py::arg("dtype"),
+          py::arg("storage_offset") = 0)
+      .def(
+          "get_signal_pad",
+          &SymmetricMemory::get_signal_pad,
+          py::arg("rank"),
+          py::arg("sizes") = py::list(),
+          py::arg("dtype") = py::none(),
           py::arg("storage_offset") = 0)
       .def(
           "barrier",
