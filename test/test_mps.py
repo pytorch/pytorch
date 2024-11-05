@@ -8826,7 +8826,8 @@ class TestNNMPS(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path)
+            # weights_only=False as this is a legacy use case that loads a module
+            m = torch.load(path, weights_only=False)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
@@ -8843,7 +8844,8 @@ class TestNNMPS(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path, encoding='utf-8')
+            # weights_only=False as this is a legacy use case that loads a module
+            m = torch.load(path, encoding='utf-8', weights_only=False)
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
