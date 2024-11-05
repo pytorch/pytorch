@@ -50,8 +50,13 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
                          at::cuda::detail::TensorInfo<mask_t, IndexType> c,
                          IndexType totalElements, accscalar_t p,
                          PhiloxCudaState philox_args) {
+#ifdef USE_ROCM
+  // make sure we don't break assumption that we can't have > 8 elements / thread
+  static_assert(VEC <= 8, "Value of VEC must be in [2, 4, 8]");
+#else
   // make sure we don't break assumption that we can't have > 4 elements / thread
   static_assert(VEC <= 4, "Value of VEC must be in [2, 4]");
+#endif
 
   using LoadT = memory::aligned_vector<scalar_t, VEC>;
   using MaskLoadT = memory::aligned_vector<mask_t, VEC>;
@@ -70,6 +75,9 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
   accscalar_t scale = 1.0 / p;
 
   float4 rand;
+#ifdef USE_ROCM
+  float4 rand1;
+#endif
 
   // Note: Vectorized loads means we'll stride each thread by an additional VEC factor, as we'll load VEC elements at a time
   for (IndexType linearIndex = idx * VEC;
@@ -83,7 +91,7 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
     //curand_uniform_double was pure evil anyway, not doing what it promises, and there's nothing for halfs, so generate float for everything
     // Note: need a new set of random values per 4 elements -- we'll handle VEC elements in this thread, so need ceil(VEC / 4)
     // sets of rand.
-    if ((VEC == 4) || (gridxvec_loop_state == 0)) {
+    if ((VEC >= 4) || (gridxvec_loop_state == 0)) {
       rand = curand_uniform4(&state);
     } else {
       // sets up the last two values we generated last iteration to be used this iteration.
@@ -92,12 +100,26 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
       gridxvec_loop_state ^= 1;
     }
 
+#ifdef USE_ROCM
+    if (VEC == 8) {
+      rand1 = curand_uniform4(&state);
+    }
+#endif
+
     rand.x = rand.x < p;
     rand.y = rand.y < p;
-    if (VEC == 4) {
+    if (VEC >= 4) {
       rand.z = rand.z < p;
       rand.w = rand.w < p;
     }
+#ifdef USE_ROCM
+    if (VEC == 8) {
+      rand1.x = rand1.x < p;
+      rand1.y = rand1.y < p;
+      rand1.z = rand1.z < p;
+      rand1.w = rand1.w < p;
+    }
+#endif
 
     // Note: We explicitly check for is_contiguous() before launching the vectorized kernel
     // and replace IndexToOffset call with linearIndex to allow vectorization of NHWC (or other)
@@ -110,10 +132,19 @@ fused_dropout_kernel_vec(at::cuda::detail::TensorInfo<const scalar_t, IndexType>
 
     // Perform the actual computation
     #pragma unroll
-    for (int ii = 0; ii < VEC; ii++) {
+    for (int ii = 0; ii < std::min(VEC, 4); ii++) {
       r[ii] = src[ii]*(&rand.x)[ii]*scale;
       mask[ii] = (mask_t)(&rand.x)[ii];
     }
+#ifdef USE_ROCM
+    if (VEC == 8) {
+      #pragma unroll
+      for (int ii = 0; ii < 4; ii++) {
+        r[4+ii] = src[4+ii]*(&rand1.x)[ii]*scale;
+        mask[4+ii] = (mask_t)(&rand1.x)[ii];
+      }
+    }
+#endif
     // Vectorized writes for both mask & result
     *(reinterpret_cast<LoadT*>(&b.data[linearIndex])) = *reinterpret_cast<LoadT*>(&r[0]);
     *(reinterpret_cast<MaskLoadT*>(&c.data[linearIndex])) = *reinterpret_cast<MaskLoadT*>(&mask[0]);
@@ -250,6 +281,22 @@ inline void launcher(
 
         if (vec_size > 1) {
           switch (vec_size) {
+            case 8:
+              fused_dropout_kernel_vec<
+                  scalar_t,
+                  accscalar_t,
+                  index_type,
+                  1,
+                  8>
+                  <<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
+                      self_info,
+                      ret_info,
+                      mask_info,
+                      nelem,
+                      pa,
+                      rng_engine_inputs);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+              break;
             case 4:
               fused_dropout_kernel_vec<
                   scalar_t,
@@ -282,6 +329,8 @@ inline void launcher(
                       rng_engine_inputs);
               C10_CUDA_KERNEL_LAUNCH_CHECK();
               break;
+	    default:
+              TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
           }
         } else {
           switch (self_info.dims) {
