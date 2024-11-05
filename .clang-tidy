@@ -35,13 +35,14 @@ cppcoreguidelines-*,
 hicpp-exception-baseclass,
 hicpp-avoid-goto,
 misc-*,
+-misc-confusable-identifiers,
 -misc-const-correctness,
 -misc-include-cleaner,
 -misc-use-anonymous-namespace,
 -misc-unused-parameters,
 -misc-no-recursion,
 -misc-non-private-member-variables-in-classes,
--misc-confusable-identifiers,
+-misc-unused-using-decls,
 modernize-*,
 -modernize-macro-to-enum,
 -modernize-return-braced-init-list,
@@ -63,5 +64,5 @@ readability-string-compare,
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 WarningsAsErrors: '*'
 CheckOptions:
-  misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h'
+  misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h;IListRef.h'
 ...

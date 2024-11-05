@@ -274,10 +274,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                             # Cell has not yet been assigned
                             contents_var = variables.DeletedVariable()
 
-                        if (
-                            closure_cell_contents.name()
-                            not in tx.mutated_closure_cell_contents
-                        ):
+                        if id(cell) not in tx.mutated_closure_cell_ids:
                             # Optimistically don't allocate the cell, to
                             # reduce the number of side effects.  This is
                             # important for cond, as without it, any accesses
@@ -287,6 +284,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                             # the analysis with this cell's name in the
                             # mutated list here
                             result[name] = contents_var
+                            # Map the variable to the original cell so we can
+                            # look it up later, see
+                            # `InliningInstructionTranslator.STORE_DEREF`.
+                            tx.contents_var_to_mutated_cell[contents_var] = cell
                             continue
 
                         # cells are written to with "cell_contents",
@@ -1226,8 +1227,7 @@ class TMADescriptorVariable(VariableTracker):
         **kwargs,
     ):
         assert isinstance(data_ptr, variables.DataPtrVariable)
-
-        super().__init__(**kwargs),
+        super().__init__(**kwargs)
         self.data_ptr = data_ptr
         self.dims = dims
         self.block_dims = block_dims
@@ -1259,8 +1259,8 @@ class CreateTMADescriptorVariable(VariableTracker):
         rank: int,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs),
         assert rank in (1, 2)
+        super().__init__(**kwargs)
         self.rank = rank
 
     def call_function(
@@ -1294,9 +1294,9 @@ class CreateTMADescriptorVariable(VariableTracker):
             ]
             block_dims = [
                 kwargs["block_dim1"] if "block_dim1" in kwargs else args[3],
-                kwargs["block_dim2"] if "block_dim2" in kwargs else args[4],
+                kwargs["block_dim0"] if "block_dim0" in kwargs else args[4],
             ]
-        element_size = kwargs["ptr"] if "ptr" in kwargs else args[-1]
+        element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
 
         return TMADescriptorVariable(
             data_ptr=ptr,
