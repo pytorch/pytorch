@@ -666,7 +666,8 @@ Tensor _safe_softmax(
     int64_t dim,
     std::optional<ScalarType> dtype) {
   auto out = at::softmax(self, dim, dtype);
-  const auto masked = self.isneginf();
+  const auto neg_inf = at::scalar_tensor(-std::numeric_limits<float>::infinity(), at::TensorOptions().dtype(out.dtype()).device(out.device()));
+  const auto masked = self.eq(neg_inf);
   const auto masked_rows = all(masked, dim, true);
   const auto zero = at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device()));
   return at::where(masked_rows, zero, out);
