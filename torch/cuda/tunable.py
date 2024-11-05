@@ -112,15 +112,16 @@ environment variables take precedence over any setting you manipulate using the
 C++ or Python APIs.
 
 """
+import concurrent.futures
+import glob
+import multiprocessing as mp
+import os
+import shutil
 import warnings
 from typing import Optional, Tuple
 
 import torch
-import concurrent.futures
-import multiprocessing as mp
-import glob
-import os
-import shutil
+
 
 __all__ = [
     "enable",
@@ -277,17 +278,19 @@ def tune_gemm_in_file(filename: str) -> None:
             if line.startswith("Gemm"):
                 process_single_offline_gemm(line, deviceid)
 
+
 def gather_unique_untuned_gemm_from_files(filename_pattern: str) -> set[str]:
     r"""Process multiple untuned results file and return a set with duplicates removed."""
-    unique_gemm_entries = set() # set will avoid duplicates
+    unique_gemm_entries = set()  # set will avoid duplicates
 
     for file_path in glob.glob(filename_pattern):
-        with open(file_path, 'r') as file:
+        with open(file_path, "r") as file:
             for line in file:
                 if line.startswith("Gemm"):
                     unique_gemm_entries.add(line)
 
     return unique_gemm_entries
+
 
 def gather_tunableop_results() -> None:
     r"""Gather results from multiple tunableop results file and create a single file."""
@@ -303,19 +306,19 @@ def gather_tunableop_results() -> None:
     #   the GPU ordinal
     if tunable_filename_env is None:
         filename_pattern = "tunableop_results?.csv"
-    elif ('%d' in tunable_filename_env):
-        filename_pattern = tunable_filename_env.replace('%d', '?')
+    elif "%d" in tunable_filename_env:
+        filename_pattern = tunable_filename_env.replace("%d", "?")
     else:
-        filename_pattern = tunable_filename_env.replace('.', '?.')
+        filename_pattern = tunable_filename_env.replace(".", "?.")
 
     FirstFile = False
     matching_files = glob.glob(filename_pattern)
     num_matching_files = len(matching_files)
     for file_path in matching_files:
-        with open(file_path, 'r') as file:
+        with open(file_path, "r") as file:
             for line in file:
                 if line.startswith("Validator"):
-                    if not(FirstFile):
+                    if not (FirstFile):
                         # Only read Validator from first file
                         validator_lines.append(line)
                 else:
@@ -323,9 +326,9 @@ def gather_tunableop_results() -> None:
 
         FirstFile = True
 
-    output_file = filename_pattern.replace('?','_full0')
+    output_file = filename_pattern.replace("?", "_full0")
 
-    with open(output_file, 'w') as out_file:
+    with open(output_file, "w") as out_file:
         for line in validator_lines:
             out_file.write(line)
         for line in gemm_lines:
@@ -333,10 +336,11 @@ def gather_tunableop_results() -> None:
 
     # Create num_matching_copies of the results file
     for i in range(1, num_matching_files):
-        duplicate_file = output_file.replace('0',str(i))
+        duplicate_file = output_file.replace("0", str(i))
         shutil.copy(output_file, duplicate_file)
 
-def process_single_offline_gemm(untuned_gemm_line:str, gpu_id:int) -> None:
+
+def process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
     r"""Process a single untuned GEMM."""
 
     deviceid = "cuda:" + str(gpu_id)
@@ -392,7 +396,8 @@ def process_single_offline_gemm(untuned_gemm_line:str, gpu_id:int) -> None:
     else:
         warnings.warn(f"error: unknown op {op_sig}")
 
-def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus:int) -> None:
+
+def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
     r"""Process one or more files and distribute work over one or more GPUs."""
     unique_gemm_entries = gather_unique_untuned_gemm_from_files(filename_pattern)
 
@@ -401,23 +406,24 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus:int) -> None:
 
     total_gpus = torch.cuda.device_count()
 
-    assert(1 <= num_gpus <= total_gpus)
+    assert 1 <= num_gpus <= total_gpus
 
     mp_context = mp.get_context("spawn")
 
-    futures = [] # empty list to hold futures
+    futures = []  # empty list to hold futures
 
     # GEMM are assigned to GPUs in a round robin manner
     h = 0
-    with concurrent.futures.ProcessPoolExecutor(max_workers=num_gpus,
-            mp_context=mp_context) as executor:
-            for line in unique_gemm_entries:
-                future = executor.submit(process_single_offline_gemm, line, h)
-                futures.append(future)
-                h = (h + 1) % num_gpus
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=num_gpus, mp_context=mp_context
+    ) as executor:
+        for line in unique_gemm_entries:
+            future = executor.submit(process_single_offline_gemm, line, h)
+            futures.append(future)
+            h = (h + 1) % num_gpus
 
-            for future in concurrent.futures.as_completed(futures):
-                future.result()
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
 
     torch.cuda.synchronize()
 
