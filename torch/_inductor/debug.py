@@ -92,7 +92,9 @@ def draw_buffers(
     gm = GraphModule({}, graph)
     legalize_graph(gm)
     gm.graph.lint()
-    draw_graph(gm, fname, clear_meta=False)
+    draw_graph(
+        gm, fname, clear_meta=False, dot_graph_shape=config.trace.dot_graph_shape
+    )
 
 
 def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
@@ -536,6 +538,7 @@ class DebugFormatter:
             clear_meta=False,
             prog=GRAPHVIZ_COMMAND_SCALABLE,
             parse_stack_trace=True,
+            dot_graph_shape=config.trace.dot_graph_shape,
         )
 
     def output_code(self, filename: str) -> None:

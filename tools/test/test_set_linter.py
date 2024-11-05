@@ -6,7 +6,9 @@ from token import NAME
 from tokenize import TokenInfo
 
 from tools.linter.adapters.set_linter import get_args, lint_file, PythonLines
+
 from torch.testing._internal.common_utils import TestCase
+
 
 TESTDATA = Path("tools/test/set_linter_testdata")
 
