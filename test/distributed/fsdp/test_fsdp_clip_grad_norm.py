@@ -23,7 +23,6 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
     run_tests,
     TEST_HPU,
     TEST_WITH_DEV_DBG_ASAN,
@@ -53,7 +52,8 @@ class TestClipGradNorm(FSDPTest):
                 self.lin2 = nn.Linear(5, 5)
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.lin2(self.lin1(x))
-        model = Model().to(device if TEST_HPU else self.rank)
+        device_id = device if TEST_HPU else self.rank
+        model = Model().to(device_id)
         model.lin2 = FSDP(model.lin2)
         fsdp_model = FSDP(model)
         fsdp_model(torch.randn((2, 5), device=torch.device(self.device_type))).sum().backward()
@@ -96,11 +96,12 @@ class TestClipGradNorm(FSDPTest):
             DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
         )
-        ddp_model = DDP(local_model, device_ids=[device if TEST_HPU else self.rank])
+        device_id = device if TEST_HPU else self.rank
+        ddp_model = DDP(local_model, device_ids=[device_id])
         fsdp_kwargs = {
             "cpu_offload": CPUOffload(offload_params=offload_params),
             "use_orig_params": use_orig_params,
-            "device_id": device if TEST_HPU else self.rank,
+            "device_id": device_id,
         }
         if sharding_strategy == "mixed_strategy":
             fsdp_model = TransformerWithSharedParams.init(
@@ -250,7 +251,7 @@ class TestClipGradNorm(FSDPTest):
         sharding_strategy: ShardingStrategy,
         use_orig_params: bool,
     ):
-        
+        device_id = device if TEST_HPU else self.rank
         fsdp_kwargs = {
             "sharding_strategy": sharding_strategy,
             "use_orig_params": use_orig_params,
@@ -259,7 +260,7 @@ class TestClipGradNorm(FSDPTest):
                 reduce_dtype=torch.float16,
                 keep_low_precision_grads=True,
             ),
-            "device_id": device if TEST_HPU else self.rank,
+            "device_id": device_id,
         }
         fsdp_model = FSDP(
             NestedWrappedModule.init(
@@ -307,11 +308,12 @@ class TestClipGradNorm(FSDPTest):
             reduce_dtype=torch.float32,
             buffer_dtype=torch.float32,
         )
+        device_id = device if TEST_HPU else self.rank
         fsdp_module = FSDP(
             lin_module,
             sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             mixed_precision=mixed_precision_config,
-            device_id=device if TEST_HPU else self.rank,
+            device_id=device_id,
             use_orig_params=use_orig_params,
         )
         inp = torch.randn(32, 24, device=self.device_type)
