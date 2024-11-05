@@ -283,12 +283,13 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
   }
 
   bool same_dtype = iter.dtype(0) == iter.dtype(1);
-  
+  bool is_complex = at::isComplexType(iter.dtype(0));
+
   // Check if the tensor is 1D or 2D and non-contiguous
-  if (iter.ndim() <= 2 && !iter.is_contiguous() && same_dtype) {   
+  if (iter.ndim() <= 2 && !iter.is_contiguous() && same_dtype && !is_complex) {   
     // Perform pitch checks to determine if a temporary is needed
     const auto& src_tensor = iter.tensor(1);
-    const auto& dst_tensor = iter.tensor(0);
+    const auto& dst_tensor = iter.tensor(0);   
 
     size_t element_size = src_tensor.element_size();
     int64_t dim0 = src_tensor.size(0);
@@ -312,7 +313,7 @@ static bool copy_requires_temporaries(TensorIterator& iter, bool p2p_enabled) {
     }
 
     // If pitch conditions are met, no temporary is required
-    if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {
+    if (src_pitch >= width_in_bytes && dst_pitch >= width_in_bytes) {     
       return false;
     }
   }
