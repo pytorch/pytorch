@@ -778,6 +778,39 @@ class TestCuda(TestCase):
         except RuntimeError as e:
             self.assertTrue('CUDNN' in str(e))
 
+    def test_force_cudnn_batchnorm(self):
+        dtype = torch.float
+        x = torch.randn(1, 1, 1, 1, dtype=dtype, device='cuda')
+        mean = torch.randn(1, dtype=dtype, device='cuda')
+        var = torch.randn(1, dtype=dtype, device='cuda')
+        weight = torch.randn(1, dtype=dtype, device='cuda')
+        with torch.backends.cudnn.flags(enabled=True, force=False):
+            torch.nn.functional.batch_norm(x, mean, var, weight)
+        # cuDNN expects bias tensor
+        try:
+            with torch.backends.cudnn.flags(enabled=True, force=True):
+                torch.nn.functional.batch_norm(x, mean, var, weight)
+        except RuntimeError as e:
+            self.assertTrue(('undefined Tensor') in str(e))
+
+    def test_force_cudnn_CTCLoss(self):
+        target_lengths = [30, 25, 500]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2).requires_grad_()
+
+        log_probs_ref = log_probs.detach().clone().requires_grad_()
+
+        try:
+            with torch.backends.cudnn.flags(enabled=True, force=True):
+                res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+                res.backward()
+        except RuntimeError as e:
+            self.assertTrue(('CUDNN') in str(e))
+
+        with torch.backends.cudnn.flags(enabled=True, force=False):
+            res2 = torch.nn.functional.ctc_loss(log_probs_ref, targets.cuda().long(), input_lengths, target_lengths)
+            res2.backward()
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
