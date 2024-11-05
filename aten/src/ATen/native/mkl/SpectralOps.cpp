@@ -575,7 +575,7 @@ Tensor _fft_c2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
 #else
 
 namespace at { namespace native {
-REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
+REGISTER_NO_CPU_DISPATCH(fft_fill_with_conjugate_symmetry_stub)
 
 Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, int64_t last_dim_size) {
   TORCH_CHECK(false, "fft: ATen not compiled with FFT support");

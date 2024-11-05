@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 
 import ast
+import contextlib
 import io
 import itertools
 import math
@@ -8,7 +9,6 @@ import random
 import sys
 import tempfile
 import unittest
-from contextlib import nullcontext
 from functools import partial
 from typing import Optional, Tuple
 
@@ -1056,6 +1056,8 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         )
         emb = torch.nn.Embedding(100, 8, device=device)
         y = emb(x)
+        if layout == torch.jagged:
+            y.backward(torch.randn_like(y))
 
         @torch._dynamo.disable
         def check(inputs, y):
@@ -3656,7 +3658,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ["contig", "noncontig_transposed", "noncontig_with_holes"],
         name_fn=lambda c: c,
     )
-    def test_serialization(self, device, dtype, contiguity):
+    @parametrize("weights_only", [True, False])
+    def test_serialization(self, device, dtype, contiguity, weights_only):
         # Test with 3 cases:
         # 1. contiguous
         # 2. non-contiguous transposed
@@ -3692,8 +3695,21 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         with tempfile.TemporaryFile() as f:
             torch.save(nt, f)
+            safe_globals = [
+                torch.nested._internal.nested_tensor.NestedTensor,
+                torch.nested._internal.nested_tensor._rebuild_njt,
+                set,
+                torch._dynamo.decorators._DimRange,
+            ]
             f.seek(0)
-            nt_loaded = torch.load(f)
+            ctx = (
+                torch.serialization.safe_globals(safe_globals)
+                if weights_only
+                else contextlib.nullcontext()
+            )
+
+            with ctx:
+                nt_loaded = torch.load(f, weights_only=weights_only)
 
             self.assertIsNot(nt, nt_loaded)
             # we expect a new offsets tensor -> different nested int upon load
@@ -4970,7 +4986,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             if nt.dim() > reduce_dim[-1]:
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "not supported along a ragged and non-batch dimension for NestedTensor",
+                    "reducing along a ragged and non-batch dimension is not supported",
                 ):
                     out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
 
@@ -5009,7 +5025,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             if nt.dim() > reduce_dim[-1]:
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "not supported along the batch dimension but not the ragged dimension for NestedTensor",
+                    "reducing along the batch dimension but not the ragged dimension "
+                    + "is not supported",
                 ):
                     out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
 
@@ -5047,7 +5064,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
             with self.assertRaisesRegex(
                 RuntimeError,
-                "not supported along the batch dimension but not the ragged dimension for NestedTensor",
+                "reducing along the batch dimension but not the ragged dimension "
+                + "is not supported",
             ):
                 out = func(nt, dim=reduce_dim, keepdim=keepdim)
 
@@ -5101,8 +5119,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 if nt_with_holes._ragged_idx in reduce_dim:
                     with self.assertRaisesRegex(
                         RuntimeError,
-                        "not supported where lengths is not None "
-                        + "if reducing across the ragged dimension for NestedTensor",
+                        "reducing across the ragged dimension is not supported for "
+                        + "non-contiguous nested tensors with holes",
                     ):
                         out = func(nt_with_holes, dim=reduce_dim, keepdim=keepdim)
                 else:
@@ -5210,92 +5228,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 out = torch.nn.functional.layer_norm(
                     nt_with_holes, normalized_shape=normalized_shape
                 )
-
-    @dtypes(torch.float32)
-    @parametrize("keepdim", [True])
-    @parametrize("requires_grad", [False, True])
-    @parametrize("components_require_grad", [False, True])
-    def test_mean_dim_reduce_multiple_dims(
-        self,
-        device,
-        dtype,
-        keepdim,
-        requires_grad,
-        components_require_grad,
-    ):
-        """
-        Mean on NestedTensor fails when trying to reduce across multiple dimensions
-        only if the batch or ragged dims are included
-        """
-        tensor_lists = self._get_example_tensor_lists(
-            include_list_of_lists=False, include_requires_grad=components_require_grad
-        )
-        reduce_dims = ((0, 1), (2, 3), (2, 3, 4), (0, 3), (1, 2))
-
-        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
-            nt = torch.nested.nested_tensor(
-                tensor_list,
-                device=device,
-                dtype=dtype,
-                layout=torch.jagged,
-                requires_grad=requires_grad,
-            )
-
-            if nt.dim() > reduce_dim[-1]:
-                ragged_or_batch_included = (
-                    nt._ragged_idx in reduce_dim or 0 in reduce_dim
-                )
-
-                context = (
-                    self.assertRaisesRegex(
-                        RuntimeError,
-                        "not supported across multiple dimensions for NestedTensor",
-                    )
-                    if ragged_or_batch_included
-                    else nullcontext()
-                )
-
-                with context:
-                    out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
-
-    @dtypes(torch.float32)
-    @parametrize("keepdim", [False, True])
-    @parametrize("requires_grad", [False, True])
-    @parametrize("components_require_grad", [False, True])
-    def test_mean_dim_keepdim_False(
-        self,
-        device,
-        dtype,
-        keepdim,
-        requires_grad,
-        components_require_grad,
-    ):
-        """
-        Mean on NestedTensor fails when keepdim=False
-        """
-        tensor_lists = self._get_example_tensor_lists(
-            include_list_of_lists=False, include_requires_grad=components_require_grad
-        )
-        reduce_dims = ((1,), (2,), (3,))
-
-        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
-            nt = torch.nested.nested_tensor(
-                tensor_list,
-                device=device,
-                dtype=dtype,
-                layout=torch.jagged,
-                requires_grad=requires_grad,
-            )
-
-            if nt.dim() > reduce_dim[-1]:
-                if not keepdim:
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        "not supported when keepdim=False for NestedTensor",
-                    ):
-                        out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
-                else:
-                    out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
 
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
@@ -6191,6 +6123,38 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             "copy_ only supports Nested Tensors that have same size and the exact same offset tensor.",
         ):
             a.copy_(b)
+
+    # This can't happen in the opinfo tests due to subprocess creation
+    @unittest.skipIf(
+        TEST_WITH_ROCM,
+        "In ROCm, kernel asserts are disabled due to performance overhead",
+    )
+    def test_index_put_error(self, device):
+        import subprocess
+
+        with self.subTest():
+            r = subprocess.call(
+                [
+                    sys.executable,
+                    "-c",
+                    """\
+import torch
+offsets = torch.tensor([0, 2, 5, 7], device='cuda')
+lengths = torch.tensor([2, 2, 2], device='cuda')
+indices = [
+    torch.tensor([0, 1, 2], device='cuda'),
+    torch.tensor([0, 2, 1], device='cuda'),
+    torch.tensor([0, 0, 0], device='cuda'),
+]
+a = torch.nested.nested_tensor_from_jagged(
+    torch.zeros(7, 3, device='cuda'), offsets, lengths
+)
+a[indices] = 1.0
+torch.cuda.synchronize()
+""",
+                ]
+            )
+            self.assertTrue(r != 0)
 
     @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
     def test_profiler_sequence_nr(self):
@@ -7780,12 +7744,6 @@ FORWARD_FAILURES = {
     "polar",
     "rsub",
     # reduction
-    "all",
-    "amax",
-    "amin",
-    "any",
-    "argmax",
-    "argmin",
     "count_nonzero",
     "linalg.vector_norm",
     "nansum",
@@ -7794,8 +7752,6 @@ FORWARD_FAILURES = {
     "var",
     "var.unbiased",
     # === BEGIN UNSUPPORTED SECTION ===
-    # RuntimeError: mean(): not supported for NestedTensor on dim=1
-    "mean",
     # ValueError: expects strided tensor (got torch.jagged tensor)
     "masked.amax",
     "masked.amin",
@@ -7822,8 +7778,6 @@ FORWARD_FAILURES = {
     "jiterator_binary",
     "jiterator_binary_return_by_ref",
     "jiterator_unary",
-    # RuntimeError: prod(): keepdim=True must be set for NestedTensor
-    "prod",
     # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
     "nanmean",
 }
@@ -7855,8 +7809,6 @@ BACKWARD_FAILURES = {
     "clone",
     # Calling into torch.ops.aten.size directly
     "masked_select",
-    # NotImplementedError: aten._nested_sum_backward.default. Need to fix the backward pass.
-    "sum",
 }
 
 COMPILE_FORWARD_FAILURES = {
@@ -7913,6 +7865,12 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_ref = op.ref(op, sample)
             self.assertEqualIgnoringNestedInts(out, out_ref)
 
+            # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
+            # TODO: Add xfails for other inplace ops instead of hardcoding
+            if op.inplace_variant and "index_put" in op.full_name:
+                op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
+                self.assertEqualIgnoringNestedInts(sample.input, out_ref)
+
     @withXFails(BACKWARD_FAILURES)
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
@@ -7967,6 +7925,32 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 self.assertEqualIgnoringNestedInts(out_compile, out_ref)
             else:
                 self.assertEqual(out_compile, out_ref)
+
+            # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
+            # TODO: Add xfails for other inplace ops instead of hardcoding
+            if op.inplace_variant and "index_put" in op.full_name:
+                op_fn = op.inplace_variant
+
+                def in_f(*args, **kwargs):
+                    return op_fn(*args, **kwargs)
+
+                compiled_in_f = torch.compile(
+                    in_f, fullgraph=True, backend="aot_eager_decomp_partition"
+                )
+
+                if sample.input.is_contiguous():
+                    compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                    if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                        self.assertEqualIgnoringNestedInts(sample.input, out_ref)
+                    else:
+                        self.assertEqual(sample.input, out_ref)
+                else:
+                    # see https://github.com/pytorch/pytorch/issues/106456
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
+                    ):
+                        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
 
     @withXFails(COMPILE_BACKWARD_FAILURES)
     @ops(
