@@ -5,6 +5,7 @@
 #include <c10/core/CPUAllocator.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <stdexcept>
 #include <string>
@@ -170,13 +171,12 @@ bool Context::userEnabledOverrideableSDP() const {
 }
 
 static constexpr const auto cublas_config_var_name = "CUBLAS_WORKSPACE_CONFIG";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-static const char* const cublas_deterministic_configs[] = {":4096:8", ":16:8"};
+static constexpr const std::array<const char*, 2> cublas_deterministic_configs = {":4096:8", ":16:8"};
 
 bool Context::checkCuBLASConfigDeterministic() {
   // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
   // is set to deterministic setting
-  if (hasCUDART() && (versionCUDART() >= 10020)) {
+  if (hasCUDART()) {
     const auto workspace_config = c10::utils::get_env(cublas_config_var_name);
     return (workspace_config == cublas_deterministic_configs[0] || workspace_config == cublas_deterministic_configs[1]);
   }
