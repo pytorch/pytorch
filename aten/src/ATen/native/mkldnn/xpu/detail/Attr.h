@@ -85,7 +85,8 @@ struct PostOpParam {
   // sum post op constructor
   PostOpParam(float scale, kind_t kind) : scale_(scale), kind_(kind) {}
   // sum post op with zp
-  PostOpParam(float scale, int64_t zero_point, kind_t kind): scale_(scale), zero_point_(zero_point), kind_(kind){};
+  PostOpParam(float scale, int64_t zero_point, kind_t kind)
+      : scale_(scale), zero_point_(zero_point), kind_(kind){};
   // binary post op constructor
   PostOpParam(
       at::Tensor& binary,
@@ -260,7 +261,9 @@ class Attr {
     return *this;
   }
 
-  dnnl::post_ops extract_post_ops(const at::Tensor& dst, bool is_quantized=false){
+  dnnl::post_ops extract_post_ops(
+      const at::Tensor& dst,
+      bool is_quantized = false) {
     // this function is used to extract post ops params from the ops_params_
     // and put them into onednn post ops
     for (size_t i = 0; i < ops_params_.size(); ++i) {
@@ -364,6 +367,44 @@ class Attr {
   dnnl::post_ops dnnl_post_ops_;
 };
 
+static inline void construct_attr_for_unary(
+    const c10::string_view& unary_post_op,
+    const torch::List<std::optional<at::Scalar>>& unary_post_op_args,
+    const c10::string_view& unary_post_op_algorithm,
+    at::native::onednn::Attr& attr) {
+  if (unary_post_op == "relu") {
+    attr = attr.append_post_eltwise(
+        /* eltwise_scale */ 1.f,
+        /* alpha */ 0.f,
+        /* beta */ 0.f,
+        attr.kind_with_relu);
+  } else if (unary_post_op == "leaky_relu") {
+    auto alpha = unary_post_op_args[0].value().to<float>();
+    attr = attr.append_post_eltwise(1.0, alpha, 0.f, attr.kind_with_relu);
+  } else if (unary_post_op == "tanh") {
+    attr = attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_tanh);
+  } else if (unary_post_op == "gelu") {
+    auto post_algorithm = unary_post_op_algorithm == "none"
+        ? attr.kind_with_gelu_erf
+        : attr.kind_with_gelu_tanh;
+    attr = attr.append_post_eltwise(1.0f, 0.0f, 0.0f, post_algorithm);
+  } else if (unary_post_op == "hardtanh") {
+    auto alpha = unary_post_op_args[0].value().to<float>();
+    auto beta = unary_post_op_args[1].value().to<float>();
+    attr = attr.append_post_eltwise(1.0, alpha, beta, attr.kind_with_clip);
+  } else if (unary_post_op == "hardswish") {
+    attr = attr.append_post_eltwise(
+        1.0f, 1.f / 6.f, 1.f / 2.f, attr.kind_with_hardswish);
+  } else if (unary_post_op == "swish") {
+    attr = attr.append_post_eltwise(1.0f, 1.0f, 0.0f, attr.kind_with_swish);
+  } else {
+    TORCH_CHECK(
+        unary_post_op == "none",
+        "onednn qlinear: unspported unary post op",
+        unary_post_op);
+  }
+}
+
 static inline void construct_attr_by_post_op(
     const c10::string_view& binary_post_op,
     double binary_alpha,
@@ -374,37 +415,8 @@ static inline void construct_attr_by_post_op(
     const c10::string_view& unary_post_op_algorithm,
     at::native::onednn::Attr& attr) {
   if (binary_post_op == "none") {
-    if (unary_post_op == "relu") {
-      attr = attr.append_post_eltwise(
-          /* eltwise_scale */ 1.f,
-          /* alpha */ 0.f,
-          /* beta */ 0.f,
-          attr.kind_with_relu);
-    } else if (unary_post_op == "leaky_relu") {
-      auto alpha = unary_post_op_args[0].value().to<float>();
-      attr = attr.append_post_eltwise(1.0, alpha, 0.f, attr.kind_with_relu);
-    } else if (unary_post_op == "tanh") {
-      attr = attr.append_post_eltwise(1.0f, 0.0f, 0.0f, attr.kind_with_tanh);
-    } else if (unary_post_op == "gelu") {
-      auto post_algorithm = unary_post_op_algorithm == "none"
-          ? attr.kind_with_gelu_erf
-          : attr.kind_with_gelu_tanh;
-      attr = attr.append_post_eltwise(1.0f, 0.0f, 0.0f, post_algorithm);
-    } else if (unary_post_op == "hardtanh") {
-      auto alpha = unary_post_op_args[0].value().to<float>();
-      auto beta = unary_post_op_args[1].value().to<float>();
-      attr = attr.append_post_eltwise(1.0, alpha, beta, attr.kind_with_clip);
-    } else if (unary_post_op == "hardswish") {
-      attr = attr.append_post_eltwise(
-          1.0f, 1.f / 6.f, 1.f / 2.f, attr.kind_with_hardswish);
-    } else if (unary_post_op == "swish") {
-      attr = attr.append_post_eltwise(1.0f, 1.0f, 0.0f, attr.kind_with_swish);
-    } else {
-      TORCH_CHECK(
-          unary_post_op == "none",
-          "onednn qlinear: unspported unary post op",
-          unary_post_op);
-    }
+    construct_attr_for_unary(
+        unary_post_op, unary_post_op_args, unary_post_op_algorithm, attr);
   }
 }
 

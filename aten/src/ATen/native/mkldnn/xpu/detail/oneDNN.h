@@ -107,7 +107,7 @@ dnnl::memory::dims deconv_dst_size(
     IntArrayRef dst_padding,
     int64_t groups);
 
-at::Tensor quantized_convolution_pt2(
+at::Tensor quantized_convolution(
     at::Tensor act,
     double act_scale,
     int64_t act_zero_point,
