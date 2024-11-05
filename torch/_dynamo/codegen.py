@@ -140,9 +140,9 @@ class PyCodegen:
             # value.source will get mutated to hold `value`
             # mutable_side_effects_from_source=False is used to codegen the mutation
             # mutable_side_effects_from_source=True is used to codegen a reference
-            from .side_effects import MutableSideEffects
+            from .side_effects import ValueMutationExisting
 
-            if isinstance(value.mutable_local, MutableSideEffects):
+            if isinstance(value.mutation_type, ValueMutationExisting):
                 self(value.source)
                 return
 
@@ -185,7 +185,9 @@ class PyCodegen:
             # NB: It works to add_graph_output on a computed expression
             # as_tensor here, because we memoize as_tensor calls on
             # SymNodeVariable!
-            graph_outputs_key = self.add_graph_output(value.as_tensor(self.tx))
+            graph_outputs_key = self.add_graph_output(
+                value.as_tensor(self.tx, torch.float64)
+            )
 
             def gen_fn():
                 self.load_graph_output(graph_outputs[graph_outputs_key].index)
