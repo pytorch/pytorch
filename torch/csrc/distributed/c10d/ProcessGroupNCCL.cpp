@@ -690,6 +690,34 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
       " milliseconds before timing out.");
 
   LOG(ERROR) << exceptionMsg;
+
+  // Get the stack trace of the work at call time
+  // First step we get the corresponding record entry from FR, based on work's
+  // trace_id_
+  std::optional<NCCLTraceBuffer::Entry> entry =
+      NCCLTraceBuffer::get()->getEntry(trace_id_);
+  if (entry.has_value()) {
+    auto entryVal = entry.value();
+    // Get stack trace from FR entry, in string format
+    // Note: `getTraceback` call below invokes `torch::symbolize`, which may
+    // need to acquire the GIL. In order for watchdog to be block-free, we make
+    // the call with std::async.
+    auto future = std::async(
+        std::launch::async, [&entryVal]() { return entryVal.getTraceback(); });
+    // Wait for the future to complete or timeout
+    auto status = future.wait_for(std::chrono::seconds(8));
+    if (status == std::future_status::ready) {
+      std::string tracebackStr = future.get();
+      LOG(ERROR) << "Stack trace of the timedout collective operation: \n"
+                 << tracebackStr;
+    } // else, symbolizer probably timed out, we skip logging the stack trace.
+  } else {
+    LOG(ERROR)
+        << "Stack trace of the timedout collective not found, "
+        << "potentially because FlightRecorder is disabled. "
+        << "You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.";
+  }
+
   std::exception_ptr exception_ptr =
       std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exceptionMsg));
   setException(exception_ptr);
