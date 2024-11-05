@@ -1,0 +1,12 @@
+#pragma once
+
+#include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/ir/ir.h>
+
+namespace torch::jit {
+
+TORCH_API void removeDropout(std::shared_ptr<Graph>& graph);
+
+TORCH_API void removeDropout(script::Module& module);
+
+} // namespace torch::jit
