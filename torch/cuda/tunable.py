@@ -276,7 +276,7 @@ def tune_gemm_in_file(filename: str) -> None:
     with open(filename) as file:
         for line in file:
             if line.startswith("Gemm"):
-                process_single_offline_gemm(line, deviceid)
+                _process_single_offline_gemm(line, deviceid)
 
 
 def _gather_unique_untuned_gemm_from_files(filename_pattern: str) -> set[str]:
