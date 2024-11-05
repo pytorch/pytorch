@@ -33,7 +33,7 @@ void hypot_kernel_cuda(TensorIteratorBase& iter) {
       });
 }
 
-REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
-REGISTER_DISPATCH(hypot_stub, &hypot_kernel_cuda);
+REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda)
+REGISTER_DISPATCH(hypot_stub, &hypot_kernel_cuda)
 
 } // namespace at::native
