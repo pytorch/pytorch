@@ -12762,7 +12762,13 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 return fn_opt(inp, weight).sum().backward()
 
             _, code = run_and_get_code(wrapper, inp, weight)
-            self.assertTrue("in_out_ptr" in code[1])
+
+            if config.cpp_wrapper:
+                # when using cpp_wrapper, backward triton code is in code[2]
+                self.assertTrue("in_out_ptr" in code[2])
+            else:
+                # when not using cpp_wrapper, backward triton code is in code[1]
+                self.assertTrue("in_out_ptr" in code[1])
 
     class RNNTest(TestCase):
         device_type = GPU_TYPE
