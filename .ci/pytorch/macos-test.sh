@@ -201,6 +201,33 @@ test_torchbench_perf() {
   cd pytorch
 }
 
+test_torchbench_smoketest() {
+  print_cmake_info
+
+  echo "Launching torchbench setup"
+  conda_benchmark_deps
+  torchbench_setup_macos
+
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir $TEST_REPORTS_DIR
+
+  echo "Setup complete, launching torchbench training performance run"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only hf_T5 --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only llama --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only moco --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
+
+  echo "Launching torchbench inference performance run"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only hf_T5 --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_inference.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only llama --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_inference.csv"
+  PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only moco --backend eager --inference --devices mps --output "$TEST_REPORTS_DIR/torchbench_inference.csv"
+
+  echo "Pytorch benchmark on mps device completed"
+  # TEMP_DEBUG
+  cat ${TEST_REPORTS_DIR}/torchbench_training.csv
+  cat ${TEST_REPORTS_DIR}/torchbench_inference.csv
+  cd pytorch
+}
+
 test_hf_perf() {
   print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
@@ -272,4 +299,6 @@ elif [[ $TEST_CONFIG == *"perf_hf"* ]]; then
   test_hf_perf
 elif [[ $TEST_CONFIG == *"perf_timm"* ]]; then
   test_timm_perf
+elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
+  test_torchbench_smoketest
 fi
