@@ -66,6 +66,17 @@ def _compare_mts(mt1, mt2, rtol=1e-05, atol=1e-08):
     if not _tensors_match(a, b, exact=False, rtol=rtol, atol=atol):
         raise ValueError("The data in MaskedTensor mt1 and MaskedTensor mt2 do not match")
 
+def _compare_forward_backward(data, mask, fn):
+    mt = masked_tensor(data, mask, requires_grad=True)
+    masked_res = fn(mt)
+    masked_res.sum().backward()
+
+    t = data.masked_fill(~mask, float("-inf")).detach().clone().requires_grad_()
+    tensor_res = fn(t)
+    tensor_res.sum().backward()
+
+    _compare_mt_t(masked_res, tensor_res)
+    _compare_mt_t(mt.grad, t.grad, atol=1e-06)
 
 def _create_random_mask(shape, device):
     return make_tensor(shape, device=device, dtype=torch.bool)
@@ -164,15 +175,8 @@ class TestBasics(TestCase):
             ],
             device=device
         )
-        mt = masked_tensor(data, mask, requires_grad=True)
-        masked_res = torch.softmax(mt, -1)
-        masked_res.sum().backward()
-        xinf = data.masked_fill(~mask, float("-inf")).detach().clone().requires_grad_()
-        tensor_res = torch.softmax(xinf, -1)
-        tensor_res.sum().backward()
 
-        _compare_mt_t(masked_res, tensor_res)
-        _compare_mt_t(mt.grad, xinf.grad, atol=1e-06)
+        _compare_forward_backward(data, mask, lambda t: torch.softmax(t, -1))
 
     def test_where(self, device):
         data = torch.tensor([-10.0, -5, 0, 5, 10, 50, 60, 70, 80, 90, 100], device=device)
@@ -191,6 +195,35 @@ class TestBasics(TestCase):
         _compare_mt_t(masked_res, tensor_res)
         _compare_mt_t(mx.grad, x.grad)
         _compare_mt_t(my.grad, y.grad)
+
+    def test_unfold(self, device):
+        data = torch.rand(5, 5, device=device)
+        mask = torch.rand(5, 5, device=device) > 0.5
+        _compare_forward_backward(data, mask, lambda t: t.unfold(1, 2, 2))
+
+    def test_nn_unfold(self, device):
+        data = torch.rand(2, 5, 3, 4, device=device)
+        mask = torch.rand(2, 5, 3, 4, device=device) > 0.5
+        _compare_forward_backward(data, mask, lambda t: torch.nn.functional.unfold(t, kernel_size=(2, 3)))
+
+    def test_stack(self, device):
+        masked_tensors = [
+            masked_tensor(
+                torch.rand(2, 5, 3, 4, device=device),
+                torch.rand(2, 5, 3, 4, device=device) > 0.5,
+                requires_grad=True,
+            ) for _ in range(3)
+        ]
+
+        data_tensors = [mt.get_data().detach().clone().requires_grad_() for mt in masked_tensors]
+        masked_res = torch.stack(masked_tensors)
+        tensor_res = torch.stack(data_tensors)
+
+        masked_res.sum().backward()
+        tensor_res.sum().backward()
+        _compare_mt_t(masked_res, tensor_res)
+        for mt, t in zip(masked_tensors, data_tensors):
+            _compare_mt_t(mt.grad, t.grad, atol=1e-06)
 
     def test_to_sparse(self, device):
         for sample in _generate_sample_data(device=device):
@@ -762,6 +795,45 @@ class TestReductions(TestCase):
         msg = "Only Tensors of floating point and complex dtype can require gradients"
         with self.assertRaisesRegex(RuntimeError, msg):
             masked_tensor(d, m, requires_grad=True)
+
+    def test_any_true_dtype(self):
+        mt = torch.masked.MaskedTensor(
+            torch.rand(2, 2),
+            torch.rand(2, 2) > 0.5
+        )
+        msg = "expected a boolean tensor"
+        with self.assertRaisesRegex(ValueError, msg):
+            mt._is_any_true()
+
+    def test__is_any_true(self):
+        mt = torch.masked.MaskedTensor(
+            torch.tensor([[True, True, False], [False, False, True]]),
+            torch.tensor([[True, False, False], [False, True, False]]),
+        )
+        _compare_mts(
+            masked_tensor(torch.tensor(True), torch.tensor(True)),
+            mt._is_any_true(),
+        )
+
+    def test__is_any_true_false(self):
+        mt = torch.masked.MaskedTensor(
+            torch.tensor([[True, True, False], [False, False, True]]),
+            torch.tensor([[False, False, False], [False, False, False]]),
+        )
+        _compare_mts(
+            masked_tensor(torch.tensor(False), torch.tensor(True),),
+            mt._is_any_true(),
+        )
+
+    def test_backward(self):
+        # See https://github.com/pytorch/pytorch/issues/128557
+        with torch.autograd.detect_anomaly():
+            mt = torch.masked.MaskedTensor(
+                torch.rand(2, 2),
+                torch.rand(2, 2) > 0.5,
+                requires_grad=True
+            )
+            mt.sum().backward()
 
 
 def is_unary(op):

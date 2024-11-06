@@ -40,6 +40,8 @@ using Stack = std::vector<c10::IValue>;
 using c10::ivalue::Future;
 using TaskLauncher = std::function<void(std::function<void()>)>;
 
+bool TORCH_API in_torchscript_runtime();
+
 struct TORCH_API Code {
   Code() = default;
   explicit Code(interpreter::CodeImpl* pImpl);

@@ -19,10 +19,10 @@ class Conversion(object):
     """Describes how a converter transformed the output of a static analysis tool from the analysis tool's native output format into the SARIF format."""
 
     tool: _tool.Tool = dataclasses.field(metadata={"schema_property_name": "tool"})
-    analysis_tool_log_files: Optional[
-        List[_artifact_location.ArtifactLocation]
-    ] = dataclasses.field(
-        default=None, metadata={"schema_property_name": "analysisToolLogFiles"}
+    analysis_tool_log_files: Optional[List[_artifact_location.ArtifactLocation]] = (
+        dataclasses.field(
+            default=None, metadata={"schema_property_name": "analysisToolLogFiles"}
+        )
     )
     invocation: Optional[_invocation.Invocation] = dataclasses.field(
         default=None, metadata={"schema_property_name": "invocation"}

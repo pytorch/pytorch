@@ -15,5 +15,20 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
     def device_guard(self, device_idx):
         return f"torch.xpu._DeviceGuard({device_idx})"
 
+    def cpp_device_guard(self):
+        return "at::xpu::XPUGuard"
+
+    def cpp_aoti_device_guard(self):
+        return "AOTIXpuGuard"
+
+    def cpp_stream_guard(self):
+        return "at::xpu::XPUStreamGuard"
+
+    def cpp_aoti_stream_guard(self):
+        return "AOTIXpuStreamGuard"
+
+    def cpp_getStreamFromExternal(self):
+        return "at::xpu::getStreamFromExternal"
+
 
 register_device_op_overrides("xpu", XPUDeviceOpOverrides())

@@ -82,7 +82,7 @@ class TORCH_API AOTIModelContainerRunner {
   std::unique_ptr<torch::aot_inductor::ProxyExecutor> proxy_executor_;
 };
 
-using CreateAOTIModelRunnerFunc = std::shared_ptr<AOTIModelContainerRunner> (*)(
+using CreateAOTIModelRunnerFunc = std::unique_ptr<AOTIModelContainerRunner> (*)(
     const std::string& model_so_path,
     size_t num_models,
     const std::string& device_str,

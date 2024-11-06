@@ -67,7 +67,7 @@ static std::vector<Method> findAllDependentFunctions(
     const Module& module,
     Graph& graph) {
   std::vector<Method> methods;
-  std::unordered_set<c10::string_view> called_method_names;
+  std::unordered_set<std::string_view> called_method_names;
   auto nodes = findAllNodes(graph, c10::prim::CallMethod, true);
   for (Node* node : nodes) {
     if (auto iface = node->input(0)->type()->castRaw<InterfaceType>()) {
@@ -149,7 +149,6 @@ mobile::Code compileGraphToMobileCode(
 
   // operator names
   std::vector<std::string> method_names;
-  std::vector<int64_t> op_debug_handles;
   int next_new_op_index = 0;
 
   auto op_to_specified_args = code.op_to_num_specified_args();

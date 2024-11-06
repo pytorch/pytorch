@@ -7,7 +7,6 @@
 #include <ATen/core/DistributionsHelper.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <limits>
 #include <mutex>
 
 #ifdef CPU_CAPABILITY_AVX2
@@ -15,10 +14,10 @@
 #include <c10/util/irange.h>
 #endif
 
-namespace at {
-namespace native {
-namespace templates {
-namespace cpu {
+
+
+
+namespace at::native::templates::cpu {
 namespace {
 
 // ==================================================== Random ========================================================
@@ -40,10 +39,10 @@ void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t bas
 template<typename RNG>
 void random_full_64_bits_range_kernel(TensorIteratorBase& iter, RNG generator) {
   AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::BFloat16, iter.dtype(), "random_full_64_bits_range_kernel_cpu", [&] {
-    if constexpr (std::is_same<scalar_t, int64_t>::value ||
-        std::is_same<scalar_t, double>::value ||
-        std::is_same<scalar_t, float>::value ||
-        std::is_same<scalar_t, at::BFloat16>::value) {
+    if constexpr (std::is_same_v<scalar_t, int64_t> ||
+        std::is_same_v<scalar_t, double> ||
+        std::is_same_v<scalar_t, float> ||
+        std::is_same_v<scalar_t, at::BFloat16>) {
       std::lock_guard<std::mutex> lock(generator->mutex_);
       cpu_serial_kernel(iter, [generator]() -> scalar_t {
         uniform_int_full_range_distribution<scalar_t> random;
@@ -423,4 +422,4 @@ struct BernoulliKernel {
   }
 };
 
-}}}}}
+}}
