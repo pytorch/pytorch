@@ -2,12 +2,19 @@
 
 # Template is at:    .github/templates/windows_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: windows-binary-libtorch-release
+name: windows-arm64-binary-libtorch-release
 
 on:
   push:
+    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
-      - main
+      - nightly
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - 'ciflow/binaries/*'
+      - 'ciflow/binaries_libtorch/*'
   workflow_dispatch:
 
 env:
@@ -15,13 +22,13 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
-  BUILD_ENVIRONMENT: windows-binary-libtorch-release
+  BUILD_ENVIRONMENT: windows-arm64-binary-libtorch-release
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 concurrency:
-  group: windows-binary-libtorch-release-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: windows-arm64-binary-libtorch-release-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -37,7 +44,7 @@ jobs:
   libtorch-cpu-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge"
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: ${{ github.workspace }}/pytorch
@@ -284,3 +291,27 @@ jobs:
         if: always()
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
+  libtorch-cpu-shared-with-deps-release-upload:  # Uploading
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cpu-shared-with-deps-release-test
+    with:
+      PYTORCH_ROOT: ${{ github.workspace }}/pytorch
+      BUILDER_ROOT: ${{ github.workspace }}/builder
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      LIBTORCH_VARIANT: shared-with-deps
+      # This is a dummy value for libtorch to work correctly with our batch scripts
+      # without this value pip does not get installed for some reason
+      DESIRED_PYTHON: "3.9"
+      build_name: libtorch-cpu-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      conda-pytorchbot-token: ${{ secrets.CONDA_PYTORCHBOT_TOKEN }}
+      conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
+    uses: ./.github/workflows/_binary-upload.yml
