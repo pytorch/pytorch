@@ -393,8 +393,7 @@ def enable_fake_mode():
 
         # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
         >>> import torch
-        >>> import torch.onnx
-        >>> class MyModel(torch.nn.Module):  # Dummy model
+        >>> class MyModel(torch.nn.Module):  # Model with a parameter
         ...     def __init__(self) -> None:
         ...         super().__init__()
         ...         self.weight = torch.nn.Parameter(torch.tensor(42.0))
