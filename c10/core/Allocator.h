@@ -234,7 +234,7 @@ struct C10_API InefficientStdFunctionContext {
         deleter_(std::move(rhs.deleter_)) {}
   InefficientStdFunctionContext& operator=(
       const InefficientStdFunctionContext&) = delete;
-  // NOLINTNEXTLINE(performance-noexcept-move-constructor)
+  // NOLINTNEXTLINE(*-noexcept-move-*)
   InefficientStdFunctionContext& operator=(
       InefficientStdFunctionContext&& rhs) {
     this->~InefficientStdFunctionContext();
