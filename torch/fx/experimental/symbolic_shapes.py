@@ -302,7 +302,11 @@ def uninteresting_files() -> Set[str]:
         torch._subclasses.meta_utils,
         torch._subclasses.fake_tensor,
     ]
-    return {inspect.getfile(m) for m in mods}
+    import torch._dynamo.guards
+
+    return {
+        inspect.getfile(m) for m in mods
+    } | torch._dynamo.guards.uninteresting_files()
 
 
 class ConstraintViolationError(RuntimeError):
@@ -6039,7 +6043,10 @@ class ShapeEnv:
         maybe_user_loc = None
         user_tb = TracingContext.extract_stack()
         if user_tb:
-            maybe_user_loc = format_frame(user_tb[-1], line=True)
+            idx = len(user_tb) - 1
+            while idx > 0 and user_tb[idx].filename in uninteresting_files():
+                idx -= 1
+            maybe_user_loc = format_frame(user_tb[idx], line=True)
 
         maybe_extra_debug = ""
         if is_debug and user_tb:
