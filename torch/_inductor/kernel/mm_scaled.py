@@ -5,7 +5,7 @@ import sympy
 
 import torch
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
-from torch.utils._triton import has_triton_tma
+from torch.utils._triton import has_triton_tma_device
 
 from .. import config as inductor_config
 from ..codegen.common import WorkspaceArg, WorkspaceZeroMode
@@ -534,7 +534,7 @@ def tuned_scaled_mm(
     static_shape, is_nonzero = _is_static_problem(layout)
 
     if is_nonzero and use_triton_template(layout, enable_float8=True):
-        if has_triton_tma():
+        if has_triton_tma_device():
             for config in persistent_mm_configs(m, n, k):
                 kwargs = scaled_mm_options_device_tma(
                     config, m, n, k, layout, scale_a, scale_b, use_fast_accum
