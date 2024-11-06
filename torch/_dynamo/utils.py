@@ -298,10 +298,19 @@ def dynamo_timed(
         )
         if dynamo_compile_column:
             assert METRICS_CONTEXT is not None
-            METRICS_CONTEXT.increment(dynamo_compile_column, time_spent // 1e3)
-            # TODO: the events that we capture in calculate_time_spent() seems
-            # arbitrary. Historically, it's those fields that are present in
-            # CompilationMetrics (but we accumulate by the associated event name).
+            # TODO: This conditional is here because we have a case where we try to
+            # increment remote_fx_graph_cache counters, but we're in the autotune path,
+            # which is running in a Triton-compiling subprocess. How shall we handle
+            # this situation initially? We can enter the METRICS_CONTEXT in the
+            # subprocs, for example, but it occurs to me that any accounting we'd
+            # attempt in the subprocs is a larger problem.
+            if METRICS_CONTEXT.recording():
+                METRICS_CONTEXT.increment(dynamo_compile_column, time_spent // 1e3)
+            # TODO: the events that we capture in calculate_time_spent() seem a little
+            # arbitrary. Currently, it's only those fields that are present in
+            # CompilationMetrics (but note that we accumulate by the associated event
+            # name, not the field name in CompilationMetrics). Do we want to keep it
+            # this way for now?
             cumulative_time_spent[event_name] += time_spent
 
 

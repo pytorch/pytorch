@@ -44,6 +44,12 @@ class MetricsContext:
         if self._level == 0:
             self._on_exit(self._metrics, exc_type, exc_value)
 
+    def recording(self) -> bool:
+        """
+        Return True if we've entered the context manager.
+        """
+        return self._level > 0
+
     def _check(self) -> None:
         """
         Raise if we haven't entered the contextmanager.
@@ -57,8 +63,7 @@ class MetricsContext:
         """
         # TODO: do we want to be safe and grab a lock whenever modifying an entry? For
         # example, I saw that we may be adding a helper thread for the remote cache and
-        # the get/put timing could be bumped on that helper. Don't know of any other
-        # case where thread safety is a concern though.
+        # the get/put timing could be bumped on that helper...
         self._check()
         if metric not in self._metrics:
             self._metrics[metric] = 0
