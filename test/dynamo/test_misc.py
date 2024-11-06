@@ -9963,7 +9963,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            collections.deque([0.0, -x]),
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -9995,7 +9995,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            [0.0, -x],
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -10011,6 +10011,7 @@ def ___make_guard_fn():
                         x * y,
                         3.0,
                         y - 2,
+                        1,
                         torch.zeros(2, 2),
                         2 * y,
                         -y,
@@ -10043,7 +10044,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            [0.0, -x],
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -10054,7 +10055,7 @@ def ___make_guard_fn():
                     }
                     tree2 = collections.OrderedDict(
                         [
-                            ("c", (y, 3.0, [-y, 10.0])),
+                            ("c", (y, 3.0, collections.deque([1, -y, 10.0]))),
                             ("a", [y, y + 1]),
                             ("b", y + 2),
                             (
@@ -10223,6 +10224,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {0 < Mod(s0, 3): False, 0 <= Mod(s0, 3): True, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, Mod(s0, 3) < 0: False, Mod(s0, 3) <= 0: True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False}
+  > Right: {}
 ==> divisible: values don't match.
   >  Left: {Mod(s0, 3)}
   > Right: {}
@@ -10260,6 +10264,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {False: False, True: True}
+  > Right: {}
 ==> guards: values don't match.
   >  Left: [Eq(s0, 3)]
   > Right: []
@@ -10301,6 +10308,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {3 <= s0: True, s0 < 3: False}
+  > Right: {}
 ==> guards: values don't match.
   >  Left: [s0 >= 3]
   > Right: []
@@ -10333,6 +10343,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {0 < PythonMod(u0, 3): False, 0 <= PythonMod(u0, 3): True, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False, PythonMod(u0, 3) < 0: False, PythonMod(u0, 3) <= 0: True}
+  > Right: {}
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {u0: [Eq(PythonMod(u0, 3), 0)]}
   > Right: {}

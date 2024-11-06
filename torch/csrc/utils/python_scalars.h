@@ -137,7 +137,9 @@ inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
       return PyComplex_FromCComplex(
           *reinterpret_cast<Py_complex*>((c10::complex<double>*)data));
     case at::kBool:
-      return PyBool_FromLong(*(bool*)data);
+      // Don't use bool*, since it may take out-of-range byte as bool.
+      // Instead, we cast explicitly to avoid ASAN error.
+      return PyBool_FromLong(static_cast<bool>(*(uint8_t*)data));
     case at::kBFloat16:
       return PyFloat_FromDouble(
           at::convert<double, at::BFloat16>(*(at::BFloat16*)data));

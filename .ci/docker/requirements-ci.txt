@@ -128,8 +128,7 @@ numba==0.55.2 ; python_version == "3.10"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.21.2; python_version == "3.9"
-numpy==1.22.4; python_version == "3.10"
+numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
 numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13"
 

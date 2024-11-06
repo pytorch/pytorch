@@ -806,18 +806,18 @@ class SwapSavedVariables {
 #define NO_OP_VISIT(T)     \
   void before(const T&) {} \
   void after(const T&) {}
-  NO_OP_VISIT(caffe2::TypeMeta);
-  NO_OP_VISIT(c10::Device);
-  NO_OP_VISIT(c10::DeviceType);
-  NO_OP_VISIT(c10::Layout);
-  NO_OP_VISIT(c10::MemoryFormat);
-  NO_OP_VISIT(c10::ScalarType);
-  NO_OP_VISIT(c10::Scalar);
-  NO_OP_VISIT(c10::TensorOptions);
-  NO_OP_VISIT(std::string);
-  NO_OP_VISIT(int64_t);
-  NO_OP_VISIT(bool);
-  NO_OP_VISIT(double);
+  NO_OP_VISIT(caffe2::TypeMeta)
+  NO_OP_VISIT(c10::Device)
+  NO_OP_VISIT(c10::DeviceType)
+  NO_OP_VISIT(c10::Layout)
+  NO_OP_VISIT(c10::MemoryFormat)
+  NO_OP_VISIT(c10::ScalarType)
+  NO_OP_VISIT(c10::Scalar)
+  NO_OP_VISIT(c10::TensorOptions)
+  NO_OP_VISIT(std::string)
+  NO_OP_VISIT(int64_t)
+  NO_OP_VISIT(bool)
+  NO_OP_VISIT(double)
 #undef NO_OP_VISIT
 
   SwapSavedVariables(

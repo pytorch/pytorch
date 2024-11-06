@@ -19,6 +19,7 @@ from typing import Any, Container, Dict, List, Optional, Set, Tuple
 
 import torch
 
+from ..triton_bundler import TritonBundler
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
 from .coordinate_descent_tuner import CoordescTuner
@@ -33,7 +34,6 @@ from .hints import (
     TRITON_MAX_RSPLIT,
 )
 from .runtime_utils import (
-    cache_dir,
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
@@ -42,6 +42,7 @@ from .runtime_utils import (
     get_max_y_grid,
     get_num_bytes,
     next_power_of_2,
+    triton_cache_dir,
     triton_config_to_hashable,
     validate_triton_config,
 )
@@ -229,10 +230,8 @@ class CachingAutotuner(KernelInterface):
         self.launchers = []  # type: ignore[var-annotated]
         self.lock = threading.Lock()
         if os.getenv("TRITON_CACHE_DIR") is None:
-            os.environ["TRITON_CACHE_DIR"] = os.path.join(
-                cache_dir(),
-                "triton",
-                str(self.triton_meta.get("device", 0)),
+            os.environ["TRITON_CACHE_DIR"] = triton_cache_dir(
+                self.triton_meta.get("device", 0)
             )
         log.debug("Triton cache dir: %s", os.environ["TRITON_CACHE_DIR"])
 
@@ -244,6 +243,16 @@ class CachingAutotuner(KernelInterface):
             inductor_meta=self.inductor_meta,
         )
         self.filename = filename
+
+        # used for profiling
+        self.kernel_hash: str = ""
+
+        # Kernels are stored in the codecache with the filename as a hash of the code.
+        # We rely on this to obtain the kernel hash
+        if self.filename is not None:
+            base_name = os.path.basename(self.filename)
+            if ".py" in base_name:
+                self.kernel_hash = os.path.splitext(base_name)[0]
 
         self.precompile_time_taken_ns = 0
         self.autotune_time_taken_ns = 0
@@ -443,6 +452,7 @@ class CachingAutotuner(KernelInterface):
                 "num_warps": compile_meta["num_warps"],
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
+                "sanitize_overflow": False,  # turn off additional asserts added for overflow checks
             }
             if self.device_props.type == "hip":
                 if "waves_per_eu" in compile_meta:
@@ -460,10 +470,10 @@ class CachingAutotuner(KernelInterface):
             compile_kwargs = compile_meta
 
         if warm_cache_only:
-            return (
-                triton.compile(*compile_args, **compile_kwargs),
-                None,
-            )
+            binary = triton.compile(*compile_args, **compile_kwargs)
+            launcher = None
+            TritonBundler.put(binary.hash, self.triton_meta.get("device", 0))
+            return binary, launcher
 
         # importing from torch is safe now that precompile has returned
         from torch._dynamo.device_interface import DeviceGuard
@@ -501,11 +511,14 @@ class CachingAutotuner(KernelInterface):
                     so we use self.fn.constexprs instead.
             3. It isn't in the compile_meta signature
         """
-        none_args = set(compile_meta["constants"].keys())
         known_constants = {
             arg for i, arg in enumerate(self.fn.arg_names) if i in self.fn.constexprs
         }
-        none_args = none_args.difference(known_constants)
+        none_args = {
+            k
+            for k, v in compile_meta["constants"].items()
+            if v is None and k not in known_constants
+        }
         none_args = none_args.difference(set(compile_meta["signature"].keys()))
 
         call_args = [
@@ -699,6 +712,8 @@ class CachingAutotuner(KernelInterface):
             launcher.fn = self.fn
             launcher.bin = binary
 
+        TritonBundler.put(binary.hash, self.triton_meta.get("device", 0))
+
         return binary, launcher
 
     def bench(self, launcher, *args, grid, with_profiler=False, **kwargs):
@@ -819,7 +834,9 @@ class CachingAutotuner(KernelInterface):
         return self.maybe_clone_args(set(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
-        with dynamo_timed("CachingAutotuner.benchmark_all_configs"):
+        with dynamo_timed(
+            "CachingAutotuner.benchmark_all_configs", log_pt2_compile_event=True
+        ):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
                 for launcher in self.launchers
@@ -987,11 +1004,13 @@ class CachingAutotuner(KernelInterface):
                 grid_info = str(grid)
             else:
                 grid_info = getattr(grid, "grid_fn_str", "")
+
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,
                 {
-                    "kernel_file": "" if self.filename is None else self.filename,
+                    "kernel_file": (self.filename or ""),
+                    "kernel_hash": self.kernel_hash,
                     "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,
@@ -1882,6 +1901,19 @@ def cooperative_reduction_grid(xnumel):
         return (meta["RSPLIT"], ceildiv(xnumel, meta.get("XBLOCK", 1)), 1)
 
     grid_fn_str = f"cooperative_reduction_grid({xnumel})"
+    setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
+    return grid_fn
+
+
+def maybe_cooperative_reduction_grid(xnumel):
+    def grid_fn(meta):
+        if "RSPLIT" in meta:
+            return coop_grid(meta)
+        return normal_grid(meta)
+
+    coop_grid = cooperative_reduction_grid(xnumel)
+    normal_grid = grid(xnumel)
+    grid_fn_str = f"maybe_cooperative_reduction_grid({xnumel})"
     setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
     return grid_fn
 
