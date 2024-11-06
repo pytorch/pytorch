@@ -855,11 +855,6 @@ class cpp:
         == "1"
     )
 
-    # Use ftree-loop-vectorize when compiling
-    enable_tree_loop_vec_opt_flag = (
-        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_TREE_LOOP_VEC_OPT_FLAG", "0") == "1"
-    )
-
     # Disable the tiling select heuristic
     enable_tiling_heuristics = (
         os.environ.get("TORCHINDUCTOR_CPP_ENABLE_TILING_HEURISTIC", "1") == "1"

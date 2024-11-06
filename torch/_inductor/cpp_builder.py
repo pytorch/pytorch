@@ -543,10 +543,10 @@ def _get_optimization_cflags() -> List[str]:
             cflags.append("fno-unsafe-math-optimizations")
         if not config.cpp.enable_floating_point_contract_flag:
             cflags.append("ffp-contract=off")
-        if not config.cpp.enable_tree_loop_vec_opt_flag:
-            cflags.append("fno-tree-loop-vectorize")
 
         if sys.platform != "darwin":
+            # on macos, unknown argument: '-fno-tree-loop-vectorize'
+            cflags.append("fno-tree-loop-vectorize")
             # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
             # `-march=native` is unrecognized option on M1
             if not config.is_fbcode():
