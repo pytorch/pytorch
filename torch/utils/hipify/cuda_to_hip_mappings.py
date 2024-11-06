@@ -6693,6 +6693,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cublasGetVersion_v2",
             ("hipblasGetVersion_v2", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
+        ("cublasSetWorkspace", ("hipblasSetWorkspace", CONV_MATH_FUNC, API_BLAS)),
         ("cublasSetStream", ("hipblasSetStream", CONV_MATH_FUNC, API_BLAS)),
         ("cublasGetStream", ("hipblasGetStream", CONV_MATH_FUNC, API_BLAS)),
         ("cublasSetStream_v2", ("hipblasSetStream_v2", CONV_MATH_FUNC, API_BLAS)),

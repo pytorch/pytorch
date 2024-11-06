@@ -172,8 +172,8 @@ template <typename RNG, typename ret_type,                                      
 C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* /*generator*/, ret_type /*cache*/) { \
 }
 
-DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(double);
-DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(float);
+DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(double)
+DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(float)
 
 /**
  * Samples a normal distribution using the Box-Muller method
