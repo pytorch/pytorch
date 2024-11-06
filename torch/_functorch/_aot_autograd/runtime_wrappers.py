@@ -10,6 +10,7 @@ import builtins
 import collections
 import itertools
 import pprint
+import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
@@ -18,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 import torch
 import torch.utils.dlpack
 from torch import Tensor
+from torch._dynamo.utils import dynamo_timed, METRICS_CONTEXT, to_int_us
 from torch._guards import (
     compile_context,
     CompileContext,
@@ -1991,17 +1993,50 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     context = torch._C._DisableAutocast if disable_amp else nullcontext
                     with tracing(saved_context), compile_context(
                         saved_compile_context
-                    ), context(), track_graph_compiling(aot_config, "backward"):
-                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, placeholder_list
-                        )
-                        # Maybe save cache entry
-                        if try_save_cache_entry is not None:
-                            try_save_cache_entry(
-                                CompiledFunction.compiled_bw,
-                                fw_metadata,
-                                aot_config,
+                    ), context(), track_graph_compiling(
+                        aot_config, "backward"
+                    ), METRICS_CONTEXT, dynamo_timed(
+                        # TODO: Capture this under "entire_frame_compile" or a new name?
+                        # It would seem to serve the same purpose when we capture the full
+                        # compile in convert_frame_py, but "frame" may not make sense here.
+                        "entire_frame_compile",
+                        fn_name="backward._backward_impl",
+                        log_pt2_compile_event=False,
+                        # TODO: How do we want to record this one in dynamo_compile?
+                        dynamo_compile_column="dynamo_cumulative_compile_time_us",
+                    ):
+                        fail_type: Optional[str] = None
+                        fail_reason: Optional[str] = None
+                        start_ns = time.time_ns()
+                        try:
+                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                bw_module, placeholder_list
                             )
+                            # Maybe save cache entry
+                            if try_save_cache_entry is not None:
+                                try_save_cache_entry(
+                                    CompiledFunction.compiled_bw,
+                                    fw_metadata,
+                                    aot_config,
+                                )
+                        except Exception as e:
+                            fail_type = type(e).__qualname__
+                            fail_reason = str(e)
+                        finally:
+                            metrics = {
+                                "compile_id": str(
+                                    torch._guards.CompileContext.current_compile_id()
+                                ),
+                                "fail_type": fail_type,
+                                "fail_reason": fail_reason,
+                                "is_forward": False,
+                                "start_time_us": start_ns // 1000,
+                                "duration_us": (time.time_ns() - start_ns) // 1000,
+                                "structured_logging_overhead_us": to_int_us(
+                                    torch._logging.get_structured_logging_overhead(),
+                                ),
+                            }
+                            METRICS_CONTEXT.update(metrics)
 
                 if (
                     torch._functorch.config.donated_buffer

@@ -1009,7 +1009,7 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
     def generate(self, is_inference):
-        with dynamo_timed("PythonWrapperCodegen.generate"):
+        with dynamo_timed("PythonWrapperCodegen.generate", log_pt2_compile_event=False):
             return self._generate(is_inference)
 
     def _generate(self, is_inference):

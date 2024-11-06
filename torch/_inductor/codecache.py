@@ -54,10 +54,10 @@ import torch
 import torch.distributed as dist
 from torch import SymInt, Tensor
 from torch._dynamo.utils import (
-    add_remote_cache_time_saved,
     counters,
     dynamo_timed,
     get_chromium_event_logger,
+    METRICS_CONTEXT,
 )
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -693,7 +693,7 @@ def torch_key() -> bytes:
     """
     Compute a key that contains relevant information about torch source files
     """
-    with dynamo_timed("inductor_codecache_torch_key", log_pt2_compile_event=True):
+    with dynamo_timed("inductor_codecache_torch_key"):
         if not config.is_fbcode():
 
             def get_code_hash(root: str) -> bytes:
@@ -1439,7 +1439,9 @@ class FxGraphCache:
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
-                add_remote_cache_time_saved(time_saved_ns, is_backward)
+                METRICS_CONTEXT.increment(
+                    "distributed_ephemeral_timeout_us", time_saved_ns // 1000
+                )
                 if (
                     ephemeral_increase := add_ephemeral_timeout_increase_for_distributed(
                         time_saved_ns
@@ -2112,7 +2114,7 @@ def cpp_prefix() -> str:
 def compile_file(
     input_path: Union[str, List[str]], output_path: str, cmd: List[str]
 ) -> None:
-    with dynamo_timed("compile_file"):
+    with dynamo_timed("compile_file", log_pt2_compile_event=False):
         return _compile_file(input_path, output_path, cmd)
 
 

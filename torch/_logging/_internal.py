@@ -1099,7 +1099,6 @@ class LazyString:
 structured_logging_overhead: Dict[str, float] = defaultdict(float)
 
 
-# Same principle as add_remote_cache_time_saved, but do it for structured logging
 def add_structured_logging_overhead(time_spent: float) -> None:
     global structured_logging_overhead
     key = None

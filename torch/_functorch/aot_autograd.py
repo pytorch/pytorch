@@ -523,7 +523,7 @@ def create_aot_dispatcher_function(
     fake_mode: FakeTensorMode,
     shape_env: Optional[ShapeEnv],
 ) -> Tuple[Callable, ViewAndMutationMeta]:
-    with dynamo_timed("create_aot_dispatcher_function", log_pt2_compile_event=True):
+    with dynamo_timed("create_aot_dispatcher_function"):
         return _create_aot_dispatcher_function(
             flat_fn, fake_flat_args, aot_config, fake_mode, shape_env
         )

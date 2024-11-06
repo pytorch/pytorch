@@ -135,5 +135,11 @@ try:
 except AttributeError:  # Compile workers only have a mock version of torch
 
     @contextlib.contextmanager
-    def dynamo_timed(key, phase_name=None, fwd_only=True):
+    def dynamo_timed(
+        event_name,
+        fn_name=None,
+        log_pt2_compile_event=True,
+        metadata=None,
+        dynamo_compile_column=None,
+    ):
         yield

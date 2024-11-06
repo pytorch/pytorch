@@ -823,7 +823,7 @@ class GraphLowering(torch.fx.Interpreter):
         raise KeyError(f"could not find {buffer_name}")
 
     def run(self, *args: Any) -> Any:  # type: ignore[override]
-        with dynamo_timed("GraphLowering.run"):
+        with dynamo_timed("GraphLowering.run", log_pt2_compile_event=False):
             return super().run(*args)
 
     def register_operation(self, op: ir.Operation) -> str:
@@ -1947,10 +1947,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def compile_to_module(self) -> ModuleType:
         with dynamo_timed(
-            "GraphLowering.compile_to_module",
-            phase_name="code_gen",
-            log_pt2_compile_event=True,
-            fwd_only=False,
+            "code_gen",
+            fn_name="GraphLowering.compile_to_module",
+            dynamo_compile_column="inductor_code_gen_cumulative_compile_time_us",
         ):
             return self._compile_to_module()
 

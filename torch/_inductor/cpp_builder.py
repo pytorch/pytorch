@@ -346,7 +346,7 @@ def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
 
 
 def run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
-    with dynamo_timed("compile_file"):
+    with dynamo_timed("compile_file", log_pt2_compile_event=False):
         return _run_compile_cmd(cmd_line, cwd)
 
 

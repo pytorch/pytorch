@@ -146,9 +146,8 @@ class RemoteCache(Generic[_T]):
     # present in the cache.
     def get(self, key: str) -> Optional[_T]:
         with dynamo_timed(
-            "RemoteFxGraphCache.get",
-            phase_name="remote_fx_graph_cache_get",
-            fwd_only=False,
+            "remote_fx_graph_cache_get",
+            dynamo_compile_column="remote_fx_graph_cache_get_time_us",
         ):
             sample = self._create_sample()
             try:
@@ -165,9 +164,8 @@ class RemoteCache(Generic[_T]):
     # between `None` and a missing cache entry).
     def put(self, key: str, value: _T) -> None:
         with dynamo_timed(
-            "RemoteFxGraphCache.put",
-            phase_name="remote_fx_graph_cache_put",
-            fwd_only=False,
+            "remote_fx_graph_cache_put",
+            dynamo_compile_column="remote_fx_graph_cache_put_time_us",
         ):
             assert value is not None
             sample = self._create_sample()

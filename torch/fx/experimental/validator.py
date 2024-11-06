@@ -534,7 +534,9 @@ try:
             self._assertions.add(ref)
 
         def validate(self) -> None:
-            with dynamo_timed("TranslationValidator.validate"):
+            with dynamo_timed(
+                "TranslationValidator.validate", log_pt2_compile_event=False
+            ):
                 return self._validate()
 
         def _validate(self) -> None:

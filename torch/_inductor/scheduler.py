@@ -1755,7 +1755,7 @@ class Scheduler:
     __dep_size_hint_cache: Dict[Dep, int]
 
     def __init__(self, nodes: List[ir.Operation]) -> None:
-        with dynamo_timed("Scheduler.__init__"):
+        with dynamo_timed("Scheduler.__init__", log_pt2_compile_event=False):
             self._init(nodes)
 
     def _init(self, nodes: List[ir.Operation]) -> None:
@@ -3411,7 +3411,7 @@ class Scheduler:
         )
 
     def codegen(self) -> None:
-        with dynamo_timed("Scheduler.codegen"):
+        with dynamo_timed("Scheduler.codegen", log_pt2_compile_event=False):
             return self._codegen()
 
     def _codegen(self) -> None:

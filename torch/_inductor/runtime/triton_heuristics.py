@@ -824,9 +824,7 @@ class CachingAutotuner(KernelInterface):
         return self.maybe_clone_args(set(), *args, **kwargs)
 
     def benchmark_all_configs(self, *args, **kwargs):
-        with dynamo_timed(
-            "CachingAutotuner.benchmark_all_configs", log_pt2_compile_event=True
-        ):
+        with dynamo_timed("CachingAutotuner.benchmark_all_configs"):
             timings = {
                 launcher: self.bench(launcher, *args, **kwargs)
                 for launcher in self.launchers

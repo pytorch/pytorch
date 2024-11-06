@@ -325,7 +325,7 @@ def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
 def _recursive_pre_grad_passes(
     gm: GraphModule, example_inputs: Sequence[InputType]
 ) -> GraphModule:
-    with dynamo_timed("_recursive_pre_grad_passes", log_pt2_compile_event=True):
+    with dynamo_timed("_recursive_pre_grad_passes"):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             # as we don't have recursive example inputs, passing empty set here
@@ -342,7 +342,7 @@ def _recursive_joint_graph_passes(gm: GraphModule) -> None:
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
-    with dynamo_timed("_recursive_post_grad_passes", log_pt2_compile_event=True):
+    with dynamo_timed("_recursive_post_grad_passes"):
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             _recursive_post_grad_passes(subgraph, is_inference)
@@ -564,10 +564,9 @@ def compile_fx_inner(
         stack.enter_context(_use_lazy_graph_module(dynamo_config.use_lazy_graph_module))
         stack.enter_context(
             dynamo_utils.dynamo_timed(
-                "compile_fx_inner",
-                phase_name="inductor_compile",
-                log_pt2_compile_event=True,
-                fwd_only=False,
+                "inductor_compile",
+                fn_name="compile_fx_inner",
+                dynamo_compile_column="inductor_cumulative_compile_time_us",
             )
         )
         # NB: Why is this the dynamo_compile counter?  The rule here is that
@@ -1097,7 +1096,8 @@ def cudagraphify(
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.dynamo_timed(
-                "cudagraphify"
+                "cudagraphify",
+                log_pt2_compile_event=False,
             ), dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
@@ -1520,7 +1520,10 @@ def compile_fx(
             example_inputs: List[InputType],
             is_inference: bool,
         ) -> CompiledFxGraph:
-            with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
+            with dynamo_utils.dynamo_timed(
+                "compile_fx.<locals>.fw_compiler_base",
+                log_pt2_compile_event=False,
+            ):
                 return _fw_compiler_base(model, example_inputs, is_inference)
 
         def _fw_compiler_base(
@@ -1631,7 +1634,10 @@ def compile_fx(
         def bw_compiler(
             model: GraphModule, example_inputs: List[InputType]
         ) -> Union[CompiledFxGraph, str]:
-            with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
+            with dynamo_utils.dynamo_timed(
+                "compile_fx.<locals>.bw_compiler",
+                log_pt2_compile_event=False,
+            ):
                 model_outputs_node = output_node(model)
                 if config.bw_outputs_user_visible:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
