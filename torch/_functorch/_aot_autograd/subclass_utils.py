@@ -72,7 +72,9 @@ def create_subclass_metadata(
         idx = start_idx + 1
         return (
             PlainTensorMeta(
-                idx, memory_format=maybe_suggest_memory_format(a, with_memory_format)
+                idx,
+                shape=a.shape if isinstance(a, Tensor) else None,
+                memory_format=maybe_suggest_memory_format(a, with_memory_format),
             ),
             idx,
         )
@@ -142,6 +144,7 @@ def create_subclass_meta(
             infos.append(
                 PlainTensorMeta(
                     idx,
+                    shape=a.shape if isinstance(a, Tensor) else None,
                     memory_format=maybe_suggest_memory_format(a, with_memory_format),
                 )
             )

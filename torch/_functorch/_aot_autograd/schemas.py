@@ -157,6 +157,7 @@ class InputAliasInfo:
 @dataclass
 class PlainTensorMeta:
     unwrapped_idx: int
+    shape: Optional[torch.Size] = None
     memory_format: Optional[torch.memory_format] = None
 
 

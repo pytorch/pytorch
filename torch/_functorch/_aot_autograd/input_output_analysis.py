@@ -60,7 +60,7 @@ def remove_dupe_metadata(
 
     assert m.subclass_tangent_meta is not None
     subclass_tangent_meta = [
-        PlainTensorMeta(0, memory_format=torch.contiguous_format)
+        PlainTensorMeta(0, torch.Size([]), memory_format=torch.contiguous_format)
     ] * len(filtered_inp_traced_tangents) + m.subclass_tangent_meta[num_data_mutations:]
 
     return ViewAndMutationMeta(
@@ -250,7 +250,7 @@ def create_synthetic_base_metadata(
     )
     assert m.subclass_tangent_meta is not None
     subclass_tangent_meta = [
-        PlainTensorMeta(0, memory_format=x)
+        PlainTensorMeta(0, torch.Size([]), memory_format=x)
         for x in inner_mutated_tangents_memory_formats
     ] + m.subclass_tangent_meta[len(inner_mutated_tangents) :]
 
