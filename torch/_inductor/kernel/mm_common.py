@@ -346,7 +346,7 @@ scaled_mm_platform_configs = tuple(
 
 # On ROCm convert num_stages to improve performance
 if torch.version.hip:
-    mm_platform_configs = (build_rocm_gemm_configs(mm_platform_configs),)
+    mm_platform_configs = build_rocm_gemm_configs(mm_platform_configs)
     extra_mm_platform_configs = build_rocm_gemm_configs(extra_mm_platform_configs)
     int8_platform_configs = build_rocm_gemm_configs(int8_platform_configs)
     mixed_mm_platform_configs = build_rocm_gemm_configs(mixed_mm_platform_configs)
