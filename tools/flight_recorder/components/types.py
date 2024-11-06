@@ -224,10 +224,8 @@ class Op:
         self.p2p_seq_id = event["p2p_seq_id"]
         self.input_dtypes = event["input_dtypes"]
         self.output_dtypes = event["output_dtypes"]
-        # When verbose output is enabled, store the original
-        # event dict so that we can print out more info.
-        if os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1":
-            self.event = event
+        self.time_created_ns = event["time_created_ns"]
+        self.is_verbose = os.getenv("FR_TRACE_VERBOSE_OUTPUT", "0") == "1"
 
     def _init_global_src_dst(self, pg_ranks: Set[Any]) -> None:
         pg_ranks = sorted(pg_ranks)
@@ -248,14 +246,14 @@ class Op:
         p2p_info = ""
         if self.type in P2P:
             p2p_info = f"s={self._src_g} d={self._dst_g}, "
-        if hasattr(self, "event"):
+        if self.is_verbose:
             return (
-                f"{self.type}(timestamp_created={self.event['time_created_ns']}, "
+                f"{self.type}(timestamp_created={self.time_created_ns}, "
                 f"{p2p_info}op_type={self.type}, "
                 f"input_sizes={self.input_sizes}, output_sizes={self.output_sizes}, "
                 f"Input dtypes: {self.input_dtypes}, Output dtypes: {self.output_dtypes}, "
                 "Collective_seq_id | P2P_seq_id: "
-                f"{self.event['p2p_seq_id'] if self.type in P2P else self.event['collective_seq_id']}, "
+                f"{self.p2p_seq_id if self.type in P2P else self.collective_seq_id}, "
                 f"Pg_name: {self.pg_name}, Pg_description={self.pg_desc}, Pg_size={self.pg_size})"
                 f", state={self.state})"
             )
