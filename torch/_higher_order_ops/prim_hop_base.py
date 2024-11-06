@@ -90,12 +90,6 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
         # In the PT2 stack, this is Dynamo's responsibility to figure out.
         return PrimHOPBaseFunction.apply(self, subgraph, kwargs, *operands)
 
-    def _forward_kwargs(self, *_, **kwargs):
-        return kwargs
-
-    def _backward_kwargs(self, *_, **kwargs):
-        return kwargs
-
     def _call_CompositeExplicitAutograd(self, subgraph, operands, *_, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
@@ -158,7 +152,7 @@ class PrimHOPBaseFunction(torch.autograd.Function):
         ctx.kwargs = kwargs
 
         with torch._C._AutoDispatchBelowAutograd():
-            return hop(subgraph, operands, **hop._forward_kwargs(**kwargs))
+            return hop(subgraph, operands, **kwargs)
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -184,7 +178,7 @@ class PrimHOPBaseFunction(torch.autograd.Function):
             *ctx.hop(
                 joint_graph,
                 (*grad_outputs, *operands),
-                **ctx.hop._backward_kwargs(**ctx.kwargs),
+                **kwargs,
             ),
         )
 

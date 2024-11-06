@@ -1,7 +1,6 @@
 # Owner(s): ["module: higher order operators"]
 # flake8: noqa: B950
 
-import unittest
 
 import torch
 import torch._dynamo
@@ -96,7 +95,6 @@ class TestInvokeSubgraph(TestCase):
 
         self.assertEqual(ref, res)
 
-    @unittest.skip("TODO: need to find a better test case")
     def test_differing_strides_for_grad_outs(self):
         class CustomOp(torch.autograd.Function):
             @staticmethod
@@ -105,12 +103,8 @@ class TestInvokeSubgraph(TestCase):
 
             @staticmethod
             def backward(ctx, grad_out):
-                if grad_out.is_contiguous():
-                    return grad_out.sin()
-                else:
-                    return grad_out.cos()
-                # a = grad_out.reshape(12, 5)
-                # return torch.cos(torch.reshape(a, (3, 4, 5)))
+                a = grad_out.view(12, 5)
+                return torch.cos(torch.reshape(a, (3, 4, 5)))
 
         def gn(x):
             return (CustomOp.apply(x),)
@@ -130,8 +124,8 @@ class TestInvokeSubgraph(TestCase):
         res = aot_fn(x_clone)
 
         # Run backward
-        ref.clone().sum().backward()
-        res.clone().sum().backward()
+        ref.sum().backward()
+        res.sum().backward()
 
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
