@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from sys import platform
 from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
@@ -28,7 +29,7 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import filtered_configs
+from .mm_common import build_rocm_gemm_configs, filtered_configs
 
 
 if TYPE_CHECKING:
@@ -78,9 +79,7 @@ platform_configs = tuple(
 
 # On ROCm convert num_stages to 1 as pipelining provides no benefit
 if torch.version.hip:
-    platform_configs = tuple(
-        (config[0], config[1], config[2], 1, config[4]) for config in platform_configs
-    )
+    platform_configs = build_rocm_gemm_configs(platform_configs)
 
 
 def _is_large_block_for_cpu(m, n, k):

@@ -7,6 +7,8 @@ import torch._inductor.custom_graph_pass
 from torch._environment import is_fbcode
 from torch.utils._config_module import get_tristate_env, install_config_module
 
+from .runtime.triton_helpers import get_backend_options
+
 
 def fx_graph_remote_cache_default() -> Optional[bool]:
     return get_tristate_env("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE")
@@ -1199,6 +1201,13 @@ class rocm:
     # Flag to use a short list of CK instances which perform well across a variety of shapes.
     # Currently RCR and F16 only
     use_preselected_instances: bool = False
+
+    # Default num_stages for gemm triton kernels on ROCm
+    try:
+        options = get_backend_options()
+        default_num_stages = options.get("num_stages", 2)
+    except Exception as e:
+        default_num_stages = 2
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
