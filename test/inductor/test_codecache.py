@@ -40,6 +40,7 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MULTIGPU,
     HAS_TRITON,
+    HAS_XPU,
     requires_gpu,
     requires_triton,
 )
@@ -164,11 +165,13 @@ class TestFxGraphCache(TestCase):
             )
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
             self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
-
+            # "cuda" has .ptx and .cubin file, but xpu only has .spv file
+            save_kernel_count = 6 if device == "xpu" else 7
+            read_and_emit_kernel_count = 6 if device == "xpu" else 7
             if bundle_triton and device != "cpu":
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_save_kernel"],
-                    grad_multiplier * 7,
+                    grad_multiplier * save_kernel_count,
                 )
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"], 0
@@ -208,11 +211,11 @@ class TestFxGraphCache(TestCase):
             if bundle_triton and device != "cpu":
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_save_kernel"],
-                    grad_multiplier * 7,
+                    grad_multiplier * save_kernel_count,
                 )
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
-                    grad_multiplier * 7,
+                    grad_multiplier * read_and_emit_kernel_count,
                 )
 
     @requires_triton()
@@ -709,6 +712,11 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"freezing": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
+    @unittest.skipIf(
+        HAS_XPU,
+        "This case failed on server with XPU environment"
+        "event if device=cpu remove this skip after #139783 fixed",
+    )
     def test_freezing(self, device):
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
