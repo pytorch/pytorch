@@ -457,11 +457,11 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    pass
-                    # XXX: WIP Allow mutations for intermediate nodes
-                    # assert (
-                    #     n.args[0] in placeholders
-                    # ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    tensor_meta = n.args[0].meta["tensor_meta"]
+                    if tensor_meta.requires_grad:
+                        assert (
+                            n.args[0] in placeholders
+                        ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                 mutation_count += 1
             else:
                 assert (
@@ -479,12 +479,12 @@ def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
             if n.target is torch.ops.aten.copy_.default:
                 # Can only copy_ into an input, and can only do so once
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    pass
-                    # XXX: WIP Allow mutations for intermediate nodes
-                    # assert (
-                    #     n.args[0] in placeholders
-                    # ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
-                    # placeholders.remove(n.args[0])
+                    tensor_meta = n.args[0].meta["tensor_meta"]
+                    if tensor_meta.requires_grad:
+                        assert (
+                            n.args[0] in placeholders
+                        ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                        placeholders.remove(n.args[0])
                 copy_from_node = n.args[1]
                 # Pre-condition: every node has a "stack_trace" field in its meta,
                 # but copy_() nodes do not (since we manually added them during functionalization).
