@@ -731,11 +731,8 @@ def distribute_tensor(
         # but without using strided sharding, which means checkpoint save/load won't be correct.
         inner_spec = tensor._spec
         outer_mesh, inner_mesh = device_mesh, inner_spec.mesh
-        # use the following new api after rebasing to the latest pytorch
-        # outer_global_mesh = _mesh_resources.get_root_mesh(outer_mesh)
-        # inner_global_mesh = _mesh_resources.get_root_mesh(inner_mesh)
-        outer_global_mesh = _mesh_resources.get_parent_mesh(outer_mesh)
-        inner_global_mesh = _mesh_resources.get_parent_mesh(inner_mesh)
+        outer_global_mesh = _mesh_resources.get_root_mesh(outer_mesh)
+        inner_global_mesh = _mesh_resources.get_root_mesh(inner_mesh)
         if outer_global_mesh != inner_global_mesh or (
             outer_global_mesh is None or inner_global_mesh is None
         ):
