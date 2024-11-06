@@ -104,9 +104,13 @@ def merge_concats_pass(graph):
     return None
 
 
+def relu_nan_to_num(graph):
+    return None
+
+
 @init_once_fakemode
 def lazy_init():
-    from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
+    from . import efficient_conv_bn_eval, split_cat  # noqa: F401
 
     if config.is_fbcode():
         from . import fb  # type: ignore[attr-defined]  # noqa: F401
@@ -161,6 +165,12 @@ def pre_grad_passes(
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)]Apply remove_noop pass",
+            )
+            pass_execution_and_save(
+                relu_nan_to_num,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)]Apply relu_nan_to_num pass",
             )
             pass_execution_and_save(
                 fuse_chunk_reshape_concat_pass,
@@ -270,9 +280,7 @@ def pre_grad_passes(
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.pre_grad_custom_pass is not None:
-        with GraphTransformObserver(
-            gm, "pre_grad_custom_pass", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "pre_grad_custom_pass"):
             config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
 
@@ -314,30 +322,20 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
         # For linear permute fusion, we need to check input info to identify
         # and perform proper permutation/transpose
         ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
-        with GraphTransformObserver(
-            gm, "linear_permute_fusion", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "linear_permute_fusion"):
             gm = linear_permute_fusion(gm)
-        with GraphTransformObserver(
-            gm, "permute_linear_fusion", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "permute_linear_fusion"):
             gm = permute_linear_fusion(gm)
-        with GraphTransformObserver(
-            gm, "permute_matmul_fusion", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "permute_matmul_fusion"):
             gm = permute_matmul_fusion(gm)
 
     # make sure the autograd is disabled.
     if torch.is_grad_enabled() or not is_cpu:
         return gm
     if config.freezing:
-        with GraphTransformObserver(
-            gm, "remove_identity", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "remove_identity"):
             gm = remove_identity(gm)
-        with GraphTransformObserver(
-            gm, "fuse_conv_bn", config.trace.log_url_for_graph_xform
-        ):
+        with GraphTransformObserver(gm, "fuse_conv_bn"):
             gm = fuse_conv_bn(gm)
     return gm
 

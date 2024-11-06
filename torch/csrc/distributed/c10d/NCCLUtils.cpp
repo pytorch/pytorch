@@ -16,7 +16,7 @@
 namespace c10d {
 
 ncclComm_t NCCLComm::getNcclComm() {
-  std::unique_lock<std::mutex> lock(mutex_);
+  LockType lock(mutex_);
   if (aborted_) {
     auto commFailureMsg = commFailureReason_ != std::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)

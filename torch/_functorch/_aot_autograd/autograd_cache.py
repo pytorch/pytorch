@@ -177,7 +177,7 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
@@ -224,47 +224,42 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             # Sometimes inductor configs are unpickleable and can fail
             raise BypassAOTAutogradCache from e
 
-    def debug_lines(self) -> List[str]:
-        return AOTAutogradCachePickler.debug_lines(self)
-
-
-def _reduce_aot_config(aot_config: AOTConfig):
-    """
-    Reduce the config to a stable key for caching.
-    """
-    return (
-        _ident,
-        (
-            aot_config.num_params_buffers,
-            aot_config.keep_inference_input_mutations,
-            aot_config.is_export,
-            aot_config.no_tangents,
-            aot_config.dynamic_shapes,
-            aot_config.aot_autograd_arg_pos_to_source,
-            aot_config.enable_log,
-            aot_config.pre_dispatch,
-        ),
-    )
-
-
-def _reduce_tensor(tensor):
-    """
-    Reduce the tensor to a stable key for caching.
-    """
-    return (
-        _ident,
-        (
-            extract_tensor_metadata_for_cache_key(
-                FxGraphCachePickler._device_map, tensor
-            ),
-        ),
-    )
-
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
-    dispatch_table = FxGraphCachePickler.dispatch_table.copy()
-    dispatch_table[AOTConfig] = _reduce_aot_config
-    dispatch_table[torch.Tensor] = _reduce_tensor
+    def __init__(self):
+        super().__init__()
+        self.dispatch_table: Dict
+        self.dispatch_table.update(
+            {
+                AOTConfig: functools.partial(self._reduce_aot_config),
+                torch.Tensor: functools.partial(self._reduce_tensor),
+            }
+        )
+
+    def _reduce_aot_config(self, aot_config: AOTConfig):
+        """
+        Reduce the config to a stable key for caching.
+        """
+        return (
+            _ident,
+            (
+                aot_config.num_params_buffers,
+                aot_config.keep_inference_input_mutations,
+                aot_config.is_export,
+                aot_config.no_tangents,
+                aot_config.dynamic_shapes,
+                aot_config.aot_autograd_arg_pos_to_source,
+                aot_config.enable_log,
+                aot_config.pre_dispatch,
+            ),
+        )
+
+    def _reduce_tensor(self, tensor):
+        """
+        Reduce the tensor to a stable key for caching.
+        """
+        metadata = extract_tensor_metadata_for_cache_key(tensor)
+        return (_ident, (metadata,))
 
 
 def autograd_cache_key(
@@ -279,9 +274,10 @@ def autograd_cache_key(
     """
     check_cacheable(gm)
     details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
+    pickler = AOTAutogradCachePickler()
     # The prefix distinguishes among the other kinds of objects we cache
-    key = "a" + AOTAutogradCachePickler.get_hash(details)
-    debug_lines = details.debug_lines()
+    key = "a" + pickler.get_hash(details)
+    debug_lines = pickler.debug_lines(details)
     log.debug(
         "Autograd graph cache hash details for key %s:\n%s",
         key,

@@ -11,7 +11,7 @@ namespace torch::lazy {
 
 class TORCH_API SymNodeImpl : public c10::SymNodeImpl {
  public:
-  SymNodeImpl(NodePtr ptr) : node_(std::move(ptr)){};
+  SymNodeImpl(NodePtr ptr) : node_(std::move(ptr)) {}
   NodePtr node_;
 };
 
