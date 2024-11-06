@@ -52,11 +52,6 @@ struct DynamicCounter::Guard {
     }
   }
 
-  Guard(Guard&& other) = delete;
-  Guard(const Guard&) = delete;
-  Guard& operator=(const Guard&) = delete;
-  Guard& operator=(Guard&&) = delete;
-
   ~Guard() {
     for (const auto& backend : backends_) {
       backend->unregisterCounter(key_);

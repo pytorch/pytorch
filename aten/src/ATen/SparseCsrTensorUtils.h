@@ -155,12 +155,6 @@ class CheckSparseTensorInvariants {
       : old_state(at::globalContext().checkSparseTensorInvariants()) {
     at::globalContext().setCheckSparseTensorInvariants(state);
   }
-  CheckSparseTensorInvariants(CheckSparseTensorInvariants&& other) = delete;
-  CheckSparseTensorInvariants(const CheckSparseTensorInvariants&) = delete;
-  CheckSparseTensorInvariants& operator=(const CheckSparseTensorInvariants&) =
-      delete;
-  CheckSparseTensorInvariants& operator=(CheckSparseTensorInvariants&&) =
-      delete;
 
   ~CheckSparseTensorInvariants() {
     at::globalContext().setCheckSparseTensorInvariants(old_state);

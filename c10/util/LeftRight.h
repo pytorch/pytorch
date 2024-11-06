@@ -18,8 +18,6 @@ struct IncrementRAII final {
   ~IncrementRAII() {
     _counter->fetch_sub(1);
   }
-  IncrementRAII(IncrementRAII&&) = delete;
-  IncrementRAII& operator=(IncrementRAII&&) = delete;
 
  private:
   std::atomic<int32_t>* _counter;
@@ -203,7 +201,6 @@ class RWSafeLeftRightWrapper final {
   RWSafeLeftRightWrapper(RWSafeLeftRightWrapper&&) noexcept = delete;
   RWSafeLeftRightWrapper& operator=(const RWSafeLeftRightWrapper&) = delete;
   RWSafeLeftRightWrapper& operator=(RWSafeLeftRightWrapper&&) noexcept = delete;
-  ~RWSafeLeftRightWrapper() = default;
 
   template <typename F>
   // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)

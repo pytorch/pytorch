@@ -148,7 +148,6 @@ TEST(ThreadLocalTest, TestThreadWithGlobalScopeVar) {
 TEST(ThreadLocalTest, TestObjectsAreReleased) {
   static std::atomic<int> ctors{0};
   static std::atomic<int> dtors{0};
-  // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
   struct A {
     A() {
       ++ctors;
@@ -184,7 +183,6 @@ TEST(ThreadLocalTest, TestObjectsAreReleased) {
 TEST(ThreadLocalTest, TestObjectsAreReleasedByNonstaticThreadLocal) {
   static std::atomic<int> ctors(0);
   static std::atomic<int> dtors(0);
-  // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
   struct A {
     A() {
       ++ctors;

@@ -159,11 +159,6 @@ class DynamicType : public SharedType {
   explicit DynamicType(Tag, Arguments);
   explicit DynamicType(Tag, std::string_view, Arguments);
 
-  DynamicType(DynamicType&& other) = delete;
-  DynamicType(const DynamicType&) = delete;
-  DynamicType& operator=(const DynamicType&) = delete;
-  DynamicType& operator=(DynamicType&&) = delete;
-
   TypePtr containedType(size_t) const override;
   size_t containedTypeSize() const override;
   Tag tag() const {

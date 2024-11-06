@@ -258,10 +258,6 @@ class TORCH_API TimedSection {
  public:
   explicit TimedSection(Metric* metric) : metric_(metric), start_(NowNs()) {}
 
-  TimedSection(TimedSection&& other) = delete;
-  TimedSection(const TimedSection&) = delete;
-  TimedSection& operator=(const TimedSection&) = delete;
-  TimedSection& operator=(TimedSection&&) = delete;
   ~TimedSection() {
     int64_t now = NowNs();
     metric_->AddSample(now, static_cast<double>(now - start_));

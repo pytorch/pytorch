@@ -4,7 +4,6 @@
 #include <c10/util/Exception.h>
 
 namespace at {
-// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class TORCH_API OptionalTensorRef {
  public:
   OptionalTensorRef() = default;
@@ -21,7 +20,6 @@ class TORCH_API OptionalTensorRef {
   OptionalTensorRef(const OptionalTensorRef& rhs)
       : ref_(Tensor::unsafe_borrow_t{}, rhs.ref_) {}
 
-  OptionalTensorRef(OptionalTensorRef&& rhs) = default;
   OptionalTensorRef& operator=(OptionalTensorRef rhs) {
     std::swap(ref_, rhs.ref_);
     return *this;
@@ -61,10 +59,6 @@ class TORCH_API TensorRef {
 
   TensorRef(const TensorBase& src)
       : ref_(Tensor::unsafe_borrow_t{}, src) {}
-  TensorRef(TensorRef&& other) = default;
-  TensorRef(const TensorRef&) = default;
-  TensorRef& operator=(const TensorRef&) = default;
-  TensorRef& operator=(TensorRef&&) = default;
 
   const Tensor& operator*() const & {
     return ref_;

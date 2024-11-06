@@ -1037,6 +1037,8 @@ InterfaceType::InterfaceType(QualifiedName name, bool is_module)
       methods_(std::make_shared<std::vector<FunctionSchema>>()),
       is_module_(is_module) {}
 
+InterfaceType::~InterfaceType() = default;
+
 bool containsAnyType(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };
   while (!to_scan.empty()) {
