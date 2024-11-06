@@ -11,7 +11,6 @@ import itertools
 import logging
 import multiprocessing as python_multiprocessing
 import os
-import pickle
 import queue
 import threading
 import warnings
@@ -1102,10 +1101,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._shutdown = False
         self._workers_done_event = multiprocessing_context.Event()
 
+        # TODO: pickling the dataset once upfront can further speed up start times,
+        # but would need to mimic multiprocessing's context-aware serialization logic
         self._index_queues = []
         self._workers = []
-        # Pickle the dataset once up front in case it is large
-        pickled_dataset = pickle.dumps(self._dataset, protocol=pickle.HIGHEST_PROTOCOL)
         for i in range(self._num_workers):
             # No certainty which module multiprocessing_context is
             index_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
@@ -1116,7 +1115,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 target=_utils.worker._worker_loop,
                 args=(
                     self._dataset_kind,
-                    pickled_dataset,
+                    self._dataset,
                     index_queue,
                     self._worker_result_queue,
                     self._workers_done_event,

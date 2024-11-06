@@ -6,7 +6,6 @@ static methods.
 """
 
 import os
-import pickle
 import queue
 import random
 from dataclasses import dataclass
@@ -230,7 +229,7 @@ def _generate_state(base_seed, worker_id):
 
 def _worker_loop(
     dataset_kind,
-    pickled_dataset,
+    dataset,
     index_queue,
     data_queue,
     done_event,
@@ -269,9 +268,6 @@ def _worker_loop(
 
         from torch.utils.data import IterDataPipe
         from torch.utils.data.graph_settings import apply_random_seed
-
-        # Dataset has been pickled in the main process
-        dataset = pickle.loads(pickled_dataset)
 
         shared_rng = torch.Generator()
         if isinstance(dataset, IterDataPipe):
