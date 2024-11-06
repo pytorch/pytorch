@@ -23,7 +23,7 @@ from .bytecode_transformation import (
 from .exc import unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
-from .variables.base import VariableTracker
+from .variables.base import ValueMutationExisting, VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -64,7 +64,6 @@ class PyCodegen:
         self.code_options = self.tx.output.code_options
         self.cell_and_freevars = self.tx.cell_and_freevars
         self.new_var = self.tx.output.new_var
-        self.mutable_side_effects_from_source = False
         self.value_from_source: bool = True
         # This serves as a way for codegen to use a different source; we need
         # this because sometimes we can't easily modify the original source
@@ -72,14 +71,11 @@ class PyCodegen:
         self.overridden_sources: Dict[Source, Source] = overridden_sources or {}
 
     def restore_stack(self, stack_values, *, value_from_source=True):
-        prior = self.mutable_side_effects_from_source
-        self.mutable_side_effects_from_source = True
         prev = self.value_from_source
         self.value_from_source &= value_from_source
         try:
             self.foreach(stack_values)
         finally:
-            self.mutable_side_effects_from_source = prior
             self.value_from_source = prev
 
     def graph_output_vars(self):
@@ -135,25 +131,37 @@ class PyCodegen:
             output.append(create_dup_top())
             return
 
-        if self.mutable_side_effects_from_source:
-            # this is needed to get aliasing relationships right
-            # value.source will get mutated to hold `value`
-            # mutable_side_effects_from_source=False is used to codegen the mutation
-            # mutable_side_effects_from_source=True is used to codegen a reference
-            from .side_effects import ValueMutationExisting
-
-            if isinstance(value.mutation_type, ValueMutationExisting):
-                self(value.source)
-                return
-
         if allow_cache:
             if self.tempvars.get(value) is not None:
                 output.append(self.create_load(self.tempvars[value]))
                 self.top_of_stack = value
                 return
 
-        if value.source is not None and allow_cache and self.value_from_source:
-            # If the source needs to be overridden, use the new one.
+        # Dynamo normally prefers codegen from source to account for aliasing,
+        # but there's a corner case for export: for instance, if the computation
+        # graph is just identity on an input tensor, Dynamo would just emit a
+        # `LOAD_FAST` from the input source, rather than generating an identity
+        # FX graph.
+        #
+        # However, export wants to maximize graph capture; in the case
+        # above, export _wants to_ obtain an identity FX graph (despite it
+        # appears unnecessarily expensive for `torch.compile`), so we have
+        # the following option to override Dynamo's preference for codegen
+        # from source. Morever, this option applies recursively, for cases
+        # like input tensor being returned in a new dictionary.
+        #
+        # And why the `ValueMutationExisting` check? Not sure, so leaving it to
+        # keep the old behavior, as when `value_from_source` was introduced.
+        # TODO sort out the invariants among side effect, codegen and export.
+        if (
+            value.source is not None
+            and allow_cache
+            # Below is the special check for export.
+            and (
+                isinstance(value.mutation_type, ValueMutationExisting)
+                or self.value_from_source
+            )
+        ):
             source = self.overridden_sources.get(value.source, value.source)
             self.call_reconstruct(source)
         elif value.is_python_constant() and is_safe_constant(
