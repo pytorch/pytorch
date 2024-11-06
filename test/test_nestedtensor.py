@@ -1274,9 +1274,13 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             subtest(torch.logical_not, name="logical_not"),
             subtest(torch.sin, name="sin"),
             subtest(torch.cos, name="cos"),
+            subtest(torch.isinf, name="isinf"),
+            subtest(torch.isposinf, name="isposinf"),
+            subtest(torch.isneginf, name="isneginf"),
+            subtest(torch.isnan, name="isnan"),
         ],
     )
-    def test_activations(self, device, func):
+    def test_unary_funcs(self, device, func):
         nt, nt_noncontiguous = random_nt_noncontiguous_pair(
             (2, 3, 6, 7), device=device, dtype=torch.float32
         )
