@@ -89,7 +89,7 @@ std::function<void(Stack&)> getExecuteFunc() {
 template <class TBackendInterface>
 class backend {
   static_assert(
-      std::is_base_of<PyTorchBackendInterface, TBackendInterface>::value,
+      std::is_base_of_v<PyTorchBackendInterface, TBackendInterface>,
       "torch::jit::backend<T> requires T to inherit from PyTorchBackendInterface");
   std::string backend_name_;
 

@@ -491,7 +491,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl_xnnp(
     // prepare weights
     underlying_t w_zp = static_cast<underlying_t>(
         orig_weight.q_zero_point() +
-        (std::is_same<underlying_t, uint8_t>::value ? 128 : 0));
+        (std::is_same_v<underlying_t, uint8_t> ? 128 : 0));
 
    at::Tensor xnnp_weight = at::_empty_affine_quantized(
         orig_weight.sizes(),
@@ -1102,8 +1102,7 @@ static at::Tensor linear_int8_with_onednn_weight(
 }
 #endif // #if AT_MKLDNN_ENABLED()
 
-namespace at {
-namespace native {
+namespace at::native {
 
   Tensor QLinearOnednn::run_pointwise_tensor(
       Tensor act, // int8 CPU tensor, not QTensor
@@ -1351,5 +1350,4 @@ TORCH_LIBRARY_IMPL(onednn, MkldnnCPU, m) {
 }
 
 } // namespace
-} // namespace native
-} // namespace at
+} // namespace at::native
