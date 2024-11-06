@@ -939,7 +939,7 @@ class CustomAdd(sympy.core.add.Add):
             if isinstance(obj, CustomAdd):
                 obj._ordered_summation_of_unique_symbols = True
             else:
-                # if the object is optimized post construction we will get Add and not CustomAdd.
+                # if the object is optimized post construction we might get Add and not CustomAdd.
                 obj = super().__new__(CustomAdd, *obj._args, evaluate=False)
                 obj._ordered_summation_of_unique_symbols = True
 
