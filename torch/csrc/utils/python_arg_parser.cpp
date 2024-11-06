@@ -1085,7 +1085,7 @@ There are two kinds of default values:
 2. IntArrayRef x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be
 space after comma since native_parse.py uses ', ' to split args)
 */
-static inline std::vector<int64_t> parse_intlist_args(
+static std::vector<int64_t> parse_intlist_args(
     const std::string& s,
     int64_t size) {
   size_t n = s.size();
