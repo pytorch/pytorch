@@ -12,6 +12,7 @@ from torch._higher_order_ops.utils import (
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
     UnsupportedAliasMutationException,
+    validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
@@ -85,11 +86,7 @@ class FlexAttentionHOP(HigherOrderOperator):
         score_mod_other_buffers: Tuple = (),
         mask_mod_other_buffers: Tuple = (),
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        if not all(
-            isinstance(buf, (torch.Tensor, torch.SymInt, int))
-            for buf in score_mod_other_buffers + mask_mod_other_buffers
-        ):
-            raise RuntimeError("Other buffers must be tensors.")
+        validate_subgraph_args_types(score_mod_other_buffers + mask_mod_other_buffers)
         return super().__call__(
             query,
             key,
@@ -129,11 +126,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
     ) -> Tuple[
         torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
     ]:
-        if not all(
-            isinstance(buf, torch.Tensor)
-            for buf in score_mod_other_buffers + mask_mod_other_buffers
-        ):
-            raise RuntimeError("Other buffers must be tensors.")
+        validate_subgraph_args_types(score_mod_other_buffers + mask_mod_other_buffers)
         return super().__call__(
             query,
             key,
@@ -415,10 +408,6 @@ def flex_attention_functionalize(
     assert isinstance(block_mask_unwrapped, tuple)
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
-    assert all(
-        isinstance(item, (torch.Tensor, torch.SymInt, int))
-        for item in score_mod_other_buffers_unwrapped + mask_mod_other_buffers_unwrapped
-    )
 
     example_vals = (
         [torch.zeros((), dtype=query.dtype)]
@@ -531,12 +520,8 @@ def create_fw_bw_graph(
                 unwrapped_other_buffers = pytree.tree_map(_from_fun, other_buffers)
 
             assert all(
-                isinstance(t, (FakeTensor, torch.SymInt, int))
-                for t in unwrapped_score_mod_indexes
-            )
-            assert all(
-                isinstance(t, (FakeTensor, torch.SymInt, int))
-                for t in unwrapped_other_buffers
+                isinstance(t, (FakeTensor, int, torch.SymInt))
+                for t in unwrapped_score_mod_indexes + unwrapped_other_buffers
             )
 
             example_flat_out = pytree.tree_map(
@@ -595,7 +580,9 @@ class FlexAttentionAutogradOp(torch.autograd.Function):
         *score_mod_other_buffers: Tuple[Any, ...],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         any_buffer_requires_grad = any(
-            buffer.requires_grad for buffer in mask_mod_other_buffers
+            buffer.requires_grad
+            for buffer in mask_mod_other_buffers
+            if isinstance(buffer, torch.Tensor)
         )
         assert (
             not any_buffer_requires_grad
@@ -777,9 +764,16 @@ def sdpa_dense_backward(
     actual_grad_query = torch.empty_like(query)
     actual_grad_key = torch.empty_like(key)
     actual_grad_value = torch.empty_like(value)
+
+    def _maybe_new_buffer(
+        buffer: Union[torch.Tensor, torch.SymInt, int]
+    ) -> Optional[Union[torch.Tensor, torch.SymInt, int]]:
+        if isinstance(buffer, torch.Tensor):
+            return torch.empty_like(buffer) if buffer.requires_grad else None
+        return buffer
+
     actual_grad_score_mod_captured = [
-        torch.empty_like(buffer) if buffer.requires_grad else None
-        for buffer in score_mod_other_buffers
+        _maybe_new_buffer(buffer) for buffer in score_mod_other_buffers
     ]
 
     Bq, Bkv = query.size(0), key.size(0)
@@ -883,7 +877,7 @@ def sdpa_dense_backward(
     actual_grad_key.copy_(grad_key)
     actual_grad_value.copy_(grad_value)
     score_mod_other_buffer_grads = [
-        actual_grad.copy_(grad) if actual_grad is not None else actual_grad
+        actual_grad.copy_(grad) if isinstance(actual_grad, torch.Tensor) else None
         for actual_grad, grad in zip(
             actual_grad_score_mod_captured, grad_score_mod_captured
         )
@@ -1072,10 +1066,6 @@ def flex_attention_backward_functionalize(
     assert isinstance(block_mask_unwrapped, tuple)
     assert isinstance(score_mod_other_buffers_unwrapped, tuple)
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
-    assert all(
-        isinstance(item, torch.Tensor)
-        for item in score_mod_other_buffers_unwrapped + mask_mod_other_buffers_unwrapped
-    )
 
     with ctx.redispatch_to_next() as m:
         functional_fw_graph = ctx.functionalize(fw_graph)
