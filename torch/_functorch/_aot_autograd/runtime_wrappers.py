@@ -1489,7 +1489,7 @@ class AOTDispatchAutograd:
                 # Backward Compatibility, as some Subclass impls can have original 1-arg function.
                 return x.__coerce_same_metadata_as_tangent__(expected_meta)
 
-            return None
+            return x.__coerce_same_metadata_as_tangent__(expected_meta, expected_type)
 
         # Coerce to expected type and metadata
         orig_x = x
