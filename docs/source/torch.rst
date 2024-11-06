@@ -171,6 +171,8 @@ Generators
 
     Generator
 
+:doc:`default_generator`
+
 .. toctree::
     :maxdepth: 1
 
