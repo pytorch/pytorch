@@ -1110,7 +1110,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             descriptor_source = None
             descriptor_get_source = None
             if self.cls_source:
-                descriptor_source = AttrSource(self.cls_source, name)
+                # To access the method descriptor from the udf object w/o using
+                # inspect.getattr_static, we can look into the class __dict__
+                descriptor_source = GetItemSource(
+                    AttrSource(self.cls_source, "__dict__"), name
+                )
                 descriptor_get_source = AttrSource(descriptor_source, "__get__")
             descriptor_var = UserDefinedObjectVariable(subobj, source=descriptor_source)
 
