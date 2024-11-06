@@ -57,7 +57,7 @@ std::shared_ptr<OperatorSet> nn_ops_first_input_preserving() {
       "aten::hardswish_(Tensor self) -> Tensor",
   });
   return ops;
-};
+}
 
 // Requirements:
 //   dims           : Changed from first argument
@@ -70,5 +70,5 @@ std::shared_ptr<OperatorSet> ops_one_tensor_in_shape_transform() {
       "aten::flatten(Tensor self, int start_dim, int end_dim) -> Tensor",
   });
   return ops;
-};
+}
 } // namespace torch::jit
