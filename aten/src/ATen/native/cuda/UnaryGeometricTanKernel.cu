@@ -52,6 +52,6 @@ void tan_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(tan_stub, &tan_kernel_cuda);
+REGISTER_DISPATCH(tan_stub, &tan_kernel_cuda)
 
 } // namespace at::native

@@ -8825,7 +8825,8 @@ class TestNNMPS(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path)
+            # weights_only=False as this is a legacy use case that loads a module
+            m = torch.load(path, weights_only=False)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
@@ -8842,7 +8843,8 @@ class TestNNMPS(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path, encoding='utf-8')
+            # weights_only=False as this is a legacy use case that loads a module
+            m = torch.load(path, encoding='utf-8', weights_only=False)
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
@@ -11538,6 +11540,17 @@ class TestAdvancedIndexing(TestCaseMPS):
         # this isn't technically necessary, but matches NumPy stride calculations.
         self.assertEqual((60, 20, 5), z.stride())
         self.assertTrue(z.is_contiguous())
+
+    def test_empty_reduce(self, device="mps"):
+        x = torch.rand(0, 3, device=device)
+        self.assertTrue(x.mean().isnan())
+        self.assertEqual(x.count_nonzero(), 0)
+        self.assertEqual(x.sum(), 0)
+        self.assertEqual(x.nansum(), 0)
+        self.assertRaises(RuntimeError, lambda: x.amax())
+        self.assertRaises(IndexError, lambda: x.amax(dim=0))
+        self.assertRaises(RuntimeError, lambda: x.amin())
+        self.assertRaises(IndexError, lambda: x.amin(dim=0))
 
     def test_index_getitem_copy_bools_slices(self, device="mps"):
         true = torch.tensor(1, dtype=torch.uint8, device=device)

@@ -289,8 +289,7 @@ static PyObject* THPStream_richcompare(
   return result;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyMemberDef THPStream_members[] = {
+static const std::initializer_list<PyMemberDef> THPStream_members = {
     {"stream_id",
      T_LONGLONG,
      offsetof(THPStream, stream_id),
@@ -308,13 +307,11 @@ static struct PyMemberDef THPStream_members[] = {
      nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static struct PyGetSetDef THPStream_properties[] = {
+static const std::initializer_list<PyGetSetDef> THPStream_properties = {
     {"device", (getter)THPStream_get_device, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
-static PyMethodDef THPStream_methods[] = {
+static const std::initializer_list<PyMethodDef> THPStream_methods = {
     {"query", THPStream_query, METH_NOARGS, nullptr},
     {"synchronize", THPStream_synchronize, METH_NOARGS, nullptr},
     {"wait_event", THPStream_wait_event, METH_O, nullptr},
@@ -355,9 +352,12 @@ static PyTypeObject THPStreamType = {
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
-    THPStream_methods, /* tp_methods */
-    THPStream_members, /* tp_members */
-    THPStream_properties, /* tp_getset */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyMethodDef*>(std::data(THPStream_methods)), /* tp_methods */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyMemberDef*>(std::data(THPStream_members)), /* tp_members */
+    // NOLINTNEXTLINE(*const-cast)
+    const_cast<PyGetSetDef*>(std::data(THPStream_properties)), /* tp_getset */
     nullptr, /* tp_base */
     nullptr, /* tp_dict */
     nullptr, /* tp_descr_get */
