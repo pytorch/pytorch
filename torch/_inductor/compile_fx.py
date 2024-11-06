@@ -301,25 +301,35 @@ def _unlift_graph(
     return unlifted_gm
 
 
-def _get_subgraph_names(gm: GraphModule) -> Generator[str, None, None]:
+def _get_subgraph_names(gm: GraphModule) -> OrderedSet[str]:
+    # Need dedup since the same graph may be invoked multiple times
+    subgraph_names = OrderedSet() 
+
     for node in sorted(
         itertools.chain(
             gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.cond),
             gm.graph.find_nodes(
                 op="call_function", target=torch.ops.higher_order.while_loop
             ),
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.invoke_subgraph
+            ),
         )
     ):
         if node.target == torch.ops.higher_order.cond:
             true_subgraph_name = node.args[1].name
             false_subgraph_name = node.args[2].name
-            yield true_subgraph_name
-            yield false_subgraph_name
+            subgraph_names.add(true_subgraph_name)
+            subgraph_names.add(false_subgraph_name)
         elif node.target == torch.ops.higher_order.while_loop:
             cond_subgraph_name = node.args[0].name
             body_subgraph_name = node.args[1].name
-            yield cond_subgraph_name
-            yield body_subgraph_name
+            subgraph_names.add(cond_subgraph_name)
+            subgrapH_names.add(body_subgraph_name)
+        elif node.target == torch.ops.higher_order.invoke_subgraph:
+            get_attr_node = node.args[0]
+            subgraph_names.add(get_attr_node.target)
+    return subgraph_names
 
 
 def _recursive_pre_grad_passes(
