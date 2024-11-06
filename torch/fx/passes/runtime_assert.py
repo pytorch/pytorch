@@ -115,12 +115,12 @@ def insert_deferred_runtime_asserts(
     ras_by_symbol = shape_env.deferred_runtime_asserts.copy()
     graph = gm.graph
     tracer = fx.proxy.GraphAppendingTracer(graph)
-    graph_code_log.debug(
-        "%s",
-        lazy_format_graph_code(
-            f"pre insert_deferred_runtime_asserts {name}", gm, colored=True
-        ),
-    )
+    # graph_code_log.debug(
+    #     "%s",
+    #     lazy_format_graph_code(
+    #         f"pre insert_deferred_runtime_asserts {name}", gm, colored=True
+    #     ),
+    # )
 
     # We are going to mutate the dict
     expr_to_proxy: Dict[sympy.Expr, fx.Proxy] = {}

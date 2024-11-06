@@ -252,6 +252,6 @@ def tensorify_python_scalars(
         if len(proxy.node.users) == 0 and proxy.node.op != "placeholder":
             graph.erase_node(proxy.node)
 
-    graph_code_log.debug(
-        "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
-    )
+    # graph_code_log.debug(
+    #     "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
+    # )
