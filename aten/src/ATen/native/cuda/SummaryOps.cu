@@ -320,10 +320,8 @@ Tensor _histc_cuda_template(
       std::nullopt /* layout */,
       DeviceType::CUDA,
       std::nullopt /* pin_memory */);
-  using bounds_t = at::acc_type<input_t, /*is_cuda=*/true>;
-  bounds_t minvalue = min;
-  bounds_t maxvalue = max;
-
+  input_t minvalue = min;
+  input_t maxvalue = max;
   if (min == max && self.numel() > 0) {
     minvalue = *self.min().cpu().const_data_ptr<input_t>();
     maxvalue = *self.max().cpu().const_data_ptr<input_t>();

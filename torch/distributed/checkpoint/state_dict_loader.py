@@ -206,7 +206,6 @@ def _load_state_dict(
     ckpt_kwargs = {}
     if (ckpt_id := getattr(storage_reader, "checkpoint_id", None)) is not None:
         ckpt_kwargs["checkpoint_id"] = ckpt_id
-        ckpt_kwargs["process_group"] = distW.group
 
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
