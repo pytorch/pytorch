@@ -12137,6 +12137,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.upsample_nearest',
         'norm', 'masked.normalize',
         'arange', 'linspace',
+        'grid_sampler_2d',
     }
 
     FP32_LOW_PRECISION_LIST = {
