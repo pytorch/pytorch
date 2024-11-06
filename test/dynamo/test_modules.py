@@ -3002,7 +3002,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
-            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            # weights_only=False as this is a legacy use case that loads a module
+            loaded_model = torch.load(
+                os.path.join(tmpdirname, "model.pt"), weights_only=False
+            )
         loaded_model(inp)
         self.assertTrue(same_two_models(loaded_model, mod, [inp]))
         self.assertTrue(same_two_models(loaded_model, opt_mod, [inp]))
@@ -3020,7 +3023,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 opt_mod = torch.compile(mod, backend=backend)
                 with tempfile.TemporaryDirectory() as tmpdirname:
                     torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
-                    loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+                    # weights_only=False as this is a legacy use case that loads a module
+                    loaded_model = torch.load(
+                        os.path.join(tmpdirname, "model.pt"), weights_only=False
+                    )
                 torch._dynamo.reset()  # force recompiles
                 torch._inductor.metrics.generated_kernel_count = 0
                 opt_mod(inp)
@@ -3129,6 +3135,55 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @patch.object(
+        torch._dynamo.config, "skip_tensor_guards_with_matching_dict_tags", False
+    )
+    @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
+    def test_param_requires_grad(self):
+        def adjust_model(model):
+            to_freeze = model.num_iter % 2 == 0
+            if to_freeze:
+                for param in model.layer2.parameters():
+                    param.requires_grad = False
+            else:
+                for param in model.layer2.parameters():
+                    param.requires_grad = True
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, input_size, hidden_size, output_size):
+                super().__init__()
+
+                self.layer1 = torch.nn.Linear(hidden_size, hidden_size)
+                self.layer2 = torch.nn.Linear(hidden_size, hidden_size)
+
+                self.num_iter = 0
+
+            def forward(self, x):
+                x = self.layer2(x + self.layer1.bias)
+
+                self.num_iter += 1
+                return x
+
+        input_size = 1024
+        hidden_size = 1024
+        output_size = 1
+        num_samples = 2048
+        features = torch.randn(num_samples, input_size)
+
+        model = MyModule(input_size, hidden_size, output_size)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_model = torch.compile(model, backend=cnt, fullgraph=True)
+
+        for _ in range(3):
+            model.zero_grad(True)
+            adjust_model(model)
+            res = opt_model(features)
+            res.sum().backward()
+
+        # Check that we have recompiled twice, which leads to 3 frames
+        self.assertEqual(cnt.frame_count, 3)
 
 
 if __name__ == "__main__":
