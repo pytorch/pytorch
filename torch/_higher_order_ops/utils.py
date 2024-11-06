@@ -99,7 +99,23 @@ def _maybe_reenter_make_fx(fn):
     if _CURRENT_MAKE_FX_TRACER is not None:
         return reenter_make_fx(fn)
     else:
-        return make_fx(fn)
+
+        def _maybe_make_fx_with_fake_mode(fn):
+            @functools.wraps(fn)
+            def wrapped(*args):
+                from torch._guards import detect_fake_mode
+
+                fake_mode = detect_fake_mode(args)
+                if fake_mode is None:
+                    # we creaeta a fake_mode here to make sure we could
+                    # trace the graph with data-dependent calls e.g. .item()
+                    return make_fx(fn, tracing_mode="fake")(*args)
+                # Tracing with real if all inputs have been fakfied
+                return make_fx(fn)(*args)
+
+            return wrapped
+
+        return _maybe_make_fx_with_fake_mode(fn)
 
 
 @contextmanager
@@ -415,7 +431,9 @@ def _stack_pytree(pytrees):
 # iterating over the pos list and pop one item from the front of paritioned_args[pos[i]].
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
 def save_tensors_and_symints_for_backward(ctx, args):
-    assert all(isinstance(arg, (torch.Tensor, torch.SymInt, int)) for arg in args), args
+    assert all(
+        isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None))) for arg in args
+    ), args
     partitioned_args: List[Any] = [[], []]
     pos = []
     for i, arg in enumerate(args):
@@ -444,3 +462,22 @@ def saved_tensors_and_symints(ctx):
             s_idx += 1
     assert t_idx + s_idx == len(ctx.pos)
     return tuple(args)
+
+
+def get_dummy_aot_autograd_config():
+    from torch._functorch.aot_autograd import AOTConfig
+
+    return AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )
+
+
+# Slices off the first element of a given dimension
+def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
+    return torch.select_copy(t, dim, 0)

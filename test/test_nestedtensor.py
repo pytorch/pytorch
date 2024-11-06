@@ -1,13 +1,14 @@
 # Owner(s): ["module: nestedtensor"]
 
 import ast
+import contextlib
 import io
 import itertools
 import math
+import random
 import sys
 import tempfile
 import unittest
-from contextlib import nullcontext
 from functools import partial
 from typing import Optional, Tuple
 
@@ -25,6 +26,7 @@ from torch.nested._internal.nested_tensor import (
     NestedTensor,
     ViewNestedFromBuffer,
 )
+from torch.nn.attention.flex_attention import create_nested_block_mask, flex_attention
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
@@ -33,6 +35,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    flex_attention_supported_platform,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -1053,6 +1056,8 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         )
         emb = torch.nn.Embedding(100, 8, device=device)
         y = emb(x)
+        if layout == torch.jagged:
+            y.backward(torch.randn_like(y))
 
         @torch._dynamo.disable
         def check(inputs, y):
@@ -3653,7 +3658,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ["contig", "noncontig_transposed", "noncontig_with_holes"],
         name_fn=lambda c: c,
     )
-    def test_serialization(self, device, dtype, contiguity):
+    @parametrize("weights_only", [True, False])
+    def test_serialization(self, device, dtype, contiguity, weights_only):
         # Test with 3 cases:
         # 1. contiguous
         # 2. non-contiguous transposed
@@ -3689,8 +3695,21 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         with tempfile.TemporaryFile() as f:
             torch.save(nt, f)
+            safe_globals = [
+                torch.nested._internal.nested_tensor.NestedTensor,
+                torch.nested._internal.nested_tensor._rebuild_njt,
+                set,
+                torch._dynamo.decorators._DimRange,
+            ]
             f.seek(0)
-            nt_loaded = torch.load(f)
+            ctx = (
+                torch.serialization.safe_globals(safe_globals)
+                if weights_only
+                else contextlib.nullcontext()
+            )
+
+            with ctx:
+                nt_loaded = torch.load(f, weights_only=weights_only)
 
             self.assertIsNot(nt, nt_loaded)
             # we expect a new offsets tensor -> different nested int upon load
@@ -3887,6 +3906,21 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             return out.values()
 
         gradcheck(grad_test_func, inputs=(a, b, c), check_batched_grad=False)
+
+    def test_binary_pointwise_with_nested_int_second_arg(self, device):
+        # See https://github.com/pytorch/pytorch/issues/138496
+        nt = random_nt_from_dims(
+            [3, None, 5],
+            device=device,
+            dtype=torch.float32,
+            layout=torch.jagged,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "invalid argument"):
+            nt * nt.size(1)
+
+        with self.assertRaisesRegex(RuntimeError, "invalid argument"):
+            nt + nt.size(1)
 
     def test_split(self, device):
         a = torch.randn(2, 3, requires_grad=True, dtype=torch.float64, device=device)
@@ -4230,6 +4264,45 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         res_dense = torch.ops.aten.threshold_backward(buf1, buf2, 0.0)
 
         self.assertEqual(res_dense, res_nt.values())
+
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_record_stream(self, device, dtype):
+        def _create_nt():
+            values = torch.ones(1024, 4 * 1024, device="cuda")
+            offsets = torch.tensor([0, 500, 1024], device="cuda", dtype=torch.int64)
+            lengths = offsets.diff()
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets, lengths)
+            data_ptrs = {
+                nt._values.data_ptr(),
+                nt._offsets.data_ptr(),
+                nt._lengths.data_ptr(),
+            }
+            return nt, data_ptrs
+
+        def fn(record_stream):
+            nt, data_ptrs = _create_nt()
+            s = torch.cuda.Stream()
+
+            with torch.cuda.stream(s):
+                # emulate doing something long via sleep
+                per_ms = 2e7
+                torch.cuda._sleep(int(per_ms * 100))
+                if record_stream:
+                    nt.record_stream(s)
+            return data_ptrs
+
+        # expect memory reuse when record_stream() is not run
+        data_ptrs = fn(record_stream=False)
+        nt, nt_data_ptrs = _create_nt()
+        self.assertEqual(data_ptrs, nt_data_ptrs)
+        del nt
+        torch.cuda.synchronize()
+
+        # expect memory to be preserved (no reuse) when record_stream() is run
+        data_ptrs = fn(record_stream=True)
+        nt, nt_data_ptrs = _create_nt()
+        self.assertEqual(len(data_ptrs.intersection(nt_data_ptrs)), 0)
 
     @dtypes(torch.float32)
     @parametrize(
@@ -4913,7 +4986,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             if nt.dim() > reduce_dim[-1]:
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "not supported along a ragged and non-batch dimension for NestedTensor",
+                    "reducing along a ragged and non-batch dimension is not supported",
                 ):
                     out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
 
@@ -4952,7 +5025,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             if nt.dim() > reduce_dim[-1]:
                 with self.assertRaisesRegex(
                     RuntimeError,
-                    "not supported along the batch dimension but not the ragged dimension for NestedTensor",
+                    "reducing along the batch dimension but not the ragged dimension "
+                    + "is not supported",
                 ):
                     out = torch.sum(nt, dim=reduce_dim, keepdim=keepdim)
 
@@ -4990,7 +5064,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
             with self.assertRaisesRegex(
                 RuntimeError,
-                "not supported along the batch dimension but not the ragged dimension for NestedTensor",
+                "reducing along the batch dimension but not the ragged dimension "
+                + "is not supported",
             ):
                 out = func(nt, dim=reduce_dim, keepdim=keepdim)
 
@@ -5044,8 +5119,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 if nt_with_holes._ragged_idx in reduce_dim:
                     with self.assertRaisesRegex(
                         RuntimeError,
-                        "not supported where lengths is not None "
-                        + "if reducing across the ragged dimension for NestedTensor",
+                        "reducing across the ragged dimension is not supported for "
+                        + "non-contiguous nested tensors with holes",
                     ):
                         out = func(nt_with_holes, dim=reduce_dim, keepdim=keepdim)
                 else:
@@ -5153,92 +5228,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 out = torch.nn.functional.layer_norm(
                     nt_with_holes, normalized_shape=normalized_shape
                 )
-
-    @dtypes(torch.float32)
-    @parametrize("keepdim", [True])
-    @parametrize("requires_grad", [False, True])
-    @parametrize("components_require_grad", [False, True])
-    def test_mean_dim_reduce_multiple_dims(
-        self,
-        device,
-        dtype,
-        keepdim,
-        requires_grad,
-        components_require_grad,
-    ):
-        """
-        Mean on NestedTensor fails when trying to reduce across multiple dimensions
-        only if the batch or ragged dims are included
-        """
-        tensor_lists = self._get_example_tensor_lists(
-            include_list_of_lists=False, include_requires_grad=components_require_grad
-        )
-        reduce_dims = ((0, 1), (2, 3), (2, 3, 4), (0, 3), (1, 2))
-
-        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
-            nt = torch.nested.nested_tensor(
-                tensor_list,
-                device=device,
-                dtype=dtype,
-                layout=torch.jagged,
-                requires_grad=requires_grad,
-            )
-
-            if nt.dim() > reduce_dim[-1]:
-                ragged_or_batch_included = (
-                    nt._ragged_idx in reduce_dim or 0 in reduce_dim
-                )
-
-                context = (
-                    self.assertRaisesRegex(
-                        RuntimeError,
-                        "not supported across multiple dimensions for NestedTensor",
-                    )
-                    if ragged_or_batch_included
-                    else nullcontext()
-                )
-
-                with context:
-                    out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
-
-    @dtypes(torch.float32)
-    @parametrize("keepdim", [False, True])
-    @parametrize("requires_grad", [False, True])
-    @parametrize("components_require_grad", [False, True])
-    def test_mean_dim_keepdim_False(
-        self,
-        device,
-        dtype,
-        keepdim,
-        requires_grad,
-        components_require_grad,
-    ):
-        """
-        Mean on NestedTensor fails when keepdim=False
-        """
-        tensor_lists = self._get_example_tensor_lists(
-            include_list_of_lists=False, include_requires_grad=components_require_grad
-        )
-        reduce_dims = ((1,), (2,), (3,))
-
-        for tensor_list, reduce_dim in itertools.product(tensor_lists, reduce_dims):
-            nt = torch.nested.nested_tensor(
-                tensor_list,
-                device=device,
-                dtype=dtype,
-                layout=torch.jagged,
-                requires_grad=requires_grad,
-            )
-
-            if nt.dim() > reduce_dim[-1]:
-                if not keepdim:
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        "not supported when keepdim=False for NestedTensor",
-                    ):
-                        out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
-                else:
-                    out = torch.mean(nt, dim=reduce_dim, keepdim=keepdim)
 
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
@@ -6135,6 +6124,38 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
+    # This can't happen in the opinfo tests due to subprocess creation
+    @unittest.skipIf(
+        TEST_WITH_ROCM,
+        "In ROCm, kernel asserts are disabled due to performance overhead",
+    )
+    def test_index_put_error(self, device):
+        import subprocess
+
+        with self.subTest():
+            r = subprocess.call(
+                [
+                    sys.executable,
+                    "-c",
+                    """\
+import torch
+offsets = torch.tensor([0, 2, 5, 7], device='cuda')
+lengths = torch.tensor([2, 2, 2], device='cuda')
+indices = [
+    torch.tensor([0, 1, 2], device='cuda'),
+    torch.tensor([0, 2, 1], device='cuda'),
+    torch.tensor([0, 0, 0], device='cuda'),
+]
+a = torch.nested.nested_tensor_from_jagged(
+    torch.zeros(7, 3, device='cuda'), offsets, lengths
+)
+a[indices] = 1.0
+torch.cuda.synchronize()
+""",
+                ]
+            )
+            self.assertTrue(r != 0)
+
     @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
     def test_profiler_sequence_nr(self):
         with torch.profiler.profile() as prof:
@@ -6969,6 +6990,121 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         self.assertTrue(torch.allclose(attn_output_eager, attn_output))
         self.assertTrue(torch.allclose(value_grad, value.grad))
 
+    # Helper function to generate random query, key, value NJTs in (B, n_heads, *, D) format.
+    # If noncontig_with_holes is True, the results will be non-contiguous with holes (i.e. have
+    # both offsets and lengths specified).
+    def _rand_qkv(self, device, dtype, noncontig_with_holes=False):
+        batch_size = 8
+        n_heads = 8
+        D = 16
+
+        sentence_lengths = [random.randint(2, 1023) for _ in range(batch_size - 1)]
+        total = sum(sentence_lengths)
+
+        # shape (B, *, D_total) where D_total = n_heads * D
+        query = torch.nested.nested_tensor(
+            [
+                torch.randn(l, n_heads * D, device=device, dtype=dtype)
+                for l in sentence_lengths
+            ],
+            layout=torch.jagged,
+        )
+        if noncontig_with_holes:
+            query = torch.nested.nested_tensor_from_jagged(
+                query._values,
+                query._offsets,
+                # -1 to introduce holes
+                lengths=query._offsets.diff() - 1,
+                jagged_dim=query._ragged_idx,
+                min_seqlen=query._min_seqlen,
+                max_seqlen=query._max_seqlen,
+            )
+        # NB: randn_like() doesn't propagate lengths so this doesn't preserve non-contiguity
+        key = torch.randn_like(query)
+        value = torch.randn_like(query)
+
+        # shape (B, *, D_total) -> (B, n_heads, *, D)
+        query = (
+            query.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        )
+        key = key.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        value = (
+            value.unflatten(-1, [n_heads, D]).transpose(1, 2).detach().requires_grad_()
+        )
+
+        return query, key, value
+
+    @onlyCUDA
+    @flex_attention_supported_platform
+    @dtypes(torch.float32)
+    # non-contiguous with holes not supported yet
+    @decorateIf(unittest.skip, lambda params: params["noncontig_with_holes"])
+    @parametrize("noncontig_with_holes", [False, True])
+    def test_flex_attention(self, device, dtype, noncontig_with_holes):
+        query, key, value = self._rand_qkv(device, dtype, noncontig_with_holes)
+
+        # Run FlexAttention with a causal mask
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_nested_block_mask(causal_mask, 1, 1, query, _compile=True)
+        out_flex = flex_attention(query, key, value, block_mask=block_mask)
+        grad_out = torch.randn_like(out_flex)
+        grads_flex = torch.autograd.grad(
+            out_flex, inputs=(query, key, value), grad_outputs=(grad_out,)
+        )
+        flex_outs = [out_flex, *grads_flex]
+
+        # Run FlexAttention with a score_mod that represents causal attention
+        def causal_score_mod(score, b, h, q_idx, kv_idx):
+            return torch.where(q_idx >= kv_idx, score, float("-inf"))
+
+        out_flex2 = flex_attention(query, key, value, score_mod=causal_score_mod)
+        grads_flex2 = torch.autograd.grad(
+            out_flex2, inputs=(query, key, value), grad_outputs=(grad_out,)
+        )
+        flex_outs2 = [out_flex2, *grads_flex2]
+
+        # Run causal SDPA for comparison
+        out_sdpa = F.scaled_dot_product_attention(query, key, value, is_causal=True)
+        grads_sdpa = torch.autograd.grad(
+            out_sdpa, inputs=(query, key, value), grad_outputs=(grad_out,)
+        )
+        sdpa_outs = [out_sdpa, *grads_sdpa]
+
+        # Compare flex vs. SDPA output and grads
+        for flex, flex2, sdpa in zip(flex_outs, flex_outs2, sdpa_outs):
+            self.assertTrue(flex.is_nested and flex2.is_nested and sdpa.is_nested)
+            self.assertEqual(flex, sdpa, atol=1e-2, rtol=1e-2)
+            self.assertEqual(flex2, sdpa, atol=1e-2, rtol=1e-2)
+
+    @onlyCUDA
+    @flex_attention_supported_platform
+    @dtypes(torch.float32)
+    def test_flex_attention_converts_stacked_seq_indices(self, device, dtype):
+        # This test verifies that a score_mod function written to operate within
+        # NJT sequence index space, such as a lookup table, works correctly. This
+        # validates that FlexAttention properly converts indices within the
+        # "stacked sequence" space used for NJT -> sequence-relative indices.
+        query, key, value = self._rand_qkv(device, dtype)
+
+        # Test with score_mod
+        score_mod_table = torch.randn(query._max_seqlen, device=device, dtype=dtype)
+
+        def my_score_mod(score, b, h, q_idx, kv_idx):
+            return score_mod_table[q_idx]
+
+        flex_attention(query, key, value, score_mod=my_score_mod)
+
+        # Test with mask_mod
+        mask_mod_table = score_mod_table > 0.0
+
+        def my_mask_mod(b, h, q_idx, kv_idx):
+            return mask_mod_table[q_idx]
+
+        block_mask = create_nested_block_mask(my_mask_mod, 1, 1, query, _compile=True)
+        flex_attention(query, key, value, block_mask=block_mask)
+
     @dtypes(torch.float32)
     def test_apply_(self, device, dtype):
         nt = random_nt_from_dims(
@@ -7608,12 +7744,6 @@ FORWARD_FAILURES = {
     "polar",
     "rsub",
     # reduction
-    "all",
-    "amax",
-    "amin",
-    "any",
-    "argmax",
-    "argmin",
     "count_nonzero",
     "linalg.vector_norm",
     "nansum",
@@ -7622,8 +7752,6 @@ FORWARD_FAILURES = {
     "var",
     "var.unbiased",
     # === BEGIN UNSUPPORTED SECTION ===
-    # RuntimeError: mean(): not supported for NestedTensor on dim=1
-    "mean",
     # ValueError: expects strided tensor (got torch.jagged tensor)
     "masked.amax",
     "masked.amin",
@@ -7650,8 +7778,6 @@ FORWARD_FAILURES = {
     "jiterator_binary",
     "jiterator_binary_return_by_ref",
     "jiterator_unary",
-    # RuntimeError: prod(): keepdim=True must be set for NestedTensor
-    "prod",
     # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
     "nanmean",
 }
@@ -7683,8 +7809,6 @@ BACKWARD_FAILURES = {
     "clone",
     # Calling into torch.ops.aten.size directly
     "masked_select",
-    # NotImplementedError: aten._nested_sum_backward.default. Need to fix the backward pass.
-    "sum",
 }
 
 COMPILE_FORWARD_FAILURES = {
@@ -7741,6 +7865,12 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             out_ref = op.ref(op, sample)
             self.assertEqualIgnoringNestedInts(out, out_ref)
 
+            # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
+            # TODO: Add xfails for other inplace ops instead of hardcoding
+            if op.inplace_variant and "index_put" in op.full_name:
+                op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
+                self.assertEqualIgnoringNestedInts(sample.input, out_ref)
+
     @withXFails(BACKWARD_FAILURES)
     @ops(
         [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
@@ -7795,6 +7925,32 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 self.assertEqualIgnoringNestedInts(out_compile, out_ref)
             else:
                 self.assertEqual(out_compile, out_ref)
+
+            # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
+            # TODO: Add xfails for other inplace ops instead of hardcoding
+            if op.inplace_variant and "index_put" in op.full_name:
+                op_fn = op.inplace_variant
+
+                def in_f(*args, **kwargs):
+                    return op_fn(*args, **kwargs)
+
+                compiled_in_f = torch.compile(
+                    in_f, fullgraph=True, backend="aot_eager_decomp_partition"
+                )
+
+                if sample.input.is_contiguous():
+                    compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                    if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                        self.assertEqualIgnoringNestedInts(sample.input, out_ref)
+                    else:
+                        self.assertEqual(sample.input, out_ref)
+                else:
+                    # see https://github.com/pytorch/pytorch/issues/106456
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
+                    ):
+                        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
 
     @withXFails(COMPILE_BACKWARD_FAILURES)
     @ops(

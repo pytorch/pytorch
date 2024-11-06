@@ -56,9 +56,18 @@ namespace {
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 90000
+  // TODO(eqy): Re-enable by default after upgrading to a release later than 9.5.0
+  // see context: https://github.com/pytorch/pytorch/issues/138340
+  // return false;
+#if defined(CUDNN_VERSION)
+
+#if CUDNN_VERSION > 90000
   auto dprops = at::cuda::getCurrentDeviceProperties();
   return dprops->major >= 9;
+#else
+  return false;
+#endif
+
 #else
   return false;
 #endif
@@ -68,16 +77,11 @@ bool check_prefer_cudnn_attention() {
 std::array<SDPBackend, num_backends> priority_order(sdp_params const& params) {
   constexpr std::array<SDPBackend, num_backends> default_order{
       SDPBackend::flash_attention,
-      SDPBackend::cudnn_attention,
       SDPBackend::efficient_attention,
-      SDPBackend::math};
-  constexpr std::array<SDPBackend, num_backends> cudnn_order{
+      SDPBackend::math,
       SDPBackend::cudnn_attention,
-      SDPBackend::flash_attention,
-      SDPBackend::efficient_attention,
-      SDPBackend::math};
-  static const bool prefer_cudnn = check_prefer_cudnn_attention();
-  return prefer_cudnn ? cudnn_order : default_order;
+      };
+  return default_order;
 }
 
 bool use_tensor_cores(sdp_params const& params, cudaDeviceProp* dprops, bool is_half) {
@@ -413,6 +417,12 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       }
       return false;
     }
+  }
+  if (s_q == 1 || s_k == 1) {
+    if (debug) {
+      TORCH_WARN_ONCE("cudnn SDPA does not support sequence length 1.");
+    }
+    return false;
   }
   return true;
 }

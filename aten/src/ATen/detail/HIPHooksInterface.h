@@ -47,7 +47,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   }
 
   Allocator* getPinnedMemoryAllocator() const override {
-    AT_ERROR("Pinned memory requires HIP.");
+    TORCH_CHECK(false, "Pinned memory requires HIP.");
   }
 
   virtual void registerHIPTypes(Context*) const {
@@ -59,7 +59,7 @@ struct TORCH_API HIPHooksInterface : AcceleratorHooksInterface {
   }
 
   bool hasPrimaryContext(DeviceIndex device_index) const override {
-    AT_ERROR("Cannot check primary context without ATen_hip library.");
+    TORCH_CHECK(false, "Cannot check primary context without ATen_hip library.");
   }
 };
 

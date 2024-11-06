@@ -326,7 +326,7 @@ struct TORCH_API ShapeSymbol {
   // is this symbol a fixed/static dimension
   bool is_static() const {
     return value_ >= 0;
-  };
+  }
   bool operator==(const ShapeSymbol& b) const {
     return value_ == b.value_;
   }
@@ -340,15 +340,15 @@ struct TORCH_API ShapeSymbol {
   int64_t static_size() const {
     TORCH_CHECK(is_static());
     return value_;
-  };
+  }
 
   int64_t value() const {
     return value_;
-  };
+  }
 
   static ShapeSymbol newSymbol() {
     return fromStaticSize(-static_cast<int64_t>(++num_symbols));
-  };
+  }
   friend TORCH_API std::ostream& operator<<(
       std::ostream& os,
       const ShapeSymbol& s);
@@ -938,7 +938,7 @@ struct TORCH_API DictType : public SharedType {
       case TypeKind::DeviceObjType:
         return DictTypePtr(new DictType(std::move(key), std::move(value)));
       default:
-        AT_ERROR(
+        TORCH_CHECK(false,
             "Cannot create dict for key type '",
             key->str(),
             "', only int, float, complex, Tensor, device and string keys are supported");
@@ -1154,7 +1154,7 @@ struct TORCH_API TupleType : public NamedType {
       const std::vector<TypePtr>& field_types);
 
   static TupleTypePtr createNamed(const std::optional<c10::QualifiedName>& name,
-      const std::vector<c10::string_view>& field_names,
+      const std::vector<std::string_view>& field_names,
       const std::vector<TypePtr>& field_types);
 
   static TupleTypePtr create(
@@ -1190,7 +1190,7 @@ struct TORCH_API TupleType : public NamedType {
   const std::shared_ptr<FunctionSchema>& schema() const {
     return schema_;
   }
-  std::optional<std::vector<c10::string_view>> names() const;
+  std::optional<std::vector<std::string_view>> names() const;
 
   static const TypeKind Kind = TypeKind::TupleType;
 
@@ -1956,6 +1956,12 @@ struct getTypePtr_<std::string> final {
 };
 template <>
 struct getTypePtr_<c10::string_view> final {
+  static decltype(auto) call() {
+    return StringType::get();
+  }
+};
+template <>
+struct getTypePtr_<std::string_view> final {
   static decltype(auto) call() {
     return StringType::get();
   }
