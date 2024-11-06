@@ -230,7 +230,6 @@ TEST(MetaprogrammingTest, TupleMap_mapsToDifferentTypes) {
 
 TEST(MetaprogrammingTest, TupleMap_differentiatesLRValueReferences) {
   struct Mapper {
-    // NOLINTNEXTLINE(*move*)
     std::string operator()(std::string&& a) const {
       return "moved";
     }

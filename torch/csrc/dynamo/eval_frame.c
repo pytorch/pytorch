@@ -611,12 +611,6 @@ static PyObject* _custom_eval_frame(
 
   PyObject* backend = get_backend(callback);
 
-
-  // We don't run the current custom_eval_frame behavior for guards.
-  // So we temporarily set the callback to Py_None to drive the correct behavior
-  // in the shim.
-  eval_frame_callback_set(Py_None);
-
   // A callback of Py_False indicates "run only" mode, the cache is checked, but
   // we never compile.
   // Also, if extra is marked as "cache_limit_hit", run in "run only" mode
@@ -651,14 +645,17 @@ static PyObject* _custom_eval_frame(
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
-    // Re-enable custom behavior
-    eval_frame_callback_set(callback);
     *should_clear_frame = 1;
     return eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, 0);
   }
   DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
+
+  // We don't run the current custom_eval_frame behavior for guards.
+  // So we temporarily set the callback to Py_None to drive the correct behavior
+  // in the shim.
+  eval_frame_callback_set(Py_None);
 
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = NULL;

@@ -230,11 +230,6 @@ class LocalState:
         default_factory=dict
     )
 
-    def render(self) -> str:
-        return "\n".join(
-            f"{k}: {v.render()}" for k, v in self.automatic_dynamic.items()
-        )
-
 
 # Mutable box that is shared across restarts
 @dataclasses.dataclass

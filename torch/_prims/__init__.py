@@ -1773,12 +1773,12 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
     assert dim >= 0
     shape = tensors[0].shape
-    sym_sum_args = []
+    concat_length = 0
     for tensor_idx, tensor in enumerate(tensors):
         assert len(shape) == len(tensor.shape)
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
-                sym_sum_args.append(length)
+                concat_length = concat_length + length
             else:
                 torch._check(
                     length == common_length,
@@ -1788,7 +1788,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
                 )
 
     new_shape = list(tensors[0].shape).copy()
-    new_shape[dim] = torch.sym_sum(sym_sum_args)
+    new_shape[dim] = concat_length
     return TensorMeta(
         tensors[0],
         shape=new_shape,

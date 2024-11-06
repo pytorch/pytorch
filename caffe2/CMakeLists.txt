@@ -1084,12 +1084,12 @@ if(USE_XPU)
     target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
     if(MSVC)
       # Windows
-      target_link_options(torch_xpu PRIVATE
-      "-WHOLEARCHIVE:$<TARGET_FILE:torch_xpu_ops>")
+      target_link_libraries(torch_xpu PRIVATE
+      "-WHOLEARCHIVE:\"$<TARGET_FILE:torch_xpu_ops>\"")
     else()
       # Linux
-      target_link_options(torch_xpu PRIVATE
-          "-Wl,--whole-archive,$<TARGET_FILE:torch_xpu_ops>,--no-whole-archive")
+      target_link_libraries(torch_xpu PRIVATE
+        "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
     endif()
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch

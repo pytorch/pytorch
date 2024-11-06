@@ -2,8 +2,10 @@
 import collections
 import contextlib
 import copy
+import dataclasses
 import functools
 import itertools
+import json
 import logging
 import operator
 import re
@@ -1316,9 +1318,11 @@ class OutputGraph:
                 "artifact",
                 metadata_fn=lambda: {
                     "name": "compiler_collective",
-                    "encoding": "string",
+                    "encoding": "json",
                 },
-                payload_fn=lambda: ds.local_state.render(),
+                payload_fn=lambda: json.dumps(
+                    dataclasses.asdict(ds.local_state),
+                ),
             )
             with torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()):
                 all_states = [None] * compile_pg.size()

@@ -121,7 +121,7 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "multigpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
+          { config: "multigpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
         ]}
       build-with-debug: false
 
@@ -145,11 +145,11 @@ jobs:
       build-with-debug: true
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
-          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu", owners: ["oncall:debug-build"] },
+          { config: "default", shard: 1, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda11_8-py3_10-gcc9-debug-test:
@@ -183,9 +183,9 @@ jobs:
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.rocm.gpu" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.rocm.gpu" },
         ]}
 
   linux-focal-rocm6_2-py3_10-test:
@@ -246,7 +246,7 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "multigpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
+          { config: "multigpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
         ]}
       build-with-debug: false
 
@@ -274,9 +274,9 @@ jobs:
       cuda-arch-list: '7.5'
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu", owners: ["oncall:distributed"] },
+          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
+          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g4dn.12xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda11_8-py3_10-gcc9-experimental-split-build-test:

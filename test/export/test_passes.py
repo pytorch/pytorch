@@ -568,12 +568,12 @@ class TestPasses(TestCase):
             without_token_ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj_attr, x):
-    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, obj_attr, x);  token = x = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, foo = obj_attr, x = x);  token = x = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1]
     getitem_2 = with_effects[2];  with_effects = None
     add = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, add);  getitem = obj_attr = add = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, foo = obj_attr, x = add);  getitem = obj_attr = add = None
     getitem_3 = with_effects_1[0]
     getitem_4 = with_effects_1[1];  with_effects_1 = None
     return (getitem_3, getitem_4)""",  # noqa: B950

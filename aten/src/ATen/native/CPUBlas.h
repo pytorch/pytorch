@@ -206,7 +206,7 @@ TORCH_API void brgemm(
     float* C);
 
 // Release brgemm hardware context
-TORCH_API void brgemm_release();
+void brgemm_release();
 
 // Pack B matrix to get better performance if needed
 void pack(
