@@ -14,7 +14,7 @@ StringCordView::StringCordView() {
 }
 
 StringCordView::StringCordView(
-    std::vector<c10::string_view> inputs,
+    std::vector<std::string_view> inputs,
     std::vector<std::shared_ptr<std::string>> ownerships)
     : pieces_(std::move(inputs)), owned_strings_(std::move(ownerships)) {
   accumulated_sizes_.push_back(0);
@@ -70,7 +70,7 @@ size_t StringCordView::find_regex(const std::string& tok, size_t start) const {
 }
 
 StringCordView StringCordView::substr(size_t start, size_t size) const {
-  std::vector<c10::string_view> pieces;
+  std::vector<std::string_view> pieces;
   std::vector<std::shared_ptr<std::string>> ownerships;
   if (start >= this->size()) {
     // out of bounds

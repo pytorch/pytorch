@@ -22,7 +22,7 @@ struct TORCH_API StringCordView {
   StringCordView(const StringCordView&) = default;
   StringCordView(StringCordView&&) noexcept = default;
   StringCordView(
-      std::vector<c10::string_view> inputs,
+      std::vector<std::string_view> inputs,
       std::vector<std::shared_ptr<std::string>> ownerships);
 
   StringCordView& operator=(const StringCordView&) = default;
@@ -171,7 +171,7 @@ struct TORCH_API StringCordView {
   Iterator iter_for_pos(size_t pos) const;
 
  private:
-  std::vector<c10::string_view> pieces_;
+  std::vector<std::string_view> pieces_;
   std::vector<size_t> accumulated_sizes_;
   std::vector<std::shared_ptr<std::string>> owned_strings_;
 };
