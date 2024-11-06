@@ -2227,10 +2227,10 @@ def maybe_handle_decomp(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
-    from torch._inductor.bisect_helper import BisectionManager
+    from torch._inductor.compiler_bisector import CompilerBisector
 
     if op in CURRENT_DECOMPOSITION_TABLE:
-        if BisectionManager.disable_subsystem(
+        if CompilerBisector.disable_subsystem(
             "aot_eager_decomp_partition", "decomposition", lambda: repr(op)
         ):
             return NotImplemented
