@@ -2,10 +2,8 @@
 import collections
 import contextlib
 import copy
-import dataclasses
 import functools
 import itertools
-import json
 import logging
 import operator
 import re
@@ -876,7 +874,7 @@ class OutputGraph:
             if not (
                 (
                     x not in self.side_effects.store_attr_mutations
-                    or isinstance(x.mutable_local, AttributeMutationExisting)
+                    or isinstance(x.mutation_type, AttributeMutationExisting)
                 )
                 and isinstance(x.source, GetItemSource)
                 and isinstance(x.source.base, LocalSource)
@@ -1006,10 +1004,8 @@ class OutputGraph:
         }
         root = FakeRootModule(nn_modules_proxies)
         # Add all the local vars to the "stack" so restore at the end
-        restore_vars = []
+        restore_vars: List[str] = []
         val_to_names: Dict[VariableTracker, List[str]] = {}
-        if stack_values:
-            val_to_names[stack_values[-1]] = []
         # NB: Typically (i.e., for graph compile from RETURN_VALUE),
         # symbolic_locals will be empty at this point, as prune_dead_locals
         # will clear out all of symbolic_locals because RETURN_VALUE is the
@@ -1256,11 +1252,9 @@ class OutputGraph:
                 "artifact",
                 metadata_fn=lambda: {
                     "name": "compiler_collective",
-                    "encoding": "json",
+                    "encoding": "string",
                 },
-                payload_fn=lambda: json.dumps(
-                    dataclasses.asdict(ds.local_state),
-                ),
+                payload_fn=lambda: ds.local_state.render(),
             )
             with torch.cuda.device(compile_pg.rank() % torch.cuda.device_count()):
                 all_states = [None] * compile_pg.size()
@@ -1394,7 +1388,9 @@ class OutputGraph:
 
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         with dynamo_timed(
-            "OutputGraph.call_user_compiler", phase_name="backend_compile"
+            "OutputGraph.call_user_compiler",
+            phase_name="backend_compile",
+            log_pt2_compile_event=True,
         ):
             return self._call_user_compiler(gm)
 
@@ -1680,6 +1676,9 @@ class OutputGraph:
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
+        self.input_source_to_var.clear()
+        self.unspec_variable_map.clear()
+        self.backward_state.clear()
 
     def set_torch_function_state(self, enabled: bool) -> None:
         self.torch_function_enabled = enabled

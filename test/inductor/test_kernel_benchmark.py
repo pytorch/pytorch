@@ -40,11 +40,11 @@ class TestKernelBenchmark(TestCase):
 
     def setUp(self):
         super().setUp()
-        PyCodeCache.cache.clear()
+        PyCodeCache.cache_clear()
 
     def get_compiled_module(self):
         compiled_module = None
-        for v in PyCodeCache.cache.values():
+        for v in PyCodeCache.modules:
             if hasattr(v, "benchmark_compiled_module"):
                 self.assertTrue(
                     compiled_module is None, "Found multiple compiled modules"

@@ -3075,8 +3075,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.assertExpectedInline(
             backend.graphs[0].score_mod_0.code.strip(),
             """\
-def forward(self, child_4 : torch.Tensor, child_5 : torch.Tensor, child_6 : torch.Tensor, child_7 : torch.Tensor, child_8 : torch.Tensor, s0 : torch.SymInt):
-    add = child_4 + s0;  child_4 = s0 = None
+def forward(self, child_4 : torch.Tensor, child_5 : torch.Tensor, child_6 : torch.Tensor, child_7 : torch.Tensor, child_8 : torch.Tensor, getitem : torch.SymInt):
+    add = child_4 + getitem;  child_4 = getitem = None
     return add""",
         )
 

@@ -478,6 +478,11 @@ def get_dummy_aot_autograd_config():
     )
 
 
+# Slices off the first element of a given dimension
+def first_slice_copy(t: torch.Tensor, dim: int = 0) -> torch.Tensor:
+    return torch.select_copy(t, dim, 0)
+
+
 # Note [lifted arg types in hop]
 # For dynamoed hops, we automatically lift the free symbols in tensors as arguments.
 # This has implications for the types of lifted args for different dispatch keys:
