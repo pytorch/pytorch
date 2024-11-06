@@ -413,7 +413,11 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "native_batch_norm"),
     (None, None, "_upsample_bilinear2d_aa"),
     (None, None, "empty_strided"),  # aten.empty_strided was not decomposed
-    (None, None, "bernoulli"),  # bernoulli is a function of randomness, so couldn't do cross-reference.
+    (
+        None,
+        None,
+        "bernoulli",
+    ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
@@ -615,7 +619,6 @@ class TestDecomp(TestCase):
         ref_p = ref.sum() / torch.prod(torch.tensor(ref.size()))
         res_p = res.sum() / torch.prod(torch.tensor(res.size()))
         self.assertEqual(ref_p, res_p, atol=0.01 * p, rtol=0.01)
-
 
     def test_broadcasting_index_copy(self, device):
         x = torch.zeros([1, 10], device=device)
