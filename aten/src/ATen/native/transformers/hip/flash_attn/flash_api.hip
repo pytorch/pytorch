@@ -356,18 +356,20 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
   auto softmax_lse = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
   at::Tensor M = softmax_lse.view({batch_size * num_heads, max_seqlen_q});
-  at::Tensor returned_softmax;
+  at::Tensor softmax_fa_t;
   // Only return softmax if there's dropout to reduce compilation time
   if (return_softmax) {
     TORCH_CHECK(p_dropout > 0.0f, "return_softmax is only supported when p_dropout > 0.0");
-    returned_softmax = at::empty({ batch_size, num_heads, seqlen_q_rounded, seqlen_k_rounded }, opts);
+    softmax_fa_t = at::empty({ batch_size, num_heads, seqlen_q_rounded, seqlen_k_rounded }, opts);
+  } else {
+    softmax_fa_t = at::empty({ 0, 0, 0, 0 }, opts);
   }
 
   if (zero_tensors) {
     out.zero_();
     softmax_lse.fill_(-std::numeric_limits<float>::infinity());
     if (return_softmax) {
-      returned_softmax.zero_();
+      softmax_fa_t.zero_();
     }
   }
 
@@ -401,7 +403,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                    offset2,
                    seed_output,
                    offset_output,
-                   mk_aotensor(returned_softmax, "encoded_softmax"),
+                   mk_aotensor(softmax_fa_t, "encoded_softmax"),
                    is_causal,
                    stream);
   } else {
@@ -410,7 +412,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     softmax_lse.fill_(std::numeric_limits<float>::infinity());
   }
 
-  return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, returned_softmax};
+  return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, softmax_fa_t};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
