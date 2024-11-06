@@ -99,6 +99,11 @@ static Tensor& pad_out_template(Tensor& output,
 
   Tensor grad_output, input = input_;
 
+  // `-[MPSGraph padTensor:withPaddingMode:leftPadding:rightPadding:constantValue:name:]`
+  // seems not support elements >= 2^16 and returns broken tensor.
+  TORCH_CHECK_NOT_IMPLEMENTED(input_w * input_h < 1 << 16,
+                              "Input elements >= 65536 causes broken tensor at the MPS device.")
+
   if (!is_backward_pass) {
     TORCH_CHECK(output_w >= 1 || output_h >= padding_dim - 1,
                 "input (H: ",
