@@ -43,6 +43,9 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
     def f(x):
         return invoke_quant(g, (x,), scheme="nf4")
     ```
+
+    NOTE: don't subclass PrimHOPBase out of tree! That is not allowed. All
+    usages must be in tree.
     """
 
     def __init__(self, hop_name) -> None:
@@ -50,15 +53,20 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
 
         # Set up the registrations
         # If you want to override any of these, override them in your subclass.
-        self.py_impl(DispatchKey.Autograd)(self.call_Autograd)
-        self.py_functionalize_impl(self.call_Functionalize)
-        self.py_impl(ProxyTorchDispatchMode)(self.call_ProxyTorchDispatchMode)
-        self.py_impl(FakeTensorMode)(self.call_FakeTensorMode)
+        self.py_impl(DispatchKey.Autograd)(self._call_Autograd)
+        self.py_functionalize_impl(self._call_Functionalize)
+        self.py_impl(ProxyTorchDispatchMode)(self._call_ProxyTorchDispatchMode)
+        self.py_impl(FakeTensorMode)(self._call_FakeTensorMode)
         self.py_impl(DispatchKey.CompositeExplicitAutograd)(
-            self.call_CompositeExplicitAutograd
+            self._call_CompositeExplicitAutograd
         )
 
-    def __call__(self, subgraph, operands, **kwargs):
+    def __call__(self, subgraph, operands, *unused, **kwargs):
+        # We accept *unused (and *_) to make mypy happy. Otherwise mypy
+        # complains that we're violating LSP. We are violating LSP, but it's
+        # OK for the purposes of implementation-sharing (end users should never
+        # subclass these methods; only in-tree PyTorch developers are allowed to).
+        assert len(unused) == 0
         if not isinstance(subgraph, (torch.fx.GraphModule, FunctionWithNoFreeVars)):
             raise RuntimeError(
                 f"{self._name}: when calling this API without torch.compile, "
@@ -67,7 +75,7 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
             )
         return super().__call__(subgraph, operands, **kwargs)
 
-    def call_Autograd(self, subgraph, operands, **kwargs):
+    def _call_Autograd(self, subgraph, operands, *_, **kwargs):
         if isinstance(subgraph, torch.fx.GraphModule):
             pass
         if not torch.is_grad_enabled() or pytree.tree_all_only(
@@ -82,14 +90,16 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
         # In the PT2 stack, this is Dynamo's responsibility to figure out.
         return PrimHOPBaseFunction.apply(self, subgraph, kwargs, *operands)
 
-    def call_CompositeExplicitAutograd(self, subgraph, operands, **kwargs):
+    def _call_CompositeExplicitAutograd(self, subgraph, operands, *_, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
         mode = _get_current_dispatch_mode()
         assert mode is None, "Mode should never be enabled for CPU/CUDA key"
         return subgraph(*operands)
 
-    def call_ProxyTorchDispatchMode(self, proxy_mode, subgraph, operands, **kwargs):
+    def _call_ProxyTorchDispatchMode(
+        self, proxy_mode, subgraph, operands, *_, **kwargs
+    ):
         traced_graph = reenter_make_fx(subgraph)(*operands)
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         qualname = proxy_mode.tracer.get_fresh_qualname("subgraph")
@@ -107,12 +117,12 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
             out, out_proxy, constant=None, tracer=proxy_mode.tracer  # type: ignore[arg-type]
         )
 
-    def call_FakeTensorMode(self, mode, subgraph, operands, **kwargs):
+    def _call_FakeTensorMode(self, mode, subgraph, operands, *_, **kwargs):
         # TODO: this should probably route through FakeTensorMode to reuse caching
         with mode:
             return subgraph(*operands)
 
-    def call_Functionalize(self, ctx, subgraph, operands, **kwargs):
+    def _call_Functionalize(self, ctx, subgraph, operands, *_, **kwargs):
         unwrapped_operands = ctx.unwrap_tensors(operands)
         with ctx.redispatch_to_next() as m:
             # We assume the subgraph doesn't mutate inputs and there is no aliasing.

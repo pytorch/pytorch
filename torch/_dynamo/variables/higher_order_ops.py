@@ -2673,7 +2673,7 @@ class PrimHOPBaseVariable(WrapHigherOrderVariable):
 
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     def install_subgraph_in_output_graph(
-        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="invoke_subgraph"
+        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
     ):
         # Check if the subgraph from speculate_subgraph (body_gmod) and the fake
         # inputs have already been seen before. If yes, the subgraph is already
@@ -2705,7 +2705,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 return identifier
 
         body_name = super().install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
+            tx, fn_vt, fn_args_vt, kwargs, body_gmod, "invoke_subgraph"
         )
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_dynamo_identifier(key, body_name)
