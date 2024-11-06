@@ -173,11 +173,6 @@ Generators
 
 :doc:`default_generator`
 
-.. toctree::
-    :maxdepth: 1
-
-    default_generator
-
 .. _random-sampling:
 
 Random sampling
