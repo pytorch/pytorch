@@ -471,6 +471,8 @@ class DTensor(torch.Tensor):
         placements: Optional[Sequence[Placement]] = None,
         *,
         async_op: bool = False,
+        forward_dtype: Optional[torch.dtype] = None,
+        backward_dtype: Optional[torch.dtype] = None,
     ) -> "DTensor":
         """
         ``redistribute`` performs necessary collective operations that redistribute the current
@@ -535,7 +537,9 @@ class DTensor(torch.Tensor):
         placements = tuple(placements)
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
-        return Redistribute.apply(self, device_mesh, placements, async_op)
+        return Redistribute.apply(
+            self, device_mesh, placements, async_op, forward_dtype, backward_dtype
+        )
 
     def full_tensor(
         self, *, grad_placements: Optional[Sequence[Placement]] = None
@@ -703,22 +707,71 @@ def distribute_tensor(
             f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
         )
     if isinstance(tensor, DTensor):
-        # if the tensor is already a DTensor, we need to check:
-        # 1. if the we can further shard this DTensor if the two device mesh belong to
-        #   the same parenet mesh and further sharding is possible.
-        # 2. check if device mesh and placements are the same
-        if tensor.device_mesh != device_mesh:
-            raise ValueError(
-                f"Cannot distribute a DTensor with device mesh {tensor.device_mesh} "
-                f"to a different device mesh {device_mesh}."
+        # # if the tensor is already a DTensor, we need to check:
+        # # 1. if the we can further shard this DTensor if the two device mesh belong to
+        # #   the same parenet mesh and further sharding is possible.
+        # # 2. check if device mesh and placements are the same
+        # if tensor.device_mesh != device_mesh:
+        #     raise ValueError(
+        #         f"Cannot distribute a DTensor with device mesh {tensor.device_mesh} "
+        #         f"to a different device mesh {device_mesh}."
+        #     )
+        # if tensor.placements != tuple(placements):
+        #     raise ValueError(
+        #         f"Cannot distribute a DTensor with placements {tensor.placements} "
+        #         f"to a different placements {placements}. do you want to call "
+        #         f"`redistribute` instead?"
+
+        # NOTE: Below are experimental enhancements to distribute a DTensor.
+        #       This helps enable Simple FSDP + TP, in which
+        #       inner spec/mesh is TP spec/mesh
+        #       outer spec/mesh is FSDP spec/mesh
+        # TODO: The logic follows
+        # https://github.com/pytorch/pytorch/blob/main/torch/distributed/_composable/fsdp/_fsdp_param.py#L261
+        # but without using strided sharding, which means checkpoint save/load won't be correct.
+        inner_spec = tensor._spec
+        outer_mesh, inner_mesh = device_mesh, inner_spec.mesh
+        # use the following new api after rebasing to the latest pytorch
+        # outer_global_mesh = _mesh_resources.get_root_mesh(outer_mesh)
+        # inner_global_mesh = _mesh_resources.get_root_mesh(inner_mesh)
+        outer_global_mesh = _mesh_resources.get_parent_mesh(outer_mesh)
+        inner_global_mesh = _mesh_resources.get_parent_mesh(inner_mesh)
+        if outer_global_mesh != inner_global_mesh or (
+            outer_global_mesh is None or inner_global_mesh is None
+        ):
+            raise AssertionError(
+                "Cannot distribute tensor across two meshes without the same root mesh: \n"
+                f"outer global mesh: {outer_global_mesh}\ninner global mesh: {inner_global_mesh}"
             )
-        if tensor.placements != tuple(placements):
-            raise ValueError(
-                f"Cannot distribute a DTensor with placements {tensor.placements} "
-                f"to a different placements {placements}. do you want to call "
-                f"`redistribute` instead?"
-            )
-        return tensor
+        assert outer_mesh.mesh_dim_names is not None
+        assert inner_mesh.mesh_dim_names is not None
+        submesh_names = outer_mesh.mesh_dim_names + inner_mesh.mesh_dim_names
+        spanned_mesh = outer_global_mesh[submesh_names]
+
+        current_spec = DTensorSpec(
+            mesh=outer_mesh,
+            placements=(Replicate(),),
+            tensor_meta=inner_spec.tensor_meta,
+        )
+        target_spec = DTensorSpec(
+            mesh=outer_mesh,
+            placements=(placements[0],),
+            tensor_meta=inner_spec.tensor_meta,
+        )
+        result_tensor = redistribute_local_tensor(
+            tensor._local_tensor,
+            current_spec=current_spec,
+            target_spec=target_spec,
+        )
+        return DTensor(
+            result_tensor.requires_grad_(tensor.requires_grad),
+            DTensorSpec(
+                mesh=spanned_mesh,
+                placements=(placements[0], inner_spec.placements[0]),
+                tensor_meta=inner_spec.tensor_meta,
+            ),
+            requires_grad=tensor.requires_grad,
+        )
 
     local_tensor = tensor.detach()
 
