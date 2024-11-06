@@ -2284,7 +2284,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         # So that subgraphs can access the unbacked symbol's proxy in parent graph
         # when lifting unbacked symbols of input tensors to subgraph inputs.
         # We do it lazily because the tensor may not be used in subgraphs.
-        tx.output.current_tracer.lazy_bind_unbacked_symbols(example_value, proxy)
+        tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
         specialized_props = target_cls.specialize(example_value)
         # TODO: not sure about this fake mode test
         if (
@@ -2372,7 +2372,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-        tx.output.current_tracer.lazy_bind_unbacked_symbols(example_value, proxy)
+        tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
         set_example_value(proxy.node, example_value)
         return SymNodeVariable(proxy, example_value, **options)
     elif (
