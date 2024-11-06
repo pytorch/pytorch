@@ -6887,6 +6887,15 @@ graph():
 
         test(export(M(), inp))
 
+        strict = not is_non_strict_test(self._testMethodName)
+        ept = torch.export.export_for_training(
+            M(),
+            inp,
+            strict=strict,
+            preserve_module_call_signature=("n",),
+        )
+        test(ept)
+
     def test_set_grad_unflatten(self):
         class M1(torch.nn.Module):
             def forward(self, a, b):
