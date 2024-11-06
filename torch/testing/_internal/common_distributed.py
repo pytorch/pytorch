@@ -959,13 +959,7 @@ class DistributedTestBase(MultiProcessTestCase):
 
     def rank_to_device(self, device):
         num_visible_devices = self.device_handle(device).device_count()
-        visible_device = range(num_visible_devices)
-        num_devices_per_process = 1
-        rank_to_device = {
-            i : list(visible_device[i * num_devices_per_process : (i + 1) * num_devices_per_process])
-            for i in range(num_visible_devices)
-        }
-        return rank_to_device
+        return {i: [i % num_visible_devices] for i in range(self.world_size)}
 
     def destroy_pg(self) -> None:
         torch.distributed.barrier()
