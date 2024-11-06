@@ -217,7 +217,13 @@ def draft_export(
     dynamic_shapes = dynamic_shapes or {}
 
     capture_structured_log = CaptureStructuredTrace(
-        ["str", "propagate_real_tensors", "guard_added", "missing_fake_kernel", "mismatched_fake_kernel"]
+        [
+            "str",
+            "propagate_real_tensors",
+            "guard_added",
+            "missing_fake_kernel",
+            "mismatched_fake_kernel",
+        ]
     )
 
     with torch._functorch.config.patch(
@@ -251,7 +257,9 @@ def draft_export(
 
         str_to_filename: Dict[str, str] = {}
         failures: List[FailureReport] = []
-        custom_ops_logs: Dict[Any, Tuple[Dict[str, Any], FailureType]] = {}  # Dedup custom ops
+        custom_ops_logs: Dict[
+            Any, Tuple[Dict[str, Any], FailureType]
+        ] = {}  # Dedup custom ops
         data_dependent_logs: Dict[
             str, Dict[str, Any]
         ] = {}  # Dedup data dependent errors based on stacktrace
@@ -298,9 +306,10 @@ def draft_export(
                 if (log_contents["op"], log_contents["reason"]) in custom_ops_logs:
                     continue
                 failure_type = FailureType.MISMATCHED_FAKE_KERNEL
-                custom_ops_logs[
-                    (log_contents["op"], log_contents["reason"])
-                ] = (log_contents, failure_type)
+                custom_ops_logs[(log_contents["op"], log_contents["reason"])] = (
+                    log_contents,
+                    failure_type,
+                )
             else:
                 raise RuntimeError(f"Unknown log name: {log_name}")
 

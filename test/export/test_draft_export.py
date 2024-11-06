@@ -1,6 +1,6 @@
 # Owner(s): ["oncall: export"]
 import copy
-from typing import List
+from typing import List, Tuple
 
 import torch
 from torch.export import Dim, export
@@ -304,8 +304,12 @@ class TestDraftExport(TestCase):
             self.assertEqual(ep_out.dtype, eager_out.dtype)
 
         self.assertEqual(len(report.failures), 2)
-        self.assertEqual(report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL)
-        self.assertEqual(report.failures[1].failure_type, FailureType.MISMATCHED_FAKE_KERNEL)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL
+        )
+        self.assertEqual(
+            report.failures[1].failure_type, FailureType.MISMATCHED_FAKE_KERNEL
+        )
         self.assertEqual(
             sorted([f.data["reason"] for f in report.failures]),
             [
@@ -334,7 +338,10 @@ class TestDraftExport(TestCase):
 
         mod = M()
         inputs = (torch.randn(3, 3),)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Real tensor propagation found an output structure mismatch",
+        ):
             with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
                 export(mod, inputs)
 
@@ -346,9 +353,50 @@ class TestDraftExport(TestCase):
             self.assertEqual(ep_out.dtype, eager_out.dtype)
 
         self.assertEqual(len(report.failures), 1)
-        self.assertEqual(report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL
+        )
         self.assertTrue(
-            "Mismatched output structure between fake kernel with output TreeSpec:" in report.failures[0].data["reason"]
+            "Mismatched output structure between fake kernel with output TreeSpec:"
+            in report.failures[0].data["reason"]
+        )
+
+    def test_override_incorrectly_aliasing_kernel(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                return torch.ops.mylib.foo(a)
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(a: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            return a * 2, a + 2
+
+        @foo.register_fake
+        def foo_fake_impl(a):
+            return a, torch.empty_like(a)  # incorrectly aliasing
+
+        mod = M()
+        inputs = (torch.randn(3, 3),)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Real tensor propagation found an aliasing mismatch",
+        ):
+            with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+                export(mod, inputs)
+
+        ep, report = draft_export(mod, inputs)
+        for ep_out, eager_out in zip(
+            tree_leaves(ep.module()(*inputs)), tree_leaves(mod(*inputs))
+        ):
+            self.assertTrue(torch.allclose(ep_out, eager_out))
+            self.assertEqual(ep_out.dtype, eager_out.dtype)
+
+        self.assertEqual(len(report.failures), 1)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.MISMATCHED_FAKE_KERNEL
+        )
+        self.assertTrue(
+            "Mismatched aliasing spec between fake kernel and real kernel"
+            in report.failures[0].data["reason"]
         )
 
 if __name__ == "__main__":
