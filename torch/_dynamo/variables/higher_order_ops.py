@@ -598,6 +598,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
     @staticmethod
     def make(value, source=None, **kwargs):
+        from torch._higher_order_ops import PrimHOPBase
+
         if value.__name__ == "cond":
             return CondHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "while_loop":
@@ -644,6 +646,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "invoke_subgraph":
             return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
+        elif isinstance(value, PrimHOPBase):
+            return PrimHOPBaseVariable(value, source, **kwargs)
         else:
             unimplemented(f"HigherOrderOperator {value.__name__}")
 
@@ -1504,6 +1508,8 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         kwargs,
         description,
         under_activation_checkpoint=False,
+        *,
+        subgraph_name="wrap_body",
     ):
         # See NOTE [HigherOrderOperator tracing design] for more details
 
@@ -1524,7 +1530,12 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
         body_name = self.install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod
+            tx,
+            fn_vt,
+            fn_args_vt,
+            kwargs,
+            body_gmod,
+            attr_name=subgraph_name,
         )
         body_node = make_attr(tx, body_name)
 
@@ -2610,6 +2621,53 @@ def hash_graph_and_inputs(tx, gmod, fake_inputs):
 
     key, _ = autograd_cache_key(canonicalized_gmod, fake_inputs, config, {})
     return key
+
+
+class PrimHOPBaseVariable(WrapHigherOrderVariable):
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        (
+            p_args,
+            p_kwargs,
+            example_value,
+            body_r,
+            treespec,
+            body_gmod,
+            body_name,
+        ) = self.create_wrapped_node(
+            tx, args[0], args[1].items, {}, self.value._name, subgraph_name="subgraph"
+        )
+        assert len(p_kwargs) == 0
+
+        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+
+        fake_inputs = [
+            node.meta["example_value"]
+            for node in body_gmod.graph.nodes
+            if node.op == "placeholder"
+        ]
+        if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
+            raise RuntimeError(
+                f"{self.value._name} where the inputs are mutated or the outputs are aliases of the inputs. Please ensure that this doesn't happen."
+            )
+
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+        p_args = (
+            p_args[0],
+            p_args[1:],
+        )
+        p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
+        return _call_function_and_unflatten_output(
+            tx, self.value, p_args, p_kwargs, flat_example_value, treespec
+        )
 
 
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
