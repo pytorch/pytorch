@@ -403,6 +403,7 @@ std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(con
     const auto& val_list = val.toList();
     size_t list_size = val_list.size();
     std::vector<int> responses;
+    responses.reserve(list_size);
     for (const auto j : c10::irange(list_size)) {
       auto [is_list, res] = findStartAddrForTensors(val_list[j]);
       if (is_list) {
@@ -496,7 +497,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
           addressList.push_back(std::to_string(scalar_result));
         }
       }
-      map.emplace(kTensorsStartAt, vectorToString(addressList));
+      map.emplace(kInTensorsStart, vectorToString(addressList));
       addressList.clear();
     }
 
@@ -516,7 +517,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
           addressList.push_back(std::to_string(scalar_result));
         }
       }
-      map.emplace(kTensorsEndAt, vectorToString(addressList));
+      map.emplace(kOutTensorsStart, vectorToString(addressList));
       addressList.clear();
     }
   }

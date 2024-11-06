@@ -13,8 +13,6 @@
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <optional>
-#include <fmt/format.h>
-#include <fmt/ranges.h>
 
 // TODO: replace with pytorch/rfcs#43 when it is ready.
 #define SOFT_ASSERT(cond, ...)                         \
@@ -165,7 +163,16 @@ struct HashCombine {
 
 template <typename T>
 const std::string vectorToString(const std::vector<T>& v) {
-  return fmt::format("[{}]", fmt::join(v, ","));
+  std::ostringstream oss;
+  oss << "[";
+  for (size_t i = 0; i < v.size(); ++i) {
+      oss << v[i];
+      if (i != v.size() - 1) {
+          oss << ", ";
+      }
+  }
+  oss << "]";
+  return oss.str();
 }
 
 #ifdef USE_DISTRIBUTED
@@ -184,8 +191,8 @@ constexpr auto kGroupRanks = "Process Group Ranks";
 constexpr auto kRank = "Rank";
 constexpr auto kP2pSrc = "Src Rank";
 constexpr auto kP2pDst = "Dst Rank";
-constexpr auto kTensorsStartAt = "Input Tensors start";
-constexpr auto kTensorsEndAt = "Output Tensors start";
+constexpr auto kInTensorsStart = "Input Tensors start";
+constexpr auto kOutTensorsStart = "Output Tensors start";
 #endif // USE_DISTRIBUTED
 
 } // namespace torch::profiler::impl
