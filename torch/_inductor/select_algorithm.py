@@ -199,7 +199,7 @@ class TritonTemplateKernel(TritonKernel):
         numel = sympy_product(output_node.get_size())
         super().__init__(
             numel,
-            sympy.Integer(1),
+            sympy.S.One,
             features=SIMDKernelFeatures([], numel),
         )
         self.input_nodes = input_nodes
@@ -519,9 +519,9 @@ class TritonTemplateKernel(TritonKernel):
             )
             contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(
-                sympy.Integer(1), sympy_product(lengths)
-            ).set_name("xindex")
+            self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths)).set_name(
+                "xindex"
+            )
             self.template_mask = mask
             self.template_out = val
             self.template_indices = indices
@@ -1666,7 +1666,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     map(
                         str,
                         V.graph.sizevars.size_hints(
-                            n.get_size(), fallback=config.unbacked_symint_fallback
+                            n.get_size(), fallback=config.unbacked_symint_fallback  # type: ignore[arg-type]
                         ),
                     )
                 )

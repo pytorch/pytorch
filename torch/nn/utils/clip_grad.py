@@ -17,8 +17,8 @@ __all__ = [
     "clip_grad_norm_",
     "clip_grad_norm",
     "clip_grad_value_",
-    "get_grad_norm",
-    "scale_grads_",
+    "clip_grads_with_norm_",
+    "get_total_norm",
 ]
 
 
@@ -40,58 +40,61 @@ def _no_grad(func):
 
 
 @_no_grad
-def get_grad_norm(
-    parameters: _tensor_or_tensors,
+def get_total_norm(
+    tensors: _tensor_or_tensors,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
     foreach: Optional[bool] = None,
 ) -> torch.Tensor:
-    r"""Compute the gradient norm of an iterable of parameters.
+    r"""Compute the norm of an iterable of tensors.
 
-    The norm is computed over the norms of the individual gradients of all parameters,
-    as if the norms of the individual gradients were concatenated into a single vector.
+    The norm is computed over the norms of the individual tensors, as if the norms of
+    the individual tensors were concatenated into a single vector.
 
     Args:
-        parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
-            single Tensor that will have gradients normalized
+        tensors (Iterable[Tensor] or Tensor): an iterable of Tensors or a
+            single Tensor that will be normalized
         norm_type (float): type of the used p-norm. Can be ``'inf'`` for
             infinity norm.
         error_if_nonfinite (bool): if True, an error is thrown if the total
-            norm of the gradients from :attr:`parameters` is ``nan``,
-            ``inf``, or ``-inf``. Default: False (will switch to True in the future)
+            norm of :attr:`tensors` is ``nan``, ``inf``, or ``-inf``.
+            Default: ``False``
         foreach (bool): use the faster foreach-based implementation.
             If ``None``, use the foreach implementation for CUDA and CPU native tensors and silently
             fall back to the slow implementation for other device types.
             Default: ``None``
 
     Returns:
-        Total norm of the parameter gradients (viewed as a single vector).
+        Total norm of the tensors (viewed as a single vector).
     """
-    if isinstance(parameters, torch.Tensor):
-        parameters = [parameters]
-    grads = [p.grad for p in parameters if p.grad is not None]
+    if isinstance(tensors, torch.Tensor):
+        tensors = [tensors]
+    else:
+        tensors = list(tensors)
     norm_type = float(norm_type)
-    if len(grads) == 0:
+    if len(tensors) == 0:
         return torch.tensor(0.0)
-    first_device = grads[0].device
-    grouped_grads: Dict[
+    first_device = tensors[0].device
+    grouped_tensors: Dict[
         Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], List[int]]
     ] = _group_tensors_by_device_and_dtype(
-        [grads]
+        [tensors]  # type: ignore[list-item]
     )  # type: ignore[assignment]
 
     norms: List[Tensor] = []
-    for (device, _), ([device_grads], _) in grouped_grads.items():  # type: ignore[assignment]
-        if (foreach is None and _has_foreach_support(device_grads, device)) or (
+    for (device, _), ([device_tensors], _) in grouped_tensors.items():  # type: ignore[assignment]
+        if (foreach is None and _has_foreach_support(device_tensors, device)) or (
             foreach and _device_has_foreach_support(device)
         ):
-            norms.extend(torch._foreach_norm(device_grads, norm_type))
+            norms.extend(torch._foreach_norm(device_tensors, norm_type))
         elif foreach:
             raise RuntimeError(
                 f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
             )
         else:
-            norms.extend([torch.linalg.vector_norm(g, norm_type) for g in device_grads])
+            norms.extend(
+                [torch.linalg.vector_norm(g, norm_type) for g in device_tensors]
+            )
 
     total_norm = torch.linalg.vector_norm(
         torch.stack([norm.to(first_device) for norm in norms]), norm_type
@@ -108,7 +111,7 @@ def get_grad_norm(
 
 
 @_no_grad
-def scale_grads_(
+def clip_grads_with_norm_(
     parameters: _tensor_or_tensors,
     max_norm: float,
     total_norm: torch.Tensor,
@@ -185,8 +188,8 @@ def clip_grad_norm_(
     as if the norms of the individual gradients were concatenated into a single vector.
     Gradients are modified in-place.
 
-    This function is equivalent to :func:`torch.nn.utils.get_grad_norm` followed by
-    :func:`torch.nn.utils.scale_grads_` with the ``total_norm`` returned by ``get_grad_norm``.
+    This function is equivalent to :func:`torch.nn.utils.get_total_norm` followed by
+    :func:`torch.nn.utils.clip_grads_with_norm_` with the ``total_norm`` returned by ``get_total_norm``.
 
     Args:
         parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
@@ -205,13 +208,15 @@ def clip_grad_norm_(
     Returns:
         Total norm of the parameter gradients (viewed as a single vector).
     """
-    # prevent generators from being exhausted due to the two separate calls to get_grad_norm and scale_grads
+    # prevent generators from being exhausted due to the two separate calls
+    # to get_total_norm and clip_grads_with_norm_
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     else:
         parameters = list(parameters)
-    total_norm = get_grad_norm(parameters, norm_type, error_if_nonfinite, foreach)
-    scale_grads_(parameters, max_norm, total_norm, foreach)
+    grads = [p.grad for p in parameters if p.grad is not None]
+    total_norm = get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
+    clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
     return total_norm
 
 

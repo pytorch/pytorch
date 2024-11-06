@@ -2,6 +2,6 @@
 
 namespace torch::jit::mobile::nnc {
 
-C10_DEFINE_REGISTRY(NNCKernelRegistry, NNCKernel);
+C10_DEFINE_REGISTRY(NNCKernelRegistry, NNCKernel)
 
 } // namespace torch::jit::mobile::nnc
