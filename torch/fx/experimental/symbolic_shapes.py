@@ -5073,7 +5073,7 @@ class ShapeEnv:
                 verbose_exprs.append(
                     f"{res}  # implicit guard for float input due to NaN specialization in the framework"
                 )
-                sympy_exprs.append((expr, {sources[0].name: [sources[0]]}))
+                sympy_exprs.append((expr, {sympy.Symbol(sources[0].name()): [sources[0]]}))
 
         if constraint_violations:
             warn_msgs: List[str] = []
