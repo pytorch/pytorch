@@ -485,14 +485,12 @@ def build_db(
     )
     logger.debug("built groups, memberships")
 
-    if args.allow_incomplete_ranks:
+    if not args.allow_incomplete_ranks:
         check_no_missing_dump_files(entries, memberships)
 
     if args.just_print_entries:
         just_print_entries(entries, _groups, _memberships, _pg_guids, args)
         sys.exit(0)
-
-    check_no_missing_dump_files(entries, memberships)
 
     tracebacks, collectives, nccl_calls = build_collectives(
         entries, _groups, _memberships, _pg_guids, version

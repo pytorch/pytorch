@@ -735,8 +735,8 @@ struct HelperInterpBase {
 
     for ([[maybe_unused]] const auto j : c10::irange(interp_size)) {
       output.emplace_back(
-          empty(new_shape, at::device(kCPU).dtype(c10::CppTypeToScalarType<int64_t>())));
-      output.emplace_back(empty(new_shape, at::device(kCPU).dtype(output_type)));
+          empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
+      output.emplace_back(empty(new_shape, CPU(output_type)));
     }
   }
 
@@ -878,16 +878,16 @@ struct HelperInterpBase {
 
     // Bounds approach as in PIL: xmin/xmax
     output.emplace_back(
-        empty(new_shape, at::device(kCPU).dtype(c10::CppTypeToScalarType<int64_t>())));
+        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
     output.emplace_back(
-        empty(new_shape, at::device(kCPU).dtype(c10::CppTypeToScalarType<int64_t>())));
+        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
     output.emplace_back(
-        empty(new_shape, at::device(kCPU).dtype(c10::CppTypeToScalarType<int64_t>())));
+        empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
 
     {
       // Weights
       new_shape[reshape_dim] = output_size * max_interp_size;
-      auto wts = empty(new_shape, at::device(kCPU).dtype(c10::CppTypeToScalarType<scalar_t>()));
+      auto wts = empty(new_shape, CPU(c10::CppTypeToScalarType<scalar_t>()));
       auto strides = wts.strides().vec();
       strides[reshape_dim] = 0;
       new_shape[reshape_dim] = output_size;
@@ -895,7 +895,7 @@ struct HelperInterpBase {
       output.emplace_back(wts);
       // Weights indices
       output.emplace_back(
-          empty(new_shape, at::device(kCPU).dtype(c10::CppTypeToScalarType<int64_t>())));
+          empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
     }
 
     int64_t* idx_ptr_xmin = output[0].data_ptr<int64_t>();
@@ -1050,9 +1050,9 @@ struct HelperInterpNearest : public HelperInterpBase {
 
     for ([[maybe_unused]] const auto j : c10::irange(interp_size)) {
       output.emplace_back(
-          empty(new_shape, at::device(kCPU).dtype(c10::CppTypeToScalarType<int64_t>())));
+          empty(new_shape, CPU(c10::CppTypeToScalarType<int64_t>())));
       // Defines weights for consistency, but not used
-      output.emplace_back(at::ones(new_shape, at::device(kCPU).dtype(output_type)));
+      output.emplace_back(at::ones(new_shape, CPU(output_type)));
     }
   }
 
