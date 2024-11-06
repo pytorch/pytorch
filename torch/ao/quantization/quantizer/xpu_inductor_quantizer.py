@@ -12,6 +12,9 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import Quantization
 from torch.fx import Node
 
 
+__all__ = ["XPUInductorQuantizer"]
+
+
 class XPUInductorQuantizer(X86InductorQuantizer):
     """
     XPUInductorQuantizer is a class designed to facilitate

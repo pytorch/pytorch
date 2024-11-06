@@ -152,7 +152,9 @@ class TestPatternMatcherBase(TestCase):
         torch._dynamo.reset()
         is_xpu = False
         for input in inputs:
-            is_xpu = is_xpu or (input.device.type == "xpu")
+            is_xpu = is_xpu or (
+                isinstance(input, torch.Tensor) and input.device.type == "xpu"
+            )
         assert matcher_check_fn is not None or (
             matcher_count is not None and matcher_nodes is not None
         )
