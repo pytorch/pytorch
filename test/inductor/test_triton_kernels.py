@@ -3,6 +3,7 @@
 # Skip do not assign a lambda expression, use a def
 import functools
 import logging
+import os
 from unittest.mock import patch
 
 import torch
@@ -1958,6 +1959,69 @@ def forward(self, arg0_1, arg1_1):
 
         x = torch.randn(4, device=GPU_TYPE)
         f(x, x)
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @common_utils.parametrize("autotune_at_compile_time", [True, False])
+    def test_triton_kernel_restore_value(self, backend, autotune_at_compile_time):
+        if autotune_at_compile_time and backend != "inductor":
+            raise unittest.SkipTest("compile-time autotuning only exists in inductor")
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 16}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 32}, num_stages=3, num_warps=8),
+            ],
+            key=[],
+            restore_value=["in_ptr0"],
+        )
+        @triton.jit
+        def increment_kernel(
+            in_ptr0,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+
+            # make sure the original all-zero x is
+            # restored before every kernel launch,
+            # including in autotuning
+            tl.device_assert(tl.sum(x) == 0)
+
+            output = x + 1
+            tl.store(in_ptr0 + offsets, output, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(x):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            increment_kernel[grid](x, n_elements=n_elements)
+            return x
+
+        # kind of a hack to use torch.int32 here, because
+        # for int tensors compile-time autotuning generates
+        # all-zero sample inputs. otherwise, without knowing
+        # what the original x is, we can't assert that every
+        # kenrel call gets the original x.
+        x = torch.zeros(4, dtype=torch.int32, device=GPU_TYPE)
+
+        try:
+            # need TRITON_DEBUG=1 for tl.device_assert to have effect
+            old_triton_debug = os.environ.get("TRITON_DEBUG", None)
+            os.environ["TRITON_DEBUG"] = "1"
+            with torch._inductor.config.patch(
+                {"triton.autotune_at_compile_time": autotune_at_compile_time}
+            ):
+                f(x)
+        finally:
+            if old_triton_debug is not None:
+                os.environ["TRITON_DEBUG"] = old_triton_debug
+            else:
+                os.environ.pop("TRITON_DEBUG")
 
     @requires_gpu
     @parametrize("dtype", (torch.float16, torch.float32, torch.float64))

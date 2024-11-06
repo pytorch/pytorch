@@ -710,7 +710,22 @@ def triton_kernel_wrapper_mutation_dense(
                 element_size,
             )
 
-    kernel[grid_fn](**kwargs, **constant_args)
+    # move as many positional arguments from dicts to args as we
+    # can to circumvent the bug with the kwargs and pre_/post_hook:
+    # https://github.com/triton-lang/triton/issues/5082
+    # TODO: remove this when the Triton issue above is fixed
+    args = []
+    kwargs = kwargs.copy()
+    constant_args = constant_args.copy()
+    for name in kernel.arg_names:
+        if name in kwargs:
+            args.append(kwargs.pop(name))
+        elif name in constant_args:
+            args.append(constant_args.pop(name))
+        else:
+            break
+
+    kernel[grid_fn](*args, **kwargs, **constant_args)
 
 
 @triton_kernel_wrapper_mutation.py_impl(FakeTensorMode)
@@ -1063,7 +1078,6 @@ class TritonHOPifier:
                     )
                     # Set via reset_to_zero argument
                     or len(kernel.reset_idx) != 0
-                    or len(kernel.restore_idx) != 0
                     or (
                         "use_cuda_graph" in defaults
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph

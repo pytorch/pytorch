@@ -5432,24 +5432,27 @@ class TMADescriptor(ExternKernel):
 
 
 class UserDefinedTritonKernel(ExternKernel):
-    def get_kernel_and_configs(self):
+    def get_kernel_and_metadata(self):
         from triton.runtime.autotuner import Autotuner
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
         configs = []
+        restore_value_args = []
         if isinstance(kernel, Autotuner):
+            for i in kernel.restore_idx:
+                restore_value_args.append(kernel.fn.arg_names[i])
             configs = kernel.configs
             kernel = kernel.fn
-        return kernel, configs
+        return kernel, configs, restore_value_args
 
     def codegen(self, wrapper):
-        kernel, configs = self.get_kernel_and_configs()
+        kernel, configs, restore_value_args = self.get_kernel_and_metadata()
 
         # Definition of kernel
         new_name, triton_meta = wrapper.define_user_defined_triton_kernel(
-            kernel, configs, self.kwargs
+            kernel, configs, self.kwargs, restore_value_args
         )
         raw_args = [
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
@@ -5554,7 +5557,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_idx = kernel_idx
         self.grid = grid
 
-        kernel, configs = self.get_kernel_and_configs()
+        kernel, configs, _ = self.get_kernel_and_metadata()
 
         # If we are autotuning, not all arguments will be passed
         self.ordered_kwargs_for_cpp_kernel = [
