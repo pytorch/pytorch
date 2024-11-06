@@ -462,13 +462,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # Weights are stored in constants_ and owned by RAIIAtenTensorHandle there.
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     self.prefix.writeline(
-                        f"""auto {constants_key} = constants_->at({idx});"""
+                        f"""[[maybe_unused]] auto {constants_key} = constants_->at({idx});"""
                     )
                 else:
                     # Append constants as inputs to the graph
                     constants_idx = inputs_len + idx
                     self.prefix.writeline(
-                        f"auto {constants_key} = std::move(inputs[{constants_idx}]);"
+                        f"[[maybe_unused]] auto {constants_key} = std::move(inputs[{constants_idx}]);"
                     )
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
