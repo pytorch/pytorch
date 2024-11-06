@@ -677,6 +677,14 @@ class SymFloat:
     def __hash__(self):
         return hash(builtins.float(self))
 
+    def conjugate(self) -> "SymFloat":
+        """Returns the complex conjugate of the float."""
+        return self
+
+    def hex(self) -> str:
+        """Returns the hexadecimal representation of the float."""
+        return self.node.guard_float("", 0).hex()
+
 
 class SymBool:
     """
@@ -1277,7 +1285,6 @@ def use_deterministic_algorithms(
         * :func:`torch.Tensor.put_` with ``accumulate=True`` when called on a CPU
           tensor
         * :func:`torch.Tensor.scatter_add_` when called on a CUDA tensor
-        * :func:`torch.cumsum` when called on a CUDA tensor
         * :func:`torch.gather` when called on a CUDA tensor that requires grad
         * :func:`torch.index_add` when called on CUDA tensor
         * :func:`torch.index_select` when attempting to differentiate a CUDA tensor
@@ -1324,6 +1331,7 @@ def use_deterministic_algorithms(
         * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
+        * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
         * :func:`torch.Tensor.scatter_reduce` when ``reduce='prod'`` and called on CUDA tensor
         * :func:`torch.Tensor.resize_` when called with a quantized tensor
 
@@ -2251,9 +2259,9 @@ class _TorchCompileInductorWrapper:
             )
 
     def apply_options(self, options: _Optional[_Dict[str, _Any]]):
-        from torch._inductor.bisect_helper import BisectionManager
+        from torch._inductor.compiler_bisector import CompilerBisector
 
-        if bisect_changes := BisectionManager.get_config_change("inductor"):
+        if bisect_changes := CompilerBisector.get_config_change("inductor"):
             options = {} if options is None else options
             options = (
                 {**bisect_changes} if options is None else {**options, **bisect_changes}  # type: ignore[dict-item]
@@ -2492,9 +2500,9 @@ def compile(
     if mode is None and options is None:
         mode = "default"
 
-    from torch._inductor.bisect_helper import BisectionManager
+    from torch._inductor.compiler_bisector import CompilerBisector
 
-    if bisect_backend := BisectionManager.get_backend():
+    if bisect_backend := CompilerBisector.get_backend():
         backend = bisect_backend
 
     if backend == "inductor":

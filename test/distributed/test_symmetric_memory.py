@@ -6,6 +6,7 @@ import torch
 import torch.distributed as dist
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
@@ -23,9 +24,11 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
+    TestCase,
 )
 
 
@@ -183,6 +186,34 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         self._verify_symmetric_memory(symm_mem_0)
         dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_get_signal_pad(self) -> None:
+        self._init_process()
+
+        t = _SymmetricMemory.empty_strided_p2p(*self._get_test_alloc_args())
+        symm_mem = _SymmetricMemory.rendezvous(t)
+        peer_rank = (self.rank + 1) % self.world_size
+
+        signal_pad = symm_mem.get_signal_pad(peer_rank)
+        self.assertEqual(signal_pad.dtype, torch.uint32)
+        self.assertEqual(signal_pad.numel(), symm_mem.signal_pad_size // 4)
+
+        # Only specify sizes
+        signal_pad = symm_mem.get_signal_pad(peer_rank, (8, 8))
+        self.assertEqual(signal_pad.dtype, torch.uint32)
+        self.assertEqual(signal_pad.numel(), 64)
+
+        # Only specify dtype
+        signal_pad = symm_mem.get_signal_pad(peer_rank, dtype=torch.uint64)
+        self.assertEqual(signal_pad.dtype, torch.uint64)
+        self.assertEqual(signal_pad.numel(), symm_mem.signal_pad_size // 8)
+
+        # Specify both sizes and dtype
+        signal_pad = symm_mem.get_signal_pad(peer_rank, (8, 8), dtype=torch.uint64)
+        self.assertEqual(signal_pad.dtype, torch.uint64)
+        self.assertEqual(signal_pad.numel(), 64)
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
@@ -734,6 +765,117 @@ class SymmMemAllReduceTest(MultiProcessTestCase):
         torch.testing.assert_close(
             gathered_inps.sum(dim=0), res, rtol=1e-01, atol=1e-01
         )
+
+
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class LoweringTest(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(f"cuda:{self.rank}")
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        enable_symm_mem_for_group(dist.group.WORLD.group_name)
+        torch.manual_seed(42 + self.rank)
+
+        torch._inductor.config._collective.auto_select = True
+
+    @skipIfRocm  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_lowering_one_shot_all_reduce(self):
+        self._init_process()
+
+        arg = torch.rand(4, 4, device=self.device)
+
+        def func_0(x):
+            x = x + 1
+            x = torch.ops._c10d_functional.all_reduce(x, "sum", "0")
+            return torch.ops._c10d_functional.wait_tensor(x)
+
+        compiled_0 = torch.compile(func_0, fullgraph=True)
+        code_0 = run_and_get_triton_code(compiled_0, arg)
+
+        self.assertIn("one_shot_all_reduce", code_0)
+        self.assertNotIn("return (buf0", code_0)
+
+        # All-reduce on a slice view
+        def func_1(x):
+            x = x + 1
+            x = x[2:]
+            x = torch.ops._c10d_functional.all_reduce(x, "sum", "0")
+            return torch.ops._c10d_functional.wait_tensor(x)
+
+        compiled_1 = torch.compile(func_1, fullgraph=True)
+        code_1 = run_and_get_triton_code(compiled_1, arg)
+
+        self.assertIn("one_shot_all_reduce", code_1)
+        self.assertNotIn("return (buf0", code_1)
+
+        # All-reduce on input
+        def func_2(x):
+            x = torch.ops._c10d_functional.all_reduce(x, "sum", "0")
+            return torch.ops._c10d_functional.wait_tensor(x)
+
+        compiled_2 = torch.compile(func_2, fullgraph=True)
+        code_2 = run_and_get_triton_code(compiled_2, arg)
+
+        self.assertNotIn("one_shot_all_reduce", code_2)
+
+        # All-reduce on matmul output
+        def func_3(x):
+            x = x @ x
+            x = torch.ops._c10d_functional.all_reduce(x, "sum", "0")
+            return torch.ops._c10d_functional.wait_tensor(x)
+
+        compiled_3 = torch.compile(func_3, fullgraph=True)
+        code_3 = run_and_get_triton_code(compiled_3, arg)
+
+        self.assertIn("one_shot_all_reduce", code_3)
+        self.assertNotIn("return (buf0", code_3)
+
+
+class SymmMemUtilTest(TestCase):
+    @skipIfRocm
+    @requires_cuda
+    def test_memset32(self):
+        t = _SymmetricMemory.empty_strided_p2p(
+            (64,),
+            (1,),
+            dtype=torch.uint32,
+            device=torch.device("cuda:0"),
+            group_name="0",
+        ).fill_(0)
+
+        _SymmetricMemory.memset32(t, offset=32, val=1, count=16)
+        self.assertTrue(t[:32].eq(0).all())
+        self.assertTrue(t[32:48].eq(1).all())
+        self.assertTrue(t[48:].eq(0).all())
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=-1, val=1, count=16)
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=32, val=4294967296, count=16)
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=32, val=1, count=-1)
 
 
 if __name__ == "__main__":

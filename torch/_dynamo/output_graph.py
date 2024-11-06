@@ -1453,7 +1453,9 @@ class OutputGraph:
 
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         with dynamo_timed(
-            "OutputGraph.call_user_compiler", phase_name="backend_compile"
+            "OutputGraph.call_user_compiler",
+            phase_name="backend_compile",
+            log_pt2_compile_event=True,
         ):
             return self._call_user_compiler(gm)
 

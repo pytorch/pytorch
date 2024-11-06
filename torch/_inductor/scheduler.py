@@ -113,7 +113,11 @@ class SchedulerBuffer:
         if not self.node.should_allocate():
             return
 
-        if self.node.get_inputs_that_alias_output() or self.node.get_mutation_names():
+        if (
+            self.node.get_inputs_that_alias_output()
+            or self.node.get_mutation_names()
+            or isinstance(self.node.get_layout(), ir.CommBufferLayout)
+        ):
             V.graph.wrapper_code.codegen_allocation(self.node)
             return
 
@@ -391,7 +395,7 @@ class BaseSchedulerNode:
         from .codegen.wrapper import buffer_reuse_key
 
         if not (
-            isinstance(self, (SchedulerNode,))
+            isinstance(self, SchedulerNode)
             and config.inplace_buffers
             and V.graph.has_feature(self.get_device(), BackendFeature.INPLACE_BUFFERS)
             and (
@@ -407,8 +411,6 @@ class BaseSchedulerNode:
             for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
         }
 
-        ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
-
         for buf in self.get_outputs():
             buf_node = buf.node
             assert buf_node is not None
@@ -420,7 +422,7 @@ class BaseSchedulerNode:
             ):
                 continue
 
-            for read in ordered_reads:
+            for read in self.read_writes.reads:
                 input_buf: Optional[SchedulerBuffer] = self.scheduler.name_to_buf.get(
                     read.name
                 )
@@ -472,9 +474,6 @@ class BaseSchedulerNode:
                         ):
                             V.kernel.mutations.add(input_buf.get_name())
                             V.kernel.mutations.add(buf.get_name())
-
-                        # update last usage of reused node
-                        self.last_usage.discard(input_buf.get_name())
 
                         V.kernel.inplace_update_buffers[
                             buf.get_name()
@@ -922,6 +921,15 @@ class SchedulerNode(BaseSchedulerNode):
 
         self.refresh_dependencies(normalize=False)
 
+        from .codegen.simd import SIMDScheduling
+
+        # TODO(shunting) if this cause compilation time increase when
+        # enabling LOAF by default, try just clearing the specific cache
+        # entry by using a customized cache implemetation rather than
+        # lru_cache.
+        SIMDScheduling.candidate_tilings.cache_clear()
+        self.pointwise_read_writes.clear_cache(self)
+
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
     ) -> None:
@@ -1022,7 +1030,7 @@ class SchedulerNode(BaseSchedulerNode):
         """
         sizes, reduction_sizes = self._sizes
         return dependencies.extract_read_writes(
-            self._body, sizes, hidden_args=[[sympy.Integer(0)] * len(reduction_sizes)]
+            self._body, sizes, hidden_args=[[sympy.S.Zero] * len(reduction_sizes)]
         )
 
     def can_inplace(self, read_dep: dependencies.Dep) -> bool:
@@ -1125,7 +1133,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         self_sizes = None
         for snode in self.snodes:
             assert isinstance(snode, SchedulerNode)
-            if self_sizes is not None and self_sizes != snode._sizes[0]:
+            if self_sizes is not None and tuple(self_sizes) != tuple(snode._sizes[0]):
                 loop_ordering_log.debug(
                     "Can not reorder fused node due to different sizes"
                 )
@@ -3323,67 +3331,6 @@ class Scheduler:
 
         self.buffer_names_to_free.clear()
 
-    def remove_kernel_local_buffers(self) -> None:
-        """
-        Any buffers that are both created and have a last use in the
-        same kernel can be removed.
-        """
-
-        fused_node_names = OrderedSet(
-            self.name_to_buf[buf].defining_op.get_name()
-            for buf in V.kernel.store_buffer_names
-            if buf in self.name_to_buf
-        )
-        names_to_remove = []
-        for out_buf in V.kernel.store_buffer_names:
-            if out_buf not in self.name_to_buf:
-                # Aux buffers created during kernel codegen
-                names_to_remove.append(out_buf)
-                continue
-            users = self.name_to_buf[out_buf].users
-            assert users is not None
-            users = OrderedSet(user.get_name() for user in users if not user.is_weak)
-            if users.issubset(fused_node_names):
-                names_to_remove.append(out_buf)
-
-        def remove_filter(n: str) -> bool:
-            return (
-                n not in V.kernel.must_keep_buffers
-                and n not in V.kernel.args.input_buffers
-                and n not in self.mutation_renames
-                and n not in self.mutation_real_name
-            )
-
-        names_to_remove = list(filter(remove_filter, names_to_remove))
-
-        for name in names_to_remove:
-            if name in V.kernel.args.inplace_buffers:
-                buf = V.kernel.args.inplace_buffers[name]
-                if isinstance(buf, str) and buf.startswith("REMOVED"):
-                    continue
-                remove = all(n in names_to_remove for n in buf.other_names)
-                if remove:
-                    self.remove_inplace_buffer(name)
-                V.kernel.inplaced_to_remove.add(name)
-            else:
-                self.remove_buffer(name)
-
-    def remove_buffer(self, name: str) -> None:
-        # Assign a special value instead of deleting the entry
-        # because we still rely on output_buffers's length to
-        # generate unique arg name.
-        log.debug("remove_buffer(%r)", name)
-        V.kernel.args.output_buffers[name] = "REMOVED"
-        V.kernel.removed_buffers.add(name)
-
-    def remove_inplace_buffer(self, name: str) -> None:
-        log.debug("removing_inplace_buffer(%r)", name)
-        inner_name = V.kernel.args.inplace_buffers[name].inner_name
-        V.kernel.args.inplace_buffers[name] = inner_name.replace(
-            "in_out_ptr", "REMOVED"
-        )
-        V.kernel.removed_buffers.add(name)
-
     def flush(self) -> None:
         for backend in self.backends.values():
             backend.flush()
@@ -3451,6 +3398,19 @@ class Scheduler:
         if origins:
             _, last = max(origins, key=operator.itemgetter(0))
             V.graph.wrapper_code.enter_context(last)
+
+    def can_buffer_be_removed_through_fusion(
+        self, name: str, fused_node_names: OrderedSet[str]
+    ) -> bool:
+        try:
+            users = self.name_to_buf[name].users
+        except KeyError:
+            return False
+        return (
+            all(user.is_weak or user.get_name() in fused_node_names for user in users)
+            and name not in self.mutation_renames
+            and name not in self.mutation_real_name
+        )
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):

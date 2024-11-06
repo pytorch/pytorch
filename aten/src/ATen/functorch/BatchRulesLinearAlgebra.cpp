@@ -686,43 +686,43 @@ _scaled_dot_product_cudnn_attention_batch_rule(
 #endif
 
 #define LINALG_CHECK_MATRIX_UNARY_ONE_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, one));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_ONE_OUT2(fn, overload, op_name) \
-  LINALG_STRING_CONST2(fn, overload, op_name);\
+  LINALG_STRING_CONST2(fn, overload, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT2(fn, overload, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE2(fn, overload, one));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_TWO_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, two));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_THREE_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, three));\
   }
 
 #define LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_UNARY_BATCH_RULE(fn, four));\
   }
 
 #define LINALG_CHECK_MATRIX_BINARY_ONE_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_BINARY_BATCH_RULE(fn, one));\
   }
 
 #define LINALG_CHECK_MATRIX_BINARY_TWO_OUT(fn, op_name) \
-  LINALG_STRING_CONST(fn, op_name);\
+  LINALG_STRING_CONST(fn, op_name)\
   TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {\
     VMAP_SUPPORT(fn, LINALG_CHECK_MATRIX_BINARY_BATCH_RULE(fn, two));\
   }

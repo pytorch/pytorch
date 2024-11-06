@@ -93,6 +93,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
+from .pgo import put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -1019,6 +1020,8 @@ def _compile(
                     f"{type(e).__qualname__}: {str(e)}"
                 ).with_traceback(e.__traceback__) from None
         finally:
+            put_code_state()
+
             if tracer:
                 tracer.output.local_scope = {}
 
@@ -1102,18 +1105,35 @@ def _compile(
                 torch._logging.get_structured_logging_overhead()
             )
 
-            def handle_sets(d: Dict[str, Any]) -> Dict[str, Any]:
-                # Remove entries that have set values which are functions
-                del d["reorderable_logging_functions"]
-                # Remove entries that have set values which are _TensorMeta
-                del d["traceable_tensor_subclasses"]
+            def clean_for_json(d: Dict[str, Any]) -> Dict[str, Any]:
+                blocklist = {
+                    "TYPE_CHECKING",
+                    "log_file_name",
+                    "verbose",
+                    "repro_after",
+                    "repro_level",
+                    "repro_forward_only",
+                    "repro_tolerance",
+                    "repro_ignore_non_fp",
+                    "same_two_models_use_fp64",
+                    "base_dir",
+                    "debug_dir_root",
+                    "_save_config_ignore",
+                    "log_compilation_metrics",
+                    "inject_BUILD_SET_unimplemented_TESTING_ONLY",
+                    "_autograd_backward_strict_mode_banned_ops",
+                    "reorderable_logging_functions",
+                    "traceable_tensor_subclasses",
+                    "_custom_ops_profile",
+                }
 
                 return {
                     key: list(value) if isinstance(value, set) else value
                     for key, value in d.items()
+                    if key not in blocklist
                 }
 
-            config_dict = handle_sets(config.get_config_copy())
+            config_dict = clean_for_json(config.get_config_copy())
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1178,7 +1198,7 @@ def _compile(
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
             chromium_event_log.log_event_end(
-                "dynamo", time.time_ns(), {}, chromium_start_time
+                "dynamo", time.time_ns(), {}, chromium_start_time, True
             )
 
 
@@ -1379,8 +1399,6 @@ class CatchErrorsWrapper:
             )
         ):
             if log.isEnabledFor(logging.DEBUG):
-                print(frame.f_lasti, first_real_inst_idx(frame.f_code))
-
                 if has_started_execution:
                     skip_reason = "traced frame already"
                 elif trace_rules.check(frame.f_code):

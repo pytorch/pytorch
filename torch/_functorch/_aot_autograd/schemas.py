@@ -155,6 +155,12 @@ class InputAliasInfo:
 
 
 @dataclass
+class PlainTensorMeta:
+    unwrapped_idx: int
+    memory_format: Optional[torch.memory_format] = None
+
+
+@dataclass
 class SubclassCreationMeta:
     """
     Used for AOTDispatch.
@@ -184,7 +190,7 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: Dict[str, Union["SubclassCreationMeta", None]]
+    attrs: Dict[str, Union["SubclassCreationMeta", PlainTensorMeta]]
     outer_size: Iterable[Union[None, int, torch.SymInt]]
     outer_stride: Iterable[Union[None, int, torch.SymInt]]
     meta: Any
@@ -197,6 +203,7 @@ class SubclassCreationMeta:
 
     # Used at runtime to determine the subclass type, so we don't need to save the original subclass
     original_subclass_type: Optional[type] = None
+    memory_format: Optional[torch.memory_format] = None
 
     def compute_outer_size_and_stride(
         self,
@@ -235,7 +242,7 @@ class SubclassCreationMeta:
 
         curr_start_idx = self.flat_tensor_start_idx
         for attr, creation_meta in self.attrs.items():
-            if creation_meta is None:
+            if isinstance(creation_meta, PlainTensorMeta):
                 subclass = all_args[curr_start_idx]
                 curr_start_idx += 1
             else:
@@ -296,7 +303,7 @@ class SubclassCreationMeta:
 
         # Recurse on nested subclass info
         for creation_meta in self.attrs.values():
-            if creation_meta is not None:
+            if isinstance(creation_meta, SubclassCreationMeta):
                 creation_meta.make_runtime_safe()
 
     def __post_init__(self):
@@ -355,7 +362,7 @@ class ViewAndMutationMeta:
     #      inputs[3] and inputs[4] of the plain-tensor graph".
 
     # length = # user inputs
-    subclass_inp_meta: List[Union[int, SubclassCreationMeta]]
+    subclass_inp_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
     # So, the full set of outputs to the forward graph looks something like:
     # (*mutated_inps, *user_outs, *intermediate_bases, *saved_for_bw_tensors)
     # where the first 3 of those 4 can be subclasses
@@ -363,9 +370,9 @@ class ViewAndMutationMeta:
     # and not user visible, so there's no point in wrapping/unwrapping them at runtime).
     # This list contains subclass information on all of the fw graph outputs
     # except for saved_for_bw_tensors.
-    subclass_fw_graph_out_meta: List[Union[int, SubclassCreationMeta]]
+    subclass_fw_graph_out_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
     # length = # backward graph inputs
-    subclass_tangent_meta: List[Union[int, SubclassCreationMeta]]
+    subclass_tangent_meta: List[Union[PlainTensorMeta, SubclassCreationMeta]]
     # TODO: we should kill this
     # (need to default it to not break internal)
     is_train: bool = False
@@ -376,14 +383,6 @@ class ViewAndMutationMeta:
     # Instead, we keep any necessary subclass metadata necessary about each traced_tangent.
     # This list is generated after calling make_runtime_safe().
     traced_tangent_metas: Optional[List[Any]] = None
-
-    # for each tangent at index i:
-    #   if the tangent is a plain tensor, traced_tangent_memory_formats[i] holds the memory format
-    #     of the tangent that we need to coerce to
-    #   if the tangent is a subclass, traced_tangent_memory_formats[i] holds a list of memory formats,
-    #     containing the expected memory format of the subclass **and** all of its inner tensors
-    TANGENT_MEMORY_FORMAT = Union[torch.memory_format, List["TANGENT_MEMORY_FORMAT"]]
-    traced_tangent_memory_formats: Optional[List[TANGENT_MEMORY_FORMAT]] = None
 
     num_symints_saved_for_bw: Optional[int] = None
 
@@ -677,7 +676,9 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
+    grad_input_metas: Optional[
+        List[Union[PlainTensorMeta, SubclassCreationMeta]]
+    ] = None
 
     def __init__(self) -> None:
         # The fields in this class get set after its construction.

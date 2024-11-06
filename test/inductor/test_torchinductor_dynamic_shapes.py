@@ -983,6 +983,42 @@ class TestInductorDynamic(TestCase):
                 self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
                 self.assertEqual(cnt.frame_count, 1)
 
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_unspecialized_float_fallback_specialization(self):
+        def fn(x, y, z):
+            return (
+                torch.tensor(z),
+                torch.exp(torch.tensor(z)) * (x * y),
+                x.size(0),
+                math.sqrt(x.size(0)),
+                math.floor(math.sqrt(x.size(0))),
+                math.floor(math.sqrt(x.numel())),
+                math.floor(math.sqrt(x.dim())),
+                math.floor(math.sqrt(z)),
+            )
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        x = torch.arange(3)
+        z = 1.3
+
+        self.assertEqual(fn(x, 2.0, z), fn_opt(x, 2.0, z))
+        self.assertEqual(fn(x, 3.0, z), fn_opt(x, 3.0, z))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_unspecialized_float_fallback_symint_specialization(self):
+        def fn(x, y):
+            return math.floor(x**2) * y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        y = torch.arange(3)
+
+        self.assertEqual(fn(2.0, y), fn_opt(2.0, y))
+        self.assertEqual(fn(3.0, y), fn_opt(3.0, y))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:
 
