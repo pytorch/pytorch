@@ -381,13 +381,10 @@ def enable_fake_mode():
     is a :class:`torch.Tensor` with the ability to run PyTorch code without having to
     actually do computation through tensors allocated on a ``meta`` device. Because
     there is no actual data being allocated on the device, this API allows for
-    exporting large models without the actual memory footprint needed for executing it.
+    initializing and exporting large models without the actual memory footprint needed for executing it.
 
-    It is highly recommended to enable fake mode when exporting models that
+    It is highly recommended to initialize the model in fake mode when exporting models that
     are too large to fit into memory.
-
-    Returns:
-        A :class:`ONNXFakeContext` object.
 
     Example::
 
