@@ -54,7 +54,7 @@ env:
 
 jobs:
   get-label-type:
-    if: github.repository_owner == 'pytorch'
+    if: github.repository_owner == 'iremyux'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -65,7 +65,7 @@ jobs:
 
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'iremyux' }}
     needs: get-label-type
     {%- if branches == "nightly" %}
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
@@ -78,7 +78,6 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
-      !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
@@ -99,7 +98,7 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
   !{{ config["build_name"] }}-test:  # Testing
-    if: ${{ github.repository_owner == 'pytorch' }}
+    if: ${{ github.repository_owner == 'iremyux' }}
     needs:
       - !{{ config["build_name"] }}-build
       - get-label-type
@@ -115,7 +114,6 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
     steps:
-      !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
       - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
