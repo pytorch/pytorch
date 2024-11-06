@@ -1707,7 +1707,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     map(
                         str,
                         V.graph.sizevars.size_hints(
-                            n.get_size(), fallback=config.unbacked_symint_fallback
+                            n.get_size(), fallback=config.unbacked_symint_fallback  # type: ignore[arg-type]
                         ),
                     )
                 )
