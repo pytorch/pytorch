@@ -54,7 +54,7 @@ env:
 
 jobs:
   get-label-type:
-    if: github.repository_owner == 'iremyux'
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -65,7 +65,7 @@ jobs:
 
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
-    if: ${{ github.repository_owner == 'iremyux' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     {%- if branches == "nightly" %}
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
@@ -98,7 +98,7 @@ jobs:
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
   !{{ config["build_name"] }}-test:  # Testing
-    if: ${{ github.repository_owner == 'iremyux' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - !{{ config["build_name"] }}-build
       - get-label-type
