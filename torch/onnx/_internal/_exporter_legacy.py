@@ -397,13 +397,12 @@ def enable_fake_mode():
         >>> class MyModel(torch.nn.Module):  # Dummy model
         ...     def __init__(self) -> None:
         ...         super().__init__()
-        ...         self.linear = torch.nn.Linear(2, 2)
+        ...         self.weight = torch.nn.Parameter(torch.tensor(42.0))
         ...     def forward(self, x):
-        ...         out = self.linear(x)
-        ...         return out
+        ...         return self.weight + x
         >>> with torch.onnx.enable_fake_mode():
         ...     my_nn_module = MyModel()
-        ...     arg1 = torch.randn(2, 2, 2)  # positional input 1
+        ...     arg1 = torch.randn(2, 2, 2)
         >>> onnx_program = torch.onnx.export(my_nn_module, (arg1,), dynamo=True)
         >>> # Saving model WITHOUT initializers
         >>> onnx_program.save(
@@ -411,8 +410,8 @@ def enable_fake_mode():
         ...     include_initializers=False,
         ...     keep_initializers_as_inputs=True,
         ... )
-        >>> # Saving model WITH initializers
-        >>> onnx_program.apply_weights(MyModel().state_dict())
+        >>> # Saving model WITH initializers after applying concrete weights
+        >>> onnx_program.apply_weights({"weight": torch.tensor(42.0)})
         >>> onnx_program.save("my_model_with_initializers.onnx")
 
     .. warning::
