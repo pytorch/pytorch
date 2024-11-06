@@ -81,6 +81,7 @@ TEST(
 }
 
 namespace {
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 struct Noncopyable {
   int x;
 

@@ -101,7 +101,7 @@ class TORCH_API Node {
   // Construct node with shape and no operands
   Node(OpKind op, Shape shape, size_t num_outputs = 1);
 
-  virtual ~Node();
+  virtual ~Node() = default;
 
   const OpKind& op() const {
     return op_;
