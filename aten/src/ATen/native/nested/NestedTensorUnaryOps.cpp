@@ -89,8 +89,20 @@ Tensor NestedTensor_logical_not(const Tensor& self) {
   return map_nt(self, at::logical_not);
 }
 
+Tensor NestedTensor_isinf(const Tensor& self) {
+  return map_nt(self, at::isinf);
+}
+
+Tensor NestedTensor_isposinf(const Tensor& self) {
+  return map_nt(self, at::isposinf);
+}
+
 Tensor NestedTensor_isneginf(const Tensor& self) {
   return map_nt(self, at::isneginf);
+}
+
+Tensor NestedTensor_isnan(const Tensor& self) {
+  return map_nt(self, at::isnan);
 }
 
 Tensor& NestedTensor_relu_(Tensor& self) {
