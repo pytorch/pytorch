@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   get-label-type:
-    if: github.repository_owner == 'iremyux'
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
@@ -42,7 +42,7 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
   wheel-py3_9-cpu-build:
-    if: ${{ github.repository_owner == 'iremyux' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
     timeout-minutes: 240
@@ -121,7 +121,7 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
   wheel-py3_9-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'iremyux' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-py3_9-cpu-build
       - get-label-type
@@ -220,7 +220,7 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_10-cpu-build:
-    if: ${{ github.repository_owner == 'iremyux' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
     timeout-minutes: 240
@@ -299,7 +299,7 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
   wheel-py3_10-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'iremyux' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-py3_10-cpu-build
       - get-label-type
@@ -398,7 +398,7 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_11-cpu-build:
-    if: ${{ github.repository_owner == 'iremyux' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
     timeout-minutes: 240
@@ -477,7 +477,7 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
   wheel-py3_11-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'iremyux' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-py3_11-cpu-build
       - get-label-type
@@ -576,7 +576,7 @@ jobs:
       conda-pytorchbot-token-test: ${{ secrets.CONDA_PYTORCHBOT_TOKEN_TEST }}
     uses: ./.github/workflows/_binary-upload.yml
   wheel-py3_12-cpu-build:
-    if: ${{ github.repository_owner == 'iremyux' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     needs: get-label-type
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
     timeout-minutes: 240
@@ -655,7 +655,7 @@ jobs:
         run: |
           .github\scripts\kill_active_ssh_sessions.ps1
   wheel-py3_12-cpu-test:  # Testing
-    if: ${{ github.repository_owner == 'iremyux' }}
+    if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - wheel-py3_12-cpu-build
       - get-label-type
