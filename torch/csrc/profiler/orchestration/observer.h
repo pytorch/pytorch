@@ -103,7 +103,8 @@ struct TORCH_API ProfilerConfig {
       bool with_stack = false,
       bool with_flops = false,
       bool with_modules = false,
-      ExperimentalConfig experimental_config = ExperimentalConfig());
+      ExperimentalConfig experimental_config = ExperimentalConfig(),
+      std::string trace_id = "");
 
   bool disabled() const;
   bool global() const;
@@ -115,6 +116,7 @@ struct TORCH_API ProfilerConfig {
   bool with_stack;
   bool with_flops;
   bool with_modules;
+  std::string trace_id;
 
   // For serialization
   at::IValue toIValue() const;

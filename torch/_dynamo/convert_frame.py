@@ -93,6 +93,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
+from .pgo import put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -120,6 +121,7 @@ from .utils import (
     reset_graph_break_dup_checker,
     setup_compile_debug,
     to_int_ms,
+    to_int_us,
     troubleshooting_url,
     write_record_to_file,
 )
@@ -543,23 +545,24 @@ class ConvertFrameAssert:
             info = f"{code.co_name} {code.co_filename}:{code.co_firstlineno}"
             dynamo_tls.traced_frame_infos.append(info)
 
-        return _compile(
-            frame.f_code,
-            frame.f_globals,
-            frame.f_locals,
-            frame.f_builtins,
-            self._torchdynamo_orig_callable,
-            self._one_graph,
-            self._export,
-            self._export_constraints,
-            hooks,
-            cache_entry,
-            cache_size,
-            frame,
-            frame_state=frame_state,
-            compile_id=compile_id,
-            skip=skip + 1,
-        )
+        with compile_context(CompileContext(compile_id)):
+            return _compile(
+                frame.f_code,
+                frame.f_globals,
+                frame.f_locals,
+                frame.f_builtins,
+                self._torchdynamo_orig_callable,
+                self._one_graph,
+                self._export,
+                self._export_constraints,
+                hooks,
+                cache_entry,
+                cache_size,
+                frame,
+                frame_state=frame_state,
+                compile_id=compile_id,
+                skip=skip + 1,
+            )
 
 
 def convert_frame_assert(
@@ -963,17 +966,12 @@ def _compile(
                 ]
             },
         )
-        start_time = time.time()
+        start_time_ns = time.time_ns()
         fail_type: Optional[str] = None
         fail_reason: Optional[str] = None
         fail_user_frame_filename: Optional[str] = None
         fail_user_frame_lineno: Optional[int] = None
-        start_possibly_missed_reinplacing_opportunities = torch._dynamo.utils.counters[
-            "inductor"
-        ]["possibly_missed_reinplacing_opportunities"]
-        start_possibly_missed_reinplacing_bytes = torch._dynamo.utils.counters[
-            "inductor"
-        ]["start_possibly_missed_reinplacing_bytes"]
+        torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
@@ -1017,8 +1015,12 @@ def _compile(
                     f"{type(e).__qualname__}: {str(e)}"
                 ).with_traceback(e.__traceback__) from None
         finally:
+            put_code_state()
+
             if tracer:
                 tracer.output.local_scope = {}
+
+            duration_ns = time.time_ns() - start_time_ns
 
             from .utils import curr_frame
 
@@ -1047,33 +1049,17 @@ def _compile(
                 compliant_custom_ops = {
                     op.__qualname__ for op in output.compliant_custom_ops
                 }
-                possibly_missed_reinplacing_opportunities = (
-                    torch._dynamo.utils.counters["inductor"][
-                        "possibly_missed_reinplacing_opportunities"
-                    ]
-                    - start_possibly_missed_reinplacing_opportunities
-                )
                 remote_cache_time_saved = frame_phase_timing[frame_key].get(
                     "remote_cache_time_saved", 0
                 )
-                possibly_missed_reinplacing_bytes = (
-                    torch._dynamo.utils.counters["inductor"][
-                        "possibly_missed_reinplacing_bytes"
-                    ]
-                    - start_possibly_missed_reinplacing_bytes
-                )
-                if possibly_missed_reinplacing_bytes != 0:
-                    signpost_event(
-                        "inductor",
-                        "auto_functionalize",
-                        {"missed_reinplacing_bytes": possibly_missed_reinplacing_bytes},
-                    )
                 remote_fx_graph_cache_get_time = frame_phase_timing[frame_key].get(
                     "remote_fx_graph_cache_get", None
                 )
                 remote_fx_graph_cache_put_time = frame_phase_timing[frame_key].get(
                     "remote_fx_graph_cache_put", None
                 )
+                torch._dynamo.utils.ReinplaceCounters.log()
+
             else:
                 guard_count = None
                 shape_env_guard_count = None
@@ -1088,8 +1074,7 @@ def _compile(
                 compliant_custom_ops = set({})
                 restart_reasons = set()
                 # If compilation failed, the entire time is wasted
-                dynamo_time_before_restart = time.time() - start_time
-                possibly_missed_reinplacing_opportunities = None
+                dynamo_time_before_restart = duration_ns / 1e9
                 remote_cache_time_saved = None
                 remote_fx_graph_cache_get_time = None
                 remote_fx_graph_cache_put_time = None
@@ -1098,18 +1083,35 @@ def _compile(
                 torch._logging.get_structured_logging_overhead()
             )
 
-            def handle_sets(d: Dict[str, Any]) -> Dict[str, Any]:
-                # Remove entries that have set values which are functions
-                del d["reorderable_logging_functions"]
-                # Remove entries that have set values which are _TensorMeta
-                del d["traceable_tensor_subclasses"]
+            def clean_for_json(d: Dict[str, Any]) -> Dict[str, Any]:
+                blocklist = {
+                    "TYPE_CHECKING",
+                    "log_file_name",
+                    "verbose",
+                    "repro_after",
+                    "repro_level",
+                    "repro_forward_only",
+                    "repro_tolerance",
+                    "repro_ignore_non_fp",
+                    "same_two_models_use_fp64",
+                    "base_dir",
+                    "debug_dir_root",
+                    "_save_config_ignore",
+                    "log_compilation_metrics",
+                    "inject_BUILD_SET_unimplemented_TESTING_ONLY",
+                    "_autograd_backward_strict_mode_banned_ops",
+                    "reorderable_logging_functions",
+                    "traceable_tensor_subclasses",
+                    "_custom_ops_profile",
+                }
 
                 return {
                     key: list(value) if isinstance(value, set) else value
                     for key, value in d.items()
+                    if key not in blocklist
                 }
 
-            config_dict = handle_sets(config.get_config_copy())
+            config_dict = clean_for_json(config.get_config_copy())
             metrics = CompilationMetrics(
                 str(compile_id),
                 frame_key,
@@ -1123,7 +1125,7 @@ def _compile(
                 graph_op_count,
                 graph_node_count,
                 graph_input_count,
-                start_time,
+                start_time_ns / 1e9,
                 entire_frame_compile_time,
                 backend_compile_time,
                 inductor_compile_time,
@@ -1137,7 +1139,6 @@ def _compile(
                 restart_reasons,
                 dynamo_time_before_restart,
                 guarded_code is not None,
-                possibly_missed_reinplacing_opportunities,
                 remote_cache_time_saved,
                 structured_logging_overhead_s,
                 config.suppress_errors,
@@ -1147,11 +1148,34 @@ def _compile(
                 True,  # is_forward
                 to_int_ms(remote_fx_graph_cache_get_time),
                 to_int_ms(remote_fx_graph_cache_put_time),
+                start_time_us=start_time_ns // 1000,
+                duration_us=duration_ns // 1000,
+                dynamo_cumulative_compile_time_us=to_int_us(entire_frame_compile_time),
+                aot_autograd_cumulative_compile_time_us=to_int_us(backend_compile_time),
+                inductor_cumulative_compile_time_us=to_int_us(inductor_compile_time),
+                inductor_code_gen_cumulative_compile_time_us=to_int_us(code_gen_time),
+                triton_compile_time_us=None,  # TODO: instrument
+                runtime_cudagraphify_time_us=None,  # TODO: instrument in separate event
+                runtime_triton_autotune_time_us=None,  # TODO: instrument in separate event
+                dynamo_compile_time_before_restart_us=to_int_us(
+                    dynamo_time_before_restart
+                ),
+                cuda_synchronize_time_us=None,  # TODO: instrument
+                distributed_ephemeral_timeout_us=to_int_us(
+                    remote_cache_time_saved
+                ),  # TODO: instrument more accurately
+                structured_logging_overhead_us=to_int_us(structured_logging_overhead_s),
+                remote_fx_graph_cache_get_time_us=to_int_us(
+                    remote_fx_graph_cache_get_time
+                ),
+                remote_fx_graph_cache_put_time_us=to_int_us(
+                    remote_fx_graph_cache_put_time
+                ),
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
             chromium_event_log.log_event_end(
-                "dynamo", time.time_ns(), {}, chromium_start_time
+                "dynamo", time.time_ns(), {}, chromium_start_time, True
             )
 
 
@@ -1352,8 +1376,6 @@ class CatchErrorsWrapper:
             )
         ):
             if log.isEnabledFor(logging.DEBUG):
-                print(frame.f_lasti, first_real_inst_idx(frame.f_code))
-
                 if has_started_execution:
                     skip_reason = "traced frame already"
                 elif trace_rules.check(frame.f_code):

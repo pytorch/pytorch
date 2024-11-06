@@ -196,7 +196,7 @@ c10::IValue Function::serialize() const {
 }
 
 void Function::init_execution_state() const {
-  if (execution_state_.get() != nullptr) {
+  if (execution_state_ != nullptr) {
     return;
   }
 
