@@ -117,6 +117,9 @@ COPY --from=jni                /usr/local/include/jni.h              /usr/local/
 FROM common as cpu_final
 ARG BASE_CUDA_VERSION=11.8
 ARG DEVTOOLSET_VERSION=11
+# Install Anaconda
+ADD ./common/install_conda_docker.sh install_conda.sh
+RUN bash ./install_conda.sh && rm install_conda.sh
 # Ensure the expected devtoolset is used
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
@@ -137,6 +140,7 @@ COPY --from=cuda     /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BAS
 COPY --from=magma    /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
+
 
 FROM common as rocm_final
 ARG ROCM_VERSION=3.7
