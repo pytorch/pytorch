@@ -64,6 +64,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-curand-cu12==10.3.2.106; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusolver-cu12==11.4.5.107; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-cusparse-cu12==12.1.0.106; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "nvidia-cusparselt-cu12==0.6.2; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nccl-cu12==2.21.5; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "nvidia-nvtx-cu12==12.1.105; platform_system == 'Linux' and platform_machine == 'x86_64'"
     ),
@@ -155,7 +156,7 @@ DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 
 WHEEL_CONTAINER_IMAGES = {
     **{
-        gpu_arch: f"pytorch/manylinux-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
+        gpu_arch: f"pytorch/manylinux2_28-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
     **{
@@ -163,7 +164,7 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in ROCM_ARCHES
     },
     "xpu": f"pytorch/manylinux2_28-builder:xpu-{DEFAULT_TAG}",
-    "cpu": f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
+    "cpu": f"pytorch/manylinux2_28-builder:cpu-{DEFAULT_TAG}",
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinuxaarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
     "cpu-s390x": f"pytorch/manylinuxs390x-builder:cpu-s390x-{DEFAULT_TAG}",

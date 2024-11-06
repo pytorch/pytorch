@@ -43,7 +43,7 @@ const std::unordered_map<std::string, c10::TypePtr>& DynamicTypeFactory::
   static const std::unordered_map<std::string, c10::TypePtr> map = {
 #define MAP_ITEM(NAME, TYPE) \
   {#NAME, c10::DynamicTypeTrait<c10::TYPE>::getBaseType()},
-      FORALL_BASE_PYTHON_TYPES(MAP_ITEM)
+    FORALL_BASE_PYTHON_TYPES(MAP_ITEM)
 #undef MAP_ITEM
   };
   return map;
@@ -61,7 +61,7 @@ const std::unordered_map<std::string, c10::TypePtr>& DefaultTypeFactory::
 
 c10::TypePtr DefaultTypeFactory::createNamedTuple(
     const std::string& name,
-    const std::vector<c10::string_view>& fields,
+    const std::vector<std::string_view>& fields,
     const std::vector<c10::TypePtr>& types) {
   return c10::TupleType::createNamed(name, fields, types);
 }
