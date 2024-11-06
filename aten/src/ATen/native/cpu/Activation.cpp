@@ -1412,22 +1412,22 @@ REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel)
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel)
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel)
 
-ALSO_REGISTER_AVX512_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_cpu_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(glu_stub, &glu_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(glu_backward_stub, &glu_backward_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(glu_jvp_stub, &glu_jvp_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(elu_stub, &elu_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(elu_backward_stub, &elu_backward_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(GeluKernel, &GeluKernelImpl);
-ALSO_REGISTER_AVX512_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
-ALSO_REGISTER_AVX512_DISPATCH(hardswish_stub, &hardswish_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(softplus_stub, &softplus_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(silu_stub, &silu_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(silu_backward_stub, &silu_backward_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(mish_stub, &mish_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(mish_backward_stub, &mish_backward_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(log_sigmoid_backward_stub, &log_sigmoid_backward_cpu_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(glu_stub, &glu_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(glu_backward_stub, &glu_backward_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(glu_jvp_stub, &glu_jvp_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(elu_stub, &elu_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(elu_backward_stub, &elu_backward_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(GeluKernel, &GeluKernelImpl)
+ALSO_REGISTER_AVX512_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl)
+ALSO_REGISTER_AVX512_DISPATCH(hardswish_stub, &hardswish_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(softplus_stub, &softplus_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(softplus_backward_stub, &softplus_backward_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(silu_stub, &silu_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(silu_backward_stub, &silu_backward_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(mish_stub, &mish_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(mish_backward_stub, &mish_backward_kernel)
 
 } // namespace at::native
