@@ -27,6 +27,7 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     TypeSource,
+    WeakRefCallSource,
 )
 from ..utils import (
     check_unspec_or_constant_args,
@@ -1719,3 +1720,26 @@ class RandomVariable(VariableTracker):
         codegen(self.wrap_state(self.random.getstate()))
         codegen.call_function(1, True)
         codegen.pop_top()
+
+
+class WeakRefVariable(VariableTracker):
+    @staticmethod
+    def build(tx, weakref_value, **options):
+        source = options.get("source", None)
+        referent = weakref_value()
+        source = source and WeakRefCallSource(source)
+        referent_vt = VariableTracker.build(tx, referent, source)
+        options["source"] = source
+        return WeakRefVariable(referent_vt, **options)
+
+    def __init__(self, referent_vt, **options):
+        super().__init__(**options)
+        self.referent_vt = referent_vt
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        return self.referent_vt
