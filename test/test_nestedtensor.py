@@ -58,6 +58,7 @@ from torch.testing._internal.common_utils import (
     NestedTensorTestCase,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
@@ -4354,7 +4355,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
             out = func(nt, dim=rd, keepdim=keepdim)
             ref_shape = ref_shape_keepdim if keepdim else ref_shape_no_keepdim
-            if not torch.compiler.is_compiling():  # if not using torch dynamo
+            if not torch.compiler.is_compiling:  # if not using torch dynamo
                 self.assertEqual(len(out.shape), len(ref_shape))
                 for o, r in zip(out.shape, ref_shape):
                     if r is not None:
@@ -4597,7 +4598,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         # requires_grad = False does not currently work with dynamo tests and throws this error:
         #   AssertionError: SymInts must use SymNodeVariable.
         #   If the underlying value is static, we will create a ConstantVariable and specialize.
-        if torch.compiler.is_compiling() and not requires_grad:
+        if torch._dynamo.is_compiling() and not requires_grad:
             return
 
         tensor_lists = self._get_example_tensor_lists(
@@ -7040,6 +7041,7 @@ torch.cuda.synchronize()
     # non-contiguous with holes not supported yet
     @decorateIf(unittest.skip, lambda params: params["noncontig_with_holes"])
     @parametrize("noncontig_with_holes", [False, True])
+    @skipIfRocm
     def test_flex_attention(self, device, dtype, noncontig_with_holes):
         query, key, value = self._rand_qkv(device, dtype, noncontig_with_holes)
 
