@@ -24,7 +24,7 @@ std::optional<std::vector<size_t>> RandomSampler::next(size_t batch_size) {
   TORCH_INTERNAL_ASSERT(index_ <= indices_.numel());
   const size_t remaining_indices = indices_.numel() - index_;
   if (remaining_indices == 0) {
-    return nullopt;
+    return std::nullopt;
   }
   std::vector<size_t> index_batch(std::min(batch_size, remaining_indices));
   auto slice = indices_.slice(/*dim=*/0, index_, index_ + index_batch.size());

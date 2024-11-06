@@ -957,6 +957,6 @@ Tensor& index_fill_mps_(Tensor& self, int64_t dim, const Tensor& index, const Sc
   return self.index_fill_(dim, index, mps::wrapped_scalar_tensor_mps(source, self.device()));
 }
 
-REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps);
-REGISTER_DISPATCH(index_put_stub, &mps::index_put_kernel_mps);
+REGISTER_DISPATCH(index_stub, &mps::index_kernel_mps)
+REGISTER_DISPATCH(index_put_stub, &mps::index_put_kernel_mps)
 } // namespace at::native

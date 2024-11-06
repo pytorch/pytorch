@@ -1399,6 +1399,5 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
         with GraphTransformObserver(
             graph.owning_module,
             f"group_batch_fusion_{i}",
-            config.trace.log_url_for_graph_xform,
         ):
             apply_group_batch_fusion(graph, rule)  # type: ignore[arg-type]

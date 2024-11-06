@@ -68,7 +68,7 @@ class StatelessDataLoader : public DataLoaderBase<
     if (!indices ||
         (indices->size() < this->options_.batch_size &&
          this->options_.drop_last)) {
-      return nullopt;
+      return std::nullopt;
     }
     TORCH_INTERNAL_ASSERT(indices->size() > 0);
     return indices;

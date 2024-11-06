@@ -60,6 +60,16 @@ DynamicType::Arguments::Arguments(c10::ArrayRef<TypePtr> args) {
 }
 
 DynamicType::Arguments::Arguments(
+    const std::vector<std::string_view>& names,
+    c10::ArrayRef<TypePtr> args)
+    : Arguments(args) {
+  TORCH_INTERNAL_ASSERT(names.size() == args.size());
+  for (size_t i = 0; i < args.size(); i++) {
+    elems[i].label = std::string{names[i]};
+  }
+}
+
+DynamicType::Arguments::Arguments(
     const std::vector<c10::string_view>& names,
     c10::ArrayRef<TypePtr> args)
     : Arguments(args) {
@@ -105,7 +115,7 @@ DynamicTypePtr DynamicType::create(Type& other) {
 DynamicType::DynamicType(Tag tag, Arguments arguments)
     : SharedType(Kind), tag_(tag), arguments_(std::move(arguments)) {}
 
-DynamicType::DynamicType(Tag tag, c10::string_view name, Arguments arguments)
+DynamicType::DynamicType(Tag tag, std::string_view name, Arguments arguments)
     : SharedType(Kind),
       tag_(tag),
       name_(std::string{name}),
@@ -258,7 +268,7 @@ TypePtr DynamicType::fallback() const {
         fallbacks.push_back(elem.ty->fallback());
       }
       if (name_) {
-        std::vector<c10::string_view> fields;
+        std::vector<std::string_view> fields;
         fields.reserve(arguments_.elems.size());
         for (const auto& elem : arguments_.elems) {
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -382,7 +392,7 @@ TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(
   return nullptr;
 #else
   const auto& dyn = type.expectRef<DynamicType>();
-  std::vector<c10::string_view> fields;
+  std::vector<std::string_view> fields;
   std::vector<TypePtr> types;
 
   for (const auto& elem : dyn.arguments().elems) {
