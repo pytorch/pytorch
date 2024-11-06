@@ -64,6 +64,8 @@ test_name_mapping = {
 }
 subtest_name = functools.partial(subtest_name, test_name_mapping)
 class TestParityWithDDP(FSDPTest):
+    def set_device(self, device):
+        return device if TEST_HPU else self.rank
     """
     Compare losses and parameter values after several updates when using
     PyTorch DDP vs. FullyShardedDataParallel.
@@ -213,7 +215,7 @@ class TestParityWithDDP(FSDPTest):
         cpu_offload: CPUOffload,
         sharding_strategy: Optional[ShardingStrategy],
     ):
-        fsdp_kwargs = {"device_id": device} if TEST_HPU else {} 
+        fsdp_kwargs = {"device_id": self.set_device(device)}
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
@@ -233,7 +235,7 @@ class TestParityWithDDP(FSDPTest):
         cpu_offload: CPUOffload,
         sharding_strategy: Optional[ShardingStrategy],
     ):
-        fsdp_kwargs = {"device_id": device} if TEST_HPU else {} 
+        fsdp_kwargs = {"device_id": self.set_device(device)}
         self.run_subtests(
             self._get_subtest_config(cpu_offload),
             self._test_fsdp_parity,
@@ -246,6 +248,8 @@ class TestParityWithDDP(FSDPTest):
             **fsdp_kwargs
         )
 class TestParamInit(FSDPTest):
+    def set_device(self, device):
+        return device if TEST_HPU else self.device_type
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
     def test_param_change_after_init(self, device, mixed_precision):
@@ -254,7 +258,7 @@ class TestParamInit(FSDPTest):
         initialization persist.
         """
         # Establish reference behavior
-        fsdp_kwargs = {"device_id": device} if TEST_HPU else {}
+        fsdp_kwargs = {"device_id": self.set_device(device)}
         if mixed_precision:
             fsdp_kwargs["mixed_precision"] = MixedPrecision()
         fsdp_model = TransformerWithSharedParams.init(
@@ -264,7 +268,7 @@ class TestParamInit(FSDPTest):
             fsdp_kwargs,
             deterministic=True,
         )
-        input = fsdp_model.module.get_input(device if TEST_HPU else self.device_type)
+        input = fsdp_model.module.get_input(self.set_device(device))
         ref_output = fsdp_model(*input)
         # Initialize the same model but change its first parameter value
         # in-place after FSDP initialization
@@ -284,12 +288,14 @@ class TestParamInit(FSDPTest):
             msg="new_output did not reflect change to param after init",
         )
 class TestHooks(FSDPTest):
+    def set_device(self, device):
+        return device if TEST_HPU else self.rank
     @skip_if_lt_x_gpu(2)
     @parametrize("cuda_first", [False, True])
     def test_pre_backward_hook_registration(self, device, cuda_first: bool):
         """Tests that FSDP pre-backward hooks are registered on forward pass
         outputs."""
-        fsdp_kwargs = {"device_id": device} if TEST_HPU else {}
+        fsdp_kwargs = {"device_id": self.set_device(device)}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -301,7 +307,7 @@ class TestHooks(FSDPTest):
     def test_pre_backward_hook_registration_after_state_dict(self, device):
         """Tests that FSDP pre-backward hooks are registered on forward pass
         outputs after saving and loading the model from a checkpoint."""
-        fsdp_kwargs = {"device_id": device} if TEST_HPU else {}
+        fsdp_kwargs = {"device_id": self.set_device(device)}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,
             FSDPInitMode.RECURSIVE,
@@ -320,7 +326,7 @@ class TestHooks(FSDPTest):
         output = model(*input)
         # this is pre-bwd hook
         self.assertEqual(len(output._backward_hooks), 1)
-        loss = model.module.get_loss(input, output).to(device if TEST_HPU else self.rank)
+        loss = model.module.get_loss(input, output).to(self.set_device(device))
         loss.backward()
         # It doesn't get removed
         self.assertEqual(len(output._backward_hooks), 1)
@@ -332,7 +338,7 @@ class TestHooks(FSDPTest):
     def test_register_functions_called(self, device, cuda_first: bool, mixed_precision: bool):
         """Tests that ``_register_{pre|post}_backward_hooks()`` are called
         during the FSDP forward."""
-        fsdp_kwargs = {"device_id": device} if TEST_HPU else {}
+        fsdp_kwargs = {"device_id": self.set_device(device)}
         if mixed_precision:
             fsdp_kwargs["mixed_precision"] = MixedPrecision()
         fsdp_model = TransformerWithSharedParams.init(
@@ -364,6 +370,8 @@ class TestHooks(FSDPTest):
             self.assertTrue(register_pre_backward_hooks_call_count > 0)
             self.assertTrue(register_post_bwd_mock.called)
 class TestNoGrad(FSDPTest):
+    def set_device(self, device):
+        return device if TEST_HPU else self.rank
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
     def test_transformer_no_grad(self, device, mixed_precision):
@@ -371,7 +379,7 @@ class TestNoGrad(FSDPTest):
         parameters, after training for one iteration, running a forward pass in
         ``eval()`` mode gives the same output as running a forward pass in
         ``torch.no_grad()``."""
-        fsdp_kwargs = {"device_id": device} if TEST_HPU else {}
+        fsdp_kwargs = {"device_id": self.set_device(device)}
         if mixed_precision:
             fsdp_kwargs["mixed_precision"] = MixedPrecision(
                 param_dtype=torch.float16,
@@ -479,7 +487,7 @@ class TestAutograd(FSDPTest):
         finally:
             FlatParamHandle._use_unsharded_views = orig_use_unsharded_views
 
-devices = ("cuda", "hpu")
+devices = ("hpu" if TEST_HPU else "cuda")
 instantiate_device_type_tests(TestHooks, globals(), only_for=devices)
 instantiate_device_type_tests(TestParityWithDDP, globals(), only_for=devices)
 instantiate_device_type_tests(TestNoGrad, globals(), only_for=devices)
@@ -487,4 +495,3 @@ instantiate_device_type_tests(TestParamInit, globals(), only_for=devices)
 instantiate_device_type_tests(TestAutograd, globals(), only_for=devices)
 if __name__ == "__main__":
     run_tests()
-
