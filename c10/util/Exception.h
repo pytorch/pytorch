@@ -205,10 +205,6 @@ class C10_API WarningHandlerGuard {
       : prev_handler_(c10::WarningUtils::get_warning_handler()) {
     c10::WarningUtils::set_warning_handler(new_handler);
   }
-  WarningHandlerGuard(WarningHandlerGuard&& other) = delete;
-  WarningHandlerGuard(const WarningHandlerGuard&) = delete;
-  WarningHandlerGuard& operator=(const WarningHandlerGuard&) = delete;
-  WarningHandlerGuard& operator=(WarningHandlerGuard&&) = delete;
   ~WarningHandlerGuard() {
     c10::WarningUtils::set_warning_handler(prev_handler_);
   }

@@ -202,8 +202,6 @@ struct SaveLocalDispatchKeySet {
   }
   SaveLocalDispatchKeySet(const SaveLocalDispatchKeySet&) = delete;
   SaveLocalDispatchKeySet& operator=(const SaveLocalDispatchKeySet&) = delete;
-  SaveLocalDispatchKeySet(SaveLocalDispatchKeySet&&) = delete;
-  SaveLocalDispatchKeySet& operator=(SaveLocalDispatchKeySet&&) = delete;
 };
 
 const std::vector<DynamicLayer>& getDynamicLayerStack() {
@@ -408,10 +406,6 @@ static void dump_local_tls() {
 
 struct WithoutTop {
   WithoutTop();
-  WithoutTop(WithoutTop&& other) = delete;
-  WithoutTop(const WithoutTop&) = delete;
-  WithoutTop& operator=(const WithoutTop&) = delete;
-  WithoutTop& operator=(WithoutTop&&) = delete;
   ~WithoutTop();
   DynamicLayer layer_;
 };

@@ -543,10 +543,6 @@ static PyObject* call_end_capture(PyObject* self, const variable_list& inputs) {
 
 struct ClosingTHPObjectPtr : public THPObjectPtr {
   ClosingTHPObjectPtr(PyObject* o) : THPObjectPtr(o) {}
-  ClosingTHPObjectPtr(ClosingTHPObjectPtr&& other) = default;
-  ClosingTHPObjectPtr(const ClosingTHPObjectPtr&) = delete;
-  ClosingTHPObjectPtr& operator=(const ClosingTHPObjectPtr&) = delete;
-  ClosingTHPObjectPtr& operator=(ClosingTHPObjectPtr&&) = default;
   ~ClosingTHPObjectPtr() {
     if (PyErr_Occurred()) {
       // do nothing, do not attempt to close
