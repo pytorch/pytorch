@@ -1015,18 +1015,6 @@ class OutputGraph:
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
 
-        co_generator = 0x20
-        if (
-            sys.version_info >= (3, 10)
-            and sys.version_info < (3, 11)
-            and self.code_options["co_flags"] & co_generator
-        ):
-            self.add_output_instructions(
-                [
-                    create_instruction("GEN_START", arg=0),
-                ]
-            )
-
         prefix_insts: List[Instruction] = []
         if sys.version_info >= (3, 11):
             # prefix instructions (Python 3.11+)
