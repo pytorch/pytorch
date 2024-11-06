@@ -3005,7 +3005,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 qkv = self.qkv(x).view(B, T, 3, self.n_head, self.head_dim)
                 qkv = qkv.permute(2, 0, 3, 1, 4)
                 q, k, v = qkv
-                y = flex_attention(q, k, v, block_mask=block_mask)
+                y = flex_attention(
+                    q,
+                    k,
+                    v,
+                    block_mask=block_mask,
+                )
                 return y.transpose(1, 2).contiguous().view(B, T, C)
 
         model = SimpleAttention().cuda()
@@ -3032,6 +3037,48 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             y = model(x, block_mask=block_mask)
 
         self.assertEqual(torch._dynamo.utils.counters["aot_autograd"]["ok"], 2)
+
+    @supported_platform
+    def test_symbol_closure_in_score_mod(self):
+        class SimpleAttention(torch.nn.Module):
+            def __init__(self, dim=512, n_head=8):
+                super().__init__()
+                self.qkv = torch.nn.Linear(dim, 3 * dim)
+                self.n_head = n_head
+                self.head_dim = dim // n_head
+
+            def forward(self, x, block_mask=None):
+                B, T, C = x.size()
+                qkv = self.qkv(x).view(B, T, 3, self.n_head, self.head_dim)
+                qkv = qkv.permute(2, 0, 3, 1, 4)
+                q, k, v = qkv
+                return flex_attention(
+                    q,
+                    k,
+                    v,
+                    score_mod=lambda s, b, h, q, k: s + B,
+                    block_mask=block_mask,
+                )
+
+        model = SimpleAttention().cuda()
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        model.compile(mode="default", dynamic=True, backend=backend)
+        sequence_len = 256
+
+        torch._dynamo.reset()
+        for batch_shape in [4, 16, 32]:
+            x = torch.randn(batch_shape, sequence_len, 512).cuda()
+            model(x)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            backend.graphs[0].score_mod_0.code.strip(),
+            """\
+def forward(self, child_4 : torch.Tensor, child_5 : torch.Tensor, child_6 : torch.Tensor, child_7 : torch.Tensor, child_8 : torch.Tensor, getitem : torch.SymInt):
+    add = child_4 + getitem;  child_4 = getitem = None
+    return add""",
+        )
 
     @supported_platform
     def test_fw_bw_graph_correctness(self):
