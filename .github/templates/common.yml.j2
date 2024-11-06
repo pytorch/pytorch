@@ -84,13 +84,14 @@ concurrency:
 
 {%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
         uses: malfet/checkout@silent-checkout
         with:

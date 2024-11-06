@@ -68,13 +68,14 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
@@ -88,13 +89,14 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
@@ -169,13 +171,14 @@ jobs:
           name: wheel-py3_9-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
@@ -189,13 +192,14 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
@@ -278,13 +282,14 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
@@ -298,13 +303,14 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
@@ -379,13 +385,14 @@ jobs:
           name: wheel-py3_10-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
@@ -399,13 +406,14 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
@@ -488,13 +496,14 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
@@ -508,13 +517,14 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
@@ -589,13 +599,14 @@ jobs:
           name: wheel-py3_11-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
@@ -609,13 +620,14 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
@@ -698,13 +710,14 @@ jobs:
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
@@ -718,13 +731,14 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
@@ -799,13 +813,14 @@ jobs:
           name: wheel-py3_12-cpu
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
@@ -819,13 +834,14 @@ jobs:
           git clean -fxd
         working-directory: pytorch
       - name: Ensure Git is installed
+        shell: powershell
         run: |
-          if ! git --version; then
-            echo "Git is not installed. Installing Git..."
+          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+            Write-Host "Git is not installed. Installing Git..."
             choco install git --version 2.18.0
-          else
-            echo "Git is already installed."
-          fi
+          } else {
+            Write-Host "Git is already installed."
+          }
       - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
