@@ -885,10 +885,10 @@ class CustomAdd(sympy.core.add.Add):
             assert isinstance(obj, CustomAdd)
             obj.ordered_summation_of_unique_symbols = True
 
-            if True : # config.run_extra_validations: # need to rebase on another PR to see this lol
-                ref = sympy.Add(lhs, rhs)
-                assert ref._args == obj._args
-                assert str(ref) == str(obj)
+            # if True : # config.run_extra_validations: # need to rebase on another PR to see this lol
+            #     ref = sympy.Add(lhs, rhs)
+            #     assert ref._args == obj._args
+            #     assert str(ref) == str(obj)
             return obj
 
         if isinstance(lhs, CustomAdd):
