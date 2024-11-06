@@ -339,26 +339,32 @@ scaled_mm_platform_configs = tuple(
     if config["cond"]
 )
 
-# On ROCm convert num_stages to 0 to enable software pipelining
+# On ROCm convert num_stages to 0 or 2 to enable software pipelining
 if torch.version.hip:
+    # on Triton version 3.2.0+, num_stages should be set to 2 instead of 0
+    # https://github.com/triton-lang/triton/blob/627ebbb9843a901dc7e1e88cc48f245d847a3057/third_party/amd/backend/compiler.py#L219
+    import triton
+
+    triton_version = tuple(int(v) for v in triton.__version__.split("."))
+    num_stages = 0 if triton_version < (3, 2, 0) else 2
     mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
+        (config[0], config[1], config[2], num_stages, config[4])
         for config in mm_platform_configs
     )
     extra_mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
+        (config[0], config[1], config[2], num_stages, config[4])
         for config in extra_mm_platform_configs
     )
     int8_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
+        (config[0], config[1], config[2], num_stages, config[4])
         for config in mm_platform_configs
     )
     mixed_mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
+        (config[0], config[1], config[2], num_stages, config[4])
         for config in mixed_mm_platform_configs
     )
     scaled_mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
+        (config[0], config[1], config[2], num_stages, config[4])
         for config in scaled_mm_platform_configs
     )
 
