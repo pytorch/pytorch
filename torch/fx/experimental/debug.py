@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import torch.fx as fx
 
+
 def set_trace(gm: fx.GraphModule) -> fx.GraphModule:
     """
     Sets a breakpoint in `gm`'s generated python code. It drops into pdb when
@@ -13,18 +14,14 @@ def set_trace(gm: fx.GraphModule) -> fx.GraphModule:
     Returns:
         the `gm` with breakpoint inserted.
     """
+
     def insert_pdb(body):
         return ["import pdb; pdb.set_trace()\n", *body]
 
     with gm.graph.on_generate_code(
         make_transformer=lambda cur_transform: (
             # new code transformer to register
-            lambda body: (
-                insert_pdb(
-                    cur_transform(body) if cur_transform
-                    else body
-                )
-            )
+            lambda body: (insert_pdb(cur_transform(body) if cur_transform else body))
         )
     ):
         gm.recompile()

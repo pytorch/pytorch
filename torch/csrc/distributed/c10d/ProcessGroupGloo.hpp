@@ -6,6 +6,7 @@
 #include <deque>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <gloo/algorithm.h>
@@ -91,7 +92,8 @@ class TORCH_API ProcessGroupGloo : public Backend {
   // Wrap c10d store as Gloo store
   class TORCH_API GlooStore : public ::gloo::rendezvous::Store {
    public:
-    GlooStore(const c10::intrusive_ptr<::c10d::Store>& store) : store_(store) {}
+    GlooStore(c10::intrusive_ptr<::c10d::Store> store)
+        : store_(std::move(store)) {}
 
     void setUint(const std::string& key, const std::vector<uint8_t>& value) {
       store_->set(key, value);

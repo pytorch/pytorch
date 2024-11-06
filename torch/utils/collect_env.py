@@ -4,6 +4,7 @@
 # This script outputs relevant system environment info
 # Run it with `python collect_env.py` or `python -m torch.utils.collect_env`
 import datetime
+import json
 import locale
 import re
 import subprocess
@@ -47,26 +48,43 @@ SystemEnv = namedtuple('SystemEnv', [
     'cpu_info',
 ])
 
-DEFAULT_CONDA_PATTERNS = {
+COMMON_PATTERNS = [
     "torch",
     "numpy",
+    "triton",
+    "optree",
+]
+
+NVIDIA_PATTERNS = [
+    "cuda-cudart",
+    "cuda-cupti",
+    "cuda-libraries",
+    "cuda-opencl",
+    "cuda-nvrtc",
+    "cuda-runtime",
+    "cublas",
+    "cudnn",
+    "cufft",
+    "curand",
+    "cusolver",
+    "cusparse",
+    "nccl",
+    "nvjitlink",
+    "nvtx",
+]
+
+CONDA_PATTERNS = [
     "cudatoolkit",
     "soumith",
     "mkl",
     "magma",
-    "triton",
-    "optree",
-}
+]
 
-DEFAULT_PIP_PATTERNS = {
-    "torch",
-    "numpy",
+PIP_PATTERNS = [
     "mypy",
     "flake8",
-    "triton",
-    "optree",
     "onnx",
-}
+]
 
 
 def run(command):
@@ -113,7 +131,7 @@ def run_and_return_first_line(run_lambda, command):
 
 def get_conda_packages(run_lambda, patterns=None):
     if patterns is None:
-        patterns = DEFAULT_CONDA_PATTERNS
+        patterns = CONDA_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS
     conda = os.environ.get('CONDA_EXE', 'conda')
     out = run_and_read_all(run_lambda, "{} list".format(conda))
     if out is None:
@@ -305,8 +323,25 @@ def get_cpu_info(run_lambda):
     if get_platform() == 'linux':
         rc, out, err = run_lambda('lscpu')
     elif get_platform() == 'win32':
-        rc, out, err = run_lambda('wmic cpu get Name,Manufacturer,Family,Architecture,ProcessorType,DeviceID, \
-        CurrentClockSpeed,MaxClockSpeed,L2CacheSize,L2CacheSpeed,Revision /VALUE')
+        rc, out, err = run_lambda(
+            'powershell.exe "gwmi -Class Win32_Processor | Select-Object -Property Name,Manufacturer,Family,\
+            Architecture,ProcessorType,DeviceID,CurrentClockSpeed,MaxClockSpeed,L2CacheSize,L2CacheSpeed,Revision\
+            | ConvertTo-Json"'
+        )
+        if rc == 0:
+            lst = []
+            try:
+                obj = json.loads(out)
+                if type(obj) is list:
+                    for o in obj:
+                        lst.append("----------------------")
+                        lst.extend([f"{k}: {v}" for (k, v) in o.items()])
+                else:
+                    lst.extend([f"{k}: {v}" for (k, v) in obj.items()])
+            except ValueError as e:
+                lst.append(out)
+                lst.append(str(e))
+            out = "\n".join(lst)
     elif get_platform() == 'darwin':
         rc, out, err = run_lambda("sysctl -n machdep.cpu.brand_string")
     cpu_info = 'None'
@@ -335,10 +370,17 @@ def get_mac_version(run_lambda):
 
 
 def get_windows_version(run_lambda):
-    system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
-    wmic_cmd = os.path.join(system_root, 'System32', 'Wbem', 'wmic')
-    findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
-    return run_and_read_all(run_lambda, '{} os get Caption | {} /v Caption'.format(wmic_cmd, findstr_cmd))
+    ret = run_and_read_all(
+        run_lambda,
+        'powershell.exe "gwmi -Class Win32_OperatingSystem | Select-Object -Property Caption,\
+        OSArchitecture,Version | ConvertTo-Json"',
+    )
+    try:
+        obj = json.loads(ret)
+        ret = f'{obj["Caption"]} ({obj["Version"]} {obj["OSArchitecture"]})'
+    except ValueError as e:
+        ret += f"\n{str(e)}"
+    return ret
 
 
 def get_lsb_version(run_lambda):
@@ -395,7 +437,7 @@ def get_libc_version():
 def get_pip_packages(run_lambda, patterns=None):
     """Return `pip list` output. Note: will also find conda-installed pytorch and numpy packages."""
     if patterns is None:
-        patterns = DEFAULT_PIP_PATTERNS
+        patterns = PIP_PATTERNS + COMMON_PATTERNS + NVIDIA_PATTERNS
 
     # People generally have `pip` as `pip` or `pip3`
     # But here it is invoked as `python -mpip`
