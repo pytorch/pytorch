@@ -1318,7 +1318,7 @@ inline void transpose_mxn<BFloat16>(const BFloat16* src, int64_t ld_src, BFloat1
 }
 
 template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same<T, BFloat16>::value && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
+          typename std::enable_if_t<std::is_same_v<T, BFloat16> && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
 inline void transpose_mxn(const BFloat16* src, int64_t ld_src, BFloat16* dst, int64_t ld_dst) {
   transpose_mxn<BFloat16>(src, ld_src, dst, ld_dst, M, N);
 }
@@ -1360,7 +1360,7 @@ inline void transpose_mxn<Half>(const Half* src, int64_t ld_src, Half* dst, int6
 }
 
 template <typename T, int M, int N,
-          typename std::enable_if_t<std::is_same<T, Half>::value && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
+          typename std::enable_if_t<std::is_same_v<T, Half> && ((M <= 32 && M != 16) || (N <= 32 && N != 16)), int> = 0>
 inline void transpose_mxn(const Half* src, int64_t ld_src, Half* dst, int64_t ld_dst) {
   transpose_mxn<Half>(src, ld_src, dst, ld_dst, M, N);
 }
@@ -1641,8 +1641,8 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
   out1 = out1_values; \
   out2 = out2_values; \
 }
-LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
-LOAD_FP32_VECTORIZED_INIT(Half, fp16);
+LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16)
+LOAD_FP32_VECTORIZED_INIT(Half, fp16)
 
 #else // defined(CPU_CAPABILITY_AVX512)
 #define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \

@@ -19,7 +19,16 @@ JAGGED_OPS_TABLE: Dict[Any, Any] = {}
 
 # Simplifying assumption: we assume that the batch dim is always the left-most
 # dim, and the ragged dim is always the second dim.
-def _outer_to_inner_dim(ndim, dim):
+def _outer_to_inner_dim(ndim, dim, canonicalize=False):
+    from torch._prims_common import canonicalize_dims
+
+    if isinstance(dim, (tuple, list)):
+        output = type(dim)(_outer_to_inner_dim(ndim, d) for d in dim)
+        # ensure no duplicates, which can result from both batch and ragged mapping to 0
+        return type(output)(dict.fromkeys(output))
+
+    if canonicalize:
+        dim = canonicalize_dims(ndim, dim)
     assert dim >= 0 and dim < ndim
     return 0 if dim < 2 else dim - 1
 
@@ -57,8 +66,9 @@ def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
     operate_on_ragged = ragged_idx in wrapped_dims
     operate_on_non_batch = any(d != 0 and d != ragged_idx for d in wrapped_dims)
 
+    # ensure no duplicates, which can result from both batch and ragged mapping to 0
     outer_to_inner_dim = tuple(
-        _outer_to_inner_dim(ndim, d) for d in wrapped_dims if d != 0
+        dict.fromkeys(_outer_to_inner_dim(ndim, d) for d in wrapped_dims)
     )
 
     return outer_to_inner_dim, operate_on_batch, operate_on_ragged, operate_on_non_batch
@@ -207,6 +217,17 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 
     # Handle pointwise fallbacks
     if torch.Tag.pointwise in func.tags:
+        from torch.fx.experimental.symbolic_shapes import is_nested_int
+
+        # No pointwise ops legitimately accept nested int inputs. Without this check,
+        # they will be incorrectly interpreted as tensors.
+        # See https://github.com/pytorch/pytorch/issues/138496
+        for arg in args:
+            if is_nested_int(arg):
+                raise RuntimeError(
+                    f"NestedTensor {func.__name__}: invalid argument {arg}"
+                )
+
         # Assume there aren't additional tensors that aren't the "unary/binary" args
         num_tensor_args = sum(isinstance(x, torch.Tensor) for x in args)
         if num_tensor_args == 1:
@@ -767,21 +788,23 @@ def native_dropout_backward_default(func, *args, **kwargs):
     )
 
 
-@register_jagged_func(torch.ops.aten.prod.dim_int, "self: jt, dim: any, keepdim: any?")
+@register_jagged_func(
+    torch.ops.aten.prod.dim_int,
+    "self: jt_all, dim: any, keepdim: any?, dtype: any?",
+)
 def prod_dim_int(func, *args, **kwargs):
+    return _apply_reduction(func, "prod", 1, *args, **kwargs)
+
+
+@register_jagged_func(torch.ops.aten.prod.default, "self: jt_all, dtype: any?")
+def prod_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
     inp = new_kwargs.pop("input")
-    # TODO: Figure out how to handle this better
-    # keep_dim is required to keep it in jagged format
-    if not new_kwargs["keepdim"]:
-        raise RuntimeError("prod(): keepdim=True must be set for NestedTensor")
-    dim = new_kwargs["dim"]
-    new_kwargs["dim"] = _wrap_jagged_dim(len(inp._size), dim, "prod")
 
-    return NestedTensor(func(inp._values, **new_kwargs), **extract_kwargs(args[0]))
+    return func(inp._values, **new_kwargs)
 
 
 @register_jagged_func(
@@ -1145,6 +1168,101 @@ def is_same_size_default(func, *args, **kwargs):
     return args[0]._size == args[1]._size
 
 
+def _apply_reduction(func, func_name, identity_element, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    # some ops use dim=None to indicate a full reduction; some use an empty dim list
+    full_reduction = new_kwargs["dim"] is None or (
+        isinstance(new_kwargs["dim"], (tuple, list)) and len(new_kwargs["dim"]) == 0
+    )
+    if full_reduction:
+        out = func(inp._values, **new_kwargs)
+        if new_kwargs.get("keepdim", False):
+            if isinstance(out, (tuple, list)):
+                # some ops return multiple things; unsqueeze all of them
+                out = type(out)(o.unsqueeze(inp._ragged_idx) for o in out)
+            else:
+                out = out.unsqueeze(inp._ragged_idx)
+        return out
+
+    # some ops support lists of dims; some don't
+    dim_to_convert = new_kwargs["dim"]
+    is_dimlist = isinstance(new_kwargs["dim"], (tuple, list))
+    if not is_dimlist:
+        dim_to_convert = [dim_to_convert]
+
+    (
+        converted_dim,
+        reduce_on_batch,
+        reduce_on_ragged,
+        reduce_on_non_batch,
+    ) = _wrap_jagged_dims(
+        inp.dim(),
+        dim_to_convert,
+        f"{func_name}",
+        inp._ragged_idx,
+    )
+
+    if not is_dimlist:
+        # convert back from list
+        converted_dim = converted_dim[0]
+    new_kwargs["dim"] = converted_dim
+
+    if reduce_on_ragged and inp._lengths is not None:
+        raise RuntimeError(
+            f"{func_name}(): reducing across the ragged dimension is not supported "
+            "for non-contiguous nested tensors with holes"
+        )
+
+    # raggedness reduced away --> return dense tensor
+    if reduce_on_ragged:
+        # reduction cases: (batch, ragged), (batch, ragged, non-batch), etc.
+        if reduce_on_batch:
+            # no need to read offsets --> apply sum directly on values
+            out = func(inp._values, **new_kwargs)
+        else:
+            # invalid reduction cases: (ragged, non-batch), etc.
+            if reduce_on_non_batch:
+                raise RuntimeError(
+                    f"{func_name}(): reducing along a ragged and non-batch dimension "
+                    "is not supported for nested tensors"
+                )
+
+            # reduction cases: (ragged)
+            # convert to padded dense and reduce
+            dim_to_pass = [inp._ragged_idx] if is_dimlist else inp._ragged_idx
+            out = func(inp.to_padded_tensor(identity_element), dim=dim_to_pass)
+
+        if new_kwargs.get("keepdim", False):
+            if isinstance(out, (tuple, list)):
+                # some ops return multiple things; unsqueeze all of them
+                out = type(out)(o.unsqueeze(inp._ragged_idx) for o in out)
+            else:
+                out = out.unsqueeze(inp._ragged_idx)
+
+        return out
+    # raggedness preserved --> return nested tensor
+    else:
+        # invalid reduction cases: (batch), (batch, non-batch), etc.
+        if reduce_on_batch:
+            raise RuntimeError(
+                f"{func_name}(): reducing along the batch dimension but not "
+                "the ragged dimension is not supported for nested tensors"
+            )
+
+        # reduction cases: (non-batch), (non-batch, non-batch), etc.
+        # apply sum directly on values
+        out = func(inp._values, **new_kwargs)
+        if isinstance(out, (tuple, list)):
+            # some ops return multiple things; wrap each of them as an NJT
+            return type(out)(NestedTensor(o, **extract_kwargs(inp)) for o in out)
+        return NestedTensor(out, **extract_kwargs(inp))
+
+
 @register_jagged_func(torch.ops.aten.sum.default, "self: jt_all, dtype: any?")
 def sum_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -1161,98 +1279,7 @@ def sum_default(func, *args, **kwargs):
     "self: jt_all, dim: any?, keepdim: any?, dtype: any?",
 )
 def sum_dim_IntList(func, *args, **kwargs):
-    """
-    Performs a sum along the provided tensor dimension.
-    Returns a dense tensor if the ragged dimension is reduced away, else returns a nested tensor.
-    """
-    _, new_kwargs = normalize_function(  # type: ignore[misc]
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-    inp = new_kwargs.pop("input")
-
-    (
-        new_kwargs["dim"],
-        reduce_on_batch,
-        reduce_on_ragged,
-        reduce_on_non_batch,
-    ) = _wrap_jagged_dims(
-        inp.dim(),
-        new_kwargs["dim"],
-        "sum",
-        inp._ragged_idx,
-    )
-
-    if reduce_on_ragged and inp._lengths is not None:
-        raise RuntimeError(
-            "sum(): not supported where lengths is not None "
-            + "if reducing across the ragged dimension for NestedTensor"
-        )
-
-    if reduce_on_ragged:  # raggedness reduced away --> return dense tensor
-        if (
-            reduce_on_batch
-        ):  # reduction cases: (batch, ragged), (batch, ragged, non-batch), etc.
-            out = func(
-                inp._values, **new_kwargs
-            )  # no need to read offsets --> apply sum directly on values
-        else:
-            if (
-                reduce_on_non_batch
-            ):  # invalid reduction cases: (ragged, non-batch), etc.
-                raise RuntimeError(
-                    "sum(): not supported along a ragged and non-batch dimension for NestedTensor"
-                )
-            # reduction cases: (ragged)
-            values_ragged_dim_outer = inp._values.permute(
-                inp._ragged_idx - 1,  # outer dimension
-                *range(0, inp._ragged_idx - 1),
-                *range(inp._ragged_idx, inp.dim() - 1),
-            )  # shift reduction dimension of values backward to outer dimension
-
-            # _jagged_to_padded_dense_forward requires values to be a 2D tensor
-            # with the ragged dimension as the 0th dimension
-            max_seqlen = inp._values.shape[inp._ragged_idx - 1]
-            if inp._max_seqlen_tensor is not None:
-                max_seqlen = inp._max_seqlen
-
-            padded = torch.ops.aten._jagged_to_padded_dense_forward(
-                values_ragged_dim_outer.reshape(values_ragged_dim_outer.shape[0], -1),
-                [inp._offsets],
-                max_lengths=[max_seqlen],
-            )
-
-            padded_ragged_dim_original = padded.view(
-                padded.shape[0],
-                max_seqlen,
-                *values_ragged_dim_outer.shape[
-                    1:
-                ],  # expand non-batch dimensions of padded tensor
-            ).permute(
-                0,
-                *range(2, inp._ragged_idx + 1),
-                1,
-                *range(inp._ragged_idx + 1, inp.dim()),
-            )  # shift reduction dimension of padded tensor forward to original ragged dimension
-
-            out = torch.sum(
-                padded_ragged_dim_original,
-                dim=inp._ragged_idx,
-            )  # need to read offsets --> pad jagged dimension and apply sum
-
-        if new_kwargs["keepdim"]:
-            out = out.unsqueeze(inp._ragged_idx)
-        return out
-    else:  # raggedness preserved --> return nested tensor
-        if (
-            reduce_on_batch
-        ):  # invalid reduction cases: (batch), (batch, non-batch), etc.
-            raise RuntimeError(
-                "sum(): not supported along the batch dimension but not the ragged dimension for NestedTensor"
-            )
-        # reduction cases: (non-batch), (non-batch, non-batch), etc.
-        return NestedTensor(
-            func(inp._values, **new_kwargs), **extract_kwargs(inp)
-        )  # apply sum directly on values
+    return _apply_reduction(func, "sum", 0, *args, **kwargs)
 
 
 @register_jagged_func(
@@ -1548,6 +1575,99 @@ def slice_tensor(func, *args, **kwargs):
 
 
 @register_jagged_func(
+    torch.ops.aten.index_put.default,
+    "input: jt_all, indices: any, values: t, accumulate: any?",
+)
+@register_jagged_func(
+    torch.ops.aten.index_put_.default,
+    "input: jt_all, indices: any, values: t, accumulate: any?",
+)
+def index_put_(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp: NestedTensor = new_kwargs.pop("input")
+
+    # For index_put_ to work, we add together the indices of the ragged dimension
+    # and the batch dimension, adding the offsets of each ragged dimension to its
+    # indices
+
+    indices = new_kwargs.pop("indices")
+
+    assert len(indices) <= inp.dim()
+
+    if len(indices) < inp._ragged_idx + 1:
+        if not inp.is_contiguous():
+            raise RuntimeError(
+                "index_put(): If ragged dimension is not part of indices, this only works on contiguous NJTs"
+            )
+        # Ragged dim is NOT part of indices, we need to pad the nested tensor to apply func
+        from .nested_tensor import nested_from_padded
+
+        min_seqlen = inp._maybe_min_seqlen
+        max_seqlen = inp._maybe_max_seqlen
+        padded_max_S = max_seqlen
+        total_L = inp._values.shape[inp._ragged_idx - 1]
+        if padded_max_S is None:
+            # use upper bound on max seqlen if it's not present
+            padded_max_S = total_L
+
+        padded_shape = (
+            *inp.shape[: inp._ragged_idx],
+            padded_max_S,
+            *inp.shape[inp._ragged_idx + 1 :],
+        )
+        padded_inp = inp.to_padded_tensor(0.0, output_size=padded_shape)
+        new_njt = nested_from_padded(
+            func(padded_inp, indices, **new_kwargs),
+            offsets=inp._offsets,
+            ragged_idx=inp._ragged_idx,
+            sum_S=total_L,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
+        )
+
+        if func == torch.ops.aten.index_put_.default:
+            inp._values.copy_(new_njt.values())
+            return inp
+        return new_njt
+
+    # We can run on the underlying values directly
+
+    # Validate indices
+    if inp.lengths() is None:
+        lengths = inp.offsets().diff()
+    else:
+        lengths = inp.lengths()
+    torch._assert_async(
+        torch.all(indices[inp._ragged_idx] < lengths),
+        "Some indices in the ragged dimension are out of bounds!",
+    )
+
+    # Recompute indices for _values
+    ragged_indices = inp.offsets()[indices[0]] + indices[inp._ragged_idx]
+    func_indices = (
+        # before ragged dim
+        indices[1 : inp._ragged_idx]
+        # ragged dim (combined with batch)
+        + [ragged_indices]
+        # after ragged dim
+        + indices[inp._ragged_idx + 1 :]
+    )
+
+    if func == torch.ops.aten.index_put_.default:
+        inp._values = func(inp._values, func_indices, **new_kwargs)
+        return inp
+
+    return NestedTensor(
+        func(inp._values, func_indices, **new_kwargs),
+        **extract_kwargs(inp),
+        lengths=inp.lengths(),
+    )
+
+
+@register_jagged_func(
     torch.ops.aten.convolution.default,
     "input: jt, weight: t, bias: t?, stride: any, padding: any, "
     "dilation: any, transposed: any, output_padding: any, groups: any",
@@ -1566,67 +1686,171 @@ def convolution_default(func, *args, **kwargs):
     torch.ops.aten.mean.dim, "self: jt_all, dim: any?, keepdim: any?, dtype: any?"
 )
 def mean_dim(func, *args, **kwargs):
-    """
-    Performs a mean along the provided tensor dimension.
-    Returns a dense tensor if the ragged dimension is reduced away, else returns a nested tensor.
-    """
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    inp = new_kwargs.pop("input")
-
-    if len(new_kwargs["dim"]) > 1 and (
-        inp._ragged_idx in new_kwargs["dim"] or 0 in new_kwargs["dim"]
-    ):
-        raise RuntimeError(
-            "mean(): not supported across multiple dimensions for NestedTensor "
-            "when either the batch dim or ragged dim is included"
-        )
-
-    (
-        new_kwargs["dim"],
-        reduce_on_batch,
-        reduce_on_ragged,
-        _reduce_on_non_batch,
-    ) = _wrap_jagged_dims(
+    inp = new_kwargs["input"]
+    (_, reduce_on_batch, reduce_on_ragged, reduce_on_non_batch) = _wrap_jagged_dims(
         inp.dim(),
         new_kwargs["dim"],
         "mean",
         inp._ragged_idx,
     )
 
-    if reduce_on_batch:
-        raise RuntimeError(
-            "mean(): not supported along the batch dimension but not the ragged dimension for NestedTensor"
+    if reduce_on_ragged and not reduce_on_batch:
+        assert not reduce_on_non_batch
+        # calculate an intermediate sum and leave the dim in for normalization purposes
+        keepdim = new_kwargs["keepdim"]
+        new_kwargs["keepdim"] = True
+        intermediate_sum = _apply_reduction(
+            torch.ops.aten.sum.dim_IntList, "mean", 0, **new_kwargs
         )
 
-    if reduce_on_ragged and inp._lengths is not None:
-        raise RuntimeError(
-            "mean(): not supported where lengths is not None "
-            + "if reducing across the ragged dimension for NestedTensor"
-        )
-
-    if not new_kwargs["keepdim"]:
-        raise RuntimeError("mean(): not supported when keepdim=False for NestedTensor")
-
-    if reduce_on_ragged:  # raggedness reduced away
-        torch_sum = torch.sum(inp, dim=inp._ragged_idx, keepdim=new_kwargs["keepdim"])
-
-        # for every non-batch dimension,
-        #   unsqueeze lengths into the same shape as the PyTorch sum,
-        #   as the extra dimensions must all be divided by the same length
-        # Note: keepdim=True is on at this point so lengths has to be unsqueezed for
-        # that 1-size dim as well.
-        lengths = inp._offsets.diff()
-        for _ in range(inp.dim() - 1):
+        # normalize by sequence lengths
+        lengths = inp._lengths if inp._lengths is not None else inp._offsets.diff()
+        for _ in range(intermediate_sum.dim() - 1):
             lengths = lengths.unsqueeze(-1)
+        out = intermediate_sum / lengths
+        if not keepdim:
+            out = out.squeeze(inp._ragged_idx)
+        return out
 
-        return torch_sum / lengths.broadcast_to(torch_sum.shape)
+    # at this point, we're just redispatching on the values buffer
+    # since we expect it to be unused, specify a weird intermediate value to
+    # hopefully make errors obvious
+    intermediate_value = 0.42
+    return _apply_reduction(func, "mean", intermediate_value, **new_kwargs)
 
-    return NestedTensor(
-        func(inp._values, **new_kwargs), **extract_kwargs(inp)
-    )  # raggedness preserved
+
+@register_jagged_func(torch.ops.aten.mean.default, "self: jt_all, dtype: any?")
+def mean_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return func(inp._values, **new_kwargs)
+
+
+@register_jagged_func(torch.ops.aten.any.dims, "self: jt_all, dim: any?, keepdim: any?")
+def any_dims(func, *args, **kwargs):
+    return _apply_reduction(func, "any", False, *args, **kwargs)
+
+
+@register_jagged_func(torch.ops.aten.any.dim, "self: jt_all, dim: any, keepdim: any?")
+def any_dim(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    # wrap dim in list to redispatch to dims overload
+    new_kwargs["dim"] = [new_kwargs["dim"]]
+    return any_dims(torch.ops.aten.any.dims, **new_kwargs)
+
+
+@register_jagged_func(torch.ops.aten.all.dims, "self: jt_all, dim: any?, keepdim: any?")
+def all_dims(func, *args, **kwargs):
+    return _apply_reduction(func, "all", True, *args, **kwargs)
+
+
+@register_jagged_func(torch.ops.aten.all.dim, "self: jt_all, dim: any, keepdim: any?")
+def all_dim(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    # wrap dim in list to redispatch to dims overload
+    new_kwargs["dim"] = [new_kwargs["dim"]]
+    return all_dims(torch.ops.aten.all.dims, **new_kwargs)
+
+
+@register_jagged_func(
+    [
+        torch.ops.aten.all.default,
+        torch.ops.aten.any.default,
+        torch.ops.aten.max.default,
+        torch.ops.aten.min.default,
+    ],
+    "self: jt_all",
+)
+def all_any_max_min_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    return func(inp._values, **new_kwargs)
+
+
+@register_jagged_func(torch.ops.aten.min.dim, "self: jt_all, dim: any, keepdim: any?")
+def min_dim(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
+    return _apply_reduction(func, "min", dtype_max, *args, **kwargs)
+
+
+@register_jagged_func(torch.ops.aten.max.dim, "self: jt_all, dim: any, keepdim: any?")
+def max_dim(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
+    return _apply_reduction(func, "max", dtype_min, *args, **kwargs)
+
+
+@register_jagged_func(
+    torch.ops.aten.amin.default, "self: jt_all, dim: any?, keepdim: any?"
+)
+def amin_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
+    return _apply_reduction(func, "amin", dtype_max, *args, **kwargs)
+
+
+@register_jagged_func(
+    torch.ops.aten.amax.default, "self: jt_all, dim: any?, keepdim: any?"
+)
+def amax_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
+    return _apply_reduction(func, "amax", dtype_min, *args, **kwargs)
+
+
+@register_jagged_func(
+    torch.ops.aten.argmin.default, "self: jt_all, dim: any?, keepdim: any?"
+)
+def argmin_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    dtype_max = torch.finfo(new_kwargs["input"].dtype).max
+    return _apply_reduction(func, "argmin", dtype_max, *args, **kwargs)
+
+
+@register_jagged_func(
+    torch.ops.aten.argmax.default, "self: jt_all, dim: any?, keepdim: any?"
+)
+def argmax_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    dtype_min = torch.finfo(new_kwargs["input"].dtype).min
+    return _apply_reduction(func, "argmax", dtype_min, *args, **kwargs)
 
 
 @register_jagged_func(torch.ops.aten.stack.default, "tensors: any, dim: any")
@@ -1679,6 +1903,20 @@ def embedding_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
+    torch.ops.aten.embedding_dense_backward.default,
+    "grad_output: jt, indices: jt, num_weights: any, padding_idx: any, scale_grad_by_freq: any",
+)
+def embedding_dense_backward_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    indices = new_kwargs.pop("indices")
+    grad_output = new_kwargs.pop("grad_output")
+    return func(grad_output._values, indices._values, **new_kwargs)
+
+
+@register_jagged_func(
     [
         torch.ops.aten.values.default,
         torch.ops.aten._nested_get_values.default,
@@ -1709,7 +1947,8 @@ def all_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
-    torch.ops.aten.to_padded_tensor.default, "self: jt, padding: any, output_size: any?"
+    torch.ops.aten.to_padded_tensor.default,
+    "self: jt_all, padding: any, output_size: any?",
 )
 def to_padded_tensor_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -1718,16 +1957,27 @@ def to_padded_tensor_default(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
 
+    if inp._lengths is not None:
+        raise RuntimeError(
+            "to_padded_tensor(): not supported for nested tensors with holes"
+        )
+
     # TODO: Handle the rest of output_size
     output_size = new_kwargs["output_size"]
     if output_size is not None:
         max_seq_len = output_size[inp._ragged_idx]
     else:
-        max_seq_len = inp._max_seqlen
+        max_seq_len = (
+            inp._max_seqlen
+            if inp._max_seqlen_tensor is not None
+            else inp._values.size(0)
+        )
 
-    # only 2D values is supported by the underlying FBGEMM kernel so do shape
-    # gymnastics if needed
+    # only 2D values with ragged packed dim=0 is supported by the underlying FBGEMM
+    # kernel so do shape gymnastics if needed
     values = inp.values()
+    if inp._ragged_idx > 1:
+        values = values.transpose(inp._ragged_idx - 1, 0)
     values_shape = values.shape
     if values.dim() > 2:
         values = values.flatten(start_dim=1)
@@ -1753,6 +2003,8 @@ def to_padded_tensor_default(func, *args, **kwargs):
         padded_out = padded_out.unflatten(-1, values_shape[1:])
     elif len(values_shape) == 1:
         padded_out = padded_out.squeeze(-1)
+    if inp._ragged_idx > 1:
+        padded_out = padded_out.transpose(inp._ragged_idx, 1)
 
     return padded_out
 
@@ -1938,6 +2190,161 @@ def _nested_select_backward_default(func, *args, **kwargs):
     grad_input.select(new_kwargs["dim"], new_kwargs["index"]).copy_(grad_output)
 
     return grad_input
+
+
+@register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
+def record_stream_default(func, *args, **kwargs):
+    inp = args[0]
+    stream = args[1]
+    # ensure all components live until stream computation completes
+    func(inp._values, stream)
+    func(inp._offsets, stream)
+    if inp._lengths is not None:
+        func(inp._lengths, stream)
+
+
+@register_jagged_func(
+    torch.ops.aten.new_empty.default,
+    "self: jt_all, size: any, dtype: any?, layout: any?, device: any?, pin_memory: any?",
+)
+def new_empty_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(  # type: ignore[misc]
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    if len(new_kwargs["size"]) == 0:
+        return func(inp._values, **new_kwargs)
+
+    raise RuntimeError("new_empty() not supported for NJT with shape != ()")
+
+
+from torch._higher_order_ops.flex_attention import (
+    flex_attention as flex_attention_hop,
+    flex_attention_backward as flex_attention_backward_hop,
+)
+from torch.fx.graph_module import GraphModule
+
+
+@flex_attention_hop.py_impl(NestedTensor)  # type: ignore[misc]
+def flex_njt(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    score_mod: Callable,
+    block_mask: Tuple,
+    scale: float,
+    kernel_options: Dict[str, Any],
+    score_mod_other_buffers: Tuple = (),
+    mask_mod_other_buffers: Tuple = (),
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    assert query.dim() == 4 and key.dim() == 4 and value.dim() == 4
+
+    # TODO: Support this if needed; determine if NJT buffers need be unwrapped as dense.
+    if any(
+        isinstance(buf, torch.Tensor) and buf.is_nested
+        for buf in score_mod_other_buffers + mask_mod_other_buffers
+    ):
+        raise RuntimeError(
+            "flex_attention(): Nested tensor score_mod / mask_mod buffers are not "
+            "currently supported. Please file an issue if this is important to you."
+        )
+
+    # need to pass dense tensor of shape (B, n_heads, sum(seq_len), D)
+    output = flex_attention_hop(
+        query.values().unsqueeze(0),
+        key.values().unsqueeze(0),
+        value.values().unsqueeze(0),
+        score_mod=score_mod,
+        block_mask=block_mask,
+        scale=scale,
+        kernel_options=kernel_options,
+        score_mod_other_buffers=score_mod_other_buffers,
+        mask_mod_other_buffers=mask_mod_other_buffers,
+    )
+
+    # wrap outputs as NJT
+    output_njt = torch.nested.nested_tensor_from_jagged(
+        output[0].transpose(1, 2).squeeze(0),
+        query._offsets,  # type: ignore[attr-defined]
+        query._lengths,  # type: ignore[attr-defined]
+        min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
+        max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
+    ).transpose(1, 2)
+
+    logsumexp_njt = torch.nested.nested_tensor_from_jagged(
+        output[1].transpose(1, 2).squeeze(0),
+        query._offsets,  # type: ignore[attr-defined]
+        query._lengths,  # type: ignore[attr-defined]
+        min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
+        max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
+    ).transpose(1, 2)
+
+    return (output_njt, logsumexp_njt)
+
+
+@flex_attention_backward_hop.py_impl(NestedTensor)  # type: ignore[misc]
+def flex_njt_backward(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    out: torch.Tensor,
+    logsumexp: torch.Tensor,
+    grad_out: torch.Tensor,
+    grad_logsumexp: torch.Tensor,
+    fw_graph: Union[Callable, GraphModule],
+    joint_graph: GraphModule,
+    block_mask: Tuple,
+    scale: float,
+    kernel_options: Dict[str, Any],
+    score_mod_other_buffers: Tuple = (),
+    mask_mod_other_buffers: Tuple = (),
+) -> Tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, Tuple[Optional[torch.Tensor], ...]
+]:
+    output = flex_attention_backward_hop(
+        query.values().unsqueeze(0),
+        key.values().unsqueeze(0),
+        value.values().unsqueeze(0),
+        out=out.values().unsqueeze(0),
+        logsumexp=logsumexp.values().unsqueeze(0),
+        grad_out=grad_out.values().unsqueeze(0),
+        grad_logsumexp=grad_logsumexp.values().unsqueeze(0),
+        fw_graph=fw_graph,
+        joint_graph=joint_graph,
+        block_mask=block_mask,
+        scale=scale,
+        kernel_options=kernel_options,
+        score_mod_other_buffers=score_mod_other_buffers,
+        mask_mod_other_buffers=mask_mod_other_buffers,
+    )
+
+    # wrap grads as NJTs
+    dense_q_grad, dense_k_grad, dense_v_grad, score_mod_other_buffer_grads = output
+    njt_q_grad = torch.nested.nested_tensor_from_jagged(
+        dense_q_grad.transpose(1, 2).squeeze(0),
+        query._offsets,  # type: ignore[attr-defined]
+        query._lengths,  # type: ignore[attr-defined]
+        min_seqlen=query._maybe_min_seqlen,  # type: ignore[attr-defined]
+        max_seqlen=query._maybe_max_seqlen,  # type: ignore[attr-defined]
+    ).transpose(1, 2)
+    njt_k_grad = torch.nested.nested_tensor_from_jagged(
+        dense_k_grad.transpose(1, 2).squeeze(0),
+        key._offsets,  # type: ignore[attr-defined]
+        key._lengths,  # type: ignore[attr-defined]
+        min_seqlen=key._maybe_min_seqlen,  # type: ignore[attr-defined]
+        max_seqlen=key._maybe_max_seqlen,  # type: ignore[attr-defined]
+    ).transpose(1, 2)
+    njt_v_grad = torch.nested.nested_tensor_from_jagged(
+        dense_v_grad.transpose(1, 2).squeeze(0),
+        value._offsets,  # type: ignore[attr-defined]
+        value._lengths,  # type: ignore[attr-defined]
+        min_seqlen=value._maybe_min_seqlen,  # type: ignore[attr-defined]
+        max_seqlen=value._maybe_max_seqlen,  # type: ignore[attr-defined]
+    ).transpose(1, 2)
+
+    return (njt_q_grad, njt_k_grad, njt_v_grad, score_mod_other_buffer_grads)
 
 
 # Make the dummy available on the C++ side.

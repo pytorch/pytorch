@@ -180,19 +180,10 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 
 static bool getDisableAddmmCudaLt() {
     static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
-    // When DISABLE_ADDMM_CUDA_LT is unset the default is TRUE on
-    // AMD architectures otherwise it is FALSE.
-#ifdef USE_ROCM
-    if (env_value != nullptr && strcmp(env_value, "0") == 0) {
-      return false;
-    }
-    return true;
-#else
     if (env_value != nullptr && strcmp(env_value, "1") == 0) {
       return true;
     }
     return false;
-#endif
 }
 
 #ifdef USE_ROCM
@@ -211,7 +202,6 @@ static bool isSupportedHipLtROCmArch(int index) {
             return true;
         }
     }
-    TORCH_CHECK(false, "Attempting to use hipBLASLt on a unsupported architecture!");
     return false;
 }
 #endif
@@ -274,7 +264,14 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes;
   bool useLtInterface = false;
+#if defined(USE_ROCM)
+  // When hipBLASLt is not supported on the architecture,
+  // disable_addmm_cuda_lt will always be to set to true
+  static bool disable_addmm_cuda_lt =
+    !isSupportedHipLtROCmArch(self.device().index()) || getDisableAddmmCudaLt();
+#else
   static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
+#endif
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
@@ -292,7 +289,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
           self.is_contiguous() && result.is_contiguous() &&
 #ifdef USE_ROCM
-          isSupportedHipLtROCmArch(self.device().index()) &&
           (scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
            scalar_type == at::ScalarType::BFloat16) &&
@@ -325,14 +321,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     }
     self__sizes = self_->sizes();
   } else {
-#if defined(USE_ROCM)
-    useLtInterface = !disable_addmm_cuda_lt &&
-        result.dim() == 2 && result.is_contiguous() &&
-        isSupportedHipLtROCmArch(self.device().index()) &&
-        (scalar_type == at::ScalarType::Float ||
-          scalar_type == at::ScalarType::Half ||
-          scalar_type == at::ScalarType::BFloat16);
-#endif
     self_ = c10::MaybeOwned<Tensor>::borrowed(self);
     self__sizes = self_->sizes();
     TORCH_CHECK(result.dim() == 2, "tensors must be 2-D");

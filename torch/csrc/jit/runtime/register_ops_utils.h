@@ -200,7 +200,7 @@ void listRemove(Stack& stack) {
   if (pos != list.end()) {
     list.erase(pos);
   } else {
-    AT_ERROR("list.remove(x): x not in list");
+    TORCH_CHECK(false, "list.remove(x): x not in list");
   }
 }
 
@@ -251,7 +251,7 @@ void listIndex(Stack& stack) {
   if (pos != list.end()) {
     push(stack, static_cast<int64_t>(std::distance(list.begin(), pos)));
   } else {
-    AT_ERROR("'", elem, "' is not in list");
+    TORCH_CHECK(false, "'", elem, "' is not in list");
   }
 }
 

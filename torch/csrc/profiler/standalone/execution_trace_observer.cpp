@@ -339,6 +339,8 @@ static void finalizeExecutionTraceOutput(ExecutionTraceObserver& ob) {
 inline ExecutionTraceObserver::ID getObjectID(
     ExecutionTraceObserver& ob,
     const void* t) {
+  const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
+
   auto iter = ob.objectId.find(t);
   if (iter == ob.objectId.end()) {
     ExecutionTraceObserver::ID objectId = ob.getNewID();
@@ -569,26 +571,29 @@ static void recordOperatorStart(
   auto tid = fn.threadId();
 
   try {
-    const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
+    {
+      const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
 
-    // if current thread stack is empty, push the root node to the stack first
-    if (ob.opStack[tid].empty()) {
-      auto thread_node_id = ob.getNewID();
-      ob.opStack[tid].push(thread_node_id);
-      writeJsonNode(
-          ob.out,
-          "[pytorch|profiler|execution_trace|thread]",
-          thread_node_id,
-          0, // rf_id
-          kRootId,
-          0, // fw_parent
-          -1, // seq_id
-          static_cast<std::underlying_type_t<RecordScope>>(
-              RecordScope::USER_SCOPE),
-          tid,
-          0); // fw_tid
-      ob.out << ",";
+      // if current thread stack is empty, push the root node to the stack first
+      if (ob.opStack[tid].empty()) {
+        auto thread_node_id = ob.getNewID();
+        ob.opStack[tid].push(thread_node_id);
+        writeJsonNode(
+            ob.out,
+            "[pytorch|profiler|execution_trace|thread]",
+            thread_node_id,
+            0, // rf_id
+            kRootId,
+            0, // fw_parent
+            -1, // seq_id
+            static_cast<std::underlying_type_t<RecordScope>>(
+                RecordScope::USER_SCOPE),
+            tid,
+            0); // fw_tid
+        ob.out << ",";
+      }
     }
+
     fc.name = fn.name();
     auto num_inputs = fn.num_inputs();
     const auto inputs = fn.inputs();
@@ -619,17 +624,21 @@ static void recordOperatorStart(
 
     handleKernelBackendInfo(fc, fn);
 
-    fc.parentId = ob.opStack[tid].top();
-    // get parent id from the forward stack, this can be different for
-    // autograd ops, which may execute on a different thread than the original
-    // thread (which should have the parent op on the stack).
-    auto fw_tid = fn.forwardThreadId();
-    if (fw_tid != 0) {
-      fc.fwParentId = ob.opStack[fw_tid].top();
+    {
+      const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
+
+      fc.parentId = ob.opStack[tid].top();
+      // get parent id from the forward stack, this can be different for
+      // autograd ops, which may execute on a different thread than the original
+      // thread (which should have the parent op on the stack).
+      auto fw_tid = fn.forwardThreadId();
+      if (fw_tid != 0) {
+        fc.fwParentId = ob.opStack[fw_tid].top();
+      }
+      // all input nodes should have id > opId
+      fc.opId = ob.getNewID();
+      ob.opStack[tid].push(fc.opId);
     }
-    // all input nodes should have id > opId
-    fc.opId = ob.getNewID();
-    ob.opStack[tid].push(fc.opId);
 
   } catch (const std::exception& e) {
     LOG(WARNING) << "Exception in execution trace observer: " << e.what();
@@ -712,10 +721,6 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     std::vector<std::string> output_shapes;
     std::vector<std::string> output_values;
     try {
-      const std::lock_guard<std::recursive_mutex> lock(ob->gMutex);
-      // remove current op id from stack
-
-      ob->opStack[fn.threadId()].pop();
       for (const auto i : c10::irange(output_start, outputs.size())) {
         appendValueInfo(
             *ob,
@@ -734,31 +739,37 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
 
       const std::string additiona_attrs =
           fn.isNcclMeta() ? getCommsNodeAttrs(fn) : "";
+      {
+        const std::lock_guard<std::recursive_mutex> lock(ob->gMutex);
 
-      writeJsonNode(
-          ob->out,
-          fc.name,
-          fc.opId,
-          fn.handle(),
-          fc.parentId,
-          fc.fwParentId,
-          fn.seqNr(),
-          static_cast<std::underlying_type_t<RecordScope>>(fn.scope()),
-          fn.threadId(),
-          fn.forwardThreadId(),
-          vectorToString(fc.inputValues),
-          vectorToString(fc.inputShapes),
-          vectorToString(fc.inputStrides),
-          vectorToString(fc.inputTypes),
-          vectorToString(output_values),
-          vectorToString(output_shapes),
-          vectorToString(output_strides),
-          vectorToString(output_types),
-          op_schema_str,
-          fc.kernelBackend,
-          fc.kernelFile,
-          additiona_attrs);
-      ob->out << ",";
+        // remove current op id from stack
+        ob->opStack[fn.threadId()].pop();
+
+        writeJsonNode(
+            ob->out,
+            fc.name,
+            fc.opId,
+            fn.handle(),
+            fc.parentId,
+            fc.fwParentId,
+            fn.seqNr(),
+            static_cast<std::underlying_type_t<RecordScope>>(fn.scope()),
+            fn.threadId(),
+            fn.forwardThreadId(),
+            vectorToString(fc.inputValues),
+            vectorToString(fc.inputShapes),
+            vectorToString(fc.inputStrides),
+            vectorToString(fc.inputTypes),
+            vectorToString(output_values),
+            vectorToString(output_shapes),
+            vectorToString(output_strides),
+            vectorToString(output_types),
+            op_schema_str,
+            fc.kernelBackend,
+            fc.kernelFile,
+            additiona_attrs);
+        ob->out << ",";
+      }
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name
                    << " (" << fc.opId << ")] " << e.what();

@@ -54,7 +54,7 @@ from ..utils import (
     tensortype_to_dtype,
     unpatched_nn_module_getattr,
 )
-from .base import MutableLocal, VariableTracker
+from .base import ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 
 
@@ -116,7 +116,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def as_proxy(self):
         return self.value
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"UserDefinedClassVariable({self.value})"
 
     @staticmethod
@@ -303,7 +303,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not kwargs
             and "__subclasses__" not in self.value.__dict__
         ):
-            options = {"mutable_local": MutableLocal()}
+            options = {"mutation_type": ValueMutationNew()}
             subs_as_vars: List[VariableTracker] = []
             for sub in self.value.__subclasses__():
                 source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
@@ -368,20 +368,37 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 {},
                 collections.defaultdict,
                 args[0],
-                mutable_local=MutableLocal(),
+                mutation_type=ValueMutationNew(),
             )
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:
                 unimplemented("TypedDict with optional keys not supported")
             return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
-        elif self.value is collections.deque and not kwargs:
-            if len(args) == 0:
-                items = []
-            elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
-                items = args[0].force_unpack_var_sequence(tx)
+        elif self.value is collections.deque:
+            maxlen = variables.ConstantVariable.create(None)
+            if not kwargs:
+                if len(args) == 0:
+                    items = []
+                elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+                    items = args[0].force_unpack_var_sequence(tx)
+                elif len(args) == 2 and args[0].has_force_unpack_var_sequence(tx):
+                    items = args[0].force_unpack_var_sequence(tx)
+                    maxlen = args[1]
+                else:
+                    unimplemented("deque() with more than 2 arg not supported")
+            elif tuple(kwargs) == ("maxlen",):
+                maxlen = kwargs["maxlen"]
+                if len(args) == 0:
+                    items = []
+                if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+                    items = args[0].force_unpack_var_sequence(tx)
+                else:
+                    unimplemented("deque() with more than 1 arg not supported")
             else:
-                unimplemented("deque() with more than 1 arg not supported")
-            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
+                unimplemented("deque() with invalid kwargs not supported")
+            return variables.lists.DequeVariable(
+                items, maxlen=maxlen, mutation_type=ValueMutationNew()
+            )
         elif self.value is functools.partial:
             if not args:
                 unimplemented("functools.partial malformed")
@@ -504,7 +521,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
         elif variables.CustomizedDictVariable.is_matching_cls(self.value):
-            options = {"mutable_local": MutableLocal()}
+            options = {"mutation_type": ValueMutationNew()}
             return variables.CustomizedDictVariable.create(
                 self.value, args, kwargs, options
             )
@@ -516,7 +533,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 variables.BuiltinVariable(list).call_function(tx, args, kwargs).items,
                 user_cls=self.value,
                 user_cls_source=self.source,
-                mutable_local=MutableLocal(),
+                mutation_type=ValueMutationNew(),
             )
         elif (
             self.value in self._in_graph_classes()
@@ -554,7 +571,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return tensor_variable
         elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
-            options = {"mutable_local": MutableLocal()}
+            options = {"mutation_type": ValueMutationNew()}
             return variables.EnumVariable.create(self.value, args[0], options)
         elif self.value is random.Random:
             if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
@@ -1344,13 +1361,13 @@ class RemovableHandleVariable(VariableTracker):
 
     def __init__(
         self,
-        mutable_local=None,
+        mutation_type=None,
         # index of the registration in the side_effects owned register_hook/handle list, used during removal.
         idx=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.mutable_local = mutable_local
+        self.mutation_type = mutation_type
         self.idx = idx
 
     def call_method(self, tx: "InstructionTranslator", method_name, args, kwargs):

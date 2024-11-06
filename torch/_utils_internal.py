@@ -4,11 +4,15 @@ import logging
 import os
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing_extensions import ParamSpec
 
 import torch
 from torch._strobelight.compile_time_profiler import StrobelightCompileTimeProfiler
 
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 
@@ -76,12 +80,16 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
 
 
 # NB!  This treats "skip" kwarg specially!!
-def compile_time_strobelight_meta(phase_name):
-    def compile_time_strobelight_meta_inner(function):
+def compile_time_strobelight_meta(
+    phase_name: str,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    def compile_time_strobelight_meta_inner(
+        function: Callable[_P, _T],
+    ) -> Callable[_P, _T]:
         @functools.wraps(function)
-        def wrapper_function(*args, **kwargs):
-            if "skip" in kwargs:
-                kwargs["skip"] = kwargs["skip"] + 1
+        def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+            if "skip" in kwargs and isinstance(skip := kwargs["skip"], int):
+                kwargs["skip"] = skip + 1
 
             if not StrobelightCompileTimeProfiler.enabled:
                 return function(*args, **kwargs)
@@ -272,7 +280,7 @@ def justknobs_feature(
     return justknobs_check(name)
 
 
-def justknobs_check(name: str) -> bool:
+def justknobs_check(name: str, default: bool = True) -> bool:
     """
     This function can be used to killswitch functionality in FB prod,
     where you can toggle this value to False in JK without having to
@@ -295,7 +303,7 @@ def justknobs_check(name: str) -> bool:
     fork safe and you will break anyone who forks the process and then
     hits JK again.
     """
-    return True
+    return default
 
 
 def justknobs_getval_int(name: str) -> int:
@@ -336,6 +344,10 @@ def max_clock_rate():
             return 1100
 
 
+def get_mast_job_name_version() -> Optional[Tuple[str, int]]:
+    return None
+
+
 TEST_MASTER_ADDR = "127.0.0.1"
 TEST_MASTER_PORT = 29500
 # USE_GLOBAL_DEPS controls whether __init__.py tries to load
@@ -359,7 +371,6 @@ def maybe_upload_prof_stats_to_manifold(profile_path: str) -> Optional[str]:
 def log_chromium_event_internal(
     event: Dict[str, Any],
     stack: List[str],
-    compile_id: Optional[str],
     logger_uuid: str,
     start_time_ns: int,
 ):
