@@ -293,7 +293,7 @@ RegisterOperators reg({
     DEFINE_TORCH_TENSOR_OP(
         bool,
         bool,
-        at::empty({}, at::device(at::kCPU).dtype(at::kBool)).fill_(scalar_val))
+        at::empty({}, at::CPU(at::kBool).options()).fill_(scalar_val))
         DEFINE_TORCH_TENSOR_OP(
             float,
             double,

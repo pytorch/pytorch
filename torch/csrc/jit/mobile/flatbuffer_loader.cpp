@@ -469,8 +469,8 @@ IValue parseBasic(
 at::Tensor parseTensorFromMetadata(
     FlatbufferLoader* loader,
     const mobile::serialization::TensorMetadata* tensor_md) {
-  auto type = static_cast<at::ScalarType>(tensor_md->scalar_type());
-  auto options = at::device(at::kCPU).dtype(type);
+  at::ScalarType type = static_cast<at::ScalarType>(tensor_md->scalar_type());
+  auto options = at::CPU(type).options();
   at::Tensor tensor;
   if (tensor_md->quantized_schema() != nullptr) {
     // is quantized
