@@ -822,9 +822,12 @@ def _engine_run_backward(
     if attach_logging_hooks:
         unregister_hooks = _register_logging_hooks_on_whole_graph(t_outputs)
     try:
-        return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+        # import fbvscode; fbvscode.set_trace()
+        a = Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, *args, **kwargs
         )  # Calls into the C++ engine to run the backward pass
+        # import fbvscode; fbvscode.set_trace()
+        return a
     finally:
         if attach_logging_hooks:
             unregister_hooks()  # type: ignore[possibly-undefined]

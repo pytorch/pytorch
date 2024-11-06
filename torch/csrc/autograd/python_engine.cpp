@@ -203,6 +203,14 @@ PyObject* THPEngine_run_backward(
                                              "allow_unreachable",
                                              "accumulate_grad",
                                              nullptr};
+  
+  std::cout << "HELLO" << std::endl;
+
+  // Print self, args, and kwargs
+  std::cout << "self: " << PyUnicode_AsUTF8(PyObject_Repr(self)) << std::endl;
+  std::cout << "args: " << PyUnicode_AsUTF8(PyObject_Repr(args)) << std::endl;
+  std::cout << "kwargs: " << PyUnicode_AsUTF8(PyObject_Repr(kwargs)) << std::endl;
+  
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
