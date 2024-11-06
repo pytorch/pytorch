@@ -678,7 +678,12 @@ class SymFloat:
         return hash(builtins.float(self))
 
     def conjugate(self) -> "SymFloat":
+        """Returns the complex conjugate of the float."""
         return self
+
+    def hex(self) -> str:
+        """Returns the hexadecimal representation of the float."""
+        return self.node.guard_float("", 0).hex()
 
 
 class SymBool:
@@ -2254,9 +2259,9 @@ class _TorchCompileInductorWrapper:
             )
 
     def apply_options(self, options: _Optional[_Dict[str, _Any]]):
-        from torch._inductor.bisect_helper import BisectionManager
+        from torch._inductor.compiler_bisector import CompilerBisector
 
-        if bisect_changes := BisectionManager.get_config_change("inductor"):
+        if bisect_changes := CompilerBisector.get_config_change("inductor"):
             options = {} if options is None else options
             options = (
                 {**bisect_changes} if options is None else {**options, **bisect_changes}  # type: ignore[dict-item]
@@ -2495,9 +2500,9 @@ def compile(
     if mode is None and options is None:
         mode = "default"
 
-    from torch._inductor.bisect_helper import BisectionManager
+    from torch._inductor.compiler_bisector import CompilerBisector
 
-    if bisect_backend := BisectionManager.get_backend():
+    if bisect_backend := CompilerBisector.get_backend():
         backend = bisect_backend
 
     if backend == "inductor":
