@@ -379,7 +379,7 @@ static std::optional<int64_t> maybe_current_level() {
     int64_t current_level = maybe_layer->layerId();
     return current_level;
   }
-  return nullopt;
+  return std::nullopt;
 }
 
 static void tls_set_vmap_excluded(bool excluded) {

@@ -54,7 +54,7 @@ from ..utils import (
     tensortype_to_dtype,
     unpatched_nn_module_getattr,
 )
-from .base import MutableLocal, VariableTracker
+from .base import ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 
 
@@ -181,7 +181,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             return super().var_getattr(tx, name)
 
-        obj = inspect.getattr_static(self.value, name, None)
+        try:
+            obj = inspect.getattr_static(self.value, name)
+        except AttributeError:
+            obj = None
 
         if isinstance(obj, staticmethod):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
@@ -203,9 +206,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             ):
                 return VariableTracker.build(tx, obj.__get__(self.value), source)
 
-        if inspect.ismemberdescriptor(obj) or inspect.isdatadescriptor(obj):
-            value = getattr(self.value, name)
-            return VariableTracker.build(tx, value, source)
         if ConstantVariable.is_literal(obj):
             return ConstantVariable.create(obj)
         elif isinstance(obj, enum.Enum):
@@ -303,7 +303,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not kwargs
             and "__subclasses__" not in self.value.__dict__
         ):
-            options = {"mutable_local": MutableLocal()}
+            options = {"mutation_type": ValueMutationNew()}
             subs_as_vars: List[VariableTracker] = []
             for sub in self.value.__subclasses__():
                 source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
@@ -368,7 +368,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 {},
                 collections.defaultdict,
                 args[0],
-                mutable_local=MutableLocal(),
+                mutation_type=ValueMutationNew(),
             )
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:
@@ -397,7 +397,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             else:
                 unimplemented("deque() with invalid kwargs not supported")
             return variables.lists.DequeVariable(
-                items, maxlen=maxlen, mutable_local=MutableLocal()
+                items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
         elif self.value is functools.partial:
             if not args:
@@ -521,7 +521,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
         elif variables.CustomizedDictVariable.is_matching_cls(self.value):
-            options = {"mutable_local": MutableLocal()}
+            options = {"mutation_type": ValueMutationNew()}
             return variables.CustomizedDictVariable.create(
                 self.value, args, kwargs, options
             )
@@ -533,7 +533,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 variables.BuiltinVariable(list).call_function(tx, args, kwargs).items,
                 user_cls=self.value,
                 user_cls_source=self.source,
-                mutable_local=MutableLocal(),
+                mutation_type=ValueMutationNew(),
             )
         elif (
             self.value in self._in_graph_classes()
@@ -571,7 +571,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return tensor_variable
         elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
-            options = {"mutable_local": MutableLocal()}
+            options = {"mutation_type": ValueMutationNew()}
             return variables.EnumVariable.create(self.value, args[0], options)
         elif self.value is random.Random:
             if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
@@ -1361,13 +1361,13 @@ class RemovableHandleVariable(VariableTracker):
 
     def __init__(
         self,
-        mutable_local=None,
+        mutation_type=None,
         # index of the registration in the side_effects owned register_hook/handle list, used during removal.
         idx=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.mutable_local = mutable_local
+        self.mutation_type = mutation_type
         self.idx = idx
 
     def call_method(self, tx: "InstructionTranslator", method_name, args, kwargs):
