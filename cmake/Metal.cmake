@@ -2,6 +2,59 @@ if(NOT APPLE)
     return()
 endif()
 
+set(METAL_CFLAGS -Wall -Wextra -fno-fast-math)
+if(WERROR)
+    string(APPEND METAL_CFLAGS -Werror)
+endif()
+
+function(metal_to_air SRC TARGET FLAGS)
+    add_custom_command(COMMAND xcrun metal -c ${SRC} -o ${TARGET} ${FLAGS} ${METAL_CFLAGS}
+                       DEPENDS ${SRC}
+                       OUTPUT ${TARGET}
+                       COMMENT "Compiling ${SRC} to ${TARGET}"
+                       VERBATIM)
+endfunction()
+
+function(air_to_metallib TARGET OBJECTS)
+    set(_OBJECTS ${OBJECTS} ${ARGN})
+    add_custom_command(COMMAND xcrun metallib -o ${TARGET} ${_OBJECTS}
+                       DEPENDS ${_OBJECTS}
+                       OUTPUT ${TARGET}
+                       COMMENT "Linking ${TARGET}"
+                       VERBATIM)
+endfunction()
+
+function(metal_to_metallib_h SRC TGT)
+    file(READ ${SRC} SHADER_CONTENT)
+    file(WRITE ${TGT} "#include <ATen/native/mps/OperationUtils.h>\n")
+    file(APPEND ${TGT} "static ::at::native::mps::MetalShaderLibrary lib(R\"SHDR(\n")
+    file(APPEND ${TGT} "${SHADER_CONTENT}")
+    file(APPEND ${TGT} ")SHDR\");\n")
+endfunction()
+
+set(BFLOAT_METAL_CODE "
+  kernel void inc(device bfloat* ptr,
+                   uint idx [[thread_position_in_grid]]) {
+    ptr[idx] += 1;
+  }
+")
+if(NOT CAN_COMPILE_METAL_FOUND)
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bfloat_inc.metal" "${BFLOAT_METAL_CODE}")
+    execute_process(COMMAND xcrun metal -std=metal3.1 bfloat_inc.metal
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+                    OUTPUT_VARIABLE XCRUN_OUTPUT
+                    ERROR_VARIABLE XCRUN_OUTPUT
+                    RESULT_VARIABLE XCRUN_RC)
+    if(${XCRUN_RC} EQUAL 0)
+        message(STATUS "Machine can compile metal shaders")
+        set(CAN_COMPILE_METAL YES CACHE BOOL "Host can compile metal shaders")
+    else()
+        message(WARNING "Machine can not compile metal shaders, fails with ${XCRUN_OUTPUT}")
+        set(CAN_COMPILE_METAL NO CACHE BOOL "Host can compile metal shaders")
+    endif()
+    set(CAN_COMPILE_METAL_FOUND YES CACHE INTERNAL "Run check for shader compiler")
+endif()
+
 if(NOT USE_PYTORCH_METAL)
     return()
 endif()
