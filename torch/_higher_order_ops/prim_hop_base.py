@@ -90,6 +90,12 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
         # In the PT2 stack, this is Dynamo's responsibility to figure out.
         return PrimHOPBaseFunction.apply(self, subgraph, kwargs, *operands)
 
+    def _forward_kwargs(self, *_, **kwargs):
+        return kwargs
+
+    def _backward_kwargs(self, *_, **kwargs):
+        return kwargs
+
     def _call_CompositeExplicitAutograd(self, subgraph, operands, *_, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
@@ -100,7 +106,7 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
     def _call_ProxyTorchDispatchMode(
         self, proxy_mode, subgraph, operands, *_, **kwargs
     ):
-        traced_graph = reenter_make_fx(subgraph)(*operands)
+        traced_graph = self._trace_subgraph(proxy_mode, subgraph, operands, **kwargs)
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         qualname = proxy_mode.tracer.get_fresh_qualname("subgraph")
         proxy_mode.tracer.root.register_module(qualname, traced_graph)
@@ -116,6 +122,10 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer  # type: ignore[arg-type]
         )
+
+    def _trace_subgraph(self, proxy_mode, subgraph, operands, *_, **kwargs):
+        traced_graph = reenter_make_fx(subgraph)(*operands)
+        return traced_graph
 
     def _call_FakeTensorMode(self, mode, subgraph, operands, *_, **kwargs):
         # TODO: this should probably route through FakeTensorMode to reuse caching
@@ -133,6 +143,11 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
             out = self(functionalized_subgraph, unwrapped_operands, **kwargs)
         return ctx.wrap_tensors(out)
 
+    def _dynamo_call_function_hook(self, tx, body_gmod, kwargs):
+        from torch._dynamo.variables.higher_order_ops import add_subgraph
+
+        return add_subgraph(tx, "subgraph", body_gmod), kwargs
+
 
 class PrimHOPBaseFunction(torch.autograd.Function):
     @staticmethod
@@ -143,7 +158,7 @@ class PrimHOPBaseFunction(torch.autograd.Function):
         ctx.kwargs = kwargs
 
         with torch._C._AutoDispatchBelowAutograd():
-            return hop(subgraph, operands, **kwargs)
+            return hop(subgraph, operands, **hop._forward_kwargs(**kwargs))
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -166,7 +181,11 @@ class PrimHOPBaseFunction(torch.autograd.Function):
             None,
             None,
             None,
-            *ctx.hop(joint_graph, (*grad_outputs, *operands), **ctx.kwargs),
+            *ctx.hop(
+                joint_graph,
+                (*grad_outputs, *operands),
+                **ctx.hop._backward_kwargs(**ctx.kwargs),
+            ),
         )
 
 

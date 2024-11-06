@@ -644,8 +644,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             or value.__name__ == "auto_functionalized_v2"
         ):
             return AutoFunctionalizeHigherOrderVariable(value, source, **kwargs)
-        elif value.__name__ == "invoke_subgraph":
-            return InvokeSubgraphHigherOrderVariable(value, source, **kwargs)
         elif isinstance(value, PrimHOPBase):
             return PrimHOPBaseVariable(value, source, **kwargs)
         else:
@@ -1492,7 +1490,13 @@ class FunctionalCallVariable(FunctorchHigherOrderVariable):
 
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def install_subgraph_in_output_graph(
-        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
+        self,
+        tx,
+        fn_vt,
+        fn_args_vt,
+        fn_kwargs_vt,
+        body_gmod,
+        attr_name="wrap_body",
     ):
         return add_subgraph(
             tx,
@@ -1505,7 +1509,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         tx: "InstructionTranslator",
         fn_vt,
         fn_args_vt,
-        kwargs,
+        fn_kwargs_vt,
         description,
         under_activation_checkpoint=False,
         *,
@@ -1521,7 +1525,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx,
             fn_vt,
             fn_args_vt,
-            kwargs,
+            fn_kwargs_vt,
             description,
             source_target=self.value,
             should_flatten_outputs=True,
@@ -1533,9 +1537,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx,
             fn_vt,
             fn_args_vt,
-            kwargs,
+            fn_kwargs_vt,
             body_gmod,
-            attr_name=subgraph_name,
+            subgraph_name,
         )
         body_node = make_attr(tx, body_name)
 
@@ -2630,20 +2634,41 @@ class PrimHOPBaseVariable(WrapHigherOrderVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        (
-            p_args,
-            p_kwargs,
-            example_value,
-            body_r,
-            treespec,
-            body_gmod,
-            body_name,
-        ) = self.create_wrapped_node(
-            tx, args[0], args[1].items, {}, self.value._name, subgraph_name="subgraph"
+        from torch._dynamo.variables.higher_order_ops import (
+            _call_function_and_unflatten_output,
         )
-        assert len(p_kwargs) == 0
-
         from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
+
+        (
+            (body_r, treespec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            args[0],
+            args[1].items,
+            {},
+            self.value._name,
+            source_target=self.value,
+            should_flatten_outputs=True,
+            under_activation_checkpoint=False,
+        )
+
+        body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
+
+        body_name, kwargs = self.value._dynamo_call_function_hook(tx, body_gmod, kwargs)
+        body_node = make_attr(tx, body_name)
+
+        # Since, we call `speculate_subgraph` with `set_subgraph_inputs="automatic`,
+        # all the arguments are lifted.
+        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+
+        proxy_args = (body_node,) + lifted_args
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
 
         fake_inputs = [
             node.meta["example_value"]
@@ -2661,90 +2686,12 @@ class PrimHOPBaseVariable(WrapHigherOrderVariable):
             lambda a: a.node.meta["example_value"],
             body_r.as_proxy(),
         )
+
         p_args = (
-            p_args[0],
-            p_args[1:],
+            proxy_args[0],
+            proxy_args[1:],
         )
         p_kwargs = {key: value.as_proxy() for key, value in kwargs.items()}
         return _call_function_and_unflatten_output(
             tx, self.value, p_args, p_kwargs, flat_example_value, treespec
-        )
-
-
-class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
-    def install_subgraph_in_output_graph(
-        self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
-    ):
-        # Check if the subgraph from speculate_subgraph (body_gmod) and the fake
-        # inputs have already been seen before. If yes, the subgraph is already
-        # installed in the output graph and we can just access the subgraph
-        # using the saved attr name.
-        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
-
-        fake_inputs = [
-            node.meta["example_value"]
-            for node in body_gmod.graph.nodes
-            if node.op == "placeholder"
-        ]
-
-        # TODO(anijain2305) - This might be too big of a limitation. Consider
-        # supporting mutation/aliasing in HOP itself to remove this restriction.
-        if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
-            unimplemented("NYI: invoke_subgraph with aliasing/mutation")
-
-        key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
-
-        invoke_subgraph_cache = (
-            tx.output.tracing_context.hop_dispatch_set_cache.get_cache(
-                torch._higher_order_ops.invoke_subgraph
-            )
-        )
-
-        if invoke_subgraph_cache:
-            if identifier := invoke_subgraph_cache.get_dynamo_identifier(key):
-                return identifier
-
-        body_name = super().install_subgraph_in_output_graph(
-            tx, fn_vt, fn_args_vt, kwargs, body_gmod, "invoke_subgraph"
-        )
-        if invoke_subgraph_cache:
-            invoke_subgraph_cache.add_dynamo_identifier(key, body_name)
-
-        return body_name
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        # This flattens the kwargs into lifted args
-        (
-            p_args,
-            p_kwargs,
-            example_value,
-            body_r,
-            treespec,
-            body_gmod,
-            body_name,
-        ) = self.create_wrapped_node(
-            tx, args[0], args[2].items, kwargs, "invoke_subgraph"
-        )
-
-        if len(p_kwargs) > 0:
-            unimplemented("kwargs should have been flattened into lifted args")
-
-        flat_example_value = pytree.tree_map_only(
-            torch.fx.Proxy,
-            lambda a: a.node.meta["example_value"],
-            body_r.as_proxy(),
-        )
-
-        p_args = (
-            p_args[0],
-            body_name,
-            p_args[1:],
-        )
-        return _call_function_and_unflatten_output(
-            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
         )

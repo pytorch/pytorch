@@ -3214,6 +3214,7 @@ LEGACY_MOD_INLINELIST = {
     "torch._functorch.deprecated",
     "torch._higher_order_ops.cond",
     "torch._higher_order_ops.while_loop",
+    "torch._higher_order_ops.prim_hop_base",
     "torch._higher_order_ops.associative_scan",
     "torch._higher_order_ops.scan",
     "torch._higher_order_ops.utils",
