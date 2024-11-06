@@ -957,6 +957,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>& work,
       const c10::intrusive_ptr<Options>& option);
 
+  // Broadcast flight-recorder dump signal
+  void broadcastDumpSignal();
+
  protected:
   // Function that runs as part of a separate thread aside from watchdog
   // thread because we need to check the heartbeat from watchdog thread

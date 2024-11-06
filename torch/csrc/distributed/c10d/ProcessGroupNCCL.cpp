@@ -1932,6 +1932,41 @@ bool ProcessGroupNCCL::verifyWorkTimeoutForTest(
       DistBackendError, "Non c10d::WorkNCCL object returned from collective");
 }
 
+// Broadcast flight-recorder dump signal
+void ProcessGroupNCCL::broadcastDumpSignal() {
+  try {
+    auto rank = globalRank();
+    auto vec = std::vector<uint8_t>(
+        reinterpret_cast<uint8_t*>(&rank),
+        reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
+    globalStore_->set(std::string(EXCEPTION_DUMP), vec);
+    if (!shouldDump_.load()) {
+      LOG(ERROR)
+          << logPrefix()
+          << "Broadcasting flight-recorder dump signal to other processes via TCPStore.";
+    }
+    // signal the monitor thread on PG0 to start dumping
+    shouldDump_.store(true);
+    // Give time for dumping before throwing exception
+    auto start = std::chrono::steady_clock::now();
+    auto status = promiseFlightRecorderDump_.get_future().wait_for(
+        std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+    if (status == std::future_status::timeout) {
+      LOG(WARNING) << logPrefix() << "timed out after waiting for "
+                   << waitTimeoutDumpInMilSec_ << "ms"
+                   << " flight recorder dumps to finish.";
+    } else if (status == std::future_status::ready) {
+      auto end = std::chrono::steady_clock::now();
+      LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
+                << "ms"
+                << " giving time for flight recorder dumps to finish.";
+    }
+  } catch (const std::exception& e) {
+    LOG(ERROR) << logPrefix() << "Failed to set dump signal in tcpstore. "
+               << "Error: " << e.what();
+  }
+}
+
 void ProcessGroupNCCL::watchdogHandler() {
   bool done = false;
   lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
@@ -2032,38 +2067,7 @@ void ProcessGroupNCCL::watchdogHandler() {
         // recorder when a collective timeout or exception happens. Flight
         // recorder behavior is independent of desync Debug.
         if (dumpOnTimeoutOrEx_) {
-          try {
-            auto rank = globalRank();
-            auto vec = std::vector<uint8_t>(
-                reinterpret_cast<uint8_t*>(&rank),
-                reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
-            globalStore_->set(std::string(EXCEPTION_DUMP), vec);
-            if (!shouldDump_.load()) {
-              LOG(ERROR)
-                  << logPrefix()
-                  << "Broadcasting flight-recorder dump signal to other processes via TCPStore.";
-            }
-            // signal the monitor thread on PG0 to start dumping
-            shouldDump_.store(true);
-            // Give time for dumping before throwing exception
-            auto start = std::chrono::steady_clock::now();
-            auto status = promiseFlightRecorderDump_.get_future().wait_for(
-                std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
-            if (status == std::future_status::timeout) {
-              LOG(WARNING) << logPrefix() << "timed out after waiting for "
-                           << waitTimeoutDumpInMilSec_ << "ms"
-                           << " flight recorder dumps to finish.";
-            } else if (status == std::future_status::ready) {
-              auto end = std::chrono::steady_clock::now();
-              LOG(INFO) << logPrefix() << "slept for "
-                        << computeDeltaMS(start, end) << "ms"
-                        << " giving time for flight recorder dumps to finish.";
-            }
-          } catch (const std::exception& e) {
-            LOG(ERROR) << logPrefix()
-                       << "Failed to set dump signal in tcpstore. "
-                       << "Error: " << e.what();
-          }
+          broadcastDumpSignal();
         }
 
         if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
