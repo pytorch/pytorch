@@ -234,7 +234,7 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
 
 
 def sympy_product(it):
-    return functools.reduce(operator.mul, it, sympy.Integer(1))
+    return functools.reduce(operator.mul, it, sympy.S.One)
 
 
 def sympy_dot(seq1, seq2):
@@ -1085,6 +1085,21 @@ class DeferredLineBase:
 
     def __len__(self):
         return len(self.line)
+
+
+class DelayReplaceLine(DeferredLineBase):
+    """At end of codegen call `line.replace(key, value_fn())`"""
+
+    def __init__(self, key: str, value_fn: Callable[[], str], line: str):
+        super().__init__(line)
+        self.key = key
+        self.value_fn = value_fn
+
+    def __call__(self) -> str:
+        return self.line.replace(self.key, self.value_fn())
+
+    def _new_line(self, line: str) -> DelayReplaceLine:
+        return DelayReplaceLine(self.key, self.value_fn, line)
 
 
 @functools.lru_cache(None)
