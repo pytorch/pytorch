@@ -18,7 +18,8 @@
 
 #include <cmath>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 namespace {
 __global__ void ChooseQuantizationParamsKernelImpl(
@@ -319,4 +320,5 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
         x, scale, zero_point, fake_quant_on, qmin, qmax);
   }
 }
-} // namespace at::native
+} // namespace native
+} // namespace at

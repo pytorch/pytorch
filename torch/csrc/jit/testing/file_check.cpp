@@ -23,7 +23,10 @@
 #include <sstream>
 #include <string>
 
-namespace torch::jit::testing {
+namespace torch {
+namespace jit {
+
+namespace testing {
 
 enum CheckType {
   CHECK,
@@ -630,4 +633,6 @@ FileCheck* FileCheck::check_regex(const std::string& str) {
   return this;
 }
 
-} // namespace torch::jit::testing
+} // namespace testing
+} // namespace jit
+} // namespace torch

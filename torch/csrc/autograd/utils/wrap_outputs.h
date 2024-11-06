@@ -66,8 +66,8 @@ inline PyObject* wrap(at::Layout layout) {
   return Py_NewRef(getTHPLayout(layout));
 }
 
-inline PyObject* wrap(const at::Tensor& tensor) {
-  return THPVariable_Wrap(tensor);
+inline PyObject* wrap(at::Tensor tensor) {
+  return THPVariable_Wrap(Variable(std::move(tensor)));
 }
 
 inline PyObject* wrap(const at::Scalar& scalar) {

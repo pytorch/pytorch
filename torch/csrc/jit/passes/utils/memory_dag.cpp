@@ -4,7 +4,8 @@
 #include <algorithm>
 #include <queue>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 namespace {
 
 void makePointerToImpl(Element* from, Element* to) {
@@ -231,4 +232,5 @@ void MemoryDAG::setWildcards(
 Element* MemoryDAG::unsafeMakeFreshValue(const Value* v) {
   return makeFreshValueImpl(v, indexToElementMap_);
 }
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

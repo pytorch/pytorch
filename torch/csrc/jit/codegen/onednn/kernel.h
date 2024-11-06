@@ -10,7 +10,10 @@
 
 #include <c10/util/CallOnce.h>
 
-namespace torch::jit::fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 using ArgSpec = LlgaTensorDesc;
 using ArgSpecs = std::vector<ArgSpec>;
@@ -86,4 +89,7 @@ class LlgaKernel {
   bool is_initialized_ = false;
 };
 
-} // namespace torch::jit::fuser::onednn
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch

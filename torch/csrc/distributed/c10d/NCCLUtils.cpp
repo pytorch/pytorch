@@ -16,7 +16,7 @@
 namespace c10d {
 
 ncclComm_t NCCLComm::getNcclComm() {
-  LockType lock(mutex_);
+  std::unique_lock<std::mutex> lock(mutex_);
   if (aborted_) {
     auto commFailureMsg = commFailureReason_ != std::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)
@@ -31,7 +31,7 @@ ncclComm_t NCCLComm::getNcclComm() {
             commFailureMsg));
   }
   // In non-blocking mode, ensure comm is ready.
-  if (nonBlocking_) {
+  if (nccl_use_nonblocking()) {
     // If timeout is reached, throw an exception.
     C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
     // ncclComm_ should be initialized by now
@@ -101,7 +101,6 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
 #endif
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
-  comm->nonBlocking_ = config.blocking == 0;
   LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
             << comm->repr() << " with color_id " << color_id;
   return comm;
@@ -164,13 +163,22 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
 }
 #endif
 
+bool nccl_use_nonblocking() {
+  static bool nccl_use_nonblocking_ =
+      c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
+  if (nccl_use_nonblocking_) {
+    TORCH_WARN_ONCE("Using experimental non-blocking NCCL communicator.");
+  }
+  return nccl_use_nonblocking_;
+}
+
 // Default value: 30 minutes
 int nccl_nonblocking_timeout() {
   static int timeout = -2; // -2 means not initialized
   if (timeout == -2) {
-    const auto val = c10::utils::get_env("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-    if (val.has_value() && !val.value().empty()) {
-      timeout = stoi(val.value());
+    const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val && strlen(val) > 0) {
+      timeout = strtol(val, nullptr, 0);
     } else {
       // Default value consistent with kBackendDefaultTimeout
       timeout = 30 * 60;
@@ -345,7 +353,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
     return;
   }
 
-  file.write(ncclTrace.data(), static_cast<std::streamsize>(ncclTrace.size()));
+  file.write(ncclTrace.data(), ncclTrace.size());
   if (!file) {
     LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
                << filename_;
@@ -539,7 +547,7 @@ void NCCLTraceBuffer::retire_id(
       return;
     }
     if (duration.has_value()) {
-      entry->duration_ = duration;
+      entry->duration_ = duration.value();
     }
   }
 }

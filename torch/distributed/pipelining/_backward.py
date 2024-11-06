@@ -140,23 +140,16 @@ def get_param_groups(
 
 
 def stage_backward_input(
-    stage_outputs_or_loss: List[torch.Tensor],
+    stage_outputs: List[torch.Tensor],
     output_grads: Optional[List[torch.Tensor]],
     input_values: List[torch.Tensor],
     weights: Iterator[Parameter],
 ):
     """
-    Compute the gradients for only the stage inputs with
-    respect to the stage outputs (if non-last stage) or loss (if last stage)
-
-    After computing input gradients, we save the intermediate nodes in `param_groups`
-    for later use in stage_backward_weight. We don't need to save any other intermediate nodes
-    that aren't needed for dW because when we do dW calculation, we start from saved intermediates.
-    Detaching the stage_outputs_or_loss at the end of this function is important as
-    it frees up the memory that the autograd graph is anticipating to be used later (but doesn't actually need).
+    compute the gradients for only the stage inputs with respect to the stage outputs
     """
     stage_output_grad_fns: List[Node] = list(
-        filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs_or_loss))
+        filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs))
     )
     stage_input_grad_fns: List[Node] = list(
         filter(None, map(_get_grad_fn_or_grad_acc, input_values))
@@ -170,7 +163,6 @@ def stage_backward_input(
         stage_input_grad_fns, weight_grad_fns, reverse_edges_dict
     )
 
-    handles = []
     for param_group in param_groups:
         for i, intermediate in enumerate(param_group["intermediates"]):
 
@@ -186,19 +178,18 @@ def stage_backward_input(
 
             # These are always "split" nodes that we need to recompute, so
             # save their inputs.
-            handle = intermediate.register_prehook(get_hook(param_group, i))
-            handles.append(handle)
+            intermediate.register_prehook(get_hook(param_group, i))
 
     # Stage 0 inputs do not require grads? Should we skip in that case?
     if all(tensor.requires_grad for tensor in input_values):
         if output_grads is None:
             # In case this is the loss and there are no output_grads, then we just use 1s
             output_grads = [
-                torch.ones_like(stage_output) for stage_output in stage_outputs_or_loss
+                torch.ones_like(stage_output) for stage_output in stage_outputs
             ]
 
         dinputs = torch.autograd.grad(
-            stage_outputs_or_loss,
+            stage_outputs,
             inputs=input_values,
             grad_outputs=output_grads,
             retain_graph=True,
@@ -211,17 +202,13 @@ def stage_backward_input(
             else:
                 inp.grad += dinputs[i]
 
-        # stage_outputs_or_loss are not used in backwards after this point, so we can safely remove it from the autograd graph
-        # this allows autograd to clear up the graph dedicated for this tensor and free up significant memory
-        for t in stage_outputs_or_loss:
+        # stage_outputs are not used in backwards after this point, so we can safely remove it from the autograd graph
+        # this allows autograd to clear up the graph dedicated for this output and free up significant memory
+        for t in stage_outputs:
             t.detach_()
 
     else:
         dinputs = None
-
-    # hooks are no longer necessary, clean up for consistency
-    for handle in handles:
-        handle.remove()
 
     return dinputs, param_groups
 
@@ -261,9 +248,6 @@ def stage_backward_weight(
             grad_outputs=sum(param_group["grads"], tuple()),
             retain_graph=retain_graph,
         )
-        # release grad memory early after use
-        del param_group["grads"]
-
         for grad_acc, dw in zip(param_group["params"], dweights):
             weight, index = grad_acc_to_weight[grad_acc]
             if weight.grad is None:

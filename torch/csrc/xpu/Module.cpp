@@ -297,7 +297,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
         break;
       default:
         stream << "unknown device type:"
-               << static_cast<typename std::underlying_type_t<device_type>>(
+               << static_cast<typename std::underlying_type<device_type>::type>(
                       prop.device_type);
         break;
     }

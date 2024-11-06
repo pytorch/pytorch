@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include <ATen/ATen.h>
 
 namespace c10d {
@@ -23,7 +25,7 @@ struct TORCH_API DMAConnectivity : c10::intrusive_ptr_target {
 
 struct DMAConnectivityDetector : c10::intrusive_ptr_target {
   virtual c10::intrusive_ptr<DMAConnectivity> detect() = 0;
-  ~DMAConnectivityDetector() override = default;
+  virtual ~DMAConnectivityDetector() {}
 };
 
 C10_EXPORT void register_dma_connectivity_detector(

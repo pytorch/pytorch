@@ -2,19 +2,20 @@
 
 #include <torch/csrc/jit/api/module.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 static ModuleHook emit_module_callback;
 void didFinishEmitModule(Module module) {
   if (emit_module_callback) {
-    emit_module_callback(std::move(module));
+    emit_module_callback(module);
   }
 }
 
 static FunctionHook emit_function_callback;
 void didFinishEmitFunction(StrongFunctionPtr fn) {
   if (emit_function_callback) {
-    emit_function_callback(std::move(fn));
+    emit_function_callback(fn);
   }
 }
 
@@ -27,4 +28,5 @@ std::pair<ModuleHook, FunctionHook> getEmitHooks() {
   return std::make_pair(emit_module_callback, emit_function_callback);
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

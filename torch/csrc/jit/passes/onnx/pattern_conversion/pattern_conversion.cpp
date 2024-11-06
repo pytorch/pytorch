@@ -12,7 +12,8 @@
 // EDITING THIS FILE? READ THIS FIRST!
 // see Note [Edit Pattern Conversion] in pattern_conversion.h
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Converting inplace index_put to ONNX
 namespace {
@@ -391,4 +392,5 @@ std::vector<Value*> ConvertPatternFromSubblock(
   return res;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -33,7 +33,6 @@ from torch._inductor.codecache import (
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import should_use_remote_fx_graph_cache
 from torch._logging import LazyString
-from torch._utils_internal import log_cache_bypass
 
 from .runtime_wrappers import (
     AOTDispatchAutograd,
@@ -177,7 +176,7 @@ def check_cacheable(gm: torch.fx.GraphModule):
     Checks that the graph module only uses supported operators
     """
     nodes = gm.graph.nodes
-    if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
+    if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
         raise BypassAOTAutogradCache(
             "Cannot cache a graph with compiled autograd enabled"
         )
@@ -251,8 +250,14 @@ def _reduce_tensor(tensor):
     """
     Reduce the tensor to a stable key for caching.
     """
-    metadata = extract_tensor_metadata_for_cache_key(tensor)
-    return (_ident, (metadata,))
+    return (
+        _ident,
+        (
+            extract_tensor_metadata_for_cache_key(
+                FxGraphCachePickler._device_map, tensor
+            ),
+        ),
+    )
 
 
 class AOTAutogradCachePickler(FxGraphCachePickler):
@@ -434,14 +439,11 @@ class AOTAutogradCacheEntry:
 
         compiled_fw_func = self.compiled_fw.load(args, fx_config)
         compiled_bw_func = None
-        chromium_log = get_chromium_event_logger()
         if self.compiled_bw is not None:
             compiled_bw_func = self.compiled_bw.load(args, fx_config)
             needs_autograd = True
-            chromium_log.add_event_data("backend_compile", dispatch_mode="autograd")
         else:
             needs_autograd = False
-            chromium_log.add_event_data("backend_compile", dispatch_mode="inference")
 
         # Wrap the forward function in post compile wrappers
         compiled_fw_func = AOTDispatchSubclassWrapper(
@@ -451,11 +453,6 @@ class AOTAutogradCacheEntry:
             num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
         ).post_compile(
             compiled_fw_func, aot_config, runtime_metadata=self.runtime_metadata
-        )
-
-        req_subclass_dispatch = self.maybe_subclass_meta is not None
-        chromium_log.add_event_data(
-            "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
         )
 
         # In autograd case, functionalizedRngWrapper should not modify outs
@@ -622,9 +619,6 @@ class AOTAutogradCache:
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             cache_state = "bypass"
             cache_event_time = time.time_ns()
-            cache_info["cache_bypass_reason"] = str(e)
-            if remote:
-                log_cache_bypass("bypass_aot_autograd", str(e))
             if config.strict_autograd_cache:
                 raise e
         if compiled_fn is None:
@@ -644,18 +638,6 @@ class AOTAutogradCache:
         chromium_log.log_instant_event(
             f"autograd_cache_{cache_state}", cache_event_time, metadata=cache_info
         )
-
-        chromium_log.add_event_data(
-            "backend_compile",
-            cache_state=cache_state,
-            cache_event_time=cache_event_time,
-            key=cache_info.get("key"),
-            components=cache_info.get("components"),
-            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
-            remote_cache_enabled=remote,
-            local_cache_enabled=local,
-        )
-
         torch._logging.trace_structured(
             "artifact",
             metadata_fn=lambda: {

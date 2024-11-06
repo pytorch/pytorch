@@ -104,10 +104,6 @@ def merge_concats_pass(graph):
     return None
 
 
-def relu_nan_to_num(graph):
-    return None
-
-
 @init_once_fakemode
 def lazy_init():
     from . import efficient_conv_bn_eval, split_cat  # noqa: F401  # noqa: F401
@@ -165,12 +161,6 @@ def pre_grad_passes(
                 gm,
                 example_inputs,
                 "[Pre grad(predispatch IR)]Apply remove_noop pass",
-            )
-            pass_execution_and_save(
-                relu_nan_to_num,
-                gm,
-                example_inputs,
-                "[Pre grad(predispatch IR)]Apply relu_nan_to_num pass",
             )
             pass_execution_and_save(
                 fuse_chunk_reshape_concat_pass,

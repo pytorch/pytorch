@@ -114,7 +114,7 @@ class ArrayRef final {
   /* implicit */ ArrayRef(const std::vector<T, A>& Vec)
       : Data(Vec.data()), Length(Vec.size()) {
     static_assert(
-        !std::is_same_v<T, bool>,
+        !std::is_same<T, bool>::value,
         "ArrayRef<bool> cannot be constructed from a std::vector<bool> bitfield.");
   }
 

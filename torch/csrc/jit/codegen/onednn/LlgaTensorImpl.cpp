@@ -4,7 +4,10 @@
 #include <c10/core/CPUAllocator.h>
 #include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 
-namespace torch::jit::fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 // Non-default dnnl::graph::allocator needs an allocator.
 // We would let it use c10::GetCPUAllocator's allocator,
@@ -149,6 +152,9 @@ at::ScalarType LlgaTensorDesc::aten_scalar_type() const {
   }
 }
 
-} // namespace torch::jit::fuser::onednn
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch
 
 #endif // AT_MKLDNN_ENABLED()

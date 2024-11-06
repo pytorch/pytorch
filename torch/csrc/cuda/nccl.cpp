@@ -113,18 +113,6 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclUint8;
     case at::kBool:
       return ncclDataType_t::ncclUint8;
-#if defined(USE_ROCM)
-    case at::kFloat8_e4m3fnuz:
-      return ncclDataType_t::ncclUint8;
-    case at::kFloat8_e5m2fnuz:
-      return ncclDataType_t::ncclUint8;
-#else
-    case at::kFloat8_e4m3fn:
-      return ncclDataType_t::ncclUint8;
-    case at::kFloat8_e5m2:
-      return ncclDataType_t::ncclUint8;
-#endif
-
 #if HAS_NCCL_BF16_DATATYPE
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
@@ -159,6 +147,7 @@ static inline void NCCL_CHECK(ncclResult_t result) {
 }
 
 // TODO(eqy): can this duplication be avoided from NCCLUtils.cpp?
+// Default value: on
 bool nccl_use_nonblocking() {
   static bool nccl_use_nonblocking_ =
       c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
@@ -193,8 +182,7 @@ static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
                            currentTimepoint - startTimepoint)
                            .count();
     if (timeElapsed > nccl_nonblocking_timeout()) {
-      throw std::runtime_error(
-          "NCCL timeout when waiting for nonblocking call to become successful.");
+      throw std::runtime_error("NCCL timeout.");
     }
     sched_yield(); // yield to other threads
     ncclCommGetAsyncError(to_nccl_comm(comm), &result);
@@ -226,8 +214,7 @@ static inline void NCCL_CHECK_TIMEOUT(
                                currentTimepoint - startTimepoint)
                                .count();
         if (timeElapsed > nccl_nonblocking_timeout()) {
-          throw std::runtime_error(
-              "NCCL timeout when waiting for nonblocking call to become successful.");
+          throw std::runtime_error("NCCL timeout.");
         }
         sched_yield(); // yield to other threads
         ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);

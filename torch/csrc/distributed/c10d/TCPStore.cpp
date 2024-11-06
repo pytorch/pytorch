@@ -5,15 +5,31 @@
 #include <torch/csrc/distributed/c10d/Backoff.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
-#include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/logging.h>
 
+#include <fcntl.h>
 #include <chrono>
 #include <fstream>
-#include <optional>
+#include <random>
 #include <thread>
 #include <unordered_map>
 #include <utility>
+
+#ifdef _WIN32
+#include <io.h>
+#include <winsock2.h>
+#else
+#include <poll.h>
+#include <unistd.h>
+#endif
+
+#ifdef _WIN32
+#include <torch/csrc/distributed/c10d/WinSockUtils.hpp>
+#else
+#include <torch/csrc/distributed/c10d/UnixSockUtils.hpp>
+#endif
+
+#include <torch/csrc/distributed/c10d/socket.h>
 
 namespace c10d {
 namespace detail {
@@ -127,10 +143,11 @@ class TCPClient {
     }
   }
   template <typename T>
-  std::optional<T> receiveValueWithTimeout(std::chrono::milliseconds timeout) {
+  bool receiveValueWithTimeout(T& t, std::chrono::milliseconds timeout) {
     if (!socket_.waitForInput(timeout))
-      return {};
-    return tcputil::recvValue<T>(socket_.handle());
+      return false;
+    t = tcputil::recvValue<T>(socket_.handle());
+    return true;
   }
   void setTimeout(std::chrono::milliseconds value);
 
@@ -183,10 +200,8 @@ void TCPClient::setTimeout(std::chrono::milliseconds value) {
 
 class SendBuffer {
   // ethernet mtu 1500 - 40 (ip v6 header) - 20 (tcp header)
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const size_t FLUSH_WATERMARK = 1440;
   std::vector<uint8_t> buffer;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   detail::TCPClient& client;
 
   void maybeFlush() {
@@ -542,10 +557,10 @@ void TCPStore::doWait(
     buffer.flush();
   }
 
-  auto response_opt =
-      client_->receiveValueWithTimeout<detail::WaitResponseType>(timeout);
-  if (response_opt.has_value()) {
-    if (response_opt != detail::WaitResponseType::STOP_WAITING) {
+  detail::WaitResponseType response;
+  if (client_->receiveValueWithTimeout<detail::WaitResponseType>(
+          response, timeout)) {
+    if (response != detail::WaitResponseType::STOP_WAITING) {
       TORCH_CHECK(false, "Stop_waiting response is expected");
     }
     return;
@@ -557,7 +572,7 @@ void TCPStore::doWait(
     buffer.flush();
   }
 
-  auto response = client_->receiveValue<detail::WaitResponseType>();
+  response = client_->receiveValue<detail::WaitResponseType>();
   // this can happen if the server responds before we cancel, just ignore it
   if (response != detail::WaitResponseType::WAIT_CANCELED) {
     if (response != detail::WaitResponseType::STOP_WAITING) {
@@ -624,7 +639,7 @@ void TCPStore::multiSet(
   const std::lock_guard<std::mutex> lock(activeOpLock_);
 
   detail::SendBuffer buffer(*client_, detail::QueryType::MULTI_SET);
-  buffer.appendValue<std::int64_t>(static_cast<int64_t>(keys.size()));
+  buffer.appendValue<std::int64_t>(keys.size());
   for (auto i : c10::irange(keys.size())) {
     buffer.appendString(keyPrefix_ + keys[i]);
     buffer.appendBytes(values[i]);

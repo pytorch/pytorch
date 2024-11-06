@@ -216,15 +216,6 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     C10_HIP_CHECK(hipEventSynchronize(hip_event));
   }
 
-  // Note: synchronizeDevice can be safely called from any device
-  void synchronizeDevice(const c10::DeviceIndex device_index) const override {
-    int orig_device{-1};
-    C10_HIP_CHECK(hipGetDevice(&orig_device));
-    C10_HIP_CHECK(hipSetDevice(device_index));
-    C10_HIP_CHECK(hipDeviceSynchronize());
-    C10_HIP_CHECK(hipSetDevice(orig_device));
-  }
-
   void recordDataPtrOnStream(
     const c10::DataPtr& data_ptr,
     const Stream& stream) const override {

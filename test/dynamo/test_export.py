@@ -3264,11 +3264,10 @@ def forward(self, x):
         def f(x):
             return cond(x.shape[0] > 10, true_fn, false_fn)
 
-        # Now we allow torch.cond to handle empty args
         example_inputs = (torch.rand(5),)
         with self.assertRaisesRegex(
             TypeError,
-            r"false_fn\(\) missing 1 required positional argument: 'x'",
+            r"cond\(\) missing 1 required positional argument: 'operands'",
         ):
             f(*example_inputs)
 

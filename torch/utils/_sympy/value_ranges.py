@@ -34,7 +34,6 @@ from .functions import (
     IntTrueDiv,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
-    OpaqueUnaryFn_log2,
     OpaqueUnaryFn_sqrt,
     PowByNatural,
     RoundDecimal,
@@ -760,13 +759,6 @@ class SymPyValueRangeAnalysis:
         if x.lower <= 0:
             return ValueRanges.unknown()
         return ValueRanges.increasing_map(x, OpaqueUnaryFn_log)
-
-    @staticmethod
-    def log2(x):
-        x = ValueRanges.wrap(x)
-        if x.lower <= 0:
-            return ValueRanges.unknown()
-        return ValueRanges.increasing_map(x, OpaqueUnaryFn_log2)
 
     @classmethod
     def minimum(cls, a, b):

@@ -2,7 +2,8 @@
 
 // Location for Commonly Used Shape registries
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 // Requirements:
 //   dims           : preserved from the first argument
@@ -71,4 +72,5 @@ std::shared_ptr<OperatorSet> ops_one_tensor_in_shape_transform() {
   });
   return ops;
 };
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

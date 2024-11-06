@@ -16,7 +16,8 @@
 
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -274,4 +275,5 @@ Module FinalizeOnDevicePTQ(
   return module;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

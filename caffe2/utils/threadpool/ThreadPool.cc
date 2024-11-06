@@ -184,10 +184,14 @@ void ThreadPoolImpl::run(const std::function<void(int, size_t)>& fn, size_t rang
   }
 
   struct FnTask : public Task {
-    const std::function<void(int, size_t)>* fn_{};
-    int idx_{};
-    size_t start_{};
-    size_t end_{};
+    // NOLINTNEXTLINE(modernize-use-equals-default,cppcoreguidelines-pro-type-member-init)
+    FnTask(){};
+    // NOLINTNEXTLINE(modernize-use-equals-default)
+    ~FnTask() override{};
+    const std::function<void(int, size_t)>* fn_;
+    int idx_;
+    size_t start_;
+    size_t end_;
     void Run() override {
       for (auto i = start_; i < end_; ++i) {
         (*fn_)(idx_, i);

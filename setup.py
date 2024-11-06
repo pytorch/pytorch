@@ -232,7 +232,7 @@ import platform
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
 BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
 
-python_min_version = (3, 9, 0)
+python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
@@ -1159,7 +1159,7 @@ def main():
         )
     install_requires = [
         "filelock",
-        "typing-extensions>=4.10.0",
+        "typing-extensions>=4.8.0",
         'setuptools ; python_version >= "3.12"',
         'sympy==1.13.1 ; python_version >= "3.9"',
         "networkx",
@@ -1252,7 +1252,6 @@ def main():
         "include/*.h",
         "include/ATen/*.h",
         "include/ATen/cpu/*.h",
-        "include/ATen/cpu/vec/vec128/*.h",
         "include/ATen/cpu/vec/vec256/*.h",
         "include/ATen/cpu/vec/vec256/vsx/*.h",
         "include/ATen/cpu/vec/vec256/zarch/*.h",

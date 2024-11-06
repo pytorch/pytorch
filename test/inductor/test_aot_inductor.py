@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
 import itertools
-import logging
 import os
 import sys
 import tempfile
@@ -42,15 +41,12 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 from torch.utils import _pytree as pytree
-from torch.utils._triton import has_triton_tma
 
 
 if HAS_CUDA:
     import triton  # @manual
-    from triton import language as tl
 
     from torch.testing._internal.triton_utils import (
         add_kernel,
@@ -59,8 +55,6 @@ if HAS_CUDA:
         add_kernel_autotuned_weird_param_order,
         add_kernel_with_optional_param,
         add_kernel_with_scaling,
-        add_kernel_with_tma_1d,
-        add_kernel_with_tma_2d,
         mul2_inplace_kernel,
     )
 
@@ -1103,56 +1097,6 @@ class AOTInductorTestsTemplate:
             torch.ones(8, device=self.device),
         )
         self.check_model(Repro(), example_inputs)
-
-    def test_fallback_kernel_with_symexpr_output(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
-
-        class Module(torch.nn.Module):
-            def forward(self, q, k, v):
-                q = q.reshape(
-                    q.shape[0],
-                    2,
-                    q.shape[2] * q.shape[3],
-                    q.shape[1] // 2,
-                )
-                k = k.reshape(
-                    k.shape[0],
-                    2,
-                    k.shape[2] * k.shape[3],
-                    k.shape[1] // 2,
-                )
-                v = v.reshape(
-                    v.shape[0],
-                    2,
-                    v.shape[2] * v.shape[3],
-                    v.shape[1] // 2,
-                )
-
-                res = torch.ops.aten._scaled_dot_product_flash_attention.default(
-                    q,
-                    k,
-                    v,
-                )
-                return res[0]
-
-        m = Module().to(device=self.device)
-        tensor_shape = (4, 32, 4, 4)
-        inputs = (
-            torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
-            torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
-            torch.randn(tensor_shape, dtype=torch.float16, device=self.device),
-        )
-
-        dynamic_shapes = {
-            "q": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
-            "k": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
-            "v": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
-        }
-        ep = torch.export.export(m, inputs, dynamic_shapes=dynamic_shapes, strict=False)
-        path = torch._inductor.aot_compile(ep.module(), inputs)
-        aot_model = torch._export.aot_load(path, device=self.device)
-        torch.testing.assert_close(m(*inputs), aot_model(*inputs))
 
     def test_large_grid(self):
         if self.device != "cuda":
@@ -2252,123 +2196,6 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.randn(10, 20, device=self.device),)
         self.check_model(Model(), example_inputs)
-
-    @common_utils.parametrize("dynamic", [False, True])
-    def test_triton_kernel_tma_descriptor_1d(self, dynamic):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
-        if not has_triton_tma():
-            raise unittest.SkipTest("requires Triton TMA")
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, a, b):
-                BLOCK_SIZE = 256
-                out = torch.zeros_like(a)
-                n_elements = out.numel()
-
-                desc_a, desc_b, desc_out = (
-                    triton.tools.experimental_descriptor.create_1d_tma_descriptor(
-                        t.data_ptr(),
-                        n_elements,
-                        BLOCK_SIZE,
-                        t.element_size(),
-                    )
-                    for t in (a, b, out)
-                )
-
-                grid = lambda meta: (  # noqa: E731
-                    triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
-                )
-                add_kernel_with_tma_1d[grid](
-                    desc_a,
-                    desc_b,
-                    desc_out,
-                    BLOCK_SIZE=BLOCK_SIZE,
-                )
-
-                return out
-
-        a = torch.randn(301, device=self.device)
-        b = torch.randn(301, device=self.device)
-        example_inputs = (a, b)
-
-        dynamic_shapes = None
-        if dynamic:
-            dim0_ab = Dim("s0", min=2, max=1024)
-            dynamic_shapes = {
-                "a": {0: dim0_ab, 1: None},
-                "b": {0: dim0_ab, 1: None},
-            }
-
-        self.check_model(
-            Model(),
-            example_inputs=example_inputs,
-            dynamic_shapes=dynamic_shapes,
-        )
-
-    @common_utils.parametrize("dynamic", [False, True])
-    def test_triton_kernel_tma_descriptor_2d(self, dynamic):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
-        if not has_triton_tma():
-            raise unittest.SkipTest("requires Triton TMA")
-
-        class Model(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-
-            def forward(self, a, b):
-                BLOCK_SIZE_X = 16
-                BLOCK_SIZE_Y = 32
-                out = torch.zeros_like(a)
-                x_size, y_size = out.size()
-
-                desc_a, desc_b, desc_out = (
-                    triton.tools.experimental_descriptor.create_2d_tma_descriptor(
-                        t.data_ptr(),
-                        x_size,
-                        y_size,
-                        BLOCK_SIZE_X,
-                        BLOCK_SIZE_Y,
-                        t.element_size(),
-                    )
-                    for t in (a, b, out)
-                )
-
-                grid = lambda meta: (  # noqa: E731
-                    triton.cdiv(x_size, meta["BLOCK_SIZE_X"]),
-                    triton.cdiv(y_size, meta["BLOCK_SIZE_Y"]),
-                )
-                add_kernel_with_tma_2d[grid](
-                    desc_a,
-                    desc_b,
-                    desc_out,
-                    BLOCK_SIZE_X=BLOCK_SIZE_X,
-                    BLOCK_SIZE_Y=BLOCK_SIZE_Y,
-                )
-
-                return out
-
-        a = torch.randn((25, 16), device=self.device)
-        b = torch.randn((25, 16), device=self.device)
-        example_inputs = (a, b)
-
-        dynamic_shapes = None
-        if dynamic:
-            dim0_ab = Dim("s0", min=2, max=1024)
-            dynamic_shapes = {
-                "a": {0: dim0_ab, 1: None},
-                "b": {0: dim0_ab, 1: None},
-            }
-
-        self.check_model(
-            Model(),
-            example_inputs=example_inputs,
-            dynamic_shapes=dynamic_shapes,
-        )
 
     def test_triton_kernel_sympy_expr_arg(self):
         if self.device != "cuda":
@@ -3866,74 +3693,6 @@ class AOTInductorTestsTemplate:
             ).run(code)
 
         self.check_model(Model(), example_inputs)
-
-    def test_none_args_aot_codegen(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
-
-        @triton.autotune(
-            configs=[
-                triton.Config({"BLOCK_SIZE": 32}, num_stages=5, num_warps=2),
-                triton.Config({"BLOCK_SIZE": 64}, num_stages=4, num_warps=4),
-            ],
-            key=["n_elements"],
-        )
-        @triton.jit
-        def sin_kernel(
-            in_ptr0,
-            out_ptr,
-            # We want to include an arg known to be 1 at compile time
-            # This is because we remove None args from the arg list; changing the eq_1/constexpr arg indices.
-            # We want to make sure we recompute these correctly
-            EQ_1_ARG,
-            n_elements,
-            BLOCK_SIZE: "tl.constexpr",
-        ):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            if in_ptr0 is not None:
-                x = tl.load(in_ptr0 + offsets, mask=mask)
-            else:
-                x = 0.0
-            output = tl.sin(x) + EQ_1_ARG
-            tl.store(out_ptr + offsets, output, mask=mask)
-
-        def sin_triton(x, out):
-            n_elements = out.numel()
-            sin_kernel[(n_elements,)](x, out, 1, n_elements)
-            return out
-
-        x = torch.randn(65, device=self.device)
-        out = torch.empty_like(x)
-
-        not_none_inputs = (x, out)
-        none_inputs = (None, out)
-
-        # AOTI compilation specializes on either None or non-None inputs
-        # So we have to check twice here
-
-        self.check_model(sin_triton, none_inputs)
-        self.check_model(sin_triton, not_none_inputs)
-
-
-class AOTInductorLoggingTest(LoggingTestCase):
-    @make_logging_test(dynamic=logging.DEBUG)
-    def test_shape_env_reuse(self, records):
-        # make sure ShapeEnv is only created once and reused afterwards
-        class Foo(torch.nn.Module):
-            def forward(self, x):
-                return x + 2
-
-        inputs = (torch.randn(4, 4),)
-        dynamic_shapes = {
-            "x": {0: Dim.AUTO, 1: Dim.AUTO},
-        }
-        ep = export(Foo(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
-        with torch.no_grad():
-            torch._inductor.aot_compile(ep.module(), inputs)
-        self.assertEqual([r.msg == "create_env" for r in records].count(True), 1)
 
 
 common_utils.instantiate_parametrized_tests(AOTInductorTestsTemplate)

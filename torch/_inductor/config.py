@@ -271,7 +271,7 @@ reorder_for_compute_comm_overlap_passes = [
 ]
 
 # enable operator reordering for peak memory optimization
-reorder_for_peak_memory = True
+reorder_for_peak_memory = os.environ.get("TORCHINDUCTOR_REORDER_FOR_PEAK_MEMORY") == "1"
 
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
@@ -472,12 +472,8 @@ comment_origin = False
 # Convert 1x1 convs into matmuls
 conv_1x1_as_mm = False
 
-# For reductions with a small output size (usually 1, e.g. x.sum()) there is not enough
-# parallelism to saturate the GPU.  We have two ways of handling this, either `split_reductions`
-# or `triton.cooperative_reductions` which are mutually exclusive.
-#   split_reductions: uses multiple kernels to gain more parallelism
-#   triton.cooperative_reductions: uses cross thread-block synchronization to gain more parallelism
-# enabling both of these will implicitly disable split_reductions
+# Enable split reductions for better utilization when the dimension
+# being reduced over is large (by splitting it)
 split_reductions = True
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
@@ -976,14 +972,6 @@ class triton:
         os.environ.get("TORCHINDUCTOR_PERSISTENT_REDUCTIONS", "1") == "1"
     )
 
-    # For small output size reductions uses cross thread-block synchronization to gain more parallelism
-    cooperative_reductions = (
-        os.environ.get("TORCHINDUCTOR_COOPERATIVE_REDUCTIONS", "0") == "1"
-    )
-
-    # used for debugging cooperative reduction codegen, always generate cooperative_reductions
-    force_cooperative_reductions = False
-
     # 0/False: disable
     # 1/True: enable, use tuning to pick between different subkernels
     # 2: enable, force using persistent reduction (for debugging)
@@ -1080,9 +1068,6 @@ class aot_inductor:
     raise_error_on_ignored_optimization: bool = (
         os.environ.get("AOTINDUCTOR_RAISE_ERROR_ON_IGNORED_OPTIMIZATION", "1") == "1"
     )
-
-    # Dictionary of presets that can be passed in
-    presets: Dict[str, Any] = {}
 
 
 class cuda:
@@ -1235,9 +1220,6 @@ class halide:
 class trace:
     # master switch for all debugging flags below
     enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
-
-    # save real tensors
-    save_real_tensors = os.environ.get("TORCH_COMPILE_DEBUG_SAVE_REAL", "0") == "1"
 
     # Save debug information to a temporary directory
     # If not specified, a temp directory will be created by system

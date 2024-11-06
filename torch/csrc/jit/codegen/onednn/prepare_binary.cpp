@@ -3,7 +3,10 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
-namespace torch::jit::fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 static bool compareConstValue(Value* v, double d) {
   auto ival = toIValue(v);
@@ -176,4 +179,7 @@ void PrepareBinaryForLLGA(const std::shared_ptr<Graph>& graph) {
   ConvertScalarToTensor(graph->block());
 }
 
-} // namespace torch::jit::fuser::onednn
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch

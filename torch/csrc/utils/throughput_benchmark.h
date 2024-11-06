@@ -103,7 +103,6 @@ struct C10_HIDDEN ModuleInput {
   ModuleInput(const ModuleInput&) = delete;
   ModuleInput& operator=(ModuleInput& other) = delete;
   ModuleInput& operator=(ModuleInput&& other) = delete;
-  ~ModuleInput() = default;
 
   ModuleInput(py::args&& args, py::kwargs&& kwargs)
       : args(std::move(args)), kwargs(std::move(kwargs)) {}

@@ -60,7 +60,7 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
   self.scalar_type(), "bernoulli_scalar_cpu_", [&] {
     at::Tensor tmp_int_tensor;
-    if (std::is_same_v<scalar_t, int> && contig) {
+    if (std::is_same<scalar_t, int>::value && contig) {
       tmp_int_tensor = self;
     } else {
       tmp_int_tensor = at::empty(self.sizes(), self.options().dtype(at::kInt));
@@ -81,7 +81,7 @@ void bernoulli_scalar_kernel(const TensorBase &self, double p, std::optional<Gen
 
         // vectorized copy if using buffer and contiguous, i.e., being non-int
         // type and contiguous
-        if (!std::is_same_v<scalar_t, int> && contig) {
+        if (!std::is_same<scalar_t, int>::value && contig) {
           scalar_t *self_seg = self_ptr + begin;
           int* tmp_seg = sample_int_ptr + begin;
           at::vec::convert<int, scalar_t>(tmp_seg, self_seg, len);
@@ -129,17 +129,17 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<G
 
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "exponential_cpu", [&] {
       at::Tensor tmp_tensor;
-      constexpr bool is_df = std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>;
+      constexpr bool is_df = std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value;
       if (is_df && contig) {
         tmp_tensor = self;
-      } else if (std::is_same_v<scalar_t, double>) {
+      } else if (std::is_same<scalar_t, double>::value) {
         tmp_tensor = at::empty(self.sizes(), self.options().dtype(at::kDouble));
       } else {
         tmp_tensor = at::empty(self.sizes(), self.options().dtype(at::kFloat));
       }
 
       scalar_t *self_ptr = self.data_ptr<scalar_t>();
-      using tmp_scalar_t = typename std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
+      using tmp_scalar_t = typename std::conditional_t<std::is_same<scalar_t, double>::value, double, float>;
       tmp_scalar_t *sample_ptr = tmp_tensor.data_ptr<tmp_scalar_t>();
 
       // Intel MKL vRngExponential variate originally does not exclude 0.
@@ -159,7 +159,7 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, std::optional<G
         int64_t len = end - begin;
         if (len > 0) {
           VSLStreamStatePtr stream;
-          if constexpr (std::is_same_v<scalar_t, double>) {
+          if constexpr (std::is_same<scalar_t, double>::value) {
             vslNewStream(&stream, VSL_BRNG_MCG31, seed);
             vslSkipAheadStream(stream, begin);
             vdRngExponential(VSL_RNG_METHOD_EXPONENTIAL_ICDF, stream, len,

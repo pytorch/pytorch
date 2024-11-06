@@ -203,13 +203,10 @@ class ConstDictVariable(VariableTracker):
             ]
         )
 
-    def reconstruct(self, codegen):
-        def is_new_item(value, other):
-            # compare the id of the realized values if both values are not lazy VTs
-            if value and value.is_realized() and other.is_realized():
-                return id(value.realize()) != id(other.realize())
-            return id(value) != id(other)
+    def _maybe_realize(self, item):
+        return item.realize() if item else item
 
+    def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary
         if self.user_cls is collections.OrderedDict:
             codegen.add_push_null(
@@ -224,8 +221,11 @@ class ConstDictVariable(VariableTracker):
         num_args = 0
         for key, value in self.items.items():
             # We can safely call realize() here as it won't introduce any new guards
-            item = self.original_items.get(key.vt)
-            if is_new_item(item, value) or self.should_reconstruct_all:
+            is_new_item = (
+                self._maybe_realize(self.original_items.get(key.vt)) != value.realize()
+            )
+
+            if is_new_item or self.should_reconstruct_all:
                 codegen(key.vt)
                 codegen(value)
                 num_args += 1

@@ -6,9 +6,11 @@ import io
 import itertools
 import logging
 import os
+import queue
 import re
 import subprocess
 import sys
+import threading
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -24,7 +26,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import scoped_load_inline, skipIfWindows
+from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 from torch.testing._internal.logging_utils import logs_to_string
 
@@ -250,346 +252,6 @@ main()
                 yield model[0].bias.grad
 
         self.check_output_and_recompiles(fn)
-
-    def test_reorder_acc_grad(self):
-        model = torch.nn.Sequential(
-            torch.nn.Conv2d(4, 4, 3, bias=True),
-            torch.nn.Conv2d(4, 4, 3, bias=True),
-        )
-        compiled_model = torch.compile(model)
-        x = torch.randn([1, 4, 32, 32])
-
-        model(x).sum().backward()
-        ref_res = [
-            model[0].weight.grad,
-            model[0].bias.grad,
-            model[1].weight.grad,
-            model[1].bias.grad,
-        ]
-
-        model[0].weight.grad = None
-        model[0].bias.grad = None
-        model[1].weight.grad = None
-        model[1].bias.grad = None
-        with compiled_autograd.enable(compiler_fn):
-            compiled_model(x).sum().backward(retain_graph=True)
-        res = [
-            model[0].weight.grad,
-            model[0].bias.grad,
-            model[1].weight.grad,
-            model[1].bias.grad,
-        ]
-
-        self.assertEqual(res[0], ref_res[0])
-        self.assertEqual(res[1], ref_res[1])
-        self.assertEqual(res[2], ref_res[2])
-        self.assertEqual(res[3], ref_res[3])
-
-    def test_reorder_post_hook1(self):
-        def grad_div(param):
-            param.grad = param.grad / 4.0
-
-        class Module(torch.nn.Module):
-            def __init__(self, ioc):
-                super().__init__()
-                self.fc1 = torch.nn.Linear(ioc, ioc, bias=False)
-                self.fc2 = torch.nn.Linear(ioc, ioc, bias=False)
-
-                self.grad_acc_hooks = []
-                self.grad_acc = []
-                self.params = [self.fc1.weight, self.fc2.weight]
-                for i, param in enumerate(self.params):
-
-                    def wrapper(param):
-                        param_tmp = param.expand_as(param)
-                        grad_acc = param_tmp.grad_fn.next_functions[0][0]
-
-                        def grad_acc_hook(*notneeded):
-                            grad_div(param)
-
-                        self.grad_acc.append(grad_acc)
-                        self.grad_acc_hooks.append(
-                            grad_acc.register_hook(grad_acc_hook)
-                        )
-
-                    wrapper(param)
-
-            def forward(self, x):
-                x = self.fc1(x)
-                x = self.fc2(x)
-                return x.sum()
-
-        bs = 8
-        ioc = 16
-        model = Module(ioc)
-        input = torch.randn([bs, ioc])
-
-        # eager ref
-        model(input).backward()
-        ref_res = [model.fc1.weight.grad, model.fc2.weight.grad]
-
-        # cag
-        model.fc1.weight.grad = None
-        model.fc2.weight.grad = None
-        model_to_train = torch.compile(model, backend="inductor")
-        with compiled_autograd.enable(compiler_fn):
-            model_to_train(input).backward()
-        res = [model_to_train.fc1.weight.grad, model_to_train.fc2.weight.grad]
-
-        self.assertEqual(res[0], ref_res[0])
-        self.assertEqual(res[1], ref_res[1])
-
-    def test_reorder_post_hook2(self):
-        x = torch.randn([1, 4, 32, 32], requires_grad=True)
-        y = torch.sigmoid(x)
-        z = torch.tanh(y)
-
-        assert isinstance(z.grad_fn, torch.autograd.graph.Node)
-        assert isinstance(y.grad_fn, torch.autograd.graph.Node)
-        handle_z = z.grad_fn.register_hook(lambda gI, gO: (gO[0] * 2,))
-        handle_y = y.grad_fn.register_hook(lambda gI, gO: (gI[0] * 2,))
-        z.sum().backward(retain_graph=True)
-        ref_res = x.grad
-
-        x.grad = None
-        with compiled_autograd.enable(compiler_fn):
-            z.sum().backward(retain_graph=True)
-        res = x.grad
-
-        self.assertEqual(res, ref_res)
-
-    def test_reorder_post_hook3(self):
-        conv = torch.nn.Conv2d(4, 4, 3, bias=False)
-        x = torch.randn([1, 4, 32, 32])
-        y = conv(x)
-
-        assert isinstance(y.grad_fn, torch.autograd.graph.Node)
-        # this hook will mul 2.0 to the conv weight gradient
-        handle_y = y.grad_fn.register_hook(lambda gI, gO: (gI[0], gI[1] * 2, gI[2]))
-        y.sum().backward(retain_graph=True)
-        ref_res = x.grad
-
-        x.grad = None
-        with compiled_autograd.enable(compiler_fn):
-            y.sum().backward(retain_graph=True)
-        res = x.grad
-
-        self.assertEqual(res, ref_res)
-
-    def test_reorder_all_bwd_hooks(self):
-        def tensor_hook(grad):
-            return grad.sub(2.0)
-
-        def acc_grad_node_pre_hook(grad_out):
-            return (grad_out[0].div(5.0),)
-
-        def post_acc_grad_hook(tensor):
-            tensor.grad.add_(3.0)
-
-        class TestModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(4, 4, 3, bias=False)
-                self.conv2 = torch.nn.Conv2d(4, 4, 3, bias=False)
-
-                self.acc_grad1 = self.conv1.weight.view_as(
-                    self.conv1.weight
-                ).grad_fn.next_functions[0][0]
-                self.conv1.weight.register_hook(tensor_hook)
-                self.conv1.weight.register_post_accumulate_grad_hook(post_acc_grad_hook)
-                self.acc_grad1.register_prehook(acc_grad_node_pre_hook)
-
-                def acc_grad_node_post_hook1(grad_in, grad_out):
-                    self.conv1.weight.grad.mul_(0.5)
-
-                self.acc_grad1.register_hook(acc_grad_node_post_hook1)
-
-                self.acc_grad2 = self.conv2.weight.view_as(
-                    self.conv2.weight
-                ).grad_fn.next_functions[0][0]
-                self.conv2.weight.register_hook(tensor_hook)
-                self.conv2.weight.register_post_accumulate_grad_hook(post_acc_grad_hook)
-                self.acc_grad2.register_prehook(acc_grad_node_pre_hook)
-
-                def acc_grad_node_post_hook2(grad_in, grad_out):
-                    self.conv2.weight.grad.mul_(0.5)
-
-                self.acc_grad2.register_hook(acc_grad_node_post_hook2)
-
-            def forward(self, x):
-                y = self.conv1(x)
-                y = self.conv2(y)
-                return y.sum()
-
-        input = torch.randn([1, 4, 32, 32])
-
-        # eager ref
-        model = TestModel()
-        model(input).backward()
-        ref_results = [model.conv1.weight.grad, model.conv2.weight.grad]
-
-        # cag
-        model.conv1.weight.grad = None
-        model.conv2.weight.grad = None
-        compiled_model = torch.compile(model, backend="inductor")
-        with compiled_autograd.enable(compiler_fn):
-            compiled_model(input).backward()
-        results = [compiled_model.conv1.weight.grad, compiled_model.conv2.weight.grad]
-
-        self.assertEqual(results[0], ref_results[0])
-        self.assertEqual(results[1], ref_results[1])
-
-    def test_reorder_multi_post_hooks(self):
-        class TestModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(4, 4, 3, bias=False)
-                self.conv2 = torch.nn.Conv2d(4, 4, 3, bias=False)
-
-                self.acc_grad1 = self.conv1.weight.view_as(
-                    self.conv1.weight
-                ).grad_fn.next_functions[0][0]
-
-                def acc_grad_node1_post_hook1(grad_in, grad_out):
-                    self.conv1.weight.grad.mul_(0.5)
-
-                def acc_grad_node1_post_hook2(grad_in, grad_out):
-                    self.conv1.weight.grad.sub_(0.3)
-
-                self.acc_grad1.register_hook(acc_grad_node1_post_hook1)
-                self.acc_grad1.register_hook(acc_grad_node1_post_hook2)
-
-                self.acc_grad2 = self.conv2.weight.view_as(
-                    self.conv2.weight
-                ).grad_fn.next_functions[0][0]
-
-                def acc_grad_node2_post_hook1(grad_in, grad_out):
-                    self.conv2.weight.grad.mul_(0.3)
-
-                def acc_grad_node2_post_hook2(grad_in, grad_out):
-                    self.conv2.weight.grad.sub_(0.5)
-
-                self.acc_grad2.register_hook(acc_grad_node2_post_hook1)
-                self.acc_grad2.register_hook(acc_grad_node2_post_hook2)
-
-            def forward(self, x):
-                y = self.conv1(x)
-                y = self.conv2(y)
-                return y.sum()
-
-        input = torch.randn([1, 4, 32, 32])
-
-        # eager ref
-        model = TestModel()
-        model(input).backward()
-        ref_results = [model.conv1.weight.grad, model.conv2.weight.grad]
-
-        # cag
-        model.conv1.weight.grad = None
-        model.conv2.weight.grad = None
-        compiled_model = torch.compile(model, backend="inductor")
-        with compiled_autograd.enable(compiler_fn):
-            compiled_model(input).backward()
-        results = [compiled_model.conv1.weight.grad, compiled_model.conv2.weight.grad]
-
-        self.assertEqual(results[0], ref_results[0])
-        self.assertEqual(results[1], ref_results[1])
-
-    def test_reorder_multi_pre_hooks(self):
-        def acc_grad_node_pre_hook1(grad_out):
-            return (grad_out[0].div(5.0),)
-
-        def acc_grad_node_pre_hook2(grad_out):
-            return (grad_out[0].sub(0.3),)
-
-        class TestModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(4, 4, 3, bias=False)
-                self.conv2 = torch.nn.Conv2d(4, 4, 3, bias=False)
-
-                self.acc_grad1 = self.conv1.weight.view_as(
-                    self.conv1.weight
-                ).grad_fn.next_functions[0][0]
-                self.acc_grad1.register_prehook(acc_grad_node_pre_hook1)
-                self.acc_grad1.register_prehook(acc_grad_node_pre_hook2)
-
-                self.acc_grad2 = self.conv2.weight.view_as(
-                    self.conv2.weight
-                ).grad_fn.next_functions[0][0]
-                self.acc_grad2.register_prehook(acc_grad_node_pre_hook1)
-                self.acc_grad2.register_prehook(acc_grad_node_pre_hook2)
-
-            def forward(self, x):
-                y = self.conv1(x)
-                y = self.conv2(y)
-                return y.sum()
-
-        input = torch.randn([1, 4, 32, 32])
-
-        # eager ref
-        model = TestModel()
-        model(input).backward()
-        ref_results = [model.conv1.weight.grad, model.conv2.weight.grad]
-
-        # cag
-        model.conv1.weight.grad = None
-        model.conv2.weight.grad = None
-        compiled_model = torch.compile(model, backend="inductor")
-        with compiled_autograd.enable(compiler_fn):
-            compiled_model(input).backward()
-        results = [compiled_model.conv1.weight.grad, compiled_model.conv2.weight.grad]
-
-        self.assertEqual(results[0], ref_results[0])
-        self.assertEqual(results[1], ref_results[1])
-
-    def test_reorder_multi_tensor_pre_hooks(self):
-        def tensor_hook1(grad):
-            return grad.sub(2.0)
-
-        def tensor_hook2(grad):
-            return grad.mul(0.5)
-
-        class TestModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.conv1 = torch.nn.Conv2d(4, 4, 3, bias=False)
-                self.conv2 = torch.nn.Conv2d(4, 4, 3, bias=False)
-
-                self.acc_grad1 = self.conv1.weight.view_as(
-                    self.conv1.weight
-                ).grad_fn.next_functions[0][0]
-                self.conv1.weight.register_hook(tensor_hook1)
-                self.conv1.weight.register_hook(tensor_hook2)
-
-                self.acc_grad2 = self.conv2.weight.view_as(
-                    self.conv2.weight
-                ).grad_fn.next_functions[0][0]
-                self.conv2.weight.register_hook(tensor_hook1)
-                self.conv2.weight.register_hook(tensor_hook2)
-
-            def forward(self, x):
-                y = self.conv1(x)
-                y = self.conv2(y)
-                return y.sum()
-
-        input = torch.randn([1, 4, 32, 32])
-
-        # eager ref
-        model = TestModel()
-        model(input).backward()
-        ref_results = [model.conv1.weight.grad, model.conv2.weight.grad]
-
-        # cag
-        model.conv1.weight.grad = None
-        model.conv2.weight.grad = None
-        compiled_model = torch.compile(model, backend="inductor")
-        with compiled_autograd.enable(compiler_fn):
-            compiled_model(input).backward()
-        results = [compiled_model.conv1.weight.grad, compiled_model.conv2.weight.grad]
-
-        self.assertEqual(results[0], ref_results[0])
-        self.assertEqual(results[1], ref_results[1])
 
     def test_torch_compile(self):
         def fn():
@@ -1924,8 +1586,7 @@ main()
                 f, compiler_fn=compiler_fn_with_op_check, compile_fn=False
             )
 
-    @scoped_load_inline
-    def test_non_traceable_autograd_cpp_node(self, load_inline):
+    def test_non_traceable_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = false;
@@ -1952,7 +1613,7 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_non_traceable_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -1973,8 +1634,8 @@ TORCH_LIBRARY(test_non_traceable_autograd_cpp_node, m) {
         ), compiled_autograd.enable(compiler_fn):
             fn()
 
-    @scoped_load_inline
-    def test_autograd_cpp_node(self, load_inline):
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
+    def test_autograd_cpp_node(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2001,7 +1662,7 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2021,8 +1682,7 @@ TORCH_LIBRARY(test_autograd_cpp_node, m) {
         # compiles for 10 (static) and 100 (dynamic)
         self.check_output_and_recompiles(fn, 2)
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_id(self, load_inline):
+    def test_autograd_cpp_node_id(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2070,11 +1730,12 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_id",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
+            extra_cflags=["-g", "-O0"],
         )
 
         def same_autograd_fn():
@@ -2113,8 +1774,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
 
         self.check_output_and_recompiles(different_autograd_fn, 2)
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_saved(self, load_inline):
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
+    def test_autograd_cpp_node_saved(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2168,7 +1829,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2189,8 +1850,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 
         self.check_output_and_recompiles(fn, 2)
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_saved_dynamic(self, load_inline):
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
+    def test_autograd_cpp_node_saved_dynamic(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2226,7 +1887,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved_dynamic",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2246,8 +1907,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
         # compiles for 10 (static) and 100 (dynamic)
         self.check_output_and_recompiles(fn, 2)
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_saved_int(self, load_inline):
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
+    def test_autograd_cpp_node_saved_int(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2286,7 +1947,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved_int",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2305,8 +1966,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
 
         self.check_output_and_recompiles(fn, 1)
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_saved_float(self, load_inline):
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
+    def test_autograd_cpp_node_saved_float(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2345,7 +2006,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_saved_float",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2365,8 +2026,8 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
         # compiled autograd and dynamo both support symfloat, but not backend
         self.check_output_and_recompiles(fn, [1, 3])
 
-    @scoped_load_inline
-    def test_autograd_cpp_node_data_dependent(self, load_inline):
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
+    def test_autograd_cpp_node_data_dependent(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2437,7 +2098,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_autograd_cpp_node_data_dependent",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2677,9 +2338,8 @@ main()
         # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-    @scoped_load_inline
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
-    def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self, load_inline):
+    def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2717,7 +2377,7 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 }
         """
 
-        module = load_inline(
+        module = torch.utils.cpp_extension.load_inline(
             name="test_cudagraphs_cpu_scalar_used_in_cpp_custom_op",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
@@ -2752,6 +2412,39 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
             "Cache miss due to new autograd node: torch::autograd::GraphRoot"
             not in logs.getvalue()
         )
+
+    def test_multithreading_tls(self):
+        def train(errors, model, x):
+            try:
+                out = model(x)
+                with compiled_autograd.enable(compiler_fn):
+                    self.assertEqual(compiled_autograd.enabled(), True)
+                    self.assertEqual(compiled_autograd.local.get("next_ctx_id"), 1)
+            except Exception as e:
+                print(f"Found error: {e}")
+                errors.put(1)
+                raise
+
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.ReLU(),
+            torch.nn.Linear(4, 4),
+            torch.nn.ReLU(),
+        )
+        x = torch.randn([2, 4])
+
+        threads = []
+        errors = queue.Queue()
+        with compiled_autograd.enable(compiler_fn):
+            for i in range(4):
+                thread = threading.Thread(target=train, args=(errors, model, x))
+                threads.append(thread)
+                thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        assert errors.empty()
 
     def test_verbose_logs_graph(self):
         def fn():
@@ -3107,63 +2800,6 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
         with torch._dynamo.compiled_autograd.enable(torch.compile):
             out.backward()
 
-    @skipIfWindows(msg="node name demangling inconsistent on windows")
-    def test_backward_hook_relative_ordering_partial(self):
-        # test backward hooks for cases that CA matches eager
-
-        def fn():
-            order = []
-
-            class MyModule(nn.Module):
-                def __init__(self):
-                    super().__init__()
-                    self.linear = torch.nn.Linear(10, 10, bias=False)
-
-                def forward(self, x):
-                    return self.linear(x)
-
-            x = torch.randn(10, 10)
-            module = MyModule()
-
-            def make_pre_hook(id):
-                return lambda _: order.append(f"pre_hook_{id}")
-
-            def make_post_hook(id):
-                return lambda _1, _2: order.append(f"post_hook_{id}")
-
-            count = 0
-
-            def register_hooks_on_all_nodes(nodes):
-                nonlocal count
-                for node, _ in nodes:
-                    if node is None:
-                        continue
-                    count += 1
-                    id = f"{node.name()}_{count}"
-                    node.register_prehook(make_pre_hook(id))
-                    node.register_hook(make_post_hook(id))
-                    register_hooks_on_all_nodes(node.next_functions)
-
-            loss = module(x).sum()
-            register_hooks_on_all_nodes(((loss.grad_fn, None),))
-
-            def make_tensor_pre_hook(id):
-                return lambda _: order.append(f"tensor_pre_hook_{id}")
-
-            def make_post_acc_grad_hook(id):
-                return lambda _: order.append(f"post_acc_grad_hook_{id}")
-
-            module.linear.weight.register_hook(make_tensor_pre_hook("weight"))
-
-            module.linear.weight.register_post_accumulate_grad_hook(
-                make_post_acc_grad_hook("weight")
-            )
-
-            loss.backward()
-            yield tuple(order)
-
-        self.check_output_and_recompiles(fn)
-
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -3330,8 +2966,7 @@ known_failing_tests = {
     "test_save_output_nr",  # output_nr grad passed as None
     "test_setup_context_when_forward_has_default_args",  # autograd.Function with class methods
     "test_lobpcg",  # create_graph
-    # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
-    "test_grad_nonleaf_register_hook",
+    "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
     "test_backward_twice_without_saved_values",  # https://github.com/pytorch/pytorch/issues/129938
     # Category: Dynamo
     "test_accumulate_grad_tensor_reference",  # Out of bounds: frame_state_entry.stride[i] is None
@@ -3356,7 +2991,6 @@ known_failing_tests = {
     # Category: Divergence from eager
     "test_invalid_gradients",  # can't give autograd error due to inaccurate output metadata of lifted backward
     "test_autograd_node_isinstance",  # backward ctx is a fake cls and not directly a Node instance
-    "test_backward_hook_relative_ordering",  # compiled autograd collects breadth first, and module backward hook not supported
     # Uncategorized
 }
 

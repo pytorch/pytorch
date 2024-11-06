@@ -16,7 +16,7 @@ std::unordered_map<std::string, worker_id_t> collectNames(
   std::unordered_map<std::string, worker_id_t> nameToId;
   nameToId.reserve(worldSize);
   nameToId.emplace(selfName, selfId);
-  // NOLINTNEXTLINE(*loop*)
+  // NOLINTNEXTLINE(bugprone-too-small-loop-variable)
   for (worker_id_t workerId = 0; workerId < worldSize; ++workerId) {
     if (workerId == selfId) {
       continue;

@@ -35,10 +35,6 @@ public:
   StashTLSOnEntryGuard(): saved_(tls_on_entry.value()) {
     tls_on_entry = std::nullopt;
   }
-  StashTLSOnEntryGuard(const StashTLSOnEntryGuard&) = delete;
-  StashTLSOnEntryGuard(StashTLSOnEntryGuard&&) = delete;
-  StashTLSOnEntryGuard& operator=(const StashTLSOnEntryGuard&) = delete;
-  StashTLSOnEntryGuard& operator=(StashTLSOnEntryGuard&&) = delete;
 
   ~StashTLSOnEntryGuard() {
     TORCH_INTERNAL_ASSERT(!tls_on_entry.has_value());

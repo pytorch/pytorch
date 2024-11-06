@@ -79,9 +79,7 @@ def aoti_compile_and_package(
     if not isinstance(exported_program, ExportedProgram):
         raise ValueError("Only ExportedProgram is supported")
 
-    assert package_path is None or package_path.endswith(
-        ".pt2"
-    ), f"Expect package path to end with .pt2, got {package_path}"
+    assert package_path is None or package_path.endswith(".pt2")
 
     inductor_configs = inductor_configs or {}
 

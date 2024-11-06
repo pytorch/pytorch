@@ -11,7 +11,6 @@
 #include <vector>
 
 #ifdef _MSC_VER
-#include <c10/util/Unicode.h>
 #include <c10/util/win32-headers.h>
 #include <iomanip>
 #pragma comment(lib, "Dbghelp.lib")
@@ -290,31 +289,27 @@ class GetBacktraceImpl {
 #elif defined(_MSC_VER) // !SUPPORTS_BACKTRACE
 
 const int max_name_len = 256;
-std::wstring get_module_base_name(void* addr) {
+std::string get_module_base_name(void* addr) {
   HMODULE h_module;
-  wchar_t module[max_name_len];
-  wcscpy(module, L"");
-
-  GetModuleHandleExW(
+  char module[max_name_len];
+  strcpy(module, "");
+  GetModuleHandleEx(
       GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-      (LPCWSTR)addr,
+      (LPCTSTR)addr,
       &h_module);
-
   if (h_module != NULL) {
-    GetModuleFileNameW(h_module, module, max_name_len);
+    GetModuleFileNameA(h_module, module, max_name_len);
   }
-
-  wchar_t* last_slash_pos = wcsrchr(module, L'\\');
+  char* last_slash_pos = strrchr(module, '\\');
   if (last_slash_pos) {
-    std::wstring module_base_name(last_slash_pos + 1);
+    std::string module_base_name(last_slash_pos + 1);
     return module_base_name;
   } else {
-    std::wstring module_base_name(module);
+    std::string module_base_name(module);
     return module_base_name;
   }
 }
-
 class SymbolHelper {
  public:
   static SymbolHelper& getInstance() {
@@ -403,8 +398,7 @@ class GetBacktraceImpl {
       }
 
       // Get the module basename
-      std::string module =
-          c10::u16u8(get_module_base_name(back_trace_[i_frame]));
+      std::string module = get_module_base_name(back_trace_[i_frame]);
 
       // The pattern on Windows is
       // `<return-address> <symbol-address>

@@ -2573,22 +2573,6 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
-    def test_cond_with_empty_operands(self):
-        @torch.compile(fullgraph=True)
-        def fn(x, y, z):
-            def true_fn():
-                return y + 2
-
-            def false_fn():
-                return z + 1
-
-            return torch.cond(x, true_fn, false_fn)
-
-        zeros = torch.zeros(1)
-        ones = torch.ones(1)
-        self.assertEqual(fn(zeros, ones, ones), torch.tensor([2.0]))
-        self.assertEqual(fn(ones, ones, ones), torch.tensor([3.0]))
-
     def test_hints_wrapper(self):
         def ref_fn(x, y):
             x = x + y

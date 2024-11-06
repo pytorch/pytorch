@@ -13,7 +13,8 @@
 #include <ATen/ops/topk_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // Currently internal-only.
 //
@@ -63,4 +64,4 @@ std::tuple<Tensor, Tensor> topk_quantized_cpu(
 
 DEFINE_DISPATCH(qtopk_stub);
 
-}  // namespace at::native
+}}  // namespace at::native

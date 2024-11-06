@@ -4334,35 +4334,6 @@ class TestSerialization(TestCase, SerializationMixin):
                 else:
                     os.environ[env_var] = old_value
 
-    @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
-    @parametrize("compute_crc32", (True, False))
-    @parametrize("filename", (True, False))
-    def test_crc32_options(self, compute_crc32, filename):
-        # test both path and buffer case
-        file_creation_func = TemporaryFileName if filename else tempfile.NamedTemporaryFile
-        sd = torch.nn.Linear(3, 5).state_dict()
-        with file_creation_func() as f:
-            try:
-                torch.serialization.set_crc32_options(compute_crc32)
-                torch.save(sd, f)
-                if not filename:
-                    f.seek(0)
-                sd_loaded = torch.load(f, weights_only=True)
-                self.assertEqual(sd_loaded, sd)
-            finally:
-                torch.serialization.set_crc32_options(True)
-
-            args = () if compute_crc32 else (zipfile.BadZipFile, "Bad CRC-32 for file")
-            ctx = contextlib.nullcontext if compute_crc32 else self.assertRaisesRegex
-
-            if not filename:
-                f.seek(0)
-            # zip_file.extractall() will raise BadZipFile if CRC32 is not populated
-            # we use the context manager to check whether CRC32 was populated
-            with ctx(*args), tempfile.TemporaryDirectory() as temp_dir:
-                with zipfile.ZipFile(f) as zip_file:
-                    zip_file.extractall(path=temp_dir)
-
     def run(self, *args, **kwargs):
         with serialization_method(use_zip=True):
             return super().run(*args, **kwargs)
@@ -4554,14 +4525,6 @@ class TestSubclassSerialization(TestCase):
                     torch.load(f, weights_only=True)
         finally:
             torch.serialization.clear_safe_globals()
-
-    def test_sets_are_loadable_with_weights_only(self):
-        s = {1, 2, 3}
-        with tempfile.NamedTemporaryFile() as f:
-            torch.save(s, f)
-            f.seek(0)
-            l_s = torch.load(f, weights_only=True)
-            self.assertEqual(l_s, s)
 
     @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
     def test_tensor_subclass_map_location(self):

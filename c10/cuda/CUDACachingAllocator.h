@@ -8,6 +8,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -497,10 +498,6 @@ struct C10_CUDA_API MemPool {
   MemPool(
       CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
       bool is_user_created = true);
-  MemPool(const MemPool&) = delete;
-  MemPool(MemPool&&) = default;
-  MemPool& operator=(const MemPool&) = delete;
-  MemPool& operator=(MemPool&&) = default;
   ~MemPool();
 
   MempoolId_t id();

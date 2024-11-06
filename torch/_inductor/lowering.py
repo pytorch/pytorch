@@ -2308,7 +2308,7 @@ FALLBACK_ALLOW_LIST = {
 def sdpa_constraint(fx_node, *args, **kwargs):
     # sdpa requires dense last dimension]
 
-    def apply_constraint(idx, arg, fx_arg):
+    def apply_constraint(arg, fx_arg):
         if not isinstance(arg, ir.IRNode):
             return arg
 
@@ -2316,22 +2316,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         meta_stride = meta_val.stride()
 
         stride_order = ir.get_stride_order(meta_stride)
-
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
             stride_order = list(reversed(range(len(arg.get_size()))))
-
-        if (
-            fx_node.target
-            == aten._scaled_dot_product_efficient_attention_backward.default
-            and idx in (0, 5)
-        ):
-            assert len(stride_order) == 4
-            # The 0 and 5th arguments for aten._scaled_dot_product_efficient_attention_backward.default
-            # are for out and gradient_out. They have to be in
-            # (3, 1, 2, 0) stride order. Otherwise the kernel will crash.
-            # Check https://github.com/pytorch/pytorch/issues/138772
-            stride_order = (3, 1, 2, 0)
 
         if not meta_val.is_cuda:
             return ir.ExternKernel.require_stride_order(arg, stride_order)
@@ -2375,10 +2362,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         return ir.ExternKernel.require_stride_order(arg, stride_order)
 
     args = tuple(
-        apply_constraint(idx, arg, fx_arg)
-        for idx, (arg, fx_arg) in enumerate(zip(args, fx_node.args))
+        apply_constraint(arg, fx_arg) for arg, fx_arg in zip(args, fx_node.args)
     )
-    kwargs = {k: apply_constraint(-1, v, fx_node.kwargs[k]) for k, v in kwargs.items()}
+    kwargs = {k: apply_constraint(v, fx_node.kwargs[k]) for k, v in kwargs.items()}
     return args, kwargs
 
 

@@ -64,7 +64,7 @@ struct PaddingParams {
       auto o_start = std::max(int64_t(0), pad);
       offsets.emplace_back(i_start - o_start);
     }
-  }
+  };
 };
 
 struct ReflectionPad {

@@ -780,13 +780,13 @@ public:
 };
 
 template <typename T>
-typename std::enable_if_t<!is_complex<T>::value&& std::is_unsigned_v<T>, T>
+typename std::enable_if_t<!is_complex<T>::value&& std::is_unsigned<T>::value, T>
 correctEpsilon(const T& eps)
 {
     return eps;
 }
 template <typename T>
-typename std::enable_if_t<!is_complex<T>::value && !std::is_unsigned_v<T>, T>
+typename std::enable_if_t<!is_complex<T>::value && !std::is_unsigned<T>::value, T>
 correctEpsilon(const T& eps)
 {
     return std::abs(eps);

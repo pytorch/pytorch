@@ -1,7 +1,8 @@
 #pragma once
 
 #include <torch/csrc/jit/backends/backend_detail.h>
-namespace torch::jit {
+namespace torch {
+namespace jit {
 class backend_preprocess_register {
   std::string backend_name_;
 
@@ -13,4 +14,5 @@ class backend_preprocess_register {
     detail::registerBackendPreprocessFunction(name, preprocess);
   }
 };
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

@@ -24,7 +24,6 @@ permissions: read-all
 
 jobs:
   llm-td:
-    if: github.repository_owner == 'pytorch'
     name: before-test
     uses: ./.github/workflows/llm_td_retrieval.yml
     permissions:
@@ -42,7 +41,6 @@ jobs:
   get-label-type:
     name: get-label-type
     uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
-    if: (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch'
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -256,7 +254,6 @@ jobs:
         ]}
 
   buck-build-test:
-    if: github.repository_owner == 'pytorch'
     name: buck-build-test
     uses: ./.github/workflows/_buck-build-test.yml
     with:
@@ -266,7 +263,6 @@ jobs:
         ]}
 
   android-emulator-build-test:
-    if: github.repository_owner == 'pytorch'
     name: android-emulator-build-test
     uses: ./.github/workflows/_run_android_tests.yml
     with:

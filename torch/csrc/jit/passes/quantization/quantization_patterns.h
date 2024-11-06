@@ -10,7 +10,8 @@
 #include <unordered_map>
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct QuantFusionInfo {
   std::string quantized_op_name;
@@ -25,9 +26,7 @@ std::string getExtraArgList(std::vector<std::string> extra_args) {
       extra_args.begin(),
       extra_args.end(),
       std::string(),
-      [](const std::string& acc, const std::string& arg) {
-        return acc + ", " + arg;
-      });
+      [](std::string acc, const std::string& arg) { return acc + ", " + arg; });
 }
 
 // Get the pattern we want to replace the match with
@@ -1261,4 +1260,5 @@ graph(%a_dequant, %w_quant, %b, %stride, %padding, %output_padding, %groups, %di
        std::move(conv_transpose2d_with_quant_prepack)}};
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

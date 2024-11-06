@@ -2,7 +2,10 @@
 #include <torch/csrc/jit/codegen/onednn/layout_propagation.h>
 #include <torch/csrc/jit/jit_log.h>
 
-namespace torch::jit::fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 static void LayoutPropagation(Node* n) {
   if (!LlgaGraphHelper::isLlgaSubgraph(n))
@@ -44,4 +47,7 @@ void PropagateLayout(const std::shared_ptr<Graph>& graph) {
   LayoutPropagation(graph->block());
 }
 
-} // namespace torch::jit::fuser::onednn
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch

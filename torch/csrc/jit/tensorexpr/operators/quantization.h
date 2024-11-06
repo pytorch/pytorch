@@ -2,7 +2,9 @@
 
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 TORCH_API ExprHandle quantizePerTensorQParamFromArg(ArgValue arg);
 
@@ -153,4 +155,6 @@ TORCH_API Tensor computeQuantizedSigmoidExternalCall(
     const std::vector<ExprHandle>& outputStrides,
     const std::optional<ScalarType>& outputType,
     at::Device);
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

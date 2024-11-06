@@ -588,12 +588,9 @@ struct THPStorageMeta {
   PyHeapTypeObject base;
 };
 
-static int THPStorageMetaType_init(
-    PyObject* cls,
-    PyObject* args,
-    PyObject* kwargs);
+int THPStorageMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs);
 
-static PyTypeObject THPStorageMetaType = {
+PyTypeObject THPStorageMetaType = {
     PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
     "torch._C._StorageMeta", /* tp_name */
     sizeof(THPStorageMeta), /* tp_basicsize */
@@ -695,7 +692,7 @@ static PyObject* THPStorage_device(THPStorage* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_get_cdata(THPStorage* self, void* unused) {
+PyObject* THPStorage_get_cdata(THPStorage* self, void* unused) {
   HANDLE_TH_ERRORS
   return PyLong_FromVoidPtr(THPStorage_Unpack(self).unsafeGetStorageImpl());
   END_HANDLE_TH_ERRORS

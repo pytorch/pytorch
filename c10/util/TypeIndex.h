@@ -128,4 +128,4 @@ inline constexpr string_view get_fully_qualified_type_name() noexcept {
 }
 } // namespace c10::util
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::type_index)
+C10_DEFINE_HASH_FOR_IDWRAPPER(c10::util::type_index);

@@ -409,12 +409,6 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
       return false;
     }
   }
-  if (s_q == 1 || s_k == 1) {
-    if (debug) {
-      TORCH_WARN_ONCE("cudnn SDPA does not support sequence length 1.");
-    }
-    return false;
-  }
   return true;
 }
 

@@ -72,10 +72,8 @@ std::vector<at::Tensor> Work::result() {
 }
 
 void Work::synchronize() {
-  if (c10d::allow_inflight_collective_as_graph_input()) {
-    c10d::unregister_work(
-        c10::intrusive_ptr<Work>::unsafe_reclaim_from_nonowning(this));
-  }
+  c10d::unregister_work(
+      c10::intrusive_ptr<Work>::unsafe_reclaim_from_nonowning(this));
 }
 
 bool Work::wait(std::chrono::milliseconds timeout) {
