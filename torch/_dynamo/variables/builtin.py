@@ -26,7 +26,13 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
-from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
+from ..source import (
+    AttrSource,
+    GetItemSource,
+    GlobalSource,
+    is_constant_source,
+    TypeSource,
+)
 from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
@@ -1879,6 +1885,11 @@ class BuiltinVariable(VariableTracker):
             ) from None
 
         source = obj.source and TypeSource(obj.source)
+        if py_type is torch.Tensor:
+            # In some cases torch isn't available in globals
+            name = tx.output.install_global_by_id("", torch)
+            source = AttrSource(GlobalSource(name), "Tensor")
+
         return VariableTracker.build(tx, py_type, source)
 
     def call_reversed(self, tx: "InstructionTranslator", obj: VariableTracker):
