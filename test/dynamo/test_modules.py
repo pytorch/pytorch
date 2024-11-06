@@ -3002,7 +3002,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
-            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+            # weights_only=False as this is a legacy use case that loads a module
+            loaded_model = torch.load(
+                os.path.join(tmpdirname, "model.pt"), weights_only=False
+            )
         loaded_model(inp)
         self.assertTrue(same_two_models(loaded_model, mod, [inp]))
         self.assertTrue(same_two_models(loaded_model, opt_mod, [inp]))
@@ -3020,7 +3023,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 opt_mod = torch.compile(mod, backend=backend)
                 with tempfile.TemporaryDirectory() as tmpdirname:
                     torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
-                    loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+                    # weights_only=False as this is a legacy use case that loads a module
+                    loaded_model = torch.load(
+                        os.path.join(tmpdirname, "model.pt"), weights_only=False
+                    )
                 torch._dynamo.reset()  # force recompiles
                 torch._inductor.metrics.generated_kernel_count = 0
                 opt_mod(inp)
@@ -3133,6 +3139,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     @patch.object(
         torch._dynamo.config, "skip_tensor_guards_with_matching_dict_tags", False
     )
+    @patch.object(torch._dynamo.config, "inline_inbuilt_nn_modules", True)
     def test_param_requires_grad(self):
         def adjust_model(model):
             to_freeze = model.num_iter % 2 == 0
