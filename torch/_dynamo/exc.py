@@ -225,15 +225,7 @@ class ObservedAttributeError(ObservedException):
     pass
 
 
-class ObservedRuntimeError(ObservedException):
-    # A RuntimeError exception to be raised from inside Dynamo tracing. This can
-    # happen on Python 3.12, when a StopIteration is converted into a RuntimeError
-    # See: https://peps.python.org/pep-0479/
-    pass
-
-
 observed_exception_map = {
-    RuntimeError: ObservedRuntimeError,
     StopIteration: ObservedUserStopIteration,
     KeyError: ObservedKeyError,
     AttributeError: ObservedAttributeError,

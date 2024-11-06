@@ -2560,7 +2560,6 @@ class InstructionTranslatorBase(
             # INTRINSIC_LIST_TO_TUPLE
             self.push(TupleVariable(self.pop().force_unpack_var_sequence(self)))
         else:
-            breakpoint()
             unimplemented(f"missing CALL_INTRINSIC_1 operand {inst.argval}")
 
     def END_SEND(self, inst):
