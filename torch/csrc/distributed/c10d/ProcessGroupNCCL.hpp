@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <future>
 #include <iostream>
 #include <list>
@@ -62,13 +63,6 @@ static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
 // TORCH_NCCL_ENABLE_MONITORING=1 and TORCH_NCCL_TRACE_BUFFER_SIZE > 0.
 static std::vector<std::string> TORCH_NCCL_DUMP_ON_TIMEOUT = {
     "TORCH_NCCL_DUMP_ON_TIMEOUT"};
-
-// TODO: remove this change after a safe rollout.
-// Control whether we sleep after an exception is thrown.
-// This change is temporary and is used to safely remove the current sleep that
-// exists after an exception is thrown.
-static std::vector<std::string> TORCH_NCCL_SLEEP_AFTER_EXCEPTION = {
-    "TORCH_NCCL_SLEEP_AFTER_EXCEPTION"};
 
 // Control whether Desync Debug is enabled. This variable must be set
 // together with TORCH_NCCL_ASYNC_ERROR_HANDLING.
@@ -204,7 +198,8 @@ struct DumpPipe {
     if (fd_ == -1) {
       return false;
     }
-    char buf[128];
+    // NOLINTNEXTLINE(*array*)
+    char buf[128]{};
     // non-blocking from O_NONBLOCK above.
     // Ignore EINTR because we already will poll this
     // again later.
@@ -326,6 +321,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Get a Future object that will be marked as completed internally.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
+    // Get a Future result of each work (e.g. success, different error types).
+    // instead of the tensor output.
+    c10::intrusive_ptr<c10::ivalue::Future> getFutureResult() override;
+
     float getDuration() const override;
 
     uint64_t getSequencenumber() const override;
@@ -441,6 +440,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // The future returned by getFuture.
     c10::intrusive_ptr<at::ivalue::Future> future_;
 
+    // the future result (e.g., success or failure) of the work
+    c10::intrusive_ptr<at::ivalue::Future> futureWorkResult_;
+
     bool timingEnabled_;
     // unique id used to tell the trace buffer that this
     // work has completed
@@ -460,8 +462,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // NOTE: We intentionally store raw pointers so that
     // we do not attempt to destroy the event objects on process exit,
     // because cuda may be gone.
-    std::vector<at::cuda::CUDAEvent*>
-        eventsArray_[2]; // 0 for timing=false, 1 for timing=true
+    std::array<std::deque<at::cuda::CUDAEvent*>, 2>
+        eventsArray_; // 0 for timing=false, 1 for timing=true
   };
 
   struct Options : Backend::Options {
@@ -486,7 +488,25 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // Optional "parent" backend and color to create communicators from
     // via `ncclCommSplit`
     std::shared_ptr<ProcessGroupNCCL> split_from;
-    int64_t split_color{0};
+    // Color to use for `ncclCommSplit`, values:
+    // * Non-negative value: in group;
+    // * NCCL_SPLIT_NOCOLOR (-1): not in group;
+    // * NCCL_SPLIT_NOCOLOR - 1: uninitialized.
+    // [Note 1]: the type must be `int` instead of `int64_t` because NCCL API
+    // accepts int. Otherwise, an implicit conversion may happen at the API call
+    // and the value may become negative.
+    // [Note 2]: this member is pybinded to Python, the value passed from Python
+    // must be within the numerical range of C++ int. Otherwise, Python will
+    // raise a RuntimeError saying type is incompatible. See also
+    // `_process_group_color` in `distributed_c10d.py`.
+#ifdef NCCL_HAS_COMM_SPLIT
+    int split_color{NCCL_SPLIT_NOCOLOR - 1};
+#else
+    // [Note 3]: for older NCCL versions, NCCL_SPLIT_NOCOLOR is not defined. But
+    // `split_color` is pybinded to Python, so we need to define it. So we use
+    // the int value of `NCCL_SPLIT_NOCOLOR` (-1) instead.
+    int split_color{-2};
+#endif
     std::vector<uint64_t> global_ranks_in_group;
     std::string group_name;
   };
@@ -506,7 +526,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // communicator. These NCCL communicators are cached and reused if possible.
   //
   ProcessGroupNCCL(
-      const c10::intrusive_ptr<Store>& store,
+      c10::intrusive_ptr<Store> store,
       int rank,
       int size,
       c10::intrusive_ptr<Options> options = Options::create());
@@ -697,6 +717,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void performNocolorSplit(at::Device device);
 
+  // If all comms on this PG are fully initialized, return true.
+  bool isInitialized();
+
   // This method adds a temporary extension for the timeout period,
   // applying to all collectives between the calling of this API and
   // the completion of the first collective on the GPU. While this feature
@@ -723,9 +746,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const std::string& devicesKey,
       int p2pRank);
 
-  // Helper that either looks up the cached NCCL communicators or creates
-  // a new set of NCCL communicators as a cache entry
-  std::shared_ptr<NCCLComm> getNCCLComm(
+  // Helper that looks up the cached NCCL communicators only
+  std::shared_ptr<NCCLComm> getNCCLComm(const std::string& deviceKey);
+
+  std::shared_ptr<NCCLComm> initNCCLComm(
       const std::string& deviceKey,
       at::Device& device,
       OpType opType,
@@ -754,7 +778,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool dumpDebuggingInfo();
 
   // Abort all communicators on this rank.
-  bool abortComms(std::optional<std::string> abortReason = std::nullopt);
+  bool abortComms(const std::optional<std::string>& abortReason = std::nullopt);
+
+  // A helper function to check if nonblocking API mode should be used.
+  // Use this helper instead of directly checking `useNonblocking_` variable.
+  bool useNonblocking();
 
  private:
   int globalRankStart;
@@ -1007,13 +1035,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::mutex mutex_;
 
   // Heartbeat of watchdog thread.
-  std::atomic_uint64_t heartbeat_;
+  std::atomic_uint64_t heartbeat_{};
 
   // The time interval used for deciding whether there is no watchdog heartbeat.
   int heartbeatTimeoutInSec_;
 
   // timeout for the dump to finish.
   int waitTimeoutDumpInMilSec_;
+
+  // promise to coordinate flight recorder dump.
+  std::promise<void> promiseFlightRecorderDump_;
 
   // Interval of check coordinated signals in ProcessGroupNCCL from other ranks
   // e.g., trigger the dump of the debugging info for timeout when notified.
@@ -1023,10 +1054,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int ncclTraceBufferSize_;
 
   // We gate the heartbeat monitor thread so that we can roll it out gradually.
-  std::atomic<bool> monitorThreadEnabled_;
+  std::atomic<bool> monitorThreadEnabled_{};
 
   // We gate the cudaEventCache so that we can roll it out gradually.
-  std::atomic<bool> cudaEventCacheEnabled_;
+  std::atomic<bool> cudaEventCacheEnabled_{};
 
   // Monitor thread which checks the heartbeat of Watchdog thread.
   // If the monitor thread finds there is no heartbeat, it will dump debug info
@@ -1049,7 +1080,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::atomic<bool> collectiveDebugInfoMode_;
 
   // Whether there are hooks pending to be fired
-  std::atomic<bool> hasPendingHooks_;
+  std::atomic<bool> hasPendingHooks_{};
 
   // This is the signal from watchdog threads to indicate whether the monitor
   // thread should dump. Making it static so that it is accessiable from all the
@@ -1112,26 +1143,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Stores communicators for all collectives run inside a coalescing block
   std::shared_ptr<NCCLComm> coalescedComm_ = nullptr;
 
-  // map from the key: "group name + pg counter (ID)" to the
-  // unique NCCL ID count. This needs to be group and pg specific
-  //
-  // For each process group, we need a uniform unique NCCL ID counter to ensure
-  // that NCCL operation in this process group can be completed successfully.
-  // Since each process group ID belongs to a group name, the key to this map
-  // is a combination of group name and ProcessGroupNCCL ID.
-  static std::unordered_map<std::string, ssize_t> pgUniqueNCCLIDCnt_;
-
-  // map from group name to the pg counter (ID) within that group
-  //
-  // For each group with the "group name" (which is the key), we need to
-  // keep track of a unique process group ID when creating a new
-  // ProcessGroupNCCL for this "group name". Therefore, the value of this
-  // map keeps the unique ProcessGroupNCCL's ID for a specific group with
-  // the "group name". The reason we need a per-group process group ID counter
-  // is that different group can have different ranks and we need ensure that
-  // each group has its own uniform process group ID for all its ranks.
-  static std::unordered_map<std::string, ssize_t> processGroupCounterMap_;
-
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
   bool blockingWait_ = false;
@@ -1152,7 +1163,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   bool dumpOnTimeoutOrEx_;
 
   // Whether or not to sleep after an exception is thrown in the watchdog.
-  bool sleepAfterException_;
+  bool sleepAfterException_{};
 
   // Whether or not to enable nan check for input tensors to collectives.
   bool enableNanCheck_;
@@ -1163,23 +1174,17 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
   // is set to true.
-  std::atomic<bool> enableTiming_;
+  std::atomic<bool> enableTiming_{};
 
   // Flag to enable the print of hash value of input/output of collectives for
   // verification.
-  std::atomic<bool> enableCollecticeHashDebug_;
+  std::atomic<bool> enableCollecticeHashDebug_{};
 
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
 
   // Whether the NCCL watchdog should rethrow CUDA errors.
   bool rethrowCUDAErrors_ = false;
-
-  // Set of communicators that this process group has aborted and their
-  // ncclUniqueId has been written to the store. We don't need a lock
-  // for this map since only the watchdog thread accesses this set. The
-  // set contains the string representation of ncclUniqueId.
-  std::unordered_set<std::string> abortedComms_;
 
   // The number of active ncclGroupStart() calls. This counter will be increased
   // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
@@ -1212,6 +1217,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   std::shared_ptr<ProcessGroupStatus> pgStatus_ =
       std::make_shared<ProcessGroupStatus>();
+
+  // Internal cached value: use NCCL non-blocking API mode or not.
+  // Use `useNonblocking()` method instead of accessing this variable directly.
+  std::optional<bool> useNonblocking_{std::nullopt};
 };
 
 // Dumps the NCCL comm traces and additional information about the Process

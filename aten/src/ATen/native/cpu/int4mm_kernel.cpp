@@ -723,7 +723,7 @@ void int4pack_mm_kernel_(
     int mb{0}, nb{0};
     data_index_init(begin, mb, MB, nb, NB);
 
-    for (C10_UNUSED const auto i : c10::irange(begin, end)) {
+    for ([[maybe_unused]] const auto i : c10::irange(begin, end)) {
       int mb_start = mb * BLOCK_M;
       int mb_size = std::min(BLOCK_M, M - mb_start);
       int nb_start = nb * BLOCK_N;
@@ -775,8 +775,8 @@ void int4pack_mm_kernel(
 
 } // anonymous namespace
 
-ALSO_REGISTER_AVX512_DISPATCH(weight_to_int4pack_stub, &weight_to_int4pack_kernel);
-ALSO_REGISTER_AVX512_DISPATCH(int4pack_mm_stub, &int4pack_mm_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(weight_to_int4pack_stub, &weight_to_int4pack_kernel)
+ALSO_REGISTER_AVX512_DISPATCH(int4pack_mm_stub, &int4pack_mm_kernel)
 
 } // at::native
 C10_DIAGNOSTIC_POP()

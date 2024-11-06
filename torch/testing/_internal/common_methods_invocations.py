@@ -35,7 +35,7 @@ from torch.testing._internal.common_cuda import (
 )
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
-    TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
+    TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR
@@ -732,10 +732,7 @@ def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
 
     for shape_lhs, shape_rhs in shapes:
         lhs = make_arg(shape_lhs)
-
-        args = []
-        for i in range(num_inputs - 1):
-            args.append(make_arg(shape_rhs))
+        args = [make_arg(shape_rhs) for _ in range(num_inputs - 1)]
         broadcasts_input = (shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs))
 
         yield SampleInput(lhs, args=tuple(args), kwargs=sample_kwargs, broadcasts_input=broadcasts_input)
@@ -843,8 +840,6 @@ def sample_inputs_arange(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(1, args=(3, 1))
 
 def sample_inputs_randn(op, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=False)
-
     shapes = (
         (M,),
         (S, S)
@@ -1259,9 +1254,8 @@ def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
 def error_inputs_dot_vdot(op_info, device, is_ref=False, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=torch.float32)
 
-    if not is_ref:
-        yield ErrorInput(SampleInput(make_input(1), args=(make_input(3, dtype=torch.float16),)),
-                         error_regex='dot : expected both vectors to have same dtype')
+    yield ErrorInput(SampleInput(make_input(1), args=(make_input(3, dtype=torch.float16),)),
+                     error_regex='dot : expected both vectors to have same dtype')
     yield ErrorInput(SampleInput(make_input(1, 1), args=(make_input(3),)),
                      error_regex='1D tensors expected')
     yield ErrorInput(SampleInput(make_input(9), args=(make_input(3),)),
@@ -3098,7 +3092,6 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
         ((XS, XS, XS), 2, (XS, XS, 1), (XS, XS, 1)),
         ((XS, XS, XS), 2, (XS, XS, XS), (XS, XS, XS)),)
 
-    sample_inputs = []
     for size, dim, size_prepend, size_append in test_cases:
         prepend_size = 0 if (size_prepend is None) else size_prepend[dim]
         append_size = 0 if (size_append is None) else size_append[dim]
@@ -3126,7 +3119,7 @@ def sample_inputs_histogram(op_info, device, dtype, requires_grad, **kwargs):
                           weight=weight_tensor, density=density)
 
         bins_tensor = make_arg((bin_ct + 1,))
-        sorted_bins, bins_indices = torch.sort(bins_tensor)
+        sorted_bins, _bins_indices = torch.sort(bins_tensor)
         yield SampleInput(input_tensor, sorted_bins,
                           weight=weight_tensor, density=density)
 
@@ -3327,7 +3320,10 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
     flag = [True, False]
     for dim, descending, stable in product(dims, flag, flag):
         # default schema without stable sort
-        yield SampleInput(small_3d_unique(), dim, descending)
+        if not (dtype == torch.bool and torch.device(device).type == 'cuda'):
+            # bool and cuda requires stable sort for stable results, at least
+            # for the return index
+            yield SampleInput(small_3d_unique(), dim, descending)
         # schema with stable sort, no CUDA support yet
         if torch.device(device).type == 'cpu':
             yield SampleInput(
@@ -4906,7 +4902,6 @@ def error_inputs_gelu(op, device, **kwargs):
 
 
 def sample_inputs_max_min_reduction_with_dim(op_info, device, dtype, requires_grad, **kwargs):
-    inputs = []
     args_for_reduction_with_dim = (
         ((S, S, S), (1,),),
         ((S, S, S), (1, True, ),),
@@ -5236,8 +5231,6 @@ def sample_inputs_dist(op_info, device, dtype, requires_grad, **kwargs):
 # Missing to test the nondeterminism of the operation
 # https://github.com/pytorch/pytorch/issues/53352
 def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, **kwargs):
-    # target.index_select(dim, idx)
-    select = "index_select" in op_info.name
     # target.index_add(dim, idx, source, *, alpha=1)
     add = "index_add" in op_info.name
     # target.index_copy(dim, idx, source)
@@ -5378,8 +5371,6 @@ def sample_inputs__unsafe_masked_index_put_accumulate(op_info, device, dtype, re
         ((S, S), M, (S, S + 1)),
         ((S, S, S), S, (M, M - 1, M + 1)),
     ]
-
-    fill_value = make_tensor([], dtype=dtype, device="cpu").item()
 
     for c in cases:
         self_shape, high, idx_sizes = c
@@ -7206,7 +7197,6 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
     def _tensor(shape, dtype=dtype, low=None, high=None):
         return make_tensor(shape, dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)
 
-    zero = torch.tensor(0, dtype=torch.long, device=device)
     test_cases = (
         # inp_shape, dim, lengths, unsafe
         ((S,), 0, [0, 1, 2, 2], False),
@@ -7249,8 +7239,6 @@ def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg((S, S, S), noncontiguous=True))
 
 def sample_inputs_unravel_index(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device,
-                       low=None, high=None, requires_grad=requires_grad)
     yield SampleInput(
         torch.tensor(
             [[3, 8, 13], [0, 5, 10]],
@@ -7579,7 +7567,6 @@ def error_inputs_view_reshape(op, device, **kwargs):
 
 
 def sample_inputs_atleast1d2d3d(op_info, device, dtype, requires_grad, **kwargs):
-    input_list = []
     shapes = ((S, S, S, S), (S, S, S), (S, S), (S, ), (),)
     make_tensor_partial = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     for shape in shapes:
@@ -7803,7 +7790,8 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(a, args=(c, b))
 
     # type promoting
-    other_dtype = torch.double if dtype is not torch.double else torch.long
+    # FIXME(rec): shouldn't other_dtype be used two lines below?
+    other_dtype = torch.double if dtype is not torch.double else torch.long  # noqa: F841
     c = make_cond((10, 3), noncontiguous=True)
     a = make_arg((10, 1), dtype=torch.long)
     b = make_arg((10, 1))
@@ -8783,7 +8771,7 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
         causal_options = [False]  # FIXME: Large errors with causal+fp32
     else:
         causal_options = [True, False]
-    for qkv_shape, is_causal, dropout_p, enable_gqa in product(
+    for qkv_shape, is_causal, dropout_p, _enable_gqa in product(
             qkv_shapes, causal_options, [0.0, 0.5], gqa_options):
         shape_q, shape_kv = qkv_shape
         samples.append(SampleInput(
@@ -8795,7 +8783,8 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
         ))
 
     # Add non standard shapes
-    diff_v_head_dim = SampleInput(
+    # FIXME(rec): should diff_v_head_dim be appended to samples?
+    diff_v_head_dim = SampleInput(  # noqa: F841
         make((batch, num_heads, seq_q, head_dim)),
         make((batch, num_heads, seq_kv, head_dim)),
         make((batch, num_heads, seq_kv, head_dim + 8)),
@@ -8841,7 +8830,7 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
     mask_types = [1, 2]  # UpperLeft, LowerRight
     scales = [None, 1.0]
 
-    for qkv_shape, is_causal, dropout_p, mask_type, scale in product(
+    for qkv_shape, _is_causal, dropout_p, mask_type, scale in product(
             qkv_shapes, [True, False], [0.0, 0.5], mask_types, scales):
         shape_q, shape_kv = qkv_shape
         samples.append(SampleInput(
@@ -8861,7 +8850,8 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
         ))
 
     # Add non standard shapes
-    diff_v_head_dim = SampleInput(
+    # FIXME(rec): should diff_v_head_dim be appended to samples?
+    diff_v_head_dim = SampleInput(  # noqa: F841
         make((batch, seq_q, num_heads, head_dim)),
         make((batch, seq_kv, num_heads, head_dim)),
         make((batch, seq_kv, num_heads, head_dim + 8)),
@@ -9046,7 +9036,6 @@ def sample_inputs_allclose(op_info, device, dtype, requires_grad, **kwargs):
     sample_shapes = [(), (S), (S, S, S)]
     atols = [1e-2, 1e-16]
     rtols = [1e-1, 0.5]
-    eps = 1e-8
     for s, rtol, atol in product(sample_shapes, rtols, atols):
         # close sample
         t = make_tensor(s, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -9474,7 +9463,7 @@ class foreach_inputs_sample_func:
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
         allow_higher_dtype_scalars = kwargs.pop("allow_higher_dtype_scalars", False)
-        for rightmost_arg_type in self._rightmost_arg_types:
+        for _rightmost_arg_type in self._rightmost_arg_types:
             zero_size_foreach_inputs_kwargs = copy.deepcopy(_foreach_inputs_kwargs)
             zero_size_foreach_inputs_kwargs["zero_size"] = True
             input = sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, **zero_size_foreach_inputs_kwargs)
@@ -10866,6 +10855,9 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(unittest.skip("consistently fails internally and causes other tests to appear flaky"),
+                         "TestForeach", "test_parity", dtypes=(torch.complex128,),
+                         active_if=lambda kwargs: IS_FBCODE and not kwargs["noncontiguous"]),
         ),
     ),
     ForeachFuncInfo(
@@ -10884,6 +10876,9 @@ foreach_binary_op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace", dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
                          dtypes=(torch.bool,)),
+            DecorateInfo(unittest.skip("consistently fails internally and causes other tests to appear flaky"),
+                         "TestForeach", "test_parity", dtypes=(torch.complex128,),
+                         active_if=lambda kwargs: IS_FBCODE and not kwargs["noncontiguous"]),
         ),
     ),
     ForeachFuncInfo(
@@ -13559,7 +13554,6 @@ op_db: List[OpInfo] = [
                    decorators=(precisionOverride({torch.bfloat16: 3e-1,
                                                   torch.float16: 5e-1}),),
                    dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   backward_dtypes=floating_types(),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
                    promotes_int_to_float=True,
@@ -16291,14 +16285,6 @@ op_db: List[OpInfo] = [
         check_batched_forward_grad=False,
         decorators=[skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention")],
         skips=(
-            # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", device_type="cuda",
-                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type="cuda",
-                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
-                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            # Checking the scalar value of the philox seed and offset
             # Checking the scalar value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
@@ -16326,14 +16312,6 @@ op_db: List[OpInfo] = [
             skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
             skipCUDAIf(TEST_WITH_ROCM, "Efficient attention on ROCM doesn't support custom_mask_type==2")],
         skips=(
-            # for element 1, was torch.Size([4, 4, 11]) but real shape was torch.Size([16, 11])
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace", device_type="cuda",
-                         dtypes=[torch.float16, torch.bfloat16, torch.float32],
-                         active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace", device_type="cuda",
-                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace", device_type="cuda",
-                         dtypes=[torch.float16, torch.bfloat16], active_if=TEST_WITH_ROCM and PLATFORM_SUPPORTS_FLASH_ATTENTION),
             # Checking the scaler value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='cuda'),
@@ -17029,6 +17007,19 @@ op_db: List[OpInfo] = [
            supports_varargs=True,
            sample_inputs_func=sample_inputs_permute,
            reference_inputs_func=reference_inputs_permute),
+    OpInfo('permute_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
+           supports_out=True,
+           assert_autodiffed=True,
+           assert_jit_shape_analysis=True,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           supports_varargs=False,  # torch.permute is also not varargs
+           sample_inputs_func=sample_inputs_permute,
+           reference_inputs_func=reference_inputs_permute,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+           )),
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
@@ -18489,11 +18480,13 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_sort,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], device_type='cuda'),
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
@@ -19387,7 +19380,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('histc',
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
-           dtypesIfCUDA=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64),
+           dtypesIfCUDA=floating_types_and(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64),
            sample_inputs_func=sample_inputs_histc,
            supports_out=True,
            supports_autograd=False,
@@ -19518,12 +19511,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('msort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_msort,
            skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], device_type='cuda'),
            )),
     OpInfo('movedim',
            aliases=('moveaxis',),
@@ -21336,7 +21331,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "argsort",
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_sort,
         supports_out=False,
         supports_autograd=False,
@@ -21346,6 +21341,13 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
                 dtypes=(torch.float32,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_non_standard_bool_values",
+                dtypes=[torch.bool],
+                device_type='cuda',
             ),
         ),
     ),
@@ -23956,6 +23958,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.permute",
         torch_opinfo_name="permute",
+    ),
+    PythonRefInfo(
+        "_refs.permute_copy",
+        torch_opinfo_name="permute_copy",
+        supports_out=True,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.rad2deg",

@@ -460,6 +460,15 @@ class TestPySymInt(TestCase):
         self.assertEqual(guard_int(a0), 2)
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
+    def test_sym_sum(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 2)
+        s1 = create_symint(shape_env, 3)
+        s2 = create_symint(shape_env, 4)
+        self.assertEqual(
+            (s0 + s1 + s2).node.expr, torch.sym_sum([s0, s1, s2]).node.expr
+        )
+
     def test_prefer_deferred_runtime_assertions_over_guards(self):
         shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
         s0 = create_symint(shape_env, 2)
@@ -499,6 +508,16 @@ class TestPySymInt(TestCase):
             str(shape_env.guards[2][0]), """Eq(TruncToInt(2.0*ToFloat(s2)), 6)"""
         )
 
+    def test_sym_log2(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 4)
+        r = torch._sym_log2(a0)
+        self.assertEqual(r, 2.0)
+        self.assertIsInstance(r, torch.SymFloat, msg=type(r))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_log2(ToFloat(s0)), 2.0)"""
+        )
+
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 4)
@@ -506,7 +525,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(s0), 2.0)"""
+            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(ToFloat(s0)), 2.0)"""
         )
 
     def test_sym_floor(self):
@@ -540,7 +559,8 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[1][0]), """Eq(TruncToInt(OpaqueUnaryFn_sqrt(s0)), 2)"""
+            str(shape_env.guards[1][0]),
+            """Eq(TruncToInt(OpaqueUnaryFn_sqrt(ToFloat(s0))), 2)""",
         )
 
     def test_sym_ceil(self):

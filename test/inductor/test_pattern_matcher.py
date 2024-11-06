@@ -27,6 +27,7 @@ from torch._inductor.pattern_matcher import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import V
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import expectedFailureXPU, skipCUDAIf
@@ -38,6 +39,9 @@ from torch.testing._internal.inductor_utils import (
     IS_BIG_GPU,
 )
 from torch.utils import _pytree as pytree
+
+
+aten = torch.ops.aten
 
 
 class TestPatternMatcher(TestCase):
@@ -817,6 +821,72 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 1, 3)
 
+    def test_pointless_view_pair(self):
+        def f(x):
+            x = aten.view.default(x, [3, 5, 7])
+            x = aten.view.default(x, [15, 7])
+            return x
+
+        x = torch.randn(15, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.view.default(x, [3, 5, 7])
+            x2 = aten.view.default(x1, [15, 7])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
+
+    def test_pointless_permute_pair(self):
+        def f(x):
+            x = aten.permute.default(x, [1, 0])
+            x = aten.permute.default(x, [1, 0])
+            return x
+
+        x = torch.randn(15, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.permute.default(x, [1, 0])
+            x2 = aten.permute.default(x1, [1, 0])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
+
+    def test_pointless_permute_pair_3d(self):
+        def f(x):
+            x = aten.permute.default(x, [1, 0, 2])
+            x = aten.permute.default(x, [1, 0, 2])
+            return x
+
+        x = torch.randn(3, 5, 7, device=GPU_TYPE)
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 0)
+
+        def f(x):
+            x1 = aten.permute.default(x, [1, 0, 2])
+            x2 = aten.permute.default(x1, [1, 0, 2])
+            return x1, x2
+
+        gm = make_fx(f)(x)
+        self.assertEqual(count_calls(gm.graph), 2)
+        joint_graph.joint_graph_passes(gm)
+        self.assertEqual(count_calls(gm.graph), 2)
+
     def test_pointless_convert(self):
         def fn1(x):
             x = torch.ops.prims.convert_element_type.default(x, torch.float16)
@@ -1233,6 +1303,37 @@ class TestPatternMatcher(TestCase):
                 # also match (since search_fn_pattern is the serialized version
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
+
+    @skipIfXpu
+    @inductor_config.patch(
+        {
+            "triton.unique_kernel_names": "original_aten",
+            "fx_graph_remote_cache": False,
+            "max_autotune_gemm_backends": "TRITON",
+        }
+    )
+    def test_original_aten_preserved_split_addmm(self):
+        # addmm -> elementwise should be decomposed into mm -> add -> elementwise
+        def fn(x, y, z):
+            return torch.addmm(z, x, y).sin()
+
+        args = [
+            torch.randn(16, 24, device=GPU_TYPE),
+            torch.randn(24, 32, device=GPU_TYPE),
+            torch.randn(16, 32, device=GPU_TYPE),
+        ]
+
+        counters.clear()
+
+        opt_fn = torch.compile(fn, mode="max-autotune")
+        ret, code = run_and_get_code(opt_fn, *args)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+
+        # The mm kernel should use a template (because we set max_autotune_gemm_backends = TRITON).
+        # Its name should contain `addmm` because `addmm` was the original aten op where the mm came from.
+        FileCheck().check_not("extern_kernels.addmm(").check(
+            "def triton_tem_fused_addmm"
+        ).run(code[0])
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations1(self):
