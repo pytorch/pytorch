@@ -4544,7 +4544,7 @@ class TestLinalg(TestCase):
             validators[key] = value
         if torch.version.hip:
             assert "HIPBLASLT_VERSION" in validators
-            assert re.match(r'^\d{3}-[a-z0-9]{8}$', validators["HIPBLASLT_VERSION"])
+            assert re.match(r'^\d{3,}-[a-z0-9]{8}$', validators["HIPBLASLT_VERSION"])
         assert len(torch.cuda.tunable.get_results()) > 0
 
         assert torch.cuda.tunable.write_file()  # use default filename
