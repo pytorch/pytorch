@@ -868,7 +868,7 @@ class CustomAdd(sympy.core.add.Add):
 
         # This way we make sure the optimizations are only triggered when we pass optimize_incremental_summations.
         # sometimes sympy will call this function during its simplifications for example, in that case we bypass to add.
-        bypass_to_add = "optimize_incremental_summations" not in kwargs
+        bypass_to_add = not kwargs.get("optimize_incremental_summations", False) 
         if bypass_to_add:
             return sympy.Add(*args, **kwargs)
 
@@ -885,7 +885,7 @@ class CustomAdd(sympy.core.add.Add):
             assert isinstance(obj, CustomAdd)
             obj.ordered_summation_of_unique_symbols = True
 
-            if config.run_extra_validations:
+            if True : # config.run_extra_validations: # need to rebase on another PR to see this lol
                 ref = sympy.Add(lhs, rhs)
                 assert ref._args == obj._args
                 assert str(ref) == str(obj)
