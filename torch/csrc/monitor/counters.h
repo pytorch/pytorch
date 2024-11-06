@@ -122,10 +122,6 @@ class Stat {
         maxSamples_(maxSamples) {
     detail::registerStat(this);
   }
-  Stat(const Stat&) = delete;
-  Stat(Stat&&) = delete;
-  Stat& operator=(const Stat&) = delete;
-  Stat& operator=(Stat&&) = delete;
 
   virtual ~Stat() {
     {

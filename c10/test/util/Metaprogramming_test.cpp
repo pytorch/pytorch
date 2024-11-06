@@ -5,7 +5,7 @@
 
 using namespace c10::guts;
 
-// NOLINTBEGIN(modernize*, cppcoreguidelines-special-member-functions)
+// NOLINTBEGIN(modernize*)
 namespace {
 
 namespace test_function_traits {
@@ -302,4 +302,4 @@ TEST(MetaprogrammingTest, TupleMap_canBeUsedWithAutoLambdas) {
 } // namespace test_tuple_map
 
 } // namespace
-// NOLINTEND(modernize*, cppcoreguidelines-special-member-functions)
+// NOLINTEND(modernize*)
