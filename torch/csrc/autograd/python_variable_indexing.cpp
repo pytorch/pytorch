@@ -85,7 +85,7 @@ static int64_t count_specified_dimensions(PyObject* index) {
   return count;
 }
 
- static void invalid_index(PyObject* obj) {
+static void invalid_index(PyObject* obj) {
   TORCH_CHECK_INDEX(
       false,
       "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
