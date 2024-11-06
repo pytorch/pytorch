@@ -12,7 +12,7 @@ name: !{{ build_environment }}
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: bash
+        shell: cmd
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
@@ -83,11 +83,11 @@ jobs:
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
       - name: Populate binary env
-        shell: bash
+        shell: cmd
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash
+        shell: cmd
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_build.sh"
       - uses: !{{ common.upload_artifact_action }}
@@ -125,11 +125,11 @@ jobs:
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
       - name: Populate binary env
-        shell: bash
+        shell: cmd
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash
+        shell: cmd
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_test.sh"
       !{{ common.wait_and_kill_ssh_windows('pytorch') }}
