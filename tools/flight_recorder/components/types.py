@@ -248,7 +248,7 @@ class Op:
         p2p_info = ""
         if self.type in P2P:
             p2p_info = f"s={self._src_g} d={self._dst_g}, "
-        if hasattr(self, "event"):
+        if hasattr(self, 'event'):
             return (
                 f"{self.type}(timestamp_created={self.event['time_created_ns']}, "
                 f"global_rank={self.event['global_rank']}, op_type={self.type}, "
@@ -259,9 +259,7 @@ class Op:
                 f"Pg_name: {self.pg_name}, Pg_description={self.pg_desc}, Pg_size={self.pg_size})"
                 f", state={self.state})"
             )
-        return (
-            f"{self.type}({p2p_info}input_sizes={self.input_sizes}, state={self.state})"
-        )
+        return f"{self.type}({p2p_info}input_sizes={self.input_sizes}, state={self.state})"
 
     def match(self, other: "Op") -> MatchState:
         # TODO: I think this can validly not match,
