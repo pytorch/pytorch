@@ -8,7 +8,6 @@ import torch.fx as fx
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._utils_internal import JustKnobsConfig
-from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.symbolic_shapes import ShapeEnv  # noqa: TCH001
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
