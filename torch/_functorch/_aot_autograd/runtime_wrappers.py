@@ -1900,7 +1900,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                 )[1]
                                 if i
                                 >= CompiledFunction.metadata.num_mutated_inp_runtime_indices
-                                else [t] * m.arg_count
+                                else (
+                                    [t] * m.arg_count
+                                    if isinstance(m, SubclassCreationMeta)
+                                    else [t]
+                                )
                             )
                             for i, (t, m) in enumerate(
                                 zip(
