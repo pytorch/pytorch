@@ -350,7 +350,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         fake_mode = _detect_fake_mode_from_gm(ep.graph_module)
         if fake_mode is None:
             fake_mode = FakeTensorMode(shape_env=ShapeEnv(), export=True)
-        fake_args = []
+        retracing_args = []
         for node in mod.graph.nodes:
             if node.op == "placeholder":
                 if isinstance(node.meta["val"], CustomObjArgument):
@@ -359,11 +359,11 @@ def _decompose_and_get_gm_with_new_signature_constants(
                         real_script_obj = ep.constants[node.meta["val"].name]
                     else:
                         real_script_obj = node.meta["val"].fake_val.real_obj
-                    fake_args.append(real_script_obj)
+                    retracing_args.append(real_script_obj)
                 else:
-                    fake_args.append(node.meta["val"])
+                    retracing_args.append(node.meta["val"])
 
-        fake_args_unwrapped = pytree.tree_unflatten(fake_args, mod._in_spec)
+        retracing_args_unwrapped = pytree.tree_unflatten(retracing_args, mod._in_spec)
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
@@ -407,8 +407,8 @@ def _decompose_and_get_gm_with_new_signature_constants(
             with _fakify_script_objects(
                 mod,
                 (
-                    *fake_args_unwrapped[0],
-                    *fake_args_unwrapped[1].values(),
+                    *retracing_args_unwrapped[0],
+                    *retracing_args_unwrapped[1].values(),
                 ),
                 {},
                 fake_mode,
