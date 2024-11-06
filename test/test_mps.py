@@ -9482,14 +9482,11 @@ class TestPad(TestCaseMPS):
         helper(mps_pad_size_limit - 1)
 
         # On the limit
-        try:
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "Input elements >= 65536 causes broken tensor at the MPS device.",
+        ):
             helper(mps_pad_size_limit)
-        except NotImplementedError as e:
-            with self.assertRaisesRegex(
-                NotImplementedError,
-                "Input elements >= 65536 causes broken tensor at the MPS device.",
-            ):
-                raise e
 
 
 class TestLinalgMPS(TestCaseMPS):
