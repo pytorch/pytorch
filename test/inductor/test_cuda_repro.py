@@ -1243,7 +1243,7 @@ class CudaReproTests(TestCase):
         self.assertTrue("for roffset" not in code)
 
     def test_scaled_dot_product_efficient_attention_backward(self):
-        from torch import Tensor, nn
+        from torch import nn, Tensor
 
         class SelfAttention(nn.Module):
             def __init__(
@@ -1302,10 +1302,11 @@ class CudaReproTests(TestCase):
         length = 1
         inputs_embeds = torch.randn(batch_size, length, hidden_size, device=device)
         attention_mask = torch.ones(batch_size, 1, length, length, device=device)
-        attn_output = model(hidden_states=inputs_embeds, attention_mask=attention_mask)[0]
+        attn_output = model(hidden_states=inputs_embeds, attention_mask=attention_mask)[
+            0
+        ]
         loss = attn_output.mean()
         loss.backward()
-
 
     def test_non_contiguous_unaligned_input_indices(self):
         from torch._inductor.compile_fx import remove_unaligned_input_idxs

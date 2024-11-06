@@ -2350,7 +2350,10 @@ def sdpa_constraint(fx_node, *args, **kwargs):
                 for i in range(len(x.get_stride()) - 1)
             )
             # if the last dim size is <= 1, stride doesnt matter
-            aligned_last_dim = (V.graph.sizevars.size_hint(x.get_stride()[-1]) or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1)
+            aligned_last_dim = (
+                V.graph.sizevars.size_hint(x.get_stride()[-1])
+                or V.graph.sizevars.size_hint(x.get_size()[-1]) <= 1
+            )
             return aligned_last_dim and aligned_strides
 
         try:
