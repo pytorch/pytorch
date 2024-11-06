@@ -16167,7 +16167,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         'torch._scaled_mm',
         sample_inputs_func=sample_inputs_scaled_mm,
-        dtypes=empty_types(),
+        dtypes=(torch.float8_e4m3fn, torch.float8_e5m2),
         dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
         supports_out=True,
         supports_forward_ad=False,

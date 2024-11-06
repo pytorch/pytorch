@@ -56,6 +56,10 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 #include <c10/util/complex.h>
+#include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e4m3fnuz.h>
+#include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -152,6 +156,10 @@ aoti_torch_item_bfloat16(AtenTensorHandle tensor, c10::BFloat16* ret_value);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_item_complex64(
     AtenTensorHandle tensor,
     c10::complex<float>* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_float8_e4m3fn(AtenTensorHandle tensor, c10::Float8_e4m3fn* ret_value);
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_item_float8_e5m2(AtenTensorHandle tensor, c10::Float8_e5m2* ret_value);
 
 // Functions for wrapping a scalar value to a single-element tensor
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scalar_to_tensor_float32(
@@ -672,6 +680,8 @@ int32_t aoti_torch_dtype() = delete;
 namespace c10 {
 struct BFloat16;
 struct Half;
+struct Float8_e4m3fn;
+struct Float8_e5m2;
 } // namespace c10
 
 DEFINE_DTYPE_SPECIALIZATION(c10::BFloat16, bfloat16)
@@ -685,6 +695,8 @@ DEFINE_DTYPE_SPECIALIZATION(int16_t, int16)
 DEFINE_DTYPE_SPECIALIZATION(int32_t, int32)
 DEFINE_DTYPE_SPECIALIZATION(int64_t, int64)
 DEFINE_DTYPE_SPECIALIZATION(bool, bool)
+DEFINE_DTYPE_SPECIALIZATION(c10::Float8_e4m3fn, float8_e4m3fn)
+DEFINE_DTYPE_SPECIALIZATION(c10::Float8_e5m2, float8_e5m2)
 
 #endif
 
