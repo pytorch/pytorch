@@ -437,7 +437,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             )
 
             # Move the first compute node to top of graph
-            # (i.e. intentionally create a use-before-write scenario)
+            # (i.e. intentionally simulate a use-before-write scenario)
             new_graph = torch.fx.Graph()
             env = {}
             nodes_processed = set()

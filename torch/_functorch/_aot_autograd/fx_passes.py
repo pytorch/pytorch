@@ -13,7 +13,9 @@ def raise_fsdp2_backward_all_gather_ops_if_applicable(
     """
     AOTAutograd partitioner does not guarantee that backward hooks are run before the compute ops that depend on them.
     (e.g. in FSDP2 case, backward hooks populate unsharded params, and compute ops read from unsharded params,
-    however there is no explicit graph edge dependency from latter to former.)
+    however there is no explicit graph edge dependency from latter to former.) The pathological "use-before-write" scenario
+    doesn't come up in unit tests, but does come up in internal models, and it's best to have this guarantee for safety.
+
     Here, we solve this problem by intentionally moving the FSDP2 backward all-gather ops to be at the top of
     each "FSDP region", so that those unsharded params are guaranteed to be populated before usage.
 
