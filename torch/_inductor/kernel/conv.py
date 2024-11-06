@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from sys import platform
 from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
