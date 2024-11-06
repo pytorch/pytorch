@@ -508,7 +508,7 @@ class TensorVariable(VariableTracker):
 
     @property
     def size(self):
-        assert self._size, "accessing None size in TensorVariable"
+        assert self._size is not None, "accessing None size in TensorVariable"
         return self._size
 
     def _strict_mode_banned_ops(self):
@@ -601,7 +601,14 @@ class TensorVariable(VariableTracker):
         # Technically, this should not be necessary, but I'm including it
         # for enhanced BC, in case example_value is sometimes not set
         # (it really should always be set though!)
-        if (r := getattr(self, name)) is not None:
+        if name != "size":
+            r = getattr(self, name)
+        elif name == "size" and self.valid_size():
+            r = self.size
+        else:
+            r = None
+
+        if r is not None:
             if dim is None:
                 return RetVariable(r)
             else:
