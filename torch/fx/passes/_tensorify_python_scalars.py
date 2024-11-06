@@ -264,7 +264,7 @@ def tensorify_python_scalars(
                 (val := node.meta.get("val")),
                 (torch.SymFloat, torch.SymInt, torch.SymBool),
             ):
-                if all(
+                if len(val.node.expr.free_symbols) > 0 and all(
                     symbol_is_type(s, SymT.FLOAT) for s in val.node.expr.free_symbols
                 ):
                     # If all symbols are backed symfloats, we can just specialize the whole node
@@ -278,17 +278,6 @@ def tensorify_python_scalars(
 
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
-
-    for node in graph.nodes:
-        # Need to do one more run because metas can now be inconsistent.
-        # eg. previously eg(_local_scalar_dense, inf) would have meta['val'] = False
-        # but after the previously specialization, this val is now True.
-        if (
-            callable(node.target)
-            and len(node.args) > 1
-            and all(isinstance(a, float) for a in node.args)
-        ):
-            node.meta["val"] = node.target(*node.args, **node.kwargs)
 
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)

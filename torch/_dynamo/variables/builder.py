@@ -1864,7 +1864,6 @@ class VariableBuilder:
             torch._dynamo.config.specialize_float
             or is_constant_source(self.get_source())
             or math.isnan(value)
-            or math.isinf(value)
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -2386,7 +2385,10 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     ):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
-    elif isinstance(example_value, float) or proxy.node.target in ["hex", "__round__"]:
+    elif isinstance(example_value, str) and (proxy.node.target in ["hex"]):
+        set_example_value(proxy.node, example_value)
+        return ConstantVariable.create(example_value, **options)
+    elif isinstance(example_value, float):
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     else:
