@@ -1906,9 +1906,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                 if isinstance(attr_meta, SubclassCreationMeta):
                                     subclass_zero_leaves(attr_meta, output_append_list)
                                 else:
-                                    assert attr_meta.shape is not None
+                                    assert attr_meta.shape_dtype_device is not None
                                     output_append_list.append(
-                                        torch.zeros(attr_meta.shape)
+                                        torch.zeros(
+                                            attr_meta.shape_dtype_device[0],
+                                            dtype=attr_meta.shape_dtype_device[1],
+                                            device=attr_meta.shape_dtype_device[2],
+                                        )
                                     )
 
                         for t, m in zip(
