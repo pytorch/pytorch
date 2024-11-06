@@ -1886,7 +1886,9 @@ class BuiltinVariable(VariableTracker):
 
         source = obj.source and TypeSource(obj.source)
         if py_type is torch.Tensor:
-            source = AttrSource(GlobalSource("torch"), "Tensor")
+            # In some cases torch isn't available in globals
+            name = tx.output.install_global_by_id("", torch)
+            source = AttrSource(GlobalSource(name), "Tensor")
 
         return VariableTracker.build(tx, py_type, source)
 
