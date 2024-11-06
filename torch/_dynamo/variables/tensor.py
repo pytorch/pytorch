@@ -134,7 +134,7 @@ class TensorVariable(VariableTracker):
         is_sparse,
         class_type,
         has_grad_fn,
-        size=None,
+        _size=None,
         stride=None,
         is_contiguous=None,
         _is_name_set=None,
@@ -146,7 +146,7 @@ class TensorVariable(VariableTracker):
         self.device = device
         self.layout = layout
         self.ndim = ndim
-        self._size = size  # this is accessed as a property for validation
+        self._size = _size  # this is accessed as a property for validation
         self.stride = stride
         self.requires_grad = requires_grad
         self.is_quantized = is_quantized
@@ -191,7 +191,7 @@ class TensorVariable(VariableTracker):
             props["has_grad_fn"] = False
 
         if is_sparse_any(value) and not has_free_symbols(value):
-            props["size"] = tuple(
+            props["_size"] = tuple(
                 [int(s) if is_symbolic(s) else s for s in value.size()]
             )
         elif not has_free_symbols(value):
@@ -201,7 +201,7 @@ class TensorVariable(VariableTracker):
             # already. We could remove the discrepancy here, by having ConstantVariable be more permissive for
             # constant backed SymInts, but that assert being strict has led to some good signal in hunting bugs, and
             # I'd like to keep it around for now.
-            props["size"] = tuple(
+            props["_size"] = tuple(
                 # the non is_symbolic case applies to the jagged layout
                 # NestedTensor case as singleton ints are not symbolic
                 [int(s) if is_symbolic(s) else s for s in value.size()]
