@@ -413,8 +413,8 @@ void gemm_transa_(
     float beta,
     at::Half *c, int64_t ldc) {
   // c = alpha * (a.T @ b) + beta * c
-  if (n == 1 && beta == 0.0 && alpha == 1.0) {
-    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, 0.0, c, 1);
+  if (n == 1 && alpha == 1.0) {
+    at::native::blas_impl::fp16_gemv_trans(k, m, 1.0, a, lda, b, 1, beta, c, 1);
     return;
   }
   parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
@@ -529,8 +529,8 @@ void cpublas_copy_impl(at::ScalarType type, int64_t n, const void *_x, int64_t i
 }}  // namespace cpublas::(anonymous)
 
 
-REGISTER_DISPATCH(cpublas::gemm_stub, &cpublas::cpublas_gemm_impl);
-REGISTER_DISPATCH(cpublas::axpy_stub, &cpublas::cpublas_axpy_impl);
-REGISTER_DISPATCH(cpublas::copy_stub, &cpublas::cpublas_copy_impl);
+REGISTER_DISPATCH(cpublas::gemm_stub, &cpublas::cpublas_gemm_impl)
+REGISTER_DISPATCH(cpublas::axpy_stub, &cpublas::cpublas_axpy_impl)
+REGISTER_DISPATCH(cpublas::copy_stub, &cpublas::cpublas_copy_impl)
 
 }  // namespace at::native
