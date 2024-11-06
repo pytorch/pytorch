@@ -445,7 +445,7 @@ def jagged_from_list(
     sizes = [t.shape for t in tensors]
     ragged_idx = None
     for d in range(component_dim):
-        dim_is_ragged = len({s[d] for s in sizes}) > 1
+        dim_is_ragged = any(size[d] != sizes[0][d] for size in sizes)
         if dim_is_ragged:
             if ragged_idx is None:
                 # add 1 to convert to outer NJT dim space

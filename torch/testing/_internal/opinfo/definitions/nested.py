@@ -8,6 +8,7 @@ from itertools import product
 from typing import List, Set
 
 import torch
+from torch.fx.experimental.symbolic_shapes import is_nested_int
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
@@ -144,7 +145,7 @@ def _sample_njts(
     dtype,
     requires_grad=False,
     dims=None,
-    contiguity=Contiguity.CONTIG,
+    # contiguity=Contiguity.CONTIG,
 ):
     if dims is None:
         dims = [2, 3, 4]
@@ -162,30 +163,31 @@ def _sample_njts(
             requires_grad=requires_grad,
             layout=torch.jagged,
         )
-        if contiguity == Contiguity.CONTIG:
-            yield nt
+        # if contiguity == Contiguity.CONTIG:
+        yield nt
 
         # without min / max seqlen cached
         values = nt.values().clone().detach()
         offsets = nt.offsets().clone().detach()
-        if contiguity == Contiguity.CONTIG:
-            yield torch.nested.nested_tensor_from_jagged(values, offsets)
+        # if contiguity == Contiguity.CONTIG:
+        yield torch.nested.nested_tensor_from_jagged(values, offsets)
 
         # non-contiguous transposed NJT (not possible for 2D)
-        if contiguity == Contiguity.NONCONTIG_TRANSPOSED and dim > 2:
+        # if contiguity == Contiguity.NONCONTIG_TRANSPOSED and dim > 2:
+        if dim > 2:
             yield nt.transpose(-2, -1)
 
         # non-contiguous with holes NJT
-        if contiguity == Contiguity.NONCONTIG_HOLES:
-            values = nt.values().clone().detach()
-            offsets = nt.offsets().clone().detach()
-            # subtract 1 to cause holes
-            lengths = (offsets.diff() - 1).clone().detach()
-            yield torch.nested.nested_tensor_from_jagged(
-                values=values,
-                offsets=offsets,
-                lengths=lengths,
-            )
+        # if contiguity == Contiguity.NONCONTIG_HOLES:
+        values = nt.values().clone().detach()
+        offsets = nt.offsets().clone().detach()
+        # subtract 1 to cause holes
+        lengths = (offsets.diff() - 1).clone().detach()
+        yield torch.nested.nested_tensor_from_jagged(
+            values=values,
+            offsets=offsets,
+            lengths=lengths,
+        )
 
 
 # Computes an unbind-based reference for a given OpInfo on a given SampleInput.
@@ -346,23 +348,19 @@ def sample_inputs_elementwise_njt_unary(
     if not op_kwargs:
         op_kwargs = {}
 
-    for contiguity in [Contiguity.CONTIG, Contiguity.NONCONTIG_HOLES, Contiguity.NONCONTIG_TRANSPOSED]:
-        for njt in _sample_njts(
-            device=device,
-            dtype=dtype,
-            requires_grad=requires_grad,
-            dims=[2, 3, 4],
-            contiguity=contiguity,
-        ):
-            sample_name = f"{njt.dim()}D: {contiguity}"
-            yield SampleInput(njt, kwargs=dict(op_kwargs), name=sample_name)
+    for njt in _sample_njts(
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+        dims=[2, 3, 4],
+    ):
+        sample_name = f"{njt.dim()}D"
+        yield SampleInput(njt, kwargs=dict(op_kwargs), name=sample_name)
 
 
 def sample_inputs_elementwise_njt_binary(
     op_info, device, dtype, requires_grad, op_kwargs=None, **kwargs
 ):
-    assert kwargs.pop("dim_type") is None
-
     if not op_kwargs:
         op_kwargs = {}
 
@@ -374,8 +372,11 @@ def sample_inputs_elementwise_njt_binary(
         yield SampleInput(njt1, args=(njt2,), kwargs=dict(op_kwargs))
 
         # broadcasting case: (B, j0, ...) with (B, 1, ...)
+        dense_shape = list(njt1.shape)
+        dense_shape[njt1._ragged_idx] = 1
         t = torch.randn(
-            (njt1.shape[0], 1, *njt1.shape[2:]),
+            dense_shape,
+            # (njt1.shape[0], 1, *njt1.shape[2:]),
             device=device,
             dtype=dtype,
             requires_grad=requires_grad,
@@ -402,13 +403,17 @@ def sample_inputs_elementwise_njt_binary(
         yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
 
         # broadcasting case: (B, j0, ...) with (...)
-        t = torch.randn(
-            njt1.shape[2:], device=device, dtype=dtype, requires_grad=requires_grad
-        )
-        # (NT, T)
-        yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
-        # (T, NT)
-        yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
+        if njt1.dim() > njt1._ragged_idx + 1:
+            t = torch.randn(
+                njt1.shape[njt1._ragged_idx + 1:],
+                device=device,
+                dtype=dtype,
+                requires_grad=requires_grad,
+            )
+            # (NT, T)
+            yield SampleInput(njt1, args=(t,), kwargs=dict(op_kwargs))
+            # (T, NT)
+            yield SampleInput(t, args=(njt1,), kwargs=dict(op_kwargs))
 
         # broadcasting case: (B, j0, ...) with scalar
         t = torch.randn((), device=device, dtype=dtype, requires_grad=requires_grad)
@@ -454,7 +459,6 @@ def sample_inputs_njt_reduction(
         dtype=dtype,
         requires_grad=requires_grad,
         dims=[2, 3, 4],
-        contiguity=kwargs.pop("contiguity"),
     ):
         for keepdim in [False, True]:
             # single dim-wise reduction; includes reduction over the ragged dim
@@ -600,12 +604,13 @@ def sample_inputs_bmm(op_info, device, dtype, requires_grad, op_kwargs=None, **k
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[3]
     ):
         # (B, j1, D) x (B, D, E) => (B, j1, E)
-        B, D = njt_3d.shape[0], njt_3d.shape[-1]
-        E = D + 2
-        other = torch.randn(B, D, E, device=device, dtype=dtype)
-        # used for slicing in unbind_reference()
-        other._batch_dim = 0
-        yield SampleInput(njt_3d.clone().detach(), kwargs={"mat2": other})
+        if njt_3d._ragged_idx == 1:
+            B, D = njt_3d.shape[0], njt_3d.shape[-1]
+            E = D + 2
+            other = torch.randn(B, D, E, device=device, dtype=dtype)
+            # used for slicing in unbind_reference()
+            other._batch_dim = 0
+            yield SampleInput(njt_3d.clone().detach(), kwargs={"mat2": other})
 
         # TODO (need factory functions):
         # (B, D, j1) x (B, j1, E) => (B, D, E)
@@ -639,24 +644,26 @@ def sample_inputs_matmul(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[3]
     ):
         # (B, j1, D) x (D, E) => (B, j1, E)
-        D = njt_3d.shape[-1]
-        E = D + 2
-        yield SampleInput(
-            njt_3d.clone().detach(),
-            kwargs={"other": torch.randn(D, E, device=device, dtype=dtype)},
-        )
+        if njt_3d._ragged_idx == 1:
+            D = njt_3d.shape[-1]
+            E = D + 2
+            yield SampleInput(
+                njt_3d.clone().detach(),
+                kwargs={"other": torch.randn(D, E, device=device, dtype=dtype)},
+            )
 
     # 4D cases
     for njt_4d in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[4]
     ):
         # (B, j1, D, E) x (E, F) => (B, j1, D, F)
-        E = njt_4d.shape[-1]
-        F = E + 2
-        yield SampleInput(
-            njt_4d.clone().detach(),
-            kwargs={"other": torch.randn(E, F, device=device, dtype=dtype)},
-        )
+        if njt_4d._ragged_idx == 1:
+            E = njt_4d.shape[-1]
+            F = E + 2
+            yield SampleInput(
+                njt_4d.clone().detach(),
+                kwargs={"other": torch.randn(E, F, device=device, dtype=dtype)},
+            )
 
         # TODO (need factory functions):
         # (B, j1, D, E) x (B, j1, E, F) => (B, j1, D, F)
@@ -807,6 +814,10 @@ def sample_inputs_nn_functional_linear(op_info, device, dtype, requires_grad, **
     for njt in _sample_njts(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[3, 4, 5]
     ):
+        # projection over a ragged dim is not currently supported
+        if is_nested_int(njt.size(-1)):
+            continue
+
         # with bias
         NUM_OUTPUT = 10
         weight = torch.randn(
@@ -843,7 +854,10 @@ def sample_inputs_nn_functional_rms_norm(
         device=device, dtype=dtype, requires_grad=requires_grad, dims=[3, 4]
     ):
         # normalize over non-ragged dims
-        for start_dim in range(2, njt.dim()):
+        for start_dim in range(njt.dim()):
+            if start_dim <= njt._ragged_idx:
+                continue
+
             normalized_shape = njt.shape[start_dim:]
             weight = torch.randn(
                 normalized_shape,
