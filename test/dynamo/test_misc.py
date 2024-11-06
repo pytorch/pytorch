@@ -1188,6 +1188,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         inp.test = None
         self.assertEqual(torch.ones(2, 2) + 2, fn(inp))
 
+    def test_mro_type_tensor_no_source(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            z = []
+            input_type = type(torch.ones(2, 2))
+            for cls in input_type.__mro__:
+                z.append(cls.__name__)
+
+            return x, input_type, z
+
+        inp = torch.ones(2, 2)
+        fn(inp)
+
     def test_shape_unpack(self):
         def fn(x):
             a, b = x.size()
