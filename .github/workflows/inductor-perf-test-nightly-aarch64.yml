@@ -1,0 +1,145 @@
+name: inductor-perf-nightly-aarch64
+
+on:
+  schedule:
+    # - cron: 0 7 * * 1-6
+    # - cron: 0 7 * * 0
+    # Does not perform max_autotune on CPU, so skip the weekly run setup
+    - cron: 0 7 * * *
+  # NB: GitHub has an upper limit of 10 inputs here
+  workflow_dispatch:
+    inputs:
+      training:
+        # CPU for training is not typical, but leave the option open here
+        description: Run training (off by default)?
+        required: false
+        type: boolean
+        default: false
+      inference:
+        description: Run inference (on by default)?
+        required: false
+        type: boolean
+        default: true
+      default:
+        description: Run inductor_default?
+        required: false
+        type: boolean
+        default: true
+      dynamic:
+        description: Run inductor_dynamic_shapes?
+        required: false
+        type: boolean
+        default: false
+      aotinductor:
+        description: Run aot_inductor for inference?
+        required: false
+        type: boolean
+        default: false
+      benchmark_configs:
+        description: The list of configs used the benchmark
+        required: false
+        type: string
+        default: inductor_huggingface_perf_cpu_aarch64,inductor_timm_perf_cpu_aarch64,inductor_torchbench_perf_cpu_aarch64
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-jammy-aarch64-py3_10-inductor-build:
+    name: linux-jammy-aarch64-py3.10-inductor
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.arm64.m7g.4xlarge
+      build-environment: linux-jammy-aarch64-py3.10
+      docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
+      test-matrix: |
+        { include: [
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 1, num_shards: 9, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 2, num_shards: 9, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 3, num_shards: 9, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 4, num_shards: 9, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 5, num_shards: 9, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 6, num_shards: 9, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 7, num_shards: 9, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 8, num_shards: 9, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 9, num_shards: 9, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  1, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  2, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  3, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  4, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  5, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  6, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  7, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  8, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  9, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 10, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 11, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 12, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 13, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 14, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 15, num_shards: 15, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  1, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  2, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  3, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  4, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  5, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  6, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  7, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  8, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  9, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 10, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 11, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 12, num_shards: 12, runner: "linux.arm64.m7g.metal" },
+        ]}
+      selected-test-configs: ${{ inputs.benchmark_configs }}
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
+
+  linux-jammy-aarch64-py3_10-inductor-test-nightly:
+    name: linux-jammy-aarch64-py3.10-inductor
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-aarch64-py3_10-inductor-build
+    if: github.event.schedule == '0 7 * * *'
+    with:
+      build-environment: linux-jammy-aarch64-py3.10
+      # Turn off dynamic-shapes and aotinductor tests for now, to have faster iteration for debugging perf instability.
+      # Will change this back
+      dashboard-tag: training-false-inference-true-default-true-dynamic-false-aotinductor-false
+      docker-image: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.test-matrix }}
+      use-gha: anything-non-empty-to-use-gha
+      timeout-minutes: 720
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
+
+  linux-jammy-aarch64-py3_10-inductor-test:
+    name: linux-jammy-aarch64-py3.10-inductor
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-jammy-aarch64-py3_10-inductor-build
+    if: github.event_name == 'workflow_dispatch'
+    with:
+      build-environment: linux-jammy-aarch64-py3.10
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-aotinductor-${{ inputs.aotinductor }}
+      docker-image: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-aarch64-py3_10-inductor-build.outputs.test-matrix }}
+      use-gha: anything-non-empty-to-use-gha
+      timeout-minutes: 720
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}

@@ -1,0 +1,21 @@
+# For documentation concerning this configuration please refer to,
+# https://github.com/pytorch/pytorch-probot#trigger-circleci-workflows
+labels_to_circle_params:
+  ci/binaries:
+    parameter: run_binary_tests
+    default_true_on:
+      branches:
+        - nightly
+        - release/.*
+      tags:
+        - v[0-9]+(\.[0-9]+)*-rc[0-9]+
+    set_to_false:
+      - run_build
+  ci/master:
+    parameter: run_master_build
+    set_to_false:
+      - run_build
+  ci/slow-gradcheck:
+    parameter: run_slow_gradcheck_build
+    set_to_false:
+      - run_build
