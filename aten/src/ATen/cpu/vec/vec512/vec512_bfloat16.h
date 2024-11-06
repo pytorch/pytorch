@@ -221,73 +221,7 @@ public:
   }
   template <int64_t mask>
   static Vectorized<T> blend(const Vectorized<T>& a, const Vectorized<T>& b) {
-    __at_align__ int16_t tmp_values[size()];
-    a.store(tmp_values);
-    if (mask & 0x01)
-      tmp_values[0] = b.values[31];
-    if (mask & 0x02)
-      tmp_values[1] = b.values[30];
-    if (mask & 0x04)
-      tmp_values[2] = b.values[29];
-    if (mask & 0x08)
-      tmp_values[3] = b.values[28];
-    if (mask & 0x10)
-      tmp_values[4] = b.values[27];
-    if (mask & 0x20)
-      tmp_values[5] = b.values[26];
-    if (mask & 0x40)
-      tmp_values[6] = b.values[25];
-    if (mask & 0x80)
-      tmp_values[7] = b.values[24];
-    if (mask & 0x100)
-      tmp_values[8] = b.values[23];
-    if (mask & 0x200)
-      tmp_values[9] = b.values[22];
-    if (mask & 0x400)
-      tmp_values[10] = b.values[21];
-    if (mask & 0x800)
-      tmp_values[11] = b.values[20];
-    if (mask & 0x1000)
-      tmp_values[12] = b.values[19];
-    if (mask & 0x2000)
-      tmp_values[13] = b.values[18];
-    if (mask & 0x4000)
-      tmp_values[14] = b.values[17];
-    if (mask & 0x8000)
-      tmp_values[15] = b.values[16];
-    if (mask & 0x10000)
-      tmp_values[16] = b.values[15];
-    if (mask & 0x20000)
-      tmp_values[17] = b.values[14];
-    if (mask & 0x40000)
-      tmp_values[18] = b.values[13];
-    if (mask & 0x80000)
-      tmp_values[19] = b.values[12];
-    if (mask & 0x100000)
-      tmp_values[20] = b.values[11];
-    if (mask & 0x200000)
-      tmp_values[21] = b.values[10];
-    if (mask & 0x400000)
-      tmp_values[22] = b.values[9];
-    if (mask & 0x800000)
-      tmp_values[23] = b.values[8];
-    if (mask & 0x1000000)
-      tmp_values[24] = b.values[7];
-    if (mask & 0x2000000)
-      tmp_values[25] = b.values[6];
-    if (mask & 0x4000000)
-      tmp_values[26] = b.values[5];
-    if (mask & 0x8000000)
-      tmp_values[27] = b.values[4];
-    if (mask & 0x10000000)
-      tmp_values[28] = b.values[3];
-    if (mask & 0x20000000)
-      tmp_values[29] = b.values[2];
-    if (mask & 0x40000000)
-      tmp_values[30] = b.values[1];
-    if (mask & 0x80000000)
-      tmp_values[31] = b.values[0];
-    return loadu(tmp_values);
+    return _mm512_mask_blend_epi16(mask, a.values, b.values);
   }
   static Vectorized<T> blendv(const Vectorized<T>& a,
       const Vectorized<T>& b, const Vectorized<T>& mask) {
