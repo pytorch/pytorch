@@ -308,7 +308,6 @@ def update_automatic_dynamic(
                 "cached": str(old_entry.scalar),
                 "new": str(entry.scalar),
             },
-            log_pt2_compile_event=True,
         )
         if is_unspecialized_nn_module:
             log.info(
@@ -348,7 +347,6 @@ def update_automatic_dynamic(
                 "cached": str(old_entry_tup),
                 "new": str(entry_tup),
             },
-            log_pt2_compile_event=True,
         )
 
     if is_update and old_entry.size != mut_entry.size:
