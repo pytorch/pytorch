@@ -1779,7 +1779,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
             maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
-            _compiled_autograd_should_lift = False
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
 
@@ -1946,7 +1945,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107
                 class CompiledFunctionBackward(torch.autograd.Function):
                     # CompiledFunctionBackward is not yet supported in dynamo skipfiles
-                    _compiled_autograd_should_lift = False
                     _aot_id = aot_config.aot_id
 
                     @staticmethod
@@ -2056,14 +2054,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     disable_amp=disable_amp,
                 )
                 return out
-
-            @staticmethod
-            def _backward_epilogue(ctx, out):
-                return _backward_epilogue_functional(
-                    CompiledFunction.metadata,
-                    CompiledFunction.maybe_subclass_metadata,
-                    out,
-                )
 
         compiled_function = RuntimeWrapper(
             indices_of_inps_to_detach=indices_of_inps_to_detach,
