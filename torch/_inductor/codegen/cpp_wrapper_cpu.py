@@ -118,9 +118,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             new_args = []
             for idx, arg in enumerate(call_args):
                 if "*" in arg_types[idx]:
-                    var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
-                    new_args.append(f"({arg_types[idx]})({var_name})")
+                    new_args.append(f"({arg_types[idx]})({arg}.data_ptr())")
                 else:
                     # arg is a scalar
                     new_args.append(arg)
@@ -464,13 +462,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # Weights are stored in constants_ and owned by RAIIAtenTensorHandle there.
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     self.prefix.writeline(
-                        f"""auto {constants_key} = constants_->at({idx});"""
+                        f"""[[maybe_unused]] auto {constants_key} = constants_->at({idx});"""
                     )
                 else:
                     # Append constants as inputs to the graph
                     constants_idx = inputs_len + idx
                     self.prefix.writeline(
-                        f"auto {constants_key} = std::move(inputs[{constants_idx}]);"
+                        f"[[maybe_unused]] auto {constants_key} = std::move(inputs[{constants_idx}]);"
                     )
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
