@@ -16,6 +16,7 @@ import torch.distributed._composable.fsdp._fsdp_param
 import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.utils import counters
+from torch._functorch._aot_autograd import fx_passes
 from torch._inductor import comms
 from torch._inductor.utils import is_fallback_op, run_and_get_code
 from torch.distributed._composable.fsdp import fully_shard
@@ -392,6 +393,92 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         else:
             return contextlib.nullcontext()
 
+    def _maybe_raise_fsdp2_backward_all_gather_ops_if_applicable_with_checks(
+        self, fwd_fullgraph
+    ):
+        def _move_first_compute_usage_before_fsdp2_all_gather(graph):
+            # Find the first resize-to-full node and its input
+            resize_node = None
+            resized_graph_input = None
+            for node in graph.nodes:
+                if (
+                    node.op == "call_function"
+                    and node.target == torch.ops.inductor.resize_storage_bytes_.default
+                    and node.args[1] > 0
+                ):
+                    resize_node = node
+                    resized_graph_input = node.args[0]
+                    break
+            assert (
+                resize_node is not None
+            ), f"Violated assumption: expected at least one resize-to-full node but found none in this graph: {graph}"
+
+            # Find the first compute node using the resized-to-full graph input
+            first_compute_node = None
+            for node in graph.nodes:
+                if (
+                    isinstance(node, torch.fx.Node)
+                    and node.op == "call_function"
+                    and node.target
+                    not in [
+                        torch.ops.inductor.resize_storage_bytes_.default,
+                        torch.ops.fsdp.copy_.default,
+                    ]
+                    and resized_graph_input in node.args
+                ):
+                    first_compute_node = node
+                    break
+            assert first_compute_node is not None, (
+                f"Violated assumption: expected the resized-to-full graph input {resized_graph_input} "
+                f"to be passed into at least one compute node. Graph: {graph}"
+            )
+            print(
+                f"first_compute_node: {first_compute_node}, args: {first_compute_node.args}"
+            )
+
+            # Move the first compute node to top of graph
+            new_graph = torch.fx.Graph()
+            env = {}
+            nodes_processed = set()
+
+            def insert_node(node):
+                if node not in nodes_processed:
+                    env[node] = new_graph.node_copy(node, lambda x: env[x])
+                    nodes_processed.add(node)
+
+            # Copy over placeholders first
+            for node in graph.nodes:
+                if node.op == "placeholder":
+                    insert_node(node)
+
+            # Copy compute node and its dependencies
+            insert_node(first_compute_node)
+
+            # Copy remaining nodes
+            for node in graph.nodes:
+                insert_node(node)
+
+            return new_graph
+
+        def _raise_fsdp2_backward_all_gather_ops_if_applicable_with_checks(
+            graph, orig_fn
+        ):
+            graph = _move_first_compute_usage_before_fsdp2_all_gather(graph)
+            graph = orig_fn(graph)
+            return graph
+
+        if fwd_fullgraph:
+            return mock.patch.object(
+                fx_passes,
+                "raise_fsdp2_backward_all_gather_ops_if_applicable",
+                functools.partial(
+                    _raise_fsdp2_backward_all_gather_ops_if_applicable_with_checks,
+                    orig_fn=fx_passes.raise_fsdp2_backward_all_gather_ops_if_applicable,
+                ),
+            )
+        else:
+            return contextlib.nullcontext()
+
     def inductor_code_check_no_compute_op(self, file_check):
         return (
             file_check.check_not(" = aten.")
@@ -716,6 +803,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             with self._reinplace_all_gather_with_optional_checks(
                 fwd_fullgraph
             ), self._maybe_run_decide_global_ordering_of_comms_with_checks(
+                fwd_fullgraph
+            ), self._maybe_raise_fsdp2_backward_all_gather_ops_if_applicable_with_checks(
                 fwd_fullgraph
             ), torch._inductor.config.patch(
                 post_grad_custom_post_pass=functools.partial(
