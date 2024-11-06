@@ -3222,7 +3222,7 @@ class AssociativeScanTests(TestCase):
         unittest.skip,
         lambda params: (params["combine_mode"] == "pointwise"),
     )
-    def test_associative_scan_freevars2(
+    def test_associative_scan_freevars_simple(
         self, compile_mode, combine_mode, reverse, device
     ):
         H = torch.rand(2, device=device)
@@ -3254,6 +3254,131 @@ class AssociativeScanTests(TestCase):
                 "combine_mode": combine_mode,
             }
             kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            self._run_test(
+                model=AssociativeScanModels.CombineFn(**kwargs),
+                model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+                inputs=inp,
+            )
+            
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_nested(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        H1 = torch.rand(4, 5, device=device)
+        H2 = torch.rand(4, 1, device=device)
+
+        def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
+            def inner(xi):
+                return xi * H2
+            ret = inner(y)
+            return x + ret * H1
+        
+        def fct_nested_outside_fake(x: torch.Tensor, y: torch.Tensor):
+            def inner(xi):
+                return xi * H2
+            ret = inner(y)
+            return x + ret * H1
+        
+        H1_i = torch.rand(4, 5, device=device)
+
+        # TODO: This triggers the vmap randomness error:
+        # RuntimeError: vmap: called random operation while in randomness error mode. 
+        # Please either use the 'same' or 'different' randomness flags on vmap or perform the randomness operation out of vmap
+        def fct_nested_inside(x: torch.Tensor, y: torch.Tensor):
+            # H2_i = torch.rand(4, 1, device=device)
+            H2_i = torch.ones(4, 1, device=device) * 42
+            def inner(xi):
+                return xi * H2_i
+            ret = inner(y)
+            return x + ret * H1
+        
+        def fct_nested_inside_fake(x: torch.Tensor, y: torch.Tensor):
+            # H2_i = torch.rand(4, 1, device=device)
+            H2_i = torch.ones(4, 1, device=device) * 42
+            def inner(xi):
+                return xi * H2_i
+            ret = inner(y)
+            return x + ret * H1
+
+        inp = torch.randn(3, 4, 5, device=device)
+
+        for fct, fct_fake, param in [
+            (fct_nested_outside, fct_nested_outside_fake, (H1,H2)),
+            (fct_nested_inside, fct_nested_inside_fake, (H1_i,)),
+        ]:
+            kwargs = {
+                "dim": 0,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_fn": fct,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            kwargs_fake["combine_fn"] = fct_fake
+            self._run_test(
+                model=AssociativeScanModels.CombineFn(**kwargs),
+                model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+                inputs=inp,
+            )
+            
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combine_mode=pointwise
+    # as the current implementation of associative_scan lowering
+    # does not support lifted arguments
+    @decorateIf(
+        unittest.skip,
+        lambda params: (params["combine_mode"] == "pointwise"),
+    )
+    def test_associative_scan_freevars_fct(
+        self, compile_mode, combine_mode, reverse, device
+    ):
+        # TODO: This testcase does not work
+        def additional_fct_no_add_inp(x, y):
+            return x * y
+
+        def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
+            ret = associative_scan(additional_fct_no_add_inp, y, 1)
+            return x + ret
+        
+        def fct_nested_outside_fake(x: torch.Tensor, y: torch.Tensor):
+            ret = _fake_associative_scan(additional_fct_no_add_inp, y, 1)
+            return x + ret
+        
+        # H1_i = torch.rand(4, 5, device=device)
+        # TODO: Write here a testcase where the additional input contains some lifted parameters
+
+        inp = torch.randn(3, 4, 5, device=device)
+
+        for fct, fct_fake, param in [
+            (fct_nested_outside, fct_nested_outside_fake, ()),
+            # (fct_nested_inside, fct_nested_inside_fake, (H1_i,)),
+        ]:
+            kwargs = {
+                "dim": 0,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_fn": fct,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            kwargs_fake["combine_fn"] = fct_fake
             self._run_test(
                 model=AssociativeScanModels.CombineFn(**kwargs),
                 model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
@@ -3297,7 +3422,6 @@ class AssociativeScanTests(TestCase):
             inputs=inp,
         )
 
-    # TODO: Support Autograd for associative scan
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -3776,7 +3900,7 @@ def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor, L_self_buffers_de
             self.assertExpectedInline(
                 gm.cond_fn_0.code.strip(),
                 """\
-def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
+def forward(self, l_iter_ : torch.Tensor, l_x_ : torch.Tensor, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
     sub = l_iter_ - l_self_buffers_dec__cond_fn;  l_iter_ = l_self_buffers_dec__cond_fn = None
     gt = sub > 0;  sub = None
     return gt""",  # noqa: B950
@@ -3784,7 +3908,7 @@ def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_lin
             self.assertExpectedInline(
                 gm.body_fn_0.code.strip(),
                 """\
-def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
+def forward(self, l_iter_ : torch.Tensor, l_x_ : torch.Tensor, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
     child = l_iter_ - 1;  l_iter_ = None
     child_1 = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  l_x_ = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
     return (child, child_1)""",  # noqa: B950

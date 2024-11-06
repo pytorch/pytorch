@@ -282,8 +282,7 @@ std::vector<at::Tensor>& scatter_out(
   at::cuda::OptionalCUDAStreamGuard cuda_guard;
   for (const auto i : c10::irange(chunks.size())) {
     if (i < (streams ? streams->size() : 0U) && (*streams)[i]) {
-      const auto device_index =
-          static_cast<int16_t>(out_tensors[i].get_device());
+      const auto device_index = out_tensors[i].get_device();
       TORCH_CHECK(
           (*streams)[i]->device_index() == device_index,
           "Expected the device associated with the stream at index ",
@@ -293,7 +292,7 @@ std::vector<at::Tensor>& scatter_out(
           ") ",
           "to match the device supplied at that index ",
           "(expected ",
-          device_index,
+          static_cast<int16_t>(device_index),
           ")");
       cuda_guard.reset_stream(*(*streams)[i]);
     }
