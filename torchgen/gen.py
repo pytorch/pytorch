@@ -691,7 +691,7 @@ inline {sig.decl()} {{
             if has_symint:
                 result += f"""
 namespace symint {{
-  template <typename T, typename = std::enable_if_t<std::is_same<T, {intlike_t}>::value>>
+  template <typename T, typename = std::enable_if_t<std::is_same_v<T, {intlike_t}>>>
   {sig.decl(suppress_symint_suffix=True)} {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
   }}

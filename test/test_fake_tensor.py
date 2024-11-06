@@ -28,6 +28,7 @@ from torch._subclasses.fake_tensor import (
     _CacheKeyState,
     DynamicOutputShapeException,
     extract_tensor_metadata,
+    MetadataMismatchError,
     FakeTensor,
     FakeTensorConverter,
     FakeTensorMode,
@@ -178,6 +179,16 @@ class FakeTensorTest(TestCase):
             self.assertEqual(repr(x), "FakeTensor(..., size=(2, 2))")
             x = torch.empty(2, 2, device="meta")
             self.assertEqual(repr(x), "FakeTensor(..., device='meta', size=(2, 2))")
+
+    def test_convert_fake_to_real(self):
+        x = torch.ones([20])
+        with FakeTensorMode(allow_non_fake_inputs=True) as m:
+            _ = x + 1
+
+        out = torch._subclasses.fake_utils.try_convert_fake_to_real([x[0:10]])
+
+        self.assertEqual(torch.ones([10]), out[0])
+
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
@@ -1367,14 +1378,20 @@ class FakeTensorOperatorInvariants(TestCase):
             try:
                 with torch._subclasses.CrossRefFakeMode():
                     Repro()(*args)
-            except RuntimeError as e:
+            except MetadataMismatchError as e:
                 # We expect the cross ref to succed for the first output to fail
                 # for the rng state, see Note [Seed and Offset]
                 self.assertTrue("output[0]" not in str(e))
-                self.assertTrue(
-                    "found mismatched tensor metadata for output[6]: Devices cpu and cuda:0 are not equal!"
-                    in str(e)
-                )
+                if self.__class__.__name__.startswith("PropagateRealTensors"):
+                    self.assertTrue(
+                        "Real tensor propagation found a metadata mismatch"
+                        in str(e)
+                    )
+                else:
+                    self.assertTrue(
+                        "found mismatched tensor metadata for output"
+                        in str(e)
+                    )
 
     # IMPORTANT!!! Always run even if CUDA is not available
     def test_fake_gpu_no_init(self):
