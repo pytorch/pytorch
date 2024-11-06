@@ -118,9 +118,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             new_args = []
             for idx, arg in enumerate(call_args):
                 if "*" in arg_types[idx]:
-                    var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
-                    new_args.append(f"({arg_types[idx]})({var_name})")
+                    new_args.append(f"({arg_types[idx]})({arg}.data_ptr())")
                 else:
                     # arg is a scalar
                     new_args.append(arg)
