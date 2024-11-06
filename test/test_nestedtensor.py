@@ -5730,7 +5730,8 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
                 self.assertEqual(nt.dim(), nt_dim)
                 self.assertEqual(nt._ragged_idx, ragged_dim)
-                self.assertTrue(is_nested_int(nt.shape[ragged_dim]))
+                for d in range(nt_dim):
+                    self.assertEqual(d == ragged_dim, is_nested_int(nt.shape[d]))
 
         # error case: empty list
         with self.assertRaisesRegex(
