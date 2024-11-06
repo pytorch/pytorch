@@ -245,20 +245,27 @@ class Op:
     def __repr__(self) -> str:
         p2p_info = ""
         if self.type in P2P:
-            p2p_info = f"s={self._src_g} d={self._dst_g}, "
+            p2p_info = f"s={self._src_g} d={self._dst_g}"
         if self.is_verbose:
+            verbose_info = (
+                f"timestamp_created={self.time_created_ns}",
+                p2p_info,
+                f"input_sizes={self.input_sizes}",
+                f"output_sizes={self.output_sizes}",
+                f"input_dtypes={self.input_dtypes}",
+                f"output_dtypes={self.output_dtypes}",
+                "collective_seq_id | p2p_seq_id="
+                f"{self.p2p_seq_id if self.type in P2P else self.collective_seq_id}",
+                f"pg_name={self.pg_name}",
+                f"pg_description={self.pg_desc}",
+                f"pg_size={self.pg_size}",
+                f"state={self.state}"
+            )
             return (
-                f"{self.type}(timestamp_created={self.time_created_ns}, "
-                f"{p2p_info}op_type={self.type}, "
-                f"input_sizes={self.input_sizes}, output_sizes={self.output_sizes}, "
-                f"Input dtypes: {self.input_dtypes}, Output dtypes: {self.output_dtypes}, "
-                "Collective_seq_id | P2P_seq_id: "
-                f"{self.p2p_seq_id if self.type in P2P else self.collective_seq_id}, "
-                f"Pg_name: {self.pg_name}, Pg_description={self.pg_desc}, Pg_size={self.pg_size})"
-                f", state={self.state})"
+                f"{self.type}(%s)" % ", ".join(s for s in verbose_info if s)
             )
         return (
-            f"{self.type}({p2p_info}input_sizes={self.input_sizes}, state={self.state})"
+            f"{self.type}({p2p_info}, input_sizes={self.input_sizes}, state={self.state})"
         )
 
     def match(self, other: "Op") -> MatchState:
