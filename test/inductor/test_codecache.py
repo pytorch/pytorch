@@ -40,7 +40,6 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     HAS_MULTIGPU,
     HAS_TRITON,
-    HAS_XPU,
     requires_gpu,
     requires_triton,
 )
@@ -712,11 +711,6 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"freezing": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
-    @unittest.skipIf(
-        HAS_XPU,
-        "This case failed on server with XPU environment"
-        "event if device=cpu remove this skip after #139783 fixed",
-    )
     def test_freezing(self, device):
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
@@ -738,10 +732,28 @@ class TestFxGraphCache(TestCase):
             out0 = mod1(x)
             out1 = torch.compile(mod1)(x)
             self.assertEqual(out0, out1)
+        # For mahcine that has mkldnn_fp16 support, the weight_pack in mkldnn_fusion.py
+        # wroks, which result in mkldnn format tensor, then the exception
+        # BypassFxGraphCache("mkldnn tensors unpickleable") is raised, and cause the
+        # fxgraph not cached.
+        if device == "cpu" and torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            fxgraph_cache_bypass_cnt = 1
+            fxgraph_cache_miss_cnt = 0
+            fxgraph_cache_hit_cnt = 0
+        else:
+            fxgraph_cache_bypass_cnt = 0
+            fxgraph_cache_miss_cnt = 1
+            fxgraph_cache_hit_cnt = 0
 
-        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_bypass"], fxgraph_cache_bypass_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_miss"], fxgraph_cache_miss_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_hit"], fxgraph_cache_hit_cnt
+        )
 
         counters.clear()
         self.reset()
@@ -756,9 +768,24 @@ class TestFxGraphCache(TestCase):
             out1 = torch.compile(mod2)(x)
             self.assertEqual(out0, out1)
 
-        self.assertEqual(counters["inductor"]["fxgraph_cache_bypass"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
-        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        if device == "cpu" and torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            fxgraph_cache_bypass_cnt = 1
+            fxgraph_cache_miss_cnt = 0
+            fxgraph_cache_hit_cnt = 0
+        else:
+            fxgraph_cache_bypass_cnt = 0
+            fxgraph_cache_miss_cnt = 0
+            fxgraph_cache_hit_cnt = 1
+
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_bypass"], fxgraph_cache_bypass_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_miss"], fxgraph_cache_miss_cnt
+        )
+        self.assertEqual(
+            counters["inductor"]["fxgraph_cache_hit"], fxgraph_cache_hit_cnt
+        )
 
 
 class TestFxGraphCacheHashing(TestCase):
