@@ -6,6 +6,7 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include "CUDATest.hpp"
+#include "TestUtils.hpp"
 
 using namespace c10d::test;
 
@@ -14,12 +15,12 @@ using at::cuda::CUDAStream;
 template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, size_t N, Args&&... args) {
   std::vector<T> tests;
-  for (C10_UNUSED const auto i : c10::irange(N)) {
+  for ([[maybe_unused]] const auto i : c10::irange(N)) {
     tests.push_back(std::move(T(path, std::forward<Args>(args)...)));
   }
 
   std::vector<std::thread> threads;
-  for (C10_UNUSED const auto i : c10::irange(N)) {
+  for ([[maybe_unused]] const auto i : c10::irange(N)) {
     threads.push_back(std::thread([i, N, &tests] { tests[i].start(i, N); }));
   }
 
@@ -65,7 +66,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
         numTensors_(numTensors),
         numDevices_(cudaNumDevices()) {
     // Allocate inputs on available devices in a round robin fashion.
-    ::at::globalContext().lazyInitCUDA();
+    ::at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
     inputs_.resize(numTensors_);
     for (const auto i : c10::irange(numTensors_)) {
       inputs_[i] = at::empty(

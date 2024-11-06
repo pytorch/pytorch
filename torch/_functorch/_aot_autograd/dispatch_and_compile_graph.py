@@ -12,10 +12,11 @@ import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import lazy_format_graph_code
+from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torchgen.utils import dataclass_repr
 
 from .. import config
 from .functional_utils import (
@@ -129,9 +130,25 @@ def aot_dispatch_base_graph(
             mod_when_exporting_non_strict, assigned_buffers
         )
 
-    saved_updated_flat_args_subclasses_desugared = pytree.tree_map_only(
-        torch.Tensor, lambda t: t.detach(), updated_flat_args_subclasses_desugared
-    )
+    # TODO: Refactor the following code so detach() persists item_memo
+    def detach_and_copy_item_memo(t):
+        detached_t = t.detach()
+        if hasattr(t, "item_memo"):
+            detached_t.item_memo = t.item_memo
+        return detached_t
+
+    fake_mode = detect_fake_mode()
+    if fake_mode:
+        saved_updated_flat_args_subclasses_desugared = pytree.tree_map_only(
+            torch.Tensor,
+            detach_and_copy_item_memo,
+            updated_flat_args_subclasses_desugared,
+        )
+    else:
+        saved_updated_flat_args_subclasses_desugared = pytree.tree_map_only(
+            torch.Tensor, lambda t: t.detach(), updated_flat_args_subclasses_desugared
+        )
+
     fw_module = _create_graph(
         fn_to_trace,
         updated_flat_args_subclasses_desugared,
@@ -192,8 +209,27 @@ def aot_dispatch_base_graph(
                 colored=True,
             ),
         )
+
         trace_structured(
-            "aot_forward_graph",
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "aot_forward_graph_fw_metadata",
+                "encoding": "string",
+            },
+            payload_fn=lambda: dataclass_repr(fw_metadata),
+        )
+        if maybe_subclass_meta is not None:
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "aot_forward_graph_fw_subclass_metadata",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: dataclass_repr(maybe_subclass_meta),
+            )
+
+        trace_structured(
+            "aot_inference_graph",
             payload_fn=lambda: fw_module.print_readable(
                 print_output=False, include_stride=True, include_device=True
             ),

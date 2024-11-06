@@ -77,7 +77,8 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     from torch._inductor.codecache import PyCodeCache
 
     nfound = 0
-    for kernel_key, kernel_mod in PyCodeCache.cache.items():
+    for kernel_mod in PyCodeCache.modules:
+        kernel_key = kernel_mod.key
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
 

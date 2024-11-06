@@ -19,8 +19,7 @@ class ThreadPool {
  public:
   explicit ThreadPool(size_t num_threads) {
     threads_.reserve(num_threads);
-    for (const auto i : c10::irange(num_threads)) {
-      (void)i; // Suppress unused variable warning
+    for ([[maybe_unused]] const auto i : c10::irange(num_threads)) {
       threads_.emplace_back([this]() {
         c10::setThreadName("pt_thread_pool");
         Worker();

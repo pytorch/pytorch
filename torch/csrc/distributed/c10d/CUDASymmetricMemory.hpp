@@ -4,8 +4,7 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 
-namespace c10d {
-namespace symmetric_memory {
+namespace c10d::symmetric_memory {
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 using HandleType = CUmemGenericAllocationHandle;
@@ -45,9 +44,15 @@ class CUDASymmetricMemory : public SymmetricMemory {
       c10::ScalarType dtype,
       int64_t storage_offset) override;
 
-  void barrier(int channel) override;
-  void put_signal(int dst_rank, int channel) override;
-  void wait_signal(int src_rank, int channel) override;
+  at::Tensor get_signal_pad(
+      int rank,
+      c10::IntArrayRef sizes,
+      std::optional<c10::ScalarType> dtype,
+      int64_t storage_offset) override;
+
+  void barrier(int channel, size_t timeout_ms) override;
+  void put_signal(int dst_rank, int channel, size_t timeout_ms) override;
+  void wait_signal(int src_rank, int channel, size_t timeout_ms) override;
 
   int get_rank() override;
   int get_world_size() override;
@@ -85,13 +90,13 @@ struct Block : public c10::intrusive_ptr_target {
       size_t block_size,
       size_t buffer_size,
       size_t signal_pad_offset,
-      const std::string& group_name)
+      std::string group_name)
       : handle(handle),
         device_idx(device_idx),
         block_size(block_size),
         buffer_size(buffer_size),
         signal_pad_offset(signal_pad_offset),
-        group_name(group_name),
+        group_name(std::move(group_name)),
         symm_mem(nullptr) {}
 };
 
@@ -113,5 +118,4 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   std::unordered_map<void*, c10::intrusive_ptr<Block>> ptr_to_block_;
 };
 
-} // namespace symmetric_memory
-} // namespace c10d
+} // namespace c10d::symmetric_memory
