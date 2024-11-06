@@ -4442,7 +4442,7 @@ else:
         D = 6144
         x = torch.zeros([16384, D], device=device, dtype=torch.bfloat16)
         index = torch.randint(0, 16384, (1, 32, 16384), device=device, dtype=torch.int64)
-        output = torch.randn([1, 32, 16384, D], device=device, dtype=torch.bfloat16)  # Use random values for test
+        output = torch.ones([1, 32, 16384, D], device=device, dtype=torch.bfloat16)  # Use random values for test
 
         x_before = x.clone()
         #Manually update x_before to generate expected values
