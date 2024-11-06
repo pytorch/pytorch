@@ -506,7 +506,9 @@ def _ident(x: T) -> T:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
+def extract_tensor_metadata_for_cache_key(
+    device_map: Dict[torch.device, torch.device], t: Tensor
+) -> TensorMetadata:
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -515,19 +517,32 @@ def extract_tensor_metadata_for_cache_key(t: Tensor) -> TensorMetadata:
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
 
+    # The pickle implementation avoids serializing the same object more than once.
+    # That behavior means the byte stream we create to hash will vary if, for example,
+    # we see two tensor objects with the same device, but the torch.device object is
+    # actually the same object vs. merely equivalent. We want to produce the same hash
+    # value in either situation, so we memoize the device objects and always reference
+    # the same object for a given device. It's possible other metadata fields deserve
+    # the same treatment, but so far we've only observed this issue with the device.
+    if meta.device not in device_map:
+        device_map[meta.device] = meta.device
+    meta = dataclasses.replace(meta, device=device_map[meta.device])
+
     return meta
 
 
-def _reduce_fake_tensor(t: Tensor) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
+def _reduce_fake_tensor(
+    device_map: Dict[torch.device, torch.device], t: Tensor
+) -> Tuple[Callable[[T], T], Tuple[TensorMetadata]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
-    metadata = extract_tensor_metadata_for_cache_key(t)
+    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
     return (_ident, (metadata,))
 
 
 def _reduce_tensor(
-    t: Tensor,
+    device_map: Dict[torch.device, torch.device], t: Tensor
 ) -> Tuple[Callable[[T], T], Tuple[TensorMetadataAndValues]]:
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
@@ -555,7 +570,7 @@ def _reduce_tensor(
             f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
         )
 
-    metadata = extract_tensor_metadata_for_cache_key(t)
+    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
@@ -585,9 +600,13 @@ class FxGraphCachePickler(pickle.Pickler):
     data that allow us to compute a stable, but safe hash.
     """
 
+    # See extract_tensor_metadata_for_cache_key. Whenever we extract metadata during
+    # pickling, we make sure devices always reference the same torch.device object.
+    _device_map: Dict[torch.device, torch.device] = {}
+
     dispatch_table = copyreg.dispatch_table.copy()
-    dispatch_table[FakeTensor] = _reduce_fake_tensor
-    dispatch_table[torch.Tensor] = _reduce_tensor
+    dispatch_table[FakeTensor] = functools.partial(_reduce_fake_tensor, _device_map)
+    dispatch_table[torch.Tensor] = functools.partial(_reduce_tensor, _device_map)
     dispatch_table[torch.SymInt] = _reduce_symint
     dispatch_table[
         torch.fx.experimental._backward_state.BackwardState
@@ -629,7 +648,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
         def get_str(obj: Any) -> str:
             if isinstance(obj, torch.Tensor):
-                return str(extract_tensor_metadata_for_cache_key(obj))
+                return str(extract_tensor_metadata_for_cache_key(cls._device_map, obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
             elif type(obj) in cls.dispatch_table:
@@ -1492,18 +1511,6 @@ class FxGraphCache:
             f"fx_graph_cache_{cache_state}",
             cache_info["cache_event_time"],
             metadata=cache_info,
-        )
-        # Add event data about cache hits/miss
-        # TODO: add remote cache get/put timings here too
-        chromium_log.add_event_data(
-            "inductor_compile",
-            cache_state=cache_state,
-            cache_event_time=cache_info["cache_event_time"],
-            key=cache_info.get("key"),
-            components=cache_info.get("components"),
-            cache_bypass_reason=cache_info.get("cache_bypass_reason"),
-            remote_cache_enabled=remote,
-            local_cache_enabled=local,
         )
         torch._logging.trace_structured(
             "artifact",
@@ -2376,7 +2383,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         static void* (*_torchinductor_pyobject_tensor_data_ptr)(PyObject* obj);
 
         template <typename T> static inline T parse_arg(PyObject* args, size_t n) {
-            static_assert(std::is_pointer_v<T>, "arg type must be pointer or long");
+            static_assert(std::is_pointer<T>::value, "arg type must be pointer or long");
             return static_cast<T>(_torchinductor_pyobject_tensor_data_ptr(PyTuple_GET_ITEM(args, n)));
         }
         template <> inline int64_t parse_arg<int64_t>(PyObject* args, size_t n) {

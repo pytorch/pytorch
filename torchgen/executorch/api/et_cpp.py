@@ -242,7 +242,7 @@ def return_names(f: NativeFunction, *, fallback_name: str = "result") -> Sequenc
 JIT_TO_CPP_DEFAULT = {
     "False": "false",
     "True": "true",
-    "None": "torch::execustd::nullopt",  # UGH this one is type directed
+    "None": "torch::executorch::nullopt",  # UGH this one is type directed
     "[]": "{}",
     "contiguous_format": "torch::executorch::MemoryFormat::Contiguous",
     "long": "torch::executorch::kLong",

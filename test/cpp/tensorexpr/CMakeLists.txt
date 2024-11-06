@@ -71,9 +71,7 @@ elseif(USE_ROCM)
 endif()
 
 if(INSTALL_TEST)
-  set_target_properties(test_tensorexpr PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS test_tensorexpr DESTINATION bin)
-  set_target_properties(tutorial_tensorexpr PROPERTIES INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${_rpath_portable_origin}/../lib")
   install(TARGETS tutorial_tensorexpr DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)

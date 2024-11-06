@@ -5,7 +5,8 @@
 #endif
 #include <torch/custom_class.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 constexpr static auto kBackendUtilsNamespace = "backendutils";
 constexpr static auto kBackendDebugInfoClass = "BackendDebugInfo";
@@ -60,4 +61,5 @@ class PyTorchBackendDebugInfoDummy : public torch::CustomClassHolder {
   PyTorchBackendDebugInfoDummy() = default;
 };
 #endif
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

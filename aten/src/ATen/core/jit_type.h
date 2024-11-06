@@ -326,7 +326,7 @@ struct TORCH_API ShapeSymbol {
   // is this symbol a fixed/static dimension
   bool is_static() const {
     return value_ >= 0;
-  }
+  };
   bool operator==(const ShapeSymbol& b) const {
     return value_ == b.value_;
   }
@@ -340,15 +340,15 @@ struct TORCH_API ShapeSymbol {
   int64_t static_size() const {
     TORCH_CHECK(is_static());
     return value_;
-  }
+  };
 
   int64_t value() const {
     return value_;
-  }
+  };
 
   static ShapeSymbol newSymbol() {
     return fromStaticSize(-static_cast<int64_t>(++num_symbols));
-  }
+  };
   friend TORCH_API std::ostream& operator<<(
       std::ostream& os,
       const ShapeSymbol& s);

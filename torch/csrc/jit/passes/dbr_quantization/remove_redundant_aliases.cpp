@@ -5,7 +5,8 @@
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 namespace {
 
@@ -69,4 +70,5 @@ Module DBRQuantRemoveRedundantAliases(Module& module) {
   return module;
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

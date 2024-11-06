@@ -214,6 +214,10 @@ include_patterns = [
     'torch/csrc/*.cpp',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.cpp',
+    'torch/csrc/distributed/autograd/**/*.cpp',
+    'torch/csrc/distributed/autograd/**/*.h',
+    'torch/csrc/distributed/rpc/**/*.cpp',
+    'torch/csrc/distributed/rpc/**/*.h',
     'torch/csrc/jit/serialization/*.h',
     'torch/csrc/jit/serialization/*.cpp',
 ]
@@ -241,11 +245,7 @@ exclude_patterns = [
     'torch/csrc/api/include/torch/linalg.h',
     'torch/csrc/api/include/torch/nn/pimpl-inl.h',
     'torch/csrc/autograd/generated/**',
-    'torch/csrc/distributed/**/*.cu',
-    'torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h',
-    'torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp',
-    'torch/csrc/distributed/c10d/WinSockUtils.hpp',
-    'torch/csrc/distributed/c10d/quantization/quantization_gpu.h',
+    'torch/csrc/distributed/**/*',
     'torch/csrc/dynamo/eval_frame.h',
     'torch/csrc/inductor/aoti_torch/c/shim.h',
     'torch/csrc/jit/**/*',
@@ -999,28 +999,6 @@ command = [
     'tools/linter/adapters/workflow_consistency_linter.py',
     '--',
     '@{{PATHSFILE}}'
-]
-init_command = [
-    'python3',
-    'tools/linter/adapters/pip_init.py',
-    '--dry-run={{DRYRUN}}',
-    'PyYAML==6.0.1',
-]
-
-[[linter]]
-code = 'NO_WORKFLOWS_ON_FORK'
-include_patterns = [
-    '.github/**/*.yml',
-    '.github/**/*.yaml',
-]
-exclude_patterns = [
-    '**/fb/**',
-]
-command = [
-    'python3',
-    'tools/linter/adapters/no_workflows_on_fork.py',
-    '--',
-    '@{{PATHSFILE}}',
 ]
 init_command = [
     'python3',

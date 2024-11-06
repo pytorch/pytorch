@@ -312,8 +312,6 @@ class NestedTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        # If you're wondering why there's a nested tensor with one of its
-        # size = -1, see note: [NJT outer_size in AOTDispatcher]
         kwargs = {} if kwargs is None else kwargs
 
         # Lazy import to avoid circular dependency

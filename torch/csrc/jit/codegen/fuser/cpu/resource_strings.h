@@ -2,7 +2,10 @@
 
 #include <ATen/code_template.h>
 
-namespace torch::jit::fuser::cpu {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace cpu {
 
 /*with type_as not checking type of its input, a fusion group can have non-fp32
 tensor as input. Correct code for this case is generated, however, nvrtc does
@@ -98,4 +101,7 @@ JIT_API void ${kernelName}(IndexType totalElements, void ** args) {
 }
 )");
 
-} // namespace torch::jit::fuser::cpu
+} // namespace cpu
+} // namespace fuser
+} // namespace jit
+} // namespace torch

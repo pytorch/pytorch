@@ -12,7 +12,7 @@
 namespace torch::data::datasets {
 namespace detail {
 template <bool C, typename T>
-using optional_if_t = std::conditional_t<C, std::optional<T>, T>;
+using optional_if_t = std::conditional_t<C, torch::optional<T>, T>;
 } // namespace detail
 
 /// A `MapDataset` is a dataset that applies a transform to a source dataset.

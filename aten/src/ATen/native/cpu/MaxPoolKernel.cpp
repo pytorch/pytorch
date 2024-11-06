@@ -19,7 +19,7 @@ namespace {
 
 template <typename scalar_t>
 bool is_nan(scalar_t v) {
-  if (std::is_integral_v<scalar_t> || std::is_same_v<scalar_t, unsigned char>) {
+  if (std::is_integral<scalar_t>::value || std::is_same<scalar_t, unsigned char>::value) {
     return false;
   }
   return std::isnan(v);
@@ -429,7 +429,7 @@ void cpu_max_pool_channels_last(
     // temp buffer holding max value with opmath_t
     std::unique_ptr<opmath_t []> max_arr;
     opmath_t* max_ptr = nullptr;
-    if (!std::is_same_v<scalar_t, opmath_t>) {
+    if (!std::is_same<scalar_t, opmath_t>::value) {
       max_arr = std::make_unique<opmath_t[]>(size);
       max_ptr = max_arr.get();
     }

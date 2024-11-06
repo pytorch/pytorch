@@ -103,7 +103,6 @@ class TensorVariable(VariableTracker):
         "requires_grad",
         "is_quantized",
         "is_contiguous",
-        "is_nested",
         "is_sparse",
         "class_type",
         "specialized_value",
@@ -129,7 +128,6 @@ class TensorVariable(VariableTracker):
         layout,
         ndim,
         requires_grad,
-        is_nested,
         is_quantized,
         is_sparse,
         class_type,
@@ -151,7 +149,6 @@ class TensorVariable(VariableTracker):
         self.requires_grad = requires_grad
         self.is_quantized = is_quantized
         self.is_contiguous = is_contiguous
-        self.is_nested = is_nested
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.has_grad_fn = has_grad_fn
@@ -178,7 +175,6 @@ class TensorVariable(VariableTracker):
             "layout": value.layout,
             "ndim": int(value.ndim),
             "requires_grad": value.requires_grad,
-            "is_nested": value.is_nested,
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
@@ -323,10 +319,6 @@ class TensorVariable(VariableTracker):
     def method_attr_is_sparse(self, tx):
         if self.is_sparse is not None:
             return ConstantVariable.create(self.is_sparse)
-
-    def method_attr_is_nested(self, tx):
-        if self.is_nested is not None:
-            return ConstantVariable.create(self.is_nested)
 
     def method_attr_data(self, tx):
         return variables.TorchInGraphFunctionVariable(
@@ -1015,7 +1007,7 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
 
         if not self.source:
-            if not compiled_autograd.compiled_autograd_enabled:
+            if not compiled_autograd.enabled():
                 # TODO(voz):
                 # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
                 # python state.
@@ -1154,11 +1146,11 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
-    def as_tensor(self, tx, dtype):
+    def as_tensor(self, tx):
         if self._tensor_var is None:
             self._tensor_var = VariableTracker.build(
                 tx, torch.scalar_tensor
-            ).call_function(tx, [self], {"dtype": VariableTracker.build(tx, dtype)})
+            ).call_function(tx, [self], {})
         return self._tensor_var
 
     def evaluate_expr(self, output_graph=None):

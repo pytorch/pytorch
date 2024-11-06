@@ -23,7 +23,7 @@ getTensorInfo(const at::TensorBase &t) {
 
   scalar* data_ptr = nullptr;
 
-  if constexpr (std::is_const_v<scalar>) {
+  if constexpr (std::is_const<scalar>::value) {
     data_ptr = t.const_data_ptr<scalar>();
   } else {
     data_ptr = t.mutable_data_ptr<scalar>();

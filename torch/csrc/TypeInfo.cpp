@@ -17,7 +17,7 @@
 #include <limits>
 #include <sstream>
 
-static PyObject* THPFInfo_New(const at::ScalarType& type) {
+PyObject* THPFInfo_New(const at::ScalarType& type) {
   auto finfo = (PyTypeObject*)&THPFInfoType;
   auto self = THPObjectPtr{finfo->tp_alloc(finfo, 0)};
   if (!self)
@@ -27,7 +27,7 @@ static PyObject* THPFInfo_New(const at::ScalarType& type) {
   return self.release();
 }
 
-static PyObject* THPIInfo_New(const at::ScalarType& type) {
+PyObject* THPIInfo_New(const at::ScalarType& type) {
   auto iinfo = (PyTypeObject*)&THPIInfoType;
   auto self = THPObjectPtr{iinfo->tp_alloc(iinfo, 0)};
   if (!self)
@@ -37,10 +37,7 @@ static PyObject* THPIInfo_New(const at::ScalarType& type) {
   return self.release();
 }
 
-static PyObject* THPFInfo_pynew(
-    PyTypeObject* type,
-    PyObject* args,
-    PyObject* kwargs) {
+PyObject* THPFInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
       "finfo(ScalarType type)",
@@ -68,10 +65,7 @@ static PyObject* THPFInfo_pynew(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPIInfo_pynew(
-    PyTypeObject* type,
-    PyObject* args,
-    PyObject* kwargs) {
+PyObject* THPIInfo_pynew(PyTypeObject* type, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
       "iinfo(ScalarType type)",
@@ -96,10 +90,7 @@ static PyObject* THPIInfo_pynew(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPDTypeInfo_compare(
-    THPDTypeInfo* a,
-    THPDTypeInfo* b,
-    int op) {
+PyObject* THPDTypeInfo_compare(THPDTypeInfo* a, THPDTypeInfo* b, int op) {
   switch (op) {
     case Py_EQ:
       if (a->type == b->type) {
@@ -243,7 +234,7 @@ static PyObject* THPFInfo_dtype(THPFInfo* self, void*) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPFInfo_str(THPFInfo* self) {
+PyObject* THPFInfo_str(THPFInfo* self) {
   std::ostringstream oss;
   const auto dtypeStr = THPFInfo_dtype(self, nullptr);
   oss << "finfo(resolution="
@@ -260,7 +251,7 @@ static PyObject* THPFInfo_str(THPFInfo* self) {
   return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
 }
 
-static PyObject* THPIInfo_str(THPIInfo* self) {
+PyObject* THPIInfo_str(THPIInfo* self) {
   std::ostringstream oss;
 
   const auto dtypeStr = THPIInfo_dtype(self, nullptr);

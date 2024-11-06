@@ -142,7 +142,7 @@ jiterator_also_stringify_as(jiterator_code(
 
     return chbevl(T{32.0} / x - T{2.0}, coefficients, int{25}) / std::sqrt(x);
   }),
-  i0e_string) // i0e_string
+  i0e_string); // i0e_string
 }
 
 #define CENTRAL_RANGE 0.7
@@ -625,7 +625,7 @@ static scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
   // exp(a - x).
 
   scalar_t ax, fac, res, num, numfac;
-  static scalar_t MAXLOG = std::is_same_v<scalar_t,double> ?
+  static scalar_t MAXLOG = std::is_same<scalar_t,double>::value ?
     7.09782712893383996843E2 : 88.72283905206835;
   static scalar_t EXP1 = 2.718281828459045;
   static scalar_t lanczos_g = 6.024680040776729583740234375;
@@ -655,7 +655,7 @@ static scalar_t _igam_helper_fac(scalar_t a, scalar_t x) {
 template <typename scalar_t>
 static scalar_t _igam_helper_series(scalar_t a, scalar_t x) {
   // Compute igam using DLMF 8.11.4. [igam1]
-  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
+  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
   static int MAXITER = 2000;
 
@@ -693,7 +693,7 @@ static scalar_t _igamc_helper_series(scalar_t a, scalar_t x) {
   scalar_t sum = 0;
   scalar_t term, logx;
   static scalar_t MAXITER = 2000;
-  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
+  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
 
   for (n = 1; n < MAXITER; n++) {
@@ -942,7 +942,7 @@ static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam
 
   int k, n, sgn;
   int maxpow = 0;
-  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
+  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
   scalar_t lambda = x / a;
   scalar_t sigma = (x - a) / a;
@@ -1007,11 +1007,11 @@ static scalar_t _igamc_helper_continued_fraction(scalar_t a, scalar_t x) {
   scalar_t ans, ax, c, yc, r, t, y, z;
   scalar_t pk, pkm1, pkm2, qk, qkm1, qkm2;
   int MAXITER = 2000;
-  static scalar_t MACHEP = std::is_same_v<scalar_t, double> ?
+  static scalar_t MACHEP = std::is_same<scalar_t, double>::value ?
     1.11022302462515654042E-16 : 5.9604644775390625E-8;
-  static scalar_t BIG = std::is_same_v<scalar_t,double> ?
+  static scalar_t BIG = std::is_same<scalar_t,double>::value ?
     4.503599627370496e15 : 16777216.;
-  static scalar_t BIGINV = std::is_same_v<scalar_t,double> ?
+  static scalar_t BIGINV = std::is_same<scalar_t,double>::value ?
     2.22044604925031308085e-16 : 5.9604644775390625E-8;
 
   ax = _igam_helper_fac(a, x);
@@ -1342,7 +1342,7 @@ inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_A() {
       -9.49010970480476444210E-2,  1.71620901522208775349E-1,
       -3.04682672343198398683E-1,  6.76795274409476084995E-1};
   return std::make_tuple(coeff, 30);
-}
+};
 
 template <typename T>
 inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
@@ -1367,7 +1367,7 @@ inline std::tuple<const T*, size_t> chebyshev_coefficients_i0e_B() {
       8.04490411014108831608E-1};
 
   return std::make_tuple(coeff, 25);
-}
+};
 
 template <typename T>
 inline typename std::enable_if_t<std::is_same_v<double, T>, std::tuple<const T*, size_t>>
@@ -1394,7 +1394,7 @@ chebyshev_coefficients_i1e_A() {
       1.02643658689847095384E-1,  -1.76416518357834055153E-1,
       2.52587186443633654823E-1};
   return std::make_tuple(coeff, 29);
-}
+};
 
 template <typename T>
 inline typename std::enable_if_t<std::is_same_v<float, T>, std::tuple<const T*, size_t>>
@@ -1423,7 +1423,7 @@ chebyshev_coefficients_i1e_A() {
       -1.76416518357834055153E-1f,
       2.52587186443633654823E-1f};
   return std::make_tuple(coeff, 17);
-}
+};
 
 template <typename T>
 inline typename std::enable_if_t<std::is_same_v<double, T>, std::tuple<const T*, size_t>>
@@ -1449,7 +1449,7 @@ chebyshev_coefficients_i1e_B() {
       7.78576235018280120474E-1};
 
   return std::make_tuple(coeff, 25);
-}
+};
 
 template <typename T>
 inline typename std::enable_if_t<std::is_same_v<float, T>, std::tuple<const T*, size_t>>
@@ -1469,7 +1469,7 @@ chebyshev_coefficients_i1e_B() {
       7.78576235018280120474E-1f};
 
   return std::make_tuple(coeff, 7);
-}
+};
 
 template <typename T>
 inline typename std::enable_if_t<std::is_floating_point_v<T>, T>

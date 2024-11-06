@@ -114,7 +114,7 @@ inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_
 
 template<typename traits, typename res_t>
 static void set_result(const int index, const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
-  // static_assert(std::is_same_v<res_t, typename traits::arg2_t>, "data types must match");
+  // static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
   if (index < num_outputs) {
     char *out = (char *) iter.data_ptr(index);
     *(res_t *) out = result;
@@ -202,7 +202,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
       typename c_traits::result_type>::value,
     "all accumulate types must match");
   static_assert(
-    std::is_default_constructible_v<acc_t>,
+    std::is_default_constructible<acc_t>::value,
     "the accumulate type must be default-constructible"
   );
   const int num_outputs = iter.noutputs();
@@ -229,7 +229,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
       int max_threads = at::get_num_threads();
       AT_ASSERT(max_threads > 0);
       static_assert(
-        !std::is_same_v<acc_t, bool>,
+        !std::is_same<acc_t, bool>::value,
         "Concurrently modifying different references into std::vector<bool> is UB."
       );
       std::vector<acc_t> buffer((unsigned)max_threads, init);

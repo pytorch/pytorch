@@ -4,11 +4,14 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 
+namespace torch {
+namespace jit {
+
 // Utilities for dealing with nodes that contain subgraphs.
 //
 // They handle the complexity of editing inputs/outputs as you merge nodes in
 // and out of subgraphs.
-namespace torch::jit::SubgraphUtils {
+namespace SubgraphUtils {
 
 // Create a new subgraph node that contains only `n`. The new subgraph will have
 // `subgraphKind` as its type.
@@ -67,4 +70,6 @@ TORCH_API std::string generateNameForGraph(
     size_t maxlen = 40,
     const std::string& prefix = "fused");
 
-} // namespace torch::jit::SubgraphUtils
+} // namespace SubgraphUtils
+} // namespace jit
+} // namespace torch

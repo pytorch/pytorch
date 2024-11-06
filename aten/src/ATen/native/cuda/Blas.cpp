@@ -202,6 +202,7 @@ static bool isSupportedHipLtROCmArch(int index) {
             return true;
         }
     }
+    TORCH_CHECK(false, "Attempting to use hipBLASLt on a unsupported architecture!");
     return false;
 }
 #endif
@@ -264,14 +265,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   IntArrayRef mat2_sizes = mat2.sizes();
   IntArrayRef self__sizes;
   bool useLtInterface = false;
-#if defined(USE_ROCM)
-  // When hipBLASLt is not supported on the architecture,
-  // disable_addmm_cuda_lt will always be to set to true
-  static bool disable_addmm_cuda_lt =
-    !isSupportedHipLtROCmArch(self.device().index()) || getDisableAddmmCudaLt();
-#else
   static bool disable_addmm_cuda_lt = getDisableAddmmCudaLt();
-#endif
   at::ScalarType scalar_type = self.scalar_type();
   c10::MaybeOwned<Tensor> self_;
   if (&result != &self) {
@@ -289,6 +283,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&
           self.is_contiguous() && result.is_contiguous() &&
 #ifdef USE_ROCM
+          isSupportedHipLtROCmArch(self.device().index()) &&
           (scalar_type == at::ScalarType::Float ||
            scalar_type == at::ScalarType::Half ||
            scalar_type == at::ScalarType::BFloat16) &&

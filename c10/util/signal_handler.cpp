@@ -107,6 +107,8 @@ FatalSignalHandler& FatalSignalHandler::getInstance() {
   return *handler;
 }
 
+FatalSignalHandler::~FatalSignalHandler() = default;
+
 FatalSignalHandler::FatalSignalHandler()
     : fatalSignalHandlersInstalled(false),
       fatalSignalReceived(false),

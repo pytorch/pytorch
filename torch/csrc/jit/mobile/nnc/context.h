@@ -8,7 +8,10 @@
 #include <ATen/core/ivalue.h>
 #include <c10/core/ScalarType.h>
 
-namespace torch::jit::mobile::nnc {
+namespace torch {
+namespace jit {
+namespace mobile {
+namespace nnc {
 
 // Specify the requirements on an input tensor.
 // TODO: support input tensor with dynamic shape (PR #54982)
@@ -220,4 +223,7 @@ class TORCH_API CompilationUnit {
   std::unordered_map<c10::QualifiedName, std::unique_ptr<Function>> functions_;
 };
 
-} // namespace torch::jit::mobile::nnc
+} // namespace nnc
+} // namespace mobile
+} // namespace jit
+} // namespace torch

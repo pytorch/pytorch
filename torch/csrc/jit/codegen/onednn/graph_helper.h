@@ -5,7 +5,10 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit::fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 #define STRIDED_LAYOUT 0
 #define OPAQUE_LAYOUT 1
@@ -95,4 +98,7 @@ class LlgaNodeWrapper {
   Node* n;
 };
 
-} // namespace torch::jit::fuser::onednn
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch

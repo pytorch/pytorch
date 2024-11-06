@@ -82,7 +82,6 @@ struct TORCH_API Argument {
     }
     return *this;
   }
-  ~Argument() = default;
 
   const std::string& name() const {
     return name_;

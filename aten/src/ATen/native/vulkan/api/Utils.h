@@ -197,7 +197,7 @@ inline constexpr To safe_downcast(const From& v) {
 
 template <typename To, typename From>
 inline constexpr bool is_signed_to_unsigned() {
-  return std::is_signed_v<From> && std::is_unsigned_v<To>;
+  return std::is_signed<From>::value && std::is_unsigned<To>::value;
 }
 
 } // namespace detail

@@ -196,7 +196,7 @@ struct TuplePacker {
 template <typename... Args>
 struct TuplePacker<0, Args...> {
   // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
-  static void execute(Stack& /*stack*/, std::tuple<Args...>&& /*t*/){}
+  static void execute(Stack& /*stack*/, std::tuple<Args...>&& /*t*/){};
 };
 
 template <typename... Args>

@@ -253,8 +253,7 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                 return r
 
             try:
-                shape_env = args[0]
-                if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
+                if args[0].is_recording:  # type: ignore[has-type]
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
                     #

@@ -72,7 +72,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
    * Members initialized after rendezvous
    */
   bool isInitialized_ = false;
-  int deviceIdx_{0};
+  int deviceIdx_;
   Topology topology_ = Topology::UNKNOWN;
   void* symmetricMemoryPtr_ = nullptr;
   c10::intrusive_ptr<SymmetricMemory> symmetricMemory_ = nullptr;

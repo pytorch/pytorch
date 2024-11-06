@@ -17,7 +17,6 @@ from torch.utils._sympy.functions import (
     Mod,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
-    OpaqueUnaryFn_log2,
     OpaqueUnaryFn_sqrt,
     PowByNatural,
     RoundDecimal,
@@ -164,10 +163,6 @@ class ReferenceAnalysis:
         return OpaqueUnaryFn_log(x)
 
     @staticmethod
-    def log2(x):
-        return OpaqueUnaryFn_log2(x)
-
-    @staticmethod
     def sqrt(x):
         return OpaqueUnaryFn_sqrt(x)
 
@@ -251,10 +246,6 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def log(x):
         raise AssertionError("log is not valid shape sympy expr")
-
-    @staticmethod
-    def log2(x):
-        return torch._sym_log2(x)  # type: ignore[attr-defined]
 
     @staticmethod
     def sqrt(x):
@@ -480,10 +471,6 @@ class TensorReferenceAnalysis:
     @staticmethod
     def log(x):
         return torch.ops.aten.log.default(x)
-
-    @staticmethod
-    def log2(x):
-        return torch.ops.aten.log2.default(x)
 
     @staticmethod
     def sqrt(x):

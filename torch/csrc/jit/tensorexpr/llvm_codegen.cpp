@@ -1078,7 +1078,7 @@ template <typename T>
 std::enable_if_t<std::is_integral_v<T>, llvm::Value*> getFromType(
     llvm::Type* type,
     T value) {
-  return llvm::ConstantInt::get(type, value, std::is_signed_v<T>);
+  return llvm::ConstantInt::get(type, value, std::is_signed<T>::value);
 }
 
 template <typename T>

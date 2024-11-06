@@ -5,7 +5,8 @@
 
 #include <utility>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using graph_rewrite_helper::getFuncName;
 
@@ -794,4 +795,5 @@ bool is_batchnorm3d_module(
       "__torch__.torch.nn.modules.batchnorm.BatchNorm3d");
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

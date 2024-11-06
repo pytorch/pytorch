@@ -599,11 +599,8 @@ class Loops(IRNode):
             self.inner_fn, *self.inner_fn_args()
         )
 
-    def has_large_inner_fn(self, threshold=None):
-        if threshold is None:
-            threshold = 0
-        threshold = max(threshold, config.realize_opcount_threshold)
-        return self.inner_fn_opcount().num_ops > threshold
+    def has_large_inner_fn(self):
+        return self.inner_fn_opcount().num_ops > config.realize_opcount_threshold
 
     def inner_fn_free_unbacked_symbols(self):
         index = self._index(self.ranges)
@@ -879,7 +876,7 @@ class Reduction(Loops):
         reduction_numel_hint = V.graph.sizevars.symbolic_hint(reduction_numel)
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
-        should_split = reduction_type == "scan" or (
+        should_split = (
             not V.graph.has_feature(device, BackendFeature.REDUCE_TO_SINGLE_ELEMENT)
             and reduction_type
             not in (
@@ -887,9 +884,11 @@ class Reduction(Loops):
                 "argmin",
             )
             and config.split_reductions
-        )
-        if not (_is_static(reduction_numel_hint) and _is_static(numel_hint)):
             # We don't support unbacked symints
+            and _is_static(reduction_numel_hint)
+            and _is_static(numel_hint)
+        )
+        if not should_split:
             return ReductionHint.DEFAULT, 1
 
         device_interface = get_interface_for_device(get_device_type(device))  # type: ignore[arg-type] # next PR
@@ -907,8 +906,6 @@ class Reduction(Loops):
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
 
         def inner_reduction_splits(reduction_numel_hint, numel_hint):
-            if not should_split:
-                return 1
             # do heuristics that's close to eager mode for split inner reduction
             # we leak reduction autotune configs here, and will need to refactor to avoid this later
             num_warps = 8
@@ -945,8 +942,6 @@ class Reduction(Loops):
             )
 
         def outer_reduction_splits(reduction_numel_hint, numel_hint):
-            if not should_split:
-                return 1
             # TODO the best heuristic currently has XBLOCK (corresponding to numel_hint) 128
             # extend to even smaller number of outputs
             num_warps = 8
@@ -1963,7 +1958,7 @@ class Scan(Loops):
             inner_fn=wrapper_fn,
             ranges=pointwise_ranges,
             reduction_ranges=scan_ranges,
-            reduction_type="scan",
+            reduction_type="sum",
             reduction_numel=scan_numel,
         )
 
@@ -5357,12 +5352,7 @@ class TMADescriptor(ExternKernel):
             # link back to the underlying tensor in terms of ownership
             # to avoid getting the underlying tensor deleted *before*
             # the TMADescriptor node can be deleted.
-            NonOwningLayout(
-                ReinterpretView(
-                    data=tensor,
-                    layout=tensor.get_layout(),
-                )
-            ),
+            NonOwningLayout(ReinterpretView(tensor, tensor.get_layout())),
             inputs,
             tuple(constant_args),
             None,
@@ -5416,50 +5406,17 @@ class UserDefinedTritonKernel(ExternKernel):
         2. The arg is not tl.constexpr so we have to remove it
         """
         constexpr_indices_set = set(constexpr_indices)
-        REMOVED = object()
         raw_args = [
-            (idx, arg)
-            if (arg is not None) or (arg is None and idx in constexpr_indices_set)
-            else (idx, REMOVED)
+            arg
             for idx, arg in enumerate(raw_args)
+            if (arg is not None) or (arg is None and idx in constexpr_indices_set)
         ]
-        removed_none_args = [idx for idx, val in raw_args if val == REMOVED]
-        raw_args = [val for idx, val in raw_args if val != REMOVED]
-
-        # We have to compute the constexpr indices for the new, filtered raw_args
-        # We also have to adjust equal_to_1.
-        if removed_none_args:
-            eq1_indices_set = set(triton_meta["configs"][0].equal_to_1)
-            constexpr_indices = []
-            equal_to_1 = []
-            index_shift = 0
-            for idx, kwarg in enumerate(self.ordered_kwargs_for_cpp_kernel):
-                # every time we encounter an idx we removed, adjust by one to account for it
-                # So for example if we had [None, const X]
-                # iter 1:
-                #   None was removed, adjust=1
-                # iter 2:
-                #  X is const at idx=1, but the adjusted idx is 0 now, because None was removed
-                if idx in removed_none_args:
-                    index_shift += 1
-                    continue
-                arg_index = kernel.arg_names.index(kwarg)
-                if arg_index in kernel.constexprs:
-                    constexpr_indices.append(idx - index_shift)
-                if arg_index in eq1_indices_set:
-                    equal_to_1.append(idx - index_shift)
-
-            triton_meta["configs"][0].equal_to_1 = equal_to_1
 
         # Call to kernel
         self.codegen_comment(wrapper)
+
         wrapper.generate_user_defined_triton_kernel(
-            new_name,
-            raw_args,
-            self.grid,
-            configs,
-            triton_meta,
-            constexpr_indices,
+            new_name, raw_args, self.grid, configs, triton_meta, constexpr_indices
         )
 
     def get_unbacked_symbol_uses(self) -> OrderedSet[sympy.Symbol]:

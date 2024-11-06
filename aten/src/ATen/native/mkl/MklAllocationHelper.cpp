@@ -1,6 +1,6 @@
 #include <ATen/Config.h>
 
-#if AT_MKL_ENABLED()
+#if AT_MKLDNN_ENABLED()
 #ifdef USE_MIMALLOC_ON_MKL
 #include <c10/core/impl/alloc_cpu.h>
 #include <mkl.h>

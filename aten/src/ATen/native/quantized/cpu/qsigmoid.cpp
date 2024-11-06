@@ -20,7 +20,8 @@
 #include <algorithm>
 #include <utility>
 
-namespace at::native {
+namespace at {
+namespace native {
 
 DEFINE_DISPATCH(qsigmoid_stub);
 
@@ -148,4 +149,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 }
 } // namespace
 
-}  // namespace at::native
+}}  // namespace at::native

@@ -2,7 +2,9 @@
 
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
-namespace torch::jit::tensorexpr {
+namespace torch {
+namespace jit {
+namespace tensorexpr {
 
 Tensor computeBatchNorm(
     const std::vector<ArgValue>& inputs,
@@ -11,4 +13,6 @@ Tensor computeBatchNorm(
     const std::optional<ScalarType>& outputType,
     at::Device device);
 
-} // namespace torch::jit::tensorexpr
+} // namespace tensorexpr
+} // namespace jit
+} // namespace torch

@@ -4,7 +4,8 @@
 
 // Functions used by both encapsulation and conversion.
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 struct IndexingPatternFinder {
  public:
@@ -14,4 +15,5 @@ struct IndexingPatternFinder {
   static bool IsSameSource(const Node* n, const Node* m);
 };
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

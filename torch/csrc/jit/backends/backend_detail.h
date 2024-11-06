@@ -6,7 +6,8 @@
 
 #include <functional>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using DebugHandleType = int64_t;
 
@@ -36,4 +37,5 @@ TORCH_API Module codegen_backend_module(
     const c10::Dict<IValue, IValue>& method_compile_spec,
     const c10::DictTypePtr& any_dict_ty);
 } // namespace detail
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

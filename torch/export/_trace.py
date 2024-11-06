@@ -1641,8 +1641,7 @@ def _non_strict_export(
                         ):
                             _check_input_constraints_pre_hook(mod, args, kwargs)
                         with torch.fx.traceback.preserve_node_meta():
-                            args = (*args, *kwargs.values())
-                            tree_out = torch.fx.Interpreter(mod).run(*args)
+                            tree_out = torch.fx.Interpreter(mod).run(*args, **kwargs)
                     else:
                         tree_out = mod(*args, **kwargs)
                     flat_outs, out_spec = pytree.tree_flatten(tree_out)

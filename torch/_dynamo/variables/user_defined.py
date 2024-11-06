@@ -374,31 +374,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if self.value.__optional_keys__:
                 unimplemented("TypedDict with optional keys not supported")
             return variables.BuiltinVariable(dict).call_dict(tx, *args, **kwargs)
-        elif self.value is collections.deque:
-            maxlen = variables.ConstantVariable.create(None)
-            if not kwargs:
-                if len(args) == 0:
-                    items = []
-                elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
-                    items = args[0].force_unpack_var_sequence(tx)
-                elif len(args) == 2 and args[0].has_force_unpack_var_sequence(tx):
-                    items = args[0].force_unpack_var_sequence(tx)
-                    maxlen = args[1]
-                else:
-                    unimplemented("deque() with more than 2 arg not supported")
-            elif tuple(kwargs) == ("maxlen",):
-                maxlen = kwargs["maxlen"]
-                if len(args) == 0:
-                    items = []
-                if len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
-                    items = args[0].force_unpack_var_sequence(tx)
-                else:
-                    unimplemented("deque() with more than 1 arg not supported")
+        elif self.value is collections.deque and not kwargs:
+            if len(args) == 0:
+                items = []
+            elif len(args) == 1 and args[0].has_force_unpack_var_sequence(tx):
+                items = args[0].force_unpack_var_sequence(tx)
             else:
-                unimplemented("deque() with invalid kwargs not supported")
-            return variables.lists.DequeVariable(
-                items, maxlen=maxlen, mutable_local=MutableLocal()
-            )
+                unimplemented("deque() with more than 1 arg not supported")
+            return variables.lists.DequeVariable(items, mutable_local=MutableLocal())
         elif self.value is functools.partial:
             if not args:
                 unimplemented("functools.partial malformed")

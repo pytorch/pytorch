@@ -14,10 +14,9 @@
 
 namespace at {
 #if AT_MKLDNN_ENABLED()
-namespace native::mkldnn {
-// NOLINTNEXTLINE(misc-use-internal-linkage)
+namespace native { namespace mkldnn {
 void clear_computation_cache();
-} // namespace native::mkldnn
+}} // namespace native::mkldnn
 #endif
 
 namespace {
@@ -101,13 +100,13 @@ bool in_parallel_region() {
 #endif
 }
 
-void intraop_launch(const std::function<void()>& func) {
+void intraop_launch(std::function<void()> func) {
   // execute inline in openmp case
   func();
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
-    const std::function<void()>& func) {
+    std::function<void()> func) {
   func();
   auto future = c10::make_intrusive<c10::ivalue::Future>(NoneType::get());
   future->markCompleted();

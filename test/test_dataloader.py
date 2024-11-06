@@ -3132,6 +3132,10 @@ class DummyDataset(torch.utils.data.Dataset):
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "DataLoader tests hang in ASAN, see: https://github.com/pytorch/pytorch/issues/66223",
+)
 class TestDataLoaderPersistentWorkers(TestDataLoader):
     def setUp(self):
         super().setUp()
@@ -3403,6 +3407,10 @@ class TestWorkerQueueDataset(Dataset):
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
     "fork is not supported. Dying (set die_after_fork=0 to override)",
 )
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "Flaky with ASAN, see https://github.com/pytorch/pytorch/issues/65727",
+)
 class TestIndividualWorkerQueue(TestCase):
     def setUp(self):
         super().setUp()
@@ -3495,6 +3503,10 @@ class ConvDataset(Dataset):
 
 
 @unittest.skipIf(IS_WINDOWS, "Needs fork")
+@unittest.skipIf(
+    TEST_WITH_ASAN,
+    "This test hangs when running with ASAN, see https://github.com/pytorch/pytorch/issues/75492",
+)
 class TestConvAfterFork(TestCase):
     # Tests crash reported in https://github.com/pytorch/pytorch/issues/53565
     def test_conv_after_fork(self):

@@ -37,9 +37,6 @@ class once_flag {
       once_flag() noexcept = default;
   once_flag(const once_flag&) = delete;
   once_flag& operator=(const once_flag&) = delete;
-  once_flag(once_flag&&) = delete;
-  once_flag& operator=(once_flag&&) = delete;
-  ~once_flag() = default;
 
  private:
   template <typename Flag, typename F, typename... Args>

@@ -8,7 +8,8 @@
 #include <ATen/ops/gelu_native.h>
 #endif
 
-namespace at::native {
+namespace at {
+namespace native {
 
 DEFINE_DISPATCH(qgelu_stub);
 
@@ -25,4 +26,4 @@ Tensor& gelu_quantized_cpu_(Tensor& self, c10::string_view approximate) {
   return self;
 }
 
-}  // namespace at::native
+}}  // namespace at::native

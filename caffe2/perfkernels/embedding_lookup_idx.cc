@@ -129,7 +129,7 @@ static bool EmbeddingLookupGenericSlowIdx(
           const float* scale_bias,                                                                    \
           bool normalize_by_lengths,                                                                  \
           OutType* out) {                                                                             \
-    if constexpr (std::is_same_v<InType, uint8_t>) {                                             \
+    if constexpr (std::is_same<InType, uint8_t>::value) {                                             \
       CAFFE_ENFORCE(scale_bias != nullptr, "scale_bias must not be nullptr");                         \
     } else {                                                                                          \
       CAFFE_ENFORCE(scale_bias == nullptr, "scale_bias must be nullptr");                             \

@@ -17,7 +17,8 @@
 #include <cstring>
 
 
-namespace at::native {
+namespace at {
+namespace native {
 
 // Define a typedef to dispatch to nearest_idx or nearest_exact_idx
 typedef int64_t (*nn_compute_source_index_fn_t)(const float, int64_t, int64_t);
@@ -233,4 +234,5 @@ Tensor _upsample_nearest_exact3d_quantized_cpu(
       input, osize, scale_d, scale_h, scale_w);
 }
 
-} // namespace at::native
+} // namespace native
+} // namespace at

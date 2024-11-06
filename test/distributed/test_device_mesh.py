@@ -98,17 +98,15 @@ class DeviceMeshTest(DTensorTestBase):
 
     # TODO: need to refactor the other tests in this file to test both
     # eager_init=True and eager_init=False scenarios.
+    @skip_if_lt_x_gpu(4)
     @with_comms(eager_init=True)
     def test_2d_mesh_eager_init_subgroup(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(self.device_type, mesh_shape)
 
-        # when eager init is used, the subgroup is created from nccl comm split and
-        # there would be bound_device_id immediately assigned for the subgroup.
-        if self.backend == "nccl":
-            curr_device = torch.cuda.current_device()
-            self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
-            self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
+        curr_device = torch.cuda.current_device()
+        self.assertEqual(mesh_2d.get_group(0).bound_device_id.index, curr_device)
+        self.assertEqual(mesh_2d.get_group(1).bound_device_id.index, curr_device)
 
     @with_comms()
     def test_get_group_and_get_all_groups(self):
@@ -604,7 +602,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             cp_dp_mesh = mesh_3d["cp", "dp"]
 
     @with_comms
-    def test_flatten_mesh_3d(self):
+    def test_flatten_mesh(self):
         mesh_shape = (2, 2, 2)
         mesh_dim_names = ("dp", "cp", "tp")
         mesh_3d = init_device_mesh(
@@ -645,23 +643,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         cp_tp_mesh = mesh_3d["cp", "tp"]
         cp_tp_mesh._flatten("dummy")
         self.assertEqual(mesh_3d["dummy"].mesh_dim_names[0], "dummy")
-
-    @with_comms(eager_init=True)
-    def test_flatten_mesh_4d(self):
-        mesh_shape = (2, 2, 2, 1)
-        mesh_dim_names = ("dp_replicate", "dp_shard", "cp", "tp")
-        mesh_4d = init_device_mesh(
-            self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
-        )
-
-        # flatten HSDP and CP into one mesh
-        dp_cp_mesh = mesh_4d[mesh_dim_names[:3]]._flatten("dp_cp")
-        # check flattened mesh integrity
-        self.assertEqual(mesh_4d["dp_cp"].mesh.flatten(), dp_cp_mesh.mesh)
-        # check flattened mesh dim names is correct
-        self.assertEqual(dp_cp_mesh.mesh_dim_names, ("dp_cp",))
-        # check flattened mesh dependency
-        self.assertEqual(_mesh_resources.get_root_mesh(dp_cp_mesh), mesh_4d)
 
     @with_comms
     def test_reconstruct_mesh_with_flatten_dim(self):

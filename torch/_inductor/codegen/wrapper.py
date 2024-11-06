@@ -524,7 +524,6 @@ class PythonWrapperCodegen(CodeGen):
         self._meta_vars: Set[str] = set()
         self.multi_kernel_state = MultiKernelState()
         self.already_codegened_subgraphs: Set[str] = set()
-        self.allocated_workspaces: Dict[str, Any] = {}
 
         # intermediate tensor value printing utility
         self.debug_printer = DebugPrinterManager(
@@ -613,14 +612,7 @@ class PythonWrapperCodegen(CodeGen):
         import_str = f"""
             import triton
             import triton.language as tl
-            from {triton_heuristics.__name__} import (
-                grid,
-                split_scan_grid,
-                grid_combo_kernels,
-                start_graph,
-                end_graph,
-                cooperative_reduction_grid,
-            )
+            from {triton_heuristics.__name__} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
             """
         self.imports.splice(import_str, strip=True)
         if config.triton.autotune_at_compile_time:
@@ -844,35 +836,19 @@ class PythonWrapperCodegen(CodeGen):
             for arg in raw_args
         ]
         self.generate_kernel_call(
-            kernel_name,
-            args,
-            grid_fn=grid_fn,
-            arg_types=arg_types,
-            raw_args=raw_args,
+            kernel_name, args, grid_fn=grid_fn, arg_types=arg_types, raw_args=raw_args
         )
 
-    def _generate_tma_descriptor_call(self, desc, apply_size_hints=False):
-        dims = desc.dims
-        block_dims = desc.block_dims
-        if apply_size_hints:
-            dims = tuple(V.graph.sizevars.atomically_apply_size_hint(d) for d in dims)
-            block_dims = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_dims
-            )
-
+    def generate_tma_descriptor(self, desc):
         ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
-        dims = ", ".join(self.val_to_arg_str(dim) for dim in dims)
-        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in block_dims)
+        dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.dims)
+        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.block_dims)
         element_size = self.val_to_arg_str(desc.element_size)
         prefix = "triton.tools.experimental_descriptor"
-        fn = f"{prefix}.create_{desc.rank}d_tma_descriptor"
+        fn_name = f"create_{desc.rank}d_tma_descriptor"
+        call = f"{prefix}.{fn_name}"
         args = f"{ptr}, {dims}, {block_dims}, {element_size}"
-        call = f"{fn}({args})"
-        return call
-
-    def generate_tma_descriptor(self, desc):
-        call = self._generate_tma_descriptor_call(desc)
-        line = f"{desc.name} = {call}{self.ending}"
+        line = f"{desc.name} = {call}({args})"
         self.writeline(line)
 
     def generate_scatter_fallback(
@@ -1500,7 +1476,7 @@ class PythonWrapperCodegen(CodeGen):
                                 f"{symbol_name}{annotation_code} = {symbol_str}"
                             )
                         else:
-                            compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
+                            compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
                         symbols_included.add(symbol_name)
                     elif (
                         symbol_name in unqualified_loads
@@ -1563,7 +1539,7 @@ class PythonWrapperCodegen(CodeGen):
             self.writeline(line)
             self.writeline(self.make_zero_buffer(name))
         elif ws.zero_mode == WorkspaceZeroMode.ZERO_PER_GRAPH:
-            prior = self.allocated_workspaces.get(name)
+            prior = V.graph.allocated_workspaces.get(name)
             if prior:
                 assert isinstance(prior, AllocateLine)
                 # expand existing allocation
@@ -1571,7 +1547,7 @@ class PythonWrapperCodegen(CodeGen):
             else:
                 self.writeline(line)
                 self.writeline(self.make_zero_buffer(name))
-                self.allocated_workspaces[name] = line
+                V.graph.allocated_workspaces[name] = line
         else:
             raise AssertionError(ws.zero_mode)
 
@@ -1676,11 +1652,7 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_example_arg_value(self, arg, arg_type, raw_arg=None, index=None):
         if isinstance(arg_type, torch_dtype):
-            if isinstance(raw_arg, ir.TMADescriptor):
-                # first we generate the underlying buffer
-                buf_name = raw_arg.tensor.get_name()
-                buf = V.graph.get_buffer(buf_name)
-            elif V.graph.try_get_buffer(arg) is not None:
+            if V.graph.try_get_buffer(arg) is not None:
                 buf_name = arg
                 buf = V.graph.get_buffer(arg)
             else:
@@ -1712,17 +1684,6 @@ class PythonWrapperCodegen(CodeGen):
             )
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
-
-            if isinstance(raw_arg, ir.TMADescriptor):
-                # generate another line initializing a host-side TMA
-                # descriptor from the underlying buffer created above
-                value = self._generate_tma_descriptor_call(
-                    desc=raw_arg,
-                    apply_size_hints=True,
-                )
-                buf_name = arg
-                self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
-
             return buf_name
         elif issubclass(arg_type, sympy.Basic) or isinstance(arg, SymbolicCallArg):
             # arg is a symbol or symbolic expression
@@ -1873,7 +1834,6 @@ class PythonWrapperCodegen(CodeGen):
             self.kernel_autotune_calls.writeline(
                 f"del {', '.join(arg for arg in tensor_args.values())}\n",
             )
-
             self.kernel_autotune_names.add(kernel_name)
 
     def writeline(self, line):

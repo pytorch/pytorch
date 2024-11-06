@@ -3,7 +3,8 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 
-namespace c10d::symmetric_memory {
+namespace c10d {
+namespace symmetric_memory {
 
 // SymmetricMemory represents symmetric allocations across a group of devices.
 // The allocations represented by a SymmetricMemory object are accessible by
@@ -37,7 +38,7 @@ namespace c10d::symmetric_memory {
 // for these two barriers, they can operate correctly in parallel.
 class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
  public:
-  ~SymmetricMemory() override = default;
+  virtual ~SymmetricMemory() {}
 
   virtual std::vector<void*> get_buffer_ptrs() = 0;
   virtual std::vector<void*> get_signal_pad_ptrs() = 0;
@@ -71,7 +72,7 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
 
 class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
  public:
-  ~SymmetricMemoryAllocator() override = default;
+  virtual ~SymmetricMemoryAllocator(){};
 
   virtual void* alloc(
       size_t size,
@@ -158,4 +159,5 @@ TORCH_API c10::intrusive_ptr<SymmetricMemory> get_symmetric_memory(
 TORCH_API bool has_multicast_support(
     c10::DeviceType device_type,
     int device_idx);
-} // namespace c10d::symmetric_memory
+} // namespace symmetric_memory
+} // namespace c10d

@@ -324,12 +324,6 @@ skip_fsdp_hooks = True
 # dynamo will not notice and will execute whichever version you first compiled.
 skip_nnmodule_hook_guards = True
 
-# Make dynamo skip no tensor aliasing guard on parameters
-# Note: unsafe: if you compile a function with different parameters as inputs,
-# and then later pass on the same parameter as two inputs, dynamo will not
-# notice and lead to incorrect result.
-skip_no_tensor_aliasing_guards_on_parameters = True
-
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
@@ -375,8 +369,8 @@ numpy_default_int = "int64"
 # use numpy's PRNG if True, pytorch otherwise
 use_numpy_random_stream = False
 
-# Use C++ guard manager (deprecated: always true)
-enable_cpp_guard_manager = True
+# Use C++ guard manager
+enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") == "1"
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = not is_fbcode()
@@ -473,6 +467,11 @@ compiled_autograd = False
 
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: Dict[str, Any] = {}
+
+# Compiled Autograd will attempt to automatically wrap C++ autograd functions found in the autograd graph,
+# and make them opaque to the compiler. This does not work when the C++ backward implementation involves
+# other dispatcher subsystems e.g. custom subclasses, autocast, vmap.
+compiled_autograd_opaque_cpp_node = False
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes

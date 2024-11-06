@@ -72,7 +72,7 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   c10::MaybeOwned<Tensor> gamma_maybe_owned =
       at::borrow_from_optional_tensor(gamma_opt);
   const Tensor& gamma = *gamma_maybe_owned;
-  const Tensor& beta = beta_opt.value_or(Tensor());
+  const Tensor& beta = c10::value_or_else(beta_opt, [] { return Tensor(); });
 
   // repeated check so expanded weights can call native_group_norm directly but
   // save mean and variance from forward
@@ -185,7 +185,7 @@ Tensor group_norm(
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = bias_opt.value_or(Tensor());
+  const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
 
   const auto N = input.sym_size(0);
   const auto C = input.sym_size(1);
@@ -224,7 +224,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
   c10::MaybeOwned<Tensor> weight_maybe_owned =
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
-  const Tensor& bias = bias_opt.value_or(Tensor());
+  const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
 
   auto input_shape = input.sizes();
   at::Tensor input_reshaped = input.view({1, N * group, N ? -1 : 1});

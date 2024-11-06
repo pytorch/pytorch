@@ -9,7 +9,9 @@
 
 #include <utility>
 
-namespace torch::jit::SubgraphUtils {
+namespace torch {
+namespace jit {
+namespace SubgraphUtils {
 namespace {
 
 bool hasSubgraph(Node* n) {
@@ -631,4 +633,6 @@ std::string generateNameForGraph(
   return truncateStrWithHash(graph_name.str(), maxlen);
 }
 
-} // namespace torch::jit::SubgraphUtils
+} // namespace SubgraphUtils
+} // namespace jit
+} // namespace torch

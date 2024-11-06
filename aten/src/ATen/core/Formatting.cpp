@@ -50,20 +50,16 @@ inline std::ios_base& defaultfloat(std::ios_base& __base) {
 //saves/restores number formatting inside scope
 struct FormatGuard {
   FormatGuard(std::ostream & out)
-  : out(out) {
+  : out(out), saved(nullptr) {
     saved.copyfmt(out);
   }
   ~FormatGuard() {
     out.copyfmt(saved);
   }
-  FormatGuard(const FormatGuard&) = delete;
-  FormatGuard(FormatGuard&&) = delete;
-  FormatGuard& operator=(const FormatGuard&) = delete;
-  FormatGuard& operator=(FormatGuard&&) = delete;
 private:
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   std::ostream & out;
-  std::ios saved{nullptr};
+  std::ios saved;
 };
 
 std::ostream& operator<<(std::ostream & out, const DeprecatedTypeProperties& t) {

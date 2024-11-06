@@ -398,7 +398,7 @@ namespace {
 // call in this functor so it can be passed to c10::BoxedKernel::makeFromFunctor
 class WrapperFunctor final : public c10::OperatorKernel {
  public:
-  WrapperFunctor(JitDecompInterface* impl) : impl_(impl) {}
+  WrapperFunctor(JitDecompInterface* impl) : impl_(impl){};
 
   void operator()(
       const c10::OperatorHandle& op,

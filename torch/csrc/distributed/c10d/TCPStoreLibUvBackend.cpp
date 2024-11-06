@@ -2,6 +2,7 @@
 #include <deque>
 #include <exception>
 #include <memory>
+#include <ostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -34,15 +35,15 @@ Other callbacks don't provide exception safety so avoid there.
 // This controls how many un-accepted TCP connections can be waiting in the
 // backlog. This should be at least world size to avoid issues on init. We set
 // it to -1 to use the host max value which is controlled by `soconnmax`.
-auto constexpr DEFAULT_BACKLOG = -1;
-auto constexpr MAX_KEY_COUNT = size_t(128 * 1024);
-auto constexpr MAX_STRING_LEN = 8 * 1024;
-auto constexpr MAX_PAYLOAD_LEN = 8 * 1024 * 1024;
+#define DEFAULT_BACKLOG -1
+#define MAX_KEY_COUNT (128 * 1024)
+#define MAX_STRING_LEN (8 * 1024)
+#define MAX_PAYLOAD_LEN (8 * 1024 * 1024)
 
 // This controls the preferred size for buffers.
 // Too small and we'll need multiple buffers for one request
 // Too big and we might taxing malloc
-auto constexpr ALLOC_BUFFER_SIZE = size_t(4000);
+#define ALLOC_BUFFER_SIZE ((size_t)4000)
 class UvHandle : public c10::intrusive_ptr_target {
  public:
   ~UvHandle() override = default;
@@ -104,8 +105,7 @@ class UvTcpSocket : public UvHandle {
       uv_handle_t* handle,
       size_t suggested_size,
       uv_buf_t* buf) {
-    suggested_size = std::min(suggested_size, ALLOC_BUFFER_SIZE);
-    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    suggested_size = std::min(suggested_size, (size_t)ALLOC_BUFFER_SIZE);
     buf->base = (char*)malloc(suggested_size);
     buf->len = suggested_size;
   }
@@ -486,7 +486,6 @@ class ChunkedStream {
 
   void append(uv_buf_t buf) {
     if (buf.len == 0) {
-      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       free(buf.base);
     } else {
       capacity += buf.len;
@@ -598,7 +597,6 @@ class ChunkedStream {
     }
 
     for (size_t i = 0; i < buff_idx; ++i) {
-      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       free(buffers[0].base);
       capacity -= buffers[0].len;
       buffers.pop_front();
@@ -1261,14 +1259,12 @@ const std::vector<uint8_t>& LibUVStoreDaemon::compareAndSet(
     if (expectedValue.empty()) {
       tcpStore_[key] = newValue;
       wakeupWaitingClients(key);
-      // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
       return newValue;
     } else {
       // TODO: This code path is not ideal as we are "lying" to the caller in
       // case the key does not exist. We should come up with a working solution.
       // It might make more sense to return ""
       wakeupWaitingClients(key);
-      // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
       return expectedValue;
     }
   } else {
@@ -1330,11 +1326,11 @@ bool LibUVStoreDaemon::waitKeys(
 }
 
 int64_t LibUVStoreDaemon::size() {
-  return static_cast<int64_t>(tcpStore_.size());
+  return tcpStore_.size();
 }
 
 int64_t LibUVStoreDaemon::deleteKey(const std::string& key) {
-  return static_cast<int64_t>(tcpStore_.erase(key));
+  return tcpStore_.erase(key);
 }
 
 void LibUVStoreDaemon::append(

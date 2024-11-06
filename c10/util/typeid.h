@@ -705,7 +705,7 @@ using _guard_long_unique = std::conditional_t<
 
 CAFFE_DECLARE_KNOWN_TYPE(
     detail::_guard_long_unique<long>,
-    detail_guard_long_unique_long)
+    detail_guard_long_unique_long);
 CAFFE_DECLARE_KNOWN_TYPE(
     detail::_guard_long_unique<std::vector<long>>,
     detail_guard_long_unique_std_vector_long)

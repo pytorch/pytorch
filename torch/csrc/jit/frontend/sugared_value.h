@@ -242,14 +242,14 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
 
 struct TORCH_API SugaredTupleValue : public SugaredValue {
   explicit SugaredTupleValue(std::vector<std::shared_ptr<SugaredValue>> tup)
-      : tup_(std::move(tup)) {}
+      : tup_(std::move(tup)){};
 
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
       GraphFunction& m,
       const std::optional<size_t>& size_hint = {}) override {
     return tup_;
-  }
+  };
 
   Value* asValue(const SourceRange& loc, GraphFunction& m) override {
     std::vector<Value*> vec;
@@ -295,7 +295,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
   std::shared_ptr<SugaredValue> iter(const SourceRange& loc, GraphFunction& m)
       override {
     return shared_from_this();
-  }
+  };
 
   // Because this is used to contain SugaredValues of Heterogenous types,
   // we define staticLen() so that when this is iterated over it is emitted
@@ -844,13 +844,13 @@ struct TORCH_API SliceValue : public SugaredValue {
 
   Value* start() {
     return start_;
-  }
+  };
   Value* stop() {
     return stop_;
-  }
+  };
   Value* step() {
     return step_;
-  }
+  };
 
  private:
   Value* start_;

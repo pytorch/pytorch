@@ -4,7 +4,8 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <memory>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 using PrePackParamFilterFn = std::function<bool(Node*)>;
 
@@ -15,4 +16,5 @@ TORCH_API std::unordered_set<std::string> RegisterPrePackParams(
     const std::string& attr_prefix);
 
 TORCH_API std::string joinPaths(const std::vector<std::string>& paths);
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

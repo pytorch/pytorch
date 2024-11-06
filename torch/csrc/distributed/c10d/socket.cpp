@@ -206,7 +206,6 @@ std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
     // if we can't resolve the hostname, display the IP address
     if (addr->sa_family == AF_INET) {
       struct sockaddr_in* psai = (struct sockaddr_in*)&addr;
-      // NOLINTNEXTLINE(*array*)
       char ip[INET_ADDRSTRLEN];
       if (inet_ntop(addr->sa_family, &(psai->sin_addr), ip, INET_ADDRSTRLEN) !=
           nullptr) {
@@ -214,7 +213,6 @@ std::string formatSockAddr(const struct ::sockaddr* addr, socklen_t len) {
       }
     } else if (addr->sa_family == AF_INET6) {
       struct sockaddr_in6* psai = (struct sockaddr_in6*)&addr;
-      // NOLINTNEXTLINE(*array*)
       char ip[INET6_ADDRSTRLEN];
       if (inet_ntop(
               addr->sa_family, &(psai->sin6_addr), ip, INET6_ADDRSTRLEN) !=
@@ -277,7 +275,7 @@ struct formatter<c10d::detail::SocketImpl> {
     addr.ai_addr = addr_ptr;
     addr.ai_addrlen = addr_len;
 
-    auto const& remote = socket.remote();
+    auto remote = socket.remote();
     std::string remoteStr = remote ? *remote : "none";
 
     return fmt::format_to(

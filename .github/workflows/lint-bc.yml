@@ -12,7 +12,6 @@ on:
 
 jobs:
   bc_linter:
-    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-latest
     steps:
       - name: Run BC Lint Action

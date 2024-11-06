@@ -3,7 +3,10 @@
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch::jit::fuser::onednn {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 struct WorkBlock : public std::pair<Node*, Node*> {
   using pair::pair;
@@ -44,4 +47,7 @@ class GraphRewriter {
 // torch/csrc/jit/passes/create_autodiff_subgraphs.cpp
 void CreateLlgaSubgraphs(std::shared_ptr<Graph>& graph);
 
-} // namespace torch::jit::fuser::onednn
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch

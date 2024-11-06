@@ -679,40 +679,38 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         # Specialize into one of the branches since pred is constant
-        pred, true_fn, false_fn, operands = args
-        if type(pred) is ConstantVariable:
+        if type(args[0]) is ConstantVariable:
             log.warning(
                 "Pred is a Python constant. When used with torch.cond, it executes only one of the branches."
                 " If you want torch.cond to perserve two branches, please make the predicate a boolean tensor or a SymBool."
             )
-            if pred.as_python_constant():
-                return true_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
+            if args[0].as_python_constant():
+                return args[1].call_function(tx, args[3].unpack_var_sequence(tx), {})
             else:
-                return false_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
+                return args[2].call_function(tx, args[3].unpack_var_sequence(tx), {})
 
         # predicate
-        if type(pred) not in (ConstantVariable, TensorVariable, SymNodeVariable):
+        if type(args[0]) not in (ConstantVariable, TensorVariable, SymNodeVariable):
             unimplemented(
                 f"Expected pred to be bool or a boolean tensor with single "
-                f"item but got {str(type(pred))} "
-                f"with original python type {str(pred.python_type())}.",
+                f"item but got {str(type(args[0]))} "
+                f"with original python type {str(args[0].python_type())}.",
             )
 
         # operands
-        if not isinstance(operands, (ListVariable, TupleVariable)):
+        if not isinstance(args[3], (ListVariable, TupleVariable)):
             unimplemented(
-                f"Expected operands to be a list/tuple but got "
-                f"{operands.python_type()}",
+                f"Expected a tuple but got {args[3].python_type()}",
             )
-        operands_seq = operands.unpack_var_sequence(tx)
-        if not only_consist_of(operands, (TensorVariable,)):
+        operands = args[3].unpack_var_sequence(tx)
+        if not only_consist_of(args[3], (TensorVariable,)):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
 
         # branches
-        _check_supported_callable_arg(tx, true_fn, "true_fn")
-        _check_supported_callable_arg(tx, false_fn, "false_fn")
+        _check_supported_callable_arg(tx, args[1], "true_fn")
+        _check_supported_callable_arg(tx, args[2], "false_fn")
 
         # Our strategy for tracing the true/false branches of cond
         # are to checkpoint our graphstate, run the true branch,
@@ -738,7 +736,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ) = speculate_subgraph(
                 tx,
                 args[ix],
-                operands_seq,
+                operands,
                 {},
                 "cond",
                 source_target=self.value,
@@ -825,7 +823,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         false_node = make_attr(tx, false_name)
 
         p_args = (
-            pred.as_proxy(),
+            args[0].as_proxy(),
             true_node,
             false_node,
             # We pick true_shared but it shouldn't matter
@@ -911,30 +909,26 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Usage: while_loop(cond_fn, body_fn, operands)",
             )
 
-        cond_fn, body_fn, operands, additional_inputs = args
-        _check_supported_callable_arg(tx, cond_fn, "cond_fn")
-        _check_supported_callable_arg(tx, body_fn, "body_fn")
+        _check_supported_callable_arg(tx, args[0], "cond_fn")
+        _check_supported_callable_arg(tx, args[1], "body_fn")
 
         # operands
-        if not isinstance(operands, (ListVariable, TupleVariable)):
+        if not isinstance(args[2], (ListVariable, TupleVariable)):
             unimplemented(
-                f"Expected operands to be a list/tuple but got "
-                f"{operands.python_type()}",
+                f"Expected a tuple but got {args[2].python_type()}",
             )
-        operands_seq = operands.unpack_var_sequence(tx)
-        if not only_consist_of(operands, (TensorVariable,)):
+        operands = args[2].unpack_var_sequence(tx)
+        if not only_consist_of(args[2], (TensorVariable,)):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
 
         # additional inputs check
-        if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
+        if not isinstance(args[3], (ListVariable, TupleVariable)):
             unimplemented(
-                f"Expected additional_inputs to be a list/tuple but got "
-                f"{additional_inputs.python_type()}. It seems to be an "
-                f"internal error, please report an issue to PyTorch."
+                f"Expected a tuple but got {args[3].python_type()}",
             )
-        additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
+        additional_inputs = args[3].unpack_var_sequence(tx)
 
         (
             (cond_r, cond_treespec),
@@ -942,8 +936,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_lifted_freevars,
         ) = speculate_subgraph(
             tx,
-            cond_fn,
-            operands_seq + additional_inputs_seq,
+            args[0],
+            operands + additional_inputs,
             {},
             "while_loop",
             source_target=self.value,
@@ -971,8 +965,8 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             body_lifted_freevars,
         ) = speculate_subgraph(
             tx,
-            body_fn,
-            operands_seq + additional_inputs_seq,
+            args[1],
+            operands + additional_inputs,
             {},
             "while_loop",
             source_target=self.value,
@@ -1018,10 +1012,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             cond_node,
             body_node,
-            tuple([operand.as_proxy() for operand in operands_seq]),
+            tuple([operand.as_proxy() for operand in operands]),
             tuple(
-                [inp.as_proxy() for inp in additional_inputs_seq]
-                + additional_lifted_inputs
+                [inp.as_proxy() for inp in additional_inputs] + additional_lifted_inputs
             ),
         )
 
@@ -2195,8 +2188,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             out_meta = torch.empty_like(
                 query_meta, memory_format=torch.contiguous_format
             )
-            # TODO: Figure out a better way to handle this for NJT than using sum()
-            lse_meta = torch.empty_like(query_meta, dtype=torch.float32).sum(dim=-1)
+            lse_meta = query_meta.new_empty(logsumexp_shape, dtype=torch.float32)
         example_value = (out_meta, lse_meta)
 
         # Compose the ordered HOO args:

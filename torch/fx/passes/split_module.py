@@ -40,15 +40,6 @@ class Partition:
         )
 
 
-def _get_attr_from_qualname(mod: torch.nn.Module, qualname: str) -> Any:
-    attr_val = mod
-    for atom in qualname.split("."):  # type: ignore[union-attr]
-        if not hasattr(attr_val, atom):
-            raise AttributeError(f"Node target {qualname} not found!")
-        attr_val = getattr(attr_val, atom)
-    return attr_val
-
-
 # Creates subgraphs out of main graph
 @compatibility(is_backward_compatible=True)
 def split_module(
@@ -188,8 +179,11 @@ def split_module(
         elif node.op == "get_attr":
             base_mod_env[node.name] = base_mod_graph.get_attr(node.target)  # type: ignore[arg-type]
             base_mod_env[node.name].meta = node.meta.copy()
-            assert isinstance(node.target, str)
-            attr_val = _get_attr_from_qualname(m, node.target)
+            attr_val = m
+            for atom in node.target.split("."):  # type: ignore[union-attr]
+                if not hasattr(attr_val, atom):
+                    raise AttributeError(f"Node target {node.target} not found!")
+                attr_val = getattr(attr_val, atom)
             base_mod_attrs[node.target] = attr_val  # type: ignore[index]
         return base_mod_env, base_mod_attrs
 
@@ -418,34 +412,13 @@ def split_module(
     # add placeholders to partition inputs
     for partition_name in sorted_partitions:
         partition = partitions[partition_name]
-        new_inputs: Dict[str, None] = {}
         for inp in partition.inputs:
-            orig_node = orig_nodes[inp]
-            # We don't pass in get_attr nodes as inputs to the partition, but
-            # instead set them as targets and use getattr within the module
-
-            if orig_node.op == "get_attr":
-                assert isinstance(orig_node.target, str)
-
-                orig_attr = _get_attr_from_qualname(m, orig_node.target)
-                if isinstance(orig_attr, torch.nn.Module):
-                    placeholder = partition.graph.get_attr(orig_node.target)
-                    partition.targets[orig_node.target] = orig_attr
-                else:
-                    placeholder = partition.graph.placeholder(
-                        inp,
-                        type_expr=orig_nodes[inp].type,
-                    )
-                    new_inputs[inp] = None
-            else:
-                placeholder = partition.graph.placeholder(
-                    inp,
-                    type_expr=orig_nodes[inp].type,
-                )
-                new_inputs[inp] = None
+            placeholder = partition.graph.placeholder(
+                inp,
+                type_expr=orig_nodes[inp].type,
+            )
             placeholder.meta = orig_nodes[inp].meta.copy()
             partition.environment[orig_nodes[inp]] = placeholder
-        partition.inputs = new_inputs
 
     # Transform nodes and collect targets for partition's submodule
     for node in m.graph.nodes:
@@ -462,8 +435,16 @@ def split_module(
             if node.op not in ["call_module", "get_attr"]:
                 target = node.target
             else:
-                target_attr = _get_attr_from_qualname(m, node.target)
-                target = node.target.replace(".", "_")
+                target_atoms = node.target.split(".")
+                target_attr = m
+                for atom in target_atoms:
+                    if not hasattr(target_attr, atom):
+                        raise AttributeError(
+                            f"Operator target {node.target} not found!"
+                        )
+                    target_attr = getattr(target_attr, atom)
+                # target = target_atoms[-1]
+                target = "_".join(target_atoms)
                 partition.targets[target] = target_attr
                 # Fill in the passed-in mapping from new qualname to old qualname
                 if qualname_map is not None:

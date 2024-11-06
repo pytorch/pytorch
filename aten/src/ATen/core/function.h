@@ -8,7 +8,7 @@
 
 namespace c10 {
 struct FunctionSchema;
-}
+};
 
 namespace at {
 TORCH_API void launch(std::function<void()> func);

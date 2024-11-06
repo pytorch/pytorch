@@ -4,7 +4,8 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 void convertSubgraphToSubBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end();
@@ -53,4 +54,5 @@ void ONNXAutogradFunctionProcess(std::shared_ptr<Graph>& graph) {
   convertSubgraphToSubBlock(graph->block());
 }
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch

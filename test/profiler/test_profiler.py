@@ -337,7 +337,6 @@ class TestProfiler(TestCase):
     )
     @serialTest()
     @parametrize("work_in_main_thread", [True, False])
-    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_source_multithreaded(self, name, thread_spec, work_in_main_thread):
         """Test various threading configurations.
 
@@ -1453,7 +1452,6 @@ class TestProfiler(TestCase):
 
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
     @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
-    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_kineto_profiler_with_environment_variable(self):
         script = """
 import torch

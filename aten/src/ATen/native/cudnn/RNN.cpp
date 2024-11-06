@@ -1402,8 +1402,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   c10::MaybeOwned<Tensor> weight_buf_r_maybe_owned =
       at::borrow_from_optional_tensor(weight_buf_r_opt);
   const Tensor& weight_buf_r = *weight_buf_r_maybe_owned;
-  const Tensor& cx = cx_opt.value_or(Tensor());
-  const Tensor& fn_dropout_state = fn_dropout_state_opt.value_or(Tensor());
+  const Tensor& cx = c10::value_or_else(cx_opt, [] { return Tensor(); });
+  const Tensor& fn_dropout_state =
+      c10::value_or_else(fn_dropout_state_opt, [] { return Tensor(); });
 
   check_attributes(input_r, weight, {hx, cx}, /*check_dtype=*/true);
   auto input = input_r;
@@ -2114,10 +2115,14 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
   c10::MaybeOwned<Tensor> cx_maybe_owned =
       at::borrow_from_optional_tensor(cx_opt);
   const Tensor& cx = *cx_maybe_owned;
-  const Tensor& grad_output_r = grad_output_r_opt.value_or(Tensor());
-  const Tensor& grad_hy_r = grad_hy_r_opt.value_or(Tensor());
-  const Tensor& grad_cy_r = grad_cy_r_opt.value_or(Tensor());
-  const Tensor& dropout_state = dropout_state_opt.value_or(Tensor());
+  const Tensor& grad_output_r =
+      c10::value_or_else(grad_output_r_opt, [] { return Tensor(); });
+  const Tensor& grad_hy_r =
+      c10::value_or_else(grad_hy_r_opt, [] { return Tensor(); });
+  const Tensor& grad_cy_r =
+      c10::value_or_else(grad_cy_r_opt, [] { return Tensor(); });
+  const Tensor& dropout_state =
+      c10::value_or_else(dropout_state_opt, [] { return Tensor(); });
 
   if (!grad_output_r.defined() && !grad_hy_r.defined() &&
       !grad_cy_r.defined()) {

@@ -572,13 +572,8 @@ def _typecheck_HalideOverrides(h: HalideOverrides) -> OpsHandler[str]:
 class HalideCSEVariable(CSEVariable):
     undefined_re = re.compile(r"\b(tmp\d+)\[\?\]")
 
-    def __init__(
-        self,
-        name,
-        bounds: ValueRanges[Any],
-        dtype: Optional[torch.dtype] = None,
-    ) -> None:
-        super().__init__(name, bounds, dtype)
+    def __init__(self, name, bounds: ValueRanges[Any]) -> None:
+        super().__init__(name, bounds)
         self.used_dims: Optional[List[sympy.Symbol]] = None
 
     def update_on_args(self, name, args, kwargs):
@@ -711,9 +706,9 @@ class HalideKernel(SIMDKernel):
         self.buffer_aliases: Dict[str, List[str]] = defaultdict(list)
         self.has_indirect_indexing = False
 
-    def create_cse_var(self, name, bounds=None, dtype=None):
+    def create_cse_var(self, name, bounds=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
-        return HalideCSEVariable(name, bounds, dtype)
+        return HalideCSEVariable(name, bounds)
 
     def finalize_indexing(self, indices: Sequence[sympy.Expr]):
         """
@@ -1660,7 +1655,7 @@ class HalideScheduling(SIMDScheduling):
     int32_type = "hl.Int(32)"
     # TODO(jansel): Halide doesn't actually support 64 bit indexing...
     int64_type = "hl.Int(64)"
-    kernel_type = HalideKernel  # type: ignore[arg-type,assignment]
+    kernel_type = HalideKernel  # type: ignore[arg-type]
 
     @classmethod
     def get_backend_features(cls, device: torch.device):

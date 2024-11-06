@@ -37,7 +37,6 @@ struct bitset final {
   // see https://gcc.gnu.org/bugzilla/show_bug.cgi?id=68754.
   bitset& operator=(const bitset&) noexcept = default;
   bitset& operator=(bitset&&) noexcept = default;
-  ~bitset() = default;
 
   constexpr void set(size_t index) noexcept {
     bitset_ |= (static_cast<long long int>(1) << index);
