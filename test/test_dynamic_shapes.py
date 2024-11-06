@@ -263,6 +263,122 @@ class TestPySymInt(TestCase):
         c = create_symbool(shape_env, True)
         self.assertIs(sympy.sympify(c), c.node.expr)
 
+    def test_sympy_custom_add_binary_search(self):
+        import sympy
+
+        from torch.utils._sympy.functions import CustomAdd
+
+        a = sympy.Symbol("a")
+        a1 = sympy.Symbol("a1")
+        a2 = sympy.Symbol("a2")
+        b = sympy.Symbol("b")
+        c = sympy.Symbol("c")
+        c1 = sympy.Symbol("c1")
+
+        args = []
+        args = CustomAdd._binary_search_insert_arg([], b)
+        self.assertEqual(args, [b])
+
+        self.assertEqual(CustomAdd._binary_search_insert_arg(args, b), None)
+
+        args = CustomAdd._binary_search_insert_arg(args, a)
+        self.assertEqual(args, [a, b])
+
+        self.assertEqual(CustomAdd._binary_search_insert_arg(args, b), None)
+        self.assertEqual(CustomAdd._binary_search_insert_arg(args, a), None)
+
+        args = CustomAdd._binary_search_insert_arg(args, c)
+        self.assertEqual(args, [a, b, c])
+
+        self.assertEqual(CustomAdd._binary_search_insert_arg(args, a), None)
+        self.assertEqual(CustomAdd._binary_search_insert_arg(args, b), None)
+        self.assertEqual(CustomAdd._binary_search_insert_arg(args, c), None)
+
+        args = CustomAdd._binary_search_insert_arg(args, a1)
+        self.assertEqual(args, [a, a1, b, c])
+
+        args = CustomAdd._binary_search_insert_arg(args, a2)
+        self.assertEqual(args, [a, a1, a2, b, c])
+
+        args = CustomAdd._binary_search_insert_arg(args, c1)
+        self.assertEqual(args, [a, a1, a2, b, c, c1])
+
+    def test_sympy_custom_add(self):
+        import sympy
+
+        from torch.utils._sympy.functions import CustomAdd
+
+        a = sympy.Symbol("a")
+        b = sympy.Symbol("b")
+        c = sympy.Symbol("c")
+
+        # optimization only triggered when optimize_incremental_summations is passed.
+        self.assertEqual(CustomAdd(a, b), a + b)
+        self.assertEqual(CustomAdd(a, b, optimize_incremental_summations=False), a + b)
+
+        self.assertNotEqual(
+            CustomAdd(a, b, optimize_incremental_summations=True), a + b
+        )
+        self.assertEqual(CustomAdd(a, b, optimize_incremental_summations=False), a + b)
+
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 2)
+        s1 = create_symint(shape_env, 3)
+        s2 = create_symint(shape_env, 4)
+        sum = s0 + s1
+
+        # sym_node.expr removes CustomAdd, but expr_allow_custom_add does not.
+        self.assertIsInstance(sum.node.expr, sympy.Add)
+
+        def assert_ordered_summation_of_unique_symbols(sym):
+            expr = sym.node.expr_allow_custom_add
+            self.assertIsInstance(expr, CustomAdd)
+            self.assertEqual(expr._ordered_summation_of_unique_symbols, True)
+
+        def assert_not_summation_of_unique_symbols(sym):
+            expr = sym.node.expr_allow_custom_add
+            if isinstance(expr, CustomAdd):
+                self.assertEqual(expr._ordered_summation_of_unique_symbols, False)
+            else:
+                self.assertIsInstance(expr, sympy.Add)
+
+        assert_ordered_summation_of_unique_symbols(sum)
+
+        # add duplicate symbol
+        assert_not_summation_of_unique_symbols(sum + s0)
+
+        # add constant.
+        assert_not_summation_of_unique_symbols(sum + 1)
+
+        # add new unique symbol, should maintain _ordered_summation_of_unique_symbols property.
+        assert_ordered_summation_of_unique_symbols(sum + s2)
+
+        # add x + (a+b) with no  _ordered_summation_of_unique_symbols)
+        a = create_symint(shape_env, 10)
+        b = create_symint(shape_env, 11)
+        two_sum = torch.sym_sum([a, b])
+        assert_not_summation_of_unique_symbols(two_sum)
+        assert_ordered_summation_of_unique_symbols(sum + two_sum)
+
+        # adding two expressions of length >2 that have _ordered_summation_of_unique_symbols = True.
+        a = s0 + s1 + s2
+        s3 = create_symint(shape_env, 10)
+        s4 = create_symint(shape_env, 20)
+        s5 = create_symint(shape_env, 30)
+        b = s3 + s4 + s5
+        assert_ordered_summation_of_unique_symbols(a)
+        assert_ordered_summation_of_unique_symbols(b)
+        assert_ordered_summation_of_unique_symbols(a + b)
+
+        # same as above but b does not have ordered_summation_of_unique_symbols.
+        s6 = create_symint(shape_env, 11)
+        s7 = create_symint(shape_env, 21)
+        s8 = create_symint(shape_env, 31)
+        b = torch.sym_sum([s6, s7, s8])
+        assert_ordered_summation_of_unique_symbols(a)
+        assert_not_summation_of_unique_symbols(b)
+        assert_not_summation_of_unique_symbols(a + b)
+
     def test_roundtrip(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)

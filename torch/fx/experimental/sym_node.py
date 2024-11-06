@@ -170,13 +170,14 @@ class SymNode:
 
     @property
     def expr(self):
-        result =  self.expr_allow_custom_add
+        result = self.expr_allow_custom_add
         # We make sure that CustomAdd is not leaking outside the construction loop.
         # This is needed to allow Add(a, b) == CustomAdd(a, b) to be true.
         if isinstance(result, torch.utils._sympy.functions.CustomAdd):
             import sympy
+
             return sympy.Add(*result._args, evaluate=False)
-        
+
         return result
 
     @property
@@ -720,10 +721,12 @@ def _sympy_floordiv(a, b):
 
     return FloorDiv(a, b)
 
+
 def _sympy_add(a, b):
     from torch.utils._sympy.functions import CustomAdd
 
     return CustomAdd(a, b, optimize_incremental_summations=True)
+
 
 def _sympy_mod(a, b):
     from torch.utils._sympy.functions import Mod, PythonMod
