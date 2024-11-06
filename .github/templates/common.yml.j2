@@ -88,7 +88,9 @@ concurrency:
         run: |
           if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
             Write-Host "Git is not installed. Installing Git..."
-            choco install git --version 2.18.0
+            $ProgressPreference = 'SilentlyContinue'
+            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.18.0.windows.1/Git-2.18.0-64-bit.exe" -OutFile "$env:TEMP\Git-2.18.0-64-bit.exe"
+            Start-Process -FilePath "$env:TEMP\Git-2.18.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART' -NoNewWindow -Wait
           } else {
             Write-Host "Git is already installed."
           }
