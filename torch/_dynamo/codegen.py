@@ -23,7 +23,7 @@ from .bytecode_transformation import (
 from .exc import unimplemented
 from .source import AttrSource, Source
 from .utils import is_safe_constant, rot_n_helper
-from .variables.base import VariableTracker
+from .variables.base import ValueMutationExisting, VariableTracker
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -137,8 +137,6 @@ class PyCodegen:
                 self.top_of_stack = value
                 return
 
-        from .side_effects import MutableSideEffects
-
         # Dynamo normally prefers codegen from source to account for aliasing,
         # but there's a corner case for export: for instance, if the computation
         # graph is just identity on an input tensor, Dynamo would just emit a
@@ -152,16 +150,15 @@ class PyCodegen:
         # from source. Morever, this option applies recursively, for cases
         # like input tensor being returned in a new dictionary.
         #
-        # And why the `MutableSideEffects` check? Not sure, so leaving it to
+        # And why the `ValueMutationExisting` check? Not sure, so leaving it to
         # keep the old behavior, as when `value_from_source` was introduced.
-        # TODO sort out the invariants among side effect, codegen and
-        # export.
+        # TODO sort out the invariants among side effect, codegen and export.
         if (
             value.source is not None
             and allow_cache
             # Below is the special check for export.
             and (
-                isinstance(value.mutable_local, MutableSideEffects)
+                isinstance(value.mutation_type, ValueMutationExisting)
                 or self.value_from_source
             )
         ):
