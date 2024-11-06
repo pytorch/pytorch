@@ -755,6 +755,7 @@ class TensorVariable(VariableTracker):
 
     def method_tolist(self):
         from ..symbolic_convert import InstructionTranslator
+        from .builder import wrap_fx_proxy
 
         tx = InstructionTranslator.current_tx()
 
@@ -765,7 +766,7 @@ class TensorVariable(VariableTracker):
                 with unittest.mock.patch.object(
                     tx.fake_mode, "allow_scalar_outputs", True
                 ):
-                    return SymNodeVariable.create(
+                    return wrap_fx_proxy(
                         tx,
                         sub_proxy.item(),
                     )
@@ -1070,7 +1071,7 @@ class TensorVariable(VariableTracker):
             )
 
         handle_variable = variables.RemovableHandleVariable(
-            mutable_local=variables.base.MutableLocal(),
+            mutation_type=variables.base.ValueMutationNew(),
         )
         tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable
