@@ -204,10 +204,6 @@ device_tma = r"""
 
             c = accumulator.to(c_desc_ptr.dtype.element_ty)
             {{tma_store(("offs_am", "offs_bn"), "c", "c_desc_ptr")}}
-            # tl._experimental_descriptor_store(c_desc_ptr, c, [offs_am, offs_bn])
-            # idx_m = offs_cm[:, None]
-            # idx_n = offs_cn[None, :]
-            # mask = (idx_m < M) & (idx_n < N)
             # inductor generates a suffix
             {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12, fake_out=True)}}
             accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
