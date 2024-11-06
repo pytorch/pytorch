@@ -22,10 +22,10 @@ def raise_fsdp2_backward_all_gather_ops_if_applicable(
     resize__0 = torch.ops.inductor.resize_storage_bytes_.default(arg30_1, 0)
     resize__1 = torch.ops.inductor.resize_storage_bytes_.default(arg31_1, 0)
     ...
-    (recursive ancestors of as_strided_3 up to graph input (root inputs should be purely graph inputs))
+    (recursive ancestors of as_strided_3 up to graph input)
     resize__2 = torch.ops.inductor.resize_storage_bytes_.default(arg30_1, 64)
     copy__2 = torch.ops.fsdp.copy_.default(arg30_1, as_strided_3)
-    (recursive ancestors of as_strided_4 up to graph input (root inputs should be purely graph inputs))
+    (recursive ancestors of as_strided_4 up to graph input)
     resize__3 = torch.ops.inductor.resize_storage_bytes_.default(arg31_1, 128)
     copy__3 = torch.ops.fsdp.copy_.default(arg31_1, as_strided_4)
     ...
@@ -117,7 +117,7 @@ def raise_fsdp2_backward_all_gather_ops_if_applicable(
                 ]  # End of region is the first node of next resize0 group
             assert region_start is not None
 
-            # Collect nodes between region boundaries
+            # Collect nodes within this FSDP region
             nodes_between = []
             in_region = False
             for node in orig_nodes:
@@ -183,7 +183,7 @@ def raise_fsdp2_backward_all_gather_ops_if_applicable(
 
     for node in orig_nodes:
         insert_node(node)
-        # Sort nodes by index in original graph to ensure correctness
+        # Sort nodes by index in original graph to ensure ordering correctness
         sorted_succ_nodes = sorted(
             nodes_to_insert_after_node[node], key=lambda n: node_to_index[n]
         )
