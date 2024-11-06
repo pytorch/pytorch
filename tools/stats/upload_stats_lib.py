@@ -128,6 +128,7 @@ def upload_to_rockset(
     client: Any = None,
 ) -> None:
     import rockset  # type: ignore[import]
+
     if not client:
         client = rockset.RocksetClient(
             host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
