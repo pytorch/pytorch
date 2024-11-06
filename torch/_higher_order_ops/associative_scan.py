@@ -31,6 +31,7 @@ from .utils import _from_fun, _maybe_reenter_make_fx, create_fw_bw_graph
 
 aten = torch._ops.ops.aten
 
+
 def get_gradient_mask(tensor_list):
     return [True if v is not None and v.requires_grad else False for v in tensor_list]
 

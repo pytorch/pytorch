@@ -2514,12 +2514,14 @@ class AssociativeScanTests(TestCase):
     def setUp(self):
         torch._dynamo.reset()
         super().setUp()
-        
+
     def _check_autograd(self, result, result_exp, autograd_param):
         result_flatten, _ = pytree.tree_flatten(result)
         result_exp_flatten, _ = pytree.tree_flatten(result_exp)
         grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
-        expected_grads = torch.autograd.grad(result_exp_flatten, autograd_param, grad_exp_init)
+        expected_grads = torch.autograd.grad(
+            result_exp_flatten, autograd_param, grad_exp_init
+        )
         grad_init = [torch.ones_like(el) for el in result_flatten]
         grads = torch.autograd.grad(result_flatten, autograd_param, grad_init)
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
@@ -2528,7 +2530,7 @@ class AssociativeScanTests(TestCase):
         result = model(inputs)
         result_exp = model_fake(inputs)
         self.assertEqual(result, result_exp)
-        
+
         if autograd_param is not None:
             self._check_autograd(result, result_exp, autograd_param)
 
@@ -2581,7 +2583,9 @@ class AssociativeScanTests(TestCase):
             self.assertEqual(results, results_torch)
 
         # Jax Examples
-        x = torch.arange(0, 4, device=device, dtype=torch.float32, requires_grad=autograd)
+        x = torch.arange(
+            0, 4, device=device, dtype=torch.float32, requires_grad=autograd
+        )
         kwargs = {
             "dim": 0,
             "reverse": reverse,
@@ -2620,7 +2624,9 @@ class AssociativeScanTests(TestCase):
             and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
-    def test_associative_scan_dim(self, combine_mode, compile_mode, reverse, device, autograd):
+    def test_associative_scan_dim(
+        self, combine_mode, compile_mode, reverse, device, autograd
+    ):
         import random
 
         random.seed(1234)
@@ -2693,7 +2699,9 @@ class AssociativeScanTests(TestCase):
             and (params["device"] == torch.device("cpu") or torch.version.hip)
         ),
     )
-    def test_associative_scan_tuple(self, compile_mode, combine_mode, reverse, device, autograd):
+    def test_associative_scan_tuple(
+        self, compile_mode, combine_mode, reverse, device, autograd
+    ):
         x = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         y = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
         inp = (x, y)
@@ -2751,7 +2759,11 @@ class AssociativeScanTests(TestCase):
     def test_associative_scan_non_contiguous_tensor(
         self, compile_mode, reverse, device, autograd
     ):
-        x = torch.arange(30, device=device, requires_grad=autograd).view(10, 3).t()
+        x = (
+            torch.arange(30, device=device, dtype=torch.float32, requires_grad=autograd)
+            .view(10, 3)
+            .t()
+        )
         assert not x.is_contiguous()
 
         kwargs = {
@@ -2805,7 +2817,7 @@ class AssociativeScanTests(TestCase):
             model=AssociativeScanModels.CombineFn(**kwargs),
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=inp,
-            autograd_param=None if not autograd else inp,
+            autograd_param=None if not autograd else (x, y, z),
         )
 
     @unittest.skipIf(not SM70OrLater, "triton")
@@ -2913,7 +2925,13 @@ class AssociativeScanTests(TestCase):
         ),
     )
     def test_associative_scan_downstream_scan_scan_different_dim(
-        self, combine_mode, compile_mode, reverse_first, same_direction, device, autograd
+        self,
+        combine_mode,
+        compile_mode,
+        reverse_first,
+        same_direction,
+        device,
+        autograd,
     ):
         reverse_second = reverse_first if same_direction else not reverse_first
 
@@ -3085,7 +3103,9 @@ class AssociativeScanTests(TestCase):
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_associative_scan_cond_in_combine_fn(self, compile_mode, reverse, device, autograd):
+    def test_associative_scan_cond_in_combine_fn(
+        self, compile_mode, reverse, device, autograd
+    ):
         def combine_fn(x, y):
             val = cond(torch.sum(y) > 0.0, lambda y: y + 0.0, lambda y: 1.0 - y, (y,))
             return x * val
@@ -3147,7 +3167,9 @@ class AssociativeScanTests(TestCase):
     @parametrize("reverse", [False, True])
     @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
     @parametrize("autograd", [False, True])
-    def test_associative_scan_vmap_in_combine_fn(self, compile_mode, reverse, device, autograd):
+    def test_associative_scan_vmap_in_combine_fn(
+        self, compile_mode, reverse, device, autograd
+    ):
         def combine_fn(x, y):
             def body(x):
                 return x**2
