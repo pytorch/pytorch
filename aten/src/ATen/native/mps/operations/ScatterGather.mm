@@ -113,7 +113,7 @@ static void scatter_mps_general(const Tensor& self_arg,
                                 const Tensor& src,
                                 const Tensor& output,
                                 string func_name,
-                                const c10::string_view reduce) {
+                                const std::string_view reduce) {
   using namespace mps;
 
   if (self_arg.numel() == 0 || index.numel() == 0 || src.numel() == 0) {
@@ -316,7 +316,7 @@ TORCH_IMPL_FUNC(scatter_reduce_out_mps)
  int64_t dim,
  const Tensor& index,
  const Tensor& src,
- const c10::string_view reduce,
+ const std::string_view reduce,
  const Tensor& output) {
   scatter_mps_general(self, dim, index, src, output, "scatter_reduce_out_mps", reduce);
 }
@@ -326,7 +326,7 @@ TORCH_IMPL_FUNC(scatter_value_reduce_out_mps)
  int64_t dim,
  const Tensor& index,
  const Scalar& value,
- const c10::string_view reduce,
+ const std::string_view reduce,
  const Tensor& output) {
   Tensor src =
       at::empty(index.sizes(), self.scalar_type(), std::nullopt, kMPS, std::nullopt, self.suggest_memory_format());

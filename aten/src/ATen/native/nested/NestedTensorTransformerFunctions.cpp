@@ -15,7 +15,7 @@ namespace {
 inline void check_nested_tensor_matrix_constraints(
     const Tensor& nested_tensor,
     const Tensor& dense_matrix,
-    c10::string_view caller) {
+    std::string_view caller) {
   auto* nt_input = get_nested_tensor_impl(nested_tensor);
   TORCH_INTERNAL_ASSERT(nt_input != nullptr);
   TORCH_CHECK(

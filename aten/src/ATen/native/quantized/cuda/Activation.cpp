@@ -7,7 +7,7 @@ namespace at::native {
 // this kernel is currently implemented with dequantize -> fp32 gelu -> quantize, which is not equivalent to int8 gelu
 // It might be possible to write a variant of the int8 gelu that's equivalent to dequantize -> fp32 cuda gelu kernel -> quantize,
 // which can be a topic for future work.
-Tensor gelu_quantized_cuda(const Tensor& qx, c10::string_view approximate) {
+Tensor gelu_quantized_cuda(const Tensor& qx, std::string_view approximate) {
   (void)approximate; // suppress unused variable lint warning
   if (qx.numel() == 0) {
     return Tensor{};

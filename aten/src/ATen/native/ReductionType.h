@@ -23,7 +23,7 @@ inline ReductionType get_reduction_enum(const c10::string_view& reduce) {
 }
 
 // used for `scatter_reduce`, old options for BC.
-inline ReductionType get_operator_enum(const c10::string_view reduce, bool use_new_options) {
+inline ReductionType get_operator_enum(const std::string_view reduce, bool use_new_options) {
   if (use_new_options) {
     return get_reduction_enum(reduce);
   } else {

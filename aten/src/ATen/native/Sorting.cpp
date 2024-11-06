@@ -185,7 +185,7 @@ void quick_select_template(
 namespace {
 
 QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
-    const c10::string_view interpolation) {
+    const std::string_view interpolation) {
   if (interpolation == "linear") {
     return QUANTILE_INTERPOLATION_MODE::LINEAR;
   } else if (interpolation == "lower") {
@@ -655,7 +655,7 @@ Tensor& quantile_out(
     const Tensor& q,
     std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation,
+    const std::string_view interpolation,
     Tensor& out) {
   quantile_out_impl(
       out,
@@ -673,7 +673,7 @@ Tensor& quantile_out(
     double q,
     std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation,
+    const std::string_view interpolation,
     Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -691,7 +691,7 @@ Tensor quantile(
     const Tensor& q,
     std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation) {
+    const std::string_view interpolation) {
   return quantile_impl(
       self,
       q,
@@ -706,7 +706,7 @@ Tensor quantile(
     double q,
     std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation) {
+    const std::string_view interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::quantile(
@@ -718,7 +718,7 @@ Tensor& nanquantile_out(
     const Tensor& q,
     std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation,
+    const std::string_view interpolation,
     Tensor& out) {
   quantile_out_impl(
       out,
@@ -736,7 +736,7 @@ Tensor& nanquantile_out(
     double q,
     std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation,
+    const std::string_view interpolation,
     Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -754,7 +754,7 @@ Tensor nanquantile(
     const Tensor& q,
     std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation) {
+    const std::string_view interpolation) {
   return quantile_impl(
       self,
       q,
@@ -769,7 +769,7 @@ Tensor nanquantile(
     double q,
     std::optional<int64_t> dim,
     bool keepdim,
-    const c10::string_view interpolation) {
+    const std::string_view interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::native::nanquantile(

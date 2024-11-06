@@ -162,7 +162,7 @@ static std::tuple<Tensor, std::optional<int64_t>> where_self_batch_rule(
 
 static std::tuple<Tensor, std::optional<int64_t>> gelu_backward_batch_rule(
     const Tensor& grad_out, std::optional<int64_t> grad_out_bdim, const Tensor& input, std::optional<int64_t> input_bdim,
-    c10::string_view approximate) {
+    std::string_view approximate) {
 
   // repeat the preprocessing from _binary_pointwise_batch_rule
   const auto tensor_other = _binary_pointwise_helper(grad_out, grad_out_bdim, input, input_bdim);

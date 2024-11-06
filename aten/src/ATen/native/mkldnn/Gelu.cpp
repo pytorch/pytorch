@@ -14,11 +14,11 @@
 
 namespace at { namespace native {
 
-Tensor mkldnn_gelu(const Tensor& input, c10::string_view approximate) {
+Tensor mkldnn_gelu(const Tensor& input, std::string_view approximate) {
   TORCH_CHECK(false, "mkldnn_gelu: ATen not compiled with MKLDNN support");
 }
 
-Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10::string_view approximate) {
+Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, std::string_view approximate) {
   TORCH_CHECK(false, "mkldnn_gelu_backward: ATen not compiled with MKLDNN support");
 }
 
@@ -31,7 +31,7 @@ Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10:
 
 namespace at { namespace native {
 
-Tensor mkldnn_gelu(const Tensor& input, c10::string_view approximate) {
+Tensor mkldnn_gelu(const Tensor& input, std::string_view approximate) {
   if (input.scalar_type() == ScalarType::BFloat16) {
     TORCH_CHECK(mkldnn_bf16_device_check(),
         "mkldnn_gelu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
@@ -46,7 +46,7 @@ Tensor mkldnn_gelu(const Tensor& input, c10::string_view approximate) {
                                  input.options().device_opt());
 }
 
-Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, c10::string_view approximate) {
+Tensor mkldnn_gelu_backward(const Tensor& grad_output, const Tensor& input, std::string_view approximate) {
   TORCH_CHECK(get_gelutype_enum(approximate) == GeluType::None,
                   "mkldnn_gelu_backward: fast, approximate gelu is not supported");
   const ideep::tensor& x = itensor_from_tensor(input);

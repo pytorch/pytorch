@@ -226,7 +226,7 @@ bool check_flash_attention_hardware_support(sdp_params const& params, bool debug
       }
       return false;
   }
-  c10::string_view arch(dprops->gcnArchName);
+  std::string_view arch(dprops->gcnArchName);
   if (arch == "gfx1100") {
     static const bool enable_navi3x = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
     if (!enable_navi3x) {
@@ -270,7 +270,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
       }
       return false;
   }
-  c10::string_view arch(dprops->gcnArchName);
+  std::string_view arch(dprops->gcnArchName);
   if (arch == "gfx1100") {
     static const bool enable_navi3x = c10::utils::check_env("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL") == true;
     if (!enable_navi3x) {

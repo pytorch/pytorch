@@ -690,7 +690,7 @@ TORCH_META_FUNC(linalg_cholesky_ex)(const Tensor& A,
 }
 
 TORCH_META_FUNC(linalg_qr)(const Tensor& A,
-                           c10::string_view mode) {
+                           std::string_view mode) {
   at::native::checkIsMatrix(A, "linalg.qr");
   at::native::checkFloatingOrComplex(A, "linalg.qr");
   auto [compute_q, reduced_mode] = at::native::_parse_qr_mode(mode);
@@ -792,7 +792,7 @@ TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_d
 }
 
 TORCH_META_FUNC(_linalg_eigh)(const Tensor& A,
-                              c10::string_view uplo,
+                              std::string_view uplo,
                               bool compute_v) {
   at::native::squareCheckInputs(A, "linalg.eigh");
   at::native::checkUplo(uplo);
@@ -1558,7 +1558,7 @@ template<> void blasTriangularSolve<float>(char side, char uplo, char trans, cha
 
 void _linalg_check_errors(
     const Tensor& infos,
-    const c10::string_view api_name,
+    const std::string_view api_name,
     bool is_matrix) {
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == kInt);
   TORCH_INTERNAL_ASSERT(infos.is_contiguous());
@@ -2425,7 +2425,7 @@ std::tuple<Tensor, Tensor> geqrf(const Tensor& input) {
   For further details, please see the LAPACK documentation for GEQRF and ORGQR.
 */
 TORCH_IMPL_FUNC(linalg_qr_out)(const Tensor& A,
-                               c10::string_view mode,
+                               std::string_view mode,
                                const Tensor & Q,
                                const Tensor & R) {
   auto m = A.size(-2);
@@ -2801,7 +2801,7 @@ DEFINE_DISPATCH(linalg_eigh_stub);
 */
 
 TORCH_IMPL_FUNC(_linalg_eigh_out)(const Tensor& A,
-                                  c10::string_view uplo,
+                                  std::string_view uplo,
                                   bool compute_v,
                                   const Tensor& L,
                                   const Tensor& V) {
@@ -2826,22 +2826,22 @@ TORCH_IMPL_FUNC(_linalg_eigh_out)(const Tensor& A,
   at::_linalg_check_errors(info, "linalg.eigh", /*is_matrix*/A.dim() == 2);
 }
 
-std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& A, c10::string_view uplo) {
+std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& A, std::string_view uplo) {
   // TODO (Good intro task) Implement linalg_eigh_ex_out
   return at::_linalg_eigh(A, uplo, /*compute_v*/true);
 }
 
-std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& A, c10::string_view uplo, Tensor& L, Tensor& V) {
+std::tuple<Tensor&, Tensor&> linalg_eigh_out(const Tensor& A, std::string_view uplo, Tensor& L, Tensor& V) {
   return at::_linalg_eigh_out(L, V, A, uplo, /*compute_v=*/true);
 }
 
 
-Tensor linalg_eigvalsh(const Tensor& A, c10::string_view uplo) {
+Tensor linalg_eigvalsh(const Tensor& A, std::string_view uplo) {
   return std::get<0>(at::_linalg_eigh(A, uplo,
                      /*compute_v=*/_may_require_fw_or_bw_grad(A)));
 }
 
-Tensor& linalg_eigvalsh_out(const Tensor& A, c10::string_view uplo, Tensor& L) {
+Tensor& linalg_eigvalsh_out(const Tensor& A, std::string_view uplo, Tensor& L) {
   auto V = at::empty({0}, A.options());
   at::_linalg_eigh_out(L, V, A, uplo, /*compute_v=*/false);
   return L;

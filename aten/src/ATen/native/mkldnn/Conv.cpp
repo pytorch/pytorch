@@ -220,7 +220,7 @@ static Tensor _mkldnn_convolution(
     IntArrayRef dilation,
     int64_t groups,
     bool use_channels_last,
-    c10::string_view attr = "none",
+    std::string_view attr = "none",
     torch::List<std::optional<at::Scalar>> scalars =
         torch::List<std::optional<at::Scalar>>(),
     std::optional<c10::string_view> algorithm = std::nullopt) {
@@ -304,7 +304,7 @@ Tensor mkldnn_convolution_pointwise(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    c10::string_view attr,
+    std::string_view attr,
     torch::List<std::optional<at::Scalar>> scalars,
     std::optional<c10::string_view> algorithm) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
@@ -342,7 +342,7 @@ Tensor mkldnn_convolution_pointwise_binary(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    c10::string_view binary_attr,
+    std::string_view binary_attr,
     std::optional<at::Scalar> alpha,
     std::optional<c10::string_view> unary_attr,
     torch::List<std::optional<at::Scalar>> unary_scalars,
@@ -382,7 +382,7 @@ Tensor mkldnn_convolution_pointwise_binary(
       weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
   bool can_be_fused = groups == 1 && use_channels_last;
 
-  c10::string_view unary_attr_value = "none";
+  std::string_view unary_attr_value = "none";
   ideep::algorithm unary_alg;
   if (unary_attr.has_value()) {
     auto it_unary = fusion_unary_alg_map().find(unary_attr.value());
@@ -506,7 +506,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    c10::string_view binary_attr,
+    std::string_view binary_attr,
     std::optional<at::Scalar> alpha,
     std::optional<c10::string_view> unary_attr,
     torch::List<std::optional<at::Scalar>> unary_scalars,
@@ -627,7 +627,7 @@ Tensor _mkldnn_convolution_transpose(
     IntArrayRef dilation,
     int64_t groups,
     bool use_channels_last,
-    c10::string_view attr = "none",
+    std::string_view attr = "none",
     torch::List<std::optional<at::Scalar>> scalars =
         torch::List<std::optional<at::Scalar>>(),
     std::optional<c10::string_view> algorithm = std::nullopt) {
@@ -722,7 +722,7 @@ Tensor mkldnn_convolution_transpose_pointwise_meta(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    c10::string_view attr,
+    std::string_view attr,
     torch::List<std::optional<at::Scalar>> scalars,
     std::optional<c10::string_view> algorithm) {
 
@@ -869,7 +869,7 @@ Tensor mkldnn_convolution_transpose_pointwise(
     IntArrayRef stride,
     IntArrayRef dilation,
     int64_t groups,
-    c10::string_view attr,
+    std::string_view attr,
     torch::List<std::optional<at::Scalar>> scalars,
     std::optional<c10::string_view> algorithm) {
   c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);

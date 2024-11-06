@@ -1393,7 +1393,7 @@ SparseTensor& _sparse_mm_out(const SparseTensor& sparse,
   return at::addmm_out(result, t, sparse, dense, 0, 1);  // redispatch!
 }
 
-Tensor _sparse_mm(const Tensor& mat1, const Tensor& mat2, const c10::string_view reduce) {
+Tensor _sparse_mm(const Tensor& mat1, const Tensor& mat2, const std::string_view reduce) {
   // result: out, arg_out
   auto result = at::_sparse_mm_reduce_impl(mat1, mat2, reduce);
   return std::get<0>(result);

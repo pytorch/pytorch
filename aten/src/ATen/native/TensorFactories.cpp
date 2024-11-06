@@ -1708,7 +1708,7 @@ Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) 
   return at::detail::tensor_complex_backend(values, options);
 }
 
-Tensor from_file(c10::string_view filename, std::optional<bool> shared, std::optional<int64_t> size,
+Tensor from_file(std::string_view filename, std::optional<bool> shared, std::optional<int64_t> size,
     std::optional<ScalarType> dtype,
     std::optional<Layout> layout,
     std::optional<Device> device,

@@ -174,7 +174,7 @@ Tensor _nested_select_backward_symint(
   return nt_grad;
 }
 
-Tensor gelu_backwards_nested(const Tensor& grad, const Tensor& self, c10::string_view approximate){
+Tensor gelu_backwards_nested(const Tensor& grad, const Tensor& self, std::string_view approximate){
     auto partial_gelu_backward = [approximate](auto && PH1, auto && PH2) { return at::gelu_backward(std::forward<decltype(PH1)>(PH1), std::forward<decltype(PH2)>(PH2), approximate); };
     return map_nt_binary(grad, self, partial_gelu_backward);
 }

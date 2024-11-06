@@ -413,7 +413,7 @@ class WrapperFunctor final : public c10::OperatorKernel {
 
 template <class Return, class... Args>
 Return run_jit_decomposition_with_args_for_jvp(
-    c10::string_view name,
+    std::string_view name,
     const c10::OperatorHandle& opHandle,
     c10::DispatchKeySet dispatchKeySet,
     Args&&... args) {

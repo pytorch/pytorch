@@ -100,7 +100,7 @@ struct IntArrayRefCaster<TargetType, 4> {
 
 
 template<int Rank = 4>
-aotriton::TensorView<Rank> mk_aotensor(const at::Tensor& q, c10::string_view tensor_name)
+aotriton::TensorView<Rank> mk_aotensor(const at::Tensor& q, std::string_view tensor_name)
 {
   const auto strides = q.strides();
   int real_rank = strides.size();

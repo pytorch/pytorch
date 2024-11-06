@@ -151,7 +151,7 @@ Tensor addmm_decomp(const Tensor& self, const Tensor& mat1, const Tensor& mat2, 
   return at::add(self * beta, at::mm(mat1, mat2), alpha);
 }
 
-void _linalg_check_errors_batch_rule(const Tensor& info, std::optional<int64_t> info_bdim, c10::string_view api_name, bool is_matrix) {
+void _linalg_check_errors_batch_rule(const Tensor& info, std::optional<int64_t> info_bdim, std::string_view api_name, bool is_matrix) {
   auto info_ = moveBatchDimToFront(info, info_bdim);
   // Not a matrix means this is a batch of matrices
   at::_linalg_check_errors(info_, api_name, false);
