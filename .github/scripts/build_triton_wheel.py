@@ -62,13 +62,6 @@ def build_triton(
         max_jobs = os.cpu_count() or 1
         env["MAX_JOBS"] = str(max_jobs)
 
-    version_suffix = ""
-    if not release:
-        # Nightly binaries include the triton commit hash, i.e. 2.1.0+e6216047b8
-        # while release build should only include the version, i.e. 2.1.0
-        version_suffix = f"+{commit_hash[:10]}"
-        version += version_suffix
-
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
         triton_pythondir = triton_basedir / "python"
@@ -140,7 +133,6 @@ def build_triton(
 
         # change built wheel name and version
         env["TRITON_WHEEL_NAME"] = triton_pkg_name
-        env["TRITON_WHEEL_VERSION_SUFFIX"] = version_suffix
         patch_init_py(
             triton_pythondir / "triton" / "__init__.py",
             version=f"{version}",
