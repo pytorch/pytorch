@@ -1,13 +1,13 @@
+# mypy: ignore-errors
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from token import NAME
 from tokenize import TokenInfo
+from unittest import TestCase
 
 from tools.linter.adapters.set_linter import get_args, lint_file, PythonLines
-
-from torch.testing._internal.common_utils import TestCase
 
 
 TESTDATA = Path("tools/test/set_linter_testdata")
@@ -32,23 +32,30 @@ class TestSetLinter(TestCase):
         self.assertEqual(expected, actual)
 
     # TODO(rec): how to get parametrize to work with unittest?
-    def test_python(self):
+    def test_python(self) -> None:
         self._test_linting(TESTFILE)
 
-    def test_includes(self):
+    def test_includes(self) -> None:
         self._test_linting(INCLUDES_FILE)
 
-    def test_includes2(self):
+    def test_includes2(self) -> None:
         self._test_linting(INCLUDES_FILE2)
 
     def _test_linting(self, path: Path) -> None:
+        def assert_expected(actual: str, suffix: str) -> None:
+            expected_file = Path(f"{path}.{suffix}")
+            if expected_file.exists():
+                self.assertEqual(actual, expected_file.read_text())
+            else:
+                expected_file.write_text(actual)
+
         all_messages = [m.asdict() for m in lint_file(str(path), ARGS)]
-        edit = all_messages[-1]
-        self.assertEqual(edit["original"], path.read_text())
-        self.assertExpected(edit["replacement"], ".python")
+        replace = all_messages[-1]
+        self.assertEqual(replace["original"], path.read_text())
+        assert_expected(replace["replacement"], "python")
 
         msgs = json.dumps(all_messages, indent=2)
-        self.assertExpected(msgs, ".json")
+        assert_expected(msgs, "json")
 
     def test_bracket_pairs(self) -> None:
         TESTS: tuple[tuple[str, dict[int, int]], ...] = (
