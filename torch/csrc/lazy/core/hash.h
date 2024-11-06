@@ -169,6 +169,7 @@ static inline hash_t Hash(const at::Generator& value) {
 // Use an arbitrary randomly-selected 64-bit integer rather than a
 // small constant that we then hash at runtime so we don't have to
 // repeatedly hash a constant at runtime.
+// NOLINTNEXTLINE(*-narrowing-conversions)
 static const int64_t kNullOpt = 0x8655d738f3678dda;
 
 // Hashing for std::optional types contributes to hash

@@ -234,7 +234,7 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
 
 
 def sympy_product(it):
-    return functools.reduce(operator.mul, it, sympy.Integer(1))
+    return functools.reduce(operator.mul, it, sympy.S.One)
 
 
 def sympy_dot(seq1, seq2):
@@ -739,7 +739,6 @@ def get_first_incompatible_cudagraph_node(
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
-        "aten.multinomial.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
         "run_and_save_rng_state",
@@ -855,6 +854,42 @@ def argsort(seq) -> List[int]:
     getter = seq.__getitem__
     a_r = range(len(seq))
     return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
+
+
+def argsort_sym(
+    shape_env, seq: Sequence[Union[int, torch.SymInt, sympy.Expr]]
+) -> List[int]:
+    def cmp(a, b):
+        a_idx, a_val = a
+        b_idx, b_val = b
+
+        def evaluate(expr):
+            if isinstance(expr, bool):
+                return expr
+            return shape_env.evaluate_expr(expr, size_oblivious=True)
+
+        if evaluate(a_val < b_val):
+            return -1
+        if evaluate(a_val > b_val):
+            return 1
+        # If strides are the same, prefer the original order.
+        # (this matches argsort's algorithm).
+        # For strides = [2048, 2048, 16, 1], this is
+        # [3, 2, 1, 0].
+        if a_idx < b_idx:
+            return 1
+        if a_idx > b_idx:
+            return -1
+        return 0
+
+    # Strategy: convert all symints to sympy.Expr, then use a custom comparator
+    exprs = [
+        (idx, s.node.expr if isinstance(s, torch.SymInt) else s)
+        for idx, s in enumerate(seq)
+    ]
+    exprs = sorted(exprs, key=functools.cmp_to_key(cmp))
+    result = [idx for idx, _ in exprs]
+    return result
 
 
 @functools.lru_cache(8)
@@ -1051,6 +1086,21 @@ class DeferredLineBase:
         return len(self.line)
 
 
+class DelayReplaceLine(DeferredLineBase):
+    """At end of codegen call `line.replace(key, value_fn())`"""
+
+    def __init__(self, key: str, value_fn: Callable[[], str], line: str):
+        super().__init__(line)
+        self.key = key
+        self.value_fn = value_fn
+
+    def __call__(self) -> str:
+        return self.line.replace(self.key, self.value_fn())
+
+    def _new_line(self, line: str) -> DelayReplaceLine:
+        return DelayReplaceLine(self.key, self.value_fn, line)
+
+
 @functools.lru_cache(None)
 def is_big_gpu(index) -> bool:
     min_sms = 68  # 3080
@@ -1225,14 +1275,14 @@ def use_ck_gemm_template(layout, m, n, k):
     from .virtualized import V
 
     return (
-        use_ck_template(layout)
-        and _use_autotune_backend("CK")
+        _use_autotune_backend("CK")
+        and use_ck_template(layout)
         and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
     )
 
 
 def use_ck_conv_template(layout):
-    return use_ck_template(layout) and _use_conv_autotune_backend("CK")
+    return _use_conv_autotune_backend("CK") and use_ck_template(layout)
 
 
 def _use_template_for_cpu(layout):
@@ -1638,7 +1688,7 @@ def pass_execution_and_save(func, gm, inp, msg):
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
-        with GraphTransformObserver(gm, msg, config.trace.log_url_for_graph_xform):
+        with GraphTransformObserver(gm, msg):
             func(gm.graph)
         time_elapsed = datetime.now() - start_time
         # recompile graph
@@ -2009,9 +2059,13 @@ def align_inputs_from_check_idxs(
 
 
 def clone_preserve_strides(x: torch.Tensor):
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-    )
+    if 0 in x.size():
+        # Short-circuits if the shape has no elements
+        needed_size = 0
+    else:
+        needed_size = (
+            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        )
     buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
     return torch.as_strided(buffer, x.size(), x.stride())
 
@@ -2095,11 +2149,9 @@ def should_use_remote_fx_graph_cache():
     except ModuleNotFoundError:
         return False
 
-    jk_name = "pytorch/remote_cache:fx_graph_memcache_version"
-    if torch.version.hip is not None:
-        jk_name = "pytorch/remote_cache:fx_graph_memcache_version_amd"
-
-    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(jk_name)
+    return REMOTE_CACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:fx_graph_memcache_version"
+    )
 
 
 def normalize_name(name: str) -> str:

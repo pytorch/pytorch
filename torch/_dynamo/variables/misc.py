@@ -56,11 +56,10 @@ class NO_SUCH_SUBOBJ:
 
 class SuperVariable(VariableTracker):
     _nonvar_fields = {
-        "specialized",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, typevar, objvar=None, specialized=False, **kwargs) -> None:
+    def __init__(self, typevar, objvar=None, **kwargs) -> None:
         super().__init__(**kwargs)
         # typevar is the fist argument to super(). In the case where no argument
         # is provided to super(), it is the __class__ object where
@@ -71,7 +70,6 @@ class SuperVariable(VariableTracker):
         # to the current function where super() is called from (self for regular method,
         # cls for a classmethod)
         self.objvar = objvar
-        self.specialized = specialized  # directly get attr from self.typevar if true
 
     def reconstruct(self, codegen):
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
@@ -84,8 +82,6 @@ class SuperVariable(VariableTracker):
 
     def _resolved_getattr_and_source(self, tx: "InstructionTranslator", name):
         assert self.objvar, "1-arg super not implemented"
-        if self.specialized:
-            return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
         # The rest of this function does two things:
@@ -166,7 +162,7 @@ class SuperVariable(VariableTracker):
 
             if (
                 isinstance(objvar, variables.UserDefinedObjectVariable)
-                and isinstance(objvar.mutable_local, AttributeMutationNew)
+                and isinstance(objvar.mutation_type, AttributeMutationNew)
                 and not (args or kwargs)
             ):
                 with do_not_convert_to_tracable_parameter():
@@ -371,7 +367,7 @@ class InspectSignatureVariable(VariableTracker):
         if kwargs:
             unimplemented(f"inspect.signature with {kwargs}")
         return InspectSignatureVariable(
-            callable, mutable_local=variables.base.MutableLocal()
+            callable, mutation_type=variables.base.ValueMutationNew()
         )
 
     def __init__(self, inspected: VariableTracker, **kwargs) -> None:
@@ -520,7 +516,7 @@ class InspectBoundArgumentsVariable(VariableTracker):
         self.bound_arguments_var = variables.ConstDictVariable(
             arguments_dict,
             type(bound_arguments.arguments),
-            mutable_local=variables.base.MutableLocal(),
+            mutation_type=variables.base.ValueMutationNew(),
         )
         self.signature = signature
 
@@ -929,7 +925,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 assert (
                     tx.one_graph
                 ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
@@ -1573,7 +1569,9 @@ class RandomClassVariable(VariableTracker):
         elif kwargs:
             unimplemented("random.Random() with kwargs")
         seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
-        return RandomVariable(seed=seed, mutable_local=variables.base.MutableLocal())
+        return RandomVariable(
+            seed=seed, mutation_type=variables.base.ValueMutationNew()
+        )
 
 
 class RandomVariable(VariableTracker):
