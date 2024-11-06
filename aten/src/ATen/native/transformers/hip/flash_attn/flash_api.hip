@@ -322,17 +322,11 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
   CHECK_SHAPE(v, total_k, num_heads_k, head_size_og);
   CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
   CHECK_SHAPE(cu_seqlens_k, batch_size + 1);
-  if (seqused_k.has_value()){
-    auto seqused_k_ = seqused_k.value();
-    TORCH_CHECK(seqused_k_.dtype() == at::kInt, "seqused_k must have dtype int32");
-    TORCH_CHECK(seqused_k_.is_cuda(), "seqused_k must be on CUDA device");
-    TORCH_CHECK(seqused_k_.is_contiguous(), "seqused_k must be contiguous");
-    CHECK_SHAPE(seqused_k_, batch_size);
-  }
 
   // AOTriton's varlen API needs input shapes be
   // (1, num_heads, total sequence lenght, head dimension)
-  at::Tensor q_padded, k_padded, v_padded, out;
+  at::Tensor q_padded, k_padded, v_padded;
+  at::Tensor out, out_padded;
   q_padded = q.unsqueeze(0).transpose(1, 2);
   k_padded = k.unsqueeze(0).transpose(1, 2);
   v_padded = v.unsqueeze(0).transpose(1, 2);
@@ -342,10 +336,10 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     CHECK_DEVICE(out);
     TORCH_CHECK(out.stride(-1) == 1, "Output tensor must have contiguous last dimension");
     CHECK_SHAPE(out, total_q, num_heads, head_size_og);
-    out = out.unsqueeze(0).transpose(1, 2);
   } else {
-    out = at::empty_like(q_padded);
+    out = at::empty_like(q);
   }
+  out_padded = out.unsqueeze(0).transpose(1, 2);
 
   auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
   const int head_size = head_size_og;
@@ -396,7 +390,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                    empty_bias,
                    softmax_scale,
                    mk_aotensor<2>(M, "M"),
-                   mk_aotensor(out, "Out"),
+                   mk_aotensor(out_padded, "Out"),
                    p_dropout,
                    seed,
                    offset1,
@@ -412,7 +406,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     softmax_lse.fill_(std::numeric_limits<float>::infinity());
   }
 
-  return {out, q_padded, k_padded, v_padded, softmax_lse, seed_t, offset_t, softmax_fa_t};
+  return {out, q, k, v, softmax_lse, seed_t, offset_t, softmax_fa_t};
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
@@ -683,15 +677,15 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
   dout_t = dout.unsqueeze(0).transpose(1, 2);
 
   at::Tensor dq, dk, dv;
+  at::Tensor dq_padded, dk_padded, dv_padded;
   if (dq_.has_value()) {
     dq = dq_.value();
     TORCH_CHECK(dq.dtype() == q_dtype, "dq must have the same dtype as q");
     CHECK_DEVICE(dq);
     TORCH_CHECK(dq.stride(-1) == 1, "dq must have contiguous last dimension");
     CHECK_SHAPE(dq, total_q, num_heads, head_size);
-    dq = dq.unsqueeze(0).transpose(1, 2);
   } else {
-    dq = at::empty_like(q_padded);
+    dq = at::empty_like(q);
   }
   if (dk_.has_value()) {
     dk = dk_.value();
@@ -699,9 +693,8 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     CHECK_DEVICE(dk);
     TORCH_CHECK(dk.stride(-1) == 1, "dk must have contiguous last dimension");
     CHECK_SHAPE(dk, total_k, num_heads_k, head_size);
-    dk = dk.unsqueeze(0).transpose(1, 2);
   } else {
-    dk = at::empty_like(k_padded);
+    dk = at::empty_like(k);
   }
   if (dv_.has_value()) {
     dv = dv_.value();
@@ -709,10 +702,12 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
     CHECK_DEVICE(dv);
     TORCH_CHECK(dv.stride(-1) == 1, "dv must have contiguous last dimension");
     CHECK_SHAPE(dv, total_k, num_heads_k, head_size);
-    dv = dv.unsqueeze(0).transpose(1, 2);
   } else {
-    dv = at::empty_like(v_padded);
+    dv = at::empty_like(v);
   }
+  dq_padded = dq.unsqueeze(0).transpose(1, 2);
+  dk_padded = dk.unsqueeze(0).transpose(1, 2);
+  dv_padded = dv.unsqueeze(0).transpose(1, 2);
 
   auto opts = q.options();
   auto softmax_d = at::empty({batch_size, num_heads, seqlen_q_rounded}, opts.dtype(at::kFloat));
@@ -749,9 +744,9 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
                    softmax_scale,
                    mk_aotensor(out_t, "out"),
                    mk_aotensor(dout_t, "dout"),
-                   mk_aotensor(dq, "dq"),
-                   mk_aotensor(dk, "dk"),
-                   mk_aotensor(dv, "dv"),
+                   mk_aotensor(dq_padded, "dq"),
+                   mk_aotensor(dk_padded, "dk"),
+                   mk_aotensor(dv_padded, "dv"),
                    empty_bias,
                    mk_aotensor<2>(softmax_lse_cont, "L"),
                    mk_aotensor<2>(delta, "delta"),
