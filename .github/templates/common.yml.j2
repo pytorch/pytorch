@@ -83,6 +83,14 @@ concurrency:
 {%- endmacro -%}
 
 {%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
+      - name: Ensure Git is installed
+        run: |
+          if ! git --version; then
+            echo "Git is not installed. Installing Git..."
+            choco install git --version 2.18.0
+          else
+            echo "Git is already installed."
+          fi
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
         uses: malfet/checkout@silent-checkout
         with:
