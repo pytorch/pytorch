@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <optional>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 // TODO: replace with pytorch/rfcs#43 when it is ready.
 #define SOFT_ASSERT(cond, ...)                         \

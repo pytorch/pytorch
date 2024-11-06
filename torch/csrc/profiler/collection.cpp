@@ -399,6 +399,10 @@ struct StealOrDefault {
   explicit StealOrDefault(T& container)
       : container_{container}, it_{container.begin()} {}
 
+  StealOrDefault(const StealOrDefault&) = delete;
+  StealOrDefault(StealOrDefault&&) = delete;
+  StealOrDefault& operator=(const StealOrDefault&) = delete;
+  StealOrDefault& operator=(StealOrDefault&&) = delete;
   ~StealOrDefault() {
     container_.get().clear();
   }
