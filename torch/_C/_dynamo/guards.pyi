@@ -49,6 +49,34 @@ class GuardManager:
         example_value,
         guard_manager_enum,
     ) -> GuardManager: ...
+    def tensor_property_size_manager(
+        self,
+        idx: int,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
+    def tensor_property_shape_manager(
+        self,
+        idx: int,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
+    def tensor_property_storage_offset_manager(
+        self,
+        idx: None,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
+    def indexed_manager(
+        self,
+        idx: int,
+        source,
+        example_value,
+        guard_manager_enum,
+    ) -> GuardManager: ...
     def lambda_manager(
         self,
         python_lambda,
@@ -102,6 +130,13 @@ def install_object_aliasing_guard(
 def install_no_tensor_aliasing_guard(
     guard_managers: list[GuardManager],
     tensor_names: list[str],
+    verbose_code_parts: list[str],
+): ...
+def install_symbolic_shape_guard(
+    guard_managers: list[GuardManager],
+    nargs: int,
+    py_addr: int,
+    py_addr_keep_alive: Any,
     verbose_code_parts: list[str],
 ): ...
 
