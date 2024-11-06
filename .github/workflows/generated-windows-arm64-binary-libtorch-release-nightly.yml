@@ -108,7 +108,7 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: bash
+        shell: cmd
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
@@ -139,11 +139,11 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Populate binary env
-        shell: bash
+        shell: cmd
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Build PyTorch binary
-        shell: bash
+        shell: cmd
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_build.sh"
       - uses: actions/upload-artifact@v4.4.0
@@ -235,7 +235,7 @@ jobs:
       #       They are also here because setting them at a workflow level doesn't give us access to the
       #       runner.temp variable, which we need.
       - name: Populate binary env
-        shell: bash
+        shell: cmd
         run: |
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
@@ -271,11 +271,11 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Populate binary env
-        shell: bash
+        shell: cmd
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
       - name: Test PyTorch binary
-        shell: bash
+        shell: cmd
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_arm64_test.sh"
       - name: Wait until all sessions have drained
