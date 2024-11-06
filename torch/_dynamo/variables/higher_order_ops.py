@@ -2652,7 +2652,8 @@ class PrimHOPBaseVariable(WrapHigherOrderVariable):
         ]
         if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
             raise RuntimeError(
-                f"{self.value._name} where the inputs are mutated or the outputs are aliases of the inputs. Please ensure that this doesn't happen."
+                f"{self.value._name} where the inputs are mutated or the "
+                f"outputs are aliases of the inputs. Please ensure that this doesn't happen."
             )
 
         flat_example_value = pytree.tree_map_only(

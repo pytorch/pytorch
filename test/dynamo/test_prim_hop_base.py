@@ -1,38 +1,16 @@
 # Owner(s): ["module: dynamo"]
-import enum
-import functools
-import pprint
-import re
 import unittest
-import warnings
 
-import functorch.experimental.control_flow as control_flow
 import torch
-import torch._dynamo.config as config
 import torch._dynamo.test_case
 import torch._functorch.config
-import torch.nn as nn
-import torch.utils._pytree as pytree
 import torch.utils.checkpoint
-from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import (
-    CompileCounter,
-    CompileCounterWithBackend,
-    EagerAndRecordGraphs,
     AotEagerAndRecordGraphs,
-    empty_line_normalizer,
+    EagerAndRecordGraphs,
     normalize_gm,
 )
-from torch._dynamo.utils import counters, ifdynstaticdefault
-from torch._higher_order_ops.hints_wrap import hints_wrapper
-from torch._higher_order_ops.wrap import wrap
-from torch.testing._internal.common_utils import (
-    munge_exc,
-    TEST_WITH_TORCHDYNAMO,
-    xfailIfTorchDynamo,
-)
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
@@ -44,10 +22,11 @@ def normalize_graph(gm):
 
 class InvokeQuantTest(torch._higher_order_ops.PrimHOPBase):
     def __init__(self):
-        return super().__init__("invoke_quant_test")
+        super().__init__("invoke_quant_test")
 
     def __call__(self, subgraph, operands, *, scheme):
         return super().__call__(subgraph, operands, scheme=scheme)
+
 
 invoke_quant_test = InvokeQuantTest()
 
@@ -72,7 +51,9 @@ class PrimHOPBaseTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(out, inner(x, y))
 
         assert len(backend.graphs) == 1
-        self.assertExpectedInline(normalize_graph(backend.graphs[0]), """\
+        self.assertExpectedInline(
+            normalize_graph(backend.graphs[0]),
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[3, 3]", L_y_: "f32[3, 3]"):
         l_x_ = L_x_
@@ -89,7 +70,8 @@ class GraphModule(torch.nn.Module):
             sin: "f32[3, 3]" = matmul.sin();  matmul = None
             cos: "f32[3, 3]" = sin.cos();  sin = None
             return (cos,)
-""")
+""",  # NOQA: B950
+        )
 
     @torch._dynamo.config.patch(assume_static_by_default=True)
     def test_aot_eager(self):
@@ -112,7 +94,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result, expected)
 
         assert len(backend.fw_graphs) == 1
-        self.assertExpectedInline(normalize_graph(backend.fw_graphs[0]), """\
+        self.assertExpectedInline(
+            normalize_graph(backend.fw_graphs[0]),
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]"):
         subgraph0 = self.subgraph0
@@ -126,10 +110,13 @@ class GraphModule(torch.nn.Module):
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(mm);  mm = None
             cos: "f32[3, 3]" = torch.ops.aten.cos.default(sin);  sin = None
             return (cos,)
-""")
+""",  # NOQA: B950
+        )
 
         assert len(backend.bw_graphs) == 1
-        self.assertExpectedInline(normalize_graph(backend.bw_graphs[0]), """\
+        self.assertExpectedInline(
+            normalize_graph(backend.bw_graphs[0]),
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]", tangents_1: "f32[3, 3]"):
         subgraph1 = self.subgraph1
@@ -154,28 +141,29 @@ class GraphModule(torch.nn.Module):
             t_1: "f32[3, 3]" = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
             mm_2: "f32[3, 3]" = torch.ops.aten.mm.default(mul_1, t_1);  mul_1 = t_1 = None
             return [mm_2, mm_1]
-""")
+""",  # NOQA: B950
+        )
 
     def test_aliasing_mutation_error(self):
         def inner(x, y):
             return x
 
+        def inner2(x, y):
+            x.sin_()
+            return x + y
+
         x = torch.randn(3, 3)
         y = torch.randn(3, 3)
 
         @torch.compile(backend="eager", fullgraph=True)
-        def f(x, y):
+        def f(inner, x, y):
             return invoke_quant_test(inner, (x, y), scheme="nf4")
 
         with self.assertRaisesRegex(RuntimeError, "aliases of the inputs"):
-            out = f(x, y)
-
-        def inner(x, y):
-            x.sin_()
-            return x + y
+            out = f(inner, x, y)
 
         with self.assertRaisesRegex(RuntimeError, "inputs are mutated"):
-            out = f(x, y)
+            out = f(inner2, x, y)
 
     def test_eager_call(self):
         def inner(x, y):
@@ -188,6 +176,7 @@ class GraphModule(torch.nn.Module):
             invoke_quant_test(inner, (x, y), scheme="nf4")
 
         from functorch import make_fx
+
         result = make_fx(inner)(x, y)
         # smoke test
         invoke_quant_test(result, (x, y), scheme="nf4")

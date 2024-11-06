@@ -1,19 +1,13 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import List, Optional, Tuple, Union
+
+import abc
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
-from torch._higher_order_ops.utils import (
-    _from_fun,
-    _maybe_reenter_make_fx,
-    clone_outputs_aliasing_inputs,
-    get_dummy_aot_autograd_config,
-    prepare_fw_with_masks,
-    reenter_make_fx,
-)
+from torch._higher_order_ops.utils import reenter_make_fx
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -22,9 +16,6 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
-from torch.fx.graph_module import GraphModule
-from .invoke_subgraph import create_fw_bw_graph
-import abc
 
 
 class PrimHOPBase(HigherOrderOperator, abc.ABC):
@@ -53,6 +44,7 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
         return invoke_quant(g, (x,), scheme="nf4")
     ```
     """
+
     def __init__(self, hop_name) -> None:
         super().__init__(hop_name)
 
@@ -62,11 +54,17 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
         self.py_functionalize_impl(self.call_Functionalize)
         self.py_impl(ProxyTorchDispatchMode)(self.call_ProxyTorchDispatchMode)
         self.py_impl(FakeTensorMode)(self.call_FakeTensorMode)
-        self.py_impl(DispatchKey.CompositeExplicitAutograd)(self.call_CompositeExplicitAutograd)
+        self.py_impl(DispatchKey.CompositeExplicitAutograd)(
+            self.call_CompositeExplicitAutograd
+        )
 
     def __call__(self, subgraph, operands, **kwargs):
         if not isinstance(subgraph, (torch.fx.GraphModule, FunctionWithNoFreeVars)):
-            raise RuntimeError(f"{self._name}: when calling this API without torch.compile, we require that the subgraph be a torch.fx.GraphModule (or a function we know doesn't have free variables).")
+            raise RuntimeError(
+                f"{self._name}: when calling this API without torch.compile, "
+                f"we require that the subgraph be a torch.fx.GraphModule (or "
+                f"a function we know doesn't have free variables)."
+            )
         return super().__call__(subgraph, operands, **kwargs)
 
     def call_Autograd(self, subgraph, operands, **kwargs):
@@ -98,14 +96,16 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
         proxy_mode.tracer.root.register_module(qualname, traced_graph)
 
         node_args = (traced_graph, operands)
-        proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
-        proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs)
+        proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)  # type: ignore[attr-defined]
+        proxy_kwargs = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, kwargs)  # type: ignore[attr-defined]
         out_proxy = proxy_mode.tracer.create_proxy(
             "call_function", self, proxy_args, proxy_kwargs
         )
 
         out = self(subgraph, operands, **kwargs)
-        return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
+        return track_tensor_tree(
+            out, out_proxy, constant=None, tracer=proxy_mode.tracer  # type: ignore[arg-type]
+        )
 
     def call_FakeTensorMode(self, mode, subgraph, operands, **kwargs):
         # TODO: this should probably route through FakeTensorMode to reuse caching
@@ -117,7 +117,9 @@ class PrimHOPBase(HigherOrderOperator, abc.ABC):
         with ctx.redispatch_to_next() as m:
             # We assume the subgraph doesn't mutate inputs and there is no aliasing.
             # In the PT2 stack, this is Dynamo's responsibility to figure out.
-            functionalized_subgraph = FunctionWithNoFreeVars(ctx.functionalize(subgraph))
+            functionalized_subgraph = FunctionWithNoFreeVars(
+                ctx.functionalize(subgraph)
+            )
             out = self(functionalized_subgraph, unwrapped_operands, **kwargs)
         return ctx.wrap_tensors(out)
 
@@ -131,11 +133,7 @@ class PrimHOPBaseFunction(torch.autograd.Function):
         ctx.kwargs = kwargs
 
         with torch._C._AutoDispatchBelowAutograd():
-            return hop(
-                subgraph,
-                operands,
-                **kwargs
-            )
+            return hop(subgraph, operands, **kwargs)
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -147,13 +145,19 @@ class PrimHOPBaseFunction(torch.autograd.Function):
         with suspend_functionalization(), disable_functional_mode(), torch.enable_grad():
             with disable_proxy_modes_tracing():
                 from .utils import _from_fun, create_fw_bw_graph
+
                 fw_inputs = pytree.tree_map(_from_fun, operands)
                 fw_outputs = subgraph(*fw_inputs)
                 _, joint_graph = create_fw_bw_graph(
                     subgraph, False, fw_inputs, fw_outputs
                 )
 
-        return None, None, None, *ctx.hop(joint_graph, (*grad_outputs, *operands), **ctx.kwargs)
+        return (
+            None,
+            None,
+            None,
+            *ctx.hop(joint_graph, (*grad_outputs, *operands), **ctx.kwargs),
+        )
 
 
 class FunctionWithNoFreeVars:
