@@ -107,7 +107,6 @@ class UserDefinedVariable(VariableTracker):
 
 class UserDefinedClassVariable(UserDefinedVariable):
     def __init__(self, value, **kwargs) -> None:
-        breakpoint()
         super().__init__(**kwargs)
         self.value = value
 
@@ -159,9 +158,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return key in self.value.__dict__
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        if name == "__mro__":
-            breakpoint()
-
         from . import ConstantVariable, EnumVariable
 
         source = AttrSource(self.source, name) if self.source is not None else None
