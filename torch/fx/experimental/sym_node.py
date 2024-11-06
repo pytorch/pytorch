@@ -1134,6 +1134,12 @@ def _make_node_magic(method, func):
                     out = Mod(self.expr, other.expr)
                 else:
                     out = PythonMod(self.expr, other.expr)
+            elif method == "add":
+                from torch.utils._sympy.functions import CustomAdd
+
+                out = CustomAdd(
+                    self.expr, other.expr, optimize_incremental_summations=True
+                )
             else:
                 # TODO: consider constant prop here
                 out = func(self.expr, other.expr)

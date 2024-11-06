@@ -20,6 +20,7 @@ import torch
 from .functions import (
     CeilToInt,
     CleanDiv,
+    CustomAdd,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
@@ -73,6 +74,7 @@ def handlers():
         TruncToFloat: "trunc",
         Where: "where",
         sympy.Add: "add",
+        CustomAdd: "add",
         sympy.Mul: "mul",
         FloatPow: "pow",
         PowByNatural: "pow_by_natural",

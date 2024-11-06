@@ -841,6 +841,141 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
     _eval_is_zero = lambda s: _torf(i.is_zero for i in s.args)  # noqa: E731
 
 
+class CustomAdd(sympy.core.add.Add):
+
+    """
+    Custom addition class inheriting from sympy.core.add.Add used to optimize
+    incremental binary summations of certain properties.
+    """
+
+    # Whether the expression represented by this is an ordered_summation_of_unique_symbols.
+    # This optimize constructing expressions of the form
+    # a + b + d +  e ..
+    # since for those all we need todo is to order args and we know Add can't do more
+    # optimizations than that.
+    ordered_summation_of_unique_symbols = False
+
+    # TODO 1 support trail constant term i.e: a + b + 10.
+    # TODO 2 support constant coefficient that is the same for all. i.e: 10a + 10b + 10d...
+
+    def __new__(cls, *args, **kwargs):
+        """
+        Override __new__ method to customize creation of CustomAdd instance.
+        """
+        from sympy.core.basic import _args_sortkey
+
+        import torch._dynamo.config as config
+
+        # This way we make sure the optimizations are only triggered when we pass optimize_incremental_summations.
+        # sometimes sympy will call this function during its simplifications for example, in that case we bypass to add.
+        bypass_to_add = "optimize_incremental_summations" not in kwargs
+        if bypass_to_add:
+            return sympy.Add(*args, **kwargs)
+
+        assert len(args) == 2
+        assert len(kwargs) == 1
+
+        lhs = args[0]
+        rhs = args[1]
+
+        def make_optimized(ordered_args_as_list):
+            obj = super(CustomAdd, cls).__new__(
+                cls, *ordered_args_as_list, evaluate=False
+            )
+            assert isinstance(obj, CustomAdd)
+            obj.ordered_summation_of_unique_symbols = True
+
+            if config.run_extra_validations:
+                ref = sympy.Add(lhs, rhs)
+                assert ref._args == obj._args
+                assert str(ref) == str(obj)
+            return obj
+
+        if isinstance(lhs, CustomAdd):
+            if lhs.ordered_summation_of_unique_symbols:
+                # rhs is CustomAdd with ordered_summation_of_unique_symbols.
+                if (
+                    isinstance(rhs, CustomAdd)
+                    and rhs.ordered_summation_of_unique_symbols
+                ):
+                    if (
+                        len(lhs._args)
+                        and len(rhs._args)
+                        and _args_sortkey(lhs._args[-1]) < _args_sortkey(rhs._args[0])
+                    ):
+                        return make_optimized(lhs._args + rhs._args)
+
+                # i.e: rhs is a
+                elif rhs.is_symbol:
+                    args = cls._binary_search_insert_arg(list(lhs._args), rhs)
+                    # if arg is None it means rhs already inside list args.
+                    if args is not None:
+                        return make_optimized(args)
+
+                # i.e: rhs is a + b
+                elif (
+                    rhs.is_Add
+                    and not isinstance(rhs, CustomAdd)
+                    and len(rhs._args) == 2
+                    and rhs._args[0].is_symbol
+                    and rhs._args[1].is_symbol
+                ):
+                    args = list(lhs._args)
+                    args = cls._binary_search_insert_arg(args, rhs._args[0])
+                    if args is not None:
+                        args = cls._binary_search_insert_arg(args, rhs._args[1])
+                        if args is not None:
+                            return make_optimized(args)
+
+        # non optimized path
+        obj = super().__new__(cls, lhs, rhs)
+
+        # Base case
+        if (
+            obj.is_Add
+            and len(obj._args) == 2
+            and obj._args[0].is_symbol
+            and obj._args[1].is_symbol
+        ):
+            if isinstance(obj, CustomAdd):
+                obj.ordered_summation_of_unique_symbols = True
+            else:
+                # if the object is optimized post construction we will get Add and not CustomAdd.
+                obj = super().__new__(CustomAdd, *obj._args, evaluate=False)
+                obj.ordered_summation_of_unique_symbols = True
+
+        return obj
+
+    @classmethod
+    def _binary_search_insert_arg(
+        cls, ordered_args: List[sympy.Basic], new_arg: sympy.Basic
+    ):
+        """
+        If new_arg is found in ordered_args None is returned, else the new
+        ordered_args with new_arg inserted
+        """
+        low, high = 0, len(ordered_args) - 1
+        from sympy.core.basic import _args_sortkey
+
+        # Fast path when new_arg > ordered_args[-1], which is common.
+        if len(ordered_args) and _args_sortkey(ordered_args[-1]) < _args_sortkey(
+            new_arg
+        ):
+            return ordered_args + [new_arg]
+
+        while low <= high:
+            mid = (low + high) // 2
+            if ordered_args[mid] == new_arg:
+                return None
+            elif _args_sortkey(ordered_args[mid]) < _args_sortkey(new_arg):
+                low = mid + 1
+            else:
+                high = mid - 1
+
+        ordered_args.insert(low, new_arg)
+        return ordered_args
+
+
 class Max(MinMaxBase, Application):  # type: ignore[misc]
     r"""
     Return, if possible, the maximum value of the list.
