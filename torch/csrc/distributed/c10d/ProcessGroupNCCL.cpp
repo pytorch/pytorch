@@ -1843,10 +1843,12 @@ void ProcessGroupNCCL::DesyncDebugger::run() {
     std::string desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
     LOG(ERROR) << logPrefix << desyncMsg;
   } catch (const std::exception& e) {
+    enabled_ = false;
     LOG(ERROR) << logPrefix
                << " Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
                << " Please file an issue. Error: " << e.what();
   } catch (...) {
+    enabled_ = false;
     LOG(ERROR)
         << logPrefix
         << " Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
@@ -1858,11 +1860,12 @@ void ProcessGroupNCCL::DesyncDebugger::run() {
 void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
   if (!enabled_)
     return;
-  if (storeError_ || work.startTraceUpdated_)
+  if (work.startTraceUpdated_)
     return;
 
   work.startTraceUpdated_ = true;
-  storeError_ = !c10d::traceUpdate(
+  // If not successful, disable the debugger
+  enabled_ = c10d::traceUpdate(
       store_, traceKeyStart_, work.seq_, opTypeToString(work.opType_));
 }
 
@@ -1870,15 +1873,14 @@ void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
 void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
   if (!enabled_)
     return;
-  if (storeError_)
-    return;
 
   // In case the start of the work hasn't been logged
   if (!work.startTraceUpdated_) {
     logWorkStart(work);
   }
 
-  storeError_ = !c10d::traceUpdate(
+  // If not successful, disable the debugger
+  enabled_ = c10d::traceUpdate(
       store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
 }
 

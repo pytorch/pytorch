@@ -534,9 +534,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // If false, all functions are no-op.
     bool enabled_{false};
 
-    // Whether store already hit an error.
-    bool storeError_{false};
-
     // From ProcessGroupNCCL
     int rank_;
     int size_;
