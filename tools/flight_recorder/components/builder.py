@@ -141,6 +141,13 @@ def build_nccl_call(
         sizes=entry["input_sizes"],
     )
 
+def best_effort_log(expected_ranks, dumps_ranks):
+    logger.info(
+        "We cannot decide what's wrong with this collective entry "
+        "because we missed FR dumps from ranks (%s) so we don't have enough "
+        "information. If you want to debug further use -j to dump all raw trace",
+        str(expected_ranks - dumps_ranks),
+    )
 
 def build_collectives(
     all_entries: Dict[int, List[Dict[str, Any]]],
@@ -242,7 +249,7 @@ def build_collectives(
                     else []
                 )
                 all_coalesced_entries[curr] = grp
-                for index, entry in grp:
+                for _, entry in grp:
                     op = Op(entry, _memberships, pg_name)
                     peer = None
                     if op.type == "send":
@@ -340,7 +347,7 @@ def build_collectives(
                 candidate_idx.update(found_idx)
                 found_idx.clear()
                 found_ranks.clear()
-            elif len(candidate_ranks) == 1:
+            elif len(candidate_ranks) == 1 and dumps_ranks == expected_ranks:
                 # case two: alltoall or alltoall_base case.
                 if has_undecided_case:
                     alltoall_cases = [entries[0]] + [
@@ -404,7 +411,13 @@ def build_collectives(
                 candidate_idx.update(found_idx)
                 found_idx.clear()
                 found_ranks.clear()
+            # partial analysis case when we cannot decide what's wrong with this collective entry.
             else:
+                candidate_ranks.update(found_ranks)
+                candidate_idx.update(found_idx)
+                found_idx.clear()
+                found_ranks.clear()
+                mismatch[pg_name] += 1
                 logger.info(
                     "We cannot decide what's wrong with this collective entry "
                     "because we missed FR dumps from ranks (%s) so we don't have enough "

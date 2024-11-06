@@ -251,8 +251,8 @@ class Op:
         if hasattr(self, "event"):
             return (
                 f"{self.type}(timestamp_created={self.event['time_created_ns']}, "
-                f"global_rank={self.event['global_rank']}, op_type={self.type}, "
-                f"{p2p_info}input_sizes={self.input_sizes}, output_sizes={self.output_sizes}, "
+                f"{p2p_info}op_type={self.type}, "
+                f"input_sizes={self.input_sizes}, output_sizes={self.output_sizes}, "
                 f"Input dtypes: {self.input_dtypes}, Output dtypes: {self.output_dtypes}, "
                 "Collective_seq_id | P2P_seq_id: "
                 f"{self.event['p2p_seq_id'] if self.type in P2P else self.event['collective_seq_id']}, "
