@@ -343,8 +343,6 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
   auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
   const int head_size = head_size_og;
-  const int seqlen_q_rounded = max_seqlen_q;
-  const int seqlen_k_rounded = max_seqlen_k;
 
   auto opts = q.options();
 
@@ -354,7 +352,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
   // Only return softmax if there's dropout to reduce compilation time
   if (return_softmax) {
     TORCH_CHECK(p_dropout > 0.0f, "return_softmax is only supported when p_dropout > 0.0");
-    softmax_fa_t = at::empty({ batch_size, num_heads, seqlen_q_rounded, seqlen_k_rounded }, opts);
+    softmax_fa_t = at::empty({ batch_size, num_heads, max_seqlen_q, max_seqlen_k }, opts);
   } else {
     softmax_fa_t = at::empty({ 0, 0, 0, 0 }, opts);
   }
@@ -372,7 +370,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
 
   if (max_seqlen_k > 0) {
     hipError_t err; // TODO: Error handling
-    using aotriton::v2::flash::attn_fwd;
+    using aotriton::v2::flash::attn_fwd_compact_varlen;
     using aotriton::TensorView;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
@@ -384,22 +382,26 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
     auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
     auto seed_output = use_philox_state ? mk_philoxtensor(seed_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
     auto offset_output = use_philox_state ? mk_philoxtensor(offset_t.data_ptr<int64_t>()) : mk_philoxtensor(nullptr);
-    err = attn_fwd(mk_aotensor(q_padded, "q"),
-                   mk_aotensor(k_padded, "k"),
-                   mk_aotensor(v_padded, "v"),
-                   empty_bias,
-                   softmax_scale,
-                   mk_aotensor<2>(M, "M"),
-                   mk_aotensor(out_padded, "Out"),
-                   p_dropout,
-                   seed,
-                   offset1,
-                   offset2,
-                   seed_output,
-                   offset_output,
-                   mk_aotensor(softmax_fa_t, "encoded_softmax"),
-                   is_causal,
-                   stream);
+    err = attn_fwd_compact_varlen(mk_aotensor(q_padded, "q"),
+                                  mk_aotensor(k_padded, "k"),
+                                  mk_aotensor(v_padded, "v"),
+                                  mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q"),
+                                  mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k"),
+                                  max_seqlen_q,
+                                  max_seqlen_k,
+                                  empty_bias,
+                                  softmax_scale,
+                                  mk_aotensor<2>(M, "M"),
+                                  mk_aotensor(out_padded, "Out"),
+                                  p_dropout,
+                                  seed,
+                                  offset1,
+                                  offset2,
+                                  seed_output,
+                                  offset_output,
+                                  mk_aotensor(softmax_fa_t, "encoded_softmax"),
+                                  is_causal,
+                                  stream);
   } else {
     // If seqlen_k == 0, then we have an empty tensor. We need to set the output to 0.
     out.zero_();
@@ -649,8 +651,6 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
   TORCH_CHECK(head_size <= 256, "FlashAttention backward only supports head dimension at most 256");
   TORCH_CHECK(num_heads % num_heads_k == 0, "Number of heads in key/value must divide number of heads in query");
 
-  auto round_multiple = [](int x, int m) { return (x + m - 1) / m * m; };
-  const int head_size_rounded = round_multiple(head_size, 16);
   const int seqlen_q_rounded = max_seqlen_q;
   const int seqlen_k_rounded = max_seqlen_k;
 
@@ -732,32 +732,37 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
   }
   if (max_seqlen_q > 0) {
     hipError_t err; // TODO: Error handling
-    using aotriton::v2::flash::attn_bwd;
+    using aotriton::v2::flash::attn_bwd_compact_varlen;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::cast_dtype;
     aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
-    err = attn_bwd(mk_aotensor(q_padded, "q"),
-                   mk_aotensor(k_padded, "k"),
-                   mk_aotensor(v_padded, "v"),
-                   empty_bias,
-                   softmax_scale,
-                   mk_aotensor(out_t, "out"),
-                   mk_aotensor(dout_t, "dout"),
-                   mk_aotensor(dq_padded, "dq"),
-                   mk_aotensor(dk_padded, "dk"),
-                   mk_aotensor(dv_padded, "dv"),
-                   empty_bias,
-                   mk_aotensor<2>(softmax_lse_cont, "L"),
-                   mk_aotensor<2>(delta, "delta"),
-                   p_dropout,
-                   mk_aoscalartensor(philox_seed),
-                   mk_aoscalartensor(philox_offset),
-                   0,
-                   is_causal,
-                   stream);
+    err = attn_bwd_compact_varlen(mk_aotensor(q_padded, "q"),
+                                  mk_aotensor(k_padded, "k"),
+                                  mk_aotensor(v_padded, "v"),
+                                  mk_aotensor<1>(cu_seqlens_q, "cu_seqlens_q"),
+                                  mk_aotensor<1>(cu_seqlens_k, "cu_seqlens_k"),
+                                  max_seqlen_q,
+                                  max_seqlen_k,
+                                  empty_bias,
+                                  softmax_scale,
+                                  mk_aotensor(out_t, "out"),
+                                  mk_aotensor(dout_t, "dout"),
+                                  mk_aotensor(dq_padded, "dq"),
+                                  mk_aotensor(dk_padded, "dk"),
+                                  mk_aotensor(dv_padded, "dv"),
+                                  empty_bias,
+                                  mk_aotensor<2>(softmax_lse_cont, "L"),
+                                  mk_aotensor<2>(delta, "delta"),
+                                  p_dropout,
+                                  mk_aoscalartensor(philox_seed),
+                                  mk_aoscalartensor(philox_offset),
+                                  0,
+                                  is_causal,
+                                  stream);
   } else {
     // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.
+    dq.zero_();
     dk.zero_();
     dv.zero_();
     softmax_d.zero_();
