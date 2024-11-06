@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import argparse
 import gc
 import os
 import pickle
@@ -66,16 +67,15 @@ def _determine_prefix(files: List[str]) -> str:
         )
 
 
-def read_dir(
-    prefix: Optional[str], folder: str
-) -> Tuple[Dict[str, Dict[str, Any]], str]:
+def read_dir(args: argparse.Namespace) -> Tuple[Dict[str, Dict[str, Any]], str]:
     gc.disable()
+    prefix = args.prefix
     details = {}
     t0 = time.time()
     version = ""
     filecount = 0
-    assert os.path.isdir(folder), f"folder {folder} does not exist"
-    for root, _, files in os.walk(folder):
+    assert os.path.isdir(args.folder), f"folder {args.folder} does not exist"
+    for root, _, files in os.walk(args.folder):
         if prefix is None:
             prefix = _determine_prefix(files)
         for f in files:
@@ -86,6 +86,6 @@ def read_dir(
             if not version:
                 version = str(details[f]["version"])
     tb = time.time()
-    assert len(details) > 0, f"no files loaded from {folder} with prefix {prefix}"
+    assert len(details) > 0, f"no files loaded from {args.folder} with prefix {prefix}"
     logger.debug("loaded %s files in %ss", filecount, tb - t0)
     return details, version

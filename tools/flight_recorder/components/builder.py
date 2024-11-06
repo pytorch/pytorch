@@ -7,6 +7,7 @@
 import argparse
 import ast
 import sys
+import os
 from typing import Any, Dict, List, Set, Tuple  # type: ignore[attr-defined]
 
 from tools.flight_recorder.components.types import (
@@ -186,6 +187,9 @@ def build_collectives(
     # instead, just record the remaining ops as NCCLCalls
     mismatch = {_groups[g].id: 0 for g in _groups}
     MISMATCH_TAIL = 10
+
+    # For best effort partial analysis.
+    dumps_ranks = {int(key) for key in all_entries.keys()}
     """
     - it doesn't matter what order I put collectives/ncclops into their table. we can later on re-sort it by start time
     - there could be multiple options for the "first" collective to pair up (rank 0,1 might do a bcast while rank 2,3 do a bcast)
@@ -314,7 +318,7 @@ def build_collectives(
                         break
 
             # case one: not every rank join the collective or in the flight recorder.
-            if (candidate_ranks | found_ranks) != expected_ranks:
+            if (candidate_ranks | found_ranks) != expected_ranks and expected_ranks - (candidate_ranks | found_ranks) <= dumps_ranks:
                 mismatch[pg_name] += 1
                 logger.info(
                     "Not all ranks joining collective %s at entry %s",
@@ -398,6 +402,13 @@ def build_collectives(
                 candidate_idx.update(found_idx)
                 found_idx.clear()
                 found_ranks.clear()
+            else:
+                logger.info(
+                    "We cannot decide what's wrong with this collective entry "
+                    "because we missed FR dumps from ranks (%s) so we don't have enough "
+                    "information. If you want to debug further use -j to dump all raw trace", 
+                    str(expected_ranks - dumps_ranks)
+                )
 
             # at this point there are 3 possibilities
             # 1. we found a match on all the ranks that are members of the group
@@ -450,6 +461,8 @@ def build_collectives(
 def build_db(
     details: Dict[str, Dict[str, Any]], args: argparse.Namespace, version: str
 ) -> Database:
+    if args.verbose:
+        os.environ["FR_TRACE_VERBOSE_OUTPUT"] = "1"
     # temporary state used for building database
     entries = {}
     pg_config = {}
@@ -469,6 +482,9 @@ def build_db(
         pg_config
     )
     logger.debug("built groups, memberships")
+
+    if args.allow_incomplete_ranks:
+        check_no_missing_dump_files(entries, memberships)
 
     if args.just_print_entries:
         just_print_entries(entries, _groups, _memberships, _pg_guids, args)
