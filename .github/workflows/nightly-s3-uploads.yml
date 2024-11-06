@@ -18,7 +18,7 @@ jobs:
   upload-stats-to-s3:
     if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
-    environment: upload-stats
+    # environment: upload-stats
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -38,8 +38,8 @@ jobs:
         uses: nick-fields/retry@v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          # AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         with:
           timeout_minutes: 10
           max_attempts: 10
