@@ -147,7 +147,7 @@ void PyTorchStreamReader::init() {
     char buf[kMagicValueLength];
     read(0, buf, kMagicValueLength);
     valid("checking magic number");
-    AT_ASSERTM(
+    TORCH_INTERNAL_ASSERT(
         memcmp("PYTORCH1", buf, kMagicValueLength) != 0,
         "File is an unsupported archive format from the preview release.");
   }

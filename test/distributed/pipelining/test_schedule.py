@@ -25,7 +25,6 @@ from torch.distributed.pipelining.schedules import (
     _PipelineSchedule,
     _PipelineScheduleRuntime,
     _simulate_comms_compute,
-    _validate_pipeline_order,
     B,
     F,
     get_schedule_class,
@@ -267,9 +266,19 @@ class TestSchedulePlan(TestCase):
                 formatted_pipeline_order = _format_pipeline_order(
                     schedule.pipeline_order
                 )
-                # print(formatted_pipeline_order)
-                _validate_pipeline_order(
-                    schedule.pipeline_order, num_microbatches, num_stages
+
+                def stage_to_rank(stage):
+                    return stage % group_size
+
+                comms_sch = _add_send_recv(
+                    schedule.pipeline_order,
+                    stage_to_rank=stage_to_rank,
+                    num_stages=num_stages,
+                )
+                _simulate_comms_compute(
+                    comms_sch,
+                    stage_to_rank=stage_to_rank,
+                    num_stages=num_stages,
                 )
 
     @parametrize(
@@ -299,11 +308,20 @@ class TestSchedulePlan(TestCase):
                     schedule.pipeline_order
                 )
                 # print(formatted_pipeline_order)
-                _validate_pipeline_order(
+
+                def stage_to_rank(stage):
+                    return stage % group_size
+
+                comms_sch = _add_send_recv(
                     schedule.pipeline_order,
-                    num_microbatches,
-                    num_stages,
-                    enable_zero_bubble=(ScheduleClass is ScheduleInterleavedZeroBubble),
+                    stage_to_rank=stage_to_rank,
+                    num_stages=num_stages,
+                )
+                # print(_format_pipeline_order(comms_sch))
+                _simulate_comms_compute(
+                    comms_sch,
+                    stage_to_rank=stage_to_rank,
+                    num_stages=num_stages,
                 )
 
 
@@ -678,8 +696,6 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=[0, 0],
-            # TODO should we test both T/F?
-            use_full_backward=True,
         )
         schedule._load_actions(
             {
@@ -792,7 +808,6 @@ class TestScheduleLowering(TestCase):
             num_microbatches,
             loss_fn=loss_fn,
             stage_index_to_group_rank=[0],
-            use_full_backward=False,
         )
         schedule._load_actions(
             {
