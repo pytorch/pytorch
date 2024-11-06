@@ -215,14 +215,6 @@ static auto combine_self_args(PyObject* self, PyObject* args) -> py::tuple {
   return args_;
 }
 
-// TODO: I'm not sure if I should call this __torch_function__ or
-// torch_function.  The former makes it easier to take an existing
-// Tensor-like __torch_function__ object and turn it into a mode;
-// but in general modes don't have to be Tensor-like (and we will
-// improperly accept mode objects as arguments when they shouldn't
-// be passed around in this way).
-const char* torch_function_mode_name = "__torch_function__";
-
 auto handle_torch_function(
     PyObject* self,
     const std::string& func_name,
