@@ -778,15 +778,15 @@ class GraphModule(torch.nn.Module):
         return (getitem_3,)
 
     class wrap_body_1(torch.nn.Module):
-        def forward(self, u0: "Sym(u0)", l_x_: "i16[3]"):
+        def forward(self, item: "Sym(u0)", l_x_: "i16[3]"):
             wrap_body_0 = self.wrap_body_0
-            wrap = torch.ops.higher_order.wrap(wrap_body_0, u0, l_x_);  wrap_body_0 = u0 = l_x_ = None
+            wrap = torch.ops.higher_order.wrap(wrap_body_0, item, l_x_);  wrap_body_0 = item = l_x_ = None
             getitem: "i16[3]" = wrap[0];  wrap = None
             return (getitem,)
 
         class wrap_body_0(torch.nn.Module):
-            def forward(self, u0: "Sym(u0)", l_x_: "i16[3]"):
-                add: "i16[3]" = u0 + l_x_;  u0 = l_x_ = None
+            def forward(self, item: "Sym(u0)", l_x_: "i16[3]"):
+                add: "i16[3]" = item + l_x_;  item = l_x_ = None
                 return (add,)
 """,
         )
@@ -831,32 +831,32 @@ class GraphModule(torch.nn.Module):
 
         c: "i64[u0, 1]" = l_x_.nonzero()
 
-        sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
+        sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
+        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
 
-        ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
+        ge: "Sym(u0 >= 0)" = sym_size_int >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-        le: "Sym(u0 <= 3)" = sym_size_int_1 <= 3
+        le: "Sym(u0 <= 3)" = sym_size_int <= 3
         _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 3 on node 'le'");  le = _assert_scalar_default_1 = None
 
         wrap_body_1 = self.wrap_body_1
-        wrap = torch.ops.higher_order.wrap(wrap_body_1, l_x_, sym_size_int_1, c);  wrap_body_1 = l_x_ = sym_size_int_1 = c = None
+        wrap = torch.ops.higher_order.wrap(wrap_body_1, l_x_, sym_size_int, c);  wrap_body_1 = l_x_ = sym_size_int = c = None
         getitem: "f32[3]" = wrap[0]
         getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
         return (getitem, getitem_1)
 
     class wrap_body_1(torch.nn.Module):
-        def forward(self, l_x_: "f32[3]", u0: "Sym(u0)", c: "i64[u0, 1]"):
+        def forward(self, l_x_: "f32[3]", size: "Sym(u0)", c: "i64[u0, 1]"):
             wrap_body_0 = self.wrap_body_0
-            wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, u0, c);  wrap_body_0 = l_x_ = u0 = c = None
+            wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, size, c);  wrap_body_0 = l_x_ = size = c = None
             child: "f32[3]" = wrap[0]
             child_1: "f32[u0, 1]" = wrap[1];  wrap = None
             return (child, child_1)
 
         class wrap_body_0(torch.nn.Module):
-            def forward(self, l_x_: "f32[3]", u0: "Sym(u0)", c: "i64[u0, 1]"):
+            def forward(self, l_x_: "f32[3]", size: "Sym(u0)", c: "i64[u0, 1]"):
                 sin: "f32[3]" = l_x_.sin();  l_x_ = None
-                child: "f32[3]" = sin + u0;  sin = u0 = None
+                child: "f32[3]" = sin + size;  sin = size = None
                 child_1: "f32[u0, 1]" = c.sin();  c = None
                 return (child, child_1)
 """,

@@ -1823,7 +1823,10 @@ class SubgraphTracer(fx.Tracer):
         # Dicts maintain the order of args for the HigherOrderOperator call.
         self.lifted_freevars = {}
 
-        # map symbols to their bound proxies.
+        # map basic symbols (unbacked and unbacked) to their bound proxies.
+        # There are only two cases where bound_symbols will be recorded:
+        # 1. when we create_graph_input for a backed SymInt that's basic symbol
+        # 2. when we track_unbacked_symbols for intermediate results that contain unbacked symints.
         self.bound_symbols: Dict[sympy.Symbol, Union[torch.fx.Proxy, LazyProxy]] = {}
 
         self.prev_inst = None
@@ -2143,7 +2146,7 @@ class SubgraphTracer(fx.Tracer):
             # Whenever we call create_graph_input, we try to also lift the basic symbols in example values
             # as graph input.
             # This applies to both top-level graph and subgraphs in higher order ops.
-            # This has several cases:
+            # It has several cases:
             #  1. When create_graph_input for a tensor that has symbolic shapes,
             #     we look for basic symbols in its size and stride, we check if the symbol is bound
             #     in current graph (i.e. bound_symbols), it it's not bound, we'll create a placeholder
@@ -2155,16 +2158,27 @@ class SubgraphTracer(fx.Tracer):
             #     can be created while tracing. So we use track_unbacked_symbols will intercept
             #     at wrap_fx_proxy, and try to bind the unbacked symbols immediately after they're
             #     created.
-            #  3. subgraph will also lifted basic symbols in compound exprs.
+            #  3. subgraph will also lifted basic symbols in compound exprs of tensor shape.
             #     For example, if an input to subgraph takes size [s1+s2//8], we'll look for the
             #     the free symbols in the sizes and lift as inputs similar to 1 in _lift_symbols_in_symint)
-            # Do not call this function direclty. This is used in create_graph_input for
-            # automatically lifting the free basic symbols in example_value.
+            #  4. When create_graph_input for a SymInt, if the symint is a basic symbol, we'll track it
+            #     in bound_symbols so that we don't lift the same basic symbol twice. When the symint is a
+            #     compound expr, we'll just create the proxy for the compouned expr but not lift its basic symbols.
+            # Also see NOTE: [Export inputs must be explicitly passed in]
             is_strict_export = self.is_export
             is_non_strict_export = torch.compiler.is_compiling()
-            if not is_strict_export and not is_non_strict_export:
-                if isinstance(example_value, torch.Tensor):
-                    self._lift_basic_symbols(example_value, source)
+            if (
+                not is_strict_export
+                and not is_non_strict_export
+                and isinstance(example_value, torch.Tensor)
+            ):
+                self._lift_basic_symbols(example_value, source)
+
+            # Bound the symbol to ph if example_value is a SymInt with basic symbol.
+            if isinstance(example_value, torch.SymInt) and isinstance(
+                example_value.node.expr, sympy.Symbol
+            ):
+                self.bound_symbols[example_value.node.expr] = proxy
             return proxy
 
     # See NOTE: [Nested SubgraphTracer and free_variable handling] for more details
@@ -2177,20 +2191,17 @@ class SubgraphTracer(fx.Tracer):
 
         example_value = proxy.node.meta["example_value"]
 
-        # For SymInt with basic symbols, it's possible that the basic symbols are lifted twice.
+        # To avoid lifting the same symbol twice, we check whether basic symbols has been tracked.
         # For example, the basic symbols may have already been lifted for current subgraph when
         # we automatically lift basic symbols in the sizes/strides of a tensor t.
         # Suppose parent graph calls sz = t.size()[0], it creates
         # a proxy in parent and the subgraph accesses sz via closure. sz's proxy is not tracked
         # in current sub-tracer so we may lift the same symbol twice.
-        # To avoid this case, we always call _lift_symbols_in_symint to handle basic symbols.
-        #
-        # For SymInt with compound expresssion, we allow them to be lifted as subgraph's input.
-        if isinstance(example_value, torch.SymInt):
-            expr = example_value.node.expr
-            if isinstance(expr, sympy.Symbol):
-                self._lift_basic_symbols(example_value, None)
-                return self.bound_symbols[expr]
+        if (
+            isinstance(example_value, torch.SymInt)
+            and example_value.node.expr in self.bound_symbols
+        ):
+            return self.bound_symbols[example_value.node.expr]
 
         # Proxys are associated with VariableTracker.
         # It is possible that we've already lifted the Proxy to be an input.
@@ -2345,7 +2356,7 @@ class SubgraphTracer(fx.Tracer):
                 return
 
             assert isinstance(s, torch.SymInt)
-            self_to_be_bound = self.lookup_unbounded_symbols(s)
+            self_to_be_bound = self.lookup_unbound_symbols(s)
             if len(self_to_be_bound) == 0:
                 return
 
@@ -2370,7 +2381,6 @@ class SubgraphTracer(fx.Tracer):
                         source.name() if source is not None else "subgraph inputs",
                         self.debug_level,
                     )
-                    self.bound_symbols[s0] = ph
                     self.lifted_freevars[parent_proxy] = ph
             # For root_tracer:
             else:
@@ -2404,7 +2414,6 @@ class SubgraphTracer(fx.Tracer):
                     fake_tensor=None,
                     is_tensor=False,
                 )
-                self.bound_symbols[s0] = ph
 
         if isinstance(example_value, torch.Tensor):
             for i, s in enumerate(example_value.size()):
@@ -2461,15 +2470,15 @@ class SubgraphTracer(fx.Tracer):
 
     # Lookup the proxy in current tracer for each symbol in expressions of s,
     # See Note [Auto lift basic free symbols when create_graph_input]
-    def lookup_unbounded_symbols(self, s: torch.SymInt) -> Set[sympy.Symbol]:
+    def lookup_unbound_symbols(self, s: torch.SymInt) -> List[sympy.Symbol]:
         free_symbols = s.node.expr.free_symbols
         if len(free_symbols) == 0:
-            return set()
+            return []
 
-        to_be_bound = set()
+        to_be_bound = []
         for s0 in free_symbols:
             if s0 not in self.bound_symbols:
-                to_be_bound.add(s0)
+                to_be_bound.append(s0)
                 continue
 
             proxy = self.bound_symbols[s0]
@@ -2479,7 +2488,8 @@ class SubgraphTracer(fx.Tracer):
             assert (
                 isinstance(proxy, torch.fx.Proxy) and proxy.tracer is self
             ), f"The proxy of symbol {s0} doesn't belong to current tracer."
-        return to_be_bound
+        # Sort the symbols so that we can have a deterministic lifting order
+        return sorted(to_be_bound, key=lambda s: s.name)
 
 
 # NOTE: [HigherOrderOperator tracing design]
