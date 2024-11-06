@@ -129,7 +129,7 @@ if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
         )
 fi
 
-if [[ $CUDA_VERSION == "12.1" || $CUDA_VERSION == "12.4" ]]; then
+if [[ $CUDA_VERSION == "12.4" || $CUDA_VERSION == "12.6" ]]; then
     export USE_STATIC_CUDNN=0
     # Try parallelizing nvcc as well
     export TORCH_NVCC_FLAGS="-Xfatbin -compress-all --threads 2"
