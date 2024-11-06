@@ -17,9 +17,14 @@ from torch._dynamo.debug_utils import (
     extra_imports,
     generate_config_string,
     helper_for_dump_minify,
+    InputReader,
     minifier_dir,
+    NopInputReader,
 )
 from torch.export import ExportedProgram
+from torch.hub import tqdm
+
+from .after_aot import generate_compiler_repro_string
 
 
 log = logging.getLogger(__name__)
@@ -35,11 +40,10 @@ def dump_to_minify(
     options: Optional[Dict[str, Any]] = None,
 ):
     out = io.StringIO()
-    # TODO: factor this out
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
-    save_graph_repro(
+    save_graph_repro_ep(
         out,
         exported_program,
         compiler_name,
@@ -50,7 +54,7 @@ def dump_to_minify(
     return helper_for_dump_minify(out.getvalue())
 
 
-def save_graph_repro(
+def save_graph_repro_ep(
     fd,
     exported_program: ExportedProgram,
     compiler_name,
@@ -62,8 +66,9 @@ def save_graph_repro(
     accuracy=None,
     check_str=None,
 ):
+    # save a graph repro using exported_program
     fd.write(
-        generate_compiler_repro_string(
+        generate_compiler_repro_exported_program(
             exported_program,
             options=options,
             stable_output=stable_output,
@@ -76,12 +81,59 @@ def save_graph_repro(
     fd.write("    from torch._dynamo.repro.aoti import run_repro\n")
     fd.write(
         f"    with torch.no_grad():\n"
-        f"        run_repro(exported_program, config_patches=options, accuracy={accuracy!r}, command={command!r}, "
+        f"        run_repro(exported_program, config_patches=config_patches, accuracy={accuracy!r}, command={command!r}, "
         f"save_dir={save_dir!r}, check_str={check_str!r})\n"
     )
 
 
-def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
+def save_graph_repro_string(
+    fd,
+    gm,
+    args,
+    compiler_name,
+    *,
+    config_patches=None,
+    stable_output=False,
+    save_dir=None,
+    command="run",
+    accuracy=None,
+    tracing_mode=None,
+    check_str=None,
+):
+    # save a graph repro by dumping the `gm` as a string
+    if any(
+        isinstance(arg, torch.fx.experimental._backward_state.BackwardState)
+        for arg in args
+    ):
+        fd.write(
+            "Repro is not generated due to existence of BackwardState in graph input"
+        )
+        return
+    fd.write(
+        generate_compiler_repro_string(
+            gm,
+            args,
+            stable_output=stable_output,
+            save_dir=save_dir,
+        )
+    )
+    if accuracy is None:
+        accuracy = "_accuracy" in compiler_name
+    fd.write("if __name__ == '__main__':\n")
+    fd.write("    from torch._dynamo.repro.aoti import run_repro, repro_load_args\n")
+    fd.write(
+        f"    config_patches={config_patches}\n"
+        f"    with torch.no_grad():\n"
+        f"        args = repro_load_args(load_args, save_dir={save_dir!r})\n"
+        f"        exported_program = torch.export.export(mod, args)\n"
+        f"        run_repro(exported_program, config_patches=config_patches, accuracy={accuracy!r}, command={command!r}, "
+        f"save_dir={save_dir!r}, check_str={check_str!r})\n"
+    )
+
+
+def dump_compiler_graph_state(
+    gm, args, compiler_name, *, config_patches=None, accuracy=None
+):
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
         os.makedirs(subdir, exist_ok=True)
@@ -89,10 +141,16 @@ def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
     log.warning(
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
-    exported_program = torch.export.export(gm, tuple(args))
+    # exported_program = torch.export.export(gm, tuple(args))
     with open(file_name, "w") as fd:
-        save_graph_repro(
-            fd, exported_program, compiler_name, save_dir=subdir, accuracy=accuracy
+        save_graph_repro_string(
+            fd,
+            gm,
+            args,
+            compiler_name,
+            config_patches=config_patches,
+            save_dir=subdir,
+            accuracy=accuracy,
         )
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
@@ -110,7 +168,7 @@ def dump_compiler_graph_state(gm, args, compiler_name, *, accuracy=None):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def generate_compiler_repro_string(
+def generate_compiler_repro_exported_program(
     exported_program,
     *,
     options: Optional[Dict[str, str]] = None,
@@ -143,8 +201,34 @@ isolate_fails_code_str = None
 
     model_str += f"exported_program = torch.export.load('{ep_path}')\n"
     model_str += "# print(exported_program.graph)\n"
-    model_str += f"options={options}\n"
+    model_str += f"config_patches={options}\n"
     return model_str
+
+
+def repro_load_args(load_args, save_dir):
+    if not hasattr(load_args, "_version"):
+        log.warning(
+            "load_args does not have a _version attribute, please file a bug to PyTorch "
+            "and describe how you generate this repro script"
+        )
+    else:
+        if load_args._version > 0:
+            log.warning(
+                "load_args is version %s, but this version of PyTorch only supports "
+                "version 0.  We will try to run it anyway but there may be an incompatibility; "
+                "if so, try upgrading your version of PyTorch.",
+                load_args._version,
+            )
+
+    nop_reader = NopInputReader()
+    load_args(nop_reader)
+
+    with tqdm(desc="Loading inputs", total=nop_reader.total) as pbar:
+        input_reader = InputReader(save_dir=save_dir, pbar=pbar)
+        load_args(input_reader)
+        args = input_reader.args
+
+    return tuple(args)
 
 
 def repro_common(options, exported_program):
@@ -233,6 +317,7 @@ def repro_minify(options, exported_program, config_patches):
         dump_state=functools.partial(
             dump_compiler_graph_state,
             compiler_name=compiler_name,
+            config_patches=config_patches,
         ),
         save_dir=options.save_dir,
         offload_to_disk=options.offload_to_disk,

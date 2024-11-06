@@ -42,9 +42,6 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
-# dump an aoti minifier if program errors
-dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
-
 # use fx aot graph codegen cache
 fx_graph_cache = (
     os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE", "0" if is_fbcode() else "1") == "1"
@@ -1071,6 +1068,9 @@ class aot_inductor:
     raise_error_on_ignored_optimization: bool = (
         os.environ.get("AOTINDUCTOR_RAISE_ERROR_ON_IGNORED_OPTIMIZATION", "1") == "1"
     )
+
+    # dump an aoti minifier if program errors
+    dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
 
 
 class cuda:

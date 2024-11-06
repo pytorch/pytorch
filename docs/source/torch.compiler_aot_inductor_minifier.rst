@@ -1,20 +1,17 @@
 AOTInductor Minifier
 ===========================
 
-If you encounter an error while using :ref:`AOT Inductor <torch.compiler_aot_inductor>` APIs such as
+If you encounter an error while using AOT Inductor APIs such as
 ``torch._inductor.aoti_compile_and_package``, ``torch._indcutor.aoti_load_package``,
 or running the loaded model of ``aoti_load_package`` on some inputs, you can use the AOTInductor Minifier
-to create a minimal nn.Module that reproduce the error by setting ```torch._inductor.config.dump_aoti_minifier = True``.
+to create a minimal nn.Module that reproduce the error by setting ``from torch._inductor import config; config.aot_inductor.dump_aoti_minifier = True``.
 
 
 One a high-level, there are two steps in using the minifier:
 
-- Set ``torch._inductor.config.dump_aoti_minifier = True`` or set the environment variable ``DUMP_AOTI_MINIFIER=1``.
-Then running the script that errors would produce a ``minifier_launcher.py`` script. The output directory is configurable by setting
-``torch._dynamo.config.base_dir`` to a valid directory name.
+- Set ``from torch._inductor import config; config.aot_inductor.dump_aoti_minifier = True`` or set the environment variable ``DUMP_AOTI_MINIFIER=1``. Then running the script that errors would produce a ``minifier_launcher.py`` script. The output directory is configurable by setting ``torch._dynamo.config.base_dir`` to a valid directory name.
 
-- Run the ``minifier_launcher.py`` script.
-If the minifier runs successfully, it generates runnable python code in ``repro.py`` which reproduces the exact error.
+- Run the ``minifier_launcher.py`` script. If the minifier runs successfully, it generates runnable python code in ``repro.py`` which reproduces the exact error.
 
 Here is sample code which will generate an error because we injected an error on relu with
 ``torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY = "compile_error"``.
@@ -23,6 +20,7 @@ Here is sample code which will generate an error because we injected an error on
 .. code-block:: py
 
     import torch
+    from torch._inductor import config as inductor_config
 
     class Model(torch.nn.Module):
         def __init__(self):
@@ -38,7 +36,7 @@ Here is sample code which will generate an error because we injected an error on
             return x
 
 
-    torch._inductor.config.dump_aoti_minifier = True
+    inductor_config.aot_inductor.dump_aoti_minifier = True
     torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY = "compile_error"
 
     with torch.no_grad():
@@ -78,7 +76,7 @@ instead if ``relu``, so we get a ``SyntaxError``.
         tl.store(in_out_ptr0 + (x2), tmp4, xmask)
 
 
-Since we have ``torch._inductor.config.dump_aoti_minifier = True``, we also see an additional line indicating where ``minifier_launcher.py`` has
+Since we have ``torch._inductor.config.aot_inductor.dump_aoti_minifier=True``, we also see an additional line indicating where ``minifier_launcher.py`` has
 been written to. The output directory is configurable by setting
 ``torch._dynamo.config.base_dir`` to a valid directory name.
 
@@ -102,8 +100,8 @@ use ``command='run'`` to just compile, load, and run the loaded model (without r
     import torch._functorch.config
     import torch.fx.experimental._config
 
-    torch._inductor.config.dump_aoti_minifier = True
     torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY = 'compile_error'
+    torch._inductor.config.aot_inductor.dump_aoti_minifier = True
 
 
 
@@ -127,13 +125,13 @@ use ``command='run'`` to just compile, load, and run the loaded model (without r
     # GPU Hardware Info:
     # NVIDIA PG509-210 : 8
 
-    exported_program = torch.export.load('/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_10_31_16_21_08_602433-pid_2861654/minifier/checkpoints/exported_program.pt2')
+    exported_program = torch.export.load('/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_11_06_13_52_35_711642-pid_3567062/minifier/checkpoints/exported_program.pt2')
     # print(exported_program.graph)
-    options={}
+    config_patches={}
     if __name__ == '__main__':
         from torch._dynamo.repro.aoti import run_repro
         with torch.no_grad():
-            run_repro(exported_program, config_patches=options, accuracy=False, command='minify', save_dir='/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_10_31_16_21_08_602433-pid_2861654/minifier/checkpoints', check_str=None)
+            run_repro(exported_program, config_patches=config_patches, accuracy=False, command='minify', save_dir='/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_11_06_13_52_35_711642-pid_3567062/minifier/checkpoints', check_str=None)
 
 
 Suppose we kept the ``command='minify'`` option, and run the script, we would get the following output:
@@ -146,21 +144,16 @@ Suppose we kept the ``command='minify'`` option, and run the script, we would ge
     Wrote minimal repro out to repro.py
 
 
-The ``repro.py`` looks like this. This looks almost the same as ``minifier_launcher.py``, except we are loading a different exported program.
-The exported program now contains only the relu node. The minifier successfully reduced the graph to the op that raises the
+The ``repro.py`` looks like this. The exported program now contains only the relu node. The minifier successfully reduced the graph to the op that raises the
 error.
-
-::
-
-    print(exported_program.graph)
-    graph():
-    %linear : [num_users=1] = placeholder[target=linear]
-    %relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
-    return (relu,)
 
 .. code-block:: py
 
     import torch
+    from torch import tensor, device
+    import torch.fx as fx
+    from torch._dynamo.testing import rand_strided
+    from math import inf
     import torch._inductor.inductor_prims
 
     import torch._dynamo.config
@@ -168,9 +161,9 @@ error.
     import torch._functorch.config
     import torch.fx.experimental._config
 
-    torch._inductor.config.dump_aoti_minifier = True
     torch._inductor.config.generate_intermediate_hooks = True
     torch._inductor.config.triton.inject_relu_bug_TESTING_ONLY = 'compile_error'
+    torch._inductor.config.aot_inductor.dump_aoti_minifier = True
 
 
 
@@ -194,10 +187,27 @@ error.
     # GPU Hardware Info:
     # NVIDIA PG509-210 : 8
 
-    exported_program = torch.export.load('/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_10_31_16_48_02_720863-pid_3598491/minifier/checkpoints/exported_program.pt2')
-    # print(exported_program.graph)
-    options=None
+
+    from torch.nn import *
+    class Repro(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+
+
+
+        def forward(self, linear):
+            relu = torch.ops.aten.relu.default(linear);  linear = None
+            return (relu,)
+
+    def load_args(reader):
+        buf0 = reader.storage('a4e748c3a3d0d4a78cde43e33ad0f9dd41d96e90', 512, device=device(type='cuda', index=0))
+        reader.tensor(buf0, (8, 16), is_leaf=True)  # linear
+    load_args._version = 0
+    mod = Repro()
     if __name__ == '__main__':
-        from torch._dynamo.repro.aoti import run_repro
+        from torch._dynamo.repro.aoti import run_repro, repro_load_args
+        config_patches={}
         with torch.no_grad():
-            run_repro(exported_program, config_patches=options, accuracy=False, command='run', save_dir='/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_10_31_16_48_02_720863-pid_3598491/minifier/checkpoints', check_str=None)
+            args = repro_load_args(load_args, save_dir='/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_11_06_14_19_09_678890-pid_561538/minifier/checkpoints')
+            exported_program = torch.export.export(mod, args)
+            run_repro(exported_program, config_patches=config_patches, accuracy=False, command='run', save_dir='/data/users/shangdiy/pytorch/torch_compile_debug/run_2024_11_06_14_19_09_678890-pid_561538/minifier/checkpoints', check_str=None)

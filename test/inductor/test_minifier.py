@@ -6,7 +6,6 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch._inductor import config
-from torch.export import load as export_load
 from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
@@ -205,40 +204,42 @@ with torch.no_grad():
     @inductor_config.patch(
         {
             "cpp.inject_relu_bug_TESTING_ONLY": "compile_error",
-            "dump_aoti_minifier": True,
+            "aot_inductor.dump_aoti_minifier": True,
         }
     )
     def test_aoti_cpu_compile_error(self):
         res = self._test_aoti("cpu", "CppCompileError")
-        ep_file_path = res.get_exported_program_path()
-        gm = export_load(ep_file_path).module()
         self.assertExpectedInline(
-            str(gm.code).strip(),
+            res.repro_module(),
             """\
-def forward(self, linear):
-    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
-    relu = torch.ops.aten.relu.default(linear);  linear = None
-    return pytree.tree_unflatten((relu,), self._out_spec)""",
+class Repro(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, linear):
+        relu = torch.ops.aten.relu.default(linear);  linear = None
+        return (relu,)""",
         )
 
     @requires_gpu
     @inductor_config.patch(
         {
             "triton.inject_relu_bug_TESTING_ONLY": "compile_error",
-            "dump_aoti_minifier": True,
+            "aot_inductor.dump_aoti_minifier": True,
         }
     )
     def test_aoti_gpu_compile_error(self):
         res = self._test_aoti(GPU_TYPE, "SyntaxError")
-        ep_file_path = res.get_exported_program_path()
-        gm = export_load(ep_file_path).module()
         self.assertExpectedInline(
-            str(gm.code).strip(),
+            res.repro_module(),
             """\
-def forward(self, linear):
-    linear, = fx_pytree.tree_flatten_spec(([linear], {}), self._in_spec)
-    relu = torch.ops.aten.relu.default(linear);  linear = None
-    return pytree.tree_unflatten((relu,), self._out_spec)""",
+class Repro(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, linear):
+        relu = torch.ops.aten.relu.default(linear);  linear = None
+        return (relu,)""",
         )
 
 

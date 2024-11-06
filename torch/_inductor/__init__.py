@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
+import torch._inductor.config
 import torch.fx
 import torch.utils._pytree as pytree
 
@@ -149,7 +150,7 @@ def aoti_compile_and_package_debug_wrapper(
     m = exported_program.module()
     assert isinstance(m, torch.fx.GraphModule)
 
-    use_minifier = torch._inductor.config.dump_aoti_minifier
+    use_minifier = torch._inductor.config.aot_inductor.dump_aoti_minifier
 
     try:
         return _aoti_compile_and_package_inner(
