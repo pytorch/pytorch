@@ -1386,6 +1386,10 @@ elements, have ``nan`` values.
 {reduction_example}"""
     if dtype is None:
         dtype = input.dtype
+    if dtype is torch.bool:
+        # upcast dtype when computing mean of boolean tensors otherwise
+        # sum(..., dtype=torch.bool) is clamped to 1
+        dtype = torch.int32
     if input.layout == torch.strided:
         if mask is None:
             # TODO: compute count analytically
