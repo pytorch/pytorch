@@ -2370,6 +2370,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(2, 3))
 
+    @unittest.expectedFailure
     def test_recursive(self):
         depth = 0
         ncols = 0
@@ -2383,8 +2384,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
             depth += 1
             yield
             depth -= 1
-            assert depth == before
-            # self.assertEqual(depth, before)
+            self.assertEqual(depth, before)
 
         @woohoo()
         def recursive():

@@ -518,19 +518,22 @@ class ConvertFrameAssert:
         if is_generator(code):
             unimplemented("generator")
 
+        f_locals = frame.f_locals
         if (
             frame.f_code.co_name in ("__enter__", "__exit__")
-            and len(frame.f_locals) == 1
+            and len(f_locals) == 1
             and any(
                 type(a) is contextlib._GeneratorContextManager
-                for a in frame.f_locals.values()
+                for a in f_locals.values()
             )
         ):
-            # ctx = next(a for a in frame.f_locals.values() if is_ctx_manager(a))
+            ctx = next(
+                a
+                for a in f_locals.values()
+                if type(a) is contextlib._GeneratorContextManager
+            )
             skip_code(frame.f_code)
-            ctx = frame.f_locals["self"]
             skip_code(ctx.gen.gi_frame.f_code)
-            # return torch._C._dynamo.eval_frame.skip_code_recursive_flag
 
         if not has_tensor_in_frame(frame):
             return None
@@ -995,12 +998,7 @@ def _compile(
         fail_reason: Optional[str] = None
         fail_user_frame_filename: Optional[str] = None
         fail_user_frame_lineno: Optional[int] = None
-        start_possibly_missed_reinplacing_opportunities = torch._dynamo.utils.counters[
-            "inductor"
-        ]["possibly_missed_reinplacing_opportunities"]
-        start_possibly_missed_reinplacing_bytes = torch._dynamo.utils.counters[
-            "inductor"
-        ]["start_possibly_missed_reinplacing_bytes"]
+        torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
@@ -1078,33 +1076,17 @@ def _compile(
                 compliant_custom_ops = {
                     op.__qualname__ for op in output.compliant_custom_ops
                 }
-                possibly_missed_reinplacing_opportunities = (
-                    torch._dynamo.utils.counters["inductor"][
-                        "possibly_missed_reinplacing_opportunities"
-                    ]
-                    - start_possibly_missed_reinplacing_opportunities
-                )
                 remote_cache_time_saved = frame_phase_timing[frame_key].get(
                     "remote_cache_time_saved", 0
                 )
-                possibly_missed_reinplacing_bytes = (
-                    torch._dynamo.utils.counters["inductor"][
-                        "possibly_missed_reinplacing_bytes"
-                    ]
-                    - start_possibly_missed_reinplacing_bytes
-                )
-                if possibly_missed_reinplacing_bytes != 0:
-                    signpost_event(
-                        "inductor",
-                        "auto_functionalize",
-                        {"missed_reinplacing_bytes": possibly_missed_reinplacing_bytes},
-                    )
                 remote_fx_graph_cache_get_time = frame_phase_timing[frame_key].get(
                     "remote_fx_graph_cache_get", None
                 )
                 remote_fx_graph_cache_put_time = frame_phase_timing[frame_key].get(
                     "remote_fx_graph_cache_put", None
                 )
+                torch._dynamo.utils.ReinplaceCounters.log()
+
             else:
                 guard_count = None
                 shape_env_guard_count = None
@@ -1120,7 +1102,6 @@ def _compile(
                 restart_reasons = set()
                 # If compilation failed, the entire time is wasted
                 dynamo_time_before_restart = duration_ns / 1e9
-                possibly_missed_reinplacing_opportunities = None
                 remote_cache_time_saved = None
                 remote_fx_graph_cache_get_time = None
                 remote_fx_graph_cache_put_time = None
@@ -1185,7 +1166,6 @@ def _compile(
                 restart_reasons,
                 dynamo_time_before_restart,
                 guarded_code is not None,
-                possibly_missed_reinplacing_opportunities,
                 remote_cache_time_saved,
                 structured_logging_overhead_s,
                 config.suppress_errors,
