@@ -128,8 +128,6 @@ def _from_dynamic_axes_to_dynamic_shapes(
 
 
 def _from_dynamic_shapes_to_dynamic_axes(
-    model,
-    *,
     dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any],
     input_names: Sequence[str] | None = None,
 ) -> dict[str, Any] | None:
@@ -319,7 +317,6 @@ def export_compat(
                 raise TypeError("f must be provided when fallback is enabled") from e
             if dynamic_shapes is not None and dynamic_axes is None:
                 dynamic_axes = _from_dynamic_shapes_to_dynamic_axes(
-                    model,
                     dynamic_shapes=dynamic_shapes,
                     input_names=input_names,
                 )
