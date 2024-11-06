@@ -11,7 +11,7 @@
 
 namespace {
 
-static inline void swapBytes16(void* ptr) {
+static void swapBytes16(void* ptr) {
   uint16_t output = 0;
   memcpy(&output, ptr, sizeof(uint16_t));
 #if defined(_MSC_VER) && !defined(_DEBUG)
@@ -26,7 +26,7 @@ static inline void swapBytes16(void* ptr) {
   memcpy(ptr, &output, sizeof(uint16_t));
 }
 
-static inline void swapBytes32(void* ptr) {
+static void swapBytes32(void* ptr) {
   uint32_t output = 0;
   memcpy(&output, ptr, sizeof(uint32_t));
 #if defined(_MSC_VER) && !defined(_DEBUG)
@@ -43,7 +43,7 @@ static inline void swapBytes32(void* ptr) {
   memcpy(ptr, &output, sizeof(uint32_t));
 }
 
-static inline void swapBytes64(void* ptr) {
+static void swapBytes64(void* ptr) {
   uint64_t output = 0;
   memcpy(&output, ptr, sizeof(uint64_t));
 #if defined(_MSC_VER)
@@ -66,37 +66,37 @@ static inline void swapBytes64(void* ptr) {
   memcpy(ptr, &output, sizeof(uint64_t));
 }
 
-static inline uint16_t decodeUInt16(const uint8_t* data) {
+static uint16_t decodeUInt16(const uint8_t* data) {
   uint16_t output = 0;
   memcpy(&output, data, sizeof(uint16_t));
   return output;
 }
 
-static inline uint16_t decodeUInt16ByteSwapped(const uint8_t* data) {
+static uint16_t decodeUInt16ByteSwapped(const uint8_t* data) {
   uint16_t output = decodeUInt16(data);
   swapBytes16(&output);
   return output;
 }
 
-static inline uint32_t decodeUInt32(const uint8_t* data) {
+static uint32_t decodeUInt32(const uint8_t* data) {
   uint32_t output = 0;
   memcpy(&output, data, sizeof(uint32_t));
   return output;
 }
 
-static inline uint32_t decodeUInt32ByteSwapped(const uint8_t* data) {
+static uint32_t decodeUInt32ByteSwapped(const uint8_t* data) {
   uint32_t output = decodeUInt32(data);
   swapBytes32(&output);
   return output;
 }
 
-static inline uint64_t decodeUInt64(const uint8_t* data) {
+static uint64_t decodeUInt64(const uint8_t* data) {
   uint64_t output = 0;
   memcpy(&output, data, sizeof(uint64_t));
   return output;
 }
 
-static inline uint64_t decodeUInt64ByteSwapped(const uint8_t* data) {
+static uint64_t decodeUInt64ByteSwapped(const uint8_t* data) {
   uint64_t output = decodeUInt64(data);
   swapBytes64(&output);
   return output;
@@ -315,7 +315,7 @@ void THP_encodeBuffer(
 }
 
 template <typename T>
-std::vector<T> complex_to_float(const c10::complex<T>* src, size_t len) {
+static std::vector<T> complex_to_float(const c10::complex<T>* src, size_t len) {
   std::vector<T> new_src;
   new_src.reserve(2 * len);
   for (const auto i : c10::irange(len)) {
@@ -362,7 +362,7 @@ TORCH_API void THP_encodeBuffer<c10::complex<double>>(
 
 #define DEFINE_ENCODE(TYPE)                       \
   template TORCH_API void THP_encodeBuffer<TYPE>( \
-      uint8_t * dst, const TYPE* src, THPByteOrder order, size_t len);
+      uint8_t* dst, const TYPE* src, THPByteOrder order, size_t len);
 
 DEFINE_ENCODE(int16_t)
 DEFINE_ENCODE(int32_t)

@@ -1076,7 +1076,7 @@ std::string FunctionParameter::type_name() const {
   }
 }
 
-static inline std::optional<int64_t> parse_as_integer(const std::string& s) {
+static std::optional<int64_t> parse_as_integer(const std::string& s) {
   if (s.empty())
     return std::nullopt;
   char* str_end = nullptr;
