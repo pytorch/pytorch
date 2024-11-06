@@ -72,8 +72,6 @@ include_patterns = [
     'aten/src/ATen/native/mkldnn/xpu/**/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
-    'distributed/c10d/*DMAConnectivity.*',
-    'distributed/c10d/*SymmetricMemory.*',
     'torch/csrc/**/*.h',
     'torch/csrc/**/*.hpp',
     'torch/csrc/**/*.cpp',
