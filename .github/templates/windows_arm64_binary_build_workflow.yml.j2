@@ -69,6 +69,8 @@ jobs:
     needs: get-label-type
     {%- if branches == "nightly" %}
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
+    {%- else %}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
     {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
@@ -76,7 +78,7 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
-      {# !{{ common.setup_ec2_windows() }} #}
+      !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
@@ -104,11 +106,16 @@ jobs:
 {%- if config["gpu_arch_type"] == "cuda" %}
 {%- if branches == "nightly" %}
     runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
+{%- else %}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
+{%- endif %}
+{%- else %}
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}windows-11-arm64"
 {%- endif %}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config, True) }}
     steps:
-      {# !{{ common.setup_ec2_windows() }} #}
+      !{{ common.setup_ec2_windows() }}
       !{{ set_runner_specific_vars() }}
       - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
