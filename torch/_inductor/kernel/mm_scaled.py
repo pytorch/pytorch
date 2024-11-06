@@ -29,6 +29,7 @@ from .mm_common import (
 )
 
 
+_TMA_SIZE = 128
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
@@ -108,7 +109,6 @@ device_tma = r"""
     k_tiles = tl.cdiv(K, BLOCK_K)
     num_tiles = num_pid_m * num_pid_n
 
-    TMA_SIZE: tl.constexpr = 128
     workspace_base = ws_ptr + start_pid * 3 * TMA_SIZE
     a_desc_ptr = workspace_base
     b_desc_ptr = workspace_base + TMA_SIZE
@@ -421,7 +421,6 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
         f"or 1-dimensional tensors with the same size. Got scale_a: {len(size_a)} and scale_b: {len(size_b)}."
     )
     NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
-    tma_size = 128
     return dict(
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
@@ -432,6 +431,7 @@ def scaled_mm_options_device_tma(  # type: ignore[no-untyped-def]
         num_warps=config.num_warps,
         # tensor-wise scaling if scalar scales
         SCALING_ROWWISE=len(scale_a.get_size()) == 2,
+        TMA_SIZE=_TMA_SIZE,
         NUM_SMS=NUM_SMS,
         **config.kwargs,
     )
@@ -475,7 +475,7 @@ add_layout_constraint(aten._scaled_mm.default, constrain_to_fx_strides)
 
 
 def get_workspace_size(
-    num_sms: int, TMA_SIZE: int = 128, NUM_TMA_DESCRIPTORS: int = 3
+    num_sms: int, TMA_SIZE: int = _TMA_SIZE, NUM_TMA_DESCRIPTORS: int = 3
 ) -> int:
     """Device side TMA requires a workspace buffer to be allocated in global memory."""
     return num_sms * NUM_TMA_DESCRIPTORS * TMA_SIZE
