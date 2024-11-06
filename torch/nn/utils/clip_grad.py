@@ -17,8 +17,6 @@ __all__ = [
     "clip_grad_norm_",
     "clip_grad_norm",
     "clip_grad_value_",
-    "clip_grads_with_norm_",
-    "get_total_norm",
 ]
 
 
@@ -40,7 +38,7 @@ def _no_grad(func):
 
 
 @_no_grad
-def get_total_norm(
+def _get_total_norm(
     tensors: _tensor_or_tensors,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
@@ -111,7 +109,7 @@ def get_total_norm(
 
 
 @_no_grad
-def clip_grads_with_norm_(
+def _clip_grads_with_norm_(
     parameters: _tensor_or_tensors,
     max_norm: float,
     total_norm: torch.Tensor,
@@ -214,8 +212,8 @@ def clip_grad_norm_(
         # prevent generators from being exhausted
         parameters = list(parameters)
     grads = [p.grad for p in parameters if p.grad is not None]
-    total_norm = get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
-    clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
+    total_norm = _get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
+    _clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
     return total_norm
 
 

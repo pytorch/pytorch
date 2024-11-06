@@ -1,10 +1,10 @@
 from . import parametrizations, rnn, stateless
 from .clip_grad import (
+    _clip_grads_with_norm_ as clip_grads_with_norm_,
+    _get_total_norm as get_total_norm,
     clip_grad_norm,
     clip_grad_norm_,
     clip_grad_value_,
-    clip_grads_with_norm_,
-    get_total_norm,
 )
 from .convert_parameters import parameters_to_vector, vector_to_parameters
 from .fusion import (
