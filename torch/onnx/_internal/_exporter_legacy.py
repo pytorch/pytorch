@@ -400,10 +400,12 @@ def enable_fake_mode():
         ...     def forward(self, x):
         ...         return self.weight + x
         >>> with torch.onnx.enable_fake_mode():
+        ...     # When initialized in fake mode, the model's parameters are fake tensors
+        ...     # They do not take up memory so we can initialize large models
         ...     my_nn_module = MyModel()
         ...     arg1 = torch.randn(2, 2, 2)
         >>> onnx_program = torch.onnx.export(my_nn_module, (arg1,), dynamo=True)
-        >>> # Saving model WITHOUT initializers
+        >>> # Saving model WITHOUT initializers (only the architecture)
         >>> onnx_program.save(
         ...     "my_model_without_initializers.onnx",
         ...     include_initializers=False,
