@@ -3,6 +3,7 @@ import pickle
 
 from torch.testing._internal import fake_config_module as config
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.utils._config_module import _UNSET_SENTINEL
 
 
 class TestConfigModule(TestCase):
@@ -50,26 +51,24 @@ class TestConfigModule(TestCase):
         ):
             config.does_not_exist = 0
         # Config changes get persisted between test cases
-        config.e_bool = True
-        config.nested.e_bool = True
-        config.e_int = 1
-        config.e_float = 1.0
-        config.e_string = "string"
-        config.e_list = [1]
-        config.e_set = {1}
-        config.e_tuple = (1,)
-        config.e_dict = {1: 2}
-        config.e_none = None
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
-    def test_delete(self):
-        self.assertTrue(config.e_bool)
-        del config.e_bool
-        with self.assertRaises(
-            AttributeError, msg="fake_config_module.e_bool does not exist"
-        ):
-            print(config.e_bool)
-        # Config changes get persisted between test cases
-        config.e_bool = True
+    def test_none_override_semantics(self):
+        config.e_bool = None
+        self.assertIsNone(config.e_bool)
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
+
+    def test_reference_semantics(self):
+        config.e_list.append(2)
+        self.assertEqual(config.e_list, [1, 2])
+        config.e_set.add(2)
+        self.assertEqual(config.e_set, {1, 2})
+        config.e_dict[2] = 3
+        self.assertEqual(config.e_dict, {1: 2, 2: 3})
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_save_config(self):
         p = config.save_config()
@@ -91,6 +90,9 @@ class TestConfigModule(TestCase):
                 "e_compile_ignored": True,
                 "magic_cache_config_ignored": True,
                 "_save_config_ignore": ["e_ignored"],
+                "e_config": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         config.e_bool = False
@@ -98,8 +100,8 @@ class TestConfigModule(TestCase):
         config.load_config(p)
         self.assertTrue(config.e_bool)
         self.assertFalse(config.e_ignored)
-        # Config changes get persisted between test cases
-        config.e_ignored = True
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_save_config_portable(self):
         p = config.save_config_portable()
@@ -118,6 +120,9 @@ class TestConfigModule(TestCase):
                 "nested.e_bool": True,
                 "e_ignored": True,
                 "e_compile_ignored": True,
+                "e_config": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         config.e_bool = False
@@ -126,46 +131,52 @@ class TestConfigModule(TestCase):
         self.assertTrue(config.e_bool)
         self.assertFalse(config._e_ignored)
         # Config changes get persisted between test cases
-        config._e_ignored = True
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_codegen_config(self):
         config.e_bool = False
         config.e_ignored = False
         code = config.codegen_config()
         self.assertEqual(
-            code, "torch.testing._internal.fake_config_module.e_bool = False"
+            code,
+            """torch.testing._internal.fake_config_module.e_bool = False
+torch.testing._internal.fake_config_module.e_list = [1]
+torch.testing._internal.fake_config_module.e_set = {1}
+torch.testing._internal.fake_config_module.e_dict = {1: 2}
+torch.testing._internal.fake_config_module._save_config_ignore = ['e_ignored']""",
         )
         # Config changes get persisted between test cases
-        config.e_bool = True
-        config.e_ignored = True
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_get_hash(self):
         self.assertEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         # Test cached value
         self.assertEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         self.assertEqual(
-            config._hash_digest, b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         config._hash_digest = "fake"
         self.assertEqual(config.get_hash(), "fake")
 
-        # BUG
         config.e_bool = False
         self.assertNotEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
         config.e_bool = True
 
         # Test ignored values
         config.e_compile_ignored = False
         self.assertEqual(
-            config.get_hash(), b"\xcd\x96\x93\xf5(\xf8(\xa5\x1c+O\n\xd3_\x0b\xa6"
+            config.get_hash(), b"\xa8\xe0\x9b\xfc*\xc4P\xb5g\x1e_\x03 \x7fA\x05"
         )
-        config.e_compile_ignored = True
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_dict_copy_semantics(self):
         p = config.shallow_copy_dict()
@@ -188,6 +199,9 @@ class TestConfigModule(TestCase):
                 "_cache_config_ignore_prefix": ["magic_cache_config"],
                 "_save_config_ignore": ["e_ignored"],
                 "magic_cache_config_ignored": True,
+                "e_config": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         p2 = config.to_dict()
@@ -210,6 +224,9 @@ class TestConfigModule(TestCase):
                 "_cache_config_ignore_prefix": ["magic_cache_config"],
                 "_save_config_ignore": ["e_ignored"],
                 "magic_cache_config_ignored": True,
+                "e_config": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
         p3 = config.get_config_copy()
@@ -232,6 +249,9 @@ class TestConfigModule(TestCase):
                 "_cache_config_ignore_prefix": ["magic_cache_config"],
                 "_save_config_ignore": ["e_ignored"],
                 "magic_cache_config_ignored": True,
+                "e_config": True,
+                "e_jk": True,
+                "e_jk_false": False,
             },
         )
 
@@ -240,9 +260,11 @@ class TestConfigModule(TestCase):
         self.assertEqual(p["e_dict"], {1: 2})
         self.assertEqual(p2["e_dict"], {1: 2})
         self.assertEqual(p3["e_dict"], {1: 2})
-        config.e_dict = {1: 2}
+        for k in config._config:
+            config._config[k].user_override = _UNSET_SENTINEL
 
     def test_patch(self):
+        self.assertTrue(config.e_bool)
         with config.patch("e_bool", False):
             self.assertFalse(config.e_bool)
         self.assertTrue(config.e_bool)
