@@ -3956,6 +3956,19 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
 
     @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
+    def test_memory_usage(self):
+        """
+        Verify memory activity reports a percentage output on memory utilization
+        """
+        a = torch.randn(16384, 16384).cuda()
+        b = torch.randn(16384, 16384).cuda()
+        res = a + b
+        torch.cuda.synchronize()
+        mem_utilization = torch.cuda.memory_usage()
+        print(mem_utilization)
+        self.assertTrue(mem_utilization > 0, mem_utilization <= 100)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
     def test_raw_amdsmi_device_count(self):
         """
