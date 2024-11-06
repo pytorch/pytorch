@@ -1811,6 +1811,8 @@ class GuardBuilder(GuardBuilderBase):
         if config.enable_cpp_symbolic_shape_guards:
             import ctypes
 
+            import sympy
+
             from torch._inductor.codecache import CppCodeCache
             from torch._inductor.codegen.cpp_utils import cexpr
 
@@ -1822,7 +1824,13 @@ class GuardBuilder(GuardBuilderBase):
                 for symbol, sources in symbols_to_sources.items():
                     existing_symbol = all_sources.get(sources[0], None)
                     if existing_symbol is None:
-                        all_sources[sources[0]] = symbol
+                        mangled_name = re.sub("[^0-9a-zA-Z_]+", "_", symbol.name)
+                        if symbol.name == mangled_name:
+                            all_sources[sources[0]] = symbol
+                        else:
+                            new_symbol = sympy.Symbol(mangled_name)
+                            all_sources[sources[0]] = new_symbol
+                            replacements[symbol] = new_symbol
                     else:
                         if existing_symbol != symbol:
                             replacements[symbol] = existing_symbol
@@ -1832,46 +1840,54 @@ class GuardBuilder(GuardBuilderBase):
                 else:
                     all_exprs.append(expr)
 
-            guard_managers = [
-                self.get_guard_manager_from_source(IndexedSource(source, i))
-                for i, source in enumerate(all_sources)
-            ]
-            all_symbols = list(all_sources.values())
+            try:
+                guard_managers = [
+                    self.get_guard_manager_from_source(IndexedSource(source, i))
+                    for i, source in enumerate(all_sources)
+                ]
+                all_symbols = list(all_sources.values())
 
-            values_str = ", ".join(
-                f"{symbol} = values[{i}]" for i, symbol in enumerate(all_symbols)
-            )
-            func_str = textwrap.dedent(
-                f"""
-            #include <cstdint>
-            #include <cmath>
-            #include <c10/util/generic_math.h>
+                values_str = ", ".join(
+                    f"{symbol} = values[{i}]" for i, symbol in enumerate(all_symbols)
+                )
+                func_str = textwrap.dedent(
+                    f"""
+                #include <cstdint>
+                #include <cmath>
+                #include <c10/util/generic_math.h>
 
-            extern "C" int64_t guard(int64_t *values) {{
-              int64_t {values_str};
-              return ({") && (".join(cexpr(expr) for expr in all_exprs)});
-            }}
-            """
-            )
-            clib = CppCodeCache.load(func_str)
-            cguard = ctypes.cast(clib.guard, ctypes.c_void_p).value
-            assert cguard
-            install_symbolic_shape_guard(
-                guard_managers,
-                len(all_symbols),
-                cguard,
-                clib,
-                verbose_code_parts,
-            )
-        else:
-            # Install all the symbolic guards in one lambda guard. These are run
-            # at the very end of the RootGuardManager via epilogue guards.
-            # TODO(anijain2305,williamwen42) - Consider moving this to C++.
-            self.add_python_lambda_leaf_guard_to_root(
-                code_parts,
-                verbose_code_parts,
-                closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
-            )
+                extern "C" int64_t guard(int64_t *values) {{
+                  int64_t {values_str};
+                  return ({") && (".join(cexpr(expr) for expr in all_exprs)});
+                }}
+                """
+                )
+                clib = CppCodeCache.load(func_str)
+                cguard = ctypes.cast(clib.guard, ctypes.c_void_p).value
+                assert cguard
+            except NameError:
+                # Happens when there are ConstantSource
+                pass
+            except torch._inductor.exc.InvalidCxxCompiler:
+                # No valid C++ compiler to compile the shape guard
+                pass
+            else:
+                install_symbolic_shape_guard(
+                    guard_managers,
+                    len(all_symbols),
+                    cguard,
+                    clib,
+                    verbose_code_parts,
+                )
+                return
+
+        # Install all the symbolic guards in one python lambda guard. These are run
+        # at the very end of the RootGuardManager via epilogue guards.
+        self.add_python_lambda_leaf_guard_to_root(
+            code_parts,
+            verbose_code_parts,
+            closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
+        )
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         # For FSDP modules, we can skip guards on nn module tensors because FSDP

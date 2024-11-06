@@ -4847,9 +4847,7 @@ class ShapeEnv:
                 if is_dim(source):
                     self.dim_constraints.add_equality(source, expr)
 
-                symbol = self.source_to_symbol.get(
-                    srcname, sympy.Symbol(re.sub("[^0-9a-zA-Z_]+", "_", srcname))
-                )
+                symbol = self.source_to_symbol.get(srcname, sympy.Symbol(srcname))
                 eq_expr = sympy.Eq(symbol, expr, evaluate=False)
                 extended_symbol_to_source = {symbol: [source], **symbol_to_source}
                 res = ShapeGuardPrinter(
@@ -5068,9 +5066,7 @@ class ShapeEnv:
             # merry hell with the reasoning.
             if symbol_is_type(symbol, SymT.FLOAT):
                 expr = sympy.Not(
-                    sympy.Function("__math_isnan")(
-                        sympy.Symbol(re.sub("[^0-9a-zA-Z_]+", "_", sources[0].name()))
-                    )
+                    sympy.Function("__math_isnan")(sympy.Symbol(sources[0].name()))
                 )
                 res = f"not __math_isnan({source_ref(sources[0])})"
                 python_exprs.append(res)
