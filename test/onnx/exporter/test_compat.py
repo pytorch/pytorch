@@ -13,6 +13,22 @@ class SampleModelForDynamicShapes(torch.nn.Module):
         return x.relu(), b.sigmoid()
 
 
+class NestedModelForDynamicShapes(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.u = torch.nn.Buffer(torch.ones(1))
+        self.v = torch.nn.Buffer(torch.ones(1))
+
+    def forward(self, x, ys, zs, c):
+        y = ys[0] + ys[1] + zs["a"] + zs["b"]
+        self.v.add_(3)
+        w = self.u - self.v
+        if x.shape[0] < 3 and c.shape[0] != 4:
+            return x + w, x + y
+        else:
+            return x - w, x - y
+
+
 @common_utils.instantiate_parametrized_tests
 class TestCompat(common_utils.TestCase):
     @common_utils.parametrize(
@@ -44,10 +60,10 @@ class TestCompat(common_utils.TestCase):
                         2: torch.export.Dim("customb_dim_2"),
                     },
                 ),
-                ["input_x"],
+                ["input_x", "input_b"],
                 {
                     "input_x": {0: "customx_dim_0", 1: "customx_dim_1"},
-                    "b": {0: "customb_dim_0", 2: "customb_dim_2"},
+                    "input_b": {0: "customb_dim_0", 2: "customb_dim_2"},
                 },
             ),
             (
@@ -56,12 +72,10 @@ class TestCompat(common_utils.TestCase):
                         0: torch.export.Dim("customx_dim_0"),
                         1: torch.export.Dim("customx_dim_1"),
                     },
-                    {0: torch.export.Dim("customb_dim_0"), 1: None, 2: None},
                 ),
-                None,
+                ["x"],
                 {
                     "x": {0: "customx_dim_0", 1: "customx_dim_1"},
-                    "b": {0: "customb_dim_0"},
                 },
             ),
         ],
@@ -73,6 +87,29 @@ class TestCompat(common_utils.TestCase):
         dynamic_axes = _compat._from_dynamic_shapes_to_dynamic_axes(
             model, dynamic_shapes=dynamic_shapes, input_names=input_names
         )
+        self.assertEqual(dynamic_axes, expected_dynamic_axes)
+
+    def test_dynamic_shapes_supports_nested_input_model_with_input_names_assigned(self):
+        model = NestedModelForDynamicShapes()
+        dim = torch.export.Dim("dim", min=3)
+        dynamic_shapes = (
+            {0: dim},
+            [{0: dim}, {0: dim}],
+            {"a": {0: dim}, "b": {0: dim}},
+            None,
+        )
+        # kwargs can still be renamed as long as it's in order
+        input_names = ["input_x", "input_y", "input_z", "d", "e", "f"]
+        dynamic_axes = _compat._from_dynamic_shapes_to_dynamic_axes(
+            model, dynamic_shapes=dynamic_shapes, input_names=input_names
+        )
+        expected_dynamic_axes = {
+            "input_x": {0: "dim"},
+            "input_y": {0: "dim"},
+            "input_z": {0: "dim"},
+            "d": {0: "dim"},
+            "e": {0: "dim"},
+        }
         self.assertEqual(dynamic_axes, expected_dynamic_axes)
 
 
