@@ -690,6 +690,34 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
       " milliseconds before timing out.");
 
   LOG(ERROR) << exceptionMsg;
+
+  // Get the stack trace of the work at call time
+  // First step we get the corresponding record entry from FR, based on work's
+  // trace_id_
+  std::optional<NCCLTraceBuffer::Entry> entry =
+      NCCLTraceBuffer::get()->getEntry(trace_id_);
+  if (entry.has_value()) {
+    auto entryVal = entry.value();
+    // Get stack trace from FR entry, in string format
+    // Note: `getTraceback` call below invokes `torch::symbolize`, which may
+    // need to acquire the GIL. In order for watchdog to be block-free, we make
+    // the call with std::async.
+    auto future = std::async(
+        std::launch::async, [&entryVal]() { return entryVal.getTraceback(); });
+    // Wait for the future to complete or timeout
+    auto status = future.wait_for(std::chrono::seconds(8));
+    if (status == std::future_status::ready) {
+      std::string tracebackStr = future.get();
+      LOG(ERROR) << "Stack trace of the timedout collective operation: \n"
+                 << tracebackStr;
+    } // else, symbolizer probably timed out, we skip logging the stack trace.
+  } else {
+    LOG(ERROR)
+        << "Stack trace of the timedout collective not found, "
+        << "potentially because FlightRecorder is disabled. "
+        << "You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.";
+  }
+
   std::exception_ptr exception_ptr =
       std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exceptionMsg));
   setException(exception_ptr);
@@ -1063,7 +1091,7 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   const auto key = getKeyFromDevice(device);
   LOG(INFO) << logPrefix() << "Eagerly connecting nccl backend with device "
             << device;
-  getNCCLComm(key, device, OpType::ALLREDUCE);
+  initNCCLComm(key, device, OpType::ALLREDUCE);
 }
 
 bool ProcessGroupNCCL::useNonblocking() {
@@ -1109,7 +1137,11 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
             << device << ", key " << key << ", i am " << this;
   bool useNb = useNonblocking();
   options_->config.blocking = useNb ? 0 : 1;
-  auto comm = getNCCLComm(key, device, OpType::ALLREDUCE);
+  auto comm = getNCCLComm(key);
+  if (comm == nullptr) {
+    LOG(ERROR) << logPrefix()
+               << "No parent communicator exists for nocolor split";
+  }
   NCCLComm::split(
       comm.get(),
       NCCL_SPLIT_NOCOLOR,
@@ -1239,8 +1271,8 @@ void ProcessGroupNCCL::waitForFutureOrTimeout(
     try {
       bool result = fut.get();
       if (result) {
-        LOG(INFO) << logPrefix()
-                  << "future is successfully executed for: " << futDescription;
+        VLOG(2) << logPrefix()
+                << "future is successfully executed for: " << futDescription;
         if (log) {
           data.strings["status"] = "SUCCESS";
         }
@@ -1307,8 +1339,9 @@ void ProcessGroupNCCL::abortCommsFromMap(
       // TODO: fix `getIndexFromDeviceKey` or fix `DeviceKey`
       gpuGuard.set_index(deviceIndex);
     }
-    LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
-              << ncclComm->repr() << " on CUDA device: " << devName;
+
+    VLOG(2) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
+            << ncclComm->repr() << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
     // Note that we don't remove the aborted communicators from the
     // cache. The reason is that if we do remove the communicator
@@ -1320,8 +1353,8 @@ void ProcessGroupNCCL::abortCommsFromMap(
     // their responsibility to destroy the process group and recreate
     // it to recover from errors.
 
-    LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroyed "
-              << " communicator on CUDA device: " << devName;
+    VLOG(2) << logPrefix() << "ProcessGroupNCCL destroyed "
+            << " communicator on CUDA device: " << devName;
   }
 }
 
@@ -1387,7 +1420,7 @@ void ProcessGroupNCCL::shutdown() {
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 ProcessGroupNCCL::~ProcessGroupNCCL() {
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
+  VLOG(2) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
   if (!terminateProcessGroup_.load()) {
     if (rank_ % localDeviceCount_ == 0) {
@@ -1409,19 +1442,19 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   if (!blockingWait_) {
     if (ncclCommWatchdogThread_.joinable()) {
       ncclCommWatchdogThread_.join();
-      LOG(INFO) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
+      VLOG(2) << logPrefix() << "ProcessGroupNCCL watchdog thread joined.";
     }
     if (ncclHeartbeatMonitorThread_.joinable()) {
       ncclHeartbeatMonitorThread_.join();
-      LOG(INFO) << logPrefix()
-                << "ProcessGroupNCCL heart beat monitor thread joined.";
+      VLOG(2) << logPrefix()
+              << "ProcessGroupNCCL heart beat monitor thread joined.";
     }
   }
 #endif
   if (onCompletionHookThread_.joinable()) {
     onCompletionHookThread_.join();
-    LOG(INFO) << logPrefix()
-              << "ProcessGroupNCCL onCompletionHookThread thread joined.";
+    VLOG(2) << logPrefix()
+            << "ProcessGroupNCCL onCompletionHookThread thread joined.";
   }
 }
 
@@ -1669,7 +1702,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           << "Could not acquire GIL within 300 ms on exit, possible GIL induced hang";
     }
   } else {
-    LOG(INFO)
+    VLOG(2)
         << logPrefix()
         << "GIL checker was not registered, perhaps this is a no-python build?";
   }
@@ -1744,7 +1777,7 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
   } catch (std::exception& e) {
     if (std::string(e.what()).find("driver shutting down") !=
         std::string::npos) {
-      LOG(INFO)
+      VLOG(2)
           << logPrefix()
           << "main process destroyed cuda before watchdog loop exited, terminating watchdog."
           << " (Watchdog caught exception: " << e.what();
@@ -1919,6 +1952,8 @@ void ProcessGroupNCCL::watchdogHandler() {
           pgStatus_->lastCompletedNumelIn;
       data.integers["last_completed_numel_out"] =
           pgStatus_->lastCompletedNumelOut;
+      data.integers["last_started_numel_in"] = pgStatus_->lastStartedNumelIn;
+      data.integers["last_started_numel_out"] = pgStatus_->lastStartedNumelOut;
       // logging strings
       data.strings["last_enqueued_work_name"] = pgStatus_->lastEnqueuedWorkName;
       data.strings["last_started_work_name"] = pgStatus_->lastStartedWorkName;
@@ -2057,6 +2092,8 @@ void ProcessGroupNCCL::watchdogHandler() {
           work.isStarted()) {
         pgStatus_->lastStartedSeq = static_cast<int64_t>(work.seq_);
         pgStatus_->lastStartedWorkName = opTypeToString(work.opType_);
+        pgStatus_->lastStartedNumelIn = work.numelIn_;
+        pgStatus_->lastStartedNumelOut = work.numelOut_;
       }
 
       // Clean up completed work
@@ -2306,7 +2343,7 @@ void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   ncclCommDevIdxMapMutex.unlock();
 }
 
-std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
+std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
     const std::string& deviceKey,
     at::Device& device,
     OpType opType,
@@ -2330,14 +2367,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 
   usedDeviceIdxs_.insert(device.index());
-
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (devNCCLCommMap_.find(deviceKey) != devNCCLCommMap_.end()) {
-      // Reuse the cached communicator if there is one.
-      return devNCCLCommMap_[deviceKey];
-    }
-  }
 
   // NCCL communicator not cached, create a new entry
   std::shared_ptr<NCCLComm> ncclComm;
@@ -2485,9 +2514,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       globalRankStride, // globalRankStride
       size_); // worldSize
 
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
-            << ncclComm->repr()
-            << " on CUDA device: " << static_cast<int>(deviceIndex);
+  VLOG(2) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
+          << ncclComm->repr()
+          << " on CUDA device: " << static_cast<int>(deviceIndex);
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file
@@ -2545,8 +2574,17 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   it = devNCCLCommMap_.find(deviceKey);
   TORCH_INTERNAL_ASSERT(
       it != devNCCLCommMap_.end(), "Communicators not populated in cache!");
-
   return it->second;
+}
+
+std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
+    const std::string& deviceKey) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (devNCCLCommMap_.find(deviceKey) != devNCCLCommMap_.end()) {
+    // Reuse the cached communicator if there is one.
+    return devNCCLCommMap_[deviceKey];
+  }
+  return nullptr;
 }
 
 uint64_t ProcessGroupNCCL::getCommSplitCounter() const {
@@ -2887,7 +2925,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
   op_id_++;
 
   const auto key = getKeyFromDevice(device);
-  auto ncclComm = getNCCLComm(key, device, opType);
+  std::shared_ptr<NCCLComm> ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    ncclComm = initNCCLComm(key, device, opType);
+  }
 
   if (coalescing_state_ & CoalActive) {
     if ((coalescing_state_ & CoalColl) == 0) {
@@ -3079,7 +3120,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   op_id_++;
 
   const auto key = getKeyFromDevice(device);
-  auto ncclComm = getNCCLComm(key, device, opType);
+  std::shared_ptr<NCCLComm> ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    ncclComm = initNCCLComm(key, device, opType);
+  }
 
   if (coalescing_state_ & CoalActive) {
     coalescing_state_ |= CoalColl;
@@ -3304,7 +3348,10 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // coalesced or individual
   op_id_++;
 
-  auto ncclComm = getNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
+  std::shared_ptr<NCCLComm> ncclComm = getNCCLComm(key);
+  if (ncclComm == nullptr) {
+    ncclComm = initNCCLComm(key, device, opType, p2pRank, isSendRecvSelf);
+  }
 
   if (coalescing_state_ & CoalActive) {
     // Bump  seqP2P_ once per coalesced group, not once per individual op.

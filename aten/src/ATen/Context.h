@@ -11,6 +11,7 @@
 #include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/HPUHooksInterface.h>
 #include <ATen/detail/IPUHooksInterface.h>
 #include <ATen/detail/MAIAHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
@@ -66,6 +67,8 @@ class TORCH_API Context {
       return at::detail::getMTIAHooks();
     } else if (device_type == at::kHIP) {
       return at::detail::getHIPHooks();
+    } else if (device_type == at::kHPU) {
+      return at::detail::getHPUHooks();
     } else {
       TORCH_CHECK(
           false,
@@ -147,6 +150,10 @@ class TORCH_API Context {
   static bool hasMAIA() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
   }
+  static bool hasHPU() {
+    return detail::getHPUHooks().hasHPU();
+  }
+
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
   }
@@ -468,6 +475,10 @@ inline bool hasMAIA() {
 
 inline bool hasXPU() {
   return globalContext().hasXPU();
+}
+
+inline bool hasHPU() {
+  return globalContext().hasHPU();
 }
 
 // Despite its name, this function returns the number of *CUDA* GPUs.
