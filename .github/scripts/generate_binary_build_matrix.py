@@ -247,6 +247,8 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     for python_version in python_versions:
         # We don't currently build conda packages for rocm
         for arch_version in arches:
+            if arch_version == "12.6":
+                continue
             gpu_arch_type = arch_type(arch_version)
             gpu_arch_version = "" if arch_version == "cpu" else arch_version
             ret.append(
@@ -424,6 +426,26 @@ def generate_wheels_matrix(
                         ),
                     }
                 )
+                # Special build building to use on Colab. Python 3.11 for 12.4 CUDA
+                if python_version == "3.11" and arch_version == "12.4":
+                    ret.append(
+                        {
+                            "python_version": python_version,
+                            "gpu_arch_type": gpu_arch_type,
+                            "gpu_arch_version": gpu_arch_version,
+                            "desired_cuda": translate_desired_cuda(
+                                gpu_arch_type, gpu_arch_version
+                            ),
+                            "use_split_build": "True" if use_split_build else "False",
+                            "devtoolset": "",
+                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                            "package_type": package_type,
+                            "pytorch_extra_install_requirements": "",
+                            "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}-full".replace(  # noqa: B950
+                                ".", "_"
+                            ),
+                        }
+                    )
             else:
                 ret.append(
                     {
