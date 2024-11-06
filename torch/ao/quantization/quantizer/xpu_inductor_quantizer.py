@@ -43,7 +43,7 @@ class XPUInductorQuantizer(X86InductorQuantizer):
         quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[FilterFn] = None,
     ):
-        return None
+        pass
 
     def _annotate_conv2d_binary(
         self,
@@ -51,7 +51,7 @@ class XPUInductorQuantizer(X86InductorQuantizer):
         quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[FilterFn] = None,
     ) -> None:
-        return None
+        pass
 
     def _annotate_conv2d_binary_unary(
         self,
@@ -59,7 +59,7 @@ class XPUInductorQuantizer(X86InductorQuantizer):
         quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[FilterFn] = None,
     ) -> None:
-        return None
+        pass
 
     def _annotate_linear_fusion_pattern(
         self,
@@ -67,7 +67,7 @@ class XPUInductorQuantizer(X86InductorQuantizer):
         quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[FilterFn] = None,
     ):
-        return None
+        pass
 
     def _annotate_matmul(
         self,
@@ -75,7 +75,7 @@ class XPUInductorQuantizer(X86InductorQuantizer):
         quantization_config: Optional[QuantizationConfig],
         filter_fn: Optional[FilterFn] = None,
     ):
-        return None
+        pass
 
     def _annotate_maxpool2d(
         self,
@@ -86,7 +86,7 @@ class XPUInductorQuantizer(X86InductorQuantizer):
         Here we skip the annotate logic for maxpool at XPU backend
         as the quantized::max_pool2d is only implemented for CPU.
         """
-        return None
+        pass
 
     def _annotate_output_for_int8_in_int8_out_pattern(
         self,

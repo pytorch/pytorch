@@ -67,7 +67,6 @@ at::Tensor quantized_convolution(
     c10::optional<c10::string_view> unary_attr,
     torch::List<c10::optional<at::Scalar>> unary_scalars,
     c10::optional<c10::string_view> unary_algorithm) {
-  // TODO: use arg to create proper attr
   Attr attr =
       Attr(/*q_scale=*/1.0 / inv_output_scale, /*zp=*/output_zero_point);
 
@@ -87,9 +86,10 @@ at::Tensor quantized_convolution(
   }
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
-      "convolution only supports 3D, 4D, 5D tensor");
+      "Quantized convolution only supports 3D, 4D, 5D tensor");
   TORCH_CHECK(
-      output.defined(), "Quantized convlution should always define output");
+      output.defined(),
+      "A valid output is required for quantized convolution.");
 
   auto engine = GpuEngineManager::Instance().get_engine(
       {c10::kXPU, c10::xpu::current_device()});
@@ -125,8 +125,6 @@ at::Tensor quantized_convolution(
 
   bool src_need_zp = (act_scale != 0);
 
-  dnnl::convolution_forward conv_forward;
-
   std::tie(src_md, weight_md, output_md) =
       qconv_get_md(act, weight, output, groups, is_channels_last_suggested);
 
@@ -140,8 +138,6 @@ at::Tensor quantized_convolution(
   pattr.set_scales_mask(DNNL_ARG_WEIGHTS, mask_weight);
   pattr.set_post_ops(po);
 
-  // Only setting zp mask when zp is not zero
-  // See: [Note: Use symmetric quant implementation when zp is 0]
   if (src_need_zp)
     pattr.set_zero_points_mask(DNNL_ARG_SRC, mask_ac);
   pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
@@ -161,7 +157,8 @@ at::Tensor quantized_convolution(
       _padding_back_bottom_right,
       pattr);
 
-  conv_forward = dnnl::convolution_forward(conv_fwd_pd);
+  dnnl::convolution_forward conv_forward =
+      dnnl::convolution_forward(conv_fwd_pd);
 
   dnnl::memory src_m, weight_m, output_m;
   Tensor src_blocked, weight_blocked, output_blocked = output;
@@ -185,9 +182,6 @@ at::Tensor quantized_convolution(
       static_cast<int32_t>(act_zero_point), src_zp_tensor, engine);
   args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, src_sc_m});
 
-  // Only setting zp when zp is not zero
-  // See: [Note: Use symmetric quant implementation when zp is 0]
-  Tensor srz_zp;
   dnnl::memory::desc src_zp_md;
   if (src_need_zp) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, src_zp_m});

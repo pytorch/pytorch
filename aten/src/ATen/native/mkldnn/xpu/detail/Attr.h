@@ -86,7 +86,7 @@ struct PostOpParam {
   PostOpParam(float scale, kind_t kind) : scale_(scale), kind_(kind) {}
   // sum post op with zp
   PostOpParam(float scale, int64_t zero_point, kind_t kind)
-      : scale_(scale), zero_point_(zero_point), kind_(kind){};
+      : scale_(scale), zero_point_(zero_point), kind_(kind) {}
   // binary post op constructor
   PostOpParam(
       at::Tensor& binary,
@@ -220,13 +220,13 @@ class Attr {
   }
 
   // append bias with binary_add method (only used for QConv now)
-  Attr& append_bias(const at::Tensor& binary, const int N) {
+  Attr& append_bias(const at::Tensor& binary, const int ndimension) {
     // In PyTorch, bias are in shape of [OC],
     // we expand its shape according to Conv dimension
     // Conv1d [OC, 1, 1], Conv2d [1, OC, 1, ,1], Conv3d [1, OC, 1, 1, 1]
     at::Tensor binary_ = binary.contiguous();
     dnnl::memory::desc binary_md;
-    switch (N) {
+    switch (ndimension) {
       case 1:
         binary_md = dnnl::memory::desc(
             {binary.size(0), 1, 1},
