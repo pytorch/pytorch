@@ -1,5 +1,6 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/util.h>
 
 #include <c10/util/ArrayRef.h>
@@ -375,6 +376,49 @@ inline std::string format_list(ListLikeType list, bool truncate) {
   return fmt::format("\"[{}]\"", fmt::join(list.begin(), list.end(), ", "));
 }
 
+
+std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(const c10::IValue& val) {
+  if (val.isTensor()) {
+    // Store hints about where the input starts in memory.
+    // Useful for debugging memory access patterns.
+    const auto& tensor = val.toTensor();
+    const int result = getTensorStartHint(tensor);
+    return {false, result};
+  } else if (val.isTuple()) {
+    const auto& val_tuple = val.toTupleRef().elements();
+    size_t tuple_size = val_tuple.size();
+    std::vector<int> responses;
+    responses.reserve(tuple_size);
+    for (const auto j : c10::irange(tuple_size)) {
+      auto [is_list, res] = findStartAddrForTensors(val_tuple[j]);
+      if (is_list) {
+        auto vec_res = std::get<std::vector<int>>(res);
+        responses.insert(responses.end(), vec_res.begin(), vec_res.end());
+      } else {
+        responses.push_back(std::get<int>(res));
+      }
+    }
+    return {true, responses};
+  } else if (val.isList()) {
+    const auto& val_list = val.toList();
+    size_t list_size = val_list.size();
+    std::vector<int> responses;
+    for (const auto j : c10::irange(list_size)) {
+      auto [is_list, res] = findStartAddrForTensors(val_list[j]);
+      if (is_list) {
+        auto vec_res = std::get<std::vector<int>>(res);
+        responses.insert(responses.end(), vec_res.begin(), vec_res.end());
+      } else {
+        responses.push_back(std::get<int>(res));
+      }
+    }
+    return {true, responses};
+  } else {
+    // push back an invalid value for indices representing non-tensor inputs
+    return {false, -1};
+  }
+}
+
 std::unordered_map<std::string, std::string> saveNcclMeta(
     const at::RecordFunction& fn,
     bool truncate) {
@@ -431,6 +475,49 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
   } else if (collective_name == "recv") {
     if (rank >= 0 && rank < nRanks) {
       map.emplace(kP2pSrc, std::to_string(groupRanks[rank]));
+    }
+  }
+
+  if (get_record_tensor_addrs_enabled()) {
+    std::vector<std::string> addressList;
+    auto num_inputs = fn.num_inputs();
+    const auto inputs = fn.inputs();
+    if (checkFunctionInputsForLogging(fn, fn.name())) {
+      // need to account for Stack mode where the inputs are at the end.
+      size_t input_start = inputs.size() - num_inputs;
+      for (const auto i : c10::irange(input_start, inputs.size())) {
+        const c10::IValue& val = inputs[i];
+        auto [is_list, result] = findStartAddrForTensors(val);
+        if (is_list) {
+          auto list_result = std::get<std::vector<int>>(result);
+          addressList.push_back(vectorToString(list_result));
+        } else {
+          auto scalar_result = std::get<int>(result);
+          addressList.push_back(std::to_string(scalar_result));
+        }
+      }
+      map.emplace(kTensorsStartAt, vectorToString(addressList));
+      addressList.clear();
+    }
+
+    const auto outputs = fn.outputs();
+    auto num_outputs = fn.num_outputs();
+    if (checkFunctionOutputsForLogging(fn, fn.name())) {
+      // need to account for Stack mode where the outputs are at the end.
+      size_t output_start = outputs.size() - num_outputs;
+      for (const auto i : c10::irange(output_start, outputs.size())) {
+        const c10::IValue& val = outputs[i];
+        auto [is_list, result] = findStartAddrForTensors(val);
+        if (is_list) {
+          auto list_result = std::get<std::vector<int>>(result);
+          addressList.push_back(vectorToString(list_result));
+        } else {
+          auto scalar_result = std::get<int>(result);
+          addressList.push_back(std::to_string(scalar_result));
+        }
+      }
+      map.emplace(kTensorsEndAt, vectorToString(addressList));
+      addressList.clear();
     }
   }
 #endif // USE_DISTRIBUTED
@@ -786,6 +873,53 @@ uint64_t computeFlops(
     return flops;
   }
   return 0;
+}
+
+// A function that takes an IValue
+// and returns a conventional string representation of the IValue
+// Currently it returns int representation of the last 8 bits of the address value
+int getTensorStartHint(const at::Tensor& t) {
+  const auto tensor_impl = t.unsafeGetTensorImpl();
+  uintptr_t storage_addr = 0;
+  storage_addr = reinterpret_cast<uintptr_t>(tensor_impl->storage().data());
+  int last_8_bits = static_cast<int>(storage_addr & 0xFF);
+  // std::vector<std::string> resp = {std::to_string(storage_addr)/*, std::to_string(last_8_bits)*/};
+  // return vectorToString(resp);
+  return last_8_bits;
+}
+
+bool checkFunctionOutputsForLogging(const at::RecordFunction& fn, const char* fn_name) {
+  const auto& outputs = fn.outputs();
+  auto num_outputs = fn.num_outputs();
+  VLOG(2) << "outputs: " << num_outputs << " " << outputs.size() << '\n';
+  // We have two cases: for unboxed kernel, we have num_outputs ==
+  // outputs.size() for boxed kernel using stack, there could be more elements
+  // on the stack from previous ops.
+  // TORCH_INTERNAL_ASSERT(num_outputs <= outputs.size());
+  if (num_outputs > outputs.size()) {
+    LOG(WARNING) << "Profiler: RecordFunction " << fn_name
+                  << " expected num_outputs=" << num_outputs
+                  << " > outputs.size()=" << outputs.size();
+    return false;
+  }
+  return true;
+}
+
+bool checkFunctionInputsForLogging(const at::RecordFunction& fn, const char* fn_name) {
+  auto num_inputs = fn.num_inputs();
+  const auto inputs = fn.inputs();
+  VLOG(2) << "inputs: " << num_inputs << " " << inputs.size() << '\n';
+  // We have two cases: for unboxed kernel, we have num_inputs ==
+  // inputs.size() for boxed kernel using stack, there could be more elements
+  // on the stack from previous ops.
+  // TORCH_INTERNAL_ASSERT(num_inputs <= inputs.size());
+  if (num_inputs > inputs.size()) {
+    LOG(WARNING) << "RecordFunction " << fn_name
+                  << " expected num_inputs=" << num_inputs
+                  << " > inputs.size()=" << inputs.size();
+    return false;
+  }
+  return true;
 }
 
 } // namespace torch::profiler::impl
