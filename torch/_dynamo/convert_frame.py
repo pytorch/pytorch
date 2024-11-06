@@ -105,6 +105,7 @@ from .symbolic_convert import (
 from .trace_rules import is_numpy
 from .utils import (
     CleanupManager,
+    codecache_metrics,
     CompilationMetrics,
     counters,
     dynamo_timed,
@@ -973,6 +974,7 @@ def _compile(
         fail_user_frame_lineno: Optional[int] = None
         torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
+        codecache_metrics.clear()
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
             return guarded_code
@@ -1058,6 +1060,7 @@ def _compile(
                 remote_fx_graph_cache_put_time = frame_phase_timing[frame_key].get(
                     "remote_fx_graph_cache_put", None
                 )
+                num_triton_bundles = codecache_metrics.get("num_triton_bundles", None)
                 torch._dynamo.utils.ReinplaceCounters.log()
 
             else:
@@ -1078,6 +1081,7 @@ def _compile(
                 remote_cache_time_saved = None
                 remote_fx_graph_cache_get_time = None
                 remote_fx_graph_cache_put_time = None
+                num_triton_bundles = None
 
             structured_logging_overhead_s = (
                 torch._logging.get_structured_logging_overhead()
@@ -1146,6 +1150,7 @@ def _compile(
                 config.specialize_float,
                 json.dumps(config_dict),
                 True,  # is_forward
+                num_triton_bundles,
                 to_int_ms(remote_fx_graph_cache_get_time),
                 to_int_ms(remote_fx_graph_cache_put_time),
                 start_time_us=start_time_ns // 1000,
