@@ -24,7 +24,7 @@ from typing import (
 )
 
 from torch._higher_order_ops.utils import autograd_not_implemented
-from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
@@ -359,7 +359,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                         real_script_obj = ep.constants[node.meta["val"].name]
                     else:
                         real_script_obj = node.meta["val"].fake_val.real_obj
-                    fake_args.append(maybe_to_fake_obj(fake_mode, real_script_obj))
+                    fake_args.append(real_script_obj)
                 else:
                     fake_args.append(node.meta["val"])
 
