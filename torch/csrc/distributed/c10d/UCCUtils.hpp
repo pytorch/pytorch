@@ -177,7 +177,7 @@ inline std::vector<std::string> parse_list(std::string list) {
     const auto end_pos = list.find_first_of(',');
     const auto token = trim(list.substr(0, end_pos));
     result.push_back(std::string(token));
-    list = (end_pos != c10::string_view::npos) ? list.substr(end_pos + 1) : "";
+    list = (end_pos != std::string_view::npos) ? list.substr(end_pos + 1) : "";
   }
   return result;
 }
