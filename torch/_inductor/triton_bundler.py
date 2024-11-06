@@ -71,6 +71,8 @@ class TritonBundler:
     - TritonBundler.begin_compile is called when we start compiling in Inductor
     - TritonBundler.put is called each time a Triton Kernel is compiled
     - TritonBundler.collect is called when a cache entry is being generated
+    - TritonBundler.end_compile is called to indicate bundling is completed,
+      collect will execute this function as well.
     - TritonBundler.read_and_emit is called when a cache entry is read
     """
 
@@ -93,7 +95,9 @@ class TritonBundler:
         if not config.is_fbcode():
             return False
 
-        return justknobs_check("pytorch/remote_cache:bundle_triton_into_fx_graph_cache")
+        return justknobs_check(
+            "pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2"
+        )
 
     @classmethod
     def begin_compile(cls) -> None:
@@ -103,8 +107,18 @@ class TritonBundler:
         """
         if not TritonBundler.is_enabled():
             return
+        log.debug("TritonBundler.begin_compile is called")
         assert cls._entries is None
         cls._entries = []
+
+    @classmethod
+    def end_compile(cls) -> None:
+        """
+        Finalizes the TritonBundler. If collect is not yet called, it
+        discards the current bundle.
+        """
+        log.debug("TritonBundler.end_compile is called")
+        cls._entries = None
 
     @classmethod
     def put(cls, kernel_hash: str, device: int) -> None:
@@ -128,7 +142,7 @@ class TritonBundler:
         This function also finalizes the current bundle.
         """
         if not TritonBundler.is_enabled():
-            cls._entries = None
+            cls.end_compile()
             return [], None
 
         with dynamo_timed(
@@ -160,9 +174,8 @@ class TritonBundler:
                             counters["inductor"]["triton_bundler_save_kernel"] += 1
                         except Exception:
                             log.debug("failed to collect triton kernel", exc_info=True)
-                        file_extension = os.path.splitext(filename)[1]
-                        if file_extension in GPU_KERNEL_BIN_EXTS.values():
-                            print(file_extension)
+                        extension = os.path.splitext(filename)[1]
+                        if extension in GPU_KERNEL_BIN_EXTS.values():
                             # Each kernel has bunch of files like .cubin(for cuda), .spv(for xpu), .json, .ttir
                             # Just append one of them without the extension
                             kernel_names.append(Path(filename).stem)
@@ -174,7 +187,7 @@ class TritonBundler:
                                 artifacts,
                             )
                         )
-                cls._entries = None
+                cls.end_compile()
                 return result, TritonBundlerMetadata(kernel_names)
             return [], None
 
@@ -234,9 +247,9 @@ class TritonBundler:
                             )
                         file.write(payload)
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"] += 1
-                    file_extension = os.path.splitext(artifact.filename)[1]
-                    if file_extension in GPU_KERNEL_BIN_EXTS.values():
-                        # Each kernel has bunch of files like .cubin(for cuda), .spv(for xpu), .json, .ttir
+                    extension = os.path.splitext(artifact.filename)[1]
+                    if extension in GPU_KERNEL_BIN_EXTS.values():
+                        # Each kernel has bunch of files like .cubin(for cuda), spv(for xpu), .json, .ttir
                         # Just append one of them without the extension
                         kernel_names.append(Path(artifact.filename).stem)
                 # Atomic on POSIX systems
