@@ -1893,13 +1893,20 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                     flat_processed_tangents = list(
                         itertools.chain.from_iterable(
-                            AOTDispatchAutograd.process_runtime_tangent(
-                                t,
-                                m,
-                            )[1]
-                            for t, m in zip(
-                                tangents,
-                                CompiledFunction.metadata.subclass_tangent_meta,
+                            (
+                                AOTDispatchAutograd.process_runtime_tangent(
+                                    t,
+                                    m,
+                                )[1]
+                                if i
+                                >= CompiledFunction.metadata.num_mutated_inp_runtime_indices
+                                else [t] * m.arg_count
+                            )
+                            for i, (t, m) in enumerate(
+                                zip(
+                                    tangents,
+                                    CompiledFunction.metadata.subclass_tangent_meta,
+                                )
                             )
                         )
                     )
