@@ -78,7 +78,7 @@ from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
     aot_autograd_check,
 )
-from torch.testing._internal.subclasses import WrapSC
+from torch.testing._internal.subclasses import WrapperSubclass
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
 
 
@@ -6232,7 +6232,7 @@ metadata incorrectly.
         def fn(x):
             return x.clone()
 
-        ref_y = fn(WrapSC(torch.randn(2, 3, requires_grad=True)))
+        ref_y = fn(WrapperSubclass(torch.randn(2, 3, requires_grad=True)))
         ref_y.sum().backward()
 
         fn_comp = torch.compile(fn, fullgraph=True)
@@ -6247,12 +6247,12 @@ metadata incorrectly.
             torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
         )
         y2 = fn_comp(x2)
-        # Test coercion WrapSC -> TwoTensor
-        y2.backward(gradient=WrapSC(torch.randn(2, 3)))
+        # Test coercion WrapperSubclass -> TwoTensor
+        y2.backward(gradient=WrapperSubclass(torch.randn(2, 3)))
 
         y3 = torch.compile(fn, fullgraph=True)(torch.randn(2, 3, requires_grad=True))
-        # Test coercion WrapSC -> Tensor
-        y3.backward(gradient=WrapSC(torch.randn(2, 3)))
+        # Test coercion WrapperSubclass -> Tensor
+        y3.backward(gradient=WrapperSubclass(torch.randn(2, 3)))
 
     @torch._inductor.config.patch({"freezing": True})
     def test_inductor_freezing_with_subclasses(self):
@@ -6658,6 +6658,24 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             return result
 
         return torch_compile_wrapper
+
+    def test_inputs_overlapping_unsqueeze_with_mutation(self):
+        def f(x, y):
+            x.add_(1)
+            y.add_(1)
+            return x
+
+        def run(f):
+            base = torch.ones(10)
+            inputs = [base.unsqueeze(0), base.unsqueeze(0)]
+            return f(*inputs)
+
+        optf = torch.compile(backend="aot_eager", dynamic=True)(f)
+
+        out = run(f)
+        optout = run(optf)
+
+        self.assertEqual(out, optout)
 
 
 class MockFXGraphCache:

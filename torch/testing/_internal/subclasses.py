@@ -3,11 +3,12 @@ from typing import Any, Optional, Type
 
 import torch
 import torch.utils._pytree as pytree
+from torch._subclasses.fake_tensor import is_fake
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils._python_dispatch import return_and_correct_aliasing
 
 
-class WrapSC(torch.Tensor):
+class WrapperSubclass(torch.Tensor):
     @staticmethod
     def __new__(cls, a, outer_size=None, outer_stride=None):
         if outer_size is None:
@@ -30,7 +31,7 @@ class WrapSC(torch.Tensor):
         self.a = a
 
     def __repr__(self):
-        return f"WrapSC({repr(self.a)})"
+        return f"WrapperSubclass({repr(self.a)})"
 
     def __tensor_flatten__(self):
         return ["a"], None
@@ -39,23 +40,24 @@ class WrapSC(torch.Tensor):
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
         assert meta is None
         a = inner_tensors["a"]
-        if type(a) is torch.Tensor:
+        if is_fake(a):
             assert outer_size is not None
             assert outer_stride is not None
-        return WrapSC(a, outer_size, outer_stride)
+        return WrapperSubclass(a, outer_size, outer_stride)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
         if kwargs is None:
             kwargs = {}
-        args_a = pytree.tree_map_only(WrapSC, lambda x: x.a, args)
+        args_a = pytree.tree_map_only(WrapperSubclass, lambda x: x.a, args)
 
-        kwargs_a = pytree.tree_map_only(WrapSC, lambda x: x.a, kwargs)
+        kwargs_a = pytree.tree_map_only(WrapperSubclass, lambda x: x.a, kwargs)
 
         out_a = func(*args_a, **kwargs_a)
         out_a_flat, spec = pytree.tree_flatten(out_a)
         out_flat = [
-            WrapSC(o_a) if isinstance(o_a, torch.Tensor) else o_a for o_a in out_a_flat
+            WrapperSubclass(o_a) if isinstance(o_a, torch.Tensor) else o_a
+            for o_a in out_a_flat
         ]
         out = pytree.tree_unflatten(out_flat, spec)
         from torch._higher_order_ops.cond import cond_op
@@ -68,7 +70,7 @@ class WrapSC(torch.Tensor):
     def __coerce_same_metadata_as_tangent__(
         self, expected_metadata: Any, expected_type: Optional[Type] = None
     ):
-        if expected_type is torch.Tensor:
+        if expected_type == type(self.a):
             return self.a
         elif expected_type is TwoTensor:
             return TwoTensor(self.a, self.a.clone())

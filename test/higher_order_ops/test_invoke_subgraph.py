@@ -374,6 +374,22 @@ class GraphModule(torch.nn.Module):
         ):
             opt_fn(x, y)
 
+    def test_simple_module(self):
+        mod = torch.nn.Linear(8, 8)
+
+        def gn(x):
+            return mod(x)
+
+        def fn(x):
+            return invoke_subgraph(gn, mod, (x,))
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        x = torch.randn(8, 8, requires_grad=True)
+
+        ref = mod(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
     def test_input_aliasing(self):
         def gn(x, y):
             return (x, torch.mul(x, y))

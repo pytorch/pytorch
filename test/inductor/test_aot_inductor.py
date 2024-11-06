@@ -2763,6 +2763,22 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), inputs)
 
+    def test_symint_item(self):
+        class Model(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        inputs = (torch.tensor([1], dtype=torch.int, device=self.device),)
+        self.check_model(Model(), inputs)
+
+    def test_symbool_item(self):
+        class Model(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        inputs = (torch.tensor([0], dtype=torch.bool, device=self.device),)
+        self.check_model(Model(), inputs)
+
     def test_constant_original_fqn_and_dtype(self):
         class FooBarModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -3857,7 +3873,7 @@ class AOTInductorTestsTemplate:
 
         expected_scalar_args = [
             "triton_poi_fused_zeros_like_0_xnumel",
-            "triton_poi_fused_ones_1_xnumel",
+            "triton_poi_fused_1_xnumel",
             "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
         ]
 
