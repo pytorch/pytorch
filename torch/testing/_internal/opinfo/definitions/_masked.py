@@ -357,7 +357,6 @@ def sample_inputs_masked_softmax(
 
 def sample_inputs_masked_cumops(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked cumsum and cumprod."""
-    inputs: List[SampleInput] = []
     for sample_input in sample_inputs_softmax_variant(
         op_info, device, dtype, requires_grad, **kwargs
     ):
@@ -1182,7 +1181,7 @@ op_db: List[OpInfo] = [
     ),
     ReductionOpInfo(
         "masked.logsumexp",
-        dtypes=all_types_and(torch.half, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         method_variant=None,
         nan_policy="propagate",
         supports_out=False,

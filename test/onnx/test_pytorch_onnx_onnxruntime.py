@@ -483,7 +483,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x_in):
                 x_out = {}
                 x_out["test_key_out"] = torch.add(
-                    x_in[list(x_in.keys())[0]], list(x_in.keys())[0]  # noqa: RUF015
+                    x_in[list(x_in.keys())[0]],  # noqa: RUF015
+                    list(x_in.keys())[0],  # noqa: RUF015
                 )
                 return x_out
 
@@ -12533,6 +12534,27 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(M(), (x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(14)
+    def test_scaled_dot_product_attention(self):
+        class M(torch.nn.Module):
+            def forward(self, q, k, v):
+                return torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, scale=1.0
+                )
+
+        # Parameters
+        batch_size = 2  # Number of samples in the batch
+        num_heads = 4  # Number of attention heads
+        seq_length = 5  # Sequence length
+        head_dim = 8  # Dimensionality of each head
+
+        # Create random query, key, and value tensors
+        q = torch.randn(batch_size, num_heads, seq_length, head_dim)
+        k = torch.randn(batch_size, num_heads, seq_length, head_dim)
+        v = torch.randn(batch_size, num_heads, seq_length, head_dim)
+
+        self.run_test(M(), (q, k, v))
+
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_normal(self):
@@ -13581,7 +13603,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         ):
             if self.opset_version < 20:
                 with self.assertRaises(
-                    torch.onnx.errors.OnnxExporterError,
+                    torch.onnx.OnnxExporterError,
                 ):
                     self.run_test(
                         GridSampleModule(mode, padding_mode, align_corners),

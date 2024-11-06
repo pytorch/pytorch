@@ -1,6 +1,10 @@
 #include <sstream>
 
+#ifdef TORCH_CUDA_USE_NVTX3
+#include <nvtx3/nvtx3.hpp>
+#else
 #include <nvToolsExt.h>
+#endif
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/ApproximateClock.h>
@@ -8,9 +12,7 @@
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 namespace {
 
 static inline void cudaCheck(cudaError_t result, const char* file, int line) {
@@ -107,6 +109,4 @@ struct RegisterCUDAMethods {
 RegisterCUDAMethods reg;
 
 } // namespace
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

@@ -76,7 +76,7 @@ static void pool2d_template(const Tensor& input,
   } else if (suggested_memory_format == at::MemoryFormat::Contiguous) {
     TORCH_CHECK((ndims == 3 || ndims == 4), "non-empty 3D or 4D (batch mode) tensor expected for input");
   } else {
-    AT_ERROR("Unsupported memory format. Supports only ChannelsLast, Contiguous");
+    TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 
   int padH = safe_downcast<int, int64_t>(padding[0]);
@@ -186,14 +186,29 @@ static void pool2d_template(const Tensor& input,
 
     MPSStream* mpsStream = getCurrentMPSStream();
     // in case of ChannelsLast we don't perform gather() in placeholder to avoid implicit conversion to NCHW
-    Placeholder inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor, input, inputShape, memory_format != MemoryFormat::ChannelsLast);
-    Placeholder gradOutputPlaceholder = !is_backward_pass
-        ? Placeholder()
-        : Placeholder(
-              cachedGraph->gradOutputTensor, grad_output, gradOutputShape, memory_format != MemoryFormat::ChannelsLast);
-    Placeholder indicesPlaceholder = has_indices ? Placeholder(cachedGraph->indicesTensor, indices) : Placeholder();
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+
+    // MPS TODO: Using strided API causes invalid indices to be generated if the original format is NHWC
+    //           Output is still correct, but indices are not matching. Disable it for now and use the old
+    //           gather path to solve the strides.
+    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor,
+                                               input,
+                                               inputShape,
+                                               memory_format != MemoryFormat::ChannelsLast,
+                                               MPSDataTypeInvalid,
+                                               /*useMPSStridedAPI=*/false);
+    Placeholder gradOutputPlaceholder = !is_backward_pass ? Placeholder()
+                                                          : Placeholder(cachedGraph->gradOutputTensor,
+                                                                        grad_output,
+                                                                        gradOutputShape,
+                                                                        memory_format != MemoryFormat::ChannelsLast,
+                                                                        MPSDataTypeInvalid,
+                                                                        /*useMPSStridedAPI=*/false);
+    Placeholder indicesPlaceholder = has_indices
+        ? Placeholder(
+              cachedGraph->indicesTensor, indices, nullptr, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false)
+        : Placeholder();
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor, output, nullptr, false, MPSDataTypeInvalid, false);
     NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
     NSMutableDictionary* results = [[NSMutableDictionary new] autorelease];
 
@@ -296,18 +311,22 @@ static void avg_pool2d_template(const Tensor& input,
       MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DWithSourceTensor:paddedTensor descriptor:desc name:nil];
       if (cachedGraph.divisorTensor) {
         // workaround: custom divisor isn't supported by MPS backend, so we scale manually
-        return [mpsGraph multiplicationWithPrimaryTensor:avgPoolTensor
-                                         secondaryTensor:cachedGraph.divisorTensor
-                                                    name:nil];
+        return
+            [mpsGraph multiplicationWithPrimaryTensor:avgPoolTensor
+                                      secondaryTensor:mps::castMPSTensor(
+                                                          mpsGraph, cachedGraph.divisorTensor, [avgPoolTensor dataType])
+                                                 name:nil];
       } else {
         return avgPoolTensor;
       }
     } else { // backward pass
       MPSGraphTensor* scaledGradTensor = cachedGraph.gradOutputTensor;
       if (cachedGraph.divisorTensor) {
-        scaledGradTensor = [mpsGraph multiplicationWithPrimaryTensor:cachedGraph.gradOutputTensor
-                                                     secondaryTensor:cachedGraph.divisorTensor
-                                                                name:nil];
+        scaledGradTensor = [mpsGraph
+            multiplicationWithPrimaryTensor:cachedGraph.gradOutputTensor
+                            secondaryTensor:mps::castMPSTensor(
+                                                mpsGraph, cachedGraph.divisorTensor, [scaledGradTensor dataType])
+                                       name:nil];
       }
       MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DGradientWithGradientTensor:scaledGradTensor
                                                                           sourceTensor:paddedTensor

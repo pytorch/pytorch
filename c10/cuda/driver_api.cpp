@@ -20,6 +20,12 @@ DriverAPI create_driver_api() {
   C10_LIBCUDA_DRIVER_API(LOOKUP_LIBCUDA_ENTRY)
 #undef LOOKUP_LIBCUDA_ENTRY
 
+#define LOOKUP_LIBCUDA_ENTRY(name)                       \
+  r.name##_ = ((decltype(&name))dlsym(handle_0, #name)); \
+  dlerror();
+  C10_LIBCUDA_DRIVER_API_12030(LOOKUP_LIBCUDA_ENTRY)
+#undef LOOKUP_LIBCUDA_ENTRY
+
   if (handle_1) {
 #define LOOKUP_NVML_ENTRY(name)                          \
   r.name##_ = ((decltype(&name))dlsym(handle_1, #name)); \

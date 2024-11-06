@@ -79,7 +79,8 @@ static PyObject* THPGenerator_pynew(
   } else if (device.type() == at::kPrivateUse1) {
     self->cdata = at::GetGeneratorForPrivateuse1(device.index());
   } else {
-    AT_ERROR(
+    TORCH_CHECK(
+        false,
         "Device type ",
         c10::DeviceTypeName(device.type()),
         " is not supported for torch.Generator() api.");
@@ -97,7 +98,7 @@ static PyObject* THPGenerator_getState(PyObject* _self, PyObject* noargs) {
   std::scoped_lock<std::mutex> lock(gen.mutex());
   auto state_tensor = gen.get_state();
 
-  return THPVariable_Wrap(std::move(state_tensor));
+  return THPVariable_Wrap(state_tensor);
   END_HANDLE_TH_ERRORS
 }
 
@@ -330,7 +331,8 @@ static struct PyMemberDef THPGenerator_members[] = {
     {nullptr}};
 
 PyTypeObject THPGeneratorType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C.Generator", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "torch._C.Generator", /* tp_name */
     sizeof(THPGenerator), /* tp_basicsize */
     0, /* tp_itemsize */
     THPGenerator_dealloc, /* tp_dealloc */

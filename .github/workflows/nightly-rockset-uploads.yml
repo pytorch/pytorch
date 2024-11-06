@@ -17,6 +17,7 @@ concurrency:
 jobs:
 
   upload-stats-to-rockset:
+    if: github.repository_owner == 'pytorch'
     runs-on: ubuntu-22.04
     environment: upload-stats
     steps:
@@ -32,10 +33,10 @@ jobs:
           cache: pip
 
       - run: |
-          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.19.12
+          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.35.42
 
       - name: Upload external contribution stats
-        uses: nick-fields/retry@v2.8.2
+        uses: nick-fields/retry@v3.0.0
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

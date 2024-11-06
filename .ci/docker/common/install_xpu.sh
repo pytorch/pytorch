@@ -16,11 +16,11 @@ function install_ubuntu() {
 
     apt-get update -y
     apt-get install -y gpg-agent wget
-    # To add the online network package repository for the GPU Driver LTS releases
+    # To add the online network package repository for the GPU Driver
     wget -qO - https://repositories.intel.com/gpu/intel-graphics.key \
         | gpg --yes --dearmor --output /usr/share/keyrings/intel-graphics.gpg
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] \
-        https://repositories.intel.com/gpu/ubuntu ${VERSION_CODENAME}/lts/2350 unified" \
+        https://repositories.intel.com/gpu/ubuntu ${VERSION_CODENAME}${XPU_DRIVER_VERSION} unified" \
         | tee /etc/apt/sources.list.d/intel-gpu-${VERSION_CODENAME}.list
     # To add the online network network package repository for the Intel Support Packages
     wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
@@ -41,13 +41,16 @@ function install_ubuntu() {
         libegl-mesa0 libegl1-mesa libegl1-mesa-dev libgbm1 libgl1-mesa-dev libgl1-mesa-dri \
         libglapi-mesa libgles2-mesa-dev libglx-mesa0 libigdgmm12 libxatracker2 mesa-va-drivers \
         mesa-vdpau-drivers mesa-vulkan-drivers va-driver-all vainfo hwinfo clinfo
+    if [[ "${XPU_DRIVER_TYPE,,}" == "rolling" ]]; then
+        apt-get install -y intel-ocloc
+    fi
     # Development Packages
     apt-get install -y libigc-dev intel-igc-cm libigdfcl-dev libigfxcmrt-dev level-zero-dev
     # Install Intel Support Packages
     if [ -n "$XPU_VERSION" ]; then
-        apt-get install -y intel-for-pytorch-gpu-dev-${XPU_VERSION} intel-pti-dev
+        apt-get install -y intel-for-pytorch-gpu-dev-${XPU_VERSION} intel-pti-dev-0.9
     else
-        apt-get install -y intel-for-pytorch-gpu-dev intel-pti-dev
+        apt-get install -y intel-for-pytorch-gpu-dev-0.5 intel-pti-dev-0.9
     fi
 
     # Cleanup
@@ -68,9 +71,9 @@ function install_rhel() {
     fi
 
     dnf install -y 'dnf-command(config-manager)'
-    # To add the online network package repository for the GPU Driver LTS releases
+    # To add the online network package repository for the GPU Driver
     dnf config-manager --add-repo \
-        https://repositories.intel.com/gpu/rhel/${VERSION_ID}/lts/2350/unified/intel-gpu-${VERSION_ID}.repo
+        https://repositories.intel.com/gpu/rhel/${VERSION_ID}${XPU_DRIVER_VERSION}/unified/intel-gpu-${VERSION_ID}.repo
     # To add the online network network package repository for the Intel Support Packages
     tee > /etc/yum.repos.d/intel-for-pytorch-gpu-dev.repo << EOF
 [intel-for-pytorch-gpu-dev]
@@ -85,7 +88,7 @@ EOF
     # The xpu-smi packages
     dnf install -y xpu-smi
     # Compute and Media Runtimes
-    dnf install -y \
+    dnf install --skip-broken -y \
         intel-opencl intel-media intel-mediasdk libmfxgen1 libvpl2\
         level-zero intel-level-zero-gpu mesa-dri-drivers mesa-vulkan-drivers \
         mesa-vdpau-drivers libdrm mesa-libEGL mesa-libgbm mesa-libGL \
@@ -97,7 +100,7 @@ EOF
         intel-igc-opencl-devel level-zero-devel intel-gsc-devel libmetee-devel \
         level-zero-devel
     # Install Intel Support Packages
-    yum install -y intel-for-pytorch-gpu-dev intel-pti-dev
+    yum install -y intel-for-pytorch-gpu-dev-0.5 intel-pti-dev-0.9
 
     # Cleanup
     dnf clean all
@@ -114,9 +117,9 @@ function install_sles() {
         exit
     fi
 
-    # To add the online network package repository for the GPU Driver LTS releases
+    # To add the online network package repository for the GPU Driver
     zypper addrepo -f -r \
-        https://repositories.intel.com/gpu/sles/${VERSION_SP}/lts/2350/unified/intel-gpu-${VERSION_SP}.repo
+        https://repositories.intel.com/gpu/sles/${VERSION_SP}${XPU_DRIVER_VERSION}/unified/intel-gpu-${VERSION_SP}.repo
     rpm --import https://repositories.intel.com/gpu/intel-graphics.key
     # To add the online network network package repository for the Intel Support Packages
     zypper addrepo https://yum.repos.intel.com/intel-for-pytorch-gpu-dev intel-for-pytorch-gpu-dev
@@ -131,10 +134,16 @@ function install_sles() {
     zypper install -y libigdfcl-devel intel-igc-cm libigfxcmrt-devel level-zero-devel
 
     # Install Intel Support Packages
-    zypper install -y intel-for-pytorch-gpu-dev intel-pti-dev
+    zypper install -y intel-for-pytorch-gpu-dev-0.5 intel-pti-dev-0.9
 
 }
 
+# Default use GPU driver LTS releases
+XPU_DRIVER_VERSION="/lts/2350"
+if [[ "${XPU_DRIVER_TYPE,,}" == "rolling" ]]; then
+    # Use GPU driver rolling releases
+    XPU_DRIVER_VERSION=""
+fi
 
 # The installation depends on the base OS
 ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')

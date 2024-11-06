@@ -220,7 +220,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
   // TODO: it is better to keep the out tensor's memory format.
   // TODO: dimension needs to be recomputed as:
   // TODO: dim = 0 --> dim = 0; dim = 1 or 2 --> dim = out.dim()- dim; otherwise dim = dim-1
-  if (out.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+  if (needsGather(out)) {
     out.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
   }
   std::vector<int64_t> size(notSkippedTensor.sizes().vec());

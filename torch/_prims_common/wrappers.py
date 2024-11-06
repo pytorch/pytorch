@@ -59,7 +59,9 @@ def _maybe_convert_to_dtype(a, dtype):
     if a is None:
         return None
 
-    raise ValueError(f"Received type {type(a)} that is neither a tensor or a number!")
+    raise ValueError(
+        f"Received unsupported type {type(a)}. Expected TensorLike, Number, or Sequence."
+    )
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:
@@ -185,16 +187,25 @@ def _maybe_resize_out(
         return out
 
 
-def _safe_copy_out(
-    *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
-):
-    # Checks same device
+def is_cpu_scalar(x: TensorLikeType) -> bool:
+    return x.dim() == 0 and x.device.type == "cpu"
+
+
+def check_copy_devices(*, copy_from: TensorLikeType, copy_to: TensorLikeType) -> None:
     if copy_from.device != copy_to.device:
         msg = (
             f"Attempting to copy from device {copy_from.device} "
             f"to device {copy_to.device}, but cross-device copies are not allowed!"
         )
         raise RuntimeError(msg)
+
+
+def _safe_copy_out(
+    *, copy_from: TensorLikeType, copy_to: TensorLikeType, exact_dtype: bool = False
+):
+    # Checks same device
+    if not is_cpu_scalar(copy_from):
+        check_copy_devices(copy_from=copy_from, copy_to=copy_to)
 
     # Checks safe cast
     if exact_dtype:
@@ -263,6 +274,17 @@ def out_wrapper(
                     out_attr = getattr(out, k)
                     if k not in kwargs:
                         kwargs[k] = out_attr
+
+            def maybe_check_copy_devices(out):
+                if isinstance(out, TensorLike) and isinstance(args[0], TensorLike):
+                    check_copy_devices(copy_from=args[0], copy_to=out)
+
+            if isinstance(out, (tuple, list)):
+                for o in out:
+                    maybe_check_copy_devices(o)
+            else:
+                maybe_check_copy_devices(out)
+
             if pass_is_out:
                 result = fn(*args, is_out=(out is not None), **kwargs)  # type: ignore[arg-type]
             else:

@@ -434,7 +434,7 @@ void spmm_reduce_kernel(
     const Tensor& values,
     const Tensor& other,
     ReductionType reduce_op) {
-    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_kernel", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_kernel", [&]() {
       AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_indices", [&]() {
         AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
           spmm_reduce_kernel_impl<scalar_t, index_t, reduce>(
@@ -452,7 +452,7 @@ void spmm_reduce_arg_kernel(
     const Tensor& values,
     const Tensor& other,
     ReductionType reduce_op) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_indices", [&]() {
       AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
         spmm_reduce_arg_kernel_impl<scalar_t, index_t, reduce>(
@@ -471,7 +471,7 @@ void spmm_reduce_backward_input_kernel(
     const Tensor& row_indices,
     ReductionType reduce_op) {
   TORCH_CHECK(reduce_op == ReductionType::SUM || reduce_op == ReductionType::MEAN);
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, other.scalar_type(), "spmm_reduce_backward_input_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, other.scalar_type(), "spmm_reduce_backward_input_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_input_indices", [&]() {
       AT_DISPATCH_REDUCTION_TYPES(reduce_op, [&]() {
         spmm_reduce_backward_input_kernel_impl<scalar_t, index_t, reduce>(
@@ -489,7 +489,7 @@ void spmm_reduce_backward_input_arg_kernel(
     const Tensor& arg_out,
     ReductionType reduce_op) {
   TORCH_CHECK(reduce_op == ReductionType::MAX || reduce_op == ReductionType::MIN);
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, other.scalar_type(), "spmm_reduce_backward_input_arg_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, other.scalar_type(), "spmm_reduce_backward_input_arg_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_input_arg_indices", [&]() {
       spmm_reduce_backward_input_arg_kernel_impl<scalar_t, index_t>(
           grad_self, grad_out, col_indices, other, arg_out);
@@ -502,7 +502,7 @@ void spmm_reduce_normalize_values_kernel(
     const Tensor& values,
     const Tensor& crow_indices,
     const Tensor& row_indices) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_normalize_values_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_normalize_values_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "spmm_reduce_normalize_values_indices", [&]() {
       spmm_reduce_normalize_values_kernel_impl<scalar_t, index_t>(
           normalized_values, values, crow_indices, row_indices);
@@ -545,7 +545,7 @@ void spmm_reduce_backward_other_arg_kernel(
     const Tensor& arg_out,
     ReductionType reduce_op) {
   TORCH_CHECK(reduce_op == ReductionType::MAX || reduce_op == ReductionType::MIN);
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, values.scalar_type(), "spmm_reduce_backward_other_arg_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, values.scalar_type(), "spmm_reduce_backward_other_arg_kernel", [&]() {
     AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "spmm_reduce_backward_other_arg_indices", [&]() {
       spmm_reduce_backward_other_arg_kernel_impl<scalar_t, index_t>(
           grad_other, grad_out, col_indices, values, arg_out);
@@ -555,11 +555,11 @@ void spmm_reduce_backward_other_arg_kernel(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(spmm_reduce_stub, &spmm_reduce_kernel);
-REGISTER_DISPATCH(spmm_reduce_arg_stub, &spmm_reduce_arg_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_input_stub, &spmm_reduce_backward_input_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_input_arg_stub, &spmm_reduce_backward_input_arg_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_other_stub, &spmm_reduce_backward_other_kernel);
-REGISTER_DISPATCH(spmm_reduce_backward_other_arg_stub, &spmm_reduce_backward_other_arg_kernel);
+REGISTER_DISPATCH(spmm_reduce_stub, &spmm_reduce_kernel)
+REGISTER_DISPATCH(spmm_reduce_arg_stub, &spmm_reduce_arg_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_input_stub, &spmm_reduce_backward_input_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_input_arg_stub, &spmm_reduce_backward_input_arg_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_other_stub, &spmm_reduce_backward_other_kernel)
+REGISTER_DISPATCH(spmm_reduce_backward_other_arg_stub, &spmm_reduce_backward_other_arg_kernel)
 
 } // at::native

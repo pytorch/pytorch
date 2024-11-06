@@ -421,11 +421,17 @@ struct ConvParams {
   // cudnn and miopen are guaranteed not to be on mobile, and T102591915 / T110194934 suggest
   // that maybe the compiledWithCuDNN() check sometimes segfaults (though I can't imagine how)
 #if !defined(C10_MOBILE)
-    if (needs_64bit_indexing_no_split(input, weight)) {
-      return false;
-    }
     if (!detail::getCUDAHooks().compiledWithCuDNN()) {
       return false;
+    }
+    if (needs_64bit_indexing_no_split(input, weight)) {
+      static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
+      if (!(cudnn_version >= 90300 && at::native::cudnnv8_enabled_check_debug())) {
+        TORCH_WARN_ONCE("cuDNN cannot be used for large non-batch-splittable convolutions"
+                        " if the V8 API is not enabled or before cuDNN version 9.3+."
+                        " Consider upgrading cuDNN and/or enabling the V8 API for better efficiency.");
+        return false;
+      }
     }
     if (!input.is_cuda() || !cudnn_enabled) {
       return false;
@@ -621,13 +627,13 @@ DEFINE_DISPATCH(mkldnn_convolution_transpose_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated2d_backward_stub);
 DEFINE_DISPATCH(slow_conv_dilated3d_backward_stub);
 DEFINE_DISPATCH(slow_conv_transpose2d_backward_stub);
-REGISTER_NO_CPU_DISPATCH(conv_depthwise2d_backward_stub);
-REGISTER_NO_CPU_DISPATCH(conv_depthwise3d_backward_stub);
-REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub);
-REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub);
-REGISTER_NO_CPU_DISPATCH(miopen_convolution_backward_stub);
-REGISTER_NO_CPU_DISPATCH(miopen_convolution_transpose_backward_stub);
-REGISTER_NO_CPU_DISPATCH(miopen_depthwise_convolution_backward_stub);
+REGISTER_NO_CPU_DISPATCH(conv_depthwise2d_backward_stub)
+REGISTER_NO_CPU_DISPATCH(conv_depthwise3d_backward_stub)
+REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub)
+REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub)
+REGISTER_NO_CPU_DISPATCH(miopen_convolution_backward_stub)
+REGISTER_NO_CPU_DISPATCH(miopen_convolution_transpose_backward_stub)
+REGISTER_NO_CPU_DISPATCH(miopen_depthwise_convolution_backward_stub)
 
 template <typename T>
 std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params) {
@@ -713,7 +719,7 @@ static void check_shape_forward(const at::Tensor& input,
         separator = " x ";
       }
 
-      AT_ERROR("Calculated padded input size per channel: (", input_ss.str(), "). "
+      TORCH_CHECK(false, "Calculated padded input size per channel: (", input_ss.str(), "). "
                "Kernel size: (", kernel_ss.str(), "). Kernel size can't be greater than actual input size");
     }
   } else { // transposed
@@ -1298,7 +1304,7 @@ ConvBackend _select_conv_backend(
   }
 
   // Error out if no suitable backend was found.
-  AT_ERROR("unsupported ConvNd parameters");
+  TORCH_CHECK(false, "unsupported ConvNd parameters");
 }
 
 // Selects a backend for convolution based on the inputs and params.
@@ -1657,14 +1663,8 @@ at::Tensor _convolution(
       break;
     case ConvBackend::Mps:
 #ifdef USE_MPS
-      TORCH_CHECK(input.options().type_equal(weight.options()),
-               "Input type (", input.toString(), ") and weight type (", weight.toString(),
-               ") should be the same");
-      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
-               "Input type (", input.toString(), ") and bias type (", bias.toString(),
-               ") should be the same");
-
-      output = at::_mps_convolution(input.contiguous(), weight, bias.defined() ? bias.contiguous() : bias,
+      check_input_same_type_as_parameters(input, weight, bias);
+      output = at::_mps_convolution(input, weight, bias.defined() ? bias.contiguous() : bias,
                                      params.padding, params.stride, params.dilation,
                                      params.groups);
 #else
@@ -1673,12 +1673,7 @@ at::Tensor _convolution(
       break;
     case ConvBackend::MpsTranspose:
 #ifdef USE_MPS
-      TORCH_CHECK(input.options().type_equal(weight.options()),
-               "Input type (", input.toString(), ") and weight type (", weight.toString(),
-               ") should be the same");
-      TORCH_CHECK(!bias.defined() || (input.options().type_equal(bias.options())),
-               "Input type (", input.toString(), ") and bias type (", bias.toString(),
-               ") should be the same");
+      check_input_same_type_as_parameters(input, weight, bias);
       output = at::_mps_convolution_transpose(
           input.contiguous(backend_memory_format), weight,
           params.padding, params.output_padding,
@@ -1737,8 +1732,8 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const std::option
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> ggI_maybe_owned = at::borrow_from_optional_tensor(ggI_opt);
   const Tensor& ggI = *ggI_maybe_owned;
-  const Tensor& ggW_r = c10::value_or_else(ggW_r_opt, [] {return Tensor();});
-  const Tensor& ggb = c10::value_or_else(ggb_opt, [] {return Tensor();});
+  const Tensor& ggW_r = ggW_r_opt.value_or(Tensor());
+  const Tensor& ggb = ggb_opt.value_or(Tensor());
 
 
   auto ggW = ggW_r;

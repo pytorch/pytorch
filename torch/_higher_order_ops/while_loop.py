@@ -7,6 +7,7 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_alias,
     _has_potential_branch_input_mutation,
+    _maybe_run_with_interpreter,
     _set_compilation_env,
     autograd_not_implemented,
     reenter_make_fx,
@@ -14,7 +15,11 @@ from torch._higher_order_ops.utils import (
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
+from torch.fx.experimental.proxy_tensor import (
+    _temp_remove_metadata_torch_function_mode,
+    ProxyTorchDispatchMode,
+    track_tensor_tree,
+)
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -112,6 +117,9 @@ def while_loop(cond_fn, body_fn, carried_inputs):
         - 'while_loop' only supports **inference** right now. Autograd will be supported in the future.
 
     """
+    from torch._dynamo.backends.debugging import (
+        make_eager_backend_with_torch_function_mode,
+    )
 
     # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
     # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
@@ -121,7 +129,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     def _validate_input(cond_fn, body_fn, carried_inputs):
         if not callable(cond_fn) or not callable(body_fn):
-            raise RuntimeError("Expect cond_fn and body_fn to be callbale.")
+            raise RuntimeError("Expect cond_fn and body_fn to be callable.")
 
         if not isinstance(carried_inputs, (tuple, list)) or pytree.tree_any(
             lambda t: not isinstance(t, torch.Tensor), carried_inputs
@@ -139,9 +147,15 @@ def while_loop(cond_fn, body_fn, carried_inputs):
         return while_loop_op(*args, **kwargs)
 
     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-        return torch.compile(_while_loop_op_wrapper, backend="eager", fullgraph=True)(
-            cond_fn, body_fn, carried_inputs, additional_inputs
-        )
+        with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
+                if metadata_mode:
+                    backend = make_eager_backend_with_torch_function_mode(metadata_mode)
+                else:
+                    backend = "eager"
+                return torch.compile(
+                    _while_loop_op_wrapper, backend=backend, fullgraph=True
+                )(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -238,8 +252,8 @@ def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
     unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
     unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
     with ctx.redispatch_to_next() as m:
-        functional_cond_fn = ctx.functionalize(cond_fn)
-        functional_body_fn = ctx.functionalize(body_fn)
+        functional_cond_fn = ctx.functionalize(_maybe_run_with_interpreter(cond_fn))
+        functional_body_fn = ctx.functionalize(_maybe_run_with_interpreter(body_fn))
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
         for fn, fn_name in [
             (functional_cond_fn, "cond_fn"),

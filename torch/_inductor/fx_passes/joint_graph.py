@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import itertools
 import logging
 import typing
@@ -10,10 +11,13 @@ import torch._guards
 import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
-from torch.fx.experimental.symbolic_shapes import statically_known_true
-from torch.fx.passes.graph_transform_observer import GraphTransformObserver
+from torch.fx.experimental.symbolic_shapes import (
+    _guard_sizes_oblivious,
+    statically_known_true,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 
+from ...utils._ordered_set import OrderedSet
 from .. import config
 from ..pattern_matcher import (
     CallFunction,
@@ -435,44 +439,104 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     """
     Run FX transformations on the joint forwards+backwards graph.
     """
+    GraphTransformObserver = functools.partial(
+        torch.fx.passes.graph_transform_observer.GraphTransformObserver,
+        subsystem="joint_graph_passes",
+    )
+
     lazy_init()
     count = 0
     if config.joint_custom_pre_pass is not None:
-        with GraphTransformObserver(
-            graph, "joint_custom_pre_pass", config.trace.log_url_for_graph_xform
-        ):
-            config.joint_custom_pre_pass(graph.graph)
-            count += 1
+        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
+            config.joint_custom_pre_pass
+        )
+        count += 1
 
     from .post_grad import remove_noop_ops
 
-    remove_noop_ops(graph.graph)
+    GraphTransformObserver(graph, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
 
     if config.joint_graph_constant_folding:
-        with GraphTransformObserver(
-            graph, "constant_fold_uniform_value", config.trace.log_url_for_graph_xform
-        ):
-            constant_fold_uniform_value(graph)
+        GraphTransformObserver(graph, "constant_fold_uniform_value").apply_gm_pass(
+            constant_fold_uniform_value
+        )
 
     if config.pattern_matcher:
-        for patterns in pass_patterns:
-            count += patterns.apply(graph.graph)  # type: ignore[arg-type]
+        for i, patterns in enumerate(pass_patterns):
+            maybe_count = GraphTransformObserver(
+                graph, f"pass_pattern_{i}"
+            ).apply_graph_pass(patterns.apply)
+            count += maybe_count if maybe_count is not None else 0
 
     if not config.fallback_random:
+        # not trying into the bisector because decomps may have already affected rng reproducibility
+        # we'll instead explicitly turn off the config
         count += replace_random_passes(graph)
 
     if config.joint_custom_post_pass is not None:
-        with GraphTransformObserver(
-            graph, "joint_custom_post_pass", config.trace.log_url_for_graph_xform
-        ):
-            config.joint_custom_post_pass(graph.graph)
-            count += 1
+        GraphTransformObserver(graph, "joint_custom_post_pass").apply_graph_pass(
+            config.joint_custom_post_pass
+        )
+        count += 1
 
     if count:
         stable_topological_sort(graph.graph)
         graph.graph.lint()
         graph.recompile()
     return graph
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.ops.prims.iota.default,
+        KeywordArg("length"),
+        start=KeywordArg("start"),
+        step=KeywordArg("step"),
+        dtype=KeywordArg("dtype"),
+        device=KeywordArg("device"),
+        requires_grad=KeywordArg("requires_grad"),
+    ),
+    pass_dict=patterns,
+)
+def fix_iota_device(match: Match, length, start, step, dtype, device, requires_grad):
+    """
+    Eager supports:
+
+        aten.index(cuda_tensor, torch.arange(..., device="cpu"))
+
+    But this results in an implicit host-device-copy and breaks cudagraphs.
+    Rewrite the arange to use CUDA.
+    """
+    (node,) = match.nodes
+    user_devices: OrderedSet[torch.device] = OrderedSet()
+    for user in node.users:
+        if (
+            user.op == "call_function"
+            and user.target in (aten.index.Tensor, aten.index_put.default)
+            and hasattr(user.meta.get("val"), "device")
+        ):
+            user_devices.add(user.meta["val"].device)  # type: ignore[union-attr]
+        else:
+            return  # bail out
+
+    if len(user_devices) == 1 and "val" in node.meta:
+        (user_device,) = user_devices
+        if device.type != user_device.type:
+            repl = match.graph.call_function(
+                torch.ops.prims.iota.default,
+                (length,),
+                {
+                    "start": start,
+                    "step": step,
+                    "dtype": dtype,
+                    "device": user_device,
+                    "requires_grad": requires_grad,
+                },
+            )
+            repl.meta.update(node.meta)
+            repl.meta["val"] = repl.meta["val"].to(user_device)
+            node.replace_all_uses_with(repl)
+            match.erase_nodes()
 
 
 @register_graph_pattern(
@@ -498,7 +562,7 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         )
         repl.meta.update(node.meta)
         node.replace_all_uses_with(repl)
-        match.erase_nodes(graph)
+        match.erase_nodes()
 
 
 @register_graph_pattern(
@@ -507,12 +571,50 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
 )
 def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
-    graph = match.graph
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
-    if size == arg_size:
-        node.replace_all_uses_with(node.args[0])
-        match.erase_nodes(graph)
+    if _guard_sizes_oblivious(size, arg_size):
+        node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
+        match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.view.default,
+        CallFunction(aten.view.default, KeywordArg("arg"), KeywordArg("size1")),
+        KeywordArg("size2"),
+    ),
+    pass_dict=patterns,
+)
+def pointless_view_pair(match: Match, arg, size1, size2):
+    """
+    Remove a pair of views that are pointless.
+    """
+    node = match.output_node()
+    arg_size = list(arg.meta["val"].shape)
+    if _guard_sizes_oblivious(arg_size, size2):
+        node.replace_all_uses_with(arg)
+        match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.permute.default,
+        CallFunction(aten.permute.default, KeywordArg("arg"), KeywordArg("perm1")),
+        KeywordArg("perm2"),
+    ),
+    pass_dict=patterns,
+)
+def pointless_permute_pair(match: Match, arg, perm1, perm2):
+    rank = len(perm1)
+    assert len(perm2) == rank
+
+    for i in range(rank):
+        if perm1[perm2[i]] != i:
+            return  # bail out
+    node = match.output_node()
+    node.replace_all_uses_with(arg)
+    match.erase_nodes()
 
 
 # When softmax is used with temperature or other scaling, we get the pattern
@@ -593,7 +695,7 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
             inp = inp.to(dtype)
 
         sign: Union[int, float, torch.Tensor]
-        if isinstance(other, (int, float)):
+        if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
             one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
@@ -620,7 +722,7 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
             inp = inp.to(dtype)
 
         sign: Union[int, float, torch.Tensor]
-        if isinstance(other, (int, float)):
+        if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
             one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)

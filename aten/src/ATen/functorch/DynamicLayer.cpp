@@ -232,7 +232,7 @@ DynamicLayer popDynamicLayer() {
 
 int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
-  int64_t layerId = 1 + dynamicLayerStack.size();
+  int64_t layerId = static_cast<int64_t>(1 + dynamicLayerStack.size());
   TORCH_INTERNAL_ASSERT(layerId == dynamic_layer.layerId());
   dynamicLayerStack.emplace_back(std::move(dynamic_layer));
 
@@ -256,7 +256,7 @@ int64_t initAndPushDynamicLayer(
     std::optional<bool> prev_fwd_grad_mode,
     std::optional<bool> functionalize_add_back_views) {
   const auto& dynamicLayerStack = dynamicLayerStackAccessor();
-  const auto layerId = 1 + dynamicLayerStack.size();
+  const int64_t layerId = static_cast<int64_t>(1 + dynamicLayerStack.size());
   DynamicLayer new_layer(transform_type, layerId, std::move(batch_size), randomness, prev_grad_mode, prev_fwd_grad_mode, functionalize_add_back_views);
   // NB: this function should be called while holding the GIL to avoid races
   new_layer.interpreter().set_is_alive(true);
@@ -459,7 +459,7 @@ static void dynamicLayerFrontFallback(
 
   // Unwrap escaped GradWrappers
   auto num_args = op.schema().arguments().size();
-  foreachTensorInplace(*stack, stack->size() - num_args, stack->size(), unwrapIfDead);
+  foreachTensorInplace(*stack, static_cast<int64_t>(stack->size() - num_args), static_cast<int64_t>(stack->size()), unwrapIfDead);
 
   auto& layer = dynamicLayerStack.back();
   layer.interpreter().process(op, stack);

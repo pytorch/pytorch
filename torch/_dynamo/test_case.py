@@ -1,7 +1,7 @@
-# mypy: allow-untyped-defs
 import contextlib
 import importlib
 import logging
+from typing import Tuple, Union
 
 import torch
 import torch.testing
@@ -18,7 +18,7 @@ from . import config, reset, utils
 log = logging.getLogger(__name__)
 
 
-def run_tests(needs=()):
+def run_tests(needs: Union[str, Tuple[str, ...]] = ()) -> None:
     from torch.testing._internal.common_utils import run_tests
 
     if TEST_WITH_TORCHDYNAMO or IS_WINDOWS or TEST_WITH_CROSSREF:
@@ -42,12 +42,12 @@ class TestCase(TorchTestCase):
     _exit_stack: contextlib.ExitStack
 
     @classmethod
-    def tearDownClass(cls):
+    def tearDownClass(cls) -> None:
         cls._exit_stack.close()
         super().tearDownClass()
 
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         super().setUpClass()
         cls._exit_stack = contextlib.ExitStack()  # type: ignore[attr-defined]
         cls._exit_stack.enter_context(  # type: ignore[attr-defined]
@@ -58,13 +58,13 @@ class TestCase(TorchTestCase):
             ),
         )
 
-    def setUp(self):
+    def setUp(self) -> None:
         self._prior_is_grad_enabled = torch.is_grad_enabled()
         super().setUp()
         reset()
         utils.counters.clear()
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         for k, v in utils.counters.items():
             print(k, v.most_common())
         reset()

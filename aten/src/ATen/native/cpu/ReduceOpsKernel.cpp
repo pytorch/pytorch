@@ -62,11 +62,12 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
     auto* result_data_bytes = data[0];
     const auto* self_data_bytes = data[1];
 
-    for (const auto i C10_UNUSED : c10::irange(n)) {
-      f(
-        (scalar_t*)result_data_bytes, result_dim_stride,
-        (scalar_t*)self_data_bytes, self_dim_stride, init_val
-      );
+    for ([[maybe_unused]] const auto i : c10::irange(n)) {
+      f((scalar_t*)result_data_bytes,
+        result_dim_stride,
+        (scalar_t*)self_data_bytes,
+        self_dim_stride,
+        init_val);
       result_data_bytes += strides[0];
       self_data_bytes += strides[1];
     }
@@ -430,21 +431,21 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 }  // anonymous namespace
 
-REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
-REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
+REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl)
+REGISTER_DISPATCH(prod_stub, &prod_kernel_impl)
 // mean implementation for CPU is in aten/src/ATen/native/ReduceOps.cpp
 // but mean_stub must be defined for CPU as well
-REGISTER_DISPATCH(mean_stub, nullptr);
-REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
-REGISTER_DISPATCH(and_stub, &and_kernel_impl);
-REGISTER_DISPATCH(or_stub, &or_kernel_impl);
-REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
-REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
-REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
-REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
+REGISTER_DISPATCH(mean_stub, nullptr)
+REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl)
+REGISTER_DISPATCH(and_stub, &and_kernel_impl)
+REGISTER_DISPATCH(or_stub, &or_kernel_impl)
+REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl)
+REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl)
+REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl)
+REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl)
 
-REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
-REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
-REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
+REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel)
+REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel)
+REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel)
 
 }  // namespace at::native

@@ -25,6 +25,8 @@ _GUARD_SOURCE_SPECIALIZED_NN_MODULE = {
     GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_NN_MODULE,
     GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
     GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
 }
 
 # represents nn.Modules tracked with UnspecializedNNModuleVariable
@@ -39,6 +41,8 @@ _GUARD_SOURCE_UNSPECIALIZED_NN_MODULE = {
     # Just to ensure that guard_source() works
     GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
     GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
 }
 
 # represents nn.Modules tracked with UnspecializedBuiltinNNModuleVariable
@@ -52,6 +56,8 @@ _GUARD_SOURCE_UNSPECIALIZED_BUILTIN_NN_MODULE = {
     # Just to ensure that guard_source() works
     GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.LOCAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
     GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE: GuardSource.GLOBAL_UNSPECIALIZED_BUILTIN_NN_MODULE,
+    GuardSource.LOCAL_FSDP_MODULE: GuardSource.LOCAL_FSDP_MODULE,
+    GuardSource.GLOBAL_FSDP_MODULE: GuardSource.GLOBAL_FSDP_MODULE,
 }
 
 _GUARD_SOURCE_FSDP_MODULE = {
@@ -186,6 +192,11 @@ class WeakRefCallSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class CallFunctionNoArgsSource(WeakRefCallSource):
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
 class AttrSource(ChainedSource):
     member: str
 
@@ -236,6 +247,12 @@ class ParamBufferSource(AttrSource):
         return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source()]
 
 
+# Special AttrSource to differentiate module._buffers or module._parameters
+@dataclasses.dataclass(frozen=True)
+class UnspecializedParamBufferSource(AttrSource):
+    pass
+
+
 # This source is intended to be used in places where a source is needed but it is expected
 # that the symbol will be simplified out later on. Symbols with ephemeral sources are
 # prioritized to be simplified out when e.g. compared against a symbol without an ephemeral
@@ -255,7 +272,7 @@ class EphemeralSource(Source):
     def name(self):
         return f"<ephemeral{': ' + self.desc if self.desc is not None else ''}>"
 
-    def make_guard(self):
+    def make_guard(self, fn):
         raise NotImplementedError
 
     def is_ephemeral(self):
@@ -289,15 +306,17 @@ class TensorPropertySource(ChainedSource):
             assert self.idx is not None
 
     def reconstruct(self, codegen):
-        def gen_fn():
-            self.base.reconstruct(codegen)
-            codegen.append_output(codegen.create_load_attr(self.prop.method_name()))
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                utils.__name__, f"call_{self.prop.method_name()}"
+            )
+        )
+        self.base.reconstruct(codegen)
 
-        codegen.add_push_null(gen_fn)
         if self.idx is not None:
             codegen.append_output(codegen.create_load_const(self.idx))
         codegen.extend_output(
-            create_call_function(1 if self.idx is not None else 0, False)
+            create_call_function(2 if self.idx is not None else 1, False)
         )
 
     def guard_source(self):
@@ -374,6 +393,17 @@ class ScriptObjectQualifiedNameSource(ChainedSource):
 
     def name(self):
         return f"{self.base.name()}._type().qualified_name()"
+
+
+class AttrProxySource(ChainedSource):
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.get_base()"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -587,6 +617,31 @@ class GlobalStateSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class TorchFunctionModeStackSource(Source):
+    ind: int
+
+    def name(self):
+        return f"___get_torch_function_mode_stack_at({self._get_index()})"
+
+    def _get_index(self):
+        from .variables.torch_function import TorchFunctionModeStackVariable
+
+        return TorchFunctionModeStackVariable.get_mode_index(self.ind)
+
+    def reconstruct(self, codegen):
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                utils.__name__, "get_torch_function_mode_stack_at"
+            )
+        )
+        codegen.extend_output([codegen.create_load_const(self._get_index())])
+        codegen.extend_output(create_call_function(1, False))
+
+    def guard_source(self):
+        return GuardSource.GLOBAL
+
+
+@dataclasses.dataclass(frozen=True)
 class ConstantSource(Source):
     source_name: str
 
@@ -679,6 +734,14 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     return True
 
 
+def is_from_unspecialized_param_buffer_source(source: Source):
+    if isinstance(source, UnspecializedParamBufferSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_unspecialized_param_buffer_source(source.base)
+    return False
+
+
 def is_from_flatten_script_object_source(source: Source):
     if isinstance(source, FlattenScriptObjectSource):
         return True
@@ -703,7 +766,3 @@ def is_from_defaults(source: Source):
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
     return False
-
-
-def is_cell_contents(source: Source):
-    return isinstance(source, AttrSource) and source.member == "cell_contents"

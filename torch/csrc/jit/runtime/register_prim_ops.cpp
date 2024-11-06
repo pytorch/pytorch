@@ -13,18 +13,11 @@
 #include <bitset>
 #include <cctype>
 #include <cmath>
-#include <exception>
-#include <fstream>
 #include <iostream>
-#include <limits>
 #include <memory>
-#include <mutex>
 #include <ostream>
 #include <stdexcept>
 #include <string>
-#include <typeinfo>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -45,8 +38,7 @@ std::string stringSlice(
 
   int64_t i = start_val;
   std::string result = "";
-  for (const auto j : c10::irange(num_vals)) {
-    (void)j; // Suppress unused variable warning
+  for ([[maybe_unused]] const auto j : c10::irange(num_vals)) {
     result += string[i];
     i += step;
   }
@@ -259,8 +251,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         TORCH_SELECTIVE_SCHEMA(
             "aten::__range_length(int lo, int hi, int step) -> int"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t lo, hi, step;
+          int64_t lo = 0, hi = 0, step = 0;
           pop(stack, lo, hi, step);
           // error handling when step_val = 0 during runtime
           if (step == 0) {
@@ -279,8 +270,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         TORCH_SELECTIVE_SCHEMA(
             "aten::__derive_index(int index, int start, int step) -> int"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t index, start, step;
+          int64_t index = 0, start = 0, step = 0;
           pop(stack, index, start, step);
           push(stack, start + index * step);
         },
@@ -336,8 +326,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::Bool.int(int a) -> bool"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t i;
+          int64_t i = 0;
           pop(stack, i);
           push(stack, (bool)i);
         },
@@ -345,8 +334,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::Bool.float(float a) -> bool"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double d;
+          double d = 0;
           pop(stack, d);
           push(stack, (bool)d);
         },
@@ -362,8 +350,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::Int.bool(bool a) -> int"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool b;
+          bool b = false;
           pop(stack, b);
           push(stack, static_cast<int64_t>(b));
         },
@@ -371,8 +358,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::Int.float(float a) -> int"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double d;
+          double d = 0;
           pop(stack, d);
           push(stack, static_cast<int64_t>(d));
         },
@@ -394,8 +380,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         TORCH_SELECTIVE_SCHEMA("aten::Int.str(str a) -> int"),
         [](Stack& stack) {
           auto s = pop(stack).toString();
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          std::string::size_type sz;
+          std::string::size_type sz = 0;
           int64_t val = static_cast<int64_t>(std::stoll(s->string(), &sz));
           if (sz == s->string().size()) {
             push(stack, val);
@@ -432,8 +417,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::Float.int(int a) -> float"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t i;
+          int64_t i = 0;
           pop(stack, i);
           push(stack, (float)i);
         },
@@ -441,8 +425,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::Float.bool(bool a) -> float"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool b;
+          bool b = false;
           pop(stack, b);
           push(stack, (float)b);
         },
@@ -451,8 +434,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         TORCH_SELECTIVE_SCHEMA("aten::Float.str(str a) -> float"),
         [](Stack& stack) {
           auto s = pop(stack).toString();
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          std::string::size_type sz;
+          std::string::size_type sz = 0;
           double b = std::stod(s->string(), &sz);
           if (sz == s->string().size()) {
             push(stack, b);
@@ -847,7 +829,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
             ss << i;
           }
           drop(stack, num_inputs);
-          ss << std::endl;
+          ss << '\n';
           auto* handler = getPrintHandler();
           TORCH_INTERNAL_ASSERT(handler);
           handler(ss.str());
@@ -1036,8 +1018,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::pow.int_to_int(int a, int b) -> int"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t a, b;
+          int64_t a = 0, b = 0;
           pop(stack, a, b);
           push(stack, powWrapper(a, b));
         },
@@ -1060,7 +1041,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           at::Tensor t = pop(stack).toTensor();
           if (t.dim() == 0) {
-            AT_ERROR("len() of a 0-d tensor");
+            TORCH_CHECK(false, "len() of a 0-d tensor");
           }
           push(stack, t.sizes()[0]);
         },
@@ -1270,10 +1251,8 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         TORCH_SELECTIVE_SCHEMA(
             "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool non_blocking;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool copy;
+          bool non_blocking = false;
+          bool copy = false;
           pop(stack, non_blocking, copy);
           std::optional<at::ScalarType> scalarType =
               pop(stack).toOptional<at::ScalarType>();
@@ -1330,7 +1309,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         [](Stack& stack) {
           at::Tensor a;
           pop(stack, a);
-          push(stack, autograd::Variable(a).variable_data());
+          push(stack, a.variable_data());
         },
         aliasAnalysisFromSchema()),
 // these ops are not defined for Tensor
@@ -1509,7 +1488,7 @@ void dictPop(Stack& stack) {
     if (has_default) {
       push(stack, default_value);
     } else {
-      AT_ERROR("KeyError: ", key);
+      TORCH_CHECK(false, "KeyError: ", key);
     }
   } else {
     // note: before erase
@@ -1529,7 +1508,7 @@ void dictDelete(Stack& stack) {
 void dictPopItem(Stack& stack) {
   auto dict = pop(stack).toGenericDict();
   if (dict.empty()) {
-    AT_ERROR("popitem(): dictionary is empty");
+    TORCH_CHECK(false, "popitem(): dictionary is empty");
   }
   auto head_item = dict.begin();
 
@@ -1709,14 +1688,12 @@ static const std::vector<OperatorGeneratorArgs> dict_ops{
 };
 RegisterOperators reg_dict_ops(createOperators(dict_ops));
 
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 constexpr c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
 // Convert an python index (which may be negative) into an index usable for a
 // C++ container
-// NOLINTNEXTLINE(clang-diagnostic-unused-function)
 int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   if (idx < 0) {
     // Handle negative indexing
@@ -2418,8 +2395,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::rangelist(int n) -> int[]"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t n;
+          int64_t n = 0;
           pop(stack, n);
           c10::List<int64_t> elems;
           elems.reserve(n);
@@ -2458,10 +2434,8 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
             "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
         [](Stack& stack) {
           at::Tensor self;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool non_blocking;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          bool copy;
+          bool non_blocking = false;
+          bool copy = false;
           pop(stack, self, non_blocking, copy);
           std::optional<c10::Device> device = std::nullopt;
           std::optional<at::ScalarType> scalarType = std::nullopt;
@@ -3077,25 +3051,20 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::modf(float a) -> (float, float)"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double a;
+          double a = 0;
           pop(stack, a);
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double b, c;
-          b = modf(a, &c);
+          double c = 0;
+          double b = modf(a, &c);
           push(stack, b, c);
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::frexp(float a) -> (float, int)"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double a;
+          double a = 0;
           pop(stack, a);
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double m;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int e;
+          double m = 0;
+          int e = 0;
           m = std::frexp(a, &e);
           push(stack, m, e);
         },
@@ -3103,10 +3072,8 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::ldexp(float x, int i) -> float"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double a;
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t b;
+          double a = 0;
+          int64_t b = 0;
           pop(stack, a, b);
           push(stack, std::ldexp(a, b));
         },
@@ -3388,8 +3355,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::divmod.int(int x, int y) -> (int, int)"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          int64_t a, b;
+          int64_t a = 0, b = 0;
           lldiv_t divresult = {};
           pop(stack, a, b);
           if (b == 0) {
@@ -3411,8 +3377,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs2{
         TORCH_SELECTIVE_SCHEMA(
             "aten::divmod.float(float x, float y) -> (float, float)"),
         [](Stack& stack) {
-          // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-          double a, b;
+          double a = 0, b = 0;
           pop(stack, a, b);
           if (b == 0) {
             throw std::runtime_error("ZeroDivisionError: float divmod()");

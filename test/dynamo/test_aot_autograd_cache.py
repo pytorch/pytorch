@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import os
 import unittest
 from unittest.mock import patch
 
@@ -24,8 +23,10 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfWindows,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 @instantiate_parametrized_tests
@@ -51,8 +52,6 @@ class AOTAutogradCacheTests(InductorTestCase):
         Clear unrelated caches, like dynamo and PyCodeCache
         """
         torch._dynamo.reset()
-        for m in torch._inductor.codecache.PyCodeCache.cache.values():
-            os.remove(m.__file__)
         torch._inductor.codecache.PyCodeCache.cache_clear()
 
     @inductor_config.patch("fx_graph_remote_cache", False)
@@ -86,9 +85,29 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
 
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_aot_runtime_trace_joint(self):
+        @torch.compile(backend="inductor")
+        def f(x):
+            tmp = x.sin()
+            s0 = tmp.shape[0]
+            return tmp.expand(s0, s0)
+
+        x_a = torch.randn(4, requires_grad=True)
+        x = TwoTensor(x_a, x_a.clone())
+        out = f(x)
+        out.sum().backward()
+
+        self._clear_dynamo_and_codecache()
+        out = f(x)
+        out.sum().backward()
+
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    @skipIfWindows(
+        msg="Known issue: Window can't delete loaded modules, so we can't clear module cache."
+    )
     def test_clear_fx_graph_cache(self):
         """
         Verify the interactions between FXGraphCache and AOTAutogradCache.
@@ -588,7 +607,7 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
         if inputs is None:
             inputs = [torch.ones(3)]
         _, fx_g, example_inputs = self._get_dynamo_output(f, *inputs)
-        return autograd_cache_key(fx_g, example_inputs, config)
+        return autograd_cache_key(fx_g, example_inputs, config, {})
 
     def test_basic_hash_key(self):
         def fn(x):

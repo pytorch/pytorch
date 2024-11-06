@@ -70,6 +70,11 @@ class ToDenseNet(torch.nn.Module):
         return x.to_dense()
 
 
+class AddNet(torch.nn.Module):
+    def forward(self, x, y):
+        return torch.add(x, y)
+
+
 class SparseActivationCOO(torch.nn.Module):
     def forward(self, x):
         return [xi.to_sparse() for xi in x]
@@ -195,9 +200,6 @@ class TestSparseProp(TestCase):
     @parametrize("itype", ITYPES)
     @all_sparse_layouts("layout")
     def test_todensenet(self, dtype, itype, layout):
-        if layout is not torch.sparse_coo:
-            self.skipTest("TODO: support non-coo sparsity (#133174)")
-
         net = ToDenseNet()
         for sparse_input in self.generate_simple_inputs(
             layout,
@@ -217,6 +219,34 @@ class TestSparseProp(TestCase):
                     self.assertEqualMeta(meta, result)
                 else:
                     self.assertEqual(meta, None)
+
+    def test_add(self):
+        net = AddNet()
+        Y = torch.arange(16, 32, dtype=torch.float32).view(4, 4)
+        A = torch.tensor(
+            [
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 2.0],
+                [0.0, 0.0, 1.0, 1.0],
+                [3.0, 0.0, 3.0, 0.0],
+            ],
+            dtype=torch.float32,
+        )
+        S = A.to_sparse_csr()
+        result = net(S, Y)
+        # Build the traced graph.
+        prog = torch.export.export(net, (S, Y))
+        # Test args/add/output.
+        for i, node in enumerate(prog.graph.nodes):
+            meta = node.meta.get("val", None)
+            if i == 0:
+                self.assertEqualMeta(meta, S)
+            elif i == 1:
+                self.assertEqualMeta(meta, Y)
+            elif i == 2:
+                self.assertEqualMeta(meta, result)
+            else:
+                self.assertEqual(meta, None)
 
     def test_activation_coo(self):
         net = SparseActivationCOO()

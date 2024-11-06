@@ -128,10 +128,26 @@ inline bool _check_tensors_share_device_and_dtype(
 // corresponding tensors in tensor lists have the same sizes and strides.
 inline bool _check_tensors_share_sizes_and_strides(
     ArrayRef<TensorList> tensorLists) {
+  auto is_diff_stride = [](const IntArrayRef& size,
+                           const IntArrayRef& left_stride,
+                           const IntArrayRef& right_stride) -> bool {
+    const size_t size_size = size.size();
+    for (const auto dim : c10::irange(size_size)) {
+      if (size[dim] == 1)
+        continue;
+      if (left_stride[dim] != right_stride[dim]) {
+        return true;
+      }
+    }
+    return false;
+  };
   for (const auto i : c10::irange(1, tensorLists.size())) {
     for (const auto j : c10::irange(tensorLists[0].size())) {
       if (tensorLists[0][j].sizes() != tensorLists[i][j].sizes() ||
-          tensorLists[0][j].strides() != tensorLists[i][j].strides()) {
+          is_diff_stride(
+              tensorLists[0][j].sizes(),
+              tensorLists[0][j].strides(),
+              tensorLists[i][j].strides())) {
         return false;
       }
     }

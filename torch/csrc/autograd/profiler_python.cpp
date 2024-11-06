@@ -554,7 +554,8 @@ struct TraceContext {
 
 // CPython boilerplate to define `TraceContext` as a proper python object.
 static PyTypeObject TraceContextType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "TraceContext", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "TraceContext", /* tp_name */
     sizeof(TraceContext), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -680,6 +681,7 @@ class PythonTracer final : public python_tracer::PythonTracerBase {
       PyObject* arg);
 
   void stop() override;
+  void restart() override;
   std::vector<std::shared_ptr<Result>> getEvents(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
       std::vector<python_tracer::CompressedEvent>& enters,
@@ -808,6 +810,25 @@ void PythonTracer::stop() {
     auto lock_returned = active_lock_.compare_exchange_strong(active_, false);
     active_ = false;
     SOFT_ASSERT(lock_returned, "Failed to return python tracer lock.");
+  }
+}
+
+void PythonTracer::restart() {
+  gil_and_restore_thread gil;
+  active_ = active_lock_.compare_exchange_strong(active_, true);
+  if (!active_) {
+    TORCH_WARN(
+        "There is already an active Python tracer. "
+        "Refusing to register profile functions.");
+    return;
+  }
+  int cur_thread = 0;
+  for (const auto thread_state : interpreterThreads()) {
+    if (thread_state->c_profilefunc == nullptr) {
+      auto* ctx = thread_local_results_[cur_thread].ctx_;
+      PyThreadState_Swap(thread_state);
+      PyEval_SetProfile(PythonTracer::pyProfileFn, (PyObject*)ctx);
+    }
   }
 }
 
@@ -996,7 +1017,7 @@ class PostProcess {
     ska::flat_hash_map<size_t, std::pair<size_t, kineto::DeviceAndResource>>
         tid_map;
     auto it = out.rbegin();
-    for (C10_UNUSED auto _ : c10::irange(initial_size, out.size())) {
+    for ([[maybe_unused]] auto _ : c10::irange(initial_size, out.size())) {
       const auto python_tid =
           std::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {
