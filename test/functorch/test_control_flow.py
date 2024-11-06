@@ -2634,6 +2634,8 @@ class AssociativeScanTests(TestCase):
 
         num_dims = [random.randint(2, 5) for _ in range(4)]
         for num_dim in num_dims:
+            # To avoid triggering automatic dynamic shape
+            torch._dynamo.reset()
             shapes = [random.randint(1, 9) for _ in range(num_dim)]
             rnd_scan_dim = random.randint(0, num_dim - 1)
             x = torch.randn(*shapes, device=device)
