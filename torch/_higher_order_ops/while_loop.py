@@ -53,6 +53,23 @@ class WhileLoopOp(HigherOrderOperator):
             )
 
         validate_subgraph_args_types(additional_inputs)
+
+        # Check the output of the body_fn for the same metadata as the carried_inputs
+        dummy_output = body_fn(*carried_inputs, *additional_inputs)
+
+        if any(
+            inp.shape != out.shape
+            or inp.dtype != out.dtype
+            or inp.device != out.device
+            or inp.stride() != out.stride()
+            for inp, out in zip(carried_inputs, dummy_output)
+        ):
+            raise RuntimeError(
+                f"The metadata of the output of the body_fn needs to match the meta data of the carried_inputs"
+                f"\n  xs metadata             : {[(x.shape, x.dtype, x.device, x.stride()) for x in carried_inputs]}"
+                f"\n  operator output metadata: {[(x.shape, x.dtype, x.device, x.stride()) for x in dummy_output]}"
+            )
+
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
