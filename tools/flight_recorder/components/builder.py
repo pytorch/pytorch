@@ -141,13 +141,6 @@ def build_nccl_call(
         sizes=entry["input_sizes"],
     )
 
-def best_effort_log(expected_ranks, dumps_ranks):
-    logger.info(
-        "We cannot decide what's wrong with this collective entry "
-        "because we missed FR dumps from ranks (%s) so we don't have enough "
-        "information. If you want to debug further use -j to dump all raw trace",
-        str(expected_ranks - dumps_ranks),
-    )
 
 def build_collectives(
     all_entries: Dict[int, List[Dict[str, Any]]],
