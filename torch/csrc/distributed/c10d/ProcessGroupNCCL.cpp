@@ -613,6 +613,12 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
                << " raised the following async exception: "
                << getExceptionMsgFromExceptionPtr(exception_);
   }
+
+  // Mark future result as ERROR
+  if (futureWorkResult_ && !futureWorkResult_->completed()) {
+    futureWorkResult_->markCompleted(
+        at::IValue(static_cast<uint8_t>(WorkResult::COMM_ERROR)));
+  }
 }
 
 const std::string& ProcessGroupNCCL::WorkNCCL::logPrefix() const {
@@ -672,11 +678,6 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 
   // Timed out
 
-  // There is already an error, we don't override it
-  if (exception()) {
-    return true;
-  }
-
   std::string exceptionMsg = c10::str(
       logPrefix(),
       "Watchdog caught collective operation timeout: ",
@@ -687,7 +688,23 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
 
   LOG(ERROR) << exceptionMsg;
 
-  // Get the stack trace of the work at call time
+  std::exception_ptr exception_ptr =
+      std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exceptionMsg));
+  if (!exception()) {
+    // if there is already an error, we don't override it
+    setException(exception_ptr);
+  }
+
+  // Mark future result as TIMEOUT
+  if (futureWorkResult_ && !futureWorkResult_->completed()) {
+    futureWorkResult_->markCompleted(
+        at::IValue(static_cast<uint8_t>(WorkResult::TIMEOUT)));
+  }
+  return true;
+}
+
+// Print the traceback of the collective at call time
+void ProcessGroupNCCL::WorkNCCL::printTraceback() const {
   // First step we get the corresponding record entry from FR, based on work's
   // trace_id_
   std::optional<NCCLTraceBuffer::Entry> entry =
@@ -704,20 +721,14 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     auto status = future.wait_for(std::chrono::seconds(8));
     if (status == std::future_status::ready) {
       std::string tracebackStr = future.get();
-      LOG(ERROR) << "Stack trace of the timedout collective operation: \n"
-                 << tracebackStr;
+      LOG(ERROR) << "Stack trace of the failed collective: \n" << tracebackStr;
     } // else, symbolizer probably timed out, we skip logging the stack trace.
   } else {
     LOG(ERROR)
-        << "Stack trace of the timedout collective not found, "
+        << "Stack trace of the failed collective not found, "
         << "potentially because FlightRecorder is disabled. "
         << "You can enable it by setting TORCH_NCCL_TRACE_BUFFER_SIZE to a non-zero value.";
   }
-
-  std::exception_ptr exception_ptr =
-      std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exceptionMsg));
-  setException(exception_ptr);
-  return true;
 }
 
 void ProcessGroupNCCL::WorkNCCL::handleException(
@@ -898,11 +909,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(std::move(store)),
       options_(std::move(options)),
 
-      traceKeyStart_(getTraceStartKey("NCCL", rank)),
-      traceKeyEnd_(getTraceEndKey("NCCL", rank)),
       terminateProcessGroup_(false),
       terminateHeartbeatMonitorThread_(false),
-      collectiveDebugInfoMode_(false),
       local_id_(process_group_id++),
       intraNodeComm_(initIntraNodeComm()) {
   TORCH_CHECK_WITH(
@@ -1076,6 +1084,11 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     c10::cuda::CUDACachingAllocator::attachAllocatorTraceTracker(
         &cacheAllocatorDeregisterHook);
     allocatorHooksAttached = true;
+  }
+
+  // Enable Desync Debugger per user setting
+  if (desyncDebug_) {
+    desyncDebugger_.init(rank, size, store_);
   }
 }
 
@@ -1710,8 +1723,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
-       shouldDump_.load()) &&
+  if ((terminateProcessGroup_.load() || desyncDebug_ || shouldDump_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
@@ -1795,11 +1807,44 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
   }
 }
 
-void ProcessGroupNCCL::logWorkStart(WorkNCCL& work) {
-  if (work.startTraceUpdated_)
-    return;
+// Initialize and enable DesyncDebugger
+void ProcessGroupNCCL::DesyncDebugger::init(
+    int rank,
+    int size,
+    c10::intrusive_ptr<Store> store) {
+  rank_ = rank;
+  size_ = size;
+  store_ = store;
+  enabled_ = true;
+  traceKeyStart_ = getTraceStartKey("NCCL", rank);
+  traceKeyEnd_ = getTraceEndKey("NCCL", rank);
+}
 
-  if (terminateProcessGroup_.load() || storeError_)
+// Run desync debug. This function is called by watchdog at time of timeout.
+void ProcessGroupNCCL::DesyncDebugger::run() {
+  if (!enabled_)
+    return;
+  auto logPrefix = c10::str("Rank ", rank_);
+  try {
+    std::string desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
+    LOG(ERROR) << logPrefix << desyncMsg;
+  } catch (const std::exception& e) {
+    LOG(ERROR) << logPrefix
+               << " Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
+               << " Please file an issue. Error: " << e.what();
+  } catch (...) {
+    LOG(ERROR)
+        << logPrefix
+        << " Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
+        << " Please file an issue.";
+  }
+}
+
+// Log work start to store.
+void ProcessGroupNCCL::DesyncDebugger::logWorkStart(WorkNCCL& work) {
+  if (!enabled_)
+    return;
+  if (storeError_ || work.startTraceUpdated_)
     return;
 
   work.startTraceUpdated_ = true;
@@ -1807,8 +1852,11 @@ void ProcessGroupNCCL::logWorkStart(WorkNCCL& work) {
       store_, traceKeyStart_, work.seq_, opTypeToString(work.opType_));
 }
 
-void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work) {
-  if (terminateProcessGroup_.load() || storeError_)
+// Log work end to store.
+void ProcessGroupNCCL::DesyncDebugger::logWorkEnd(WorkNCCL& work) {
+  if (!enabled_)
+    return;
+  if (storeError_)
     return;
 
   // In case the start of the work hasn't been logged
@@ -1818,10 +1866,6 @@ void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work) {
 
   storeError_ = !c10d::traceUpdate(
       store_, traceKeyEnd_, work.seq_, opTypeToString(work.opType_));
-}
-
-std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
-  return retrieveDesyncReport(store_, "NCCL", rank_, size_);
 }
 
 // We want to have both PG ID and global unique ID (guid) for the logging
@@ -1961,55 +2005,29 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (!terminateProcessGroup_.load()) {
         work.checkAndSetException();
       }
-      if (work.exception()) {
-        // log as soon as exception is detected
-        LOG(ERROR) << c10::str(
-            logPrefix(),
-            "NCCL error is detected by watchdog at work: ",
-            work.seq_,
-            ", last enqueued NCCL work: ",
-            pgStatus_->lastEnqueuedSeq,
-            ", last completed NCCL work: ",
-            pgStatus_->lastCompletedSeq,
-            ".");
-        if (work.futureWorkResult_ && !work.futureWorkResult_->completed()) {
-          work.futureWorkResult_->markCompleted(
-              at::IValue(static_cast<uint8_t>(WorkResult::COMM_ERROR)));
-        }
-      } else if (work.checkTimeout()) {
-        LOG(ERROR) << c10::str(
-            logPrefix(),
-            "Work timeout is detected by watchdog at work: ",
-            work.seq_,
-            ", last enqueued NCCL work: ",
-            pgStatus_->lastEnqueuedSeq,
-            ", last completed NCCL work: ",
-            pgStatus_->lastCompletedSeq,
-            ".");
-        if (work.futureWorkResult_ && !work.futureWorkResult_->completed()) {
-          work.futureWorkResult_->markCompleted(
-              at::IValue(static_cast<uint8_t>(WorkResult::TIMEOUT)));
-        }
-        // Report desync state in case of timeout
-        if (desyncDebug_) {
-          try {
-            collectiveDebugInfoMode_.store(true);
-            auto desyncMsg = getNCCLWatchdogDebugInfo();
-            LOG(ERROR) << logPrefix() << desyncMsg;
-          } catch (const std::exception& e) {
-            LOG(ERROR) << logPrefix()
-                       << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
-                       << " Please file an issue. Error: " << e.what();
-          } catch (...) {
-            LOG(ERROR)
-                << logPrefix()
-                << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
-                << " Please file an issue.";
-          }
-        }
+      // Then check if work has timed out
+      bool timedout = work.checkTimeout();
+
+      // Report desync state in case of timeout (if TORCH_NCCL_DESYNC_DEBUG is
+      // turned on; otherwise, run() is no-op)
+      if (timedout) {
+        desyncDebugger_.run();
       }
+
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
+        LOG(ERROR) << c10::str(
+            logPrefix(),
+            " failure detected by watchdog at work sequence id: ",
+            work.seq_,
+            " PG status: last enqueued work: ",
+            pgStatus_->lastEnqueuedSeq,
+            ", last completed work: ",
+            pgStatus_->lastCompletedSeq);
+
+        // Print the traceback of the collective at call time
+        work.printTraceback();
+
         // try to notify other ranks via global TCPStore to dump the flight
         // recorder when a collective timeout or exception happens. Flight
         // recorder behavior is independent of desync Debug.
@@ -2060,14 +2078,7 @@ void ProcessGroupNCCL::watchdogHandler() {
       }
 
       // Work status logging for desync debug
-      if (desyncDebug_) {
-        if (work.isStarted()) {
-          logWorkStart(work);
-        }
-        if (work.isCompleted()) {
-          logWorkEnd(work);
-        }
-      }
+      desyncDebugger_.logWorkStart(work);
 
       // a work could be started but not completed, so we should not update
       // lastStartedSeq and lastStartedOpName if the work state is checked
@@ -2080,6 +2091,9 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // Clean up completed work
       if (work.isCompleted()) {
+        // Work status logging for desync debug
+        desyncDebugger_.logWorkEnd(work);
+
         if (work.futureWorkResult_ && work.finishedGPUExecutionInternal() &&
             !work.futureWorkResult_->completed()) {
           work.futureWorkResult_->markCompleted(
