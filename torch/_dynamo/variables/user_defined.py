@@ -1116,7 +1116,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     AttrSource(self.cls_source, "__dict__"), name
                 )
                 descriptor_get_source = AttrSource(descriptor_source, "__get__")
-            descriptor_var = UserDefinedObjectVariable(subobj, source=descriptor_source)
+                descriptor_var = VariableTracker.build(tx, subobj, descriptor_source)
+            else:
+                # Sourceless Builder does not support user defined objects
+                descriptor_var = UserDefinedObjectVariable(subobj)
 
             # The arguments of the __get__ function are (self, instance, owner)
             # self - descriptor_var
