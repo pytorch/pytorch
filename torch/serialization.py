@@ -67,7 +67,6 @@ __all__ = [
     "skip_data",
 ]
 
-
 DEFAULT_PROTOCOL = 2
 
 LONG_SIZE = struct.Struct("=l").size
@@ -90,6 +89,11 @@ if not IS_WINDOWS:
     from mmap import MAP_PRIVATE, MAP_SHARED
 else:
     MAP_SHARED, MAP_PRIVATE = None, None  # type: ignore[assignment]
+
+
+def _default_to_weights_only(pickle_module):
+    is_fbcode = not hasattr(torch.version, "git_version")
+    return pickle_module is None and not is_fbcode
 
 
 # _serialization_tls is used to store thread local state specific to serialization
@@ -1205,7 +1209,7 @@ def load(
     # documentation. We need it so that Sphinx doesn't leak `pickle`s path from
     # the build environment (e.g. `<module 'pickle' from '/leaked/path').
 
-    """load(f, map_location=None, pickle_module=pickle, *, weights_only=False, mmap=None, **pickle_load_args)
+    """load(f, map_location=None, pickle_module=pickle, *, weights_only=True, mmap=None, **pickle_load_args)
 
     Loads an object saved with :func:`torch.save` from a file.
 
@@ -1248,6 +1252,7 @@ def load(
         weights_only: Indicates whether unpickler should be restricted to
             loading only tensors, primitive types, dictionaries
             and any types added via :func:`torch.serialization.add_safe_globals`.
+            See :ref:`weights-only` for more details.
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
@@ -1346,6 +1351,11 @@ def load(
             "is not supported yet. Please call torch.load outside the skip_data context manager."
         )
 
+    weights_only_not_set = weights_only is None
+
+    if weights_only_not_set:
+        weights_only = _default_to_weights_only(pickle_module)
+
     true_values = ["1", "y", "yes", "true"]
     # Add ability to force safe only or non-safe weight loads via environment variables
     force_weights_only_load = (
@@ -1363,7 +1373,8 @@ def load(
     elif force_weights_only_load:
         weights_only = True
     elif force_no_weights_only_load:
-        if weights_only is None:
+        # TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD can only override if callsite did not explicitly set weights_only
+        if weights_only_not_set:
             warnings.warn(
                 "Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected, since the"
                 "`weights_only` argument was not explicitly passed to `torch.load`, forcing weights_only=False.",
@@ -1372,11 +1383,6 @@ def load(
             )
             weights_only = False
 
-    if weights_only is None:
-        weights_only, warn_weights_only = False, True
-    else:
-        warn_weights_only = False
-
     if weights_only:
         if pickle_module is not None:
             raise RuntimeError(
@@ -1384,21 +1390,6 @@ def load(
             )
     else:
         if pickle_module is None:
-            if warn_weights_only:
-                warnings.warn(
-                    "You are using `torch.load` with `weights_only=False` (the current default value), which uses "
-                    "the default pickle module implicitly. It is possible to construct malicious pickle data "
-                    "which will execute arbitrary code during unpickling (See "
-                    "https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). "
-                    "In a future release, the default value for `weights_only` will be flipped to `True`. This "
-                    "limits the functions that could be executed during unpickling. Arbitrary objects will no "
-                    "longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the "
-                    "user via `torch.serialization.add_safe_globals`. We recommend you start setting "
-                    "`weights_only=True` for any use case where you don't have full control of the loaded file. "
-                    "Please open an issue on GitHub for any issues related to this experimental feature.",
-                    FutureWarning,
-                    stacklevel=2,
-                )
             pickle_module = pickle
 
     # make flipping default BC-compatible
