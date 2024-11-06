@@ -4098,7 +4098,11 @@ module_db: List[ModuleInfo] = [
                train_and_eval_differ=True,
                skips=(
                    # not supported on MPS backend
-                   DecorateInfo(skipMPS),
+                   DecorateInfo(expectedFailureMPS, 'TestModuleMPS', 'test_memory_format'),
+                   DecorateInfo(expectedFailureMPS, 'TestModuleMPS', 'test_non_contiguous_tensors'),
+                   DecorateInfo(expectedFailureMPS, 'TestModuleMPS', 'test_forward'),
+                   DecorateInfo(expectedFailureMPS, 'TestModuleMPS', 'test_non_contiguous'),
+                   DecorateInfo(expectedFailureMPS, 'TestModuleMPS', 'test_save_load'),
                    # No channels_last support for InstanceNorm3d currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
@@ -4106,7 +4110,12 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_LocalResponseNorm,
                skips=(
                    # uses avg_pool3d which is not supported on MPS backend
-                   DecorateInfo(skipMPS),)
+                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_memory_format'),
+                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_non_contiguous_tensors'),
+                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_forward'),
+                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_if_train_and_eval_modes_differ'),
+                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_non_contiguous'),
+                   DecorateInfo(expectedFailureMPS, 'TestModule', 'test_save_load'),)
                ),
     ModuleInfo(torch.nn.LayerNorm,
                module_inputs_func=module_inputs_torch_nn_LayerNorm,
