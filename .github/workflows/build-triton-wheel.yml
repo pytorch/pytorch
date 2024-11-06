@@ -119,7 +119,7 @@ jobs:
           fi
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0 pybind11==2.13.1
           # Triton xpu build use GCC11
           if [[ "${BUILD_DEVICE}" == xpu ]]; then
             docker exec -t "${container_name}" yum install -y devtoolset-11-gcc-c++
