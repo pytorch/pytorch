@@ -58,6 +58,7 @@ from torch.testing._internal.common_utils import (
     NestedTensorTestCase,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
@@ -7040,6 +7041,7 @@ torch.cuda.synchronize()
     # non-contiguous with holes not supported yet
     @decorateIf(unittest.skip, lambda params: params["noncontig_with_holes"])
     @parametrize("noncontig_with_holes", [False, True])
+    @skipIfRocm
     def test_flex_attention(self, device, dtype, noncontig_with_holes):
         query, key, value = self._rand_qkv(device, dtype, noncontig_with_holes)
 
