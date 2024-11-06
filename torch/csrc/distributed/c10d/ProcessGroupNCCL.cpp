@@ -523,8 +523,6 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
   exception_ = w.exception_;
 }
 
-ProcessGroupNCCL::WorkNCCL::~WorkNCCL() = default;
-
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   if (!ncclComm_->isAborted()) {
     checkAndSetException();
@@ -4539,7 +4537,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       this->getSize()); // worldSize
 
   // Device to use for barrier
-  int barDevIdx = -1;
+  c10::DeviceIndex barDevIdx = -1;
 
   // Select device to use for barrier
   // 1st choice: Use user defined GPU device ids if provided
@@ -4562,12 +4560,12 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
     // Note: it is better to use global rank because the group-local rank can be
     // offset wrt the device id if intra-node GPUs are sharded into multiple
     // dimensions.
-    barDevIdx = static_cast<int16_t>(globalRank() % localDeviceCount_);
+    barDevIdx = static_cast<c10::DeviceIndex>(globalRank() % localDeviceCount_);
     LOG(WARNING)
         << logPrefix()
         << c10::str(
                " using GPU ",
-               barDevIdx,
+               static_cast<int>(barDevIdx),
                " to perform barrier as devices used by this process are currently unknown. ",
                "This can potentially cause a hang if this rank to GPU mapping is incorrect. ",
                "Specify device_ids in barrier() to force use of a particular device, ",
@@ -4579,7 +4577,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
       barDevIdx >= 0,
       "Failed to infer a GPU device id to perform barrier. ");
   auto barDevice = at::Device(
-      at::DeviceType::CUDA, static_cast<c10::DeviceIndex>(barDevIdx));
+      at::DeviceType::CUDA, barDevIdx);
 
   // Create a dummy tensor on the device
   // Note: we use zeros() instead of empty() to prevent barrier from triggering
