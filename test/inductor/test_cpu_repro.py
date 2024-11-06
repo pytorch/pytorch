@@ -639,6 +639,66 @@ class CPUReproTests(TestCase):
             change_input_sizes=True,
         )
 
+    def test_set_source_Tensor(self):
+        class MaskedConv2d(torch.nn.Conv2d):
+            def __init__(
+                self,
+                *,
+                in_channels: int,
+                out_channels: int,
+                kernel_size: int,
+                padding: int = 0,
+            ) -> None:
+                super().__init__(
+                    in_channels, out_channels, kernel_size, padding=padding
+                )
+                mask = torch.zeros_like(self.weight)
+
+                mask[:, :, : kernel_size // 2, :] = 1
+                mask[:, :, kernel_size // 2, : kernel_size // 2] = 1
+                self.register_buffer("mask", mask)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                with torch.no_grad():
+                    self.weight.data *= self.mask
+                return super().forward(x)
+
+        class M(torch.nn.Module):
+            def __init__(
+                self, num_channels: int, num_colors: int, H: int, W: int
+            ) -> None:
+                super().__init__()
+                self.num_channels = num_channels
+                self.num_colors = num_colors
+                self.H = H
+                self.W = W
+                kernel_size = 7
+                padding = (kernel_size - 1) // 2
+                # 1 7x7 Mask
+                layers = [
+                    MaskedConv2d(
+                        in_channels=self.num_channels,
+                        out_channels=64,
+                        kernel_size=kernel_size,
+                        padding=padding,
+                    ),
+                ]
+                self.model = nn.Sequential(*layers)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                x = x.permute(0, 3, 1, 2)
+                return self.model(x)
+
+        model = M(H=32, W=32, num_channels=4, num_colors=2)
+        fn_opt = torch._dynamo.optimize("inductor")(model)
+        v = (torch.rand(10, 32, 32, 4) > 0.5).to(torch.float32)
+        inps = [
+            v.clone(),
+        ]
+        result, code = run_and_get_cpp_code(fn_opt, *inps)
+        self.assertTrue("aten.set_.source_Tensor" in code)
+        self.assertEqual(model(*inps), result)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     @torch._dynamo.config.patch(assume_static_by_default=False)
     @torch._dynamo.config.patch(allow_rnn=True)
@@ -4398,6 +4458,34 @@ class CPUReproTests(TestCase):
                 funcs, example_shapes, mixed_types, check_vecns
             ):
                 check_use_full_bits(func, shapes, dtype, mixed, check_vecn)
+
+    @config.patch("cpp.simdlen", 256)
+    @requires_vectorization
+    def test_avx2_bool_constant_pad_nd(self):
+        # NOTE: I tried using (0, 12, 12) and removing the cpp.simdlen=256 override, but
+        # that didn't repro the issue.
+        result = torch.testing.make_tensor(
+            (0, 6, 6), dtype=torch.bool, device=torch.device("cpu")
+        )
+
+        def fn(arg):
+            return torch.constant_pad_nd(arg, (1, 1, 1, 1, 1, 1))
+
+        self.common(fn, (result,))
+
+    @config.patch(unroll_reductions_threshold=9999)
+    @requires_vectorization
+    def test_unrolled_bool_prod_vectorized(self):
+        result = torch.zeros((37, 37, 37), dtype=torch.bool)
+        dim_select = [0, 1]
+        result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
+        result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
+        result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
+
+        def fn(arg):
+            return torch.prod(arg, 1, dtype=torch.bool)
+
+        self.common(fn, (result,))
 
 
 if __name__ == "__main__":

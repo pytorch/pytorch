@@ -52,7 +52,7 @@ void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& value) {
 }
 } // namespace
 
-REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
-REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
+REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel)
+REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel)
 
 } // namespace at::native
