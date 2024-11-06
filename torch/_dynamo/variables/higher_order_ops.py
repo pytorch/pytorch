@@ -1068,10 +1068,10 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
 
-        def arg_extractor(combine_fn, xs, dim):
-            return combine_fn, xs, dim
+        def arg_extractor(combine_fn, xs):
+            return combine_fn, xs
 
-        combine_fn, xs, dim = arg_extractor(*args, **kwargs)
+        combine_fn, xs = arg_extractor(*args, **kwargs)
 
         if xs.python_type() != list:
             unimplemented(
@@ -1084,7 +1084,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
         # the sub_args shape will be (4, ).
         sub_args = [
-            _make_inlined(tx, first_slice_copy)(leaf, dim)
+            _make_inlined(tx, first_slice_copy)(leaf)
             for leaf in itertools.chain(xs.items, xs.items)
         ]
         (
@@ -1133,7 +1133,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         p_args = (
             make_attr(tx, combine_fn_name),
             xs_proxy,
-            dim.as_proxy(),
         )
 
         with tx.fake_mode:

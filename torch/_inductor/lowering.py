@@ -6423,7 +6423,7 @@ def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, operands):
 
 
 @register_lowering(associative_scan_op, type_promotion_kind=None)
-def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
+def associative_scan(combine_fn: ir.Subgraph, xs):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     subgraph_inputs = [
@@ -6438,7 +6438,7 @@ def associative_scan(combine_fn: ir.Subgraph, xs, dim: int):
             *pytree.tree_leaves(rhs),
         )
 
-    kwargs = _make_scan_inner(xs[0], axis=dim, dtype=None)
+    kwargs = _make_scan_inner(xs[0], axis=0, dtype=None)
     kwargs["dtypes"] = tuple(x.get_dtype() for x in xs)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in xs)
     result = ir.Scan.create(
