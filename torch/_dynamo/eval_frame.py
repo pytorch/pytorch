@@ -1679,8 +1679,7 @@ def export(
                     if (
                         c.t_id == id(x)
                         and not isinstance(c, _RelaxedConstraint)
-                        and c.constraint_range.vr.lower
-                        != c.constraint_range.vr.upper
+                        and c.constraint_range.vr.lower != c.constraint_range.vr.upper
                     )
                 )
                 for x in flat_args

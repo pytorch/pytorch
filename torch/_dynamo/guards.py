@@ -1741,7 +1741,7 @@ class GuardBuilder(GuardBuilderBase):
                 Tuple[Source, Union[Source, Symbol], Callable]
             ] = []
             phantom_symbols: Dict[str, Symbol] = {}
-            relaxed_sources: OrderedSet[Source] = OrderedSet()
+            relaxed_sources: Set[Source] = set()  # noqa: set_linter
             for constraint in output_graph.export_constraints:
                 if constraint.t_id in output_graph.tracked_fakes_id_to_source:
                     torch.export.dynamic_shapes._process_equalities(
@@ -2308,7 +2308,7 @@ class CheckFunctionManager:
                 code_parts.append(code_part)
                 verbose_code_parts.append(verbose_code_part)
 
-        seen = OrderedSet()
+        seen = OrderedSet[int]()
         for gcl in builder.code:
             for code in gcl.code_list:
                 if code not in seen:
@@ -2698,7 +2698,7 @@ set_guard_error_hook(guard_error_hook)
 
 
 def unique(seq):
-    seen = OrderedSet()
+    seen = OrderedSet[int]()
     for x in seq:
         if x not in seen:
             yield x

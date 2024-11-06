@@ -153,7 +153,7 @@ class NNModuleToString:
 
     @staticmethod
     def can_convert_to_string(gm):
-        cant_convert = OrderedSet()
+        cant_convert = OrderedSet[Any]()
         for _, module in gm.named_children():
             if type(module) not in NNModuleToString.safe_reprs:
                 cant_convert.add(module)

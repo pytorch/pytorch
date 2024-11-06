@@ -108,7 +108,7 @@ def set_union(set1, set2):
 
 
 def set_difference(set1, set2):
-    difference_set = OrderedSet()
+    difference_set = OrderedSet[Any]()
     for x in set1:
         if x not in set2:
             difference_set.add(x)

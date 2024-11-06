@@ -36,7 +36,7 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import MutableLocal, typestr, VariableTracker
+from .base import typestr, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -689,7 +689,7 @@ class SkipFunctionVariable(VariableTracker):
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
             return self.fold_through_function_to_wrapper().get(self.value)(
-                value, mutable_local=MutableLocal()
+                value, mutation_type=ValueMutationNew()
             )
         elif (
             self.value is functools.wraps

@@ -1382,7 +1382,7 @@ def clean_and_assemble_instructions(
     code_options["co_code"] = bytecode
     code_options["co_stacksize"] = stacksize_analysis(instructions)
     assert (OrderedSet(keys) - OrderedSet(["co_posonlyargcount"])) == (
-        OrderedSet(code_options.keys() ) - OrderedSet(["co_posonlyargcount"])
+        OrderedSet(code_options.keys()) - OrderedSet(["co_posonlyargcount"])
     )
     if sys.version_info >= (3, 11):
         code_options["co_exceptiontable"] = assemble_exception_table(

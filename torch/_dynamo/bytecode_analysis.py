@@ -8,11 +8,12 @@ from typing import Any, Union
 from torch.utils._ordered_set import OrderedSet
 
 
-TERMINAL_OPCODES = OrderedSet(
-    dis.opmap["RETURN_VALUE"],
-    dis.opmap["JUMP_FORWARD"],
-    dis.opmap["RAISE_VARARGS"],
-    # TODO(jansel): double check exception handling
+TERMINAL_OPCODES = OrderedSet[int](
+    [
+        dis.opmap["RETURN_VALUE"],
+        dis.opmap["JUMP_FORWARD"],
+        dis.opmap["RAISE_VARARGS"],
+    ]  # TODO(jansel): double check exception handling
 )
 if sys.version_info >= (3, 9):
     TERMINAL_OPCODES.add(dis.opmap["RERAISE"])

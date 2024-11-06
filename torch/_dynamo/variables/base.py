@@ -17,25 +17,36 @@ if TYPE_CHECKING:
     from .symbolic_convert import InstructionTranslator, InstructionTranslatorBase
 
 
-class MutableLocalSource(Enum):
+class SourceType(Enum):
     """
-    If the VariableTracker.mutable_local represents a Variable that:
+    This Enum divides VariableTracker into 2 cases, depending on the variable
+    it represents:
     - already existed that Dynamo began tracking while introspection (Existing)
-    - is a new variable that is created during Dynamo introspection (Local)
+    - is a new variable that is created during Dynamo introspection (New)
+
+    In general, we have these invariants:
+    1. for `VariableTracker` associated with `Existing`, its `source` field must not be None.
+    2. for `VariableTracker` associated with `New`, most of the time its
+       `source` field is None, except for cases like side effect codegen for
+       `AttributeMutationNew`, during which we generate a
+       `LocalSource('tmp...')` for such variable, to facilitate codegen.
     """
 
     Existing = 0
-    Local = 1
+    New = 1
 
 
-class MutableLocalBase:
+class MutationType:
     """
-    Base class for Variable.mutable_local
+    Base class for Variable.mutation_type. It encodes information about
+    1. The type of mutation Dynamo allows on the variable.
+    2. Whether the value represented by this variable already existed before
+    Dynamo tracing.
     """
 
-    def __init__(self, typ: MutableLocalSource) -> None:
+    def __init__(self, typ: SourceType) -> None:
         # In HigherOrderOperator tracing, we need to distinguish
-        # between MutableLocals inside the HigherOrderOperator and
+        # between MutationTypes inside the HigherOrderOperator and
         # ones outside it. For example, it is not safe to mutate
         # `a` in the following example because it was constructed
         # in a different scope.
@@ -57,23 +68,28 @@ class MutableLocalBase:
         #             Dynamo introspection of a HigherOrderOp.
         #             The exact number corresponds to the level
         #             of nested HigherOrderOps.
-        if typ is MutableLocalSource.Existing:
+        if typ is SourceType.Existing:
             self.scope = 0
-        elif typ is MutableLocalSource.Local:
+        elif typ is SourceType.New:
             self.scope = current_scope_id()
         else:
-            unimplemented(f"Unsupported MutableLocalSource: {typ}")
+            unimplemented(f"Unsupported SourceType: {typ}")
 
 
-class MutableLocal(MutableLocalBase):
+class ValueMutationNew(MutationType):
     """
-    Marker used to indicate this (list, iter, etc) was constructed in
-    local scope and can be mutated safely in analysis without leaking
-    state.
+    This case of VariableTracker.mutation_type marker indicates
+    1. Dynamo allows mutation on the value itself (rather than its attributes).
+    2. The value is created by the bytecode Dynamo is tracing through.
+
+    For instance, Dynamo could model a newly created list with this marker,
+    indicating that while we need to model mutations to this list, we don't have
+    to emit bytecode for these mutations if the list doesn't escape into the
+    Python world.
     """
 
     def __init__(self) -> None:
-        super().__init__(MutableLocalSource.Local)
+        super().__init__(SourceType.New)
 
     def __hash__(self):
         return id(self)
@@ -82,11 +98,76 @@ class MutableLocal(MutableLocalBase):
         return self is other
 
 
+class ValueMutationExisting(MutationType):
+    """
+    This case of VariableTracker.mutation_type marker indicates
+    1. Dynamo allows mutation on the value itself (rather than its attributes).
+    2. The value exists before Dynamo tracing started.
+
+    For instance, Dynamo could model a pre-existing list with this marker,
+    indicating that if we encounter mutations to this list, we need to buffer
+    and re-apply those mutations after the graph runs, since the list might be
+    used afterwards in Python.
+    """
+
+    # A flag to indicate whether mutation happened on the associated
+    # `VariableTracker`. This enables SideEffects to accurately and quickly
+    # filter out which pre-existing values it needs to generate mutation for.
+    is_modified: bool
+
+    def __init__(self, is_modified: bool = False):
+        super().__init__(SourceType.Existing)
+        self.is_modified = is_modified
+
+
+class AttributeMutation(MutationType):
+    """
+    This case of VariableTracker.mutation_type marker indicates that Dynamo
+    allows mutation on the value's attributes.
+    """
+
+    def __init__(self, typ: SourceType):
+        super().__init__(typ)
+
+
+class AttributeMutationExisting(AttributeMutation):
+    """
+    This case of VariableTracker.mutation_type marker indicates
+    1. Dynamo allows mutation on the value's attributes.
+    2. The value exists before Dynamo tracing started.
+
+    For instance, Dynamo could model a pre-existing object with this marker,
+    indicating that if we encounter mutations to this object, we need to buffer
+    then re-apply those mutations after the graph runs, since the object might
+    be used afterwards in Python.
+    """
+
+    def __init__(self):
+        super().__init__(SourceType.Existing)
+
+
+class AttributeMutationNew(AttributeMutation):
+    """
+    This case of VariableTracker.mutation_type marker indicates
+    1. Dynamo allows mutation on the value's attributes.
+    2. The value is created by the bytecode Dynamo is tracing through.
+
+    For instance, Dynamo could model a newly created object with this marker,
+    indicating that while we need to model mutations to this object, we don't
+    have to emit bytecode for these mutations if the object doesn't escape into
+    the Python world.
+    """
+
+    def __init__(self, cls_source: Optional[Source] = None):
+        super().__init__(SourceType.New)
+        self.cls_source = cls_source
+
+
 def _is_top_level_scope(scope_id):
     return scope_id == 1
 
 
-def is_side_effect_safe(m: MutableLocalBase):
+def is_side_effect_safe(m: MutationType):
     scope_id = current_scope_id()
 
     # In the top-level scope (if no HigherOrderOperators are involved),
@@ -133,7 +214,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             "value",
             "guards",
             "source",
-            "mutable_local",
+            "mutation_type",
             "parents_tracker",
             "user_code_variable_name",
         ]
@@ -367,6 +448,14 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def is_strict_mode(self, tx):
         return tx.strict_checks_fn and tx.strict_checks_fn(self)
 
+    def is_mutable(self):
+        """Whether Dynamo allows mutation on this variable."""
+        return not self.is_immutable()
+
+    def is_immutable(self):
+        """Whether Dynamo bans mutation on this variable."""
+        return self.mutation_type is None
+
     @staticmethod
     def build(
         tx: "InstructionTranslatorBase",
@@ -385,11 +474,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         self,
         *,
         source: Source = None,
-        mutable_local: MutableLocal = None,
+        mutation_type: MutationType = None,
     ) -> None:
         super().__init__()
         self.source = source
-        self.mutable_local = mutable_local
+        self.mutation_type = mutation_type
 
 
 def typestr(*objs):
