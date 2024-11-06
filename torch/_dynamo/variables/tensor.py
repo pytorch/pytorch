@@ -306,7 +306,7 @@ class TensorVariable(VariableTracker):
             return ConstantVariable.create(self.device.type == "cuda")
 
     def method_attr_shape(self, tx):
-        if self.size is not None:
+        if self.valid_size():
             sizes = [variables.ConstantVariable.create(x) for x in self.size]
             return SizeVariable(sizes)
         else:
@@ -471,7 +471,7 @@ class TensorVariable(VariableTracker):
     def unpack_var_sequence(self, tx: "InstructionTranslator", idxes=None):
         from .builder import wrap_fx_proxy_cls
 
-        if self.size:
+        if self.valid_size():
             size_len = len(self.size)
         else:
             size_var = self.call_method(tx, "size", [], {})
@@ -480,7 +480,7 @@ class TensorVariable(VariableTracker):
         # Ensure we don't unpack a scalar tensor.
         assert size_len != 0, "Can't unpack scalar tensors."
 
-        if self.size:
+        if self.valid_size():
             length = self.size[0]
         else:
             dyn_length = self.call_method(tx, "size", [ConstantVariable.create(0)], {})
@@ -502,6 +502,9 @@ class TensorVariable(VariableTracker):
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
         ]
+
+    def valid_size(self):
+        return self._size is not None
 
     @property
     def size(self):
@@ -618,7 +621,7 @@ class TensorVariable(VariableTracker):
                     return ConstantVariable.create(int(fake_r))
 
     def method_numel(self):
-        if self.size is not None:
+        if self.valid_size():
             return ConstantVariable.create(product(self.size))
 
         # It might still be constant!  Consult the fake tensor and see
