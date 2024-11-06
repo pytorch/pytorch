@@ -281,11 +281,17 @@ try:
         # in order to use z3 bitwise ops. We assume that integers are 64 bit.
         def bitwise_lift(func):
             def wrap(a) -> z3.ExprRef:
-                if isinstance(a, (z3.ArithRef, z3.BoolRef)):
+                if isinstance(a, bool):
+                    a = z3.BoolVal(a)
+                if isinstance(a, (int, sympy.Integer)):
+                    a = z3.IntVal(int(a))
+                if not isinstance(a, (z3.ArithRef, z3.BoolRef)):
+                    raise ValueError(f"can't lift type for bitwise op: {type(a)}")
+                try:
                     return z3.Int2BV(a, 64)
-                if isinstance(a, (bool, int, sympy.Integer)):
-                    return z3.Int2BV(z3.IntVal(int(a)), 64)
-                raise ValueError(f"can't lift type for bitwise op: {type(a)}")
+                except z3.Z3Exception:
+                    # Catch z3 Int/Bool sort error
+                    return z3.Int2BV(a != 0, 64)
 
             @functools.wraps(func)
             def wrapper(*args):
@@ -752,6 +758,8 @@ def bisect(shape_env):
             return fake
         if isinstance(fake, torch.SymInt):
             return torch.SymInt(fake.node.with_shape_env(shape_env))
+        if isinstance(fake, torch.SymFloat):
+            return torch.SymFloat(fake.node.with_shape_env(shape_env))
         assert isinstance(fake, FakeTensorMeta)
         return FakeTensorMeta(
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),

@@ -989,14 +989,14 @@ def sympy_is_contiguous_generic(sizes, strides, dim_order):
         return sympy.false
 
     is_contiguous = sympy.true
-    z = sympy.Integer(1)
+    z = sympy.S.One
     # Contiguous if the strides make sense (or the dim is size 1)
     for d in dim_order:
-        is_contiguous &= sympy.Eq(sizes[d], sympy.Integer(1)) | sympy.Eq(strides[d], z)
+        is_contiguous &= sympy.Eq(sizes[d], sympy.S.One) | sympy.Eq(strides[d], z)
         z *= sizes[d]
     # OR if any size is zero
     for d in range(dim):
-        is_contiguous |= sympy.Eq(sizes[d], sympy.Integer(0))
+        is_contiguous |= sympy.Eq(sizes[d], sympy.S.Zero)
     return is_contiguous
 
 
@@ -1022,7 +1022,7 @@ def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
     if dim != len(dim_order):
         return sympy.false
 
-    m = sympy.Integer(0)
+    m = sympy.S.Zero
     r = sympy.true
 
     # special case for trivial C dimension. default to NCHW

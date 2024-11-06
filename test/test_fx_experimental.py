@@ -29,6 +29,7 @@ from torch.fx.experimental.partitioner_utils import (
     PartitionerConfig,
     PartitionMode,
 )
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 from torch.fx.graph_module import GraphModule
@@ -832,6 +833,27 @@ terrible spacing
 
         x = torch.randn((5,))
         torch.testing.assert_close(split(x), traced(x))
+
+    def test_split_module_return_node(self):
+        def foo(x):
+            x.add_(1)
+
+        gm = make_fx(foo, tracing_mode="fake")(
+            torch.randn(
+                3,
+            )
+        )
+
+        def cb(_):
+            return 1
+
+        sp_gm = split_module(gm, None, cb)
+        submod_gm = sp_gm.submod_1
+        for node in submod_gm.graph.nodes:
+            if node.op == "output":
+                break
+        else:
+            raise RuntimeError("Expected the subgraph to have an output node.")
 
     def test_split_module_kwargs_expansion(self):
         class ModuleWithKwargsExpansion(torch.nn.Module):

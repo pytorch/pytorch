@@ -1,4 +1,5 @@
 list(APPEND Caffe2_CPU_SRCS
+  utils/string_utils.cc
   utils/threadpool/ThreadPool.cc
 )
 

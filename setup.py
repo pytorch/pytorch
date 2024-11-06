@@ -442,10 +442,6 @@ def check_submodules():
         os.path.join(third_party_path, "fbgemm", "third_party", "asmjit"),
         ["CMakeLists.txt"],
     )
-    check_for_files(
-        os.path.join(third_party_path, "onnx", "third_party", "benchmark"),
-        ["CMakeLists.txt"],
-    )
 
 
 # Windows has very bad support for symbolic links.
@@ -1284,6 +1280,8 @@ def main():
         "include/ATen/native/hip/*.h",
         "include/ATen/native/hip/*.cuh",
         "include/ATen/native/mps/*.h",
+        "include/ATen/native/mkldnn/xpu/*.h",
+        "include/ATen/native/mkldnn/xpu/detail/*.h",
         "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
