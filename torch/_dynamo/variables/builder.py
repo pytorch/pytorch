@@ -196,6 +196,7 @@ from .misc import (
     SavedTensorBox,
     TorchVersionVariable,
     TypingVariable,
+    WeakRefVariable,
 )
 from .nn_module import (
     FSDPManagedNNModuleVariable,
@@ -227,7 +228,6 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
-    WeakRefVariable,
 )
 
 
@@ -483,7 +483,7 @@ class VariableBuilder:
 
     def wrap_weakref(self, value: weakref.ReferenceType):
         self.install_guards(GuardBuilder.TYPE_MATCH)
-        return WeakRefVariable(value, source=self.source)
+        return WeakRefVariable.build(self.tx, value, source=self.source)
 
     def wrap_removable_handle(self, value):
         # This means that the removable handle was created in some other frame.

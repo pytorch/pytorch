@@ -12,6 +12,7 @@ import sys
 import threading
 import types
 import warnings
+import weakref
 from typing import Dict, Generic, List, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
@@ -36,7 +37,6 @@ from ..source import (
     ODictGetItemSource,
     RandomValueSource,
     UnspecializedParamBufferSource,
-    WeakRefCallSource,
 )
 from ..utils import (
     build_checkpoint_variable,
@@ -399,6 +399,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.lists.DequeVariable(
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
+        elif self.value is weakref.ref:
+            return variables.WeakRefVariable(args[0])
         elif self.value is functools.partial:
             if not args:
                 unimplemented("functools.partial malformed")
@@ -1315,24 +1317,6 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
             args,
             kwargs,
         )
-
-
-class WeakRefVariable(UserDefinedObjectVariable):
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
-    def __init__(self, value, **kwargs) -> None:
-        super().__init__(value, **kwargs)
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        call_source = None
-        referent = self.value()
-        source = self.source and WeakRefCallSource(self.source)
-        return VariableTracker.build(tx, referent, source)
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
