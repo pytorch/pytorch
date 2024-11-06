@@ -207,6 +207,8 @@ def _determine_input_dtype(
         return ir.DataType.STRING
     if isinstance(arg, (ir.Tensor, ir.TensorProtocol)):
         return arg.dtype
+    if isinstance(arg, complex):
+        return ir.DataType.FLOAT
     if arg is None:
         return ir.DataType.UNDEFINED
 
@@ -261,9 +263,15 @@ def _get_or_create_constant(
     dtype: ir.DataType,
     opset: onnxscript.values.Opset,
 ) -> ir.Value:
+    # float representation of complex numbers
+    if isinstance(arg, complex):
+        # Convert the complex number to a float
+        arg = (arg.real, arg.imag)
+
     if isinstance(arg, list):
         # Make the arg hashable
         arg = tuple(arg)  # type: ignore[assignment]
+
     constant_value = constant_farm.get((arg, dtype))  # type: ignore[arg-type]
     if constant_value is None:
         constant_tensor = ir.tensor(value=arg, dtype=dtype)  # type: ignore[arg-type]
@@ -412,7 +420,7 @@ def _process_python_sequences(
             # when the expected input type is INT64
             # We assume this only happens for 1D cases
             if all(isinstance(val, ir.Value) for val in arg):
-                named_inputs[name] = opset.Concat(*arg)
+                named_inputs[name] = opset.Concat(*arg, axis=0)
                 continue
 
             dtype = _determine_input_dtype(param, arg, type_binding)
@@ -423,7 +431,7 @@ def _process_python_sequences(
                 elif val is None:
                     # Skip None values
                     continue
-                elif isinstance(arg, (ir.Tensor, ir.TensorProtocol)):
+                elif isinstance(val, (ir.Tensor, ir.TensorProtocol)):
                     new_args.append(opset.Constant(value=val))
                 else:
                     # Turn the Python constant into 1D tensor for the constant
@@ -431,9 +439,9 @@ def _process_python_sequences(
                         val, (bool, int, float)
                     ), f"Expected int or float, got {type(val)}"
                     new_args.append(
-                        _get_or_create_constant(constant_farm, [arg], dtype, opset)  # type: ignore[arg-type]
+                        _get_or_create_constant(constant_farm, [val], dtype, opset)  # type: ignore[arg-type]
                     )
-            named_inputs[name] = opset.Concat(*new_args)
+            named_inputs[name] = opset.Concat(*new_args, axis=0)
             continue
     return named_inputs
 

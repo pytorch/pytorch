@@ -99,7 +99,23 @@ def _maybe_reenter_make_fx(fn):
     if _CURRENT_MAKE_FX_TRACER is not None:
         return reenter_make_fx(fn)
     else:
-        return make_fx(fn)
+
+        def _maybe_make_fx_with_fake_mode(fn):
+            @functools.wraps(fn)
+            def wrapped(*args):
+                from torch._guards import detect_fake_mode
+
+                fake_mode = detect_fake_mode(args)
+                if fake_mode is None:
+                    # we creaeta a fake_mode here to make sure we could
+                    # trace the graph with data-dependent calls e.g. .item()
+                    return make_fx(fn, tracing_mode="fake")(*args)
+                # Tracing with real if all inputs have been fakfied
+                return make_fx(fn)(*args)
+
+            return wrapped
+
+        return _maybe_make_fx_with_fake_mode(fn)
 
 
 @contextmanager
@@ -112,6 +128,73 @@ def _set_compilation_env():
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+
+
+def _detect_input_mutation(gm):
+    input_nodes = set()
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            input_nodes.add(node)
+        if node.op == "call_function":
+            target = node.target
+            if isinstance(target, torch._ops.OpOverload) and target._schema.is_mutable:
+                for arg in node.args:
+                    if arg in input_nodes:
+                        return True
+
+    for _, module in gm.named_children():
+        if isinstance(module, torch.fx.GraphModule):
+            if _detect_input_mutation(module):
+                return True
+
+    return False
+
+
+def _detect_input_alias(gm):
+    input_storages = set()
+    for node in gm.graph.nodes:
+        # We need to check existence of "val" because we reuse the logic here
+        # for map operator, where num_mapped_args is a scalar
+        # and doesn't have a "val" meta.
+        if (
+            node.op == "placeholder"
+            and "val" in node.meta
+            and isinstance(node.meta["val"], torch.Tensor)
+        ):
+            input_storages.add(StorageWeakRef(node.meta["val"]._typed_storage()))
+        if node.op == "output":
+
+            def check_alias(out):
+                if (
+                    out is not None
+                    and "val" in out.meta
+                    and isinstance(out.meta["val"], torch.Tensor)
+                ):
+                    out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
+                    return out_storage in input_storages
+                return False
+
+            if any(pytree.tree_leaves(pytree.tree_map(check_alias, node.args))):
+                return True
+
+    for _, module in gm.named_children():
+        if isinstance(module, torch.fx.GraphModule) and _detect_input_alias(module):
+            return True
+
+    return False
+
+
+def has_potential_input_alias_or_mutation(gm, inputs, pre_dispatch=False):
+    try:
+        gm = make_fx(gm, pre_dispatch=pre_dispatch)(*inputs)
+    except UnsupportedAliasMutationException:
+        # this can happen when nested cond_op is
+        # functionalized
+        return True
+    except Exception as e:
+        raise e
+
+    return _detect_input_mutation(gm) or _detect_input_alias(gm)
 
 
 def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
@@ -128,28 +211,6 @@ def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
         return True
     except Exception as e:
         raise e
-
-    def _detect_input_mutation(gm):
-        input_nodes = set()
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                input_nodes.add(node)
-            if node.op == "call_function":
-                target = node.target
-                if (
-                    isinstance(target, torch._ops.OpOverload)
-                    and target._schema.is_mutable
-                ):
-                    for arg in node.args:
-                        if arg in input_nodes:
-                            return True
-
-        for _, module in gm.named_children():
-            if isinstance(module, torch.fx.GraphModule):
-                if _detect_input_mutation(module):
-                    return True
-
-        return False
 
     return _detect_input_mutation(gm)
 
@@ -168,39 +229,6 @@ def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
         return True
     except Exception as e:
         raise e
-
-    def _detect_input_alias(gm):
-        input_storages = set()
-        for node in gm.graph.nodes:
-            # We need to check existence of "val" because we reuse the logic here
-            # for map operator, where num_mapped_args is a scalar
-            # and doesn't have a "val" meta.
-            if (
-                node.op == "placeholder"
-                and "val" in node.meta
-                and isinstance(node.meta["val"], torch.Tensor)
-            ):
-                input_storages.add(StorageWeakRef(node.meta["val"]._typed_storage()))
-            if node.op == "output":
-
-                def check_alias(out):
-                    if (
-                        out is not None
-                        and "val" in out.meta
-                        and isinstance(out.meta["val"], torch.Tensor)
-                    ):
-                        out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
-                        return out_storage in input_storages
-                    return False
-
-                if any(pytree.tree_leaves(pytree.tree_map(check_alias, node.args))):
-                    return True
-
-        for _, module in gm.named_children():
-            if isinstance(module, torch.fx.GraphModule) and _detect_input_alias(module):
-                return True
-
-        return False
 
     return _detect_input_alias(gm)
 
@@ -403,7 +431,9 @@ def _stack_pytree(pytrees):
 # iterating over the pos list and pop one item from the front of paritioned_args[pos[i]].
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
 def save_tensors_and_symints_for_backward(ctx, args):
-    assert all(isinstance(arg, (torch.Tensor, torch.SymInt, int)) for arg in args), args
+    assert all(
+        isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None))) for arg in args
+    ), args
     partitioned_args: List[Any] = [[], []]
     pos = []
     for i, arg in enumerate(args):
@@ -432,3 +462,17 @@ def saved_tensors_and_symints(ctx):
             s_idx += 1
     assert t_idx + s_idx == len(ctx.pos)
     return tuple(args)
+
+
+def get_dummy_aot_autograd_config():
+    from torch._functorch.aot_autograd import AOTConfig
+
+    return AOTConfig(
+        fw_compiler=None,  # type: ignore[arg-type]
+        bw_compiler=None,  # type: ignore[arg-type]
+        partition_fn=None,  # type: ignore[arg-type]
+        decompositions={},
+        num_params_buffers=0,
+        aot_id=0,
+        keep_inference_input_mutations=False,
+    )

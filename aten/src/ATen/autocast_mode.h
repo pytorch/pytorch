@@ -211,7 +211,7 @@ inline at::ScalarType prioritize(
     const Tensor& nextArg,
     c10::DeviceType device_type = c10::DeviceType::CUDA) {
   if (current == at::kDouble) {
-    AT_ERROR("promote type is double in at::autocast::prioritize");
+    TORCH_CHECK(false, "promote type is double in at::autocast::prioritize");
     return current;
   }
   at::ScalarType lower_precision_fp =
@@ -225,7 +225,8 @@ inline at::ScalarType prioritize(
     } else if (current == lower_precision_fp && next == lower_precision_fp) {
       return lower_precision_fp;
     } else {
-      AT_ERROR("Unexpected floating ScalarType in at::autocast::prioritize");
+      TORCH_CHECK(
+          false, "Unexpected floating ScalarType in at::autocast::prioritize");
       return current;
     }
   } else {

@@ -342,14 +342,11 @@ def _single_tensor_adamw(
         # have overloads to handle both float and Tensor lrs, so we just assert it's
         # a float since most people using JIT are using floats
         assert isinstance(lr, float)
+        assert isinstance(beta1, float)
 
     # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
     # treating it as a scalar.
-    beta1_dict: Optional[DeviceDict] = (
-        {beta1.device: beta1}
-        if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
-        else None
-    )
+    beta1_dict: Optional[DeviceDict] = {} if isinstance(beta1, Tensor) else None
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -358,7 +355,7 @@ def _single_tensor_adamw(
         step_t = state_steps[i]
 
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-        if not torch._utils.is_compiling() and capturable:
+        if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             assert (
                 param.device.type == step_t.device.type
@@ -380,7 +377,7 @@ def _single_tensor_adamw(
         param.mul_(1 - lr * weight_decay)
 
         # Decay the first and second moment running average coefficient
-        device = param[0].device
+        device = param.device
         if beta1_dict is not None and device not in beta1_dict:
             beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr]
 
@@ -476,7 +473,7 @@ def _multi_tensor_adamw(
         )
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
+    if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
@@ -544,7 +541,7 @@ def _multi_tensor_adamw(
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if not torch._utils.is_compiling() and device_state_steps[0].is_cpu:
+        if not torch.compiler.is_compiling() and device_state_steps[0].is_cpu:
             torch._foreach_add_(
                 device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
             )
@@ -562,6 +559,7 @@ def _multi_tensor_adamw(
         # Due to the strictness of the _foreach_addcmul API, we can't have a single
         # tensor scalar as the scalar arg (only python number is supported there)
         # as a result, separate out the value mul
+        # Filed https://github.com/pytorch/pytorch/issues/139795
         if isinstance(beta2, torch.Tensor):
             scaled_device_grads = torch._foreach_mul(device_grads, 1 - beta2)  # type: ignore[assignment]
             value = 1.0
@@ -783,7 +781,7 @@ def adamw(
 
     See :class:`~torch.optim.AdamW` for details.
     """
-    if not torch._utils.is_compiling() and not all(
+    if not torch.compiler.is_compiling() and not all(
         isinstance(t, torch.Tensor) for t in state_steps
     ):
         raise RuntimeError(
