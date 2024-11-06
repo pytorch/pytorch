@@ -616,12 +616,12 @@ void ProcessGroupNCCL::WorkNCCL::checkAndSetException() {
     LOG(ERROR) << logPrefix() << "Collective " << *this
                << " raised the following async exception: "
                << getExceptionMsgFromExceptionPtr(exception_);
-  }
 
-  // Mark future result as ERROR
-  if (futureWorkResult_ && !futureWorkResult_->completed()) {
-    futureWorkResult_->markCompleted(
-        at::IValue(static_cast<uint8_t>(WorkResult::COMM_ERROR)));
+    // Mark future result as ERROR
+    if (futureWorkResult_ && !futureWorkResult_->completed()) {
+      futureWorkResult_->markCompleted(
+          at::IValue(static_cast<uint8_t>(WorkResult::COMM_ERROR)));
+    }
   }
 }
 
