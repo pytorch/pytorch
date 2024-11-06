@@ -466,12 +466,7 @@ class ConvertFrameAssert:
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
-    ) -> Optional[
-        Union[
-            GuardedCode,
-            torch._C._dynamo.eval_frame.SkipCodeRecursiveFlag,
-        ]
-    ]:
+    ) -> Optional[GuardedCode]:
         increment_frame()
 
         code = frame.f_code

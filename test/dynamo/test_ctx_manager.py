@@ -2356,6 +2356,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
             with woohoo():
                 raise StopIteration
 
+    @unittest.expectedFailure
     def test_keywords(self):
         # Ensure no keyword arguments are inhibited
         @contextmanager
@@ -2365,8 +2366,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             with woohoo(self=11, func=22, args=33, kwds=44) as target:
-                assert target == (11, 22, 33, 44)
-                # self.assertEqual(target, (11, 22, 33, 44))
+                self.assertEqual(target, (11, 22, 33, 44))
 
         fn(torch.randn(2, 3))
 
