@@ -6,8 +6,8 @@
 
 import argparse
 import ast
-import sys
 import os
+import sys
 from typing import Any, Dict, List, Set, Tuple  # type: ignore[attr-defined]
 
 from tools.flight_recorder.components.types import (
@@ -318,7 +318,9 @@ def build_collectives(
                         break
 
             # case one: not every rank join the collective or in the flight recorder.
-            if (candidate_ranks | found_ranks) != expected_ranks and expected_ranks - (candidate_ranks | found_ranks) <= dumps_ranks:
+            if (candidate_ranks | found_ranks) != expected_ranks and expected_ranks - (
+                candidate_ranks | found_ranks
+            ) <= dumps_ranks:
                 mismatch[pg_name] += 1
                 logger.info(
                     "Not all ranks joining collective %s at entry %s",
@@ -406,8 +408,8 @@ def build_collectives(
                 logger.info(
                     "We cannot decide what's wrong with this collective entry "
                     "because we missed FR dumps from ranks (%s) so we don't have enough "
-                    "information. If you want to debug further use -j to dump all raw trace", 
-                    str(expected_ranks - dumps_ranks)
+                    "information. If you want to debug further use -j to dump all raw trace",
+                    str(expected_ranks - dumps_ranks),
                 )
 
             # at this point there are 3 possibilities

@@ -41,8 +41,8 @@ class JobConfig:
             help=(
                 "FR trace require all ranks to have dumps for analysis. "
                 "This flag allows best-effort partial analysis of results "
-                "and printing of collected data.",
-            )
+                "and printing of collected data."
+            ),
         )
         self.parser.add_argument(
             "--pg-filters",
