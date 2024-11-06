@@ -77,7 +77,7 @@ struct VulkanGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
 } // namespace
 
-C10_REGISTER_GUARD_IMPL(Vulkan, VulkanGuardImpl);
+C10_REGISTER_GUARD_IMPL(Vulkan, VulkanGuardImpl)
 
 } // namespace detail
 } // namespace at

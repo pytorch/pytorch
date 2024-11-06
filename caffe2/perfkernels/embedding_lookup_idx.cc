@@ -227,23 +227,23 @@ static bool EmbeddingLookupGenericSlowIdx(
   }
 // clang-format on
 
-EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, bfloat16, at::BFloat16, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, bfloat16, at::BFloat16, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, false);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, false);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, bfloat16, at::BFloat16, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, bfloat16, at::BFloat16, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, false)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, false)
 
-EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, bfloat16, at::BFloat16, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, bfloat16, at::BFloat16, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, true);
-EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, true);
+EMBEDDING_IDX_SPECIALIZATION(int32_t, float, float, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, float, float, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, half, at::Half, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, half, at::Half, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, bfloat16, at::BFloat16, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, bfloat16, at::BFloat16, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int32_t, uint8_t, uint8_t, float, true)
+EMBEDDING_IDX_SPECIALIZATION(int64_t, uint8_t, uint8_t, float, true)
 
 #undef EMBEDDING_IDX_SPECIALIZATION
 

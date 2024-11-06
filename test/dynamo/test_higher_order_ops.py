@@ -1197,7 +1197,7 @@ def forward(self, L_xs_ : torch.Tensor, L_y_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child, l_y_):
+def forward(self, child : torch.Tensor, l_y_ : torch.Tensor):
     child_1 = child[0];  child_1 = None
     map_body_0 = self.map_body_0
     map_impl = torch.ops.higher_order.map_impl(map_body_0, [child], [l_y_]);  map_body_0 = child = l_y_ = None
@@ -1229,7 +1229,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child):
+def forward(self, child : torch.Tensor):
     child_1 = child.sin()
     child_2 = child.sin();  child = None
     return (child_1, child_2)""",
@@ -1270,7 +1270,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child):
+def forward(self, child : torch.Tensor):
     return (child, child, child, child, child, child, child)""",
             )
 
@@ -1313,7 +1313,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child, const_unused):
+def forward(self, child : torch.Tensor, const_unused : int):
     add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
@@ -1347,7 +1347,7 @@ def forward(self, L_x_ : torch.Tensor):
             self.assertExpectedInline(
                 body_graph,
                 """\
-def forward(self, child, const_unused):
+def forward(self, child : torch.Tensor, const_unused : int):
     add = child + 3;  child = None
     sin = torch.sin(add);  add = None
     return (sin,)""",
@@ -3818,10 +3818,10 @@ class GraphModule(torch.nn.Module):
         if torch._dynamo.config.inline_inbuilt_nn_modules:
             expected = """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_buffers_buffer_: "f32[1]", L_params_l1_bias_: "f32[1]", L_inputs_: "f32[1, 1]"):
+    def forward(self, L_params_l1_weight_: "f32[1, 1]", L_params_l1_bias_: "f32[1]", L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
         l_params_l1_weight_ = L_params_l1_weight_
-        l_buffers_buffer_ = L_buffers_buffer_
         l_params_l1_bias_ = L_params_l1_bias_
+        l_buffers_buffer_ = L_buffers_buffer_
         l_inputs_ = L_inputs_
 
         linear: "f32[1, 1]" = torch._C._nn.linear(l_inputs_, l_params_l1_weight_, l_params_l1_bias_);  l_inputs_ = l_params_l1_weight_ = l_params_l1_bias_ = None
@@ -6005,7 +6005,7 @@ class GraphModule(torch.nn.Module):
             return torch.func.vmap(f)(x, y)
 
         actual = wrapper_fn(x, y)
-        expected = torch.compile(wrapper_fn, backend="aot_eager")(x, y)
+        expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x, y)
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
         self.assertEqual(some_list, [1, 1])

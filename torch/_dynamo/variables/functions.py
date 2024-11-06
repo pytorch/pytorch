@@ -35,7 +35,7 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import MutableLocal, typestr, VariableTracker
+from .base import typestr, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -164,8 +164,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             self.is_constant = False
 
         assert isinstance(
-            fn,
-            (types.BuiltinFunctionType, types.FunctionType, torch.jit.ScriptFunction),
+            fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # TODO(anijain2305) - Replace directly calling UserFunctionVariable with
         # VariableBuilder, which handles the wrapping of _torchdynamo_inline.
@@ -683,7 +682,7 @@ class SkipFunctionVariable(VariableTracker):
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
             return self.fold_through_function_to_wrapper().get(self.value)(
-                value, mutable_local=MutableLocal()
+                value, mutation_type=ValueMutationNew()
             )
         elif (
             self.value is functools.wraps
