@@ -96,7 +96,6 @@ class XPUInductorQuantizer(X86InductorQuantizer):
         Here we skip the annotate logic for maxpool at XPU backend
         as the quantized::max_pool2d is only implemented for CPU.
         """
-        pass
 
     def _annotate_output_for_int8_in_int8_out_pattern(
         self,
