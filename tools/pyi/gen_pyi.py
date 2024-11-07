@@ -238,7 +238,11 @@ def sig_for_ops(opname: str) -> list[str]:
     assert opname.endswith("__") and opname.startswith("__"), f"Unexpected op {opname}"
 
     name = opname[2:-2]
-    if name in arithmetic_ops:
+    if name == "rpow":
+        return [  # somehow required to make mypy ci happy?
+            f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ... # type: ignore[has-type]"
+        ]
+    elif name in arithmetic_ops:
         return [
             f"def {opname}(self, other: Union[Tensor, Number, _complex]) -> Tensor: ..."
         ]
