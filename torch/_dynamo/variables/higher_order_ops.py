@@ -8,7 +8,7 @@ import itertools
 import logging
 import types
 import warnings
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch._C
 import torch.fx
@@ -199,20 +199,24 @@ def validate_args_and_maybe_create_graph_inputs(
                 continue
             elif set_subgraph_inputs == "semi_automatic":
                 if isinstance(a, AutogradFunctionContextVariable):
+                    example_value = a.as_proxy().node.meta["example_value"]
                     arg_name = (
                         a.as_proxy().node.name
                         if sub_args_names is None
                         else sub_args_names[idx]
                     )
-                    tracer.create_graph_input(arg_name)
+                    tracer.create_graph_input(arg_name, a.python_type(), example_value)
                 elif a.maybe_fx_node() is not None:
                     node = a.maybe_fx_node()
+                    example_value = node.meta["example_value"]
                     arg_name = (
                         a.as_proxy().node.name
                         if sub_args_names is None
                         else sub_args_names[idx]
                     )
-                    new_proxy = tracer.create_graph_input(arg_name)
+                    new_proxy = tracer.create_graph_input(
+                        arg_name, a.python_type(), example_value
+                    )
                     example_value = (
                         node.meta["example_value"]
                         if "example_value" in node.meta
@@ -237,25 +241,30 @@ def validate_args_and_maybe_create_graph_inputs(
                     if sub_args_names is None
                     else f"const_unused_{sub_args_names[idx]}"
                 )
-                tracer.create_graph_input(arg_name)
+                tracer.create_graph_input(
+                    arg_name, a.python_type(), a.as_python_constant()
+                )
                 new_arg = a
             # Weird special case, we probably want to delete it or fold it
             # into the next case (of `a` being placeable into a graph)
             elif isinstance(a, AutogradFunctionContextVariable):
+                example_value = a.as_proxy().node.meta["example_value"]
                 arg_name = (
                     a.as_proxy().node.name
                     if sub_args_names is None
                     else sub_args_names[idx]
                 )
-                tracer.create_graph_input(arg_name)
+                tracer.create_graph_input(arg_name, a.python_type(), example_value)
                 new_arg = a
             # If `a` can be put into a graph
             elif a.maybe_fx_node() is not None:
                 node = a.maybe_fx_node()
-                arg_name = node.name if sub_args_names is None else sub_args_names[idx]
-                new_proxy = tracer.create_graph_input(arg_name)
                 example_value = (
                     node.meta["example_value"] if "example_value" in node.meta else None
+                )
+                arg_name = node.name if sub_args_names is None else sub_args_names[idx]
+                new_proxy = tracer.create_graph_input(
+                    arg_name, a.python_type(), example_value
                 )
                 new_arg = wrap_fx_proxy_cls(
                     target_cls=type(a),
@@ -530,6 +539,70 @@ def speculate_subgraph(
                 graph.lint()
                 lifted_freevars = subtracer.lifted_freevars
 
+                # NOTE: [HigherOrderOperator subgraph input ordering]
+                # The input ordering of the higher order ops is determined by the order of
+                # the creatation of the placehoder.
+                # Mannually created inputs are created in validate_args_and_maybe_create_graph_inputs before
+                # speculating subgraph.
+                # During subgraph speculation, we may lift closured tensors and free symbols as inputs,
+                # their ordering is determined by the time they are lifted: earlier lifted ones precede later
+                # lifted ones.
+                #
+                # Suppose the placeholders are
+                # O1, O2, X1, O3, O4, X2, X3, O5 where Xs are lifted phs
+                # The following code re-order the placeholders to
+                # O1, O2, O3, O4, O5, X1, X2, X3
+                def move_lifted_freevars_phs_to_end(
+                    graph: torch.fx.Graph, lifted_freevars: Tuple[torch.fx.Node]
+                ):
+                    lifted_ph_set = {
+                        child_p.node for child_p in lifted_freevars.values()
+                    }
+
+                    prev_phs = [n for n in graph.nodes if n.op == "placeholder"]
+
+                    # No need to reorder when graph doesn't have args or doesn't
+                    # have lifted freevars or all inputs are lifted freevars.
+                    if (
+                        len(prev_phs) == 0
+                        or len(lifted_ph_set) == 0
+                        or len(prev_phs) == len(lifted_ph_set)
+                    ):
+                        return
+
+                    # Step 1: find first X1
+                    for x1 in prev_phs:
+                        if x1 in lifted_ph_set:
+                            break
+
+                    assert x1 is not None and x1.op == "placeholder"
+                    # Step 2: starting from the X1, skip Xs and prepend Os before X1.
+                    cand_x = x1.next
+                    while cand_x is not None and cand_x.op == "placeholder":
+                        if cand_x in lifted_ph_set:
+                            cand_x = cand_x.next
+                        else:
+                            nxt = cand_x.next
+                            cand_x._remove_from_list()
+                            x1.prepend(cand_x)
+                            cand_x = nxt
+
+                    # Step 3: assert that all placeholders are in the correct order as .
+                    # in lifted_freevars
+                    after_phs = [
+                        node for node in graph.nodes if node.op == "placeholder"
+                    ][-len(lifted_freevars) :]
+                    assert len(after_phs) == len(lifted_freevars)
+                    for child_proxy, ph in zip(lifted_freevars.values(), after_phs):
+                        assert (
+                            child_proxy.node is ph
+                        ), "The order of placeholders is different from the order of lifted_freevars"
+
+                    graph.lint()
+
+                if len(lifted_freevars) > 0:
+                    move_lifted_freevars_phs_to_end(graph, lifted_freevars)
+
                 return (
                     (output, treespec),
                     graph,
@@ -707,7 +780,7 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"{operands.python_type()}",
             )
         operands_seq = operands.unpack_var_sequence(tx)
-        if not only_consist_of(operands, (TensorVariable,)):
+        if not only_consist_of(operands, (TensorVariable, ConstantVariable)):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
@@ -1053,6 +1126,8 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
+        from torch._higher_order_ops.utils import first_slice_copy
+
         from .builder import wrap_fx_proxy
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
@@ -1070,29 +1145,10 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         # Trace the subgraph
         # TODO: Fix these pointless new_empty calls appearing in the dynamo output graph.
+        # The sub_args is a slice of original input, e.g. if input.size is (3, 4), and scan dim=0
+        # the sub_args shape will be (4, ).
         sub_args = [
-            leaf.call_method(
-                tx,
-                "new_empty",
-                args=(
-                    VariableTracker.build(
-                        tx,
-                        (
-                            leaf.size
-                            if leaf.size is not None
-                            else BuiltinVariable(getattr)
-                            .call_function(
-                                tx, [leaf, ConstantVariable.create("shape")], {}
-                            )
-                            .items
-                        ),
-                    ),
-                ),
-                kwargs={
-                    "dtype": VariableTracker.build(tx, leaf.dtype),
-                    "requires_grad": VariableTracker.build(tx, leaf.requires_grad),
-                },
-            )
+            _make_inlined(tx, first_slice_copy)(leaf, dim)
             for leaf in itertools.chain(xs.items, xs.items)
         ]
         (

@@ -90,6 +90,7 @@ _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
+GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -739,7 +740,6 @@ def get_first_incompatible_cudagraph_node(
     forbidden_set = {
         "aten._fused_moving_avg_obs_fq_helper.default",
         "aten._fused_moving_avg_obs_fq_helper_functional.default",
-        "aten.multinomial.default",
         "fbgemm.dense_to_jagged.default",
         "fbgemm.jagged_to_padded_dense.default",
         "run_and_save_rng_state",
@@ -1276,14 +1276,14 @@ def use_ck_gemm_template(layout, m, n, k):
     from .virtualized import V
 
     return (
-        use_ck_template(layout)
-        and _use_autotune_backend("CK")
+        _use_autotune_backend("CK")
+        and use_ck_template(layout)
         and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
     )
 
 
 def use_ck_conv_template(layout):
-    return use_ck_template(layout) and _use_conv_autotune_backend("CK")
+    return _use_conv_autotune_backend("CK") and use_ck_template(layout)
 
 
 def _use_template_for_cpu(layout):
