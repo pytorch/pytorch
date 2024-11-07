@@ -2516,14 +2516,23 @@ class AssociativeScanTests(TestCase):
         super().setUp()
 
     def _check_autograd(self, result, result_exp, autograd_param):
-        result_flatten, _ = pytree.tree_flatten(result)
-        result_exp_flatten, _ = pytree.tree_flatten(result_exp)
+        grad_param = [p for p in autograd_param if p.requires_grad]
+        result_masked = [r for r in result if r.requires_grad]
+        result_exp_masked = [r for r in result_exp if r.requires_grad]
+
+        # Check the result and parameter lists
+        assert len(result_masked) == len(
+            result_exp_masked
+        ), "The number of elements requiring gradients is different for the results and the expected results"
+
+        result_flatten, _ = pytree.tree_flatten(result_masked)
+        result_exp_flatten, _ = pytree.tree_flatten(result_exp_masked)
         grad_exp_init = [torch.ones_like(el) for el in result_exp_flatten]
         expected_grads = torch.autograd.grad(
-            result_exp_flatten, autograd_param, grad_exp_init
+            result_exp_flatten, grad_param, grad_exp_init
         )
         grad_init = [torch.ones_like(el) for el in result_flatten]
-        grads = torch.autograd.grad(result_flatten, autograd_param, grad_init)
+        grads = torch.autograd.grad(result_flatten, grad_param, grad_init)
         self.assertEqual(grads, expected_grads, atol=6e-05, rtol=6e-06)
 
     def _run_test(self, model, model_fake, inputs, autograd_param=None):
@@ -2531,7 +2540,9 @@ class AssociativeScanTests(TestCase):
         result_exp = model_fake(inputs)
         self.assertEqual(result, result_exp)
 
-        if autograd_param is not None:
+        if autograd_param is not None and any(
+            par.requires_grad for par in autograd_param
+        ):
             self._check_autograd(result, result_exp, autograd_param)
 
         # Return the result of the functions under test for further investigations
@@ -3268,6 +3279,107 @@ class AssociativeScanTests(TestCase):
             model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
             inputs=elements,
             autograd_param=None if not autograd else elements,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    def test_associative_scan_partial_grad(
+        self, combine_mode, compile_mode, reverse, device
+    ):
+        import random
+
+        fct_cmp = compile_mode_helper(associative_scan, compile_mode)
+
+        n_params = 6
+        autograds = []
+        autograds.append([True, True, True, True, True, True])
+        autograds.append([False, False, False, False, False, False])
+        autograds.append([False, True, False, False, False, False])
+        for _ in range(5):
+            autograds.append([bool(random.randint(0, 1)) for _ in range(n_params)])
+
+        def mul2(x, y):
+            return (*[xv * yv for xv, yv in zip(x, y)],)
+
+        for a_grads in autograds:
+            inp = tuple(
+                [
+                    torch.randn(10, 3, 2, device=device, requires_grad=a_grads[n])
+                    for n in range(n_params)
+                ]
+            )
+
+            kwargs = {
+                "dim": 0,
+                "reverse": reverse,
+                "compile_mode": compile_mode,
+                "combine_fn": mul2,
+                "combine_mode": combine_mode,
+            }
+            kwargs_fake = self._prepare_fake_kwargs(kwargs)
+            self._run_test(
+                model=AssociativeScanModels.CombineFn(**kwargs),
+                model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+                inputs=inp,
+                autograd_param=inp,
+            )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @requires_cuda
+    @parametrize("combine_mode", ["pointwise", "generic"])
+    @parametrize("compile_mode", ["none", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    # Skipping the combination of combine_mode=pointwise and device=cpu
+    # as the current implementation of pointwise does only support CUDA device
+    @decorateIf(
+        unittest.skip,
+        lambda params: (
+            params["combine_mode"] == "pointwise"
+            and (params["device"] == torch.device("cpu") or torch.version.hip)
+        ),
+    )
+    def test_associative_scan_partial_grad_no_grad(
+        self, combine_mode, compile_mode, reverse, device
+    ):
+        fct_cmp = compile_mode_helper(associative_scan, compile_mode)
+
+        def mul_single_nograd(x, y):
+            xy1 = x[0] * y[0]
+            with torch.no_grad():
+                xy2 = x[1] * y[1]
+            return xy1, xy2
+
+        inp = tuple(
+            [torch.randn(10, 3, 2, device=device, requires_grad=True) for n in range(2)]
+        )
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": mul_single_nograd,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+            autograd_param=inp[0:1],
         )
 
     @unittest.skipIf(not SM70OrLater, "triton")
