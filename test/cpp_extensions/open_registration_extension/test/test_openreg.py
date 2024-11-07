@@ -75,6 +75,11 @@ class TestOpenReg(TestCase):
         slice_a = pinned_a[2:5]
         self.assertTrue(slice_a.is_pinned())
 
+    def test_stream_synchronize(self):
+        stream = torch.Stream(device="openreg:1")
+        stream.synchronize()
+        self.assertEqual(True, stream.query())
+
 
 if __name__ == "__main__":
     run_tests()

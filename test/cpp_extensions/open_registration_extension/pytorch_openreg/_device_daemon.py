@@ -90,12 +90,14 @@ class Driver:
 
         # State of our driver
         self.curr_device_idx = 0
-        self.curr_stream = 0
-        # Constant properties of our device
-        self.num_devices = 2
+        self.curr_streams = {}
+
         # Allocated memory belongs to which device
         self.memory_belong = {}
         self.host_allocator = Allocator()
+
+        # Constant properties of our device
+        self.num_devices = 2
         self.devices = []
 
         for i in range(self.num_devices):
@@ -128,8 +130,9 @@ class Driver:
 
     def run_on_executor(self, device_idx, cmd, *args):
         req_queue, ans_queue, _ = self.devices[device_idx]
+        stream = self.getStream(device_idx)
         validate_send_queue_args(cmd, args)
-        req_queue.put((cmd,) + args)
+        req_queue.put((stream, cmd) + args)
         return ans_queue.get()
 
     registry = {}
@@ -180,16 +183,42 @@ class Driver:
     def hostFree(self, ptr):
         return self.host_allocator.free(ptr)
 
+    @register(registry)
+    def getNewStream(self, device_idx, priority):
+        return self.run_on_executor(device_idx, "getNewStream", priority)
+
+    @register(registry)
+    def queryStream(self, stream):
+        return self.run_on_executor(
+            stream.device_index, "queryStream", stream.stream_id
+        )
+
+    @register(registry)
+    def getStream(self, device_idx):
+        return self.curr_streams.get(device_idx, 0)
+
+    @register(registry)
+    def exchangeStream(self, stream):
+        stream_id = self.curr_streams.get(stream.device_index, 0)
+        self.curr_streams[stream.device_index] = stream.stream_id
+        return stream_id
+
+    @register(registry)
+    def synchronizeStream(self, stream):
+        self.run_on_executor(stream.device_index, "synchronizeStream", stream.stream_id)
+
 
 class _Executor:
     def __init__(self, id):
         self.id = id
         self.allocator = Allocator()
+        self.stream = 0
 
     def run_forever(self, req_queue, ans_queue):
         # Serve all requests
         while True:
-            cmd, *args = req_queue.get()
+            # Ignore stream since cpu backend doesn't support asynchronous execution
+            _, cmd, *args = req_queue.get()
             log.info("Worker executing: %s", cmd)
             if cmd in _Executor.registry:
                 res = _Executor.registry[cmd](self, *args)
@@ -232,6 +261,20 @@ class _Executor:
     def recv_data(self, host_tensor, dev_mem):
         dev_tensor = OpenRegTensorData.from_meta(self.allocator, dev_mem)
         dev_tensor.copy_(host_tensor)
+
+    @register(registry)
+    def getNewStream(self, priority):
+        self.stream += 1
+        return self.stream
+
+    @register(registry)
+    def queryStream(self, stream):
+        return True
+
+    @register(registry)
+    def synchronizeStream(self, stream):
+        # no-op
+        pass
 
 
 driver = Driver()
