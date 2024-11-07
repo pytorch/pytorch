@@ -19,8 +19,7 @@
 #include <ATen/ops/resize_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // BEGIN QUANTIZE HELPER FUNCTIONS
 __device__ __forceinline__ float bfe(uint32_t val, uint32_t pos, uint32_t len) {
@@ -577,5 +576,4 @@ TORCH_LIBRARY_IMPL(quantized, CUDA, m) {
       TORCH_FN(embedding_bag_4bit_rowwise_offsets));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

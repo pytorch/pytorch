@@ -1441,7 +1441,7 @@ def tensor_split_tensor_indices_or_sections_py_impl(
 
 # TODO: this doesn't appear to have enough precision in bfloat16
 @register_decomposition(aten.addmm)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @pw_cast_for_opmath
 def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
     if not self.is_floating_point() and not self.is_complex():
@@ -3888,7 +3888,9 @@ def _unsafe_masked_index(x, mask, indices, fill):
         lambda: "tensors used as masks must be bool tensors",
     )
 
-    if x.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(x.numel() == 0):
         meta_result = torch._meta_registrations.meta_index_Tensor(x, indices)
         return x.new_full(meta_result.shape, fill)
 
@@ -4372,9 +4374,18 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 
     t1_shape = t1.shape
     t1_stride = t1.stride()
+
+    # Check the contiguous, we can skip the dim with size of 1
+    # as aten: https://github.com/pytorch/pytorch/blob/
+    # e201460f8aa1510b4c4686627d57b69756c4b916/aten/src/ATen/TensorGeometry.cpp#L17
+    expected_stride = [1]
+    for size in reversed(t1_shape[1:]):
+        expected_stride.append(size * expected_stride[-1])
     return all(
-        st1 == st2 * s2
-        for (st1, st2, s2) in zip(t1_stride[:-2], t1_stride[1:-1], t1_shape[1:-1])
+        guard_size_oblivious(size == 1) or left == right
+        for left, right, size in zip(
+            t1_stride, list(reversed(expected_stride)), t1_shape
+        )
     )
 
 

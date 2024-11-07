@@ -8,6 +8,7 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <opcode.h>
+#include <signal.h>
 #include <stdbool.h>
 
 PyObject* guard_error_hook = NULL;
@@ -610,6 +611,12 @@ static PyObject* _custom_eval_frame(
 
   PyObject* backend = get_backend(callback);
 
+
+  // We don't run the current custom_eval_frame behavior for guards.
+  // So we temporarily set the callback to Py_None to drive the correct behavior
+  // in the shim.
+  eval_frame_callback_set(Py_None);
+
   // A callback of Py_False indicates "run only" mode, the cache is checked, but
   // we never compile.
   // Also, if extra is marked as "cache_limit_hit", run in "run only" mode
@@ -644,17 +651,14 @@ static PyObject* _custom_eval_frame(
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
+    // Re-enable custom behavior
+    eval_frame_callback_set(callback);
     *should_clear_frame = 1;
     return eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, 0);
   }
   DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_builtins));
-
-  // We don't run the current custom_eval_frame behavior for guards.
-  // So we temporarily set the callback to Py_None to drive the correct behavior
-  // in the shim.
-  eval_frame_callback_set(Py_None);
 
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = NULL;
@@ -865,6 +869,27 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* obj) {
   Py_RETURN_NONE;
 }
 
+// Debugging function for GNU C only.
+// Used to set gdb breakpoints in hot CPython sites from Python.
+// Code example:
+//
+// def foo(x):
+//     x = x + 1
+//     torch._dynamo.eval_frame.raise_sigtrap()
+//     # (gdb) b bytecodes.c:1234 (whatever line CALL is handled)
+//     x = torch.sin(x)  # gdb breakpoint hit when sin is called
+//
+// In this example, we want to breakpoint on CALL in bytecodes.c only when
+// running foo. Otherwise, we would need to breakpoint before running the program,
+// and that breakpoint would be hit every time Python makes a function call,
+// leading to a spammy debugging experience.
+static PyObject* raise_sigtrap(PyObject* dummy, PyObject* obj) {
+#ifdef __GNUC__
+  raise(SIGTRAP);
+#endif
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_O, NULL},
     {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
@@ -872,6 +897,7 @@ static PyMethodDef _methods[] = {
     {"unsupported", unsupported, METH_VARARGS, NULL},
     {"skip_code", skip_code, METH_O, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
+    {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

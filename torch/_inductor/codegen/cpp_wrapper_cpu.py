@@ -118,9 +118,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             new_args = []
             for idx, arg in enumerate(call_args):
                 if "*" in arg_types[idx]:
-                    var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
-                    new_args.append(f"({arg_types[idx]})({var_name})")
+                    new_args.append(f"({arg_types[idx]})({arg}.data_ptr())")
                 else:
                     # arg is a scalar
                     new_args.append(arg)
@@ -464,13 +462,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     # Weights are stored in constants_ and owned by RAIIAtenTensorHandle there.
                     # Don't call std::move here because it will cause constants_ to lose the ownership.
                     self.prefix.writeline(
-                        f"""auto {constants_key} = constants_->at({idx});"""
+                        f"""[[maybe_unused]] auto {constants_key} = constants_->at({idx});"""
                     )
                 else:
                     # Append constants as inputs to the graph
                     constants_idx = inputs_len + idx
                     self.prefix.writeline(
-                        f"auto {constants_key} = std::move(inputs[{constants_idx}]);"
+                        f"[[maybe_unused]] auto {constants_key} = std::move(inputs[{constants_idx}]);"
                     )
 
             self.codegen_inputs(self.prefix, V.graph.graph_inputs)
@@ -837,24 +835,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return [x.codegen_reference(self.wrapper_call) for x in V.graph.graph_outputs]
 
     def generate_return(self, output_refs: List[str]):
-        def use_thread_local_cached_output_tensor(idx, output):
-            cached_output_name = f"cached_output_{next(self.cached_output_id)}"
-            cache_type = "Tensor"
-            self.wrapper_call.writeline(
-                f"thread_local ThreadLocalCachedOutput{cache_type}<std::decay_t<decltype({output})>> "
-                f"{cached_output_name}({output});"
-            )
-            self.wrapper_call.writeline(
-                f"{cached_output_name}.copy_data_from({output});"
-            )
-            self.wrapper_call.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]));"
-            )
-            self.wrapper_call.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors({cached_output_name}.tensor(), "
-                f"output_handles[{idx}]));"
-            )
-
         cst_names = V.graph.constants.keys()
         output2idx: Dict[str, int] = {}
         for idx, output in enumerate(output_refs):
@@ -876,37 +856,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
                 continue
 
-            output_is_tensor_handle_expr = (
-                f"std::is_same_v<std::decay_t<decltype({output})>,"
-                "RAIIAtenTensorHandle> || "
-                f"std::is_same_v<std::decay_t<decltype({output})>,"
-                "AtenTensorHandle> || "
-                f"std::is_same_v<std::decay_t<decltype({output})>,"
-                "ConstantHandle>"
-            )
-            self.wrapper_call.writeline(
-                f"if constexpr ({output_is_tensor_handle_expr}) {{"
-            )
-            with self.wrapper_call.indent():
-                if is_constant_buffer:
-                    # See NOTE(return_constant) above.
+            if is_constant_buffer:
+                # See NOTE(return_constant) above.
+                self.wrapper_call.writeline(
+                    f"aoti_torch_clone({output}, &output_handles[{idx}]);"
+                )
+            else:
+                if output in output2idx:
+                    src_idx = output2idx[output]
                     self.wrapper_call.writeline(
-                        f"aoti_torch_clone({output}, &output_handles[{idx}]);"
+                        f"output_handles[{idx}] = output_handles[{src_idx}];"
                     )
                 else:
-                    if output in output2idx:
-                        src_idx = output2idx[output]
-                        self.wrapper_call.writeline(
-                            f"output_handles[{idx}] = output_handles[{src_idx}];"
-                        )
-                    else:
-                        self.wrapper_call.writeline(
-                            f"output_handles[{idx}] = {output}.release();"
-                        )
-            self.wrapper_call.writeline("} else {")
-            with self.wrapper_call.indent():
-                use_thread_local_cached_output_tensor(idx, output)
-            self.wrapper_call.writeline("}")
+                    self.wrapper_call.writeline(
+                        f"output_handles[{idx}] = {output}.release();"
+                    )
 
             if output not in output2idx:
                 output2idx[output] = idx
@@ -1055,9 +1019,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 output_name = f"{output_name_base}_{idx}"
                 self.writeline(f"int64_t {output_name} = {output};")
                 output_args.append(f"&{output_name}")
-            elif isinstance(output, sympy.Symbol):
+            elif isinstance(output, sympy.Expr):
                 output_name = f"{output_name_base}_{idx}"
-                self.writeline(f"auto {output_name} = {output};")
+                self.writeline(f"auto {output_name} = {self.expr_printer(output)};")
                 output_args.append(f"&{output_name}")
             elif output is None:
                 output_args.append("nullptr")
@@ -1174,6 +1138,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return (
             ""
             if isinstance(buffer.get_layout(), ir.MultiOutputLayout)
+            or isinstance(buffer, ir.TMADescriptor)
             else f"{buffer.get_name()}.reset();"
         )
 
