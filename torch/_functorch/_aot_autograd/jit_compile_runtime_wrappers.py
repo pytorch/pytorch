@@ -499,7 +499,7 @@ def run_joint_graph_passes_on_hops(
                 )
 
                 # Step 2) and 3) - Run joint graph passes and partitioner
-                new_fw_hop_gm, new_bw_hop_gm, signature = aot_config.partition_fn(
+                new_fw_hop_gm, new_bw_hop_gm = aot_config.partition_fn(
                     joint_hop_gm, [], num_fwd_outputs=num_fw_outputs
                 )
 
@@ -708,27 +708,6 @@ def run_joint_graph_passes_on_hops(
     new_graph.eliminate_dead_code()
     new_graph.lint()
     new_joint_gm = torch.fx.GraphModule(joint_gm, new_graph)
-
-    if aot_config.enable_log:
-        aot_joint_log.info(
-            "%s",
-            lazy_format_graph_code(
-                "Joint graph",
-                new_joint_gm,
-                aot_config.aot_id,
-                include_stride=True,
-                include_device=True,
-                colored=True,
-            ),
-        )
-        joint_graph_str = new_joint_gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        )
-        trace_structured(
-            "aot_joint_graph",
-            payload_fn=lambda: joint_graph_str,
-        )
-
     return new_joint_gm
 
 
