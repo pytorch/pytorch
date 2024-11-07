@@ -1193,6 +1193,11 @@ class rocm:
     # Install with `pip install git+https://github.com/rocm/composable_kernel@develop`.
     ck_dir = os.environ.get("TORCHINDUCTOR_CK_DIR")
 
+    # generate standalone executables for instances generated with the CK backend
+    generate_test_runner: bool = (
+        os.environ.get("INDUCTOR_CK_BACKEND_GENERATE_TEST_RUNNER_CODE", "0") == "1"
+    )
+
     # Number of op instance choices to trade off between runtime perf and compilation time
     n_max_profiling_configs: Optional[int] = None
 
