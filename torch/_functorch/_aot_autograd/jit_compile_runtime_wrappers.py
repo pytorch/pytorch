@@ -368,8 +368,8 @@ class InvokeSubgraphHopGraphs:
 
     new_fw_hop_gm: Optional[torch.fx.GraphModule] = None
     new_bw_hop_gm: Optional[torch.fx.GraphModule] = None
-    # This includes (*fw_outs, *saved_tensors)
-    new_num_fw_outputs: Optional[int] = None
+    new_num_sym_nodes: Optional[int] = None
+    new_num_saved_nodes: Optional[int] = None
 
 
 def run_joint_graph_passes_on_hops(
@@ -509,6 +509,19 @@ def run_joint_graph_passes_on_hops(
                 new_hop_graphs[identifier].new_num_fw_outputs = num_outputs(
                     new_fw_hop_gm
                 )
+
+                # Save the number of symints and saved tensors
+                new_fw_out_nodes = new_fw_hop_gm.graph.find_nodes(op="output")[0].args[
+                    0
+                ]
+                extra_outputs = new_fw_out_nodes[num_fw_outputs:]
+                symint_outputs = [n for n in extra_outputs if is_sym_node(n)]
+
+                new_hop_graphs[identifier].new_num_sym_nodes = len(symint_outputs)
+                new_hop_graphs[identifier].new_num_saved_nodes = len(
+                    extra_outputs
+                ) - len(symint_outputs)
+
                 new_hop_graphs[identifier].partitioning_done = True
 
     if not new_hop_graphs:
@@ -614,26 +627,31 @@ def run_joint_graph_passes_on_hops(
                 propagate_meta_info(new_fw_hop_gm, env[node], node)
 
                 old_num_fw_outputs = new_hop_graphs[identifier].old_num_fw_outputs
-                new_num_fw_outputs = new_hop_graphs[identifier].new_num_fw_outputs
-                assert old_num_fw_outputs
-                assert new_num_fw_outputs
+                new_num_sym_nodes = new_hop_graphs[identifier].new_num_sym_nodes
+                new_num_saved_nodes = new_hop_graphs[identifier].new_num_saved_nodes
+                assert old_num_fw_outputs is not None
+                assert new_num_sym_nodes is not None
+                assert new_num_saved_nodes is not None
 
-                saved_tensor_nodes = []
+                extra_fw_outputs = []
                 # new_hop_fw_gm output signature is (*fw_outs, *saved_tensors)
                 # old_num_fw_outputs = len(fw_outs)
-                # new_num_fw_outputs = len(*fw_outs, *saved_tensors)
-                for fw_out_idx in range(old_num_fw_outputs, new_num_fw_outputs):
+                # new_num_fw_outputs = len(*fw_outs, *saved_tensors, *sym_nodes)
+                total_outputs = (
+                    old_num_fw_outputs + new_num_saved_nodes + new_num_sym_nodes
+                )
+                for fw_out_idx in range(old_num_fw_outputs, total_outputs):
                     saved_tensor_node = new_graph.call_function(
                         the_function=operator.getitem, args=(env[node], fw_out_idx)
                     )
                     saved_tensor_node.meta = copy.copy(env[node].meta)
                     saved_tensor_node.meta["val"] = env[node].meta["val"][fw_out_idx]
-                    saved_tensor_nodes.append(saved_tensor_node)
+                    extra_fw_outputs.append(saved_tensor_node)
 
                 # Save the saved_tensors info for the fw_node. This will be used
                 # to form the inputs for the backward hop.
                 old_fw_hop_nodes_stack.append(node)
-                fw_node_to_saved_tensors_map[node] = (identifier, saved_tensor_nodes)
+                fw_node_to_saved_tensors_map[node] = (identifier, extra_fw_outputs)
             elif node.args[1].startswith("___backward"):
                 # Get the saved_tensors from the forward graph and find the new
                 # tangents, and replace the old bw hop with the new bw hop.
@@ -644,23 +662,35 @@ def run_joint_graph_passes_on_hops(
 
                 # Prepare the operands for the bwd graph
                 # Old bw graph signature : (*primals, *tangents)
-                # New signature will be : (*saved_tensors, *tangents)
+                # New signature will be : (*sym_nodes, *saved_tensors, *tangents)
                 # We have already collected the saved_tensors in the forward hop processing.
 
                 assert len(old_fw_hop_nodes_stack)
                 fw_hop_node = old_fw_hop_nodes_stack.pop()
                 (
                     fw_hop_node_identifier,
-                    saved_tensor_nodes,
+                    extra_fw_outputs,
                 ) = fw_node_to_saved_tensors_map[fw_hop_node]
+
+                # extra_fw_outputs are in the order (*saved_nodes, *sym_nodes).
+                # Partitioner has this quirk where the backward wants sym_nodes
+                # first. So extract the sym and saved nodes.
+                num_sym_nodes = new_hop_graphs[fw_hop_node_identifier].new_num_sym_nodes
+                num_saved_nodes = new_hop_graphs[
+                    fw_hop_node_identifier
+                ].new_num_saved_nodes
+                assert num_sym_nodes is not None
+                assert num_saved_nodes is not None
+                saved_tensor_nodes = extra_fw_outputs[:num_saved_nodes]
+                sym_nodes = extra_fw_outputs[num_saved_nodes:]
 
                 assert fw_hop_node_identifier == identifier
 
                 num_primals = new_hop_graphs[identifier].old_num_fw_inputs
-                assert num_primals
+                assert num_primals is not None
                 old_tangents = node.args[2][num_primals:]
                 new_tangents = [env[n] for n in old_tangents]
-                new_operands = saved_tensor_nodes + new_tangents
+                new_operands = sym_nodes + saved_tensor_nodes + new_tangents
 
                 env[node] = new_graph.call_function(
                     the_function=invoke_subgraph,
