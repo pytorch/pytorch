@@ -36,7 +36,6 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._dynamo.utils import clone_input
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -100,12 +99,15 @@ from ..trace_rules import (
 from ..utils import (
     _extract_tensor_dict,
     build_checkpoint_variable,
+    build_invoke_subgraph_variable,
+    clone_input,
     common_constant_types,
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
     is_function_or_wrapper,
+    is_invoke_subgraph,
     is_lru_cache_wrapped_function,
     is_namedtuple,
     is_parameter_freezing,
@@ -697,6 +699,8 @@ class VariableBuilder:
             return LoggingLoggerVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
+        elif is_invoke_subgraph(value):
+            return build_invoke_subgraph_variable(source=self.source)
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
@@ -841,6 +845,10 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return HFPretrainedConfigVariable(value)
         elif isinstance(value, HigherOrderOperator):
+            if value is torch._higher_order_ops.invoke_subgraph:
+                unimplemented(
+                    "Directly using invoke_subgraph is not supported. Use wrap_with_invoke_subgraph"
+                )
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
         elif isinstance(value, torch.cuda.StreamContext):

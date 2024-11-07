@@ -2772,6 +2772,21 @@ def is_utils_checkpoint(obj):
     return obj is torch.utils.checkpoint.checkpoint
 
 
+def is_invoke_subgraph(obj):
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
+
+    return obj is invoke_subgraph_placeholder
+
+
+def build_invoke_subgraph_variable(**options):
+    from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
+
+    return TorchHigherOrderOperatorVariable.make(
+        torch._higher_order_ops.invoke_subgraph,
+        **options,
+    )
+
+
 def build_checkpoint_variable(**options):
     import torch._higher_order_ops.wrap as higher_order_ops
 

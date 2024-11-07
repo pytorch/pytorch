@@ -62,6 +62,33 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 invoke_subgraph = InvokeSubgraphHOP()
 
 
+def invoke_subgraph_placeholder(subgraph, *args, **kwargs):
+    # Just a placeholder for Dynamo to replace with invoke_subgraph
+    return subgraph(*args, **kwargs)
+
+
+def wrap_with_invoke_subgraph(fn=None):
+    """
+    This wrapper instructs torch.compile to compile the wrapped region once and
+    reuse the compiled artifact, instead of the usual way of aggressively
+    inlining the function.
+
+    Under the hood, it tells TorchDynamo to use InvokeSubgraph HOP for the
+    region. For PyTorch eager, this is a no-op.
+    """
+
+    def wrap(func):
+        def inner(*args, **kwargs):
+            return invoke_subgraph_placeholder(func, *args, **kwargs)
+
+        return inner
+
+    if fn:
+        return wrap(fn)
+    else:
+        return wrap
+
+
 def get_invoke_subgraph_cache():
     cache = None
     if tracing_ctx := torch._guards.TracingContext.try_get():
