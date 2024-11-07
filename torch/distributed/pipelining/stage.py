@@ -194,10 +194,6 @@ class _PipelineStageBase(ABC):
         self.grad_recv_info: Dict = {}
         self.grad_send_info: Optional[List] = None
 
-        # Number of backward chunks seen. This is used to determine when to do
-        # grad reduction in DDP or FSDP.
-        self._seen_bwd_chunks = 0
-
         # To be populated later by the Schedule
         self.chunks: Optional[int] = None
         self.stage_index_to_group_rank: Dict[int, int] = {
@@ -513,8 +509,6 @@ class _PipelineStageBase(ABC):
         self.fwd_cache.clear()
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks.clear()
-        # Reset bwd chunk counter
-        self._seen_bwd_chunks = 0
 
         # Clear grad of input buffers in between schedule steps. This is because
         # `torch.autograd.backward()` will accumulate gradients into leaf
@@ -768,9 +762,6 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
-        # Save full_backward
-        bwd_kwargs["full_backward"] = full_backward
-
         # Custom backward function
         if self.dw_builder:
             # TODO: We may want to change our semantics so we are allowed to ignore
@@ -822,7 +813,6 @@ class _PipelineStageBase(ABC):
             for t in stage_output:
                 t.detach_()
 
-        self._seen_bwd_chunks += 1
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
     def backward_weight_one_chunk(self, bwd_chunk_id: int, last_backward=False):
@@ -845,7 +835,6 @@ class _PipelineStageBase(ABC):
                 bwd_kwargs = {
                     "stage_output": stage_output,
                     "param_groups": param_groups,
-                    "full_backward": False,
                 }
                 self.backward_maybe_with_nosync(
                     "weight", bwd_kwargs, last_backward=last_backward
@@ -860,13 +849,10 @@ class _PipelineStageBase(ABC):
                     "stage_output": stage_output,
                     "output_grads": output_grads,
                     "input_values": input_values,
-                    "full_backward": False,
                 }
                 self.backward_maybe_with_nosync(
                     "full", bwd_kwargs, last_backward=last_backward
                 )
-
-        self._seen_bwd_chunks += 1
 
     def _validate_fwd_input(self, args, kwargs):
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
