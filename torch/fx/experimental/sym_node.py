@@ -170,7 +170,7 @@ class SymNode:
 
     @property
     def expr(self):
-        result = self.expr_allow_custom_add
+        return self.expr_allow_custom_add
         # We make sure that CustomAdd is not leaking outside the construction loop.
         # This is needed to allow Add(a, b) == CustomAdd(a, b) to be true.
         if isinstance(result, torch.utils._sympy.functions.CustomAdd):
