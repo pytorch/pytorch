@@ -118,7 +118,9 @@ DEPS_SONAME=(
     "libgomp.so.1"
 )
 
-if [[ $USE_CUSPARSELT == "1" ]]; then
+# CUDA 11.8 have to ship the libcusparseLt.so.0 with the binary
+# since nvidia-cusparselt-cu11 is not available in PYPI
+if [[ $USE_CUSPARSELT == "1" && $CUDA_VERSION == "11.8" ]]; then
         DEPS_SONAME+=(
             "libcusparseLt.so.0"
         )
@@ -145,6 +147,7 @@ if [[ $CUDA_VERSION == "12.1" || $CUDA_VERSION == "12.4" ]]; then
             "/usr/local/cuda/lib64/libcudnn.so.9"
             "/usr/local/cuda/lib64/libcublas.so.12"
             "/usr/local/cuda/lib64/libcublasLt.so.12"
+            "/usr/local/cuda/lib64/libcusparseLt.so.0"
             "/usr/local/cuda/lib64/libcudart.so.12"
             "/usr/local/cuda/lib64/libnvToolsExt.so.1"
             "/usr/local/cuda/lib64/libnvrtc.so.12"
@@ -161,6 +164,7 @@ if [[ $CUDA_VERSION == "12.1" || $CUDA_VERSION == "12.4" ]]; then
             "libcudnn.so.9"
             "libcublas.so.12"
             "libcublasLt.so.12"
+            "libcusparseLt.so.0"
             "libcudart.so.12"
             "libnvToolsExt.so.1"
             "libnvrtc.so.12"
@@ -178,6 +182,7 @@ if [[ $CUDA_VERSION == "12.1" || $CUDA_VERSION == "12.4" ]]; then
             '$ORIGIN/../../nvidia/curand/lib'
             '$ORIGIN/../../nvidia/cusolver/lib'
             '$ORIGIN/../../nvidia/cusparse/lib'
+            '$ORIGIN/../../cusparselt/lib'
             '$ORIGIN/../../nvidia/nccl/lib'
             '$ORIGIN/../../nvidia/nvtx/lib'
         )

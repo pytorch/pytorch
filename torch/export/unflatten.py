@@ -22,6 +22,7 @@ from torch.export.exported_program import (
     ExportGraphSignature,
     InputKind,
     ModuleCallSignature,
+    SymBoolArgument,
     SymIntArgument,
     TensorArgument,
 )
@@ -237,11 +238,14 @@ class UnflattenedModule(torch.nn.Module):
         self.ivals = _IVals()
         # record any intermediate value x that is used, with the modules that used it,
         # and generate instructions to read the corresponding attribute
-        seen_modules = _outline_submodules(export_graph, self)
+        seen_modules, seen_attrs = _outline_submodules(export_graph, self)
         # for each read intermediate value x, find the module that created it,
         # and generate instructions to update the corresponding attribute;
         # finally, initialize all these attributes
         self.ivals.create(seen_modules.values())
+        # move attributes that correspond to graph arguments for HOPs
+        # from exported program to unflattened submodules
+        _copy_graph_attrs(export_module._graph_module, self, seen_attrs)
 
         self.range_constraints = export_module.range_constraints
         self.equality_constraints: List = []
@@ -695,7 +699,13 @@ def _add_spec(gm: torch.nn.Module, spec) -> str:
     return name
 
 
-def _generate_flatten(gm: torch.nn.Module, node, spec) -> torch.fx.Node:
+def _generate_flatten(gm: torch.nn.Module, node) -> torch.fx.Node:
+    flatten = gm.graph.call_function(pytree.tree_flatten, (node,))
+    getitem_0 = gm.graph.call_function(operator.getitem, (flatten, 0))
+    return getitem_0
+
+
+def _generate_flatten_spec(gm: torch.nn.Module, node, spec) -> torch.fx.Node:
     name = _add_spec(gm, spec)
     spec_node = gm.graph.get_attr(name)
     return gm.graph.call_function(fx_pytree.tree_flatten_spec, (node, spec_node))
@@ -760,6 +770,7 @@ class _ModuleFrame:
         nodes: Tuple[torch.fx.Node, ...],
         seen_nodes,
         seen_modules,
+        seen_attrs,
         parent,
         module_stack: List[Tuple[str, int]],
         module_id,
@@ -770,6 +781,7 @@ class _ModuleFrame:
         self.nodes = nodes
         self.seen_nodes = seen_nodes
         self.seen_modules = seen_modules
+        self.seen_attrs = seen_attrs
         self.parent = parent
         self.module_stack = module_stack
         self.module_id = module_id
@@ -825,7 +837,7 @@ class _ModuleFrame:
                 kwarg_nodes = {}
                 for name in kwargs_spec.context:
                     kwarg_nodes[name] = self.graph.placeholder(name)
-                flat_args = _generate_flatten(
+                flat_args = _generate_flatten_spec(
                     self.module,
                     (tuple(arg_nodes), kwarg_nodes),
                     signature.in_spec,
@@ -858,7 +870,9 @@ class _ModuleFrame:
                     elif input.name not in self.seen_nodes:
                         input_nodes.append(None)
                     else:
-                        assert isinstance(input, (TensorArgument, SymIntArgument))
+                        assert isinstance(
+                            input, (TensorArgument, SymIntArgument, SymBoolArgument)
+                        )
                         input_nodes.append(
                             self.parent.remap_input(self.seen_nodes[input.name])
                         )
@@ -964,7 +978,9 @@ class _ModuleFrame:
         signature = self.module_call_graph.get(self.child_fqn)
         if signature is not None and self.parent is not None:
             for output in signature.outputs:
-                if isinstance(output, (TensorArgument, SymIntArgument)):
+                if isinstance(
+                    output, (TensorArgument, SymIntArgument, SymBoolArgument)
+                ):
                     if output.name in self.seen_nodes:
                         orig_outputs.append(self.seen_nodes[output.name])
                     else:
@@ -993,7 +1009,7 @@ class _ModuleFrame:
                 tuple(get_actual_output_node(output) for output in orig_outputs),
                 signature.out_spec,
             )
-            parent_out: Optional[torch.fx.Node] = _generate_flatten(
+            parent_out: Optional[torch.fx.Node] = _generate_flatten_spec(
                 self.parent.module, self.parent_call_module, signature.out_spec
             )
             graph_outputs: Union[torch.fx.Node, List[torch.fx.Node]] = tree_out_node
@@ -1135,6 +1151,7 @@ class _ModuleFrame:
                     self.nodes,
                     self.seen_nodes,
                     self.seen_modules,
+                    self.seen_attrs,
                     self,
                     self.module_stack + [next_module],
                     next_module_key.split("@")[0],
@@ -1146,6 +1163,11 @@ class _ModuleFrame:
             # The only remaining possibility is that we are in the right stack
             # frame. Copy the node into this frame's graph and increment the node counter.
             assert node_module_stack == self.module_stack
+
+            if node.op == "get_attr":
+                # this must be a graph argument for a HOP
+                self.seen_attrs[self.child_fqn].add(node.target)
+
             self.copy_node(node)
             node_idx += 1
 
@@ -1163,11 +1185,13 @@ class _SubmoduleEntry:
 def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModule):
     seen_nodes: Dict[str, torch.fx.Node] = {}
     seen_modules: Dict[int, List[_SubmoduleEntry]] = defaultdict(list)
+    seen_attrs: Dict[str, Set[str]] = defaultdict(set)
     _ModuleFrame(
         orig_graph,
         tuple(orig_graph.nodes),
         seen_nodes,
         seen_modules,
+        seen_attrs,
         None,
         [("", 0)],
         "",
@@ -1178,7 +1202,7 @@ def _outline_submodules(orig_graph: torch.fx.Graph, root_module: UnflattenedModu
         },
         module=root_module,
     ).run_outer()
-    return seen_modules
+    return seen_modules, seen_attrs
 
 
 def _reorder_submodules(
@@ -1301,6 +1325,18 @@ class _IVals:
                     ival_name,
                     self.storage[name],
                 )
+
+
+def _copy_graph_attrs(
+    gm: torch.fx.GraphModule,
+    root_module: UnflattenedModule,
+    seen_attrs: Dict[str, Set[str]],
+):
+    for child_fqn, names in seen_attrs.items():
+        module = _get_attr(root_module, child_fqn) if child_fqn else root_module
+        for name in names:
+            val = getattr(gm, name)
+            setattr(module, name, val)
 
 
 def _deduplicate_modules(partitions):

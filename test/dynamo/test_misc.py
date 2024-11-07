@@ -79,6 +79,7 @@ from torch.testing._internal.common_methods_invocations import (
 from torch.testing._internal.common_utils import (
     freeze_rng_state,
     IS_FBCODE,
+    scoped_load_inline,
     set_default_dtype,
     skipIfNNModuleInlined,
     skipIfWindows,
@@ -321,16 +322,17 @@ class MiscTests(torch._inductor.test_case.TestCase):
         res_compiled = add_fn(2, 3, torch.tensor(0.0))
         self.assertEqual(res, res_compiled)
 
+    @scoped_load_inline
     @skipIfNNModuleInlined("fails internal CI")
     @unittest.skipIf(IS_FBCODE, "inline cpp_extension doesn't work in fbcode")
-    def test_cpp_extension_recommends_custom_ops(self):
+    def test_cpp_extension_recommends_custom_ops(self, load_inline):
         cpp_source = """
         #include <torch/extension.h>
         at::Tensor foobar(const at::Tensor& x) {
             return x.clone();
         }
         """
-        module = torch.utils.cpp_extension.load_inline(
+        module = load_inline(
             name="mylib",
             cpp_sources=cpp_source,
             functions="foobar",
@@ -362,7 +364,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             return x.clone();
         }
         """
-        module2 = torch.utils.cpp_extension.load_inline(
+        module2 = load_inline(
             name="mylib2",
             cpp_sources=cpp_source,
             functions="baz",
@@ -1185,6 +1187,19 @@ utils_device.CURRENT_DEVICE == None""".split(
         inp = torch.ones(2, 2)
         inp.test = None
         self.assertEqual(torch.ones(2, 2) + 2, fn(inp))
+
+    def test_mro_type_tensor_no_source(self):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            z = []
+            input_type = type(torch.ones(2, 2))
+            for cls in input_type.__mro__:
+                z.append(cls.__name__)
+
+            return x, input_type, z
+
+        inp = torch.ones(2, 2)
+        fn(inp)
 
     def test_shape_unpack(self):
         def fn(x):
@@ -3767,6 +3782,33 @@ utils_device.CURRENT_DEVICE == None""".split(
         actual2 = opt_mod(torch.tensor(True), inp)
         self.assertTrue(torch.allclose(exp1, actual1))
         self.assertTrue(torch.allclose(exp2, actual2))
+
+    def test_closure_write_across_functions(self):
+        z = 1
+        k = 2
+
+        def create_fn():
+            def fn(x):
+                nonlocal k, z
+                k = z
+
+            return fn
+
+        def update_z_and_run_fn(fn, x):
+            nonlocal z
+            z = 3
+            fn(x)
+            return x.cos()
+
+        @torch.compile(backend="eager")
+        def foo(x):
+            fn = create_fn()
+            return update_z_and_run_fn(fn, x)
+
+        x = torch.randn(1)
+        foo(x)
+        self.assertEqual(3, z)
+        self.assertEqual(3, k)
 
     def test_top_package_import(self):
         def fn(x):
@@ -9934,7 +9976,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            collections.deque([0.0, -x]),
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -9966,7 +10008,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            [0.0, -x],
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -9982,6 +10024,7 @@ def ___make_guard_fn():
                         x * y,
                         3.0,
                         y - 2,
+                        1,
                         torch.zeros(2, 2),
                         2 * y,
                         -y,
@@ -10014,7 +10057,7 @@ def ___make_guard_fn():
                         "c": (
                             x,
                             3.0,
-                            [0.0, -x],
+                            collections.deque([0.0, -x, 1, 2], maxlen=3),
                         ),
                         "d": collections.OrderedDict(
                             {
@@ -10025,7 +10068,7 @@ def ___make_guard_fn():
                     }
                     tree2 = collections.OrderedDict(
                         [
-                            ("c", (y, 3.0, [-y, 10.0])),
+                            ("c", (y, 3.0, collections.deque([1, -y, 10.0]))),
                             ("a", [y, y + 1]),
                             ("b", y + 2),
                             (
@@ -10194,6 +10237,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {0 < Mod(s0, 3): False, 0 <= Mod(s0, 3): True, Eq(0, Mod(s0, 3)): True, Eq(Mod(s0, 3), 0): True, Mod(s0, 3) < 0: False, Mod(s0, 3) <= 0: True, Ne(0, Mod(s0, 3)): False, Ne(Mod(s0, 3), 0): False}
+  > Right: {}
 ==> divisible: values don't match.
   >  Left: {Mod(s0, 3)}
   > Right: {}
@@ -10231,6 +10277,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {False: False, True: True}
+  > Right: {}
 ==> guards: values don't match.
   >  Left: [Eq(s0, 3)]
   > Right: []
@@ -10272,6 +10321,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {3 <= s0: True, s0 < 3: False}
+  > Right: {}
 ==> guards: values don't match.
   >  Left: [s0 >= 3]
   > Right: []
@@ -10304,6 +10356,9 @@ ShapeEnv not equal: field values don't match:
             """\
 ShapeEnv not equal: field values don't match:
 
+==> axioms: values don't match.
+  >  Left: {0 < PythonMod(u0, 3): False, 0 <= PythonMod(u0, 3): True, Eq(0, PythonMod(u0, 3)): True, Eq(PythonMod(u0, 3), 0): True, Ne(0, PythonMod(u0, 3)): False, Ne(PythonMod(u0, 3), 0): False, PythonMod(u0, 3) < 0: False, PythonMod(u0, 3) <= 0: True}
+  > Right: {}
 ==> deferred_runtime_asserts: values don't match.
   >  Left: {u0: [Eq(PythonMod(u0, 3), 0)]}
   > Right: {}
@@ -11395,8 +11450,14 @@ fn
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
-        self.assertEqual(fn(x), opt_fn(x))
-        self.assertEqual(fn(x), opt_fn(x))
+        # Opt_fn is deliberately called first to trigger the __get__ function.
+        # Otherwise, the setattr removes the lazy property.
+        ref = opt_fn(x)
+        res = fn(x)
+        self.assertEqual(ref, res)
+        ref = opt_fn(x)
+        res = fn(x)
+        self.assertEqual(ref, res)
 
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
