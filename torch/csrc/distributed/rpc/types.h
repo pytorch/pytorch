@@ -13,10 +13,6 @@ TORCH_API void disableJitRRefPickle();
 
 struct TORCH_API JitRRefPickleGuard {
   JitRRefPickleGuard();
-  JitRRefPickleGuard(JitRRefPickleGuard&& other) = delete;
-  JitRRefPickleGuard(const JitRRefPickleGuard&) = delete;
-  JitRRefPickleGuard& operator=(const JitRRefPickleGuard&) = delete;
-  JitRRefPickleGuard& operator=(JitRRefPickleGuard&&) = delete;
   ~JitRRefPickleGuard();
 };
 

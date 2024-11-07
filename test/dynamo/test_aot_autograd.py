@@ -959,8 +959,6 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         out_test = m_compiled(*sample_inputs)
         self.assertEqual(out_ref, out_test)
 
-    # set donated_buffer=False due to create_graph=True
-    @torch._functorch.config.patch("donated_buffer", False)
     def test_eager_sequence_nr(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:

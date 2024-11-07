@@ -124,7 +124,7 @@ from ..utils import (
     unwrap_with_attr_name_if_wrapper,
     wrap_fake_exception,
 )
-from .base import typestr, ValueMutationNew, VariableTracker, VariableTrackerMeta
+from .base import MutableLocal, typestr, VariableTracker, VariableTrackerMeta
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
     AutocastModeVariable,
@@ -1311,7 +1311,7 @@ class VariableBuilder:
             tensor_list_proxy.node.meta["grapharg"] = grapharg
 
         result = BaseListVariable.cls_for_instance(value)(
-            output, mutation_type=ValueMutationNew()
+            output, mutable_local=MutableLocal()
         )
         if istype(value, list):
             return self.set_source_and_track_mutable(value, result)
@@ -1326,7 +1326,7 @@ class VariableBuilder:
             for i in range(tuple_iterator_len(value))
         ]
         result = TupleIteratorVariable(
-            output, mutation_type=ValueMutationNew(), source=self.source
+            output, mutable_local=MutableLocal(), source=self.source
         )
 
         return self.set_source_and_track_mutable(value, result)
@@ -1335,7 +1335,7 @@ class VariableBuilder:
         self.install_guards(GuardBuilder.TYPE_MATCH)
         # Get all the values from the range iterator
         items = [ConstantVariable.create(v) for v in copy.deepcopy(value)]
-        return ListIteratorVariable(items, mutation_type=ValueMutationNew())
+        return ListIteratorVariable(items, mutable_local=MutableLocal())
 
     def wrap_slice_range(self, value: Union[slice, range]):
         items = [
@@ -2359,7 +2359,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         elif istype(example_value, tuple):
             return TupleVariable(unpacked, **options)
         elif istype(example_value, (list, immutable_list)):
-            return ListVariable(unpacked, mutation_type=ValueMutationNew(), **options)
+            return ListVariable(unpacked, mutable_local=MutableLocal(), **options)
         else:
             assert example_value.__class__.__module__ == "torch.return_types" or hasattr(
                 example_value, "_fields"
@@ -2917,15 +2917,15 @@ class SourcelessBuilder:
         for t in common_constant_types:
             handlers[t] = lambda tx, value: ConstantVariable(value)
         handlers[set] = lambda tx, value: SetVariable(
-            [create(tx, x) for x in value], mutation_type=ValueMutationNew()
+            [create(tx, x) for x in value], mutable_local=MutableLocal()
         )
         handlers[dict] = lambda tx, value: ConstDictVariable(
             {create(tx, k): create(tx, v) for k, v in value.items()},
             type(value),
-            mutation_type=ValueMutationNew(),
+            mutable_local=MutableLocal(),
         )
         handlers[list] = lambda tx, value: ListVariable(
-            [create(tx, x) for x in value], mutation_type=ValueMutationNew()
+            [create(tx, x) for x in value], mutable_local=MutableLocal()
         )
         handlers[tuple] = lambda tx, value: TupleVariable(
             [create(tx, x) for x in value]
@@ -2942,17 +2942,17 @@ class SourcelessBuilder:
         handlers[
             torch.distributions.constraints._Real
         ] = lambda tx, value: UserDefinedObjectVariable(
-            value, mutation_type=ValueMutationNew()
+            value, mutable_local=MutableLocal()
         )
         handlers[
             torch.distributions.constraints._Interval
         ] = lambda tx, value: UserDefinedObjectVariable(
-            value, mutation_type=ValueMutationNew()
+            value, mutable_local=MutableLocal()
         )
         handlers[
             torch.distributions.constraints.Constraint
         ] = lambda tx, value: UserDefinedObjectVariable(
-            value, mutation_type=ValueMutationNew()
+            value, mutable_local=MutableLocal()
         )
 
         def passthrough(tx: "InstructionTranslator", value):

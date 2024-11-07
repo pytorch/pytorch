@@ -829,8 +829,7 @@ class AssociativeScanTests(TestCase):
         def fct(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
-        # for n in range(10):
-        for n in [9]:
+        for n in range(10):
             x = torch.arange(n, device=device)
             torch.compiler.reset()
             associative_scan1 = torch.compile(

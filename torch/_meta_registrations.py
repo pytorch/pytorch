@@ -3709,7 +3709,7 @@ def meta_masked_scatter_(self, mask, source):
     torch._check(
         self.dtype == source.dtype,
         lambda: "masked_scatter: expected self and source to have same "
-        f"dtypes but got {self.dtype} and {source.dtype}",
+        "dtypes but got {self.dtype} and {source.dtype}",
     )
     return self
 

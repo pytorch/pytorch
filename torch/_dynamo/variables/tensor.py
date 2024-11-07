@@ -664,12 +664,10 @@ class TensorVariable(VariableTracker):
             tensortype = next(
                 k for k, v in tensortype_to_dtype.items() if self.dtype in v
             )
-            if self.device.type == "cpu":
-                return ConstantVariable.create(f"torch.{tensortype.__name__}")
+            if self.device.type == "cuda":
+                return ConstantVariable.create(f"torch.cuda.{tensortype.__name__}")
             else:
-                return ConstantVariable.create(
-                    f"torch.{self.device.type}.{tensortype.__name__}"
-                )
+                return ConstantVariable.create(f"torch.{tensortype.__name__}")
         elif (
             dtype is not None
             and fqn(type(dtype.as_python_constant())) == "torch.tensortype"
@@ -755,7 +753,6 @@ class TensorVariable(VariableTracker):
 
     def method_tolist(self):
         from ..symbolic_convert import InstructionTranslator
-        from .builder import wrap_fx_proxy
 
         tx = InstructionTranslator.current_tx()
 
@@ -766,7 +763,7 @@ class TensorVariable(VariableTracker):
                 with unittest.mock.patch.object(
                     tx.fake_mode, "allow_scalar_outputs", True
                 ):
-                    return wrap_fx_proxy(
+                    return SymNodeVariable.create(
                         tx,
                         sub_proxy.item(),
                     )
@@ -1071,7 +1068,7 @@ class TensorVariable(VariableTracker):
             )
 
         handle_variable = variables.RemovableHandleVariable(
-            mutation_type=variables.base.ValueMutationNew(),
+            mutable_local=variables.base.MutableLocal(),
         )
         tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable

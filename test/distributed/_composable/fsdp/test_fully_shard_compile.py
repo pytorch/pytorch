@@ -171,16 +171,6 @@ class TestFullyShardCompile(FSDPTest):
         torch.compile(f, backend="aot_eager")(x)
         self.assertEqual(x, ref_x)
 
-    def _get_resize_count_in_fx_graph(self, graph: torch.fx.Graph):
-        resize_count = 0
-        for node in graph.nodes:
-            if (
-                node.op == "call_function"
-                and node.target == torch.ops.inductor.resize_storage_bytes_.default
-            ):
-                resize_count += 1
-        return resize_count
-
     def _assert_no_aliased_unsharded_params_in_graph_inputs(
         self, model, graph: torch.fx.Graph
     ) -> None:
@@ -222,17 +212,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         self.assertTrue(no_aliased_unsharded_params_in_graph_inputs, err_msg)
 
     def _remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
-        self, model, *, bwd_resize_count_before_pass=None, fwd_fullgraph=False
+        self, model, fwd_fullgraph
     ):
         def _run_with_checks(graph, orig_fn):
-            if (
-                self._is_bwd_fx_graph(graph)
-                and bwd_resize_count_before_pass is not None
-            ):
-                self.assertEqual(
-                    bwd_resize_count_before_pass,
-                    self._get_resize_count_in_fx_graph(graph),
-                )
             self._assert_no_aliased_unsharded_params_in_graph_inputs(model, graph)
             orig_fn(graph)
 
@@ -330,16 +312,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             return True
         else:
             return False
-
-    def _is_bwd_fx_graph(self, graph):
-        for node in graph.nodes:
-            if (
-                node.op == "call_function"
-                and node.target
-                == torch.ops._c10d_functional.reduce_scatter_tensor.default
-            ):
-                return True
-        return False
 
     def _maybe_run_decide_global_ordering_of_comms_with_checks(self, fwd_fullgraph):
         def _check_fsdp_ops_in_snodes(snodes, is_fwd_graph, expect=True):
@@ -471,8 +443,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         input_creation_fn,
         backend,
         fwd_fullgraph,
-        *,
-        bwd_resize_count_before_inductor=None,
     ):
         def fwd_bwd(model, inp):
             out = model(inp)
@@ -504,9 +474,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
             counters.clear()
             with self._remove_fsdp2_unsharded_param_graph_input_usage_with_optional_checks(
-                model,
-                bwd_resize_count_before_pass=bwd_resize_count_before_inductor,
-                fwd_fullgraph=fwd_fullgraph,
+                model, fwd_fullgraph
             ):
                 fwd_bwd_fn_compiled = torch.compile(
                     fwd_bwd_fn,
@@ -651,11 +619,8 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             def forward(self, x):
                 # Intentionally reusing all layers a few times,
                 # to test "multiple all-gathers for the same parameter" case.
-                # Case 1: rerun the same layer twice
-                for layer_id in range(len(self.layers)):
-                    for _ in range(2):
-                        x = self.layers[layer_id](x)
-                # Case 2: iterate through all layers twice
+                for layer in self.layers:
+                    x = layer(x)
                 for layer in self.layers:
                     x = layer(x)
                 for layer in self.layers:
@@ -735,7 +700,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         ),
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
-                        bwd_resize_count_before_inductor=48 if fwd_fullgraph else None,
                     )
                 )
             if fwd_fullgraph:
@@ -961,7 +925,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                         ),
                         "inductor",
                         fwd_fullgraph=fwd_fullgraph,
-                        bwd_resize_count_before_inductor=76 if fwd_fullgraph else None,
                     )
                 )
             if fwd_fullgraph:

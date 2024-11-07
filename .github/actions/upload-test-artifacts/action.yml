@@ -147,7 +147,7 @@ runs:
 
     # GHA upload
     - name: Store Test Downloaded JSONs on Github
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       if: inputs.use-gha
       continue-on-error: true
       with:
@@ -158,7 +158,7 @@ runs:
         path: test/**/*.json
 
     - name: Store Test Reports on Github
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       if: inputs.use-gha
       continue-on-error: true
       with:
@@ -172,7 +172,7 @@ runs:
           test/**/*.csv
 
     - name: Store Usage Logs on Github
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v3
       if: inputs.use-gha
       continue-on-error: true
       with:

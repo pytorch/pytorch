@@ -13102,7 +13102,6 @@
   variants: function, method
   structured_delegate: isneginf.out
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: NestedTensor_isneginf
     SparseCPU, SparseCUDA: isneginf_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isneginf_sparse_csr
   tags: pointwise
