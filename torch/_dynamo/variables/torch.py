@@ -467,7 +467,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.numel)
         def handle_numel(self, tx: "InstructionTranslator", input):
-            if isinstance(input, TensorVariable) and input.size is not None:
+            if isinstance(input, TensorVariable) and input.valid_size():
                 return ConstantVariable.create(product(input.size))
             elif isinstance(input, TensorVariable):
                 # Workaround dynamic shapes issue
