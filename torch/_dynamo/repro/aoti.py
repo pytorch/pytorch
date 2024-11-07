@@ -11,6 +11,7 @@ from importlib import import_module
 from typing import Any, Dict, Optional, Union
 
 import torch
+from torch._C._monitor import _WaitCounter
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
     BuckTargetWriter,
@@ -142,16 +143,17 @@ def dump_compiler_graph_state(
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
     # exported_program = torch.export.export(gm, tuple(args))
-    with open(file_name, "w") as fd:
-        save_graph_repro_string(
-            fd,
-            gm,
-            args,
-            compiler_name,
-            config_patches=config_patches,
-            save_dir=subdir,
-            accuracy=accuracy,
-        )
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(file_name, "w") as fd:
+            save_graph_repro_string(
+                fd,
+                gm,
+                args,
+                compiler_name,
+                config_patches=config_patches,
+                save_dir=subdir,
+                accuracy=accuracy,
+            )
     curdir = os.getcwd()
     repro_path = os.path.join(curdir, "repro.py")
     try:

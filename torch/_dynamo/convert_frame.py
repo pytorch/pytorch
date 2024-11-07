@@ -23,12 +23,12 @@ import weakref
 from pathlib import Path
 from types import CodeType, FrameType, FunctionType, ModuleType
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar, Union
-from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
 import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
+from torch._C._monitor import _WaitCounter
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.utils import CompileTimeInstructionCounter
 from torch._guards import compile_context, CompileContext, CompileId, tracing
@@ -52,6 +52,7 @@ from torch.utils._python_dispatch import (
     is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
+from typing_extensions import ParamSpec
 
 from . import config, exc, trace_rules
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
@@ -352,9 +353,9 @@ def exception_handler(
 
 
 FRAME_COUNTER = 0
-FRAME_COMPILE_COUNTER: typing.Counter[
-    Union[int, FrameStateSizeEntry]
-] = collections.Counter()
+FRAME_COMPILE_COUNTER: typing.Counter[Union[int, FrameStateSizeEntry]] = (
+    collections.Counter()
+)
 
 
 def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:
@@ -629,9 +630,9 @@ def _compile(
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
 
-    tf_mode_stack: List[
-        torch.overrides.TorchFunctionMode
-    ] = torch.overrides._get_current_function_mode_stack()
+    tf_mode_stack: List[torch.overrides.TorchFunctionMode] = (
+        torch.overrides._get_current_function_mode_stack()
+    )
 
     @preserve_global_state
     def transform(
@@ -1304,8 +1305,9 @@ def replay(filename: str) -> None:
 
     original_replay_val = config.replay_record_enabled
     config.replay_record_enabled = False
-    with open(filename, "rb") as in_file:
-        record = ExecutionRecord.load(in_file)
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(filename, "rb") as in_file:
+            record = ExecutionRecord.load(in_file)
     record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
     try:
@@ -1347,8 +1349,7 @@ class ConvertFrameProtocol(typing.Protocol):
         frame_state: Dict[str, Union[int, FrameStateSizeEntry]],
         *,
         skip: int = 0,
-    ) -> Optional[GuardedCode]:
-        ...
+    ) -> Optional[GuardedCode]: ...
 
 
 class CatchErrorsWrapper:

@@ -10,16 +10,16 @@ import pickle
 import time
 from collections import defaultdict
 from typing import DefaultDict, Optional, Tuple, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self
 
 import torch._dynamo.config
 import torch._utils_internal
 import torch.compiler.config
 import torch.distributed as dist
+from torch._C._monitor import _WaitCounter
 from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
-
+from typing_extensions import Self
 
 if TYPE_CHECKING:
     import types
@@ -162,9 +162,9 @@ class FrameStateSizeEntry:
     scalar: Union[int, AutoDynamic, AutoUnset] = dataclasses.field(default=auto_unset)
     # NB: We don't have cases where we have a known dimensionality but
     # we know NOTHING about the individual sizes
-    size: Union[
-        AutoDynamic, AutoUnset, Tuple[Union[int, AutoDynamic], ...]
-    ] = dataclasses.field(default=auto_unset)
+    size: Union[AutoDynamic, AutoUnset, Tuple[Union[int, AutoDynamic], ...]] = (
+        dataclasses.field(default=auto_unset)
+    )
     stride: Union[
         AutoDynamic, AutoUnset, Tuple[Union[int, AutoDynamic, InferStride], ...]
     ] = dataclasses.field(default=auto_unset)
@@ -545,16 +545,19 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
             chromium_log.add_event_data(name, cache_key=cache_key)
             # Read lock not necessary as we always write atomically write to
             # the actual location
-            with open(path, "rb") as f:
-                try:
-                    _CODE_STATE = pickle.load(f)
-                    chromium_log.add_event_data(name, cache_size_bytes=f.tell())
-                except Exception:
-                    log.warning(
-                        "get_code_state failed while reading %s", path, exc_info=True
-                    )
-                else:
-                    return hit("local")
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(path, "rb") as f:
+                    try:
+                        _CODE_STATE = pickle.load(f)
+                        chromium_log.add_event_data(name, cache_size_bytes=f.tell())
+                    except Exception:
+                        log.warning(
+                            "get_code_state failed while reading %s",
+                            path,
+                            exc_info=True,
+                        )
+                    else:
+                        return hit("local")
 
     # Attempt remote
     remote_cache = get_remote_cache()
@@ -638,18 +641,19 @@ def put_local_code_state(cache_key: str) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
         with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-            with open(tmp_path, "wb") as f:
-                pickle.dump(_CODE_STATE, f)
-                chromium_log.add_event_data(name, cache_size_bytes=f.tell())
-            os.rename(tmp_path, path)
-            log.info(
-                "put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE)
-            )
-            trace_structured_artifact(
-                "put_local_code_state",
-                "string",
-                lambda: render_code_state(_CODE_STATE),
-            )
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(tmp_path, "wb") as f:
+                    pickle.dump(_CODE_STATE, f)
+                    chromium_log.add_event_data(name, cache_size_bytes=f.tell())
+                os.rename(tmp_path, path)
+                log.info(
+                    "put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE)
+                )
+                trace_structured_artifact(
+                    "put_local_code_state",
+                    "string",
+                    lambda: render_code_state(_CODE_STATE),
+                )
 
 
 def put_remote_code_state(cache_key: str) -> None:

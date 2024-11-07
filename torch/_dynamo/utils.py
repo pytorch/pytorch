@@ -56,7 +56,6 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Literal, TypeIs
 
 import torch
 import torch._functorch.config
@@ -70,6 +69,7 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
+from torch._C._monitor import _WaitCounter
 from torch._dispatch.python import enable_python_dispatcher
 from torch._guards import Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
@@ -82,7 +82,7 @@ from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
-
+from typing_extensions import Literal, TypeIs
 
 try:
     import numpy as np
@@ -455,15 +455,13 @@ def dynamo_timed(
 
 
 @overload
-def compile_times(repr: Literal["str"], aggregate: bool = False) -> str:
-    ...
+def compile_times(repr: Literal["str"], aggregate: bool = False) -> str: ...
 
 
 @overload
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
-) -> Tuple[List[str], List[object]]:
-    ...
+) -> Tuple[List[str], List[object]]: ...
 
 
 def compile_times(repr="str", aggregate: bool = False):
@@ -596,8 +594,9 @@ def write_record_to_file(filename: str, exec_record) -> None:
             )
         else:
             os.makedirs(os.path.dirname(filename), exist_ok=True)
-            with open(filename, "wb") as f:
-                exec_record.dump(f)
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(filename, "wb") as f:
+                    exec_record.dump(f)
     except Exception:
         log.exception("Unable to write execution record %s", filename)
 
@@ -663,20 +662,17 @@ class ExactWeakKeyDictionary:
 
 
 @overload
-def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]:
-    ...
+def istype(obj: object, allowed_types: Type[T]) -> TypeIs[T]: ...
 
 
 @overload
 def istype(
     obj: object, allowed_types: Tuple[Type[List[T]], Type[Tuple[T, ...]]]
-) -> TypeIs[T]:
-    ...
+) -> TypeIs[T]: ...
 
 
 @overload
-def istype(obj: object, allowed_types: Iterable[type]) -> bool:
-    ...
+def istype(obj: object, allowed_types: Iterable[type]) -> bool: ...
 
 
 def istype(obj, allowed_types):
@@ -954,15 +950,15 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics):
         fail_user_frame_filename=c.fail_user_frame_filename,
         fail_user_frame_lineno=c.fail_user_frame_lineno,
         # Sets aren't JSON serializable
-        non_compliant_ops=list(c.non_compliant_ops)
-        if c.non_compliant_ops is not None
-        else None,
-        compliant_custom_ops=list(c.compliant_custom_ops)
-        if c.compliant_custom_ops is not None
-        else None,
-        restart_reasons=list(c.restart_reasons)
-        if c.restart_reasons is not None
-        else None,
+        non_compliant_ops=(
+            list(c.non_compliant_ops) if c.non_compliant_ops is not None else None
+        ),
+        compliant_custom_ops=(
+            list(c.compliant_custom_ops) if c.compliant_custom_ops is not None else None
+        ),
+        restart_reasons=(
+            list(c.restart_reasons) if c.restart_reasons is not None else None
+        ),
         dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
         has_guarded_code=c.has_guarded_code,
         dynamo_config=c.dynamo_config,
@@ -2242,9 +2238,11 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
     if node.name in ["interpolate", "is_integer", "wrapped_gradient"]:
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
-            float(arg)
-            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
-            else arg
+            (
+                float(arg)
+                if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+                else arg
+            )
             for arg in args
         )
 

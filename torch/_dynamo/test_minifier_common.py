@@ -15,6 +15,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+from torch._C._monitor import _WaitCounter
 from torch._dynamo.trace_rules import _as_posix_path
 from torch.utils._traceback import report_compile_source_on_error
 
@@ -101,8 +102,9 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                 args = ["-c"]
             else:
                 assert len(args) >= 2, args
-                with open(args[1]) as f:
-                    code = f.read()
+                with _WaitCounter("pytorch.file_system_access").guard() as _:
+                    with open(args[1]) as f:
+                        code = f.read()
                 args = args[1:]
 
             # WARNING: This is not a perfect simulation of running
@@ -174,8 +176,9 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     def _run_minifier_launcher(self, repro_dir, isolate, *, minifier_args=()):
         self.assertIsNotNone(repro_dir)
         launch_file = _as_posix_path(os.path.join(repro_dir, "minifier_launcher.py"))
-        with open(launch_file) as f:
-            launch_code = f.read()
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(launch_file) as f:
+                launch_code = f.read()
         self.assertTrue(os.path.exists(launch_file))
 
         args = ["python3", launch_file, "minify", *minifier_args]
@@ -193,8 +196,9 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     def _run_repro(self, repro_dir, *, isolate=True):
         self.assertIsNotNone(repro_dir)
         repro_file = _as_posix_path(os.path.join(repro_dir, "repro.py"))
-        with open(repro_file) as f:
-            repro_code = f.read()
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(repro_file) as f:
+                repro_code = f.read()
         self.assertTrue(os.path.exists(repro_file))
 
         repro_proc = self._maybe_subprocess_run(

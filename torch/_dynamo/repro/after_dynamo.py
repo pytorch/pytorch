@@ -12,6 +12,7 @@ from typing import Union
 
 import torch
 import torch.fx as fx
+from torch._C._monitor import _WaitCounter
 from torch._dynamo.backends.registry import CompiledFn
 from torch._dynamo.debug_utils import (
     AccuracyError,
@@ -217,12 +218,13 @@ def dump_backend_repro_as_file(gm, args, compiler_name, check_accuracy=False):
         "Writing checkpoint with %s nodes to %s", len(gm.graph.nodes), file_name
     )
 
-    with open(file_name, "w") as fd:
-        fd.write(
-            generate_dynamo_fx_repro_string(
-                gm, args, compiler_name, check_accuracy, save_dir=subdir
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(file_name, "w") as fd:
+            fd.write(
+                generate_dynamo_fx_repro_string(
+                    gm, args, compiler_name, check_accuracy, save_dir=subdir
+                )
             )
-        )
     latest_repro = os.path.join(curdir, "repro.py")
     log.warning("Copying %s to %s for convenience", file_name, latest_repro)
 

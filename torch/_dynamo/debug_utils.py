@@ -22,6 +22,7 @@ import torch
 import torch._prims_common as utils
 import torch._subclasses.meta_utils
 from torch import Tensor
+from torch._C._monitor import _WaitCounter
 from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -101,8 +102,9 @@ python_binary(
 
     def write(self, print_msg=True):
         target_file = os.path.join(self.subdir, "TARGETS")
-        with open(target_file, "w") as fd:
-            fd.write(self.build())
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(target_file, "w") as fd:
+                fd.write(self.build())
         # log.warning("Wrote isolation TARGETS file at %s", target_file)
         cmd_split = BUCK_CMD_PREFIX + [self.cmd_line_path]
         if print_msg:
@@ -281,8 +283,9 @@ def helper_for_dump_minify(contents):
     if use_buck:
         BuckTargetWriter(minified_repro_path).write()
     try:
-        with open(minified_repro_path, "w") as fd:
-            fd.write(contents)
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(minified_repro_path, "w") as fd:
+                fd.write(contents)
 
     except OSError as e:
         log.exception("")
@@ -422,9 +425,9 @@ def cast_to(dtype, model, inputs):
         model = cast_dtype_args_to_fp64(model)
 
     inputs = tree_map(
-        lambda x: x.to(dtype)
-        if isinstance(x, torch.Tensor) and x.is_floating_point()
-        else x,
+        lambda x: (
+            x.to(dtype) if isinstance(x, torch.Tensor) and x.is_floating_point() else x
+        ),
         inputs,
     )
     return model, inputs

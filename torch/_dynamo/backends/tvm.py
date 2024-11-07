@@ -10,10 +10,10 @@ from types import MappingProxyType
 from typing import Optional
 
 import torch
+from torch._C._monitor import _WaitCounter
 
 from .common import device_from_inputs, fake_tensor_unsupported
 from .registry import register_backend
-
 
 log = logging.getLogger(__name__)
 
@@ -186,9 +186,10 @@ def has_tvm():
 @functools.lru_cache(None)
 def llvm_target():
     if sys.platform == "linux":
-        cpuinfo = open("/proc/cpuinfo").read()
-        if "avx512" in cpuinfo:
-            return "llvm -mcpu=skylake-avx512"
-        elif "avx2" in cpuinfo:
-            return "llvm -mcpu=core-avx2"
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            cpuinfo = open("/proc/cpuinfo").read()
+            if "avx512" in cpuinfo:
+                return "llvm -mcpu=skylake-avx512"
+            elif "avx2" in cpuinfo:
+                return "llvm -mcpu=core-avx2"
     return "llvm"

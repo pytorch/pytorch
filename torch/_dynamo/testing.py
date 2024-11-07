@@ -24,6 +24,7 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
+from torch._C._monitor import _WaitCounter
 from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
 
@@ -116,15 +117,13 @@ def requires_bwd_pass(out: Any) -> bool:
 
 
 @overload
-def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor:
-    ...
+def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor: ...
 
 
 @overload
 def reduce_to_scalar_loss(
     out: Union[List[Any], Tuple[Any, ...], Dict[Any, Any]]
-) -> float:
-    ...
+) -> float: ...
 
 
 def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
@@ -157,10 +156,11 @@ def debug_dir() -> str:
 
 
 def debug_dump(name: str, code: types.CodeType, extra: str = "") -> None:
-    with open(os.path.join(debug_dir(), name), "w") as fd:
-        fd.write(
-            f"{dis.Bytecode(code).info()}\n\n{dis.Bytecode(code).dis()}\n\n{extra}\n"
-        )
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(os.path.join(debug_dir(), name), "w") as fd:
+            fd.write(
+                f"{dis.Bytecode(code).info()}\n\n{dis.Bytecode(code).dis()}\n\n{extra}\n"
+            )
 
 
 def debug_insert_nops(
