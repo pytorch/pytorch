@@ -26,8 +26,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(qmul_relu_stub);
 DEFINE_DISPATCH(qmul_stub);
@@ -370,4 +369,4 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 }
 
 }  // namespace
-}}  // namespace at::native
+}  // namespace at::native

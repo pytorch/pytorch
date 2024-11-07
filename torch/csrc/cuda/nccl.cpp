@@ -109,10 +109,23 @@ ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
       return ncclDataType_t::ncclInt;
     case at::kChar:
       return ncclDataType_t::ncclChar;
+    // NOLINTNEXTLINE(*-narrowing-conversions, bugprone-branch-clone)
     case at::kByte:
       return ncclDataType_t::ncclUint8;
     case at::kBool:
       return ncclDataType_t::ncclUint8;
+#if defined(USE_ROCM)
+    case at::kFloat8_e4m3fnuz:
+      return ncclDataType_t::ncclUint8;
+    case at::kFloat8_e5m2fnuz:
+      return ncclDataType_t::ncclUint8;
+#else
+    case at::kFloat8_e4m3fn:
+      return ncclDataType_t::ncclUint8;
+    case at::kFloat8_e5m2:
+      return ncclDataType_t::ncclUint8;
+#endif
+
 #if HAS_NCCL_BF16_DATATYPE
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
@@ -142,12 +155,11 @@ using namespace at;
 
 namespace detail {
 
-static inline void NCCL_CHECK(ncclResult_t result) {
+static void NCCL_CHECK(ncclResult_t result) {
   NCCL_CHECK(from_nccl_result(result));
 }
 
 // TODO(eqy): can this duplication be avoided from NCCLUtils.cpp?
-// Default value: on
 bool nccl_use_nonblocking() {
   static bool nccl_use_nonblocking_ =
       c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
@@ -163,6 +175,7 @@ static int nccl_nonblocking_timeout() {
   if (timeout == -2) {
     const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
     if (val && strlen(val) > 0) {
+      // NOLINTNEXTLINE(*-narrowing-conversions)
       timeout = strtol(val, nullptr, 0);
     } else {
       // Default value consistent with kBackendDefaultTimeout
@@ -172,7 +185,7 @@ static int nccl_nonblocking_timeout() {
   return timeout;
 }
 
-static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
+static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
   ncclResult_t result = to_nccl_result(status);
   auto startTimepoint = std::chrono::steady_clock::now();
@@ -182,7 +195,8 @@ static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
                            currentTimepoint - startTimepoint)
                            .count();
     if (timeElapsed > nccl_nonblocking_timeout()) {
-      throw std::runtime_error("NCCL timeout.");
+      throw std::runtime_error(
+          "NCCL timeout when waiting for nonblocking call to become successful.");
     }
     sched_yield(); // yield to other threads
     ncclCommGetAsyncError(to_nccl_comm(comm), &result);
@@ -196,11 +210,11 @@ static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
 #endif
 }
 
-static inline void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
+static void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
   NCCL_CHECK_TIMEOUT(from_nccl_result(result), comm);
 }
 
-static inline void NCCL_CHECK_TIMEOUT(
+static void NCCL_CHECK_TIMEOUT(
     ncclResult status,
     std::vector<ncclComm_t>& comms) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
@@ -214,7 +228,8 @@ static inline void NCCL_CHECK_TIMEOUT(
                                currentTimepoint - startTimepoint)
                                .count();
         if (timeElapsed > nccl_nonblocking_timeout()) {
-          throw std::runtime_error("NCCL timeout.");
+          throw std::runtime_error(
+              "NCCL timeout when waiting for nonblocking call to become successful.");
         }
         sched_yield(); // yield to other threads
         ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);
@@ -233,7 +248,7 @@ static inline void NCCL_CHECK_TIMEOUT(
 #endif
 }
 
-static inline void NCCL_CHECK_TIMEOUT(
+static void NCCL_CHECK_TIMEOUT(
     ncclResult_t result,
     std::vector<ncclComm_t>& comms) {
   NCCL_CHECK_TIMEOUT(from_nccl_result(result), comms);
@@ -247,14 +262,18 @@ void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
 }
 
 struct NcclCommList {
+  // NOLINTNEXTLINE(*array*)
   std::unique_ptr<ncclComm_t[]> comms;
-  int ndevices;
+  size_t ndevices;
   NcclCommList(const std::vector<int>& devices)
       : comms(new ncclComm_t[devices.size()]), ndevices(devices.size()) {
     NCCL_CHECK(ncclCommInitAll(
-        to_nccl_comm(comms.get()), devices.size(), devices.data()));
+        to_nccl_comm(comms.get()),
+        static_cast<int>(devices.size()),
+        devices.data()));
   }
   NcclCommList(NcclCommList&& foo) = default;
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~NcclCommList() {
     if (comms) {
       for (const auto i : c10::irange(ndevices)) {
@@ -291,11 +310,11 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
-static inline void check_tensor(
+static void check_tensor(
     const at::Tensor& input,
     const std::optional<at::Tensor>& output,
-    int input_multiplier,
-    int output_multiplier,
+    size_t input_multiplier,
+    size_t output_multiplier,
     int64_t ref_numel,
     ScalarType ref_dtype) {
   auto check_one = [&](const at::Tensor& tensor) {
@@ -340,12 +359,12 @@ static inline void check_tensor(
 void check_inputs(
     TensorList inputs,
     TensorList outputs,
-    int input_multiplier,
-    int output_multiplier) {
+    size_t input_multiplier,
+    size_t output_multiplier) {
   // len(inputs) == len(outputs)
   size_t len = inputs.size();
 
-  if (len <= 0) {
+  if (len == 0) {
     throw std::runtime_error("input sequence can't be empty");
   }
 
@@ -439,6 +458,7 @@ AutoNcclGroup::AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking)
 #endif
 }
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
   if (comm_nonblocking_ && comm_ != nullptr) {
@@ -952,7 +972,7 @@ void all2all(
   uintptr_t recvBase = reinterpret_cast<uintptr_t>(outputTensors[0].data_ptr());
   size_t dtypeSize = inputTensors.front().element_size();
 
-  for (const auto r : c10::irange(outputTensors.size())) {
+  for (const int r : c10::irange(outputTensors.size())) {
     sendCounts[r] = inputTensors[r].numel();
     auto sendOffset =
         reinterpret_cast<uintptr_t>(inputTensors[r].data_ptr()) - sendBase;
@@ -980,7 +1000,7 @@ void all2all(
       stream.stream()));
 #else
   NCCL_CHECK(ncclGroupStart());
-  for (const auto r : c10::irange(outputTensors.size())) {
+  for (const int r : c10::irange(static_cast<int>(outputTensors.size()))) {
     at::Tensor& input = inputTensors[r];
     at::Tensor& output = outputTensors[r];
 
