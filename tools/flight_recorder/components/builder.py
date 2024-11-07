@@ -9,6 +9,7 @@ import ast
 import sys
 from typing import Any, Dict, List, Set, Tuple  # type: ignore[attr-defined]
 
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 from tools.flight_recorder.components.types import (
     Collective,
     Database,
@@ -25,7 +26,6 @@ from tools.flight_recorder.components.utils import (
     check_size_alltoall,
     check_version,
     find_coalesced_group,
-    FlightRecorderLogger,
     format_frames,
     get_version_detail,
     just_print_entries,
