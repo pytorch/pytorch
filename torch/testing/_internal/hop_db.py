@@ -13,7 +13,7 @@ from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo
 from torch.testing._internal.common_device_type import onlyCUDA
 from torch.nn.attention.flex_attention import flex_attention, _create_empty_block_mask
-from torch._higher_order_ops import invoke_subgraph
+from torch._higher_order_ops.invoke_subgraph import wrap_with_invoke_subgraph
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -109,10 +109,13 @@ def sample_inputs_invoke_subgraph(opinfo, device, dtype, requires_grad, **kwargs
     )
     yield SampleInput(make_arg(2, 2, 2, low=0.1, high=2))
 
+
+@wrap_with_invoke_subgraph
+def fn_for_invoke_subgraph(x):
+    return torch.sin(x)
+
 def simple_invoke_subgraph(x):
-    def fn(x):
-        return (torch.sin(x),)
-    return invoke_subgraph(fn, None, (x,))
+    return fn_for_invoke_subgraph(x)
 
 def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
