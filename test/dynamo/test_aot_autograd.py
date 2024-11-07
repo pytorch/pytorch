@@ -10,7 +10,12 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
-from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend, expectedFailureDynamic, rand_strided
+from torch._dynamo.testing import (
+    CompileCounter,
+    CompileCounterWithBackend,
+    expectedFailureDynamic,
+    rand_strided,
+)
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
 from torch._guards import CompileContext, StorageOverlap, TracingContext
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1460,7 +1465,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         def non_overlapping_args(x):
             return x[:5], x[7:13], x[13:15]
 
-        guard_failure = self._get_guard_failure_on_overlapping_view_inputs(f, overlapping_args, non_overlapping_args)
+        guard_failure = self._get_guard_failure_on_overlapping_view_inputs(
+            f, overlapping_args, non_overlapping_args
+        )
         self.assertExpectedInline(
             guard_failure[0],
             """0/0: ___check_overlapping(overlapping=[L['args'][1], L['args'][2]], non_overlapping=[L['args'][0]])""",
@@ -1481,7 +1488,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         def a_b_c_overlapping_args(x):
             return x[:5], x[4:9], x[8:13], x[15:]
 
-        guard_failure = self._get_guard_failure_on_overlapping_view_inputs(f, a_b_overlapping_args, a_b_c_overlapping_args)
+        guard_failure = self._get_guard_failure_on_overlapping_view_inputs(
+            f, a_b_overlapping_args, a_b_c_overlapping_args
+        )
         self.assertExpectedInline(
             guard_failure,
             """0/0: check_overlapping(overlapping=[L['a'], L['b']], non_overlapping=[L['c'], L['d']])""",
