@@ -1,0 +1,17 @@
+#pragma once
+
+/**
+${generated_comment}
+ */
+
+namespace torch::onnx::diagnostics {
+
+enum class Rule : uint32_t {
+${rules}
+};
+
+static constexpr const char* const kPyRuleNames [] = {
+${py_rule_names}
+};
+
+} // namespace torch::onnx::diagnostics
