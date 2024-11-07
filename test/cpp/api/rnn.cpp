@@ -750,7 +750,7 @@ TEST_F(RNNTest, UsePackedSequenceAsInput) {
         std::get<0>(rnn_output).data(), expected_output, 1e-05, 2e-04));
 
     // Test passing optional argument to `LSTM::forward_with_packed_input`
-    rnn_output = m->forward_with_packed_input(packed_input, torch::nullopt);
+    rnn_output = m->forward_with_packed_input(packed_input, std::nullopt);
     ASSERT_TRUE(torch::allclose(
         std::get<0>(rnn_output).data(), expected_output, 1e-05, 2e-04));
   }
