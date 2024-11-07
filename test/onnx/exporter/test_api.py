@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import os
 
-from onnxscript import BOOL, FLOAT, opset18 as op
+import numpy as np
+from onnxscript import BOOL, FLOAT, ir, opset18 as op
 
 import torch
 import torch.onnx._flags
@@ -292,6 +293,103 @@ class TestCustomTranslationTable(common_utils.TestCase):
         all_nodes = [n.op_type for n in onnx_program.model.graph]
         self.assertIn("Sub", all_nodes)
         self.assertNotIn("Add", all_nodes)
+
+
+class TestFakeTensorExport(common_utils.TestCase):
+    """Test exporting in fake mode."""
+
+    def test_onnx_program_raises_when_model_defined_in_fake_mode(self):
+        with torch.onnx.enable_fake_mode():
+
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.weight = torch.nn.Parameter(torch.tensor(42.0))
+
+                def forward(self, x):
+                    return self.weight + x
+
+            onnx_program = torch.onnx.export(Model(), (torch.tensor(1.0),), dynamo=True)
+            assert onnx_program is not None
+            # Convert to model proto and back to trigger to_bytes method which serializes the tensor
+            with self.assertRaises(Exception):
+                # The tensors need to be replaced with real tensors
+                _ = onnx_program.model_proto
+
+        # Convert to model proto and back to trigger to_bytes method which serializes the tensor
+        with self.assertRaises(Exception):
+            # It doesn't matter if it is called inside or outside of the enable_fake_mode() context
+            _ = onnx_program.model_proto
+
+        # If we replace with concrete tensors, the serialization will succeed.
+        # This needs to happen outside of the fake context
+        onnx_program.apply_weights({"weight": torch.tensor(42.0)})
+        onnx_model = ir.serde.deserialize_model(onnx_program.model_proto)
+        np.testing.assert_allclose(
+            onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
+        )
+
+    def test_onnx_program_save_raises_when_model_initialized_in_fake_mode(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.tensor(42.0))
+
+            def forward(self, x):
+                return self.weight + x
+
+        with torch.onnx.enable_fake_mode():
+            onnx_program = torch.onnx.export(Model(), (torch.tensor(1.0),), dynamo=True)
+            assert onnx_program is not None
+            # Convert to model proto and back to trigger to_bytes method which serializes the tensor
+            with self.assertRaises(Exception):
+                # The tensors need to be replaced with real tensors
+                _ = onnx_program.model_proto
+
+        with self.assertRaises(Exception):
+            # It doesn't matter if it is called inside or outside of the enable_fake_mode() context
+            _ = onnx_program.model_proto
+
+        # If we replace with concrete tensors, the serialization will succeed
+        # This needs to happen outside of the fake context
+        onnx_program.apply_weights({"weight": torch.tensor(42.0)})
+        onnx_model = ir.serde.deserialize_model(onnx_program.model_proto)
+        np.testing.assert_allclose(
+            onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
+        )
+
+    def test_onnx_program_save_succeeds_when_export_and_save_in_fake_mode(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.tensor(42.0))
+
+            def forward(self, x):
+                return self.weight + x
+
+        real_model = Model()
+
+        with torch.onnx.enable_fake_mode():
+            onnx_program = torch.onnx.export(
+                real_model, (torch.tensor(1.0),), dynamo=True
+            )
+
+            assert onnx_program is not None
+            # Convert to model proto and back to trigger to_bytes method which serializes the tensor
+            # Note that even though we are calling .model_proto (equivalently .save()) in fake mode,
+            # the concrete tensors are maintained.
+            # This is due to the usage of torch._subclasses.fake_tensor.unset_fake_temporarily() in
+            # TorchTensor.tobytes()
+            onnx_model = ir.serde.deserialize_model(onnx_program.model_proto)
+            np.testing.assert_allclose(
+                onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
+            )
+
+        # This works inside or outside the fake mode
+        onnx_model = ir.serde.deserialize_model(onnx_program.model_proto)
+        np.testing.assert_allclose(
+            onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
+        )
 
 
 if __name__ == "__main__":

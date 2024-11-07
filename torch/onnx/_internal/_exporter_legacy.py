@@ -381,38 +381,35 @@ def enable_fake_mode():
     is a :class:`torch.Tensor` with the ability to run PyTorch code without having to
     actually do computation through tensors allocated on a ``meta`` device. Because
     there is no actual data being allocated on the device, this API allows for
-    exporting large models without the actual memory footprint needed for executing it.
+    initializing and exporting large models without the actual memory footprint needed for executing it.
 
-    It is highly recommended to enable fake mode when exporting models that
+    It is highly recommended to initialize the model in fake mode when exporting models that
     are too large to fit into memory.
-
-    Returns:
-        A :class:`ONNXFakeContext` object.
 
     Example::
 
         # xdoctest: +REQUIRES(env:TORCH_DOCTEST_ONNX)
         >>> import torch
-        >>> import torch.onnx
-        >>> class MyModel(torch.nn.Module):  # Dummy model
+        >>> class MyModel(torch.nn.Module):  # Model with a parameter
         ...     def __init__(self) -> None:
         ...         super().__init__()
-        ...         self.linear = torch.nn.Linear(2, 2)
+        ...         self.weight = torch.nn.Parameter(torch.tensor(42.0))
         ...     def forward(self, x):
-        ...         out = self.linear(x)
-        ...         return out
+        ...         return self.weight + x
         >>> with torch.onnx.enable_fake_mode():
+        ...     # When initialized in fake mode, the model's parameters are fake tensors
+        ...     # They do not take up memory so we can initialize large models
         ...     my_nn_module = MyModel()
-        ...     arg1 = torch.randn(2, 2, 2)  # positional input 1
+        ...     arg1 = torch.randn(2, 2, 2)
         >>> onnx_program = torch.onnx.export(my_nn_module, (arg1,), dynamo=True)
-        >>> # Saving model WITHOUT initializers
+        >>> # Saving model WITHOUT initializers (only the architecture)
         >>> onnx_program.save(
         ...     "my_model_without_initializers.onnx",
         ...     include_initializers=False,
         ...     keep_initializers_as_inputs=True,
         ... )
-        >>> # Saving model WITH initializers
-        >>> onnx_program.apply_weights(MyModel().state_dict())
+        >>> # Saving model WITH initializers after applying concrete weights
+        >>> onnx_program.apply_weights({"weight": torch.tensor(42.0)})
         >>> onnx_program.save("my_model_with_initializers.onnx")
 
     .. warning::
