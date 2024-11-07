@@ -12,6 +12,7 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
+    PipelineScheduleMulti,
     PipelineScheduleSingle,
     Schedule1F1B,
     ScheduleGPipe,
@@ -47,6 +48,12 @@ class MLPModule(torch.nn.Module):
         x = self.relu(x)
         x = self.net2(x)
         return x
+
+    def init_weights(self):
+        torch.nn.init.xavier_uniform_(self.net1.weight)
+        torch.nn.init.xavier_uniform_(self.net2.weight)
+        torch.nn.init.zeros_(self.net1.bias)
+        torch.nn.init.zeros_(self.net2.bias)
 
 
 class ComposabilityTest(MultiProcessTestCase):
@@ -112,6 +119,18 @@ class ComposabilityTest(MultiProcessTestCase):
         full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
         ref_model = nn.Sequential(*copy.deepcopy(full_model))
         ref_model.to(self.device)
+
+        seed = 123
+
+        def initializer(seq):
+            for layer in seq:
+                layer.init_weights()
+
+        if issubclass(ScheduleClass, PipelineScheduleMulti):
+            # initialize ref_mod and pipeline mod with the same seed and expect matching output/grad
+            # TODO: currently seeded init only supported on Multi not Single
+            torch.manual_seed(seed)
+            initializer(ref_model)
 
         # Prepare inputs
         num_microbatches = 8
@@ -206,6 +225,14 @@ class ComposabilityTest(MultiProcessTestCase):
                 stages,
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
+            )
+
+            # Ensure that serial initialization mode produces the same weights as the reference model when starting
+            # from the same seed.  Note: i manually tested that using 'parallel' mode leads to mismatched inits and
+            # therefore failing output and gradient checks, as expected.  Skipped adding a version of the test
+            # that asserts this mismatch.
+            pipeline_schedule.seeded_module_init(
+                stage_initializer=initializer, mode="serial", initial_seed=seed
             )
 
         # Run

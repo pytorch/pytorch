@@ -25,6 +25,7 @@ from typing import (
 import torch
 import torch.distributed as dist
 from torch.distributed._composable.fsdp.fully_shard import FSDPModule, UnshardHandle
+from torch.distributed.tensor import _random as dtensor_random
 from torch.profiler import record_function
 
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
@@ -1097,9 +1098,32 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     )
                     torch.set_rng_state(state_cpu.cpu())
                     torch.cuda.set_rng_state(state_cuda.cpu(), device=device)
+                    recv_objs = [None]
+                    torch.distributed.recv_object_list(
+                        recv_objs, src=stage.prev_rank, group=stage.group, device=device
+                    )
+                    if recv_objs[0] is not None:
+                        state_dtensor = recv_objs[0]
+                        assert isinstance(
+                            state_dtensor, torch.Tensor
+                        ), f"invalid dtensor state {type(state_dtensor)}"
+                        if dtensor_random._rng_tracker is None:
+                            dtensor_random._rng_tracker = (
+                                dtensor_random.OffsetBasedRNGTracker()
+                            )
+                            print(
+                                f"{self.rank=} {stage.stage_index=} Initialized OffsetBasedRNGTracker"
+                            )
+                        dtensor_random._rng_tracker._states[
+                            "parallel-rng"
+                        ] = state_dtensor
+                        print(
+                            f"{self.rank=} {stage.stage_index=} set dtensor states {state_dtensor=}"
+                        )
 
             # initalize
             stage_initializer(stage.submod)
+            print(f"Finished init on {self.rank=} {stage.stage_index=}")
 
             # send new RNG seed
             if mode == "serial" and not next_stage_is_rank_local and not stage.is_last:
@@ -1111,6 +1135,23 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 torch.distributed.send(
                     state_cuda, dst=stage.next_rank, group=stage.group
                 )
+                if dtensor_random._rng_tracker is not None:
+                    assert isinstance(
+                        dtensor_random._rng_tracker,
+                        dtensor_random.OffsetBasedRNGTracker,
+                    ), "TODO other trackers not safe yet (world broadcast)"
+                    state_dtensor = dtensor_random._rng_tracker._states["parallel-rng"]
+                    print(f"{self.rank=} {stage.stage_index=}: {state_dtensor=}")
+                    torch.distributed.send_object_list(
+                        [state_dtensor],
+                        dst=stage.next_rank,
+                        group=stage.group,
+                        device=device,
+                    )
+                else:
+                    torch.distributed.send_object_list(
+                        [None], dst=stage.next_rank, group=stage.group, device=device
+                    )
 
     def _initialize_stages(self, args: Tuple[Any, ...], kwargs):
         # may be 'none' value (if this stage sends its output shapes to the next stage via P2P)
