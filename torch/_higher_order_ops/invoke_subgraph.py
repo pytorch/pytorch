@@ -72,7 +72,7 @@ def invoke_subgraph_placeholder(subgraph, *args, **kwargs):
     return subgraph(*args, **kwargs)
 
 
-def wrap_with_invoke_subgraph(fn=None):
+def mark_compile_region(fn=None):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
     reuse the compiled artifact, instead of the usual way of aggressively
