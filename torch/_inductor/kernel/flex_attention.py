@@ -3,7 +3,8 @@
 
 import logging
 import math
-from typing import Any, List, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import sympy
 
@@ -45,19 +46,14 @@ aten = torch.ops.aten
 Expr = sympy.Expr
 
 
-def zeros_and_scater_lowering(shape: List[int], indices, values):
-    self = _full(0, values.get_device(), values.get_dtype(), shape)
-    x_size = self.get_size()
-    x_ndim = len(x_size)
-
-    values = to_dtype(values, self.get_dtype())
-
+def zeros_and_scatter_lowering(shape: List[int], indices, values):
+    grad = _full(0, values.get_device(), values.get_dtype(), shape)
+    assert isinstance(grad, TensorBox)
+    grad.realize()
+    x_size = grad.get_size()
+    values = to_dtype(values, grad.get_dtype())
     indices_loaders = [i.make_loader() if i is not None else None for i in indices]
-
-    assert isinstance(self, TensorBox)
-    self.realize()
-
-    indices, tensor_indices = check_and_broadcast_indices(indices, self.get_device())
+    indices, tensor_indices = check_and_broadcast_indices(indices, grad.get_device())
     # We can use the first one since they are all required to be the same size
     tensor_size = list(indices[tensor_indices[0]].get_size())
     indexed_size = [x_size[i] for i in range(len(indices))]
@@ -75,21 +71,20 @@ def zeros_and_scater_lowering(shape: List[int], indices, values):
 
     values = expand(values, expected_vals_size)
     scatter = Scatter(
-        device=self.get_device(),
-        dtype=self.get_dtype(),
+        device=grad.get_device(),
+        dtype=grad.get_dtype(),
         inner_fn=values.make_loader(),
         ranges=expected_vals_size,  # iter_ranges,
         output_indexer=inner_fn,
         scatter_mode="atomic_add",
     )
+
     buffer = ComputedBuffer(
-        None,
-        MutationLayoutSHOULDREMOVE(self),
-        scatter,
+        name=None,
+        layout=MutationLayoutSHOULDREMOVE(grad),
+        data=scatter,
     )
-    buffer.name = V.graph.register_buffer(buffer)
-    V.graph.register_operation(buffer)
-    return buffer
+    return (buffer, grad)
 
 
 def construct_strides(
@@ -145,10 +140,34 @@ def get_float32_precision():
         return "'tf32'"
 
 
+@dataclass(frozen=True)
+class SubgraphOutput:
+    """When building the subgraph buffers we fall into 1 of two cases:
+    1. The subgraph returns a single output node, this happens in the forward and
+        backward pass when there are no input_buffers that require grad
+    2. The subgraph has multiple outputs (i.e. input_buffers that require grad)
+        In this case we want to return these output_nodes from the lowering
+    """
+
+    compute_buffer: ComputedBuffer
+    output_node: Optional[IRNode] = None
+
+    def __post_init__(self):
+        assert isinstance(self.compute_buffer, ComputedBuffer), (
+            "The compute buffer for the subgraph output must be a TensorBox, but got: ",
+            type(self.compute_buffer),
+        )
+        if self.output_node is not None:
+            assert isinstance(self.output_node, IRNode), (
+                "The output node for the subgraph output must be an IRNode, but got: ",
+                type(self.output_node),
+            )
+
+
 def build_subgraph_buffer(
     args: List[TensorBox],
     subgraph: Subgraph,
-):
+) -> Union[List[SubgraphOutput], SubgraphOutput]:
     """This function's goal is to take in the required args and produce the subgraph buffer
     The subgraph buffer is a ComputedBuffer that will be inlined into the triton template
 
@@ -179,7 +198,7 @@ def build_subgraph_buffer(
                 flex_lowering = (
                     lowerings[node.target]
                     if node.target._opname != "zeros_and_scatter"
-                    else zeros_and_scater_lowering
+                    else zeros_and_scatter_lowering
                 )
                 env[node] = flex_lowering(*args, **kwargs)
             elif node.op == "output":
@@ -189,9 +208,12 @@ def build_subgraph_buffer(
                         return None
                     output_node = output
                     output_buffer = env[output_node]
-                    if isinstance(output_buffer, ComputedBuffer):
+                    if isinstance(output_buffer, tuple):
                         # These nodes are coming from the output of zeros_and_scatter
-                        return output_buffer
+                        return SubgraphOutput(
+                            compute_buffer=output_buffer[0],
+                            output_node=output_buffer[1],
+                        )
                     assert isinstance(output_buffer, TensorBox), (
                         "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
                         type(output_buffer),
@@ -209,7 +231,7 @@ def build_subgraph_buffer(
                         ),
                         data=output_buffer.data.data,  # type: ignore[arg-type]
                     )
-                    return subgraph_buffer
+                    return SubgraphOutput(compute_buffer=subgraph_buffer)
 
                 # node.args[0] is either a single element or a list of elements
                 # representing all outputs of the function.
@@ -780,6 +802,8 @@ def flex_attention(
     subgraph_buffer = build_subgraph_buffer(
         placeholder_inps + list(score_mod_other_buffers), subgraph
     )
+    assert isinstance(subgraph_buffer, SubgraphOutput)
+    subgraph_buffer = subgraph_buffer.compute_buffer
     mask_graph_placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -792,6 +816,8 @@ def flex_attention(
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+    assert isinstance(mask_graph_buffer, SubgraphOutput)
+    mask_graph_buffer = mask_graph_buffer.compute_buffer
     kernel_options = dict(kernel_options)
     kernel_options.setdefault("FLOAT32_PRECISION", get_float32_precision())
     if _use_flex_decoding(query, kernel_options):
@@ -1659,17 +1685,16 @@ def bwd_dkdv_block_mn(
     ) | indent_except_first(1) }}
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
-    {{ modification(
-        subgraph_number=3,
-        output_name = "scatter",
-        score="pre_mod_scores",
-        b="off_z",
-        h="off_hq",
-        m="m",
-        n="n",
-        grad_score_mod="dsT"
-    ) | indent_except_first(1) }}
-
+    #  modification(
+    #     subgraph_number=3,
+    #     output_name = "scatter",
+    #     score="pre_mod_scores",
+    #     b="off_z",
+    #     h="off_hq",
+    #     m="m",
+    #     n="n",
+    #     grad_score_mod="dsT"
+    # ) | indent_except_first(1)
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     if CHECK_BLOCK_BOUNDARY:
@@ -1785,6 +1810,8 @@ def flex_attention_backward(*args, **kwargs):
     fw_subgraph_buffer = build_subgraph_buffer(
         fwd_placeholder_inps + list(score_mod_other_buffers), fw_graph
     )
+    assert isinstance(fw_subgraph_buffer, SubgraphOutput)
+    fw_subgraph_buffer = fw_subgraph_buffer.compute_buffer
 
     joint_placeholder_inps = fwd_placeholder_inps + [
         create_placeholder("grad_score_mod", dtype, device)
@@ -1792,10 +1819,20 @@ def flex_attention_backward(*args, **kwargs):
     all_joint_outputs = build_subgraph_buffer(
         joint_placeholder_inps + list(score_mod_other_buffers), joint_graph
     )
+    assert isinstance(all_joint_outputs, List)
     joint_subgraph_buffer = all_joint_outputs[0]
+    joint_subgraph_buffer = joint_subgraph_buffer.compute_buffer
     score_mod_other_buffer_grads = all_joint_outputs[len(joint_placeholder_inps) - 1 :]
+
+    score_mod_other_buffer_grads_compute = [
+        buf.compute_buffer for buf in score_mod_other_buffer_grads
+    ]
+    score_mod_other_buffer_grads_out = [
+        buf.output_node for buf in score_mod_other_buffer_grads
+    ]
+
     mutated_other_buffer_grads = [
-        buffer for buffer in score_mod_other_buffer_grads if buffer is not None
+        buffer for buffer in score_mod_other_buffer_grads_out if buffer is not None
     ]
 
     mask_graph_placeholder_inps = [
@@ -1810,6 +1847,8 @@ def flex_attention_backward(*args, **kwargs):
     mask_graph_buffer = build_subgraph_buffer(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
+    assert isinstance(mask_graph_buffer, SubgraphOutput)
+    mask_graph_buffer = mask_graph_buffer.compute_buffer
 
     layout_broadcasted_k = FixedLayout(
         key.get_device(),
@@ -1914,7 +1953,7 @@ def flex_attention_backward(*args, **kwargs):
                 fw_subgraph_buffer,
                 joint_subgraph_buffer,
                 mask_graph_buffer,
-                score_mod_other_buffer_grads,
+                score_mod_other_buffer_grads_compute,
             ],
             mutated_inputs=[
                 grad_query,
@@ -1977,9 +2016,10 @@ def flex_attention_backward(*args, **kwargs):
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 
+    # import fbvscode; fbvscode.set_trace()
     return (
         grad_query,
         grad_key,
         grad_value,
-        *score_mod_other_buffer_grads,
+        tuple(score_mod_other_buffer_grads_out),
     )

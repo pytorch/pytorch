@@ -1527,6 +1527,7 @@ class TritonKernel(SIMDKernel):
         has_rindex = False
 
         mask_vars: OrderedSet[str] = OrderedSet()
+
         for var in index_vars:
             assert isinstance(var, sympy.Symbol)
             has_rindex = has_rindex or symbol_is_type(var, SymT.RINDEX)

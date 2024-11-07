@@ -467,7 +467,6 @@ class TritonTemplateKernel(TritonKernel):
                     return sympy_index_symbol(str(index_var))
 
                 def store(self, name, index, value, mode):
-                    print("storing")
                     add_input(name)
                     return self._inner.store(name, index, value, mode)
 
@@ -481,7 +480,7 @@ class TritonTemplateKernel(TritonKernel):
                         assert isinstance(
                             scatter_graph, ir.ComputedBuffer
                         ), "Expected a scatter if subgraph is a list"
-                        scatter_graph.data.store_output("buf0", lambda x: x[0], [])
+                        scatter_graph.data.store_output("buf0_grad", lambda x: x[0], [])
 
                 elif isinstance(subgraph.data, ir.InputBuffer):
                     out = subgraph.data.make_loader()(())
