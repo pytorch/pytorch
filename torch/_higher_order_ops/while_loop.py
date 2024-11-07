@@ -32,7 +32,7 @@ class WhileLoopOp(HigherOrderOperator):
         cond_fn: Callable,
         body_fn: Callable,
         carried_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
+        additional_inputs: Tuple[Union[torch.Tensor, torch.SymInt, int], ...],
         /,
     ):
         if not isinstance(carried_inputs, tuple):
@@ -44,14 +44,7 @@ class WhileLoopOp(HigherOrderOperator):
                 f"additional_inputs must be a tuple, got {type(additional_inputs)}"
             )
 
-        if not all(
-            isinstance(t, (torch.Tensor, int, float, bool)) for t in carried_inputs
-        ):
-            raise RuntimeError(
-                "carried_inputs must be a tuple of tensors, ints, floats, or bools, got "
-                f"{carried_inputs}"
-            )
-
+        validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
@@ -120,16 +113,31 @@ def while_loop(cond_fn, body_fn, carried_inputs):
     # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
     # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
     additional_inputs: Tuple = ()
+
+    # See NOTE: []
+    # Construct flat cond_fn and flat_body_fn, which takes flattened inputs
+    flat_inputs, in_spec = pytree.tree_flatten((carried_inputs, additional_inputs))
+
+    def flat_cond_fn(*flat_args):
+        carried, additional = pytree.tree_unflatten(flat_args, in_spec)
+        return cond_fn(*carried, *additional)
+
+    def flat_body_fn(*flat_args):
+        carried, additional = pytree.tree_unflatten(flat_args, in_spec)
+        return body_fn(*carried, *additional)
+
     if torch.compiler.is_dynamo_compiling():
-        return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
+        return while_loop_op(flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple())
 
     def _validate_input(cond_fn, body_fn, carried_inputs):
+        from torch._higher_order_ops.utils import validate_subgraph_args_types
+
         if not callable(cond_fn) or not callable(body_fn):
             raise RuntimeError("Expect cond_fn and body_fn to be callable.")
 
-        if not isinstance(carried_inputs, (tuple, list)) or pytree.tree_any(
-            lambda t: not isinstance(t, torch.Tensor), carried_inputs
-        ):
+        validate_subgraph_args_types(flat_inputs)
+
+        if not pytree.tree_all(lambda t: isinstance(t, torch.Tensor), carried_inputs):
             raise RuntimeError(
                 "Expect carried_inputs to be a tuple of possibly nested dict/list/tuple that only"
                 f"consists of tensor leaves, but got {carried_inputs}."
@@ -151,7 +159,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
                     backend = "eager"
                 return torch.compile(
                     _while_loop_op_wrapper, backend=backend, fullgraph=True
-                )(cond_fn, body_fn, carried_inputs, additional_inputs)
+                )(flat_cond_fn, flat_body_fn, tuple(flat_inputs), tuple())
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)

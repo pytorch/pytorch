@@ -967,7 +967,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         from . import TensorVariable
 
         args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+        cond_fn, body_fn, operands, additional_inputs = args
 
+        # Input checks
         for i, k in enumerate(["cond_fn", "body_fn", "operands"]):
             if v := kwargs.pop(k, None):
                 assert i == len(
@@ -986,23 +988,14 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Usage: while_loop(cond_fn, body_fn, operands)",
             )
 
-        cond_fn, body_fn, operands, additional_inputs = args
+        # cond_fn and body_fn input check
         _check_supported_callable_arg(tx, cond_fn, "cond_fn")
         _check_supported_callable_arg(tx, body_fn, "body_fn")
 
-        # operands
-        if not isinstance(operands, (ListVariable, TupleVariable)):
-            unimplemented(
-                f"Expected operands to be a list/tuple but got "
-                f"{operands.python_type()}",
-            )
+        # operands input check
         operands_seq = operands.unpack_var_sequence(tx)
-        if not only_consist_of(operands, (TensorVariable,)):
-            unimplemented(
-                "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
-            )
 
-        # additional inputs check
+        # additional_inputs input check
         if not isinstance(additional_inputs, (ListVariable, TupleVariable)):
             unimplemented(
                 f"Expected additional_inputs to be a list/tuple but got "
@@ -1011,6 +1004,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         additional_inputs_seq = additional_inputs.unpack_var_sequence(tx)
 
+        # create cond subgrpahs
         (
             (cond_r, cond_treespec),
             cond_graph,
@@ -1022,7 +1016,33 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             "while_loop",
             source_target=self.value,
-            set_subgraph_inputs="manual",
+            # NOTE [why we cannot use "automatic" for while_loop]:
+            # The reason is that we want to enforce
+            # the ordering of inputs and outputs to be consistent and the the ordering
+            # of cond_fn and body_fn to the consistent.
+            # e.g. suppose we use "automatic" and we have:
+            #
+            # def body_fn(ph1, ph2):
+            #   new_a, new_b = ph2.cos(), ph1.sin()
+            #   return new_a, new_b
+            #
+            # a, b = torch.randn(3), torch.randn(3)
+            # new_a, new_b = body_fn(a, b)
+            #
+            # Using automatic, the ordering of arguments will be the order that they're
+            # used. In this example, the capture graph looks like:
+            #
+            # def captured_body(ph1, ph2):
+            #   new_a, new_b = ph1.cos(), ph2.add_(1)
+            #   return new_a, new_b
+            #
+            # This is fine when we change the calling convention of captured_body to be
+            # new_a, new_b = captured_body(b, a).
+            # But for while_loop, the next iteration's input is previous iteration output
+            # we'll end up feeding captured_body(new_a, new_b) instead.
+            # So it's best we always enforce the ordering of carried_inputs the same as outputs
+            # with "flatten_manual".
+            set_subgraph_inputs="flatten_manual",
         )
         cond_nn_modules = dict(tx.output.nn_modules)
         if not isinstance(cond_r, TensorVariable):
@@ -1030,6 +1050,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected cond_fn to return a tensor but got {cond_r.python_type()}",
             )
 
+        # cond output checks
         cond_r_meta = _extract_tensor_metadata(
             cond_r.proxy.node.meta["example_value"], include_contiguity=False
         )
@@ -1040,6 +1061,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected cond_fn to return a tensor with shape (,) but got {cond_r_meta.shape}"
             )
 
+        # create body subgraph
         (
             (body_r, body_treespec),
             body_graph,
@@ -1051,7 +1073,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             {},
             "while_loop",
             source_target=self.value,
-            set_subgraph_inputs="manual",
+            set_subgraph_inputs="flatten_manual",
             should_flatten_outputs=True,
         )
         (

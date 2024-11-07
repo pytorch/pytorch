@@ -230,6 +230,22 @@ def _while_loop_tests():
 
             return while_loop(cond_fn, body_fn, (iter, x))
 
+    class SimpleWithPytreeCarry(torch.nn.Module):
+        def forward(self, it, pytree_input):
+            def cond_fn(it, pytree_input):
+                return it > 0
+
+            def body_fn(it, pytree_input):
+                x = pytree_input[0][0]
+                y = pytree_input[1]["x"]
+                z = pytree_input[1]["y"]
+                new_x = y.sin()
+                new_y = z.cos()
+                new_z = x + 1
+                return it - 1, ([new_x], {"x": new_y, "y": new_z})
+
+            return while_loop(cond_fn, body_fn, (it, pytree_input))
+
     class NestedWithLinear(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -248,6 +264,7 @@ def _while_loop_tests():
 
     nested2 = Nested()
     simple_with_linear = SimpleWithLinear()
+    simple_with_pytree_carry = SimpleWithPytreeCarry()
     nested_with_linear = NestedWithLinear()
 
     x = torch.zeros(1)
@@ -268,6 +285,13 @@ def _while_loop_tests():
         "nested_with_linear": (
             nested_with_linear,
             (torch.tensor(3), torch.randn(2, 2)),
+        ),
+        "simple_with_pytree_carry": (
+            simple_with_pytree_carry,
+            (
+                torch.tensor(3),
+                ([torch.randn(3, 3)], {"x": torch.randn(3, 3), "y": torch.randn(3, 3)}),
+            ),
         ),
     }
 
@@ -3472,6 +3496,33 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     return (add, getitem_1, getitem_2)
     """,  # noqa: B950
         )
+
+    def test_while_loop_pytree_carry(self):
+        fn, inp = WHILE_LOOP_TESTS["simple_with_pytree_carry"]
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        expected_res = fn(*inp)
+        compiled_res = torch.compile(fn, backend=backend)(*inp)
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_it_ : torch.Tensor, L_pytree_input_0_0_ : torch.Tensor, L_pytree_input_1_x_ : torch.Tensor, L_pytree_input_1_y_ : torch.Tensor):
+    l_it_ = L_it_
+    l_pytree_input_0_0_ = L_pytree_input_0_0_
+    l_pytree_input_1_x_ = L_pytree_input_1_x_
+    l_pytree_input_1_y_ = L_pytree_input_1_y_
+    cond_fn_0 = self.cond_fn_0
+    body_fn_0 = self.body_fn_0
+    while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_it_, l_pytree_input_0_0_, l_pytree_input_1_x_, l_pytree_input_1_y_), ());  cond_fn_0 = body_fn_0 = l_it_ = l_pytree_input_0_0_ = l_pytree_input_1_x_ = l_pytree_input_1_y_ = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1]
+    getitem_2 = while_loop[2]
+    getitem_3 = while_loop[3];  while_loop = None
+    return (getitem, getitem_1, getitem_2, getitem_3)""",  # noqa: B950
+        )
+        self.assertEqual(expected_res, compiled_res)
 
     def _wrap_with_functionalize(self, fn, func_type):
         mode = None
