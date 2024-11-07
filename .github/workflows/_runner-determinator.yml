@@ -51,6 +51,7 @@ jobs:
       TRIGGERING_ACTOR: ${{ inputs.triggering_actor }}
       ISSUE_OWNER: ${{ inputs.issue_owner }}
       CHECK_EXPERIMENTS: ${{ inputs.check_experiments }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
       # - name: Checkout PyTorch
       #   uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
@@ -580,3 +581,4 @@ jobs:
             --github-ref-type "$curr_ref_type" \
             --github-repo "$GITHUB_REPOSITORY" \
             --eligible-experiments "$CHECK_EXPERIMENTS" \
+            --pr-number "${PR_NUMBER}"
