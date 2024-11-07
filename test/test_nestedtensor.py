@@ -57,7 +57,6 @@ from torch.testing._internal.common_utils import (
     markDynamoStrictTest,
     NestedTensorTestCase,
     parametrize,
-    reparametrize,
     run_tests,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
@@ -65,11 +64,9 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     xfailIfTorchDynamo,
 )
-from torch.testing._internal.opinfo.definitions.nested import (
-    include_dim_type_and_contiguity,
-    njt_op_db,
-)
-from torch.utils._pytree import tree_flatten
+from torch.testing._internal.opinfo.core import BinaryUfuncInfo, ReductionOpInfo
+from torch.testing._internal.opinfo.definitions.nested import njt_op_db, XFailRule
+from torch.utils._pytree import tree_flatten, tree_map
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
 
@@ -7822,129 +7819,404 @@ torch.cuda.synchronize()
         self.assertEqual(res.shape, (4, nt.shape[1], 6))
 
 
-FORWARD_FAILURES = {
-    # === BEGIN NotImplementedError SECTION ===
-    # unary
-    "nn.functional.celu",
-    "nn.functional.elu",
-    "nn.functional.hardshrink",
-    "nn.functional.hardsigmoid",
-    "nn.functional.hardtanh",
-    "nn.functional.logsigmoid",
-    "nn.functional.mish",
-    "nn.functional.relu6",
-    "nn.functional.rrelu",
-    "nn.functional.selu",
-    "nn.functional.softplus",
-    "nn.functional.softshrink",
-    "nn.functional.threshold",
-    "rad2deg",
-    # binary
-    "__rsub__",
-    "complex",
-    "floor_divide",
-    "polar",
-    "rsub",
-    # reduction
-    "count_nonzero",
-    "linalg.vector_norm",
-    "nansum",
-    "std",
-    "std.unbiased",
-    "var",
-    "var.unbiased",
-    # === BEGIN UNSUPPORTED SECTION ===
-    # ValueError: expects strided tensor (got torch.jagged tensor)
-    "masked.amax",
-    "masked.amin",
-    "masked.argmax",
-    "masked.argmin",
-    "masked.logsumexp",
-    "masked.mean",
-    "masked.norm",
-    "masked.prod",
-    "masked.std",
-    "masked.sum",
-    "masked.var",
-    # === BEGIN BUG SECTION ===
-    # Returns a tuple of Tensors so it doesn't work with NJT's unary pointwise logic
-    "frexp",
+FORWARD_FAILURES = [
+    # not implemented
+    XFailRule(
+        error_type=NotImplementedError,
+        match_fn=lambda device, dtype, op, sample: op.full_name
+        in {
+            # unary
+            "nn.functional.celu",
+            "nn.functional.elu",
+            "nn.functional.hardshrink",
+            "nn.functional.hardsigmoid",
+            "nn.functional.hardtanh",
+            "nn.functional.logsigmoid",
+            "nn.functional.mish",
+            "nn.functional.relu6",
+            "nn.functional.rrelu",
+            "nn.functional.selu",
+            "nn.functional.softplus",
+            "nn.functional.softshrink",
+            "nn.functional.threshold",
+            "rad2deg",
+            # binary
+            "__rsub__",
+            "complex",
+            "floor_divide",
+            "polar",
+            "rsub",
+            # reduction
+            "count_nonzero",
+            "linalg.vector_norm",
+            "nansum",
+            "std",
+            "std.unbiased",
+            "var",
+            "var.unbiased",
+        },
+    ),
+    # expected: masked ops don't support jagged layout
+    XFailRule(
+        error_type=ValueError,
+        error_msg="expects strided",
+        match_fn=lambda device, dtype, op, sample: op.full_name
+        in {
+            "masked.amax",
+            "masked.amin",
+            "masked.argmax",
+            "masked.argmin",
+            "masked.logsumexp",
+            "masked.mean",
+            "masked.norm",
+            "masked.prod",
+            "masked.std",
+            "masked.sum",
+            "masked.var",
+        },
+    ),
     # Need to adjust sample input func to pass the right thing
-    "nn.functional.prelu",
-    # TypeError: fill() received an invalid combination of arguments
-    # got (NestedTensor), but expected one of:
-    # * (Tensor input, Tensor value)
-    # * (Tensor input, Number value)
-    "fill",
-    # RuntimeError: unsupported tensor layout: Jagged
-    "jiterator_binary",
-    "jiterator_binary_return_by_ref",
-    "jiterator_unary",
-    # RuntimeError: "jagged_to_padded_dense" not implemented for 'Bool'
-    "nanmean",
-}
+    XFailRule(
+        error_type=TypeError,
+        error_msg="missing 1 required positional arguments",
+        match_fn=lambda device, dtype, op, sample: op.full_name
+        == "nn.functional.prelu",
+    ),
+    # Op doesn't support lengths being present
+    XFailRule(
+        error_type=ValueError,
+        error_msg="expected input to be a contiguous jagged layout NestedTensor",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "nn.functional.linear" and sample.input._lengths is not None
+        ),
+    ),
+    # Some kinda reduction bug that needs to be fixed!
+    XFailRule(
+        error_type=IndexError,
+        error_msg="tuple index out of range",
+        match_fn=lambda device, dtype, op, sample: (
+            # min.reduction_with_dim and max.reduction_with_dim aren't associated with
+            # ReductionOpInfo entries sadly even though they're reductions
+            (isinstance(op, ReductionOpInfo) or "reduction_with_dim" in op.full_name)
+            and (
+                sample.name == "3D_noncontig_transposed_with_seqlen_cache: "
+                "normal dim reduction with keepdim=False"
+            )
+        ),
+    ),
+    # nanmean sometimes hits an unimplemented nansum() path and other times hits an
+    # unimplemented sum() path
+    XFailRule(
+        error_type=NotImplementedError,
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "nanmean"
+            and not (
+                "noncontig_holes" in sample.name
+                and "dim" in sample.kwargs
+                and (
+                    (
+                        isinstance(sample.kwargs["dim"], int)
+                        and sample.kwargs["dim"] == sample.input._ragged_idx
+                    )
+                    or (
+                        isinstance(sample.kwargs["dim"], (tuple, list))
+                        and sample.input._ragged_idx in sample.kwargs["dim"]
+                    )
+                )
+            )
+        ),
+    ),
+    # expected: reducing across the ragged dimension is not supported for non-contiguous
+    # nested tensors with holes
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg=(
+            "reducing across the ragged dimension is not supported for non-contiguous "
+            "nested tensors with holes"
+        ),
+        match_fn=lambda device, dtype, op, sample: (
+            # min.reduction_with_dim and max.reduction_with_dim aren't associated with
+            # ReductionOpInfo entries sadly even though they're reductions
+            (isinstance(op, ReductionOpInfo) or "reduction_with_dim" in op.full_name)
+            and "noncontig_holes" in sample.name
+            and "dim" in sample.kwargs
+            and (
+                (
+                    isinstance(sample.kwargs["dim"], int)
+                    and sample.kwargs["dim"] == sample.input._ragged_idx
+                )
+                or (
+                    isinstance(sample.kwargs["dim"], (tuple, list))
+                    and sample.input._ragged_idx in sample.kwargs["dim"]
+                )
+            )
+        ),
+    ),
+    # expected: index_put() doesn't work on non-contiguous NJTs without ragged dimension indices
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="If ragged dimension is not part of indices, this only works on contiguous NJTs",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "index_put"
+            and not sample.input.is_contiguous()
+            and len(sample.kwargs["indices"]) - 1 < sample.input._ragged_idx
+        ),
+    ),
+    # expected: masked_select() doesn't work on non-contiguous NJTs
+    XFailRule(
+        error_type=ValueError,
+        error_msg="expected self to be a contiguous jagged layout NestedTensor",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "masked_select" and not sample.input.is_contiguous()
+        ),
+    ),
+    # expected: bmm / matmul sometimes use a to_padded_tensor() fallback which isn't
+    # supported for non-contig NJTs with holes
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="not supported for nested tensors with holes",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name in {"bmm", "matmul"}
+            and "noncontig_holes" in sample.name
+            and
+            # "other" is the name for the matmul arg and "mat2" is the name for the bmm arg
+            sample.input.dim()
+            == sample.kwargs.get("other", sample.kwargs.get("mat2")).dim()
+        ),
+    ),
+    # some jiterator op failures due to unsupported jagged layout
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="unsupported tensor layout",
+        match_fn=lambda device, dtype, op, sample: op.full_name
+        in {
+            "jiterator_binary",
+            "jiterator_binary_return_by_ref",
+            "jiterator_unary",
+        },
+    ),
+    # Bug when broadcasting a binary op with non-contiguous with holes NJT + dense
+    # tensor with 1 in ragged dim.
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="cannot call binary pointwise function .* with inputs of shapes",
+        match_fn=lambda device, dtype, op, sample: (
+            isinstance(op, BinaryUfuncInfo)
+            and "noncontig_holes" in sample.name
+            and "broadcasting 1 over ragged" in sample.name
+        ),
+    ),
+    # Bug: this op returns a tuple of Tensors so it doesn't work with NJT's unary
+    # pointwise logic
+    XFailRule(
+        error_type=AttributeError,
+        error_msg="'tuple' object has no attribute 'device'",
+        match_fn=lambda device, dtype, op, sample: op.full_name == "frexp",
+    ),
+    # Bug: fill doesn't work with NJTs at all for some reason
+    XFailRule(
+        error_type=TypeError,
+        error_msg="received an invalid combination of arguments",
+        match_fn=lambda device, dtype, op, sample: op.full_name == "fill",
+    ),
+]
 
-BACKWARD_FAILURES = {
+BACKWARD_FAILURES = [
     *FORWARD_FAILURES,
-    # TODO: categorize these
-    "__rpow__",
-    "atanh",
-    "cdouble",
-    "cfloat",
-    "chalf",
-    "clamp_max",
-    "clamp_min",
-    "copysign",
-    "float_power",
-    "max.binary",
-    "maximum",
-    "min.binary",
-    "minimum",
-    "pow",
-    "sgn",
-    "sinc",
-    "special.i1",
-    "special.i1e",
-    # clone() on a "non-contiguous with holes" NJT allocates a new offsets -> new nested int
-    # RuntimeError: Function CloneBackward0 returned an invalid gradient at index 0 -
-    # got [3, j29, 5] but expected shape compatible with [3, j28, 5]
-    "clone",
-    # Calling into torch.ops.aten.size directly
-    "masked_select",
-}
+    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
+    # for these binary ops
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="INTERNAL ASSERT FAILED",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name
+            in {
+                "__rpow__",
+                "clamp_min",
+                "clamp_max",
+                "float_power",
+                "pow",
+                "sinc",
+            }
+            and (
+                (
+                    "(NT, T) broadcasting 1 over ragged" in sample.name
+                    and "noncontig_holes" not in sample.name
+                )
+                or "(NT, T) broadcasting all 1s" in sample.name
+                or "(NT, T) mixed broadcasting" in sample.name
+            )
+        ),
+    ),
+    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
+    # for this op when cached seqlen metadata is present
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="INTERNAL ASSERT FAILED",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name
+            in {
+                "special.i1",
+                "special.i1e",
+                "sinc",
+            }
+            and "with_seqlen_cache" in sample.name
+        ),
+    ),
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="reducing across the ragged dimension is not supported for non-contiguous",
+        match_fn=lambda device, dtype, op, sample: (
+            isinstance(op, BinaryUfuncInfo)
+            # doesn't happen for these ops for some reason
+            and op.full_name
+            not in {"copysign", "max.binary", "maximum", "min.binary", "minimum"}
+            and "(NT, T) broadcasting all 1s" in sample.name
+            and "noncontig_holes" in sample.name
+        ),
+    ),
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="reducing across the ragged dimension is not supported for non-contiguous",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "nn.functional.rms_norm"
+            and sample.input._lengths is not None
+        ),
+    ),
+    # not implemented
+    XFailRule(
+        error_type=NotImplementedError,
+        match_fn=lambda device, dtype, op, sample: op.full_name
+        in {
+            # uses fill_ which isn't implemented
+            "atanh",
+        }
+        and "with_seqlen_cache" in sample.name,
+    ),
+    # autodiff on complex dtype is not supported
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg=(
+            "_nested_view_from_jagged does not support automatic differentiation "
+            "for outputs with complex dtype"
+        ),
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name in {"cdouble", "cfloat", "chalf"}
+            and "with_seqlen_cache" in sample.name
+        ),
+    ),
+    # bad derivative formula or something
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="NestedTensor does not support directly calling torch.ops.aten.size",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name in {"sgn", "masked_select"}
+            and "with_seqlen_cache" in sample.name
+        ),
+    ),
+    # Bug: need to use the correct nested int in the return shape
+    XFailRule(
+        error_type=RuntimeError,
+        error_msg="Function CloneBackward0 returned an invalid gradient",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "clone"
+            and sample.kwargs.get("memory_format", None) == torch.contiguous_format
+        ),
+    ),
+    # Bad bug! Silently incorrect clone() backward
+    # XFailRule(
+    #     error_type=AssertionError,
+    #     error_msg="Tensor-likes are not close!",
+    #     match_fn=lambda device, dtype, op, sample: (
+    #         op.full_name == "clone" and
+    #         "noncontig_holes" in sample.name and
+    #         sample.kwargs.get("memory_format", None) == torch.preserve_format
+    #     ),
+    # ),
+    # some min / max ops use masked_fill_ underneath sometimes, which isn't implemented
+    XFailRule(
+        error_type=NotImplementedError,
+        error_msg="aten.masked_fill_.Scalar",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name in {"max.binary", "min.binary", "minimum", "maximum"}
+            and (
+                (
+                    (
+                        "(NT, T) broadcasting all 1s" in sample.name
+                        or "(NT, T) broadcasting 1 over ragged" in sample.name
+                        or "(NT, T) mixed broadcasting" in sample.name
+                    )
+                    and "noncontig" not in sample.name
+                )
+                or sample.name
+                in {
+                    "4D_noncontig_with_seqlen_cache: (NT, T) broadcasting 1 over ragged",
+                    "4D_noncontig_with_seqlen_cache: (NT, T) broadcasting all 1s",
+                }
+            )
+        ),
+    ),
+    XFailRule(
+        error_type=ValueError,
+        error_msg="expected condition to be a contiguous jagged layout NestedTensor",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name in {"max.binary", "min.binary", "minimum", "maximum"}
+            and (
+                "(NT, T) broadcasting all 1s" in sample.name
+                or "(NT, T) broadcasting 1 over ragged" in sample.name
+            )
+        ),
+    ),
+]
 
-COMPILE_FORWARD_FAILURES = {
+COMPILE_FORWARD_FAILURES = [
     *FORWARD_FAILURES,
-    # clone() on non-contiguous with holes NJTs currently use unbind(), leading to
-    # data-dependent error in torch.compile
-    "clone",
-    # to(device) allocates a new nested int in compile only.
-    # AssertionError: The values for attribute 'shape' do not match:
-    # torch.Size([7, j2]) != torch.Size([7, j1]).
-    ("to", "cuda"),
-}
+    # Bug: cross-device conversions with to() result in new nested ints within compile only
+    XFailRule(
+        error_type=AssertionError,
+        error_msg="The values for attribute 'shape' do not match",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "to" and "-> cpu" in sample.name
+        ),
+    ),
+    # clone() -> contiguous format on an non-contiguous NJT with holes currently uses
+    # unbind(), leading to data-dependent error in torch.compile
+    XFailRule(
+        error_type=torch._dynamo.exc.Unsupported,
+        error_msg="data dependent operator: aten._local_scalar_dense.default",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "clone"
+            and "noncontig_holes" in sample.name
+            and sample.kwargs.get("memory_format", None) == torch.contiguous_format
+        ),
+    ),
+    # Bug: no idea what's going on here; needs investigation within AOTAutograd
+    XFailRule(
+        error_type=ValueError,
+        error_msg="has length 1 but the spec refers to a pytree that holds 3 items",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "nan_to_num" and "noncontig_transposed" in sample.name
+        ),
+    ),
+    # Bug: also no idea what's going on here: needs investigation within AOTAutograd
+    XFailRule(
+        error_type=AssertionError,
+        error_msg="Expected 5 == 4",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "isreal" and "noncontig_transposed" in sample.name
+        ),
+    ),
+]
 
-COMPILE_BACKWARD_FAILURES = {
+COMPILE_BACKWARD_FAILURES = [
     *COMPILE_FORWARD_FAILURES,
     *BACKWARD_FAILURES,
-}
+]
 
 COMPARE_TENSOR_COMPONENT_EQUALITY = {
     # masked_select is expected to output a different shape
     "masked_select",
 }
-
-
-def withXFails(failure_list):
-    return decorateIf(
-        unittest.expectedFailure,
-        lambda params: (
-            params["op"].full_name in failure_list
-            or
-            # allow for e.g. (op_name, "cuda") to skip on CUDA only
-            (params["op"].full_name, params["device"].split(":")[0]) in failure_list
-        ),
-    )
 
 
 # OpInfo-based NJT tests. These tests utilize an NJT-specific op_db generated from the standard
@@ -7958,187 +8230,219 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
         else:
             return (torch.ones_like(out_val),)
 
-    # @withXFails(FORWARD_FAILURES)
+    @dtypes(torch.float32)
+    def test_blah(self, device, dtype):
+        nt = torch.nested.nested_tensor(
+            [
+                torch.randn(2, 5),
+                torch.randn(3, 5),
+                torch.randn(4, 5),
+            ],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+        )
+
+        new_offsets = torch.tensor(
+            [0, 1, 5, nt._values.shape[0]], dtype=torch.int64, device=device
+        )
+        nt2 = torch.nested.nested_tensor_from_jagged(nt.values(), new_offsets)
+        self.assertEqual(nt, nt2)
+
+    # Returns a context manager xfailing for expected errors.
+    def maybe_xfail(self, xfail_rules, device, dtype, op, sample):
+        if xfail_rules is None or len(xfail_rules) == 0:
+            return contextlib.nullcontext()
+
+        for rule in xfail_rules:
+            if rule.match_fn(device, dtype, op, sample):
+                return self.assertRaisesRegex(rule.error_type, rule.error_msg)
+
+        return contextlib.nullcontext()
+
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
     def test_forward(self, device, dtype, op):
-    # @reparametrize(
-    #     ops(
-    #         [op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,)
-    #     ),
-    #     include_dim_type_and_contiguity,
-    # )
-    # def test_forward(self, device, dtype, op, dim_type, contiguity):
-        for sample in op.sample_inputs(
-            device=device,
-            dtype=dtype,
-            requires_grad=False,
-            # dim_type=dim_type,
-            # contiguity=contiguity,
+        for i, sample in enumerate(
+            op.sample_inputs(device=device, dtype=dtype, requires_grad=False)
         ):
-            pass
-            # # compare to reference, but expect different nested int
-            # out = op.op(sample.input, *sample.args, **sample.kwargs)
-            # out_ref = op.ref(op, sample)
-            # self.assertEqualIgnoringNestedInts(out, out_ref)
+            maybe_xfail = self.maybe_xfail(FORWARD_FAILURES, device, dtype, op, sample)
+            with self.subTest(sample=sample, i=i), maybe_xfail:
+                # compare to reference, but expect different nested int
+                out = op.op(sample.input, *sample.args, **sample.kwargs)
+                out_ref = op.ref(op, sample)
+                self.assertEqualIgnoringNestedInts(out, out_ref)
 
-            # # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
-            # # TODO: Add xfails for other inplace ops instead of hardcoding
-            # if op.inplace_variant and "index_put" in op.full_name:
-            #     op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
-            #     self.assertEqualIgnoringNestedInts(sample.input, out_ref)
+                # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
+                # TODO: Add xfails for other inplace ops instead of hardcoding
+                if op.inplace_variant and "index_put" in op.full_name:
+                    op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
+                    self.assertEqualIgnoringNestedInts(sample.input, out_ref)
 
-    @withXFails(BACKWARD_FAILURES)
-    @reparametrize(
-        ops(
-            [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
-            allowed_dtypes=(torch.float32,),
-        ),
-        include_dim_type_and_contiguity,
+    @ops(
+        [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
+        allowed_dtypes=(torch.float32,),
     )
-    def test_backward(self, device, dtype, op, dim_type, contiguity):
-        for sample in op.sample_inputs(
-            device=device,
-            dtype=dtype,
-            requires_grad=True,
-            dim_type=dim_type,
-            contiguity=contiguity,
+    def test_backward(self, device, dtype, op):
+        for i, sample in enumerate(
+            op.sample_inputs(device=device, dtype=dtype, requires_grad=True)
         ):
-            # compare to reference, but expect different nested int
-            out = op.op(sample.input, *sample.args, **sample.kwargs)
-            out_ref = op.ref(op, sample)
-            self.assertEqualIgnoringNestedInts(out, out_ref)
+            maybe_xfail = self.maybe_xfail(BACKWARD_FAILURES, device, dtype, op, sample)
+            with self.subTest(sample=sample, i=i), maybe_xfail:
+                # compare to reference, but expect different nested int
+                out = op.op(sample.input, *sample.args, **sample.kwargs)
+                out_ref = op.ref(op, sample)
+                self.assertEqualIgnoringNestedInts(out, out_ref)
 
-            inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
-            g_inps = [
-                inp
-                for inp in inps
-                if isinstance(inp, torch.Tensor) and inp.requires_grad
-            ]
-            if len(g_inps) > 0:
-                grads = torch.autograd.grad(
-                    out, inputs=g_inps, grad_outputs=self._gen_grad_outputs(out)
-                )
+                inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
+                g_inps = [
+                    inp
+                    for inp in inps
+                    if isinstance(inp, torch.Tensor) and inp.requires_grad
+                ]
+                if len(g_inps) > 0:
+                    grads = torch.autograd.grad(
+                        out, inputs=g_inps, grad_outputs=self._gen_grad_outputs(out)
+                    )
 
-                grads_ref = torch.autograd.grad(
-                    out_ref,
-                    inputs=g_inps,
-                    grad_outputs=self._gen_grad_outputs(out_ref),
-                )
+                    grads_ref = torch.autograd.grad(
+                        out_ref,
+                        inputs=g_inps,
+                        grad_outputs=self._gen_grad_outputs(out_ref),
+                    )
 
-                self.assertEqual(grads, grads_ref)
+                    # assertEqual() doesn't take into account lengths, so hack around this
+                    # by comparing unbound components and shapes
+                    self.assertEqualIgnoringNestedInts(grads, grads_ref)
 
-    @withXFails(COMPILE_FORWARD_FAILURES)
+                    def _get_njt_shapes(x):
+                        return (
+                            x.shape
+                            if isinstance(x, torch.Tensor) and x.is_nested
+                            else None
+                        )
+
+                    grads_njt_shapes = tree_map(_get_njt_shapes, grads)
+                    grads_ref_njt_shapes = tree_map(_get_njt_shapes, grads_ref)
+                    self.assertEqual(grads_njt_shapes, grads_ref_njt_shapes)
+
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    @reparametrize(
-        ops(
-            [op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,)
-        ),
-        include_dim_type_and_contiguity,
-    )
-    def test_compile_forward(self, device, dtype, op, dim_type, contiguity):
-        for sample in op.sample_inputs(
-            device=device,
-            dtype=dtype,
-            requires_grad=False,
-            dim_type=dim_type,
-            contiguity=contiguity,
+    @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
+    def test_compile_forward(self, device, dtype, op):
+        for i, sample in enumerate(
+            op.sample_inputs(device=device, dtype=dtype, requires_grad=False)
         ):
-            torch.compiler.reset()
-
-            op_fn = op.op
-
-            def f(*args, **kwargs):
-                return op_fn(*args, **kwargs)
-
-            compiled_f = torch.compile(
-                f, fullgraph=True, backend="aot_eager_decomp_partition"
+            maybe_xfail = self.maybe_xfail(
+                COMPILE_FORWARD_FAILURES, device, dtype, op, sample
             )
+            with self.subTest(sample=sample, i=i), maybe_xfail:
+                torch.compiler.reset()
 
-            out_ref = f(sample.input, *sample.args, **sample.kwargs)
-            out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
+                op_fn = op.op
 
-            if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
-                self.assertEqualIgnoringNestedInts(out_compile, out_ref)
-            else:
-                self.assertEqual(out_compile, out_ref)
-
-            # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
-            # TODO: Add xfails for other inplace ops instead of hardcoding
-            if op.inplace_variant and "index_put" in op.full_name:
-                op_fn = op.inplace_variant
-
-                def in_f(*args, **kwargs):
+                def f(*args, **kwargs):
                     return op_fn(*args, **kwargs)
 
-                compiled_in_f = torch.compile(
-                    in_f, fullgraph=True, backend="aot_eager_decomp_partition"
+                compiled_f = torch.compile(
+                    f, fullgraph=True, backend="aot_eager_decomp_partition"
                 )
 
-                if sample.input.is_contiguous():
-                    compiled_in_f(sample.input, *sample.args, **sample.kwargs)
-                    if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
-                        self.assertEqualIgnoringNestedInts(sample.input, out_ref)
-                    else:
-                        self.assertEqual(sample.input, out_ref)
-                else:
-                    # see https://github.com/pytorch/pytorch/issues/106456
-                    with self.assertRaisesRegex(
-                        RuntimeError,
-                        "Mutations on non-contiguous inputs are currently not allowed on tensor subclasses",
-                    ):
-                        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                out_ref = f(sample.input, *sample.args, **sample.kwargs)
+                out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
 
-    @withXFails(COMPILE_BACKWARD_FAILURES)
-    @reparametrize(
-        ops(
-            [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
-            allowed_dtypes=(torch.float32,),
-        ),
-        include_dim_type_and_contiguity,
+                if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                    self.assertEqualIgnoringNestedInts(out_compile, out_ref)
+                else:
+                    self.assertEqual(out_compile, out_ref)
+
+                # TODO: Revisit once https://github.com/pytorch/pytorch/pull/138369 lands
+                # TODO: Add xfails for other inplace ops instead of hardcoding
+                if op.inplace_variant and "index_put" in op.full_name:
+                    op_fn = op.inplace_variant
+
+                    def in_f(*args, **kwargs):
+                        return op_fn(*args, **kwargs)
+
+                    compiled_in_f = torch.compile(
+                        in_f, fullgraph=True, backend="aot_eager_decomp_partition"
+                    )
+
+                    if sample.input.is_contiguous():
+                        compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+                        if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                            self.assertEqualIgnoringNestedInts(sample.input, out_ref)
+                        else:
+                            self.assertEqual(sample.input, out_ref)
+                    else:
+                        # see https://github.com/pytorch/pytorch/issues/106456
+                        with self.assertRaisesRegex(
+                            RuntimeError,
+                            "Mutations on non-contiguous inputs are currently not "
+                            "allowed on tensor subclasses",
+                        ):
+                            compiled_in_f(sample.input, *sample.args, **sample.kwargs)
+
+    @ops(
+        [op for op in njt_op_db if op.supports_njt and op.supports_autograd],
+        allowed_dtypes=(torch.float32,),
     )
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_compile_backward(self, device, dtype, op, dim_type, contiguity):
-        for sample in op.sample_inputs(
-            device=device,
-            dtype=dtype,
-            requires_grad=True,
-            dim_type=dim_type,
-            contiguity=contiguity,
+    def test_compile_backward(self, device, dtype, op):
+        for i, sample in enumerate(
+            op.sample_inputs(device=device, dtype=dtype, requires_grad=True)
         ):
-            torch.compiler.reset()
-
-            op_fn = op.op
-
-            def f(*args, **kwargs):
-                return op_fn(*args, **kwargs)
-
-            compiled_f = torch.compile(
-                f, fullgraph=True, backend="aot_eager_decomp_partition"
+            maybe_xfail = self.maybe_xfail(
+                COMPILE_BACKWARD_FAILURES, device, dtype, op, sample
             )
+            with self.subTest(sample=sample, i=i), maybe_xfail:
+                torch.compiler.reset()
 
-            out_ref = f(sample.input, *sample.args, **sample.kwargs)
-            out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
+                op_fn = op.op
 
-            self.assertEqual(out_compile, out_ref)
+                def f(*args, **kwargs):
+                    return op_fn(*args, **kwargs)
 
-            inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
-            g_inps = [
-                inp
-                for inp in inps
-                if isinstance(inp, torch.Tensor) and inp.requires_grad
-            ]
-            if len(g_inps) > 0:
-                grads_compile = torch.autograd.grad(
-                    out_compile,
-                    inputs=g_inps,
-                    grad_outputs=self._gen_grad_outputs(out_compile),
+                compiled_f = torch.compile(
+                    f, fullgraph=True, backend="aot_eager_decomp_partition"
                 )
 
-                grads_ref = torch.autograd.grad(
-                    out_ref, inputs=g_inps, grad_outputs=self._gen_grad_outputs(out_ref)
-                )
+                out_ref = f(sample.input, *sample.args, **sample.kwargs)
+                out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
 
-                self.assertEqual(grads_compile, grads_ref)
+                self.assertEqual(out_compile, out_ref)
+
+                inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
+                g_inps = [
+                    inp
+                    for inp in inps
+                    if isinstance(inp, torch.Tensor) and inp.requires_grad
+                ]
+                if len(g_inps) > 0:
+                    grads_compile = torch.autograd.grad(
+                        out_compile,
+                        inputs=g_inps,
+                        grad_outputs=self._gen_grad_outputs(out_compile),
+                    )
+
+                    grads_ref = torch.autograd.grad(
+                        out_ref,
+                        inputs=g_inps,
+                        grad_outputs=self._gen_grad_outputs(out_ref),
+                    )
+
+                    # assertEqual() doesn't take into account lengths, so hack around this
+                    # by comparing unbound components and shapes
+                    self.assertEqualIgnoringNestedInts(grads_compile, grads_ref)
+
+                    def _get_njt_shapes(x):
+                        return (
+                            x.shape
+                            if isinstance(x, torch.Tensor) and x.is_nested
+                            else None
+                        )
+
+                    grads_compile_njt_shapes = tree_map(_get_njt_shapes, grads_compile)
+                    grads_ref_njt_shapes = tree_map(_get_njt_shapes, grads_ref)
+                    self.assertEqual(grads_compile_njt_shapes, grads_ref_njt_shapes)
 
 
 instantiate_parametrized_tests(TestNestedTensor)

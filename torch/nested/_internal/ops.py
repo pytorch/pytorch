@@ -254,6 +254,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
 def extract_kwargs(arg):
     kwargs = {
         "offsets": arg.offsets(),
+        "lengths": arg.lengths(),
         "_metadata_cache": arg._metadata_cache,
         "_ragged_idx": arg._ragged_idx,
     }
@@ -512,9 +513,6 @@ def clone_default(func, *args, **kwargs):
             ), "NJT with ragged_idx != 1 not supported for contiguous clone"
             contig, _ = jagged_from_list(inp.unbind(), offsets=None)
             return contig
-        else:
-            # need to preserve any lengths metadata present
-            new_meta["lengths"] = inp._lengths
 
     return NestedTensor(func(inp._values, **new_kwargs), **new_meta)
 
@@ -954,7 +952,7 @@ def squeeze_dim(func, *args, **kwargs):
     return NestedTensor(func(values, **new_kwargs), **extract_kwargs(inp))
 
 
-@register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt, dim: any")
+@register_jagged_func(torch.ops.aten.unsqueeze.default, "self: jt_all, dim: any")
 def unsqueeze_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -1294,11 +1292,6 @@ def transpose_int(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     dim0, dim1 = canonicalize_dims(inp.dim(), (new_kwargs["dim0"], new_kwargs["dim1"]))
-
-    if inp._lengths is not None:
-        raise ValueError(
-            "transpose(): not supported on jagged layout nested tensor with holes"
-        )
 
     # To support the SDPA API, inputs need to have the ragged idx transposed to dim 2
     # instead of 1, although the internal Flash and mem-effn implementations will
@@ -1663,7 +1656,6 @@ def index_put_(func, *args, **kwargs):
     return NestedTensor(
         func(inp._values, func_indices, **new_kwargs),
         **extract_kwargs(inp),
-        lengths=inp.lengths(),
     )
 
 
@@ -2018,15 +2010,14 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
 
-    if new_kwargs["ragged_idx"] != 1:
-        raise RuntimeError(
-            "_nested_from_padded_tensor(): only ragged_idx=1 supported for jagged layout"
-        )
-
     padded, offsets = new_kwargs["padded"], new_kwargs["offsets"]
+    ragged_idx = new_kwargs.get("ragged_idx", 1)
 
-    # non-3D padded is not supported by the underlying FBGEMM kernel so do shape gymnastics
+    # only 3D padded with ragged packed dim=0 is supported by the underlying FBGEMM
+    # kernel so do shape gymnastics
     padded_shape = padded.shape
+    if ragged_idx > 1:
+        padded = padded.transpose(ragged_idx, 1)
     if padded.dim() > 3:
         padded = padded.flatten(start_dim=2)
     elif padded.dim() < 3:
@@ -2048,8 +2039,9 @@ def _nested_from_padded_tensor_default(func, *args, **kwargs):
         values = values.unflatten(-1, padded_shape[2:])
     elif len(padded_shape) < 3:
         values = values.squeeze(-1)
+    if ragged_idx > 1:
+        values = values.transpose(ragged_idx - 1, 0)
 
-    ragged_idx = new_kwargs["ragged_idx"]
     min_seqlen = new_kwargs["min_seqlen"]
     max_seqlen = new_kwargs["max_seqlen"]
     metadata_cache = {}
@@ -2176,7 +2168,7 @@ def masked_select_default(func, *args, **kwargs):
 
 @register_jagged_func(
     torch.ops.aten._nested_select_backward.default,
-    "grad_output: t, self: jt, dim: any, index: any",
+    "grad_output: t, self: jt_all, dim: any, index: any",
 )
 def _nested_select_backward_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(  # type: ignore[misc]
