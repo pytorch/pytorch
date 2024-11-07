@@ -38,7 +38,9 @@ jobs:
 
   get-label-type:
     name: get-label-type
-    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    # FOR TESTING ON PR, WILL REVERT THIS BACK BEFORE COMMIT
+    # uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    uses: ./.github/workflows/_runner-determinator.yml
     if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
     with:
       triggering_actor: ${{ github.triggering_actor }}
