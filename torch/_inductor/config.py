@@ -1081,6 +1081,9 @@ class aot_inductor:
         os.environ.get("AOTINDUCTOR_RAISE_ERROR_ON_IGNORED_OPTIMIZATION", "1") == "1"
     )
 
+    # dump an aoti minifier if program errors
+    dump_aoti_minifier: bool = os.environ.get("DUMP_AOTI_MINIFIER", "0") == "1"
+
     # Dictionary of presets that can be passed in
     presets: Dict[str, Any] = {}
 

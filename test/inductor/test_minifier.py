@@ -170,6 +170,78 @@ inner(torch.randn(20, 20))
             minifier_args=["--offload-to-disk"],
         )
 
+    # Test that compile errors in AOTInductor can be repro'd (both CPU and CUDA)
+    def _test_aoti(self, device, expected_error):
+        # NB: The program is intentionally quite simple, just enough to
+        # trigger one minification step, no more (dedicated minifier tests
+        # should exercise minifier only)
+        run_code = f"""\
+class Model(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(10, 16)
+        self.relu = torch.nn.ReLU()
+        self.sigmoid = torch.nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.sigmoid(x)
+        return x
+with torch.no_grad():
+    model = Model().to("{device}")
+    example_inputs = (torch.randn(8, 10).to("{device}"),)
+    ep = torch.export.export(
+        model, example_inputs
+    )
+    torch._inductor.aoti_compile_and_package(
+        ep, example_inputs
+    )
+"""
+        return self._run_full_test(run_code, None, expected_error, isolate=True)
+
+    @unittest.skipIf(IS_JETSON, "Fails on Jetson")
+    @inductor_config.patch(
+        {
+            "cpp.inject_relu_bug_TESTING_ONLY": "compile_error",
+            "aot_inductor.dump_aoti_minifier": True,
+        }
+    )
+    def test_aoti_cpu_compile_error(self):
+        res = self._test_aoti("cpu", "CppCompileError")
+        self.assertExpectedInline(
+            res.repro_module(),
+            """\
+class Repro(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, linear):
+        relu = torch.ops.aten.relu.default(linear);  linear = None
+        return (relu,)""",
+        )
+
+    @requires_gpu
+    @inductor_config.patch(
+        {
+            "triton.inject_relu_bug_TESTING_ONLY": "compile_error",
+            "aot_inductor.dump_aoti_minifier": True,
+        }
+    )
+    def test_aoti_gpu_compile_error(self):
+        res = self._test_aoti(GPU_TYPE, "SyntaxError")
+        self.assertExpectedInline(
+            res.repro_module(),
+            """\
+class Repro(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, linear):
+        relu = torch.ops.aten.relu.default(linear);  linear = None
+        return (relu,)""",
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
