@@ -1768,7 +1768,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     }
   } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
-  } else if (is_float_or_symfloat(obj)) {
+  } else if (THPUtils_checkDouble(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
     // NB: we DO NOT put symbolic ints/floats into the Scalar itself,
     // because although Scalar supports SymInt/SymFloat, the subsequent
