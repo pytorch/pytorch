@@ -1359,6 +1359,9 @@ test_executorch() {
   # shellcheck disable=SC1091
   source .ci/scripts/setup-linux.sh cmake
 
+  # NB: We need to install torchtune and ao as the dependencies for llama
+  source examples/models/llama3_2_vision/install_requirements.sh
+
   echo "Run ExecuTorch unit tests"
   pytest -v -n auto
   # shellcheck disable=SC1091
