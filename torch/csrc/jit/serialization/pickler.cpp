@@ -338,8 +338,8 @@ void Pickler::pushBytes(const std::string& string) {
 }
 
 void Pickler::pushGlobal(
-    c10::string_view module_name,
-    c10::string_view class_name) {
+    std::string_view module_name,
+    std::string_view class_name) {
   std::string key;
   key.reserve(module_name.size() + class_name.size() + 2);
   key.append(module_name.data(), module_name.size());
@@ -539,7 +539,7 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-static inline double swapDouble(double value) {
+static double swapDouble(double value) {
   const char* bytes = reinterpret_cast<const char*>(&value);
   double flipped = 0;
   char* out_bytes = reinterpret_cast<char*>(&flipped);
