@@ -3347,27 +3347,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.output.side_effects.store_cell(cell, val)
         else:
-            maybe_cell = self.symbolic_locals.get(inst.argval)
-            if isinstance(
-                maybe_cell,
-                variables.NewCellVariable,
+            unboxed_cell = self.symbolic_locals.get(inst.argval)
+            root_tx = self.output.root_tx
+            if (
+                unboxed_cell in root_tx.contents_var_to_mutated_cell
+                and id(root_tx.contents_var_to_mutated_cell[unboxed_cell])
+                not in root_tx.mutated_closure_cell_ids
             ):
-                self.output.side_effects.store_cell(
-                    self.symbolic_locals[inst.argval], self.pop()
+                self.output.root_tx.mutated_closure_cell_ids.add(
+                    id(root_tx.contents_var_to_mutated_cell[unboxed_cell])
                 )
-            else:
-                root_tx = self.output.root_tx
-                if (
-                    maybe_cell is not None
-                    and maybe_cell in root_tx.contents_var_to_mutated_cell
-                    and id(root_tx.contents_var_to_mutated_cell[maybe_cell])
-                    not in root_tx.mutated_closure_cell_ids
-                ):
-                    self.output.root_tx.mutated_closure_cell_ids.add(
-                        id(root_tx.contents_var_to_mutated_cell[maybe_cell])
-                    )
-                    raise exc.UnspecializeRestartAnalysis
-                unimplemented("write to __closure__ while inlining")
+                raise exc.UnspecializeRestartAnalysis
+            unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):
         if inst.argval in self.closure_cells:
@@ -3377,11 +3368,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 self.push(self.output.side_effects.load_cell(cell))
         else:
-            maybe_sym_local = self.symbolic_locals.get(inst.argval, None)
-            if isinstance(maybe_sym_local, variables.NewCellVariable):
-                self.push(self.output.side_effects.load_cell(maybe_sym_local))
-            else:
-                super().LOAD_DEREF(inst)
+            super().LOAD_DEREF(inst)
 
     def _load_closure(self, name):
         assert name in self.cell_and_freevars()
