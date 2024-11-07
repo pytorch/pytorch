@@ -78,7 +78,7 @@ namespace {
 }
 
 inline bool cudnnv8_enabled_check_debug() {
-  static auto cudnnv8_flag_opt = c10::utils::check_env("TORCH_CUDNN_V8_API_DISABLED");  
+  static auto cudnnv8_flag_opt = c10::utils::check_env("TORCH_CUDNN_V8_API_DISABLED");
   // If the environment variable is set and its value is true (i.e., "1"), disable cuDNN v8.
   // Otherwise, keep it enabled.
   static bool cudnnv8_flag = !(cudnnv8_flag_opt.has_value() && cudnnv8_flag_opt.value());
