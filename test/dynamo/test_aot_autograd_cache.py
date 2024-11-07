@@ -106,6 +106,43 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_activation_checkpointing(self):
+        """
+        Verify that AC work
+        """
+
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=True
+            )
+
+        a = torch.randn(4, 4)
+        b = torch.randn(4, 4)
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # A first call should miss in the cache.
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        # A second call should hit. (First reset so in-memory guards
+        # don't prevent compilation).
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(fn(a, b), compiled_fn(a, b))
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     @skipIfWindows(
         msg="Known issue: Window can't delete loaded modules, so we can't clear module cache."
     )

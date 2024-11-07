@@ -2041,6 +2041,17 @@ class GraphLowering(torch.fx.Interpreter):
             and not isinstance(node, ir.ShapeAsConstantBuffer)
         ]
 
+    def get_output_names_with_none(self) -> List[str]:
+        names = []
+        for node in self.graph_outputs:
+            if isinstance(node, ir.NoneAsConstantBuffer):
+                names.append("_")
+            elif isinstance(node, ir.ShapeAsConstantBuffer):
+                raise NotImplementedError("ShapeAsConstantBuffer is not supported yet")
+            else:
+                names.append(node.get_name())
+        return names
+
     def is_unspec_arg(self, name: str) -> bool:
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)

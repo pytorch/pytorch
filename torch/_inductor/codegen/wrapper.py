@@ -2215,9 +2215,10 @@ class PythonWrapperCodegen(CodeGen):
     def codegen_subgraph_suffix(self, subgraph, outer_inputs, outer_outputs):
         assert len(subgraph.graph.graph_outputs) == len(outer_outputs)
         for inner_output, outer_output in zip(
-            subgraph.graph.get_output_names(), outer_outputs
+            subgraph.graph.get_output_names_with_none(), outer_outputs
         ):
-            self.writeline(f"{outer_output} = {inner_output}{self.ending}")
+            if inner_output != "_":
+                self.writeline(f"{outer_output} = {inner_output}{self.ending}")
 
     def codegen_subgraph_call(self, subgraph, outer_inputs, outer_outputs):
         # Get the input and output names of the subgraph
@@ -2226,7 +2227,7 @@ class PythonWrapperCodegen(CodeGen):
         if len(input_names) == 1:
             inner_inputs += ","
 
-        output_names = subgraph.graph.get_output_names()
+        output_names = subgraph.graph.get_output_names_with_none()
         inner_outputs = ", ".join(output_names)
         if len(output_names) == 1:
             inner_outputs += ","
@@ -2249,6 +2250,7 @@ class PythonWrapperCodegen(CodeGen):
             return
 
         self.push_codegened_graph(subgraph.graph)
+        self.writeline("")
         self.writeline(f"{self.comment} subgraph: {subgraph.name}")
         self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
 

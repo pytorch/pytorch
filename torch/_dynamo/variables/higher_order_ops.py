@@ -2620,9 +2620,25 @@ def canonicalize(gmod, root_gmod):
         nonlocal node_counter
         return f"node_{next(node_counter)}"
 
+    get_attr_counter = itertools.count(0)
+
+    sub_mods = {}
+
+    def next_get_attr_name():
+        nonlocal get_attr_counter
+        return f"get_attr_{next(get_attr_counter)}"
+
     for node in gmod.graph.nodes:
         if node.op == "placeholder":
             env[node] = new_graph.placeholder(next_placeholder_name())
+        elif node.op == "get_attr" and isinstance(
+            getattr(gmod, node.target), torch.fx.GraphModule
+        ):
+            # Recursively canonicalize the subgraph.
+            new_sub_gm = canonicalize(getattr(gmod, node.target), root_gmod)
+            new_attr_name = next_get_attr_name()
+            sub_mods[new_attr_name] = new_sub_gm
+            env[node] = new_graph.get_attr(new_attr_name)
         else:
             # Can't use node_copy because node.name will not be unique.
             args = map_arg(node.args, lambda x: env[x])
@@ -2633,7 +2649,7 @@ def canonicalize(gmod, root_gmod):
         env[node].meta = copy.copy(node.meta)
 
     new_graph.lint()
-    new_gmod = torch.fx.GraphModule(root_gmod, new_graph)
+    new_gmod = torch.fx.GraphModule({**root_gmod, **sub_mods}, new_graph)
     return new_gmod
 
 
@@ -2732,9 +2748,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             treespec,
             body_gmod,
             body_name,
-        ) = self.create_wrapped_node(
-            tx, args[0], args[2].items, kwargs, "invoke_subgraph"
-        )
+        ) = self.create_wrapped_node(tx, args[0], args[1:], kwargs, "invoke_subgraph")
 
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
@@ -2751,5 +2765,10 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
             p_args[1:],
         )
         return _call_function_and_unflatten_output(
-            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
+            tx,
+            torch._higher_order_ops.invoke_subgraph,
+            tuple(p_args),
+            p_kwargs,
+            flat_example_value,
+            treespec,
         )
