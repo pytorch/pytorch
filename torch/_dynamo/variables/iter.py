@@ -14,7 +14,7 @@ from ..exc import (
     unimplemented,
     UserError,
 )
-from .base import MutableLocal, VariableTracker
+from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -51,7 +51,9 @@ class ItertoolsVariable(VariableTracker):
             items = []
             for item in itertools.product(*seqs):
                 items.append(variables.TupleVariable(list(item)))
-            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
+            return variables.ListIteratorVariable(
+                items, mutation_type=ValueMutationNew()
+            )
         elif self.value is itertools.accumulate:
             from .builtin import BuiltinVariable
 
@@ -96,7 +98,9 @@ class ItertoolsVariable(VariableTracker):
                         )
                 items.append(acc)
 
-            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
+            return variables.ListIteratorVariable(
+                items, mutation_type=ValueMutationNew()
+            )
         elif (
             self.value is itertools.combinations
             and not kwargs
@@ -110,7 +114,9 @@ class ItertoolsVariable(VariableTracker):
             items = []
             for item in itertools.combinations(iterable, r):
                 items.append(variables.TupleVariable(list(item)))
-            return variables.ListIteratorVariable(items, mutable_local=MutableLocal())
+            return variables.ListIteratorVariable(
+                items, mutation_type=ValueMutationNew()
+            )
         elif self.value is itertools.groupby:
             if any(kw != "key" for kw in kwargs.keys()):
                 unimplemented(
@@ -154,10 +160,10 @@ class ItertoolsVariable(VariableTracker):
                                 if variables.ConstantVariable.is_literal(k)
                                 else k,
                                 variables.ListIteratorVariable(
-                                    list(v), mutable_local=MutableLocal()
+                                    list(v), mutation_type=ValueMutationNew()
                                 ),
                             ],
-                            mutable_local=MutableLocal(),
+                            mutation_type=ValueMutationNew(),
                         )
                     )
             except Exception as e:
@@ -165,20 +171,26 @@ class ItertoolsVariable(VariableTracker):
                     "Unexpected failure when calling itertools.groupby",
                     from_exc=e,
                 )
-            return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
+            return variables.ListIteratorVariable(
+                result, mutation_type=ValueMutationNew()
+            )
         elif self.value is itertools.repeat:
             if len(args) < 2:
                 return variables.RepeatIteratorVariable(
-                    *args, mutable_local=MutableLocal()
+                    *args, mutation_type=ValueMutationNew()
                 )
 
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.repeat), args, kwargs
             )
         elif self.value is itertools.count:
-            return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
+            return variables.CountIteratorVariable(
+                *args, mutation_type=ValueMutationNew()
+            )
         elif self.value is itertools.cycle:
-            return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
+            return variables.CycleIteratorVariable(
+                *args, mutation_type=ValueMutationNew()
+            )
         elif self.value is itertools.dropwhile:
             return variables.UserFunctionVariable(polyfills.dropwhile).call_function(
                 tx, args, kwargs
@@ -251,7 +263,7 @@ class CountIteratorVariable(IteratorVariable):
         self.step = step
 
     def next_variable(self, tx):
-        assert self.mutable_local
+        assert self.is_mutable()
         old_item = self.item
         tx.output.side_effects.mutation(self)
         self.item = self.item.call_method(tx, "__add__", [self.step], {})
@@ -275,7 +287,7 @@ class CycleIteratorVariable(IteratorVariable):
     def __init__(
         self,
         iterator: IteratorVariable,
-        saved: List[VariableTracker] = None,
+        saved: Optional[List[VariableTracker]] = None,
         saved_index: int = 0,
         item: Optional[VariableTracker] = None,
         **kwargs,
@@ -289,7 +301,7 @@ class CycleIteratorVariable(IteratorVariable):
         self.item = item
 
     def next_variable(self, tx):
-        assert self.mutable_local
+        assert self.is_mutable()
 
         if self.iterator is not None:
             try:
@@ -362,7 +374,7 @@ class ZipVariable(IteratorVariable):
         return [variables.TupleVariable(list(var)) for var in zipped]
 
     def next_variable(self, tx):
-        assert self.mutable_local
+        assert self.is_mutable()
         old_index = self.index
         args = []
 

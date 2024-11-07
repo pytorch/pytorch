@@ -236,7 +236,6 @@ DEFINE_CONSTANT(started_state, "started");
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
 TORCH_API std::string getNcclVersion();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
-bool nccl_use_nonblocking();
 int nccl_nonblocking_timeout();
 
 // Provides additional detail into NCCL error codes based on when these are
@@ -276,6 +275,9 @@ class TORCH_API DebugInfoWriter {
 
 // RAII wrapper for NCCL communicator
 class NCCLComm {
+  using MutexType = std::recursive_mutex;
+  using LockType = std::unique_lock<MutexType>;
+
  public:
   explicit NCCLComm(ncclComm_t ncclComm) : ncclComm_(ncclComm) {}
 
@@ -284,7 +286,7 @@ class NCCLComm {
   ~NCCLComm() noexcept {
     // Add lock in this destructor, as aborted_ needs to be read after memory
     // barrier here.
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
     if (ncclComm_ && initialized_ && !aborted_) {
 #ifdef ENABLE_NCCL_ERROR_CHECKING
       // Use ncclCommAbort instead of ncclCommDestroy here since
@@ -308,6 +310,8 @@ class NCCLComm {
     comm->ncclId_ = commId;
     comm->rank_ = rank;
     comm->initialized_ = true;
+    // Old style comm is always blocking.
+    comm->nonBlocking_ = false;
     return comm;
   }
 
@@ -318,26 +322,19 @@ class NCCLComm {
       ncclUniqueId commId,
       ncclConfig_t& config) {
     auto comm = std::make_shared<NCCLComm>();
-    bool isInitialized = false;
-    if (nccl_use_nonblocking()) {
-      config.blocking = 0;
-      LOG(INFO) << "Rank " << rank
-                << ": creating NCCL communicator in nonblocking mode";
-      C10D_NCCL_CHECK_NONBLOCKING(
-          ncclCommInitRankConfig(
-              &(comm->ncclComm_), numRanks, commId, rank, &config),
-          std::nullopt);
-    } else {
-      C10D_NCCL_CHECK(
-          ncclCommInitRankConfig(
-              &(comm->ncclComm_), numRanks, commId, rank, &config),
-          std::nullopt);
-      // under blocking mode, comm is initialized after NCCL CHECK
-      isInitialized = true;
-    }
+    comm->nonBlocking_ = config.blocking == 0;
+    LOG(INFO) << "Rank " << rank << ": creating NCCL communicator with mode: "
+              << (comm->nonBlocking_ ? "nonblocking" : "blocking");
+    C10D_NCCL_CHECK_NONBLOCKING(
+        ncclCommInitRankConfig(
+            &(comm->ncclComm_), numRanks, commId, rank, &config),
+        std::nullopt);
     comm->ncclId_ = commId;
     comm->rank_ = rank;
-    comm->initialized_ = isInitialized;
+    // Under blocking mode, comm is initialized immediately after NCCL init
+    // returns; Under nonblocking mode, we check whether comm is initialized the
+    // *next* time ncclComm_ is accessed.
+    comm->initialized_ = !comm->nonBlocking_;
     return comm;
   }
 
@@ -373,27 +370,28 @@ class NCCLComm {
   NCCLComm& operator=(NCCLComm&& other) = delete;
 
   // Move constructable
-  // NOLINTNEXTLINE(.*-noexcept-move-.*)
+  // NOLINTNEXTLINE(*-noexcept-move-*)
   NCCLComm(NCCLComm&& other) {
     // Using other's lock, as it reads other's states
     // Can not use this.mutex_, as this object is being constructed.
-    std::unique_lock<std::mutex> lock(other.mutex_);
+    LockType lock(other.mutex_);
     std::swap(ncclComm_, other.ncclComm_);
     std::swap(aborted_, other.aborted_);
     std::swap(ncclAsyncErr_, other.ncclAsyncErr_);
     std::swap(initialized_, other.initialized_);
+    std::swap(nonBlocking_, other.nonBlocking_);
   }
 
   ncclComm_t getNcclComm();
 
   std::optional<std::string> getNcclCommFailureReason() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
     return commFailureReason_;
   }
 
   void ncclCommAbort(
       std::optional<std::string> commFailureReason = std::nullopt) {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_ && !initialized_) {
       // Should not abort twice.
@@ -441,12 +439,12 @@ class NCCLComm {
   }
 
   bool isInitialized() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
     return initialized_;
   }
 
   bool isAborted() const {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
     return aborted_;
   }
 
@@ -455,7 +453,7 @@ class NCCLComm {
   }
 
   ncclResult_t checkForNcclError() {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (ncclAsyncErr_ != ncclSuccess) {
       return ncclAsyncErr_;
@@ -470,7 +468,7 @@ class NCCLComm {
   }
 
   ncclResult_t registerSegment(void* ptr, size_t size) {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
     // We register only segments from cache allocator
     // which are guaranteed to be with disjoint addr ranges. Thus, a ptr always
@@ -503,7 +501,7 @@ class NCCLComm {
   }
 
   ncclResult_t deregisterSegment(void* ptr) {
-    std::unique_lock<std::mutex> lock(mutex_);
+    LockType lock(mutex_);
 #ifdef NCCL_HAS_COMM_REGISTER
     TORCH_CHECK(
         registeredSegmentHandles_.count(ptr) == 1,
@@ -543,13 +541,17 @@ class NCCLComm {
   bool aborted_{false};
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_{ncclSuccess};
-  mutable std::mutex mutex_;
+  mutable MutexType mutex_;
   // Rank that this communicator corresponds to.
   int rank_{};
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
   std::optional<std::string> commFailureReason_{};
   bool initialized_{false};
+  // Whether this communicator is using nonblocking mode. Recorded during comm
+  // creation or split. For safety, we give a default value of true (more
+  // protection).
+  bool nonBlocking_{true};
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL
   std::unordered_map<void*, void*> registeredSegmentHandles_;
@@ -661,6 +663,9 @@ struct NCCLTraceBuffer {
     c10::SmallVector<int64_t, 8> sizes_; // flattened from inputs, outputs
     bool retired_ = false; // is this work entry no longer in the workMetaList_?
                            // a retired but not completed event has timed out
+
+    // Returns the traceback of current entry, in string form.
+    std::string getTraceback();
   };
 
   bool enabled_ = false;
@@ -696,6 +701,10 @@ struct NCCLTraceBuffer {
   void update_state(Entry& r);
 
   std::vector<Entry> dump_entries();
+
+  // Returns the entry with the given id, if it exists. Otherwise, returns
+  // std::nullopt.
+  std::optional<Entry> getEntry(std::optional<size_t> id);
 
   /*
   Mark an Event as completed and free its events.
