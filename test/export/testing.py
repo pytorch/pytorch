@@ -284,3 +284,14 @@ def expectedFailureSerDerPreDispatch(fn):
 def expectedFailurePreDispatchRunDecomp(fn):
     fn._expected_failure_pre_dispatch = True
     return fn
+
+
+# Controls tests generated in test/export/test_export_legacy.py
+def expectedFailureLegacyExportStrict(fn):
+    fn._expected_failure_legacy_export = True
+    return fn
+
+
+def expectedFailureLegacyExportNonStrict(fn):
+    fn._expected_failure_legacy_export_non_strict = True
+    return fn

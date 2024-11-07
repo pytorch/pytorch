@@ -178,10 +178,16 @@ SERDES_NON_STRICT_SUFFIX = "_serdes_non_strict"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
 TRAINING_IR_DECOMP_STRICT_SUFFIX = "_training_ir_to_decomp"
 TRAINING_IR_DECOMP_NON_STRICT_SUFFIX = "_training_ir_to_decomp_non_strict"
+LEGACY_EXPORT_STRICT_SUFFIX = "_legacy_export_strict"
+LEGACY_EXPORT_NONSTRICT_SUFFIX = "_legacy_export_non_strict"
 
 
 def is_non_strict_test(test_name):
     return test_name.endswith(NON_STRICT_SUFFIX)
+
+
+def is_non_strict_legacy_test(test_name):
+    return test_name.endswith(LEGACY_EXPORT_NONSTRICT_SUFFIX)
 
 
 def is_retracebility_test(test_name):
@@ -1211,7 +1217,9 @@ graph():
         # as input, runtime assertion should fail. This is because we would create
         # guard on y.shape[0] > x.shape[0] but somehow in old export, we dce this
         # assertion.
-        if is_non_strict_test(self._testMethodName):
+        if is_non_strict_test(self._testMethodName) and not is_non_strict_legacy_test(
+            self._testMethodName
+        ):
             with self.assertRaisesRegex(RuntimeError, "Runtime assertion failed for"):
                 ep.module()(x, x)
         else:
@@ -1450,6 +1458,8 @@ def forward(self, x, y):
                     self.assertEqual(ep.module()(sample_input), nz)
                     print(ep)
 
+    @testing.expectedFailureLegacyExportNonStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
+    @testing.expectedFailureLegacyExportStrict  # Trivial error, just need to move the error check earlier, for real users it wont matter
     def test_export_script_module(self):
         class Foo(torch.nn.Module):
             def forward(self, rv: torch.Tensor, t: torch.Tensor):
@@ -3676,6 +3686,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
     @testing.expectedFailureNonStrict
     @testing.expectedFailureTrainingIRToRunDecompNonStrict  # source_fn_stack failure
     @testing.expectedFailureRetraceabilityNonStrict
+    @testing.expectedFailureLegacyExportNonStrict
     def test_linear_conv(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -9055,6 +9066,7 @@ def forward(self, x):
     @testing.expectedFailureSerDer  # T195866111
     @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureRetraceabilityNonStrict
+    @testing.expectedFailureLegacyExportNonStrict
     def test_hints_wrapper(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
