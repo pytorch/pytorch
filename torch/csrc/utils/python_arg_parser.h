@@ -702,7 +702,12 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     PyObject* obj =
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
-      res[idx] = THPUtils_unpackDouble(obj);
+      if (torch::is_symfloat(py::handle(obj))) {
+        res[idx] = py::cast<c10::SymFloat>(py::handle(obj))
+                       .guard_float(__FILE__, __LINE__);
+      } else {
+        res[idx] = THPUtils_unpackDouble(obj);
+      }
     } catch (const std::exception&) {
       throw TypeError(
           "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
