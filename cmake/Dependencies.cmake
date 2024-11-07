@@ -1300,6 +1300,28 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
 
+# --[ x86-simd-sort integration
+if(USE_X86_SIMD_SORT)
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(WARNING
+      "x64 operating system is required for x86-simd-sort. "
+      "Not compiling with x86-simd-sort. "
+      "Turn this warning off by USE_X86_SIMD_SORT=OFF.")
+    set(USE_X86_SIMD_SORT OFF)
+  endif()
+
+  if(USE_X86_SIMD_SORT)
+    if(USE_OPENMP AND NOT MSVC)
+      set(USE_XSS_OPENMP ON)
+    else()
+      set(USE_XSS_OPENMP OFF)
+    endif()
+
+    set(XSS_SIMD_SORT_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/x86-simd-sort)
+    include_directories(SYSTEM ${XSS_SIMD_SORT_INCLUDE_DIR})
+  endif()
+endif()
+
 # --[ ATen checks
 set(USE_LAPACK 0)
 
