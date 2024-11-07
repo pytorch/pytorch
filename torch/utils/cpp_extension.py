@@ -566,10 +566,10 @@ class BuildExtension(build_ext):
 
             self._add_compile_flag(extension, '-DTORCH_API_INCLUDE_EXTENSION_H')
             # See note [Pybind11 ABI constants]
-            # for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
-            #     val = getattr(torch._C, f"_PYBIND11_{name}")
-            #     if val is not None and not IS_WINDOWS:
-            #         self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
+            for name in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
+                val = getattr(torch._C, f"_PYBIND11_{name}")
+                if val is not None and not IS_WINDOWS:
+                    self._add_compile_flag(extension, f'-DPYBIND11_{name}="{val}"')
             self._define_torch_extension_name(extension)
             self._add_gnu_cpp_abi_flag(extension)
 
@@ -1387,6 +1387,10 @@ def _get_pybind11_abi_build_flags():
     # that can cause a hard to debug segfaults.
     # For PyTorch extensions we want to relax those restrictions and pass compiler, stdlib and abi properties
     # captured during PyTorch native library compilation in torch/csrc/Module.cpp
+    #
+    # Note that these flags don't have side effects even if the PyTorch extension does not
+    # require nor use pybind, so we do not do anything differently for them in the py_limited_api
+    # case.
 
     abi_cflags = []
     for pname in ["COMPILER_TYPE", "STDLIB", "BUILD_ABI"]:
@@ -1528,7 +1532,7 @@ def _check_and_build_extension_h_precompiler_headers(
         common_cflags += ['-DTORCH_API_INCLUDE_EXTENSION_H']
 
     common_cflags += ['-std=c++17', '-fPIC']
-    # common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
+    common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
     common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
     common_cflags_str = listToString(common_cflags)
 
@@ -2235,7 +2239,7 @@ def _write_ninja_file_to_build_library(path,
         common_cflags.append(f'-DTORCH_EXTENSION_NAME={name}')
         common_cflags.append('-DTORCH_API_INCLUDE_EXTENSION_H')
 
-    # common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
+    common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
 
     # Windows does not understand `-isystem` and quotes flags later.
     if IS_WINDOWS:
