@@ -109,6 +109,10 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
   return matmul_alignment_mn;
 }
 
+// On ROCM, ME and FA share the backend, and hence they share the checking
+// function for fundamental limitations by the GPU kernel
+// caller_is_meff is added to make the TORCH_WARN message showing the correct result
+template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
   // All head_dim sizes must be equal and less than 256
   const auto max_size = c10::SymInt(256);
@@ -120,7 +124,8 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
   if (!(same_head_dim_size && (query_size_last <= max_size))) {
     if (debug) {
       TORCH_WARN(
-          "Flash attention requires q,k,v to have the same last dimension and to be less than or equal to 256.",
+          caller_is_meff ? "Efficient attention on ROCM" : "Flash attention",
+          " requires q,k,v to have the same last dimension and to be less than or equal to 256.",
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
@@ -134,6 +139,8 @@ bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
   return true;
 }
 
+// See check_head_dim_size_flash above for the purpose of caller_is_meff
+template<bool caller_is_meff = false>
 bool check_head_dim_size_flash_nested(sdp_params const& params, bool debug) {
   const auto max_size = c10::SymInt(256);
   const auto query_size_last = params.query.sym_size(-1);
@@ -145,7 +152,9 @@ bool check_head_dim_size_flash_nested(sdp_params const& params, bool debug) {
         (query_size_last <= max_size))) {
     if (debug) {
       TORCH_WARN(
-          "For NestedTensor inputs, Flash attention requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 256.",
+          "For NestedTensor inputs,",
+          caller_is_meff ? " Efficient attention on ROCM " : " Flash attention",
+          " requires q,k,v to have the same last dimension and to be a multiple of 8 and less than or equal to 256.",
           " Got Query.size(-1): ",
           query_size_last,
           ", Key.size(-1): ",
@@ -685,7 +694,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
 #ifdef USE_ROCM
-      check_head_dim_size_flash
+      check_head_dim_size_flash<true /* caller_is_meff */>
 #else
       check_head_dim_size_mem_efficient
 #endif
@@ -697,12 +706,12 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
   if (has_for_nested_inputs(params)) {
-#ifdef USE_ROCM
-    TORCH_WARN_ONCE(false, "[ROCM] no support for nested tensors in memory efficient attention.");
-    return false;
-#endif
     constexpr auto nested_constraints = array_of<bool (*)(sdp_params const&, bool)>(
+#ifndef USE_ROCM  // ME and FA shares backend on ROCM and thus supports training
         check_requires_grad_and_nested,
+#else // Meanwhile ME on ROCM share the limits of FA about head dimensions
+        check_head_dim_size_flash_nested<true /* caller_is_meff */>,
+#endif
         check_batch_size_nested,
         check_for_seq_len_0_nested_tensor);
     for (auto& constraint : nested_constraints) {
