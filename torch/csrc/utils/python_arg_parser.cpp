@@ -27,14 +27,12 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"Scalar", ParameterType::SCALAR},
     {"int64_t", ParameterType::INT64},
     {"SymInt", ParameterType::SYM_INT},
-    {"SymFloat", ParameterType::SYM_FLOAT},
     {"double", ParameterType::DOUBLE},
     {"complex", ParameterType::COMPLEX},
     {"TensorList", ParameterType::TENSOR_LIST},
     {"c10::List<::std::optional<Tensor>>", ParameterType::TENSOR_LIST},
     {"IntArrayRef", ParameterType::INT_LIST},
     {"SymIntArrayRef", ParameterType::SYM_INT_LIST},
-    {"SymFloatArrayRef", ParameterType::SYM_FLOAT_LIST},
     {"ArrayRef<double>", ParameterType::FLOAT_LIST},
     {"Generator", ParameterType::GENERATOR},
     {"bool", ParameterType::BOOL},
@@ -842,7 +840,7 @@ static bool is_float_or_symfloat(PyObject* obj) {
   return false;
 }
 
-static bool is_float_or_symfloat_or_complex_list(PyObject* obj) {
+static bool is_float_or_complex_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
     return false;
@@ -948,7 +946,7 @@ auto FunctionParameter::check(
       }
       [[fallthrough]];
     case ParameterType::DOUBLE: {
-      if (THPUtils_checkDouble(obj)) {
+      if (is_float_or_symfloat(obj)) {
         return true;
       }
       if (THPVariable_Check(obj)) {
@@ -992,8 +990,7 @@ auto FunctionParameter::check(
           obj, &overloaded_args, argnum, true /* throw_error */);
     }
     case ParameterType::FLOAT_LIST:
-    case ParameterType::SYM_FLOAT_LIST:
-      return is_float_or_symfloat_or_complex_list(obj);
+      return is_float_or_complex_list(obj);
     case ParameterType::GENERATOR:
       return THPGenerator_Check(obj);
     case ParameterType::BOOL:
@@ -1023,8 +1020,6 @@ auto FunctionParameter::check(
       return is_scalar_list(obj);
     case ParameterType::SYM_INT:
       return is_int_or_symint(obj);
-    case ParameterType::SYM_FLOAT:
-      return is_float_or_symfloat(obj);
     // Allow SymInt where int is expected; we'll guard in this case
     case ParameterType::INT_LIST:
     case ParameterType::SYM_INT_LIST:
@@ -1048,7 +1043,6 @@ std::string FunctionParameter::type_name() const {
     // use will only know about ints
     case ParameterType::SYM_INT:
       return "int";
-    case ParameterType::SYM_FLOAT:
     case ParameterType::DOUBLE:
       return "float";
     case ParameterType::COMPLEX:
@@ -1087,8 +1081,6 @@ std::string FunctionParameter::type_name() const {
       return "tuple of Scalars";
     case ParameterType::SYM_INT_LIST:
       return "tuple of ints";
-    case ParameterType::SYM_FLOAT_LIST:
-      return "tuple of floats";
     case ParameterType::DISPATCH_KEY_SET:
       return "DispatchKeySet";
     default:
@@ -1222,8 +1214,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
     default_int = atol(str.c_str());
   } else if (type_ == ParameterType::BOOL) {
     default_bool = (str == "True" || str == "true");
-  } else if (
-      type_ == ParameterType::DOUBLE || type_ == ParameterType::SYM_FLOAT) {
+  } else if (type_ == ParameterType::DOUBLE) {
     default_double = atof(str.c_str());
   } else if (type_ == ParameterType::COMPLEX) {
     default_complex[0] = atof(str.c_str()); // TODO: parse "x + xj"?
@@ -1241,9 +1232,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (str != "None") {
       default_intlist = parse_intlist_args(str, size);
     }
-  } else if (
-      type_ == ParameterType::FLOAT_LIST ||
-      type_ == ParameterType::SYM_FLOAT_LIST) {
+  } else if (type_ == ParameterType::FLOAT_LIST) {
     if (str != "None") {
       throw std::runtime_error("Defaults not supported for float[]");
     }
@@ -1779,7 +1768,7 @@ at::Tensor PythonArgs::tensor_slow(int i) {
     }
   } else if (PyComplex_Check(obj)) {
     scalar = at::Scalar(THPUtils_unpackComplexDouble(obj));
-  } else if (THPUtils_checkDouble(obj)) {
+  } else if (is_float_or_symfloat(obj)) {
     scalar = at::Scalar(THPUtils_unpackDouble(obj));
     // NB: we DO NOT put symbolic ints/floats into the Scalar itself,
     // because although Scalar supports SymInt/SymFloat, the subsequent
