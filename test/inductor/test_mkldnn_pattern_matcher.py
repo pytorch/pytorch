@@ -12,7 +12,6 @@ from torch._inductor import config, metrics
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
-from torch.ao.quantization.quantizer.xpu_inductor_quantizer import XPUInductorQuantizer
 from torch.nn import functional as F
 from torch.testing._internal.common_quantization import (
     _generate_qdq_quantized_model,
@@ -150,11 +149,6 @@ class TestPatternMatcherBase(TestCase):
     ):
         counters.clear()
         torch._dynamo.reset()
-        is_xpu = False
-        for input in inputs:
-            is_xpu = is_xpu or (
-                isinstance(input, torch.Tensor) and input.device.type == "xpu"
-            )
         assert matcher_check_fn is not None or (
             matcher_count is not None and matcher_nodes is not None
         )
@@ -175,13 +169,6 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = contextlib.nullcontext()
 
         if check_quantization:
-            if is_xpu:
-                quantizer = XPUInductorQuantizer()
-                quantizer.set_global(
-                    xiq.get_default_x86_inductor_quantization_config(
-                        is_qat=is_qat, is_dynamic=is_dynamic
-                    )
-                )
             convert_model = _generate_qdq_quantized_model(
                 mod, inputs, is_qat, is_dynamic, quantizer
             )

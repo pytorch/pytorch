@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
+import functools
 from typing import Optional
 
 import torch
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
     _is_any_annotated,
     FilterFn,
+    get_default_x86_inductor_quantization_config,
     int8_in_int8_out_ops,
     X86InductorQuantizer,
 )
@@ -12,7 +14,15 @@ from torch.ao.quantization.quantizer.xnnpack_quantizer_utils import Quantization
 from torch.fx import Node
 
 
-__all__ = ["XPUInductorQuantizer"]
+__all__ = [
+    "XPUInductorQuantizer",
+    "get_default_xpu_inductor_quantization_config",
+]
+
+
+@functools.lru_cache
+def get_default_xpu_inductor_quantization_config():
+    return get_default_x86_inductor_quantization_config()
 
 
 class XPUInductorQuantizer(X86InductorQuantizer):

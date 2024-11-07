@@ -354,6 +354,8 @@ inductor_expected_failures_single_sample["xpu"] = {
     # not implemented for 'Half'
     "nn.functional.multilabel_margin_loss": {f16},
     "nn.functional.multi_margin_loss": {f16},
+    "sort": {b8},
+    "argsort": {b8},
 }
 
 
@@ -693,7 +695,7 @@ inductor_one_sample["cpu"] = {
     "nn.functional.cosine_similarity": {f16},
     "nn.functional.cross_entropy": {f16, f32, f64},
     "nn.functional.gaussian_nll_loss": {f16},
-    "nn.functional.grid_sample": {f32, f64},
+    "nn.functional.grid_sample": {f32, f64, f16},
     "nn.functional.interpolate.area": {f16},
     "nn.functional.nll_loss": {f16, f32, f64},
     "normal": {f16, f32, f64},
