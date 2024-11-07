@@ -229,6 +229,7 @@ class CMake:
                     "STATIC_DISPATCH_BACKEND",
                     "SELECTED_OP_LIST",
                     "TORCH_CUDA_ARCH_LIST",
+                    "TORCH_XPU_ARCH_LIST",
                     "TRACING_BASED",
                     "PYTHON_LIB_REL_PATH",
                 )

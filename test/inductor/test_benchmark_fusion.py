@@ -169,8 +169,8 @@ class BenchmarkFusionTestTemplate:
 
         for c in out_code[0], out_code2[0]:
             FileCheck().check("async_compile.wait").check("DeviceGuard").check_count(
-                "empty_strided_cuda", 2, exactly=True
-            ).check("return").run(c)
+                "empty_strided_cuda", 1, exactly=True
+            ).check_regex("buf[0-9]* = buf[0-9]*; del buf[0-9]*").check("return").run(c)
 
     def test_tield_kernel_fusion(self):
         def f(x):
@@ -279,7 +279,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             for out_code in [code, code2]:
                 FileCheck().check("def call").check_count(
                     "empty_strided_cuda", 1, exactly=True
-                ).check("triton_tem_fused_relu_0.run").check_count(
+                ).check("triton_tem_fused_addmm_relu_0.run").check_count(
                     "del", 3, exactly=True
                 ).check(
                     "return"

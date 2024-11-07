@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: cpu inductor"]
 import contextlib
 import functools
-import logging
-import os
 import sys
 import unittest
 from typing import Optional
@@ -14,6 +12,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch._inductor.select_algorithm as select_algorithm
 from torch._dynamo.utils import counters
+from torch._inductor import test_operators
 from torch._inductor.cpu_vec_isa import VecAMX
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_device_type import (
@@ -30,9 +29,6 @@ from torch.testing._internal.common_utils import (
     skipIfWindows,
     TEST_MKL,
 )
-
-
-log = logging.getLogger(__name__)
 
 
 try:
@@ -137,6 +133,12 @@ class BaseTestSelectAlgorithm(TestCase):
             self.assertTrue(counters["inductor"]["cpp_micro_gemm_amx_counter"] > 0)
         else:
             self.assertEqual(counters["inductor"]["cpp_micro_gemm_amx_counter"], 0)
+
+    def _check_brgemm_counter(self, vec_amx):
+        if vec_amx and torch.cpu._is_amx_fp16_supported():
+            self.assertTrue(counters["inductor"]["cpp_micro_brgemm_counter"] > 0)
+        else:
+            self.assertEqual(counters["inductor"]["cpp_micro_brgemm_counter"], 0)
 
 
 class TestSelectAlgorithm(BaseTestSelectAlgorithm):
@@ -274,19 +276,6 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             def forward(self, x):
                 return self.epilogue(self.linear(x))
 
-        # TODO: debug utils, safe to remove in Oct 2024
-        if inductor_config.is_fbcode():
-            log.warning(
-                f"DEBUG: torch.backends.mkl.is_available() is {torch.backends.mkl.is_available()}, "  # noqa: G004
-                f"torch.ops.mkldnn._is_mkldnn_fp16_supported() is {torch.ops.mkldnn._is_mkldnn_fp16_supported()}, "
-                f"torch.ops.mkldnn._is_mkldnn_bf16_supported() is {torch.ops.mkldnn._is_mkldnn_bf16_supported()}, "
-                f"inductor_config.freezing is {inductor_config.freezing}, "
-                f"mkldnn._is_mkldnn_acl_supported() is {torch.ops.mkldnn._is_mkldnn_acl_supported()}, "
-                f"torch._C.has_mkl is {torch._C.has_mkl}, "
-                f"PYTORCH_TEST_FBCODE is {os.getenv('PYTORCH_TEST_FBCODE')}, "
-                f"PYTORCH_TEST_REMOTE_GPU is {os.getenv('PYTORCH_TEST_REMOTE_GPU')}, "
-            )
-
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
@@ -296,7 +285,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         if (
             (
-                dtype == torch.bfloat16
+                (
+                    dtype == torch.bfloat16
+                    and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+                )
                 or (
                     dtype == torch.float16
                     and torch.ops.mkldnn._is_mkldnn_fp16_supported()
@@ -304,7 +296,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             )
             and epilogue != "mul"
             and epilogue != "div"
-            or (dtype == torch.half and epilogue == "add" and not bias)
+            or (
+                dtype in (torch.float16, torch.bfloat16)
+                and epilogue == "add"
+                and not bias
+            )
             or (
                 dtype == torch.float32
                 and epilogue == "add"
@@ -318,7 +314,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             #    not fused via scheduler. This will also be true for float16 when
             #    hardware has the float16 instruction. The exception is mul or
             #    div fusion which is not supported for oneDNN linear.
-            # 2. For float16, since oneDNN linear is not applied, linear w/o bias
+            # 2. For bfloat16/float16, when oneDNN linear is not applied, linear w/o bias
             #    plus epilogue add is treated as linear w/ bias.
             # 3. For float32, when dynamic shapes is enabled, mkl linear is not applied.
             #    and linear w/o bias plus epilogue add is treated as addmm.
@@ -544,6 +540,137 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @patches
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (8,))
+    @parametrize("in_features", (128,))
+    @parametrize("size_0", (4,))
+    @parametrize("size_1", (14,))
+    @parametrize("out_features", (512,))
+    @parametrize("out_features_conv", (256,))
+    @parametrize(
+        "bias",
+        (
+            False,
+            True,
+        ),
+    )
+    @parametrize(
+        "epilogue",
+        (
+            False,
+            True,
+        ),
+    )
+    @dtypes(torch.float32)
+    def test_linear_unsupported_epilogue_fusion(
+        self,
+        batch_size,
+        in_features,
+        size_0,
+        size_1,
+        out_features,
+        out_features_conv,
+        bias,
+        epilogue,
+        dtype,
+    ):
+        img_size_0 = int(size_0 * size_0)
+        img_size_1 = int(size_1 * size_1)
+        conv_shape = int(size_0 * size_1)
+        flatten_BS = int(batch_size * size_0 * size_0 * size_1 * size_1)
+
+        # Reproducer from the jx_nest_base model in timm
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(in_features, in_features, bias=bias)
+                self.linear2 = torch.nn.Linear(out_features, in_features, bias=bias)
+                self.conv = torch.nn.Conv2d(
+                    in_features,
+                    out_features_conv,
+                    kernel_size=3,
+                    padding=1,
+                    stride=1,
+                    dilation=1,
+                    groups=1,
+                )
+                self.epilogue = epilogue
+
+            def forward(self, mul_239, view_425, add_184):
+                _mkl_linear_91 = self.linear1(view_425)
+                view_426 = torch.ops.aten.reshape.default(
+                    _mkl_linear_91, [batch_size, img_size_0, img_size_1, in_features]
+                )
+                _mkl_linear_91 = None
+                add_187 = torch.ops.aten.add.Tensor(add_184, view_426)
+                add_184 = view_426 = None
+                view_429 = torch.ops.aten.reshape.default(
+                    mul_239, [flatten_BS, out_features]
+                )
+                mul_239 = None
+
+                _mkl_linear_89 = self.linear2(view_429)
+                if self.epilogue:
+                    _mkl_linear_89 = torch.pow(_mkl_linear_89, 2)
+                    _mkl_linear_89 = test_operators.realize(_mkl_linear_89)
+
+                view_430 = torch.ops.aten.reshape.default(
+                    _mkl_linear_89, [batch_size, img_size_0, img_size_1, in_features]
+                )
+                _mkl_linear_89 = None
+
+                add_191 = torch.ops.aten.add.Tensor(add_187, view_430)
+                add_187 = view_430 = None
+
+                view_431 = torch.ops.aten.reshape.default(
+                    add_191, [batch_size, size_0, size_0, size_1, size_1, in_features]
+                )
+                add_191 = None
+                permute_203 = torch.ops.aten.permute.default(
+                    view_431, [0, 1, 3, 2, 4, 5]
+                )
+                view_431 = None
+                clone_188 = torch.ops.aten.clone.default(
+                    permute_203, memory_format=torch.contiguous_format
+                )
+                permute_203 = None
+                view_432 = torch.ops.aten.reshape.default(
+                    clone_188, [batch_size, conv_shape, conv_shape, in_features]
+                )
+                clone_188 = None
+                permute_204 = torch.ops.aten.permute.default(view_432, [0, 3, 1, 2])
+                view_432 = None
+
+                _convolution_pointwise_default_1 = self.conv(permute_204)
+
+                return _convolution_pointwise_default_1
+
+        mul_239 = torch.randn(batch_size, img_size_0, img_size_1, out_features)
+        view_425 = torch.randn(flatten_BS, in_features)
+        add_184 = torch.randn(batch_size, img_size_0, img_size_1, in_features)
+        mod = M(bias=bias).eval()
+        with verify(dtype) as (atol, rtol), torch.cpu.amp.autocast(
+            enabled=dtype == torch.bfloat16
+        ):
+            self.common(
+                mod,
+                (
+                    mul_239,
+                    view_425,
+                    add_184,
+                ),
+                atol=atol,
+                rtol=rtol,
+            )
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 2)
+        # TODO: change cpp_epilogue_fusion_counter to 1 once supported
+        self.assertEqual(
+            counters["inductor"]["cpp_epilogue_fusion_counter"], 1 if epilogue else 0
+        )
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
     @parametrize("out_features", (384, 385))
@@ -621,11 +748,65 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @set_num_threads(1)
+    @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
+    @parametrize("batch_size", (256,))
+    @parametrize("in_features", (3,))
+    @parametrize("out_features", (1024,))
+    @parametrize("out_features2", (2,))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.float)
+    def test_linear_local_and_global_buffer_dynamic_shapes(
+        self, batch_size, in_features, out_features, out_features2, bias, dtype
+    ):
+        # Reproducer from soft_actor_critic
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.linear1 = torch.nn.Linear(out_features, out_features, bias)
+                self.linear2 = torch.nn.Linear(out_features, out_features2, bias)
+
+            def forward(self, arg7_1):
+                addmm_3 = self.linear(arg7_1)
+                relu_2 = torch.ops.aten.relu.default(addmm_3)
+
+                addmm_4 = self.linear1(relu_2)
+                relu_3 = torch.ops.aten.relu.default(addmm_4)
+
+                addmm_5 = self.linear2(relu_3)
+
+                split_1 = torch.ops.aten.split.Tensor(addmm_5, 1, 1)
+                getitem_2 = split_1[0]
+                getitem_3 = split_1[1]
+
+                tanh_1 = torch.ops.aten.tanh.default(getitem_3)
+
+                add_62 = torch.ops.aten.add.Tensor(tanh_1, 1)
+
+                mul_36 = torch.ops.aten.mul.Tensor(add_62, 6.0)
+                add_69 = torch.ops.aten.add.Tensor(mul_36, -10.0)
+
+                exp_1 = torch.ops.aten.exp.default(add_69)
+                return (getitem_2, exp_1)
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 3)
+        self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 2)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @parametrize("batch_size", (1024,))
     @parametrize("in_features", (1024,))
     @parametrize("out_features", (1024, 1025))
     @parametrize("bias", (True, False))
-    @dtypes(torch.bfloat16)
+    @dtypes(torch.bfloat16, torch.half)
     def test_linear_amx(self, batch_size, in_features, out_features, bias, dtype):
         class M(torch.nn.Module):
             def __init__(self, bias):
@@ -642,7 +823,11 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
         vec_amx = VecAMX()
-        self._check_amx_counter(vec_amx)
+        # Currently brgemm config is only added for half
+        if dtype == torch.half:
+            self._check_brgemm_counter(vec_amx)
+        else:
+            self._check_amx_counter(vec_amx)
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -1185,7 +1370,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @dtypes(torch.bfloat16)
     @parametrize("batch_size", (32,))
-    @parametrize("in_features", (128,))
+    @parametrize("in_features", (128, 144))
     @parametrize("out_features", (64, 65))
     def test_int8_woq_mm(self, dtype, batch_size, in_features, out_features):
         # x will be reshaped from 3d to 2d
@@ -1396,7 +1581,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @set_num_threads(1)
-    @parametrize("batch_size", (1024,))
+    @parametrize("batch_size", (512,))
     @parametrize("in_features", (1024,))
     @parametrize("out_features", (1024,))
     @parametrize("bias", (True, False))
@@ -1445,6 +1630,134 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         mod = M(bias=bias).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": False})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64,))
+    @parametrize("bias", (True,))
+    @dtypes(
+        torch.float,
+    )
+    def test_aoti_linear(self, batch_size, in_features, out_features, bias, dtype):
+        try:
+            try:
+                from . import test_aot_inductor_utils
+            except ImportError:
+                import test_aot_inductor_utils
+        except Exception:
+            # skip this UT if import failed
+            return
+
+        class M(torch.nn.Module):
+            def __init__(self, bias=bias) -> None:
+                super().__init__()
+                self.mlp = torch.nn.Sequential(
+                    torch.nn.Linear(in_features, out_features, bias=bias),
+                    torch.nn.ReLU(),
+                )
+
+            def forward(self, x):
+                return self.mlp(x)
+
+        assert torch._inductor.config.freezing is False
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        torch.manual_seed(0)
+        with verify(dtype) as (atol, rtol), torch.no_grad():
+            expected = mod(v)
+            actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
+                "cpu",
+                mod,
+                (v,),
+            )
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": False})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (16,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64,))
+    @dtypes(
+        torch.float,
+    )
+    def test_aoti_linear_multi_view_operations(
+        self, batch_size, in_features, out_features, dtype
+    ):
+        try:
+            try:
+                from . import test_aot_inductor_utils
+            except ImportError:
+                import test_aot_inductor_utils
+        except Exception:
+            # skip this UT if import failed
+            return
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.bias = torch.randn(out_features)
+                self.weight = torch.randn(out_features // 2, 2, in_features)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                tmp = torch.addmm(
+                    self.bias,
+                    x,
+                    self.weight.permute(2, 0, 1).view(in_features, out_features),
+                )
+                return self.relu(tmp)
+
+        assert torch._inductor.config.freezing is False
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M().to(dtype=dtype).eval()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        torch.manual_seed(0)
+        with verify(dtype) as (atol, rtol), torch.no_grad():
+            expected = mod(v)
+            actual = test_aot_inductor_utils.AOTIRunnerUtil.run(
+                "cpu",
+                mod,
+                (v,),
+            )
+            self.assertEqual(actual, expected, atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @inductor_config.patch({"coordinate_descent_tuning": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_cpp_coordinate_descent_tuning(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(512, 1024, bias=False)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        v = torch.randn(1, 512)
+        mod = M().eval()
+        torch._dynamo.reset()
+        torch._inductor.metrics.reset()
+        counters.clear()
+        with verify(torch.bfloat16) as (atol, rtol), torch.autocast(device_type="cpu"):
             self.common(mod, (v,), atol=atol, rtol=rtol)
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 

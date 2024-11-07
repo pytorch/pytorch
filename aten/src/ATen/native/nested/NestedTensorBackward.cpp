@@ -9,8 +9,6 @@
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
-#include <ATen/native/nested/NestedTensorMath.h>
-#include <ATen/native/layer_norm.h>
 #include <c10/core/DeviceType.h>
 
 #include <utility>
@@ -143,9 +141,9 @@ Tensor _nested_sum_backward_cpu(
     for (const auto i : c10::irange(ntensors)) {
       int64_t segments = num_segments[i].item<int64_t>();
       int64_t segment_length = segment_lengths[i].item<int64_t>();
-      for (auto j = 0; j < segments; j++) {
+      for (int64_t j = 0; j < segments; j++) {
         scalar_t output_grad = output_grad_data[out_idx];
-        for (auto k = 0; k < segment_length; k++) {
+        for (int64_t k = 0; k < segment_length; k++) {
           self_grad_data[in_idx] = output_grad;
           in_idx += 1;
         }

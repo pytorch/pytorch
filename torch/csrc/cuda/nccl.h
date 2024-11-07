@@ -31,8 +31,8 @@ typedef void* ncclComm_t;
 /** redefine nccl unique ID in torch scope. this should be identical to native
  * nccl impp. */
 #define NCCL_UNIQUE_ID_BYTES 128
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 typedef struct {
+  // NOLINTNEXTLINE(*array*)
   char internal[NCCL_UNIQUE_ID_BYTES];
 } ncclUniqueId;
 
@@ -75,7 +75,7 @@ enum class ncclDataType {
 // RAII helper class to manage NCCL group API and CUDA free mutex.
 // The destructor is allowed to throw since this helper class only
 // manages group and lock lifetimes.
-struct AutoNcclGroup {
+struct TORCH_CUDA_CPP_API AutoNcclGroup {
   AutoNcclGroup();
   AutoNcclGroup(ncclComm_t comm, bool comm_nonblocking);
   ~AutoNcclGroup() noexcept(false);
@@ -100,14 +100,14 @@ TORCH_CUDA_CPP_API at::ArrayRef<ncclComm_t> get_communicators(
 TORCH_CUDA_CPP_API void check_inputs(
     at::TensorList inputs,
     at::TensorList outputs,
-    int input_multiplier,
-    int output_multiplier);
+    size_t input_multiplier,
+    size_t output_multiplier);
 TORCH_CUDA_CPP_API void check_inputs(
     at::TensorList inputs,
     const at::Tensor& output,
     int root,
-    int input_multiplier,
-    int output_multiplier);
+    size_t input_multiplier,
+    size_t output_multiplier);
 
 } // namespace detail
 

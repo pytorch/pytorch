@@ -5,7 +5,13 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import logging
 from typing import Optional, Sequence
+
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
+
+
+logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
 class JobConfig:
@@ -19,6 +25,7 @@ class JobConfig:
         )
         self.parser.add_argument(
             "trace_dir",
+            nargs="?",
             help="Directory containing one trace file per rank, named with <prefix>_<rank>.",
         )
         self.parser.add_argument(
@@ -33,7 +40,10 @@ class JobConfig:
             default=None,
             nargs="+",
             type=str,
-            help="List of filter strings",
+            help=(
+                "List of filter strings, it could be pg name or pg desc. "
+                "If specified, only show traces for the given pg."
+            ),
         )
         self.parser.add_argument("-o", "--output", default=None)
         self.parser.add_argument(
@@ -60,4 +70,6 @@ class JobConfig:
             assert (
                 args.just_print_entries
             ), "Not support selecting pg filters without printing entries"
+        if args.verbose:
+            logger.set_log_level(logging.DEBUG)
         return args

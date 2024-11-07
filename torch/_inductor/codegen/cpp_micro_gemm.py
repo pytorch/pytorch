@@ -8,7 +8,7 @@ import sympy
 
 import torch
 
-from .. import ir
+from .. import cpp_builder, ir
 from ..cpu_vec_isa import pick_vec_isa, VecAMX, VecAVX2, VecAVX512, VecISA
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
@@ -104,6 +104,7 @@ inline void {{kernel_name}}(
             "int8_gemm": self.input_dtype == torch.uint8,
             "vnni_size": 4 if self.input_dtype == torch.uint8 else 2,
             "restrict_keyword": get_restrict_keyword(),
+            "is_msvc_compiler": cpp_builder.is_msvc_cl(),
         }
 
     def get_kernel_declaration(self):
@@ -504,18 +505,75 @@ class CppMicroGemmAMX(CppMicroGemm):
     This class generates the code for micro gemm using Advanced Matrix eXtention (AMX)
     instructions available in 4th generation Intel Xeon for compute.
     It supports input types of torch.bfloat16 with fp32 output.
-    TODO(jgong5): support int8 data type.
     """
 
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
     {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
     {{kernel.assert_function}}(K % 2 == 0, "K dimension must be multiple of 2");
+{%- if use_cached_dequantized_B %}
+    // Create a stack-allocated buffer for tiles of B.
+    // Except maybe for the tail-case, an AMX tile of B has 16x32 BF16 elements.
+    const auto num_elements_per_b_tile = 512;
+    const auto last_k_offset = K / {{block_k}} * {{block_k}};
+    const auto tail_k_size = K - last_k_offset;
+    // we cache K * {{block_n}} elements of dequantized B
+    const auto buf_size = K * {{block_n}} * sizeof({{input_t}});
+    {%- if is_msvc_compiler %}
+    // MSVC doesn't support stack-allocated dynamic-sized arrays, so using heap memory here.
+    std::unique_ptr<{{input_t}}[]> heap_deq_b_buf_ptr(new {{input_t}}[buf_size]);
+    {{input_t}}* dequantized_B_buf = heap_deq_b_buf_ptr.get();
+    {%- else %}
+    // It's safe to use a stack-allocated array since the blocking strategy would
+    // require us to allocate an array that's smaller than the size of L1D cache,
+    // and the default per thread max stack size on Linux is quite higher,
+    // so we need not worry about stack overflow.
+    alignas(4096) {{input_t}} dequantized_B_buf[buf_size];
+    {%- endif %}
+
+    const auto b_tile_ptr_stride = ldb * {{vnni_size}};
+
+    auto load_B_row = [&]({{input2_t}}* {{restrict_keyword}} src, {{input_t}}* {{restrict_keyword}} dst) {
+        auto b_int8 = at::vec::Vectorized<int8_t>::loadu(src, static_cast<int64_t>(32));
+        auto b_bf16 = at::vec::convert<{{input_t}}>(b_int8);
+        b_bf16.store(dst);
+    };
+
+    auto load_B_tile = [&]({{input2_t}}* B_ptr, int idx, int num_b_rows) {
+        {{input_t}}* base_addr = dequantized_B_buf + idx;
+        {{kernel.unroll_pragma(8)}}
+        for (int i = 0; i < num_b_rows; i++) {
+            load_B_row(
+                B_ptr + i * b_tile_ptr_stride,
+                base_addr + i * 32
+            );
+        }
+    };
+    auto load_dequantized_B = [&](int n) {
+        // Load a tile of B & cache it in L1D.
+        {{kernel.unroll_pragma(4)}}
+        for (int k = 0; k < K; k += {{block_k}}) {
+            int num_b_rows = (k < last_k_offset) ? 16 : tail_k_size;
+            {{kernel.unroll_pragma(2)}}
+            for (int tile_col = 0; tile_col <= 1; tile_col++) {
+                load_B_tile(
+                    const_cast<{{input2_t}}*>(B) + n + k * ldb + tile_col * {{16 * vnni_size}},
+                    (k / {{block_k // 2}} + tile_col) * num_elements_per_b_tile,
+                    num_b_rows
+                );
+            }
+        }
+    };
+{%- endif %}
     // TODO(jgong5): loop unroll for M and N
-    for (int64_t m = 0; m < M; m += {{block_m}}) {
-        int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
-        int64_t m_tail = m;
-        for (int64_t n = 0; n < N; n += {{block_n}}) {
+    for (int64_t n = 0; n < N; n += {{block_n}}) {
+{%- if use_cached_dequantized_B %}
+        // Dequantize K * 32 int8 B elements into BF16
+        load_dequantized_B(n);
+{%- endif %}
+        for (int64_t m = 0; m < M; m += {{block_m}}) {
+            int64_t block_m = std::min<int64_t>(M - m, {{block_m}});
+            int64_t m_tail = m;
 {%- for num_rows in range(block_m, 0, -16) %}
     {%- if num_rows != block_m %}
             else
@@ -524,7 +582,11 @@ class CppMicroGemmAMX(CppMicroGemm):
                 {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}<accum>(
                     amx_state,
                     A + m * lda,
+{%- if use_cached_dequantized_B %}
+                    dequantized_B_buf,
+{%- else %}
                     B + n,
+{%- endif %}
                     C + m * ldc + n,
                     K,
                     lda,
@@ -540,7 +602,11 @@ class CppMicroGemmAMX(CppMicroGemm):
                 {{kernel_name}}_amx_kernel_16_{{num_columns}}<accum>(
                     amx_state,
                     A + m_tail * lda,
+{%- if use_cached_dequantized_B %}
+                    dequantized_B_buf,
+{%- else %}
                     B + n,
+{%- endif %}
                     C + m_tail * ldc + n,
                     K,
                     lda,
@@ -555,11 +621,12 @@ class CppMicroGemmAMX(CppMicroGemm):
 """
 
     TEMPLATE_KERNEL = r"""
+
 template <bool accum>
 inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     AMXState& amx_state,
     const {{input_t}}* {{restrict_keyword}} A,
-    const {{input2_t}}* {{restrict_keyword}} B,
+    const {{input_t}}* {{restrict_keyword}} B,
     {{output_t}}* {{restrict_keyword}} C,
     int64_t K,
     int64_t lda,
@@ -601,35 +668,12 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         zero_c();
     }
 
-{%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
-    // create a buffer for tiles of B.
-    alignas(64) {{input_t}} bf16_weights_buf[512];
-
-    int num_b_rows = (last_k_offset > 0) ? 16 : (tail_k_size * sizeof({{input_t}})) / 4;
-    int b_tile_ptr_stride = ldb * {{vnni_size}};
-
-    auto load_B_row = [&]({{input2_t}}* src, {{input_t}}* dst) {
-        {{kernel.unroll_pragma(2)}}
-        for (int i = 0; i < 2; i++) {
-            // int8 -> int32 -> fp32 -> bf16
-            auto b32 = at::vec::convert_to_int32<int8_t>(src + i * 16);
-            auto b_bf16 = at::vec::convert<{{input_t}}>(b32);
-            b_bf16.store(dst + i * 16);
-         }
-    };
-
-    auto load_B_in_buf = [&]({{input2_t}}* B_ptr) {
-        {{kernel.unroll_pragma(8)}}
-        for (int i = 0; i < num_b_rows; i++) {
-            load_B_row(
-                B_ptr + i * b_tile_ptr_stride,
-                bf16_weights_buf + i * 32
-            );
-        }
-    };
-{%- endif %}
-
     auto compute = [&](int k) {
+{%- if use_cached_dequantized_B %}
+    // base index for dequantized B
+    const auto num_elements_per_b_tile = 512;
+    const auto base_idx_of_deq_B = (k / {{block_k // 2}}) * num_elements_per_b_tile;
+{%- endif %}
 {%- set tile_offset_a = num_rows // 16 * num_columns %}
 {%- set tile_offset_b = tile_offset_a + num_rows // 16 %}
 {%- for tile_row in range(num_rows // 16) %}
@@ -641,9 +685,8 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         _tile_stream_loadd({{tile_idx_a}}, A + {{tile_row * 16}} * lda + k, lda * sizeof({{input_t}}));
         {%- endif %}
         {%- if tile_row == 0 %}
-            {%- if input_dtype == torch.bfloat16 and input2_dtype == torch.int8 %}
-        load_B_in_buf(const_cast<{{input2_t}}*>(B) + k * ldb + {{tile_col * 16 * vnni_size}});
-        _tile_loadd({{tile_idx_b}}, bf16_weights_buf, 64);
+            {%- if use_cached_dequantized_B %}
+        _tile_loadd({{tile_idx_b}}, B + base_idx_of_deq_B + {{tile_col}} * num_elements_per_b_tile, 64);
             {%- else %}
         _tile_loadd({{tile_idx_b}}, B + k * ldb + {{tile_col * 16 * vnni_size}}, ldb * {{vnni_size}} * sizeof({{input_t}}));
             {%- endif %}
@@ -697,6 +740,8 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
         num_columns = block_n // 16
         options = {
             "declare_kernel": self.get_kernel_declaration(),
+            "use_cached_dequantized_B": self.input_dtype == torch.bfloat16
+            and self.input2_dtype == torch.int8,
             "kernel": kernel,
             "block_m": block_m,
             "block_n": block_n,
@@ -739,6 +784,69 @@ inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
             return LayoutType.VNNI4
         else:
             return LayoutType.VNNI2
+
+
+# extra check for CppMicroBrgemm
+def check_brgemm_extra(config, m, n, k, alpha, num_threads):
+    assert config.input_dtype == torch.half and config.output_dtype == torch.float
+    vnni_size = 2
+    # use brgemm for Half when amx_fp16 is supported
+    return torch.cpu._is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
+
+
+@register_micro_gemm(
+    *generate_gemm_config(
+        VecAMX,
+        [(32, 32, 32), (48, 16, 32), (16, 48, 32)],
+        input_dtype=torch.half,
+        output_dtype=torch.float,
+        extra_check=check_brgemm_extra,
+    ),
+)
+class CppMicroBrgemm(CppMicroGemm):
+    """
+    This class generates the code for micro gemm using oneDNN brgemm.
+    It supports input types of torch.half.
+    """
+
+    TEMPLATE_ENTRY = r"""
+#include <ATen/native/CPUBlas.h>
+{{declare_kernel}} {
+    at::native::cpublas::brgemm(
+      M, N, K,
+      lda, ldb, ldc,
+      1.f, accum ? 1.f : 0.f,
+      A,
+      B,
+      C);
+}
+"""
+
+    def codegen_define(self, kernel: CppTemplateKernel) -> str:
+        options = {
+            "declare_kernel": self.get_kernel_declaration(),
+            "kernel": kernel,
+            "block_m": self.register_blocking.block_m,
+            "block_n": self.register_blocking.block_n,
+            "block_k": self.register_blocking.block_k,
+            "restrict_keyword": get_restrict_keyword(),
+            **self.get_common_options(),
+        }
+        result = ""
+        result += KernelTemplate._template_from_string(self.TEMPLATE_ENTRY).render(
+            options
+        )
+        return result
+
+    def codegen_finalize(
+        self,
+        kernel: CppTemplateKernel,
+    ) -> str:
+        return "at::native::cpublas::brgemm_release();"
+
+    def get_b_layout(self):
+        assert self.input_dtype == torch.half and torch.cpu._is_amx_fp16_supported()
+        return LayoutType.VNNI2
 
 
 def create_micro_gemm(

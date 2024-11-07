@@ -1,8 +1,13 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional, Tuple
+
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch.fx
 import torch.utils._pytree as pytree
+
+
+if TYPE_CHECKING:
+    from torch._inductor.utils import InputType
 
 
 __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
@@ -10,7 +15,7 @@ __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_
 
 def compile(
     gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
+    example_inputs: List["InputType"],
     options: Optional[Dict[str, Any]] = None,
 ):
     """
@@ -40,7 +45,33 @@ def aoti_compile_and_package(
 ) -> str:
     """
     Compiles the exported program with AOTInductor, and packages it into a .pt2
-    file specified by the input package_path.
+    artifact specified by the input package_path. To load the package, you can
+    call `torch._inductor.aoti_load_package(package_path)`.
+
+    To compile and save multiple models into a single .pt2 artifact, you can do
+    the following:
+    ```
+    ep1 = torch.export.export(M1(), ...)
+    aoti_file1 = torch._inductor.aot_compile(ep1, ...)
+    ep2 = torch.export.export(M2(), ...)
+    aoti_file2 = torch._inductor.aot_compile(ep2, ...)
+
+    from torch._inductor.package import package_aoti, load_package
+    package_aoti("my_package.pt2", {"model1": aoti_file1, "model2": aoti_file2})
+
+    compiled_model1 = load_package("my_package.pt2", "model1")
+    compiled_model2 = load_package("my_package.pt2", "model2")
+    ```
+
+    Args:
+        exported_program: An exported program created through a call from torch.export
+        args: Example positional inputs
+        kwargs: Optional example keyword inputs
+        package_path: Optional specified path to the generated .pt2 artifact.
+        inductor_configs: Optional dictionary of configs to control inductor.
+
+    Returns:
+        Path to the generated artifact
     """
     from torch._inductor.package import package_aoti
     from torch.export import ExportedProgram
@@ -48,7 +79,9 @@ def aoti_compile_and_package(
     if not isinstance(exported_program, ExportedProgram):
         raise ValueError("Only ExportedProgram is supported")
 
-    assert package_path is None or package_path.endswith(".pt2")
+    assert package_path is None or package_path.endswith(
+        ".pt2"
+    ), f"Expect package path to end with .pt2, got {package_path}"
 
     inductor_configs = inductor_configs or {}
 
@@ -70,6 +103,27 @@ def aoti_compile_and_package(
     res = package_aoti(package_path, aoti_files)
     assert res == package_path
     return package_path
+
+
+def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
+    """
+    Loads the model from the PT2 package.
+
+    If multiple models were packaged into the PT2, this will load the default
+    model. To load a specific model, you can directly call the load API
+    ```
+    from torch._inductor.package import load_package
+
+    compiled_model1 = load_package("my_package.pt2", "model1")
+    compiled_model2 = load_package("my_package.pt2", "model2")
+    ```
+
+    Args:
+        path: Path to the .pt2 package
+    """
+    from torch._inductor.package import load_package
+
+    return load_package(path)
 
 
 def aot_compile(
@@ -185,12 +239,14 @@ def list_mode_options(
         # enable max-autotune
         "max-autotune-no-cudagraphs": {
             "max_autotune": True,
+            "coordinate_descent_tuning": True,
         },
         # enable max-autotune
         # enable cudagraphs
         "max-autotune": {
             "max_autotune": True,
             "triton.cudagraphs": True,
+            "coordinate_descent_tuning": True,
         },
     }
     return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
@@ -209,7 +265,7 @@ def list_options() -> List[str]:
 
     from torch._inductor import config
 
-    current_config: Dict[str, Any] = config.shallow_copy_dict()
+    current_config: Dict[str, Any] = config.get_config_copy()
 
     return list(current_config.keys())
 

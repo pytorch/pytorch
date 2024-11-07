@@ -20,11 +20,25 @@ def _rocm_include_paths() -> List[str]:
     )
     if not config.rocm.ck_dir:
         log.warning("Unspecified Composable Kernel include dir")
-    ck_include = os.path.join(
-        config.rocm.ck_dir or cpp_extension._join_rocm_home("composable_kernel"),
-        "include",
-    )
-    return [os.path.realpath(rocm_include), os.path.realpath(ck_include)]
+
+    if config.is_fbcode():
+        from libfb.py import parutil
+
+        ck_path = parutil.get_dir_path("composable-kernel-headers")
+    else:
+        ck_path = config.rocm.ck_dir or cpp_extension._join_rocm_home(
+            "composable_kernel"
+        )
+
+    ck_include = os.path.join(ck_path, "include")
+    ck_library_include = os.path.join(ck_path, "library", "include")
+
+    # CK has to take priority over ROCm include paths
+    # Since CK is potentially more up-to-date
+    paths = [
+        os.path.realpath(p) for p in (ck_include, ck_library_include, rocm_include)
+    ]
+    return paths
 
 
 def _rocm_lib_options() -> List[str]:
@@ -42,6 +56,7 @@ def _rocm_lib_options() -> List[str]:
     )
 
     return [
+        "-include __clang_hip_runtime_wrapper.h",
         f"-L{os.path.realpath(rocm_lib_dir)}",
         f"-L{os.path.realpath(hip_lib_dir)}",
         "-lamdhip64",

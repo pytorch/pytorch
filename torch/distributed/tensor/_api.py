@@ -629,7 +629,7 @@ def distribute_tensor(
     Distribute a leaf ``torch.Tensor`` (i.e. nn.Parameter/buffers) to the ``device_mesh`` according
     to the ``placements`` specified. The rank of ``device_mesh`` and ``placements`` must be the
     same. The ``tensor`` to distribute is the logical or "global" tensor, and the API would use
-    the ``tensor`` from first rank of the DeviceMesh dimension as the source of truth to perserve
+    the ``tensor`` from first rank of the DeviceMesh dimension as the source of truth to preserve
     the single-device semantic. If you want to construct a DTensor in the middle of the Autograd
     computation, please use :meth:`DTensor.from_local` instead.
 
