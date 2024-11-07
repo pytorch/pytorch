@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional, Protocol, Sequence, Tuple, TypeVar, Union
+from typing import Callable, Optional, Protocol, Sequence, Tuple, TypeVar, Union
+
+import sympy
 
 import torch
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
-
 
 T = TypeVar("T")
 
