@@ -1252,7 +1252,7 @@ class TritonKernelOverrides(TritonOverrides):
             return V.kernel.cse.cache[cache_key]
 
         mantissa = V.kernel.cse.newvar(dtype=x.dtype)
-        exponent = V.kernel.cse.newvar(dtype=x.dtype)
+        exponent = V.kernel.cse.newvar(dtype=torch.int32)
         V.kernel.compute.writeline(
             f"{mantissa}, {exponent} = triton_helpers.frexp({x})"
         )

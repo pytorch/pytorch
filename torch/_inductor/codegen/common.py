@@ -27,6 +27,7 @@ from sympy.printing.printer import Printer
 
 import torch
 import torch.fx
+from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
 from torch.utils._ordered_set import OrderedSet
@@ -36,6 +37,7 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, Val
 
 from .. import config, metrics
 from ..utils import (
+    boolean_ops,
     DeferredLineBase,
     generate_assert,
     IndentedBuffer,
@@ -419,22 +421,6 @@ def get_device_op_overrides(device: str):
 
     if device in device_op_overrides_dict.keys():
         return device_op_overrides_dict[device]
-
-
-@functools.lru_cache(None)
-def boolean_ops():
-    return (
-        "isinf",
-        "isnan",
-        "logical_not",
-        "signbit",
-        "le",
-        "lt",
-        "ge",
-        "gt",
-        "eq",
-        "ne",
-    )
 
 
 DTYPE_TO_COMPUTATION_DTYPE = {
@@ -1789,206 +1775,6 @@ class CSE:
         return var
 
 
-@functools.lru_cache(None)
-def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
-    def construct_input(inp):
-        if isinstance(inp, torch._prims_common.Number):
-            return inp
-        else:
-            assert hasattr(inp, "dtype")
-
-            # construct a tmp tensor to use dtype promotion util function
-            return torch.empty([1], dtype=inp.dtype)
-
-    inps = [construct_input(arg) for arg in args]
-    _, dtype = torch._prims_common.elementwise_dtypes(
-        *inps, type_promotion_kind=type_promotion_kind
-    )
-    return dtype
-
-
-def promote_types(args):
-    dtype_prop_candidates = []
-
-    # CSEVariable and scalar will be included in dtype_prop_candidates
-    for arg in args:
-        if isinstance(arg, str):
-            continue
-        elif (
-            isinstance(arg, OpsValue)
-            and isinstance(arg.value, CSEVariable)
-            and arg.value.dtype is not None
-        ):
-            dtype_prop_candidates.append(arg.value)
-        elif (isinstance(arg, CSEVariable) and arg.dtype is not None) or isinstance(
-            arg, torch._prims_common.Number
-        ):
-            dtype_prop_candidates.append(arg)  # type: ignore[arg-type]
-
-    dtype = get_promoted_dtype(
-        *dtype_prop_candidates,
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
-    )
-
-    return dtype
-
-
-class DtypePropagationOpsHandler:
-    """
-    Propagate dtype from args to output
-    """
-
-    @staticmethod
-    def default_handler(*args):
-        # Fallback to FP32 dtype
-        return torch.float32
-
-    @staticmethod
-    def randint64(seed, offset, low, high):
-        return torch.int64
-
-    @staticmethod
-    def where(a, b, c):
-        return promote_types([b, c])
-
-    @staticmethod
-    def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
-        return dtype
-
-    @staticmethod
-    def load_seed(name, offset):
-        return torch.float32
-
-    @staticmethod
-    def masked(mask, body, other):
-        # TODO: inspect body to propagate dtype
-        return torch.float32
-
-    @staticmethod
-    def index_expr(expr, dtype):
-        return dtype
-
-    @staticmethod
-    def isnan(x):
-        return torch.bool
-
-    @staticmethod
-    def lt(a, b):
-        return torch.bool
-
-    @staticmethod
-    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
-        return dtype
-
-    @staticmethod
-    def constant(value, dtype):
-        return dtype
-
-    @staticmethod
-    def mul(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def sub(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def add(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def div(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def abs(x):
-        return promote_types([x])
-
-    @staticmethod
-    def exp(x):
-        return promote_types([x])
-
-    @staticmethod
-    def truediv(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def pow(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def sqrt(x):
-        return promote_types([x])
-
-    @staticmethod
-    def rsqrt(x):
-        return promote_types([x])
-
-    @staticmethod
-    def sigmoid(x):
-        return promote_types([x])
-
-    @staticmethod
-    def gelu(x):
-        return promote_types([x])
-
-    @staticmethod
-    def neg(x):
-        return promote_types([x])
-
-    @staticmethod
-    def minimum(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def maximum(a, b):
-        return promote_types([a, b])
-
-    @staticmethod
-    def log(x):
-        return promote_types([x])
-
-    @staticmethod
-    def log1p(x):
-        return promote_types([x])
-
-    @staticmethod
-    def gt(a, b):
-        return torch.bool
-
-    @staticmethod
-    def ge(a, b):
-        return torch.bool
-
-    @staticmethod
-    def reciprocal(x):
-        return promote_types([x])
-
-    @staticmethod
-    def and_(a, b):
-        return torch.bool
-
-    @staticmethod
-    def bitwise_right_shift(a, b):
-        return a.dtype
-
-    @staticmethod
-    def bitwise_left_shift(a, b):
-        return a.dtype
-
-    @staticmethod
-    def sin(x):
-        return promote_types([x])
-
-    @staticmethod
-    def cos(x):
-        return promote_types([x])
-
-    @staticmethod
-    def mod(a, b):
-        return promote_types([a, b])
-
-
 class CodeGen:
     def __init__(self) -> None:
         super().__init__()
@@ -2222,12 +2008,14 @@ class Kernel(CodeGen):
                     bounds = CSEProxy._bound_variable(name, *args, **kwargs)
 
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
+                    dtype_handler = DtypePropagationOpsHandler()
 
                     def do_cse(v):
+                        # TODO - throw on default
                         output_dtype = getattr(
-                            DtypePropagationOpsHandler,
+                            dtype_handler,
                             name,
-                            DtypePropagationOpsHandler.default_handler,
+                            dtype_handler.default_handler,
                         )(*args)
 
                         csevar = V.kernel.cse.generate(

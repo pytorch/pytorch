@@ -67,6 +67,7 @@ from .utils import (
     is_pointwise_use,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
+    register_op_dtype_propagation_rules,
     sympy_product,
     use_scatter_fallback,
 )
@@ -759,6 +760,14 @@ def register_pointwise(
     fn = ops_wrapper(name)
     if use_libdevice_for_f64:
         fn_libdevice = ops_wrapper("libdevice_" + name)
+        register_op_dtype_propagation_rules(
+            "libdevice_" + name, type_promotion_kind, override_return_dtype
+        )
+
+    register_op_dtype_propagation_rules(
+        name, type_promotion_kind, override_return_dtype
+    )
+
     if override_fn_when_input_bool is not None:
         override_fn_when_input_bool = ops_wrapper(override_fn_when_input_bool)
 
