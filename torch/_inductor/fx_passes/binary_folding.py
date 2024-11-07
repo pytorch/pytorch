@@ -277,7 +277,9 @@ def binary_folding_init():
     def resize_scalar_or_tensor_to_shape(graph, other, shape, weight):
         if isinstance(other, (int, float)):
             with torch.utils._python_dispatch._disable_current_modes():
-                other_tensor = torch.tensor(other, device=weight.device)
+                other_tensor = torch.tensor(
+                    other, dtype=weight.dtype, device=weight.device
+                )
             graph.owning_module.register_buffer("other_tensor", other_tensor)
             res = graph.create_node("get_attr", "other_tensor")
             res = graph.create_node(
