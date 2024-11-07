@@ -39,12 +39,17 @@ class MixedPrecisionPolicy:
             precision policies. (Default: ``None``)
         cast_forward_inputs (bool): This specifies whether FSDP should cast the
             forward's floating-point input tensors to ``param_dtype`` or not.
+        all_reduce_dtype (Optional[torch.dtype]): This specifies the dtype for
+            gradient all-reduce if using HSDP. It can be different from
+            ``reduce_dtype`` (e.g. to do reduce-scatter in bf16 but all-reduce
+            in fp32).
     """
 
     param_dtype: Optional[torch.dtype] = None
     reduce_dtype: Optional[torch.dtype] = None
     output_dtype: Optional[torch.dtype] = None
     cast_forward_inputs: bool = True
+    all_reduce_dtype: Optional[torch.dtype] = None
 
     def __post_init__(self):
         # Clamp `reduce_dtype` to `None` if no casting is required: since

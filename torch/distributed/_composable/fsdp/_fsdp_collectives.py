@@ -329,6 +329,7 @@ def foreach_reduce(
     all_reduce_group: Optional[dist.ProcessGroup],  # not `None` iff HSDP
     all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
+    all_reduce_dtype: Optional[torch.dtype],
     partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
 ) -> Tuple[torch.Tensor, torch.Event, torch.Event, Optional[torch.Tensor]]:
     """
@@ -387,6 +388,7 @@ def foreach_reduce(
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
         if all_reduce_group is not None:  # HSDP
+            reduce_output = _to_dtype_if_needed(reduce_output, all_reduce_dtype)
             # Accumulations must run in the reduce-scatter stream
             if not all_reduce_grads:
                 if partial_reduce_output is not None:

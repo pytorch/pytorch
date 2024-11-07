@@ -215,6 +215,14 @@ class FSDPParamGroup:
                 f"FSDP expects uniform reduce dtype but got {reduce_dtypes}"
             )
         self._reduce_dtype = next(iter(reduce_dtypes))
+        all_reduce_dtypes = {
+            fsdp_param.all_reduce_dtype for fsdp_param in self.fsdp_params
+        }
+        if len(all_reduce_dtypes) != 1:
+            raise AssertionError(
+                f"FSDP expects uniform all-reduce dtype but got {all_reduce_dtypes}"
+            )
+        self._all_reduce_dtype = next(iter(all_reduce_dtypes))
 
     def lazy_init(self):
         # Lazy init should be idempotent
@@ -420,6 +428,7 @@ class FSDPParamGroup:
                 self._all_reduce_process_group if self._is_hsdp else None,
                 self.comm_ctx.all_reduce_stream,
                 self.all_reduce_grads,
+                self._all_reduce_dtype,
                 self._partial_reduce_output,
             )
             self.comm_ctx.reduce_scatter_state = ReduceScatterState(

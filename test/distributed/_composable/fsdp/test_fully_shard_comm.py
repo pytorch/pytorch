@@ -266,6 +266,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             all_reduce_group=None,
             all_reduce_stream=all_reduce_stream,
             all_reduce_grads=True,
+            all_reduce_dtype=None,
             partial_reduce_output=None,
         )
         torch.cuda.current_stream().wait_event(post_reduce_event)

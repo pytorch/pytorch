@@ -419,6 +419,7 @@ class FSDPParam:
             param_dtype = None
         self.param_dtype = param_dtype
         self.reduce_dtype = reduce_dtype
+        self.all_reduce_dtype = mp_policy.all_reduce_dtype
         # None indicates that the mixed precision is not enabled
 
     def _init_extensions(self) -> None:
