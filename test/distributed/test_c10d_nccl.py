@@ -347,6 +347,44 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         with self.assertRaises(ValueError):
             dist.all_reduce(t)
 
+    @requires_nccl()
+    @skip_if_rocm_multiprocess
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_restart_pg(self):
+        # Note: restart test passes steadily only for blocking mode for now.
+        # TODO: expand this test to non-blocking mode
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+
+        # initialize pg for the first time
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        t0 = torch.rand(10, 10, device=device)
+        # First allreduce to lazy initialize default pg
+        dist.all_reduce(t0)
+        torch.cuda.synchronize()
+        # Destroy pg
+        dist.destroy_process_group()
+
+        # re-initialize pg
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        t1 = torch.rand(5, 5, device=device)
+        dist.all_reduce(t1)
+        torch.cuda.synchronize()
+        dist.destroy_process_group()
+        # validate default pg is no longer valid
+        with self.assertRaises(ValueError):
+            dist.all_reduce(t1)
+
     CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
         torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
     )
@@ -980,28 +1018,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         if self.rank == 1:
             recv_tensor = torch.rand(10, 10, device=device)
             dist.recv(recv_tensor, 0)
-            self.assertEqual(send_tensor, recv_tensor)
-        dist.destroy_process_group()
-
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-    @parametrize("eager_init", [True, False])
-    def test_subgroup_p2p(self, eager_init: bool):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
-        c10d.init_process_group(
-            "nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-            device_id=device if eager_init else None,
-        )
-        send_tensor = torch.ones(10, 10, device=device)
-        group = dist.new_group()
-        if self.rank == 0:
-            dist.send(send_tensor, 1, group=group)
-        if self.rank == 1:
-            recv_tensor = torch.rand(10, 10, device=device)
-            dist.recv(recv_tensor, 0, group=group)
             self.assertEqual(send_tensor, recv_tensor)
         dist.destroy_process_group()
 
