@@ -59,7 +59,7 @@ Py_ssize_t doPartialWrite<PyObject*>(
   return doPartialPythonWrite(fildes, buf, nbytes);
 }
 
-static bool isUnsupportedOperation() {
+static inline bool isUnsupportedOperation() {
   THPObjectPtr io(PyImport_ImportModule("io"));
   if (!io)
     throw python_error();
@@ -70,7 +70,7 @@ static bool isUnsupportedOperation() {
 }
 
 // Call Python fildes.read(nbytes) and copy it to buf.
-static Py_ssize_t doPartialPythonReadBuffered(
+static inline Py_ssize_t doPartialPythonReadBuffered(
     PyObject* fildes,
     void* buf,
     size_t raw_nbytes) {
@@ -100,7 +100,7 @@ static Py_ssize_t doPartialPythonReadBuffered(
 }
 
 // Either does fildes.readinto(buf) or fildes.write(buf)
-static Py_ssize_t doPartialPythonIO(
+static inline Py_ssize_t doPartialPythonIO(
     PyObject* fildes,
     void* buf,
     size_t nbytes,
