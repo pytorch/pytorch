@@ -216,6 +216,14 @@ static auto combine_self_args(PyObject* self, PyObject* args) -> py::tuple {
   return args_;
 }
 
+// TODO: I'm not sure if I should call this __torch_function__ or
+// torch_function.  The former makes it easier to take an existing
+// Tensor-like __torch_function__ object and turn it into a mode;
+// but in general modes don't have to be Tensor-like (and we will
+// improperly accept mode objects as arguments when they shouldn't
+// be passed around in this way).
+const char* torch_function_mode_name = "__torch_function__";
+
 auto handle_torch_function(
     PyObject* self,
     const std::string& func_name,
@@ -1081,7 +1089,7 @@ std::string FunctionParameter::type_name() const {
   }
 }
 
-static std::optional<int64_t> parse_as_integer(const std::string& s) {
+static inline std::optional<int64_t> parse_as_integer(const std::string& s) {
   if (s.empty())
     return std::nullopt;
   char* str_end = nullptr;
@@ -1098,7 +1106,7 @@ There are two kinds of default values:
 2. IntArrayRef x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be
 space after comma since native_parse.py uses ', ' to split args)
 */
-static std::vector<int64_t> parse_intlist_args(
+static inline std::vector<int64_t> parse_intlist_args(
     const std::string& s,
     int64_t size) {
   size_t n = s.size();
