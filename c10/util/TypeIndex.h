@@ -93,11 +93,7 @@ inline constexpr uint64_t type_index_impl() {
 
 template <typename T>
 inline constexpr type_index get_type_index() {
-#if defined(__CUDA_ARCH__)
-  // Don't run this on device code
-  static_assert(false && sizeof(T));
-  return type_index(0);
-#endif
+  static_assert(!defined(__CUDA_ARCH__) && sizeof(T), " Don't call me from device code");
   // To enforce that this is really computed at compile time, we pass the
   // type index through std::integral_constant.
   return type_index{std::integral_constant<
