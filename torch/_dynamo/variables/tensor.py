@@ -89,6 +89,16 @@ supported_const_comparison_op_values = dict.fromkeys(
 )
 
 
+def is_bound_tensor_method(value):
+    return (
+        callable(value)
+        and not torch._dynamo.utils.object_has_getattribute(value)
+        and hasattr(value, "__self__")
+        and isinstance(value.__self__, torch.Tensor)
+        and getattr(torch.Tensor, value.__name__, None)
+    )
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -273,8 +283,17 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
 
         real_value = getattr(_input_associated_real_value, name)
+
         attr_source = AttrSource(self.source, name)
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
+
+        # Typically we'd want to use variable builder here
+        # but unfortunately id(real_value.__self__) is not id(<original value>)
+        if is_bound_tensor_method(real_value):
+            from .misc import GetAttrVariable
+
+            return GetAttrVariable(self, name, source=attr_source)
+
         return VariableTracker.build(tx, real_value, attr_source)
 
     def method_attr_ndim(self, tx):
