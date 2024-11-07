@@ -57,7 +57,6 @@ struct bitset final {
 
   // Call the given functor with the index of each bit that is set
   template <class Func>
-  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   void for_each_set_bit(Func&& func) const {
     bitset cur = *this;
     size_t index = cur.find_first_set();

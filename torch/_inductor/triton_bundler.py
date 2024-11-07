@@ -70,8 +70,6 @@ class TritonBundler:
     - TritonBundler.begin_compile is called when we start compiling in Inductor
     - TritonBundler.put is called each time a Triton Kernel is compiled
     - TritonBundler.collect is called when a cache entry is being generated
-    - TritonBundler.end_compile is called to indicate bundling is completed,
-      collect will execute this function as well.
     - TritonBundler.read_and_emit is called when a cache entry is read
     """
 
@@ -94,9 +92,7 @@ class TritonBundler:
         if not config.is_fbcode():
             return False
 
-        return justknobs_check(
-            "pytorch/remote_cache:bundle_triton_into_fx_graph_cache_v2"
-        )
+        return justknobs_check("pytorch/remote_cache:bundle_triton_into_fx_graph_cache")
 
     @classmethod
     def begin_compile(cls) -> None:
@@ -106,18 +102,8 @@ class TritonBundler:
         """
         if not TritonBundler.is_enabled():
             return
-        log.debug("TritonBundler.begin_compile is called")
         assert cls._entries is None
         cls._entries = []
-
-    @classmethod
-    def end_compile(cls) -> None:
-        """
-        Finalizes the TritonBundler. If collect is not yet called, it
-        discards the current bundle.
-        """
-        log.debug("TritonBundler.end_compile is called")
-        cls._entries = None
 
     @classmethod
     def put(cls, kernel_hash: str, device: int) -> None:
@@ -141,7 +127,7 @@ class TritonBundler:
         This function also finalizes the current bundle.
         """
         if not TritonBundler.is_enabled():
-            cls.end_compile()
+            cls._entries = None
             return [], None
 
         with dynamo_timed(
@@ -185,7 +171,7 @@ class TritonBundler:
                                 artifacts,
                             )
                         )
-                cls.end_compile()
+                cls._entries = None
                 return result, TritonBundlerMetadata(kernel_names)
             return [], None
 

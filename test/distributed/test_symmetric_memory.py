@@ -24,11 +24,9 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    requires_cuda,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
-    TestCase,
 )
 
 
@@ -849,33 +847,6 @@ class LoweringTest(MultiProcessTestCase):
 
         self.assertIn("one_shot_all_reduce", code_3)
         self.assertNotIn("return (buf0", code_3)
-
-
-class SymmMemSingleProcTest(TestCase):
-    @skipIfRocm
-    @requires_cuda
-    def test_memset32(self):
-        t = _SymmetricMemory.empty_strided_p2p(
-            (64,),
-            (1,),
-            dtype=torch.uint32,
-            device=torch.device("cuda:0"),
-            group_name="0",
-        ).fill_(0)
-
-        _SymmetricMemory.memset32(t, offset=32, val=1, count=16)
-        self.assertTrue(t[:32].eq(0).all())
-        self.assertTrue(t[32:48].eq(1).all())
-        self.assertTrue(t[48:].eq(0).all())
-
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.memset32(t, offset=-1, val=1, count=16)
-
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.memset32(t, offset=32, val=4294967296, count=16)
-
-        with self.assertRaises(RuntimeError):
-            _SymmetricMemory.memset32(t, offset=32, val=1, count=-1)
 
 
 if __name__ == "__main__":

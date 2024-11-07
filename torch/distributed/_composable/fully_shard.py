@@ -42,8 +42,7 @@ from torch.distributed.fsdp.wrap import _Policy
     "`torch.distributed._composable.fully_shard` is being deprecated. "
     "You can continue to use the wrapper based FSDP. "
     "See usage in: https://github.com/pytorch/pytorch/blob/main/torch/distributed/fsdp/fully_sharded_data_parallel.py. "
-    "`torch.distributed._composable.fully_shard` will be removed after PyTorch 2.5. "
-    "If you are looking for FSDP2, please see `torch.distributed._composable.fsdp.fully_shard.`",
+    "`torch.distributed._composable.fully_shard` will be removed after PyTorch 2.5.",
     category=FutureWarning,
 )
 def fully_shard(

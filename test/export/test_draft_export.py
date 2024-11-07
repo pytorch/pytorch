@@ -142,29 +142,6 @@ class TestDraftExport(TestCase):
             inp = (torch.randn(3, 3), torch.randn(3, 3), torch.tensor(2))
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
-    def test_dedup_data_dependent_failure(self):
-        class M(torch.nn.Module):
-            def forward(self, x, y, z):
-                res = 0
-                for v in [x, y]:
-                    if v.item() > 10:
-                        res += v * v
-                    else:
-                        res += v + v
-
-                return z * res
-
-        inp = (torch.tensor(5), torch.tensor(3), torch.tensor(2))
-
-        ep, report = draft_export(M(), inp)
-        self.assertTrue(len(report.failures) > 0)
-        self.assertEqual(
-            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
-        )
-
-        inp = (torch.tensor(4), torch.tensor(2), torch.tensor(6))
-        self.assertEqual(ep.module()(*inp), M()(*inp))
-
     def test_offsets(self):
         class M(torch.nn.Module):
             def forward(self, x):

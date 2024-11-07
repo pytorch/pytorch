@@ -26,13 +26,7 @@ from ..exc import (
 )
 from ..guards import GuardBuilder, install_guard
 from ..replay_record import DummyModule
-from ..source import (
-    AttrSource,
-    GetItemSource,
-    GlobalSource,
-    is_constant_source,
-    TypeSource,
-)
+from ..source import AttrSource, GetItemSource, is_constant_source, TypeSource
 from ..utils import (
     check_constant_args,
     check_numpy_ndarray_args,
@@ -48,7 +42,7 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import EventVariable, StreamVariable
 from .dicts import (
@@ -405,8 +399,7 @@ class BuiltinVariable(VariableTracker):
                     (BaseListVariable, ConstantVariable, ListIteratorVariable),
                 ),
                 lambda tx, a, b: ListVariable(
-                    [*a.items, *b.unpack_var_sequence(tx)],
-                    mutation_type=ValueMutationNew(),
+                    [*a.items, *b.unpack_var_sequence(tx)], mutable_local=MutableLocal()
                 ),
             ),
             (
@@ -417,7 +410,7 @@ class BuiltinVariable(VariableTracker):
         op_handlers[operator.add].extend(list_like_addition_handlers)
 
         def list_iadd_handler(tx: "InstructionTranslator", a, b):
-            if a.is_immutable() or not b.has_unpack_var_sequence(tx):
+            if not a.mutable_local or not b.has_unpack_var_sequence(tx):
                 # Handler doesn't apply
                 return None
 
@@ -448,7 +441,7 @@ class BuiltinVariable(VariableTracker):
                 lst, const = const, lst
             return lst.__class__(
                 items=lst.items * const.as_python_constant(),
-                mutation_type=ValueMutationNew(),
+                mutable_local=MutableLocal(),
             )
 
         list_like_expansion_handlers = [
@@ -1276,7 +1269,7 @@ class BuiltinVariable(VariableTracker):
         if obj is None:
             return cls(
                 [],
-                mutation_type=ValueMutationNew(),
+                mutable_local=MutableLocal(),
             )
         elif obj.has_unpack_var_sequence(tx):
             if obj.source and not is_constant_source(obj.source):
@@ -1296,7 +1289,7 @@ class BuiltinVariable(VariableTracker):
 
             return cls(
                 list(obj.unpack_var_sequence(tx)),
-                mutation_type=ValueMutationNew(),
+                mutable_local=MutableLocal(),
             )
 
     def _call_tuple_list(self, tx, obj=None, *args, **kwargs):
@@ -1304,7 +1297,7 @@ class BuiltinVariable(VariableTracker):
             cls = variables.BaseListVariable.cls_for(self.fn)
             return cls(
                 list(obj.force_unpack_var_sequence(tx)),
-                mutation_type=ValueMutationNew(),
+                mutable_local=MutableLocal(),
             )
         else:
             return self._call_iter_tuple_list(tx, obj, *args, **kwargs)
@@ -1371,11 +1364,9 @@ class BuiltinVariable(VariableTracker):
             assert len(args) == 1
             arg = args[0]
             if isinstance(arg, dict):
-                return ConstDictVariable(
-                    arg, user_cls, mutation_type=ValueMutationNew()
-                )
+                return ConstDictVariable(arg, user_cls, mutable_local=MutableLocal())
             elif isinstance(arg, variables.ConstDictVariable):
-                return arg.clone(user_cls=user_cls, mutation_type=ValueMutationNew())
+                return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
             elif isinstance(
                 arg,
                 (
@@ -1389,9 +1380,7 @@ class BuiltinVariable(VariableTracker):
                     x.force_unpack_var_sequence(tx)
                     for x in arg.force_unpack_var_sequence(tx)
                 )
-                return ConstDictVariable(
-                    items, user_cls, mutation_type=ValueMutationNew()
-                )
+                return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
             elif isinstance(arg, variables.MutableMappingVariable):
                 # This is applicable for user defined objects which seem like dict, but are not really dicts. For
                 # example, TensorDict derives from MutableMapping. For such cases, we can directly inline the .items
@@ -1417,7 +1406,7 @@ class BuiltinVariable(VariableTracker):
         elif not args and kwargs:
             items = {ConstantVariable.create(k): v for k, v in kwargs.items()}
             return variables.ConstDictVariable(
-                items, user_cls=user_cls, mutation_type=ValueMutationNew()
+                items, user_cls=user_cls, mutable_local=MutableLocal()
             )
         unimplemented(f"{user_cls.__name__}(): {args} {kwargs}")
 
@@ -1444,15 +1433,13 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, dict):
             arg = [ConstantVariable.create(k) for k in arg.keys()]
             return DictVariableType(
-                dict.fromkeys(arg, value), user_cls, mutation_type=ValueMutationNew()
+                dict.fromkeys(arg, value), user_cls, mutable_local=MutableLocal()
             )
         elif arg.has_force_unpack_var_sequence(tx):
             keys = arg.force_unpack_var_sequence(tx)
             if all(is_hashable(v) for v in keys):
                 return DictVariableType(
-                    dict.fromkeys(keys, value),
-                    user_cls,
-                    mutation_type=ValueMutationNew(),
+                    dict.fromkeys(keys, value), user_cls, mutable_local=MutableLocal()
                 )
         unimplemented(f"{user_cls.__name__}.fromkeys(): {args} {kwargs}")
 
@@ -1460,14 +1447,14 @@ class BuiltinVariable(VariableTracker):
         # Can we merge this implementation and call_dict's one?
         assert not kwargs
         if not args:
-            return SetVariable([], mutation_type=ValueMutationNew())
+            return SetVariable([], mutable_local=MutableLocal())
         assert len(args) == 1
         arg = args[0]
         if isinstance(arg, variables.SetVariable):
-            return arg.clone(mutation_type=ValueMutationNew())
+            return arg.clone(mutable_local=MutableLocal())
         elif arg.has_force_unpack_var_sequence(tx):
             items = arg.force_unpack_var_sequence(tx)
-            return SetVariable(items, mutation_type=ValueMutationNew())
+            return SetVariable(items, mutable_local=MutableLocal())
         elif isinstance(arg, variables.UserDefinedObjectVariable) and isinstance(
             arg.value, KeysView
         ):
@@ -1504,9 +1491,7 @@ class BuiltinVariable(VariableTracker):
             arg.unpack_var_sequence(tx) if arg.has_unpack_var_sequence(tx) else arg
             for arg in args
         ]
-        return variables.ZipVariable(
-            args, strict=strict, mutation_type=ValueMutationNew()
-        )
+        return variables.ZipVariable(args, strict=strict, mutable_local=MutableLocal())
 
     def call_len(self, tx: "InstructionTranslator", *args, **kwargs):
         return args[0].call_method(tx, "__len__", args[1:], kwargs)
@@ -1611,7 +1596,7 @@ class BuiltinVariable(VariableTracker):
             seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
             for seq in seqs
         ]
-        return variables.MapVariable(fn, seqs, mutation_type=ValueMutationNew())
+        return variables.MapVariable(fn, seqs, mutable_local=MutableLocal())
 
     def call_filter(self, tx: "InstructionTranslator", fn, seq):
         if seq.has_unpack_var_sequence(tx):
@@ -1885,11 +1870,6 @@ class BuiltinVariable(VariableTracker):
             ) from None
 
         source = obj.source and TypeSource(obj.source)
-        if py_type is torch.Tensor:
-            # In some cases torch isn't available in globals
-            name = tx.output.install_global_by_id("", torch)
-            source = AttrSource(GlobalSource(name), "Tensor")
-
         return VariableTracker.build(tx, py_type, source)
 
     def call_reversed(self, tx: "InstructionTranslator", obj: VariableTracker):

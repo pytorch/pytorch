@@ -140,9 +140,9 @@ class PyCodegen:
             # value.source will get mutated to hold `value`
             # mutable_side_effects_from_source=False is used to codegen the mutation
             # mutable_side_effects_from_source=True is used to codegen a reference
-            from .side_effects import ValueMutationExisting
+            from .side_effects import MutableSideEffects
 
-            if isinstance(value.mutation_type, ValueMutationExisting):
+            if isinstance(value.mutable_local, MutableSideEffects):
                 self(value.source)
                 return
 

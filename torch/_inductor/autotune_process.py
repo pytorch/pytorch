@@ -689,8 +689,8 @@ class TritonBenchmarkRequest(BenchmarkRequest):
                 run_method(
                     *input_tensors,
                     output_tensor,
-                    *extra_args,
                     workspace_tensor,
+                    *extra_args,
                     grid=self.grid,
                     **warmup_arg,
                     stream=stream,

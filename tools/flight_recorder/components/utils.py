@@ -5,62 +5,22 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
-import logging
 import math
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
-from .types import Group, MatchState, Membership, Op, P2P
-
-
-class FlightRecorderLogger:
-    _instance: Optional[Any] = None
-    logger: logging.Logger
-
-    def __init__(self) -> None:
-        self.logger: logging.Logger = logging.getLogger("Flight Recorder")
-
-    def __new__(cls) -> Any:
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance.logger = logging.getLogger("Flight Recorder")
-            cls._instance.logger.setLevel(logging.INFO)
-            formatter = logging.Formatter("%(message)s")
-            ch = logging.StreamHandler()
-            ch.setFormatter(formatter)
-            cls._instance.logger.addHandler(ch)
-        return cls._instance
-
-    def set_log_level(self, level: int) -> None:
-        self.logger.setLevel(level)
-
-    @property
-    def debug(self) -> Callable[..., None]:
-        return self.logger.debug
-
-    @property
-    def info(self) -> Callable[..., None]:
-        return self.logger.info
-
-    @property
-    def warning(self) -> Callable[..., None]:
-        return self.logger.warning
-
-    @property
-    def error(self) -> Callable[..., None]:
-        return self.logger.error
-
-    @property
-    def critical(self) -> Callable[..., None]:
-        return self.logger.critical
-
-
-logger = FlightRecorderLogger()
+from tools.flight_recorder.components.types import (
+    Group,
+    MatchState,
+    Membership,
+    Op,
+    P2P,
+)
 
 
 try:
     from tabulate import tabulate
 except ModuleNotFoundError:
-    logger.debug("tabulate is not installed. Proceeding without it.")
+    print("tabulate is not installed. Proceeding without it.")
 
 
 def format_frame(frame: Dict[str, str]) -> str:
@@ -161,8 +121,7 @@ def match_coalesced_groups(
             row = []
             i += 1
         title = "Match" if match else "MISMATCH"
-        logger.info("%s \n", title)
-        logger.info("%s", tabulate(table))  # type: ignore[operator]
+        print(f"{title}\n", tabulate(table))  # type: ignore[operator]
 
     # TODO can't verify seq_id bc there might have been valid seq deltas between ranks even within a pg.
     for op_list in all_ops.values():
@@ -289,7 +248,7 @@ def just_print_entries(
         if progress:
             rows.append(row)
 
-    logger.info(tabulate(rows, headers=headers))
+    print(tabulate(rows, headers=headers))
 
 
 def check_no_missing_dump_files(

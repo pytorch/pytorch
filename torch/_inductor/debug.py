@@ -604,7 +604,7 @@ class DebugFormatter:
             except Exception as e:
                 pass
             try:
-                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))  # type: ignore[arg-type]
+                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))
             except Exception as e:
                 pass
             try:

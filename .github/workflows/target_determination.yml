@@ -85,7 +85,7 @@ jobs:
           path: td_results.json
 
       - name: Store TD results on GHA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         if: steps.td.outcome == 'success'
         with:
           name: td_results.json

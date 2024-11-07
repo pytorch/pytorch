@@ -199,7 +199,7 @@ fake_tensor_propagate_real_tensors = False
 
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
-donated_buffer = False if is_fbcode() else True
+donated_buffer = False
 
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/

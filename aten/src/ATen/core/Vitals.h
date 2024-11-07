@@ -39,8 +39,6 @@ struct TORCH_API TorchVital {
   explicit TorchVital(std::string n) : name(std::move(n)) {}
   TorchVital(const TorchVital&) = default;
   TorchVital(TorchVital&&) = default;
-  TorchVital& operator=(const TorchVital&) = default;
-  TorchVital& operator=(TorchVital&&) = default;
   TorchVital() = delete;
 
   TorchVitalAttr& create(const std::string& attr);
@@ -73,7 +71,6 @@ class TORCH_API APIVitals {
   APIVitals(APIVitals&& other) = delete;
   APIVitals& operator=(const APIVitals&) = delete;
   APIVitals& operator=(APIVitals&&) = delete;
-  ~APIVitals() = default;
 
  private:
   std::unordered_map<std::string, TorchVital> name_map_;
