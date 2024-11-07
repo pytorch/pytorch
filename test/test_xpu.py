@@ -501,7 +501,7 @@ class TestXpuAutocast(TestAutocast):
             self.assertTrue(output.dtype is torch.float16)
             output.sum().backward()
 
-    def test_xpu_autocast_dtype(self):
+    def test_xpu_autocast_dtype1(self):
         dtype = torch.get_autocast_dtype("xpu")
         self.assertEqual(dtype, torch.float16)
         mat0_fp32 = torch.randn((10, 10), dtype=torch.float32, device="xpu")
