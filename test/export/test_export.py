@@ -9252,6 +9252,35 @@ class GraphModule(torch.nn.Module):
             state_dict.keys(),
         )
 
+    @testing.expectedFailureSerDer  # T202237665
+    @testing.expectedFailureSerDerNonStrict
+    def test_dynamic_sym_round(self):
+        class ModuleWithSymRound(torch.nn.Module):
+            def forward(self, x):
+                out_size = round(x.shape[0] / 2.0)
+                return x[:out_size]
+
+        dim_min = 5
+        dim_max = 10
+        dynamic_shapes = {"x": {0: Dim("n", min=dim_min, max=dim_max)}}
+
+        module = ModuleWithSymRound()
+        inp = (torch.randn(8),)
+        ep = export(module, inp, dynamic_shapes=dynamic_shapes)
+
+        # Expect builtin round in the export graph
+        round_nodes = [
+            n for n in ep.graph.nodes if n.op == "call_function" and n.target == round
+        ]
+        self.assertEqual(len(round_nodes), 1)
+
+        # Check pre/post-export equality
+        for i in range(dim_min, dim_max + 1):
+            dyn_inp = (torch.randn(i),)
+            export_res = ep.module()(*dyn_inp)
+            ref_res = module(*dyn_inp)
+            self.assertEqual(export_res, ref_res)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
