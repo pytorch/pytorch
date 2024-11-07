@@ -191,25 +191,26 @@ void IRPrinter::visit(const CompareSelectPtr& v) {
   withParens(v->ret_val2());
 }
 
-static void formatFPSuffix(std::ostream& os, double v) {
-  os << (v == std::ceil(v) ? ".0" : "");
+static void formatFPSuffix(std::ostream& os, double v, bool flag) {
+  os << (flag && v == std::ceil(v) ? ".0" : "");
 }
 
 template <typename T>
-static void formatFPSuffix(std::ostream& os, T v) {
-  os << (v == std::ceil(v) ? ".f" : "f");
+static void formatFPSuffix(std::ostream& os, T v, bool flag) {
+  os << (flag && v == std::ceil(v) ? ".f" : "f");
 }
 
 template <typename T, std::enable_if_t<std::is_floating_point_v<T>>* = nullptr>
 static void formatImm(std::ostream& os, T v) {
   const int precision = 16;
+  const T const_range[] = {static_cast<T>(-1e16), static_cast<T>(1e16)};
   if (std::isnan(v)) {
     os << "NAN";
   } else if (std::isinf(v)) {
     os << (v > 0 ? "POS_INFINITY" : "NEG_INFINITY");
   } else {
     os << std::setprecision(precision) << v;
-    formatFPSuffix(os, v);
+    formatFPSuffix(os, v, v > const_range[0] && v < const_range[1]);
   }
 }
 
