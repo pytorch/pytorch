@@ -4,8 +4,7 @@
 #include <functional>
 #include <memory>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 struct Module;
 
 using ModuleHook = std::function<void(Module module)>;
@@ -17,5 +16,4 @@ TORCH_API void setEmitHooks(ModuleHook for_module, FunctionHook for_fn);
 
 TORCH_API std::pair<ModuleHook, FunctionHook> getEmitHooks();
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

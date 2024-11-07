@@ -29,12 +29,12 @@ DispatchKey computeDispatchKey(
     std::optional<Device> device);
 
 inline ScalarType dtype_or_default(std::optional<ScalarType> dtype) {
-  return value_or_else(dtype, [] { return get_default_dtype_as_scalartype(); });
+  return dtype.value_or(get_default_dtype_as_scalartype());
 }
 
 inline caffe2::TypeMeta dtype_or_default(
     std::optional<caffe2::TypeMeta> dtype) {
-  return value_or_else(dtype, [] { return get_default_dtype(); });
+  return dtype.value_or(get_default_dtype());
 }
 
 inline Layout layout_or_default(std::optional<Layout> layout) {
@@ -42,7 +42,7 @@ inline Layout layout_or_default(std::optional<Layout> layout) {
 }
 
 inline Device device_or_default(std::optional<Device> device) {
-  return value_or_else(device, [] { return Device(kCPU); });
+  return device.value_or(Device(kCPU));
 }
 
 inline bool pinned_memory_or_default(std::optional<bool> pinned_memory) {
