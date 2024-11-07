@@ -49,7 +49,7 @@ public:
     return 8;
   }
   using Vectorizedi::Vectorizedi;
-  constexpr Vectorized() {}
+  Vectorized() {}
   constexpr Vectorized(int64_t v) { values = _mm512_set1_epi64(v); }
   constexpr Vectorized(int64_t val1, int64_t val2, int64_t val3, int64_t val4,
          int64_t val5, int64_t val6, int64_t val7, int64_t val8) {

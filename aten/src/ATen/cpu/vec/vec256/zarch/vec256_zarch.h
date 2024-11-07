@@ -383,7 +383,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   static constexpr size_type size() {
     return VECTOR_WIDTH / sizeof(ElementType);
   }
-  constexpr Vectorized() {}
+  Vectorized() {}
 
   constexpr C10_ALWAYS_INLINE Vectorized(vtype v) : _vec0{v}, _vec1{v} {}
   constexpr C10_ALWAYS_INLINE Vectorized(const vinner_data &v) : _vec0{v.first}, _vec1{v.second} {}

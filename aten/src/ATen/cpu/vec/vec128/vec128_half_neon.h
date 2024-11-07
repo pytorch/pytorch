@@ -118,7 +118,7 @@ class Vectorized<c10::Half> {
 
  public:
    // constructor
-  constexpr Vectorized() {}
+  Vectorized() {}
   constexpr Vectorized(float16x8_t v) : values(v) {}
 
   // A ctor that accepts c10::Half is needed to fit interface with vec_base.h

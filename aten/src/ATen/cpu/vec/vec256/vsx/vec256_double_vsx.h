@@ -36,7 +36,7 @@ class Vectorized<double> {
   static constexpr size_type size() {
     return 4;
   }
-  constexpr Vectorized() {}
+  Vectorized() {}
   constexpr C10_ALWAYS_INLINE Vectorized(vfloat64 v) : _vec0{v}, _vec1{v} {}
   constexpr C10_ALWAYS_INLINE Vectorized(vbool64 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
   constexpr C10_ALWAYS_INLINE Vectorized(vfloat64 v1, vfloat64 v2) : _vec0{v1}, _vec1{v2} {}

@@ -29,7 +29,7 @@ public:
   static constexpr size_type size() {
     return 8;
   }
-  constexpr Vectorized() {}
+  Vectorized() {}
   constexpr Vectorized(__m512 v) : values(v) {}
   constexpr Vectorized(c10::complex<float> val) {
     float real_value = val.real();

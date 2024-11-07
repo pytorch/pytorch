@@ -27,7 +27,7 @@ public:
   static constexpr size_type size() {
     return 4;
   }
-  constexpr Vectorized() {}
+  Vectorized() {}
   constexpr Vectorized(__m256d v) : values(v) {}
   constexpr Vectorized(double val) {
     values = _mm256_set1_pd(val);

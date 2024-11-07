@@ -48,7 +48,7 @@ public:
     return 4;
   }
   using Vectorizedi::Vectorizedi;
-  constexpr Vectorized() {}
+  Vectorized() {}
   constexpr Vectorized(int64_t v) { values = _mm256_set1_epi64x(v); }
   constexpr Vectorized(int64_t val1, int64_t val2, int64_t val3, int64_t val4) {
     values = _mm256_setr_epi64x(val1, val2, val3, val4);
@@ -169,7 +169,7 @@ public:
     return 8;
   }
   using Vectorizedi::Vectorizedi;
-  constexpr Vectorized() {}
+  Vectorized() {}
   constexpr Vectorized(int32_t v) { values = _mm256_set1_epi32(v); }
   constexpr Vectorized(int32_t val1, int32_t val2, int32_t val3, int32_t val4,
          int32_t val5, int32_t val6, int32_t val7, int32_t val8) {
@@ -327,7 +327,7 @@ public:
     return 16;
   }
   using Vectorizedi::Vectorizedi;
-  constexpr Vectorized() {}
+  Vectorized() {}
   constexpr Vectorized(int16_t v) { values = _mm256_set1_epi16(v); }
   constexpr Vectorized(int16_t val1, int16_t val2, int16_t val3, int16_t val4,
          int16_t val5, int16_t val6, int16_t val7, int16_t val8,

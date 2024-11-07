@@ -72,7 +72,7 @@ public:
   static constexpr size_type size() {
     return 4;
   }
-  constexpr Vectorized() {}
+  Vectorized() {}
   constexpr Vectorized(float32x4_t v) : values(v) {}
   constexpr Vectorized(float val) : values(vdupq_n_f32(val)) {}
   constexpr Vectorized(float val0, float val1, float val2, float val3) :

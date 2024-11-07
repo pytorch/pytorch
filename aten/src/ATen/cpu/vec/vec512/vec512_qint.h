@@ -290,7 +290,7 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
 
  public:
     using Vectorizedqi::Vectorizedqi;
-    constexpr Vectorized() {}
+    Vectorized() {}
 
     constexpr Vectorized(__m512i vals_) { vals = vals_;}
 

@@ -50,7 +50,7 @@ struct Vectorized<c10::quint8> {
   } __attribute__((__may_alias__));
 
  public:
-  constexpr Vectorized() {}
+  Vectorized() {}
   using size_type = int;
   static constexpr size_type size() {
     return 32;

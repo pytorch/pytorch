@@ -30,7 +30,7 @@ public:
   static constexpr size_type size() {
     return 8;
   }
-  constexpr Vectorized() {}
+  Vectorized() {}
   constexpr Vectorized(__m512d v) : values(v) {}
   constexpr Vectorized(double val) {
     values = _mm512_set1_pd(val);
