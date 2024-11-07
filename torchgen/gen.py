@@ -144,6 +144,25 @@ _GLOBAL_PARSE_NATIVE_YAML_CACHE: dict[str, ParsedYaml] = {}
 _GLOBAL_PARSE_TAGS_YAML_CACHE: dict[str, set[str]] = {}
 
 
+def file_manager_from_dispatch_key(
+    dispatch_key: DispatchKey,
+    device_fms: dict[str, FileManager],
+    default_fm: FileManager,
+) -> FileManager:
+    fm = device_fms.get(
+        next(
+            (
+                device
+                for check, device in dispatch_device_map.items()
+                if check(dispatch_key)
+            ),
+            "",
+        ),
+        default_fm,
+    )
+    return fm
+
+
 def parse_native_yaml_struct(
     es: object,
     valid_tags: set[str],
@@ -1797,18 +1816,7 @@ def gen_aggregated_headers(
     )
 
     for dispatch_key in dispatch_keys:
-        fm = device_fms.get(
-            next(
-                (
-                    device
-                    for check, device in dispatch_device_map.items()
-                    if check(dispatch_key)
-                ),
-                "cpu",
-            ),
-            cpu_fm,
-        )
-
+        fm = file_manager_from_dispatch_key(dispatch_key, device_fms, cpu_fm)
         if dispatch_key in functions_keys:
             inl_headers = f"#include <ATen/{dispatch_key}Functions_inl.h>"
 
@@ -1996,17 +2004,7 @@ def gen_per_operator_headers(
                 },
             )
 
-        fm = device_fms.get(
-            next(
-                (
-                    device
-                    for check, device in dispatch_device_map.items()
-                    if check(dispatch_key)
-                ),
-                "cpu",
-            ),
-            cpu_fm,
-        )
+        fm = file_manager_from_dispatch_key(dispatch_key, device_fms, cpu_fm)
         inl_headers = f"#include <ATen/{dispatch_key}Functions_inl.h>"
 
         fm.write_with_template(
@@ -2219,18 +2217,7 @@ def gen_source_files(
 #include <ATen/hip/HIPContext.h>"""
 
     for dispatch_key in dispatch_keys:
-        fm = device_fms.get(
-            next(
-                (
-                    device
-                    for check, device in dispatch_device_map.items()
-                    if check(dispatch_key)
-                ),
-                "cpu",
-            ),
-            cpu_fm,
-        )
-
+        fm = file_manager_from_dispatch_key(dispatch_key, device_fms, cpu_fm)
         if per_operator_headers:
 
             def operator_headers() -> list[str]:
