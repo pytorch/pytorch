@@ -28,6 +28,8 @@ struct DeviceStats {
   StatArray inactive_split_bytes;
   // SUM: bytes requested by client code
   StatArray requested_bytes;
+  // SUM: bytes annotated as comms tensors by user
+  StatArray comms_annotated_bytes;
 
   // COUNT: total number of failed calls to device malloc necessitating cache
   // flushes.

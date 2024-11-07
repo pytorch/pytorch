@@ -359,6 +359,7 @@ ncclResult_t NCCLComm::registerSegment(
     void* ptr,
     size_t size,
     bool isExpandable,
+    bool isComms,
     bool regSnapshot,
     size_t snapshotSegmentSize,
     bool errorOnRereg) {
@@ -372,9 +373,14 @@ ncclResult_t NCCLComm::registerSegment(
   // FIXME: set kLargeBuffer to c10::cuda::CUDACachingAllocator::kLargeBuffer
   const auto kLargeBuffer = 20971520;
   bool directRDMA = c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-     experimental_direct_rdma();
-  if (!directRDMA && isExpandable && !regSnapshot && size >= kLargeBuffer) {
-    segmentSize = kLargeBuffer;
+      experimental_direct_rdma();
+  // Update segmentSize only for expandable segments
+  if (!directRDMA && isExpandable && !isComms) {
+    if (!regSnapshot && size >= kLargeBuffer) {
+      segmentSize = kLargeBuffer;
+    } else if (regSnapshot) {
+      segmentSize = snapshotSegmentSize;
+    }
     TORCH_CHECK(
         size % segmentSize == 0,
         "Segment with ptr ",

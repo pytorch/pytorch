@@ -165,6 +165,12 @@ void CUDAPluggableAllocator::init(int device_count) {
   initialized_ = true;
 }
 
+void CUDAPluggableAllocator::initCommsPool(c10::DeviceIndex device, size_t commsPoolSize) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not support comms pool.");
+}
+
 bool CUDAPluggableAllocator::initialized() {
   return initialized_;
 }

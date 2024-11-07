@@ -34,6 +34,14 @@ class C10_CUDA_API CUDAAllocatorConfig {
 #endif
   }
 
+  static bool comms() {
+    return instance().m_comms;
+  }
+
+  static void set_experimental_direct_rdma(bool val) {
+    instance().m_experimental_direct_rdma = val;
+  }
+
   static bool experimental_direct_rdma() {
     return instance().m_experimental_direct_rdma;
   }
@@ -138,7 +146,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<double> m_garbage_collection_threshold;
   std::atomic<size_t> m_pinned_num_register_threads;
   std::atomic<bool> m_expandable_segments;
-  std::atomic<bool> m_experimental_direct_rdma;
+  static thread_local std::atomic<bool> m_comms;
+  static thread_local std::atomic<bool> m_experimental_direct_rdma;
   std::atomic<bool> m_release_lock_on_cudamalloc;
   std::atomic<bool> m_pinned_use_cuda_host_register;
   std::atomic<bool> m_pinned_use_background_threads;

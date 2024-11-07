@@ -334,10 +334,35 @@ class NCCLComm {
 
   ncclResult_t checkForNcclError();
 
+  /**
+   * Registers memory with NCCL using ncclCommRegister.
+   * In order to register each cuMem allocation in an expandable segment,
+   * we have to break down the buffers passed to registerSegment. If
+   * regSnapshot is true, then we are looping through the snapshot and need
+   * snapshotSegmentSize to tell us if the memory is from the large pool or
+   * small pool. If regSnapshot is false, then we have just allocated this
+   * memory and we know that we should break down the buffer into kLargeBuffer
+   * chunks if it is larger than kLargeBuffer.
+   *
+   * @param ptr Address of the memory to pass to ncclCommRegister.
+   * @param size Size of the memory to register.
+   * @param isExpandable If this memory is part of an expandable segment, we
+   *                     need to call ncclCommRegister on each allocated chunk.
+   * @param isComms Does this memory belong to the comms pool? If so, the memory
+   *                was allocated as a single cuMem allocation which should be
+   *                passed to ncclCommRegister.
+   * @param regSnapshot Memory can be registered by either hitting the callback
+   *                    after CCA allocates it (regSnapshot=False) or during nccl
+   *                    pg creation when the pg loops through the existing snapshot
+   *                    so that each previous memory allocation before the pg was
+   *                    created is registered to it (regSnapshot=True).
+   * @param snapshotSegmentSize Size of the memory to register if regSnapshot=true
+   */
   ncclResult_t registerSegment(
       void* ptr,
       size_t size,
       bool isExpandable,
+      bool isComms,
       bool regSnapshot,
       size_t snapshotSegmentSize = 0,
       bool errorOnRereg = true);

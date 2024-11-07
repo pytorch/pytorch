@@ -590,7 +590,7 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
 
   const auto statArrayToDict = [=](const StatArray& statArray) {
     const std::array<const char*, static_cast<size_t>(StatType::NUM_TYPES)>
-        statTypeNames = {"all", "small_pool", "large_pool"};
+        statTypeNames = {"all", "small_pool", "large_pool", "comms_pool"};
     py::dict dict;
     for (const auto i : c10::irange(statTypeNames.size())) {
       dict[statTypeNames[i]] = statToDict(statArray[i]);
@@ -818,7 +818,9 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str segment_alloc_s = "segment_alloc";
   py::str segment_free_s = "segment_free";
   py::str segment_map_s = "segment_map";
+  py::str comms_segment_register = "comms_segment_register";
   py::str segment_unmap_s = "segment_unmap";
+  py::str comms_segment_deregister = "comms_segment_deregister";
 
   py::str snapshot_s = "snapshot";
   py::str oom_s = "oom";
@@ -844,8 +846,12 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         return snapshot_s;
       case TraceEntry::SEGMENT_UNMAP:
         return segment_unmap_s;
+      case TraceEntry::COMMS_SEGMENT_DEREGISTER:
+        return comms_segment_deregister;
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
+      case TraceEntry::COMMS_SEGMENT_REGISTER:
+        return comms_segment_register;
     }
     throw std::runtime_error("unreachable");
   };

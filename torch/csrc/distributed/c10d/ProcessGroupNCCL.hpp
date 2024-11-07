@@ -191,6 +191,9 @@ static std::vector<std::string> TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK =
     {"TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK",
      "NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"};
 
+static std::vector<std::string> TORCH_NCCL_COMMS_POOL_SIZE_MB = {
+    "TORCH_NCCL_COMMS_POOL_SIZE_MB"};
+
 #if defined(__linux__)
 struct DumpPipe {
   DumpPipe(int rank) {
@@ -1307,6 +1310,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not wait() and synchronize() are blocking operations that wait
   // for the operation to complete.
   bool blockingWait_ = false;
+
+  size_t commsPoolSize_ = 0;
 
   // Whether or not the workCleanupThread is used to perform async error
   // handling.

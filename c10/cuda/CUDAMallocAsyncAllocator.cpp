@@ -443,6 +443,12 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     (void)called;
   }
 
+  void initCommsPool(c10::DeviceIndex device, size_t commsPoolSize) override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not support comms pool.");
+  }
+
   bool initialized() override {
     return !devs_initialized_flags.empty();
   }

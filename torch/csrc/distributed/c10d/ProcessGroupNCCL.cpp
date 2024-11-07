@@ -311,13 +311,13 @@ std::atomic<bool> ProcessGroupNCCL::shouldDump_(false);
 
 static void cacheAllocatorRegisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
-  // Register after SEGMENT_ALLOC
   bool needRegister =
-      (te.action_ ==
-       c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_ALLOC) ||
-      (te.action_ ==
-       c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_MAP);
-  if (!needRegister) {
+    (te.action_ ==
+     c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_ALLOC) ||
+    (te.action_ ==
+     c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_MAP);
+
+  if (!shouldAllCommunicatorsRegisterAllTensors() || !needRegister) {
     return;
   }
 
@@ -331,7 +331,11 @@ static void cacheAllocatorRegisterHook(
           memPools.find(te.mempool_) != memPools.end()) {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         ncclComm->registerSegment(
-            reinterpret_cast<void*>(te.addr_), te.size_, isExpandable, false);
+            reinterpret_cast<void*>(te.addr_),
+            te.size_,
+            isExpandable,
+            false,
+            false);
       }
     }
   }
@@ -340,11 +344,12 @@ static void cacheAllocatorRegisterHook(
 static void cacheAllocatorDeregisterHook(
     const c10::cuda::CUDACachingAllocator::TraceEntry& te) {
   bool needDeregister =
-      (te.action_ ==
-       c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_FREE) ||
-      (te.action_ ==
-       c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_UNMAP);
-  if (!needDeregister) {
+    (te.action_ ==
+     c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_FREE) ||
+    (te.action_ ==
+     c10::cuda::CUDACachingAllocator::TraceEntry::Action::SEGMENT_UNMAP);
+
+  if (!shouldAllCommunicatorsRegisterAllTensors() || !needDeregister) {
     return;
   }
 
@@ -1008,6 +1013,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     TORCH_WARN_ONCE(
         "TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated.");
   }
+  commsPoolSize_ = getCvarInt(TORCH_NCCL_COMMS_POOL_SIZE_MB, 0);
 
   if (blockingWait_) {
     LOG(INFO)
@@ -1038,8 +1044,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   const std::string OFF = "OFF";
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
-  LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
-            << "size: " << size << ", global rank: " << globalRank()
+  LOG(INFO) << logPrefix()
+            << "ProcessGroupNCCL initialization options: " << "size: " << size
+            << ", global rank: " << globalRank()
             << ", TIMEOUT(ms): " << options_->timeout.count()
             << ", USE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
@@ -1062,6 +1069,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
             << shouldAllCommunicatorsRegisterAllTensors()
 #endif // NCCL_HAS_COMM_REGISTER
+            << ", TORCH_NCCL_COMMS_POOL_SIZE_MB: " << commsPoolSize_
             << ", TORCH_NCCL_ENABLE_MONITORING: "
             << monitorThreadEnabled_.load()
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
@@ -1097,6 +1105,12 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
   LOG(INFO) << logPrefix() << "Eagerly connecting nccl backend with device "
             << device;
   initNCCLComm(key, device, OpType::ALLREDUCE);
+  // If using comms pool, initialize now that we have the device.
+  // This means that comms pool is only supported for eager init.
+  if (commsPoolSize_ > 0) {
+    c10::cuda::CUDACachingAllocator::initCommsPool(
+        device.index(), commsPoolSize_);
+  }
   eagerInit = true;
 }
 
@@ -3074,13 +3088,15 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::initNCCLComm(
         // c10::cuda::CUDACachingAllocator::kSmallBuffer
         const size_t kLargeBuffer = 20971520;
         const size_t kSmallBuffer = 2097152;
-        ncclComm->registerSegment(
-            // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            reinterpret_cast<void*>(segmentInfo.address),
-            segmentInfo.total_size,
-            segmentInfo.is_expandable,
-            true,
-            segmentInfo.is_large ? kLargeBuffer : kSmallBuffer);
+        if (shouldAllCommunicatorsRegisterAllTensors()) {
+          ncclComm->registerSegment(
+              reinterpret_cast<void*>(segmentInfo.address),
+              segmentInfo.total_size,
+              segmentInfo.is_expandable,
+              segmentInfo.from_comms_pool,
+              true,
+              segmentInfo.is_large ? kLargeBuffer : kSmallBuffer);
+        }
       }
     }
     // Record the mapping between ncclComm and device index so that later

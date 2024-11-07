@@ -78,6 +78,7 @@ struct SegmentInfo {
   cudaStream_t stream = nullptr;
   bool is_large = false;
   bool is_expandable = false;
+  bool from_comms_pool = false;
   MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
   std::shared_ptr<GatheredContext> context_when_allocated;
@@ -103,7 +104,9 @@ struct TraceEntry {
     SEGMENT_FREE, // a call to cudaFree to return memory to the OS (e.g. to
                   // defragment or empty_caches)
     SEGMENT_MAP, // a call to cuMemMap (used with expandable_segments)
+    COMMS_SEGMENT_REGISTER, // register allocated comms pool
     SEGMENT_UNMAP, // unmap part of a segment (used with expandable segments)
+    COMMS_SEGMENT_DEREGISTER, // deregister allocated comms pool
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
     OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free
@@ -208,6 +211,7 @@ class CUDAAllocator : public Allocator {
   virtual void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) = 0;
   virtual void raw_delete(void* ptr) = 0;
   virtual void init(int device_count) = 0;
+  virtual void initCommsPool(c10::DeviceIndex device, size_t commsPoolSize) = 0;
   virtual bool initialized() = 0;
   virtual double getMemoryFraction(c10::DeviceIndex device) = 0;
   virtual void setMemoryFraction(double fraction, c10::DeviceIndex device) = 0;
@@ -361,6 +365,10 @@ inline void init(int device_count) {
 
 inline double getMemoryFraction(c10::DeviceIndex device) {
   return get()->getMemoryFraction(device);
+}
+
+inline void initCommsPool(c10::DeviceIndex device, size_t commsPoolSize) {
+  return get()->initCommsPool(device, commsPoolSize);
 }
 
 inline void setMemoryFraction(double fraction, c10::DeviceIndex device) {

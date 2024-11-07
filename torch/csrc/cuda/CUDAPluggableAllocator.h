@@ -111,6 +111,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) override;
   void raw_delete(void* ptr) override;
   void init(int device_count) override;
+  void initCommsPool(c10::DeviceIndex device, size_t commsPoolSize) override;
   bool initialized() override;
   double getMemoryFraction(c10::DeviceIndex device) override;
   void setMemoryFraction(double fraction, c10::DeviceIndex device) override;

@@ -157,10 +157,11 @@ static bool BlockComparatorSize(const Block* a, const Block* b);
 static bool BlockComparatorAddress(const Block* a, const Block* b);
 
 struct BlockPool {
-  BlockPool(bool small, PrivatePool* private_pool = nullptr)
+  BlockPool(bool small, PrivatePool* private_pool = nullptr, bool comms = false)
       : blocks(BlockComparatorSize),
         unmapped(BlockComparatorAddress),
         is_small(small),
+        is_comms(comms),
         owner_PrivatePool(private_pool) {}
 
   // Do not insert a Block to blocks directly; use insert_into_blocks(),
@@ -169,6 +170,7 @@ struct BlockPool {
   std::set<Block*, Comparison> unmapped;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
+  const bool is_comms;
   PrivatePool* owner_PrivatePool;
   int64_t get_free_blocks_call_count{0};
 
@@ -188,6 +190,7 @@ struct Block {
   size_t size; // block size in bytes
   size_t requested_size; // memory originally requested
   BlockPool* pool{nullptr}; // owning memory pool
+  bool comms_annotated{false};
   void* ptr{nullptr}; // memory address
   bool allocated{false}; // in-use flag
   bool mapped{true}; // is the virtual address range this Block references
@@ -1061,6 +1064,8 @@ class DeviceCachingAllocator {
   // unallocated cached blocks larger than 1 MB
   BlockPool large_blocks;
 
+  BlockPool comms_blocks;
+
   // unallocated cached blocks 1 MB or smaller
   BlockPool small_blocks;
 
@@ -1132,7 +1137,7 @@ class DeviceCachingAllocator {
  public:
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   DeviceCachingAllocator()
-      : large_blocks(/*small=*/false), small_blocks(/*small=*/true) {
+      : large_blocks(/*small=*/false), comms_blocks(/*small=*/false, nullptr, true), small_blocks(/*small=*/true) {
     stats.max_split_size =
         static_cast<int64_t>(CUDAAllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
@@ -1221,7 +1226,8 @@ class DeviceCachingAllocator {
   Block* malloc(
       c10::DeviceIndex device,
       size_t orig_size,
-      cudaStream_t stream) {
+      cudaStream_t stream,
+      bool commsAlloc = false) {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
@@ -1241,11 +1247,26 @@ class DeviceCachingAllocator {
       //    effect on memory use during capture should be small.
       process_events(context);
     }
+    bool comms_annotated = false;
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
+    auto& comms_pool = comms_blocks;
     const size_t alloc_size = get_allocation_size(size);
-    AllocParams params(device, size, stream, &pool, alloc_size, stats);
+    AllocParams default_params(device, size, stream, &pool, alloc_size, stats);
+    AllocParams comms_params(device, size, stream, &comms_pool, alloc_size, stats);
+
+    AllocParams params = default_params;
     params.stat_types = get_stat_types_for_pool(pool);
+    // We use the comms pool in two cases: 1) when the user sets comms() setting
+    // to be true, we give memory from the comms pool, but don't allocate more.
+    // 2) when we first initialize the comms pool and allocate memory to it
+    // which is when commsAlloc is true.
+    if(CUDAAllocatorConfig::comms() || commsAlloc){
+      comms_annotated = true;
+      params = comms_params;
+      params.stat_types = get_stat_types_for_pool(comms_pool);
+    }
+
 
     // First, try to get a block from the existing pool.
     bool block_found =
@@ -1253,6 +1274,19 @@ class DeviceCachingAllocator {
         get_free_block(params)
         // Trigger callbacks and retry search
         || (trigger_free_memory_callbacks(params) && get_free_block(params));
+
+    // The comms pool is not allowed to expand past its initial allocation,
+    // so we fall back to the default pool if we have not found a block.
+    if(CUDAAllocatorConfig::comms() && !block_found){
+      params = default_params;
+      params.stat_types = get_stat_types_for_pool(pool);
+      TORCH_WARN("Comms pool status: ", alloc_size," byte comms pool alloc fall back to default pool. Details: current comms_pool_capacity: ", stats.active_bytes[static_cast<uint64_t>(StatType::COMMS_POOL)].current, " bytes, peak comms_pool_capacity: ", stats.active_bytes[static_cast<uint64_t>(StatType::COMMS_POOL)].peak, " bytes, current comms_tensors_from_comms_pool: ", stats.comms_annotated_bytes[static_cast<uint64_t>(StatType::COMMS_POOL)].current, " bytes, peak comms_tensors_from_comms_pool: ", stats.comms_annotated_bytes[static_cast<uint64_t>(StatType::COMMS_POOL)].peak, " bytes, current comms_tensors_from_default_pool: ", stats.comms_annotated_bytes[static_cast<uint64_t>(StatType::LARGE_POOL)].current," bytes, peak comms_tensors_from_default_pool: ", stats.comms_annotated_bytes[static_cast<uint64_t>(StatType::LARGE_POOL)].peak," bytes");
+      block_found =
+          // Search pool
+          get_free_block(params)
+          // Trigger callbacks and retry search
+          || (trigger_free_memory_callbacks(params) && get_free_block(params));
+    }
 
     // Can't reuse an existing block; try to get a new one.
     if (!block_found) {
@@ -1267,15 +1301,27 @@ class DeviceCachingAllocator {
       // cudaMalloc. So far this function has not modified allocator state, but
       // keep in mind that any observed allocator state may change across calls
       // to alloc_block since it may release the lock.
-      block_found = alloc_block(params, false, context, lock)
+      block_found = alloc_block(params, false, context, lock);
+      // Use the comms pool if alloc_block fails before releasing memory from
+      // cache allocator.
+      if(!block_found){
+          block_found = get_free_block(comms_params);
+          if(block_found){
+            params = comms_params;
+            params.stat_types = get_stat_types_for_pool(comms_pool);
+            TORCH_WARN("Comms pool status: ", alloc_size," byte default pool alloc fall back to comms pool. Details: current comms_pool_capacity: ", stats.active_bytes[static_cast<uint64_t>(StatType::COMMS_POOL)].current, " bytes, peak comms_pool_capacity: ", stats.active_bytes[static_cast<uint64_t>(StatType::COMMS_POOL)].peak, " bytes, current comms_tensors_from_comms_pool: ", stats.comms_annotated_bytes[static_cast<uint64_t>(StatType::COMMS_POOL)].current, " bytes, peak comms_tensors_from_comms_pool: ", stats.comms_annotated_bytes[static_cast<uint64_t>(StatType::COMMS_POOL)].peak, " bytes, current comms_tensors_from_default_pool: ", stats.comms_annotated_bytes[static_cast<uint64_t>(StatType::LARGE_POOL)].current," bytes, peak comms_tensors_from_default_pool: ", stats.comms_annotated_bytes[static_cast<uint64_t>(StatType::LARGE_POOL)].peak," bytes");
+          }
+      }
           // Free enough available cached blocks to satisfy alloc and retry
           // alloc.
-          || (release_available_cached_blocks(params, context) &&
+      if(!block_found){
+          block_found = (release_available_cached_blocks(params, context) &&
               alloc_block(params, false, context, lock))
           // Free all non-split cached blocks and retry alloc.
           || (C10_LIKELY(captures_underway.empty()) &&
               release_cached_blocks(context) &&
               alloc_block(params, true, context, lock));
+      }
     }
 
     // we are about to oom, try to use existing mempools as a last resort
@@ -1425,14 +1471,15 @@ class DeviceCachingAllocator {
 
     bool split_remainder = should_split(params.block, params.size());
     return alloc_found_block(
-        params, orig_size, std::move(context), split_remainder);
+        params, orig_size, std::move(context), split_remainder, comms_annotated);
   }
 
   Block* alloc_found_block(
       const AllocParams& params,
       size_t orig_size,
       std::shared_ptr<GatheredContext> context,
-      bool split_remainder) {
+      bool split_remainder,
+      bool comms_annotated = false) {
     auto size = params.size();
     auto device = params.device();
     auto pool = params.pool;
@@ -1486,6 +1533,7 @@ class DeviceCachingAllocator {
 
     block->allocated = true;
     block->requested_size = orig_size;
+    block->comms_annotated = comms_annotated;
 
     block->context_when_allocated = std::move(context);
     record_trace(
@@ -1507,6 +1555,7 @@ class DeviceCachingAllocator {
       stats.active[stat_type].increase(1);
       stats.active_bytes[stat_type].increase(block->size);
       stats.requested_bytes[stat_type].increase(block->requested_size);
+      stats.comms_annotated_bytes[stat_type].increase(block->comms_annotated ? block->size : 0);
     });
     if (block->size >= CUDAAllocatorConfig::max_split_size())
       stats.oversize_allocations.increase(1);
@@ -2027,6 +2076,7 @@ class DeviceCachingAllocator {
       segment_info.stream = head_block->stream;
       segment_info.is_large = (!head_block->pool->is_small);
       segment_info.is_expandable = head_block->expandable_segment_;
+      segment_info.from_comms_pool = head_block->pool->is_comms;
       segment_info.context_when_allocated =
           head_block->context_when_segment_allocated;
       MempoolId_t id = head_block->pool->owner_MempoolId();
@@ -2231,6 +2281,8 @@ class DeviceCachingAllocator {
         blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
     blocks.insert(
         blocks.end(), large_blocks.blocks.begin(), large_blocks.blocks.end());
+    blocks.insert(
+        blocks.end(), comms_blocks.blocks.begin(), comms_blocks.blocks.end());
     for (const auto& gp : graph_pools) {
       blocks.insert(
           blocks.end(),
@@ -2418,6 +2470,16 @@ class DeviceCachingAllocator {
         to_map->device,
         to_map->pool->owner_MempoolId(),
         ctx);
+    if(pool.is_comms){
+      record_trace(
+          TraceEntry::COMMS_SEGMENT_REGISTER,
+          int64_t(mapped_range.ptr),
+          mapped_range.size,
+          to_map->stream,
+          to_map->device,
+          to_map->pool->owner_MempoolId(),
+          ctx);
+    }
     if (!to_map->prev && !to_map->context_when_segment_allocated) {
       to_map->context_when_segment_allocated = ctx;
     }
@@ -2478,6 +2540,7 @@ class DeviceCachingAllocator {
     block->context_when_allocated = nullptr;
     size_t original_block_size = block->size;
     size_t requested_size = block->requested_size;
+    bool comms_annotated = block->comms_annotated;
 
     auto& pool = *block->pool;
     int64_t net_change_inactive_split_blocks = 0;
@@ -2493,6 +2556,7 @@ class DeviceCachingAllocator {
     }
 
     active_blocks.erase(block);
+    block->comms_annotated = false;
     // Makes sure the Block* isn't already present in the pool we're freeing it
     // back into.
     // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -2505,7 +2569,6 @@ class DeviceCachingAllocator {
     }
 
     StatTypes stat_types = get_stat_types_for_pool(pool);
-
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       // inactive_split tries to capture the idea that blocks
       // cannot be freed when requested, but fully free pages
@@ -2532,6 +2595,7 @@ class DeviceCachingAllocator {
       stats.active[stat_type].decrease(1);
       stats.active_bytes[stat_type].decrease(original_block_size);
       stats.requested_bytes[stat_type].decrease(requested_size);
+      stats.comms_annotated_bytes[stat_type].decrease(comms_annotated ? original_block_size : 0);
     });
   }
 
@@ -2598,8 +2662,13 @@ class DeviceCachingAllocator {
   StatTypes get_stat_types_for_pool(const BlockPool& pool) {
     StatTypes stat_types = {false};
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    stat_types[static_cast<size_t>(
-        pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
+    if(pool.is_comms){
+       stat_types[static_cast<size_t>(StatType::COMMS_POOL)] = true;
+    }
+    else{
+      stat_types[static_cast<size_t>(
+          pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
+    }
     return stat_types;
   }
 
@@ -3113,6 +3182,16 @@ class DeviceCachingAllocator {
         block->device,
         block->pool->owner_MempoolId(),
         context ? context : block->context_when_segment_allocated);
+    if(block->pool->is_comms){
+      record_trace(
+          TraceEntry::COMMS_SEGMENT_DEREGISTER,
+          int64_t(unmapped.ptr),
+          unmapped.size,
+          block->stream,
+          block->device,
+          block->pool->owner_MempoolId(),
+          context ? context : block->context_when_segment_allocated);
+    }
   }
   void release_blocks(
       BlockPool& pool,
@@ -3417,6 +3496,9 @@ class NativeCachingAllocator : public CUDAAllocator {
   bool record_history = false;
   RingBuffer<AnnotationEntry> annotation_buffer;
 
+  // Track comms pool state
+  bool commsPoolInitialized = false;
+
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
 
@@ -3444,6 +3526,29 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
   }
 
+  void initCommsPool(c10::DeviceIndex device, size_t commsPoolSize) override{
+    // Allocate to the comms pool by calling malloc with commsAlloc=true.
+    // This will allocate a single segment of memory of size TORCH_NCCL_COMMS_POOL_SIZE_MB
+    // with cuMem api since expandable_segments and experimental_direct_rdma are True.
+    // The cuMem call is necessary for comms tensors. We then free the memory so
+    // future malloc calls with comms:True will use this segment.
+    if(!commsPoolInitialized){
+      TORCH_INTERNAL_ASSERT(CUDAAllocatorConfig::expandable_segments());
+      // experimental_direct_rdma is an internal config that allows us to use
+      // expandable segments (and therefore cuMem) to allocate a segment with a
+      // set size rather than variable size.
+      CUDAAllocatorConfig::set_experimental_direct_rdma(true);
+      size_t nbytes = commsPoolSize*1024*1024;
+      if (nbytes > 0) {
+        void* r = nullptr;
+        malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device), /*commsAlloc=*/true);
+        free(r);
+      }
+      CUDAAllocatorConfig::set_experimental_direct_rdma(false);
+      commsPoolInitialized = true;
+    }
+  }
+
   bool initialized() override {
     return !device_allocator.empty();
   }
@@ -3453,13 +3558,14 @@ class NativeCachingAllocator : public CUDAAllocator {
       void** devPtr,
       c10::DeviceIndex device,
       size_t size,
-      cudaStream_t stream) {
+      cudaStream_t stream,
+      bool commsAlloc = false) {
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
         "Allocator not initialized for device ",
         device,
         ": did you call init?");
-    Block* block = device_allocator[device]->malloc(device, size, stream);
+    Block* block = device_allocator[device]->malloc(device, size, stream, commsAlloc);
     add_allocated_block(block);
     *devPtr = (void*)block->ptr;
     const c10::impl::PyInterpreter* interp = c10::impl::GPUTrace::get_trace();

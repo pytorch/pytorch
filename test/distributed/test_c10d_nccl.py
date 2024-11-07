@@ -211,6 +211,14 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
         ):
             c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
+@contextmanager
+def comms_tensor():
+    torch.cuda.memory._set_allocator_settings("comms:True")
+    try:
+        yield
+    finally:
+        torch.cuda.memory._set_allocator_settings("comms:False")
+
 
 class ProcessGroupNCCLInitTest(MultiProcessTestCase):
     device_type = "cuda"
@@ -680,6 +688,311 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             self._helper_test_extra_cuda_context_by_nvml()
         except ModuleNotFoundError:
             self._helper_test_extra_cuda_context_by_memory()
+
+    def _setup_comms_pool_test(self, comms_pool_size_in_mb, additional_allowed_memory_in_mb):
+        os.environ["TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"] = "ALL"
+        os.environ["TORCH_NCCL_COMMS_POOL_SIZE_MB"] = str(comms_pool_size_in_mb)
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        default_pg = self._create_process_group_nccl(store, self.opts(), device_id=device)
+
+        torch.cuda.memory.empty_cache()
+        mb = 1024 * 1024
+        _, all_memory = torch.cuda.memory.mem_get_info(device)
+        pre_reserved = torch.cuda.memory_reserved(device)
+        total_allowed = additional_allowed_memory_in_mb * mb + pre_reserved
+        fraction_allowed = total_allowed / all_memory
+        torch.cuda.memory.set_per_process_memory_fraction(fraction_allowed, device)
+
+        dtype = torch.int8
+        return device, dtype, default_pg
+
+
+    def _teardown_comms_pool_test(self):
+        c10d.barrier()
+        c10d.destroy_process_group()
+        os.environ["TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK"] = ""
+        os.environ["TORCH_NCCL_COMMS_POOL_SIZE_MB"] = ""
+        os.environ["PYTORCH_CUDA_ALLOC_CONF"] = ""
+
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory.set_per_process_memory_fraction(1.0)
+
+
+    def _thread_local_allocate_helper(self, thread_id, results, size, device, dtype, barrier):
+        if thread_id == 0:
+            # thread 0 sets the "comms" config to true and waits before setting it to false
+            with comms_tensor():
+                barrier.wait()
+                tensor = torch.empty(size, device=device, dtype=dtype)
+                # make sure all other threads allocate before setting "comms" config to false
+                barrier.wait()
+
+        else:
+            # all other threads wait so thread 0 can set comms config to true locally
+            barrier.wait()
+            # comms config should still be false for other threads and will not use comms pool
+            tensor = torch.empty(size, device=device, dtype=dtype)
+            barrier.wait()
+        results[thread_id] = tensor
+
+    def _tensor_in_comms_pool(self, comms_pool_start, comms_pool_end, tensor):
+        ptr = tensor.data_ptr()
+        if comms_pool_start <= ptr and ptr < comms_pool_end:
+            return True
+        else:
+            return False
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_comms_pool_thread_local(self):
+        # set up comms pool of 200 mb
+        comms_pool_size_in_mb = 200
+        additional_allowed_memory_in_mb = 200
+        device, dtype, _ = self._setup_comms_pool_test(
+            comms_pool_size_in_mb, additional_allowed_memory_in_mb
+        )
+        size = 40 * (1 << 20)
+
+        # get range of comms pool
+        with comms_tensor():
+            tensor = torch.empty(size, device=device, dtype=dtype)
+        comms_pool_start = tensor.data_ptr()
+        comms_pool_end = comms_pool_start + comms_pool_size_in_mb * (1 << 20)
+        del tensor
+
+        # run multiple threads where only thread 0 should use comms pool
+        num_threads = 4
+        threads = []
+        results = [None] * num_threads
+        barrier = threading.Barrier(num_threads)
+        for i in range(num_threads):
+            thread = threading.Thread(
+                target=self._thread_local_allocate_helper,
+                args=(i, results, size, device, dtype, barrier),
+            )
+            threads.append(thread)
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        # only thread 0 allocate from comms pool
+        self.assertTrue(self._tensor_in_comms_pool(comms_pool_start, comms_pool_end, results[0]))
+        # all other threads allocate from default pool
+        for i in range(1, num_threads):
+            self.assertFalse(self._tensor_in_comms_pool(comms_pool_start, comms_pool_end, results[i]))
+
+        self._teardown_comms_pool_test()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_comms_pool_simple(self):
+        comms_pool_size_in_mb = 40
+        additional_allowed_memory_in_mb = 43
+        device, dtype, _ = self._setup_comms_pool_test(comms_pool_size_in_mb, additional_allowed_memory_in_mb)
+        size = 40 * (1 << 20)
+        # remaining free mem: 43 mb
+        # comms pool   [____] 40 mb
+        # default pool [] 0 mb
+
+        with comms_tensor():
+            a = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 43 mb
+        # comms pool   [aaaa] 40 mb
+        # default pool [] 0 mb
+        a_ptr = a.data_ptr()
+        b = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 3 mb
+        # comms pool   [aaaa] 40 mb
+        # default pool [bbbb] 40 mb
+        b_ptr = b.data_ptr()
+        c10d.all_reduce(a, dist.ReduceOp.AVG)
+        # barrier has to allocate some small amount of memory causing
+        # CCA to give 2mb
+        c10d.barrier()
+        # remaining free mem: ~1 mb
+        # comms pool   [aaaa] 40 mb
+        # default pool [bbbb] 40 mb
+        # small pool barrier ~2 mb
+        del a, b
+        # comms pool   [____] 40 mb
+        # default pool [____] 40 mb
+        with comms_tensor():
+            c = torch.empty(size, device=device, dtype=dtype)
+        # comms pool   [cccc] 40 mb
+        # default pool [____] 40 mb
+        d = torch.empty(size, device=device, dtype=dtype)
+        # comms pool   [cccc] 40 mb
+        # default pool [dddd] 40 mb
+        self.assertEqual(c.data_ptr(), a_ptr)
+        self.assertEqual(d.data_ptr(), b_ptr)
+        del c, d
+
+        self._teardown_comms_pool_test()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_comms_pool_overflow_from_default_to_comms(self):
+        comms_pool_size_in_mb = 80
+        additional_allowed_memory_in_mb = 43
+        device, dtype, _ = self._setup_comms_pool_test(comms_pool_size_in_mb, additional_allowed_memory_in_mb)
+        size = 40 * (1 << 20)
+        # remaining free mem: 43 mb
+        # comms pool   [________] 80 mb
+        # default pool [] 0 mb
+
+        # get comms pool start ptr
+        with comms_tensor():
+            comms_pool_start = torch.empty(size, device=device, dtype=dtype)
+        comms_pool_start_ptr = comms_pool_start.data_ptr()
+        del comms_pool_start
+
+        # remaining free mem: 43 mb
+        # comms pool   [________] 80 mb
+        # default pool [] 0 mb
+        a = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 3 mb
+        # comms pool   [________] 80 mb
+        # default pool [aaaa] 40 mb
+        b = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 3 mb
+        # comms pool   [bbbb____] 80 mb
+        # default pool [aaaa] 40 mb
+        self.assertEqual(b.data_ptr(), comms_pool_start_ptr)
+        c = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 3 mb
+        # comms pool   [bbbbcccc] 80 mb
+        # default pool [aaaa] 40 mb
+        with self.assertRaises(torch.OutOfMemoryError):
+            # no more room in either pool, so oom
+            d = torch.empty(size, device=device, dtype=dtype)
+        del a, b, c
+
+        # we leave 3mb for barrier in teardown
+        self._teardown_comms_pool_test()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_comms_pool_not_allocated(self):
+        comms_pool_size_in_mb = 0
+        additional_allowed_memory_in_mb = 43
+        device, dtype, _ = self._setup_comms_pool_test(comms_pool_size_in_mb, additional_allowed_memory_in_mb)
+        size = 40 * (1 << 20)
+        # remaining free mem: 40 mb
+        # comms pool   [] 0 mb
+        # default pool [] 0 mb
+
+        with comms_tensor():
+            a = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 3 mb
+        # comms pool   [] 0 mb
+        # default pool [aaaa] 40 mb
+        del a
+
+        # we leave 3mb for barrier in teardown
+        self._teardown_comms_pool_test()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_comms_pool_overflow_from_comms_to_default(self):
+        comms_pool_size_in_mb = 40
+        additional_allowed_memory_in_mb = 123
+        device, dtype, _ = self._setup_comms_pool_test(comms_pool_size_in_mb, additional_allowed_memory_in_mb)
+        size = 40 * (1 << 20)
+        # remaining free mem: 123 mb
+        # comms pool   [____] 40 mb
+        # default pool [] 0 mb
+        with comms_tensor():
+            a = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 123 mb
+        # comms pool   [aaaa] 40 mb
+        # default pool [] 0 mb
+        with comms_tensor():
+            # no more room in comms pool, so use default pool
+            b = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 83 mb
+        # comms pool   [aaaa] 40 mb
+        # default pool [bbbb] 40 mb
+        with comms_tensor():
+            # no more room in comms pool, so use default pool
+            c = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 43 mb
+        # comms pool   [aaaa] 40 mb
+        # default pool [bbbbcccc] 80 mb
+        with comms_tensor():
+            # no more room in comms pool, so use default pool
+            d = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 3 mb
+        # comms pool   [aaaa] 40 mb
+        # default pool [bbbbccccdddd] 120 mb
+        del a, b, c, d
+        with comms_tensor():
+            a = torch.empty(size, device=device, dtype=dtype)
+            b = torch.empty(size, device=device, dtype=dtype)
+        del a, b
+
+        # we leave 3mb for barrier in teardown
+        self._teardown_comms_pool_test()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_comms_pool_oom_default_taking_up_comms_space(self):
+        comms_pool_size_in_mb = 40
+        additional_allowed_memory_in_mb = 43
+        device, dtype, _ = self._setup_comms_pool_test(comms_pool_size_in_mb, additional_allowed_memory_in_mb)
+        size = 40 * (1 << 20)
+        # remaining free mem: 40 mb
+        # comms pool   [____] 40 mb
+        # default pool [] 0 mb
+        a = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 0 mb
+        # comms pool   [____] 40 mb
+        # default pool [aaaa] 40 mb
+        b = torch.empty(size, device=device, dtype=dtype)
+        # remaining free mem: 0 mb
+        # comms pool   [bbbb] 40 mb
+        # default pool [aaaa] 40 mb
+        with self.assertRaises(torch.OutOfMemoryError):
+            with comms_tensor():
+                # computation tensor using comms pool and no more room for comms tensor, so oom
+                c = torch.empty(size, device=device, dtype=dtype)
+        del a, b
+
+        # we leave 3mb for barrier in teardown
+        self._teardown_comms_pool_test()
+
+    def test_comms_pool_split_group(self):
+        comms_pool_size_in_mb = 40
+        additional_allowed_memory_in_mb = 43
+        device, dtype, default_pg = self._setup_comms_pool_test(comms_pool_size_in_mb, additional_allowed_memory_in_mb)
+        backend = default_pg._get_backend(torch.device(device))
+
+        with comms_tensor():
+            tensor = torch.full((1,), self.rank).cuda(device)
+        ng1 = c10d.split_group(default_pg, [[0, 1]])
+        backend1 = default_pg._get_backend(torch.device(device))
+
+        # check basic options are the same between parent and child
+        self.assertEqual(backend.options._timeout, backend1.options._timeout)
+        self.assertEqual(
+            backend.options.is_high_priority_stream,
+            backend1.options.is_high_priority_stream,
+        )
+        self.assertEqual(ng1.group_desc, "default_pg:split:0")
+
+        # comm split happens eagerly since device_id is passed to init_process_group.
+        self.assertEqual(backend.comm_split_count(), 1)
+        dist.broadcast(tensor, 0, group=ng1)
+        self.assertEqual(tensor, torch.full((1,), 0))
+
+        ng2 = c10d.split_group(default_pg, [[0, 1]])
+        self.assertEqual(ng2.group_desc, "default_pg:split:1")
+        self.assertEqual(backend.comm_split_count(), 2)
+
+        # we leave 3mb for barrier in teardown
+        self._teardown_comms_pool_test()
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
