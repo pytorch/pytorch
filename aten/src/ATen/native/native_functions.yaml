@@ -3179,6 +3179,7 @@
   device_guard: False
   dispatch:
     CPU, CUDA, MPS: isnan
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_isnan
     SparseCPU, SparseCUDA: isnan_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isnan_sparse_csr
   autogen: isnan.out
@@ -6488,6 +6489,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA, MPS: where_self_out
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_where_out
 
 - func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
   variants: function
@@ -13070,6 +13072,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: isinf
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_isinf
     SparseCPU, SparseCUDA: isinf_sparse
     SparseMeta: isinf_sparse_meta
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isinf_sparse_csr
@@ -13085,6 +13088,7 @@
   variants: function, method
   structured_delegate: isposinf.out
   dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_isposinf
     SparseCPU, SparseCUDA: isposinf_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isposinf_sparse_csr
   tags: pointwise

@@ -8,10 +8,10 @@ import argparse
 import logging
 from typing import Optional, Sequence
 
-from tools.flight_recorder.components.utils import FlightRecorderLogger
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 
 
-logger = FlightRecorderLogger()
+logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
 class JobConfig:

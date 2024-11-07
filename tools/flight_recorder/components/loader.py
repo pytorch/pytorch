@@ -14,7 +14,7 @@ import typing
 from collections import defaultdict
 from typing import Any, Dict, List, Set, Tuple, Union
 
-from tools.flight_recorder.components.utils import FlightRecorderLogger
+from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
 
 
 logger: FlightRecorderLogger = FlightRecorderLogger()
