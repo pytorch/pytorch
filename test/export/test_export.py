@@ -7144,6 +7144,24 @@ graph():
             )
         )
 
+    def test_sdpa_reshape_decomp(self):
+        class DummyModel(torch.nn.Module):
+            def forward(self, query, key, value):
+                res = torch.nn.functional.scaled_dot_product_attention(
+                    query, key, value
+                )
+                rest = res.transpose(0, 1)
+                final = rest.reshape(8, 32, 128 * 64)
+                return final
+
+        model = DummyModel()
+        device = "cpu"
+        query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
+        key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
+        value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=device)
+        ep = export(model, (query, key, value))
+        ep.run_decompositions()
+
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self) -> None:
