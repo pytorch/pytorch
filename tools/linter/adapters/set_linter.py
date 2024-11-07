@@ -11,13 +11,10 @@ from functools import cached_property
 from pathlib import Path
 from tokenize import generate_tokens, TokenInfo
 from typing import Any, Iterator, Sequence
+from typing_extensions import Never
 
 
-BRACKETS = {
-    "{": "}",
-    "(": ")",
-    "[": "]",
-}
+BRACKETS = {"{": "}", "(": ")", "[": "]"}
 BRACKETS_INV = {j: i for i, j in BRACKETS.items()}
 EMPTY_TOKENS = {
     token.COMMENT,
@@ -30,6 +27,43 @@ EMPTY_TOKENS = {
 ERROR = "Builtin `set` is deprecated"
 IMPORT_LINE = "from torch.utils._ordered_set import OrderedSet\n"
 OMIT = "# noqa: set_linter"
+
+DESCRIPTION = """`set_linter` is a lintrunner linter which finds usages of the
+Python built-in class `set` in Python code, and optionally replaces them with with
+`OrderedSet`.
+"""
+
+EPILOG = """
+
+To exempt a line of Python code from `set_linter` checking, append a comment:
+
+    s = set()  # noqa: set_linter
+    t = {  # noqa: set_linter
+       "one",
+       "two",
+    }
+
+`lintrunner` only operates on the entire repository. If you want to fix an existing
+section of code, run this `set_linter` directly:
+
+    python tools/linter/adapters/set_linter.py --fix [... python file names ...]
+
+Fix mode usually needs some manual intervention in one of three ways:
+
+1. Replacing `set` with `OrderedSet` will keep the behavior of the code the same,
+but sometimes introduce new errors in the typechecking.  To fix these, you will need
+to replace `OrderedSet` with `OrderedSet[SomeType]`, or if the actual type of the elements
+is too hard to represent, with with `OrderedSet[typing.Any]`
+
+2. The fix mode doesn't do a great job on recognizing generator expressions, so it
+will replace `s = {i for i in range(3)}` with `s = OrderedSet([i for i in range(3)])`.
+You can correctly delete the square brackets in every such case.
+
+3. There is a common pattern of set usage where a set is created and then only used
+for testing inclusion. For small collections, up to around 12 elements, a tuple
+is more time-efficient than an OrderedSet and also has less visual clutter
+(see https://github.com/rec/test/blob/master/python/time_access.py).
+"""
 
 
 class LintSeverity(str, Enum):
@@ -289,17 +323,21 @@ def expand_file_patterns(file_paths: list[str]) -> Iterator[str]:
 
 
 def get_args(argv: list[str] | None = None) -> Namespace:
-    parser = ArgumentParser()
+    class ArgParser(ArgumentParser):
+        def exit(self, status: int = 0, message: str | None = None) -> Never:
+            arg = sys.argv[1:] if argv is None else argv
+            if not status and "-h" in arg or "--help" in arg:
+                print(EPILOG)
+            super().exit(status, message)
+
+    parser = ArgParser(description=DESCRIPTION)
     add = parser.add_argument
 
-    add("files", nargs="*", help="Files or directories to include")
-    add("-v", "--verbose", action="store_true", help="Print more info")
-    add(
-        "-e",
-        "--edit",
-        action="store_true",
-        help="Edit the files without using lintrunner",
-    )
+    FIX_HELP = "Fix the files in the repository directly without using lintrunner"
+
+    add("files", nargs="*", help="Files or directories to search for sets")
+    add("-v", "--verbose", action="store_true", help="Print more debug info")
+    add("-f", "--fix", action="store_true", help=FIX_HELP)
 
     args = parser.parse_args(argv)
     args.files = list(expand_file_patterns(args.files))
