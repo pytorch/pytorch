@@ -1,7 +1,6 @@
 # Owner(s): ["module: c10d"]
 
 import os
-from unittest import skipIf
 
 import torch
 import torch.distributed as dist
@@ -11,7 +10,6 @@ from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
-    _fused_all_gather_matmul_native,
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
     _fused_scaled_matmul_reduce_scatter_fallback,
@@ -19,7 +17,6 @@ from torch.distributed._symmetric_memory import (
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
-from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
@@ -320,55 +317,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         for mm_output_0, mm_output_1 in zip(mm_outputs_0, mm_outputs_1):
             assert torch.allclose(mm_output_0, mm_output_1)
             assert mm_output_0.stride(), mm_output_1.stride()
-
-        dist.destroy_process_group()
-
-    @skipIfRocm
-    @skipIf(
-        not SM90OrLater,
-        "_fused_all_gather_matmul_native currently only supports sm>=90",
-    )
-    @skip_if_lt_x_gpu(2)
-    @parametrize("symm_mem_input", [True, False])
-    @parametrize("is_b_row_major", [True, False])
-    def test_fused_all_gather_matmul_native(
-        self, symm_mem_input: bool, is_b_row_major: bool
-    ) -> None:
-        self._init_process()
-
-        M = 1024
-        N = 1024
-        K = 1024
-        group_name = dist.group.WORLD.group_name
-
-        torch.manual_seed(42 + self.rank)
-        if symm_mem_input:
-            A_shard = _SymmetricMemory.empty_strided_p2p(
-                size=(M // self.world_size, K),
-                stride=(K, 1),
-                dtype=torch.bfloat16,
-                device=self.device,
-                group_name="0",
-            ).normal_()
-        else:
-            A_shard = torch.rand(
-                M // self.world_size, K, dtype=torch.bfloat16, device="cuda"
-            )
-
-        if is_b_row_major:
-            B = torch.rand(K, N, dtype=torch.bfloat16, device="cuda")
-        else:
-            B = torch.rand(N, K, dtype=torch.bfloat16, device="cuda").t()
-
-        ag_baseline, mm_baseline = _fused_all_gather_matmul_fallback(
-            A_shard, [B], gather_dim=0, group_name=group_name
-        )
-        ag_target, mm_target = _fused_all_gather_matmul_native(
-            A_shard, B, group_name=group_name
-        )
-
-        torch.testing.assert_close(ag_target, ag_baseline)
-        torch.testing.assert_close(mm_target, mm_baseline[0])
 
         dist.destroy_process_group()
 
