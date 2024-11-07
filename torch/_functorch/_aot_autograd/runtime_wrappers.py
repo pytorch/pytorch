@@ -1922,7 +1922,16 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             ],
                         ):
                             if isinstance(m, SubclassCreationMeta):
-                                subclass_zero_leaves(m, flat_processed_tangents),
+                                if type(t) == torch.Tensor:
+                                    # Autograd deduced that this tangent does not participate in backward computation.
+                                    # And returns zero tensor instead of subclass tangent.
+                                    subclass_zero_leaves(m, flat_processed_tangents),
+                                else:
+                                    flat_processed_tangents.extend(
+                                        AOTDispatchAutograd.process_runtime_tangent(
+                                            t, m
+                                        )[1]
+                                    )
                             else:
                                 flat_processed_tangents.append(t)
 
