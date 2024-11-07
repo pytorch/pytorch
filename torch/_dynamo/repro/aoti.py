@@ -11,7 +11,6 @@ from importlib import import_module
 from typing import Any, Dict, Optional, Union
 
 import torch
-from torch._C._monitor import _WaitCounter
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
     BuckTargetWriter,
@@ -24,6 +23,7 @@ from torch._dynamo.debug_utils import (
 )
 from torch.export import ExportedProgram
 from torch.hub import tqdm
+from torch.monitor import _WaitCounter
 
 from .after_aot import generate_compiler_repro_string
 

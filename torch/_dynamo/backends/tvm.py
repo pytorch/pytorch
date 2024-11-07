@@ -10,7 +10,7 @@ from types import MappingProxyType
 from typing import Optional
 
 import torch
-from torch._C._monitor import _WaitCounter
+from torch.monitor import _WaitCounter
 
 from .common import device_from_inputs, fake_tensor_unsupported
 from .registry import register_backend

@@ -18,7 +18,6 @@ from typing import Any, Callable, Dict, Sequence, TYPE_CHECKING, Union
 import torch
 import torch.fx as fx
 import torch.nn as nn
-from torch._C._monitor import _WaitCounter
 from torch._dynamo.debug_utils import (
     _cuda_system_info_comment,
     AccuracyError,
@@ -45,6 +44,7 @@ from torch.fx.experimental.symbolic_shapes import (
     has_free_symbols,
 )
 from torch.hub import tqdm
+from torch.monitor import _WaitCounter
 from typing_extensions import Unpack
 
 from .. import config

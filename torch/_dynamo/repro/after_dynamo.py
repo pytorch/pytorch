@@ -12,7 +12,6 @@ from typing import Union
 
 import torch
 import torch.fx as fx
-from torch._C._monitor import _WaitCounter
 from torch._dynamo.backends.registry import CompiledFn
 from torch._dynamo.debug_utils import (
     AccuracyError,
@@ -32,6 +31,7 @@ from torch._dynamo.debug_utils import (
 )
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_targets
 from torch.hub import tqdm
+from torch.monitor import _WaitCounter
 
 from .. import config
 from ..backends.registry import lookup_backend, register_debug_backend

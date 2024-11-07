@@ -24,9 +24,9 @@ from unittest.mock import patch
 
 import torch
 from torch import fx
-from torch._C._monitor import _WaitCounter
 from torch._dynamo.backends.debugging import aot_eager
 from torch._dynamo.output_graph import OutputGraph
+from torch.monitor import _WaitCounter
 
 from . import config, eval_frame, optimize_assert, reset
 from .bytecode_transformation import (

@@ -15,8 +15,8 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
-from torch._C._monitor import _WaitCounter
 from torch._dynamo.trace_rules import _as_posix_path
+from torch.monitor import _WaitCounter
 from torch.utils._traceback import report_compile_source_on_error
 
 

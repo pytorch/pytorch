@@ -15,10 +15,10 @@ import torch._dynamo.config
 import torch._utils_internal
 import torch.compiler.config
 import torch.distributed as dist
-from torch._C._monitor import _WaitCounter
 from torch._dynamo.utils import dynamo_timed, get_chromium_event_logger, warn_once
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
+from torch.monitor import _WaitCounter
 from typing_extensions import Self
 
 if TYPE_CHECKING:
