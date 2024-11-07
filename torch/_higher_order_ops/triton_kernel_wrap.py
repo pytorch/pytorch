@@ -1050,8 +1050,8 @@ class TritonHOPifier:
             import torch
             import torch._dynamo
 
-            # We only support configs and keys arguments of triton.autotune
-            # Make sure other arguments are defaulted
+            # We only support configs, keys, and restore_value arguments
+            # of triton.autotune. Make sure other arguments are defaulted.
             defaults = inspect.signature(Autotuner.__init__).parameters
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
@@ -1084,7 +1084,7 @@ class TritonHOPifier:
                 )
             ):
                 self.raise_unsupported(
-                    "Only configs and keys are supported for triton.autotune"
+                    "Only configs, keys, and restore_value are supported for triton.autotune"
                 )
             if (
                 not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
