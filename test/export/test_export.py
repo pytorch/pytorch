@@ -843,6 +843,28 @@ graph():
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_symint_item(self):
+        class M(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        input = (torch.tensor([1], dtype=torch.int),)
+
+        orig_res = M()(*input)
+        ep_res = torch.export.export(M(), input).module()(*input)
+        self.assertEqual(orig_res, ep_res)
+
+    def test_symbool_item(self):
+        class M(torch.nn.Module):
+            def forward(self, tensor):
+                return tensor.item()
+
+        input = (torch.tensor([1], dtype=torch.bool),)
+
+        orig_res = M()(*input)
+        ep_res = torch.export.export(M(), input).module()(*input)
+        self.assertEqual(orig_res, ep_res)
+
     def test_unbacked_to_cond(self):
         class M(torch.nn.Module):
             def forward(self, a):
@@ -1055,6 +1077,120 @@ graph():
         x = torch.randn(20, 10)
         ep_model = export(model, (x,), strict=False).module()
         self.assertTrue(torch.allclose(model(x), ep_model(x)))
+
+    def test_real_tensor_size_mismatch(self):
+        from torch._subclasses.fake_tensor import MetadataMismatchError
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.ops.mylib.foo(a, b)
+
+        @torch.library.custom_op("mylib::foo", mutates_args={})
+        def foo(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+            return a + b
+
+        @foo.register_fake
+        def foo_fake_impl(a, b):
+            m, n = a.shape
+            return torch.empty(n, m)  # incorrectly permute
+
+        error_type = (
+            MetadataMismatchError
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.TorchRuntimeError
+        )
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            # won't catch anything if dims are equal
+            export(
+                M(),
+                (torch.randn(4, 4), torch.randn(4, 4)),
+            )
+            # catch concrete inequality
+            with self.assertRaisesRegex(
+                error_type,
+                "Real tensor propagation found an output size mismatch between fake shape 8 and real shape 4, "
+                "at output index 0, dimension 0 for func: mylib.foo.default",
+            ):
+                export(
+                    M(),
+                    (torch.randn(4, 8), torch.randn(4, 8)),
+                )
+            # same test with dynamic shapes
+            d0 = Dim("d0")
+            d1 = Dim("d1")
+            export(
+                M(),
+                (torch.randn(4, 4), torch.randn(4, 4)),
+                dynamic_shapes={
+                    "a": (d0, d1),
+                    "b": (d0, d1),
+                },
+            )
+            with self.assertRaisesRegex(
+                error_type,
+                "Real tensor propagation found an output size mismatch between fake shape s1 and real shape 4, "
+                "at output index 0, dimension 0 for func: mylib.foo.default",
+            ):
+                export(
+                    M(),
+                    (torch.randn(4, 8), torch.randn(4, 8)),
+                    dynamic_shapes={
+                        "a": (d0, d1),
+                        "b": (d0, d1),
+                    },
+                )
+
+    def test_real_tensor_alias_dtype_mismatch(self):
+        from torch._subclasses.fake_tensor import MetadataMismatchError
+
+        error_type = (
+            MetadataMismatchError
+            if is_non_strict_test(self._testMethodName)
+            else torch._dynamo.exc.TorchRuntimeError
+        )
+
+        # test alias case
+        class M(torch.nn.Module):
+            def forward(self, a):
+                return torch.ops.mylib.foo_alias(a)
+
+        @torch.library.custom_op("mylib::foo_alias", mutates_args={})
+        def foo_alias(a: torch.Tensor) -> torch.Tensor:
+            return a * 2
+
+        @foo_alias.register_fake
+        def foo_fake_impl(a):
+            return a
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            with self.assertRaisesRegex(
+                error_type,
+                r"Real tensor propagation found an aliasing mismatch between fake output (.*\n)*.* "
+                r"and real output (.*\n)*.* for func: mylib.foo_alias.default",
+            ):
+                ep = export(M(), (torch.randn(4, 4),))
+
+        # test dtype case
+        class N(torch.nn.Module):
+            def forward(self, a):
+                return torch.ops.mylib.foo_dtype(a)
+
+        @torch.library.custom_op("mylib::foo_dtype", mutates_args={})
+        def foo_dtype(a: torch.Tensor) -> torch.Tensor:
+            return a * 2
+
+        @foo_dtype.register_fake
+        def foo_fake_impl(a):
+            m, n = a.shape
+            return torch.empty([m, n], dtype=torch.int32)
+
+        with torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True):
+            with self.assertRaisesRegex(
+                error_type,
+                r"Real tensor propagation found a metadata mismatch between fake tensor (.*\n)*.* "
+                r"and real tensor (.*\n)*.* at output index 0, for func: mylib.foo_dtype.default",
+            ):
+                ep = export(N(), (torch.randn(4, 4),))
 
     def test_real_tensor_for_max_op(self):
         class Foo(torch.nn.Module):
@@ -5324,6 +5460,28 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
+        class Boo(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.a = torch.tensor(True)
+
+            def forward(self, x):
+                list_tensor = [torch.tensor(False), torch.tensor(True)]
+                return x + self.a + list_tensor[0] + list_tensor[1]
+
+        ep = export(Boo(), (torch.tensor(False),))
+
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertEqual(len(ep.state_dict), 0)
+        self.assertEqual(len(ep.constants), 3)
+
+        inp = (torch.tensor(True),)
+        self.assertTrue(torch.allclose(ep.module()(*inp), Boo()(*inp)))
+
+        transform = ep.run_decompositions()
+        self.assertEqual(len(ep.graph_signature.input_specs), 4)
+        self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
+
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -9093,6 +9251,35 @@ class GraphModule(torch.nn.Module):
             },
             state_dict.keys(),
         )
+
+    @testing.expectedFailureSerDer  # T202237665
+    @testing.expectedFailureSerDerNonStrict
+    def test_dynamic_sym_round(self):
+        class ModuleWithSymRound(torch.nn.Module):
+            def forward(self, x):
+                out_size = round(x.shape[0] / 2.0)
+                return x[:out_size]
+
+        dim_min = 5
+        dim_max = 10
+        dynamic_shapes = {"x": {0: Dim("n", min=dim_min, max=dim_max)}}
+
+        module = ModuleWithSymRound()
+        inp = (torch.randn(8),)
+        ep = export(module, inp, dynamic_shapes=dynamic_shapes)
+
+        # Expect builtin round in the export graph
+        round_nodes = [
+            n for n in ep.graph.nodes if n.op == "call_function" and n.target == round
+        ]
+        self.assertEqual(len(round_nodes), 1)
+
+        # Check pre/post-export equality
+        for i in range(dim_min, dim_max + 1):
+            dyn_inp = (torch.randn(i),)
+            export_res = ep.module()(*dyn_inp)
+            ref_res = module(*dyn_inp)
+            self.assertEqual(export_res, ref_res)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

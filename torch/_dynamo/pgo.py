@@ -4,7 +4,6 @@ import base64
 import copy
 import dataclasses
 import enum
-import json
 import logging
 import os
 import pickle
@@ -170,6 +169,35 @@ class FrameStateSizeEntry:
         AutoDynamic, AutoUnset, Tuple[Union[int, AutoDynamic, InferStride], ...]
     ] = dataclasses.field(default=auto_unset)
 
+    def render(self) -> str:
+        # Special cases
+        def render_single(s: Union[int, AutoDynamic, AutoUnset, InferStride]) -> str:
+            if s is auto_dynamic:
+                return "?"
+            elif s is auto_unset:
+                # This basically shouldn't happen, this is for debugging
+                return "auto unset"
+            elif isinstance(s, InferStride):
+                return f"S({s.dim})"
+            else:
+                return str(s)
+
+        def render_tuple(ss: Tuple[Union[int, AutoDynamic, InferStride], ...]) -> str:
+            return "[" + ", ".join(render_single(s) for s in ss) + "]"
+
+        # Common cases
+        if self.size is auto_dynamic and self.stride is auto_dynamic:
+            if self.scalar is auto_dynamic:
+                return "fully dynamic scalar or tensor"
+            else:
+                return f"scalar {self.scalar}"
+        elif self.scalar is auto_dynamic:
+            if isinstance(self.size, tuple) and isinstance(self.stride, tuple):
+                return f"tensor size={render_tuple(self.size)} stride={render_tuple(self.stride)}"
+
+        # Fallback
+        return "unusual {repr(self)}"
+
     def __post_init__(self) -> None:
         assert not isinstance(self.scalar, torch.SymInt), self.scalar
         if isinstance(self.size, tuple):
@@ -304,7 +332,6 @@ def update_automatic_dynamic(
                 "cached": str(old_entry.scalar),
                 "new": str(entry.scalar),
             },
-            log_pt2_compile_event=True,
         )
         if is_unspecialized_nn_module:
             log.info(
@@ -344,7 +371,6 @@ def update_automatic_dynamic(
                 "cached": str(old_entry_tup),
                 "new": str(entry_tup),
             },
-            log_pt2_compile_event=True,
         )
 
     if is_update and old_entry.size != mut_entry.size:
@@ -498,33 +524,14 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
     )
 
 
-# TODO: this dump format sucks but apparently it's very difficult to json.dumps
-# while not indenting inner lists SIGH
-
-
-def _key_asdict(x: object) -> object:
-    if isinstance(x, CodeId):
-        return f"{x.filename}:{x.firstlineno}:{x.name}"
-    else:
-        return x
-
-
-def _asdict(x: object) -> object:
-    if isinstance(x, (dict, defaultdict)):
-        return {_key_asdict(k): _asdict(v) for k, v in x.items()}
-    elif isinstance(x, (list, tuple)):
-        return [_asdict(v) for v in x]
-    elif dataclasses.is_dataclass(x):
-        return {
-            field.name: _asdict(getattr(x, field.name))
-            for field in dataclasses.fields(x)
-        }
-    elif x is auto_unset:
-        return "auto_unset"
-    elif x is auto_dynamic:
-        return "auto_dynamic"
-    else:
-        return x
+def render_code_state(cs: DefaultDict[CodeId, CodeState]) -> str:
+    return "\n".join(
+        f"{k.filename}:{k.firstlineno}:{k.name}:\n"
+        + "\n".join(
+            f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()
+        )
+        for k, v in cs.items()
+    )
 
 
 def get_code_state() -> DefaultDict[CodeId, CodeState]:
@@ -548,7 +555,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
         trace_structured_artifact(
             f"get_{ty}_code_state",
             "string",
-            lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
+            lambda: render_code_state(_CODE_STATE),
         )
         _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
         return _CODE_STATE
@@ -565,6 +572,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
             with open(path, "rb") as f:
                 try:
                     _CODE_STATE = pickle.load(f)
+                    chromium_log.add_event_data(name, cache_size_bytes=f.tell())
                 except Exception:
                     log.warning(
                         "get_code_state failed while reading %s", path, exc_info=True
@@ -593,6 +601,7 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
                         data = cache_data["data"]
                         assert isinstance(data, str)
                         payload = base64.b64decode(data)
+                        chromium_log.add_event_data(name, cache_size_bytes=len(payload))
                         _CODE_STATE = pickle.loads(payload)
                     except Exception:
                         log.warning(
@@ -655,6 +664,7 @@ def put_local_code_state(cache_key: str) -> None:
         with FileLock(lock_path, timeout=LOCK_TIMEOUT):
             with open(tmp_path, "wb") as f:
                 pickle.dump(_CODE_STATE, f)
+                chromium_log.add_event_data(name, cache_size_bytes=f.tell())
             os.rename(tmp_path, path)
             log.info(
                 "put_code_state: wrote local %s, %d entries", path, len(_CODE_STATE)
@@ -662,7 +672,7 @@ def put_local_code_state(cache_key: str) -> None:
             trace_structured_artifact(
                 "put_local_code_state",
                 "string",
-                lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
+                lambda: render_code_state(_CODE_STATE),
             )
 
 
@@ -679,6 +689,7 @@ def put_remote_code_state(cache_key: str) -> None:
             return
 
         content = pickle.dumps(_CODE_STATE)
+        chromium_log.add_event_data(name, cache_size_bytes=len(content))
         cache_data: JsonDataTy = {
             "data": base64.b64encode(content).decode("ascii"),
         }
@@ -690,7 +701,7 @@ def put_remote_code_state(cache_key: str) -> None:
         trace_structured_artifact(
             "put_remote_code_state",
             "string",
-            lambda: json.dumps(_asdict(_CODE_STATE), indent=1),
+            lambda: render_code_state(_CODE_STATE),
         )
 
 
