@@ -259,14 +259,10 @@ class Op:
                 f"pg_name={self.pg_name}",
                 f"pg_description={self.pg_desc}",
                 f"pg_size={self.pg_size}",
-                f"state={self.state}"
+                f"state={self.state}",
             )
-            return (
-                f"{self.type}(%s)" % ", ".join(s for s in verbose_info if s)
-            )
-        return (
-            f"{self.type}({p2p_info}, input_sizes={self.input_sizes}, state={self.state})"
-        )
+            return f"{self.type}(%s)" % ", ".join(s for s in verbose_info if s)
+        return f"{self.type}({p2p_info}, input_sizes={self.input_sizes}, state={self.state})"
 
     def match(self, other: "Op") -> MatchState:
         # TODO: I think this can validly not match,
