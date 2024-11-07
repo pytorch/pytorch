@@ -28,7 +28,6 @@ from weakref import ReferenceType
 import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
-from torch._C._monitor import _WaitCounter
 from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.utils import CompileTimeInstructionCounter
 from torch._guards import compile_context, CompileContext, CompileId, tracing
