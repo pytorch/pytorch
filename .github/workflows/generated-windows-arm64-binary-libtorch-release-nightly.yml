@@ -75,8 +75,8 @@ jobs:
           if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
             Write-Host "Git is not installed. Installing Git..."
             $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.18.0.windows.1/Git-2.18.0-64-bit.exe" -OutFile "$env:TEMP\Git-2.18.0-64-bit.exe"
-            Start-Process -FilePath "$env:TEMP\Git-2.18.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART' -NoNewWindow -Wait
+            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.46.0.windows.1/Git-2.46.0-64-bit.exe" -OutFile "$env:TEMP\Git-2.46.0-64-bit.exe"
+            Start-Process -FilePath "$env:TEMP\Git-2.46.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART' -NoNewWindow -Wait
           } else {
             Write-Host "Git is already installed."
           }
@@ -92,17 +92,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Ensure Git is installed
-        shell: powershell
-        run: |
-          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-            Write-Host "Git is not installed. Installing Git..."
-            $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.18.0.windows.1/Git-2.18.0-64-bit.exe" -OutFile "$env:TEMP\Git-2.18.0-64-bit.exe"
-            Start-Process -FilePath "$env:TEMP\Git-2.18.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART' -NoNewWindow -Wait
-          } else {
-            Write-Host "Git is already installed."
-          }
       - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
@@ -179,17 +168,6 @@ jobs:
         with:
           name: libtorch-cpu-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Ensure Git is installed
-        shell: powershell
-        run: |
-          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-            Write-Host "Git is not installed. Installing Git..."
-            $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.18.0.windows.1/Git-2.18.0-64-bit.exe" -OutFile "$env:TEMP\Git-2.18.0-64-bit.exe"
-            Start-Process -FilePath "$env:TEMP\Git-2.18.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART' -NoNewWindow -Wait
-          } else {
-            Write-Host "Git is already installed."
-          }
       - name: Checkout PyTorch
         uses: malfet/checkout@silent-checkout
         with:
@@ -202,17 +180,6 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Ensure Git is installed
-        shell: powershell
-        run: |
-          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-            Write-Host "Git is not installed. Installing Git..."
-            $ProgressPreference = 'SilentlyContinue'
-            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.18.0.windows.1/Git-2.18.0-64-bit.exe" -OutFile "$env:TEMP\Git-2.18.0-64-bit.exe"
-            Start-Process -FilePath "$env:TEMP\Git-2.18.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART' -NoNewWindow -Wait
-          } else {
-            Write-Host "Git is already installed."
-          }
       - name: Checkout iremyux/pytorch-builder
         uses: malfet/checkout@silent-checkout
         with:
