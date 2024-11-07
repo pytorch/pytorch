@@ -41,8 +41,8 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         subgraph: GraphModule,
         identifier: Optional[str],
         operands: Union[
-            List[Union[torch.Tensor, torch.SymInt]],
-            Tuple[Union[torch.Tensor, torch.SymInt]],
+            List[Union[torch.Tensor, int]],
+            Tuple[Union[torch.Tensor, int]],
         ],
     ):
         assert identifier is None or isinstance(
@@ -51,10 +51,10 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
         assert isinstance(
             operands, (list, tuple)
-        ), f"invoke_subgraph operands must be a list or tuple of tensors and SymInts {operands}"
+        ), f"invoke_subgraph operands must be a list or tuple of tensors and ints {operands}"
         assert all(
-            isinstance(o, (torch.Tensor, torch.SymInt)) for o in operands
-        ), f"invoke_subgraph operands must be a list of tensors and SymInts {operands}"
+            isinstance(o, (torch.Tensor, int)) for o in operands
+        ), f"invoke_subgraph operands must be a list of tensors and ints {operands}"
 
         return super().__call__(subgraph, identifier, operands)
 
