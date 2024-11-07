@@ -75,11 +75,13 @@ detect_fake_mode will search a number of locations to try to find "the" fake ten
 
 PT2 post-AOTAutograd usage:
 
-# Fake mode is enabled! example_inputs is typically fake already
-# TODO: we probably want to change this
-# Still do this to access fake mode
-fake_mode = detect_fake_mode(example_inputs)
-# But in general you don't have to turn it on
+.. code:: python
+
+    # Fake mode is enabled! example_inputs is typically fake already
+    # TODO: we probably want to change this
+    # Still do this to access fake mode
+    fake_mode = detect_fake_mode(example_inputs)
+    # But in general you don't have to turn it on
 
 Other useful stuff:
 
