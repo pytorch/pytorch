@@ -56,15 +56,15 @@ namespace torch::profiler::impl {
 // JSON output utility functions. To be merged with PyTorch profiler.
 //******************************************************************************
 template <typename T>
-static std::string vectorToString(const std::vector<T>& v) {
+inline std::string vectorToString(const std::vector<T>& v) {
   return fmt::format("[{}]", fmt::join(v, ","));
 }
 
-static std::string json_str_escape(const std::string& str);
+std::string json_str_escape(const std::string& str);
 
 constexpr size_t kMaxNumElements = 4096;
 
-static std::string getScalarValue(const c10::IValue& val) {
+inline std::string getScalarValue(const c10::IValue& val) {
   if (val.isDouble()) {
     double d_val = val.toDouble();
     if (std::isinf(d_val) || std::isnan(d_val)) {
@@ -85,7 +85,7 @@ static std::string getScalarValue(const c10::IValue& val) {
   return fmt::format("\"<{}>\"", val.tagKind());
 }
 
-static int32_t processId() {
+inline int32_t processId() {
 #ifndef _WIN32
   return static_cast<int32_t>(getpid());
 #else
@@ -204,7 +204,7 @@ static std::ofstream openOutputFile(const std::string& name) {
 }
 
 #ifdef USE_DISTRIBUTED
-static std::string getAttrJson(
+static inline std::string getAttrJson(
     const std::string& name,
     const std::string& type,
     const std::string& value) {
@@ -272,7 +272,7 @@ static void writeJsonNode(
       additiona_attrs);
 }
 
-static std::string timeString(const std::time_t timepoint) {
+inline std::string timeString(const std::time_t timepoint) {
   std::ostringstream oss;
   oss << std::put_time(std::localtime(&timepoint), "%Y-%m-%d %X"); // NOLINT
   return oss.str();
@@ -336,7 +336,7 @@ static void finalizeExecutionTraceOutput(ExecutionTraceObserver& ob) {
   VLOG(1) << "PyTorch Execution Trace: written to file " << ob.fileName;
 }
 
-static ExecutionTraceObserver::ID getObjectID(
+inline ExecutionTraceObserver::ID getObjectID(
     ExecutionTraceObserver& ob,
     const void* t) {
   const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
@@ -351,7 +351,7 @@ static ExecutionTraceObserver::ID getObjectID(
   return iter->second;
 }
 
-static std::tuple<std::string, std::string, std::string, std::string>
+inline std::tuple<std::string, std::string, std::string, std::string>
 convertIValue(
     ExecutionTraceObserver& ob,
     const c10::IValue& val,
@@ -460,7 +460,7 @@ convertIValue(
   }
 }
 
-static void appendValueInfo(
+inline void appendValueInfo(
     ExecutionTraceObserver& ob,
     const c10::IValue& val,
     std::vector<std::string>& shapes,
@@ -475,7 +475,7 @@ static void appendValueInfo(
   values.push_back(std::get<3>(tuple));
 }
 
-static void handleKernelBackendInfo(
+inline void handleKernelBackendInfo(
     FunctionCallContext& fc,
     const RecordFunction& fn) {
   // triton kernel related information are in kwinputs
@@ -658,7 +658,7 @@ static std::unique_ptr<ObserverContext> onFunctionEnter(
   return nullptr;
 }
 
-static std::string json_str_escape(const std::string& str) {
+inline std::string json_str_escape(const std::string& str) {
   std::ostringstream ostream;
   for (char ch : str) {
     if (ch == '"') {
@@ -700,7 +700,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     }
     auto& fc = *fc_ptr;
 
-    auto const& outputs = fn.outputs();
+    auto outputs = fn.outputs();
     auto num_outputs = fn.num_outputs();
     // We have two cases: for unboxed kernel, we have num_outputs ==
     // outputs.size() for boxed kernel using stack, there could be more elements

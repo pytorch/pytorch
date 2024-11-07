@@ -155,7 +155,7 @@ using namespace at;
 
 namespace detail {
 
-static void NCCL_CHECK(ncclResult_t result) {
+static inline void NCCL_CHECK(ncclResult_t result) {
   NCCL_CHECK(from_nccl_result(result));
 }
 
@@ -185,7 +185,7 @@ static int nccl_nonblocking_timeout() {
   return timeout;
 }
 
-static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
+static inline void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
   ncclResult_t result = to_nccl_result(status);
   auto startTimepoint = std::chrono::steady_clock::now();
@@ -210,11 +210,11 @@ static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
 #endif
 }
 
-static void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
+static inline void NCCL_CHECK_TIMEOUT(ncclResult_t result, ncclComm_t comm) {
   NCCL_CHECK_TIMEOUT(from_nccl_result(result), comm);
 }
 
-static void NCCL_CHECK_TIMEOUT(
+static inline void NCCL_CHECK_TIMEOUT(
     ncclResult status,
     std::vector<ncclComm_t>& comms) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
@@ -248,7 +248,7 @@ static void NCCL_CHECK_TIMEOUT(
 #endif
 }
 
-static void NCCL_CHECK_TIMEOUT(
+static inline void NCCL_CHECK_TIMEOUT(
     ncclResult_t result,
     std::vector<ncclComm_t>& comms) {
   NCCL_CHECK_TIMEOUT(from_nccl_result(result), comms);
@@ -310,7 +310,7 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   return it->second.ref();
 }
 
-static void check_tensor(
+static inline void check_tensor(
     const at::Tensor& input,
     const std::optional<at::Tensor>& output,
     size_t input_multiplier,
