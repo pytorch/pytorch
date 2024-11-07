@@ -2641,7 +2641,6 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         # inputs have already been seen before. If yes, the subgraph is already
         # installed in the output graph and we can just access the subgraph
         # using the saved attr name.
-        from torch._higher_order_ops.utils import has_potential_input_alias_or_mutation
 
         fake_inputs = [
             node.meta["example_value"]
@@ -2651,8 +2650,8 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
 
         # TODO(anijain2305) - This might be too big of a limitation. Consider
         # supporting mutation/aliasing in HOP itself to remove this restriction.
-        if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
-            unimplemented("NYI: invoke_subgraph with aliasing/mutation")
+        # if has_potential_input_alias_or_mutation(body_gmod, fake_inputs):
+        #     unimplemented("NYI: invoke_subgraph with aliasing/mutation")
 
         key = hash_graph_and_inputs(tx, body_gmod, fake_inputs)
 

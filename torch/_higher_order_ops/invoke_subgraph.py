@@ -52,8 +52,13 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         assert isinstance(
             operands, (list, tuple)
         ), f"invoke_subgraph operands must be a list or tuple of tensors and SymInts {operands}"
+        for idx, o in enumerate(operands):
+            if not isinstance(o, (torch.Tensor, torch.SymInt, int)):
+                raise RuntimeError(
+                    f"invoke_subgraph operands must be a list of tensors and SymInts {o} at {idx}"
+                )
         assert all(
-            isinstance(o, (torch.Tensor, torch.SymInt)) for o in operands
+            isinstance(o, (torch.Tensor, torch.SymInt, int)) for o in operands
         ), f"invoke_subgraph operands must be a list of tensors and SymInts {operands}"
 
         return super().__call__(subgraph, identifier, operands)
@@ -273,6 +278,7 @@ def _(mode, subgraph, identifier, operands):
     # TODO(anijain2305) - Implement fake tensor caching.
     with mode:
         return subgraph(*operands)
+
 
 
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
