@@ -1,6 +1,5 @@
 from typing import Any, Dict, List
 
-import torch
 import torch._export.serde.report_schema as schema
 from torch._export.serde.serialize import SerializeError
 from torch.export._draft_export import DraftExportReport, FailureReport, FailureType

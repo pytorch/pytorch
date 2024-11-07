@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import builtins
 import contextlib
+import dataclasses
 import functools
 import inspect
 import itertools
@@ -15,7 +16,7 @@ import time
 from collections import namedtuple
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
 from unittest.mock import patch
 
 import sympy
@@ -35,6 +36,7 @@ from .autotune_process import (
 )
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate, WorkspaceArg
+from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.triton import (
     gen_common_triton_imports,
     texpr,
@@ -74,6 +76,61 @@ class KernelNamespace:
 
 # these objects are imported from the generated wrapper code
 extern_kernels = KernelNamespace()
+
+
+_T = TypeVar("_T", bound="AutotuneArgs")
+
+
+@dataclasses.dataclass
+class BenchmarkTensors:
+    """Represents a set of inputs and outputs for autotuning with a template"""
+
+    input_tensors: List[torch.Tensor]
+    output_tensor: Optional[torch.Tensor]
+
+    def unpack(self):
+        return self.input_tensors, self.output_tensor
+
+
+@dataclasses.dataclass
+class AutotuneArgs:
+    """During autotuning, we need to pass the same inputs to all choices.
+    Note:
+        Since we typically have a mix of external choices and triton choices, we create
+        two lists of inputs for the same underlying buffers:
+        - External inputs (for aten kernels): Include offset for sliced tensors
+        - Triton inputs: Use base pointer for sliced tensors, without offset
+    """
+
+    triton: BenchmarkTensors
+    extern: BenchmarkTensors
+    expected: Optional[torch.Tensor] = None
+
+    def get_benchmark_tensors(self, extern=False) -> BenchmarkTensors:
+        """Returns the inputs and output tensors for a given choice."""
+        bench_tensors = self.extern if extern else self.triton
+        return bench_tensors
+
+    @classmethod
+    def from_choice_args(
+        cls: Type[_T],
+        example_inputs: List[torch.Tensor],
+        example_inputs_extern: List[torch.Tensor],
+        out: torch.Tensor,
+        out_extern: torch.Tensor,
+        expected: Optional[torch.Tensor] = None,
+    ) -> _T:
+        """Factory method to create AutotuneInputs from separate inputs/outputs"""
+        return cls(
+            triton=BenchmarkTensors(example_inputs, out),
+            extern=BenchmarkTensors(example_inputs_extern, out_extern),
+            expected=expected,
+        )
+
+    def verify(self, **kwargs):
+        """Verify the correctness of the benchmarking results"""
+
+        torch.testing.assert_close(self.extern.output_tensor, self.expected, **kwargs)
 
 
 class PartialRender:
@@ -138,13 +195,12 @@ class TritonTemplateKernel(TritonKernel):
         epilogue_fn=identity,
         subgraphs: Optional[List[ir.ComputedBuffer]] = None,
         workspace_arg: Optional[WorkspaceArg] = None,
-        *,
-        index_dtype,
     ) -> None:
+        numel = sympy_product(output_node.get_size())
         super().__init__(
-            sympy_product(output_node.get_size()),
-            sympy.Integer(1),
-            index_dtype=index_dtype,
+            numel,
+            sympy.S.One,
+            features=SIMDKernelFeatures([], numel),
         )
         self.input_nodes = input_nodes
         self.output_node = output_node
@@ -463,9 +519,9 @@ class TritonTemplateKernel(TritonKernel):
             )
             contiguous_index = self.rename_indexing(contiguous_index)
             self.body.writeline("xindex = " + texpr(contiguous_index))
-            self.range_trees[0].lookup(
-                sympy.Integer(1), sympy_product(lengths)
-            ).set_name("xindex")
+            self.range_trees[0].lookup(sympy.S.One, sympy_product(lengths)).set_name(
+                "xindex"
+            )
             self.template_mask = mask
             self.template_out = val
             self.template_indices = indices
@@ -690,7 +746,6 @@ class TritonTemplate(KernelTemplate):
             "prefix_args": prefix_args,
             "suffix_args": suffix_args,
             "epilogue_fn": epilogue_fn,
-            "index_dtype": "tl.int32",
             "subgraphs": subgraphs,
         }
 
@@ -1456,7 +1511,9 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is None:
             input_gen_fns = {}
 
-        def get_inputs(choices: List[ChoiceCaller]):
+        def get_inputs(
+            choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]]
+        ) -> AutotuneArgs:
             # de-duplicate args
             unique_example_inputs = {
                 x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
@@ -1489,55 +1546,44 @@ class AlgorithmSelectorCache(PersistentCache):
             out_extern = torch.as_strided(
                 out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
             )
-
             expected = None
             if VERIFY:
                 choices[0].benchmark(*example_inputs_extern, out=out_extern)
                 expected = out_extern.clone()
 
-            return example_inputs, example_inputs_extern, out, out_extern, expected
+            return AutotuneArgs.from_choice_args(
+                example_inputs,
+                example_inputs_extern,
+                out,
+                out_extern,
+                expected,
+            )
 
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
-        def debug_str(example_inputs, out):
-            def tensor_repr(x):
-                return (
-                    f"torch.empty_strided({tuple(x.size())!r}, {tuple(x.stride())!r}, "
-                    f"dtype={x.dtype!r}, device={x.device.type!r})"
-                )
-
-            lines = [
-                "inputs = [",
-            ]
-            for x in example_inputs:
-                lines.append(f"    {tensor_repr(x)},")
-            lines += ["]", f"out = {tensor_repr(out)}", ""]
-            return "\n".join(lines)
-
         def benchmark_choice_in_current_process(
-            choice, example_inputs, example_inputs_extern, out, out_extern, expected
-        ):
-            out.zero_()
-            if isinstance(choice, ExternKernelCaller):
-                # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)
-            else:
-                # triton templates want the base pointer for sliced tensors
-                result = choice.benchmark(*example_inputs, out=out)
-            if VERIFY and expected is not None:
-                torch.testing.assert_close(out_extern, expected, **VERIFY)
+            choice: ChoiceCaller, autotune_args: AutotuneArgs
+        ) -> float:
+            is_extern = isinstance(choice, ExternKernelCaller)
+            benchmark_tensors = autotune_args.get_benchmark_tensors(is_extern)
+            inpts, output = benchmark_tensors.unpack()
+            output.zero_()
+            result = choice.benchmark(*inpts, out=output)
+            if VERIFY and autotune_args.expected is not None:
+                autotune_args.verify(**VERIFY)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()  # shake out any CUDA errors
             return result
 
-        def benchmark_in_current_process(choices):
+        def benchmark_in_current_process(
+            choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]],
+        ) -> Dict[Union[ExternKernelCaller, TritonTemplateCaller], float]:
             inputs = get_inputs(choices)
-            example_inputs, _, out, _, _ = inputs
             timings = {}
             for choice in choices:
                 try:
-                    timing = benchmark_choice_in_current_process(choice, *inputs)
+                    timing = benchmark_choice_in_current_process(choice, inputs)
                 except CUDACompileError as e:
                     log.error(
                         "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice.",
@@ -1579,7 +1625,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
             return timings
 
-        def benchmark_in_sub_process(choices):
+        def benchmark_in_sub_process(
+            choices: Union[List[ExternKernelCaller], List[TritonTemplateCaller]]
+        ):
             from . import autotune_process
 
             # only benchmark triton kernel in sub process for now.
@@ -1588,7 +1636,7 @@ class AlgorithmSelectorCache(PersistentCache):
             triton = [c for c in choices if not isinstance(c, ExternKernelCaller)]
 
             timings = benchmark_in_current_process(extern)
-            timings.update(autotune_process.benchmark_in_sub_process(triton))
+            timings.update(autotune_process.benchmark_in_sub_process(triton))  # type: ignore[arg-type]
             return timings
 
         benchmark = (
@@ -1618,7 +1666,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     map(
                         str,
                         V.graph.sizevars.size_hints(
-                            n.get_size(), fallback=config.unbacked_symint_fallback
+                            n.get_size(), fallback=config.unbacked_symint_fallback  # type: ignore[arg-type]
                         ),
                     )
                 )

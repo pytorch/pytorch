@@ -6,9 +6,10 @@ from importlib import import_module
 
 import torch
 import torch._prims_common as utils
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.utils import preserve_rng_state
 from torch._inductor import config
-from torch._inductor.bisect_helper import BisectionManager
+from torch._inductor.compiler_bisector import CompilerBisector
+from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -90,11 +91,63 @@ class TestCompilerBisector(TestCase):
 
             return not out_compiled.isnan().any()
 
-        out = BisectionManager.do_bisect(test_fn)
+        out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "aot_eager_decomp_partition")
         self.assertEqual(out.subsystem, "decomposition")
         self.assertEqual(out.bisect_number, 1)
         self.assertTrue("aten.exponential" in out.debug_info)
+
+    def test_joint_graph(self):
+        from torch._inductor import config
+
+        def pass_fn(graph: torch.fx.Graph):
+            nodes = graph.find_nodes(
+                op="call_function", target=torch.ops.aten.add.Tensor
+            )
+            assert len(nodes) == 1
+            args = list(nodes[0].args)
+            args[1] = 2
+            nodes[0].args = tuple(args)
+
+        config.joint_custom_post_pass = pass_fn
+
+        def foo(x):
+            return x + 1
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            inp = torch.rand([10], device="cuda")
+
+            out = foo(inp)
+            out_c = torch.compile(foo)(inp)
+
+            return torch.allclose(out, out_c)
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "joint_graph_passes")
+        self.assertEqual(out.bisect_number, 4)
+        self.assertTrue("joint_custom_post_pass" in out.debug_info)
+
+    def test_rng(self):
+        def foo():
+            return torch.rand([10], device="cuda") + 1
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            with preserve_rng_state():
+                out = foo()
+            with preserve_rng_state():
+                out_c = torch.compile(foo)()
+
+            return torch.allclose(out, out_c)
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "inductor_fallback_random")
+        self.assertTrue("inductor_fallback_random" in out.debug_info)
 
     def test_crossref(self):
         test_ns = "bisect_ops"
@@ -139,7 +192,7 @@ class TestCompilerBisector(TestCase):
                     return False
                 return True
 
-            out = BisectionManager.do_bisect(test_fn)
+            out = CompilerBisector.do_bisect(test_fn)
             self.assertEqual(out.backend, "aot_eager_decomp_partition_crossref")
 
     def test_emulate_precision_casts(self):
@@ -160,7 +213,7 @@ class TestCompilerBisector(TestCase):
 
             return torch.equal(eager_scale, compile_scale)
 
-        out = BisectionManager.do_bisect(test_fn)
+        out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "inductor_emulate_precision_casts")
 
@@ -176,7 +229,7 @@ class TestCompilerBisector(TestCase):
 
                 return torch.allclose(torch.compile(my_func)(inp), my_func(inp))
 
-        out = BisectionManager.do_bisect(test_fn)
+        out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "lowerings")
         self.assertEqual(out.bisect_number, 2)
@@ -187,7 +240,7 @@ class TestCompilerBisector(TestCase):
         def test_fn():
             return False
 
-        out = BisectionManager.do_bisect(test_fn)
+        out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "eager")
         self.assertEqual(out.subsystem, None)
 

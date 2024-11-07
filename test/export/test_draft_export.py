@@ -96,7 +96,31 @@ class TestDraftExport(TestCase):
             "_TorchScriptTesting::_TensorQueue"
         )
 
-    def test_missing_meta_kernel(self):
+    def test_missing_meta_kernel_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+
+            @torch.library.custom_op("mylib::foo2", mutates_args={})
+            def foo2_impl(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                return a + b
+
+            class M(torch.nn.Module):
+                def forward(self, a, b):
+                    res = torch.ops.mylib.foo2(a, b)
+                    return res
+
+            inp = (torch.ones(3, 3), torch.ones(3, 3))
+
+            ep, report = draft_export(M(), inp)
+
+            self.assertEqual(len(report.failures), 1)
+            self.assertEqual(
+                report.failures[0].failure_type, FailureType.MISSING_FAKE_KERNEL
+            )
+
+            inp = (torch.randn(3, 3), torch.randn(3, 3))
+            self.assertEqual(ep.module()(*inp), M()(*inp))
+
+    def test_missing_meta_kernel_impl(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
                 "mylib::foo",
@@ -126,7 +150,6 @@ class TestDraftExport(TestCase):
             inp = (torch.randn(3, 3), torch.randn(3, 3))
             self.assertEqual(ep.module()(*inp), M()(*inp))
 
-    @skip_specific_tests([DraftExportTestTypes.SERDE])  # Duplicate fake impl registered
     def test_data_dependent_failure(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
@@ -140,7 +163,7 @@ class TestDraftExport(TestCase):
             def foo_impl(a, b):
                 return a + b
 
-            @torch.library.register_fake("mylib::foo1")
+            @torch.library.register_fake("mylib::foo1", lib=lib)
             def mylib_foo_default_fake(*args, **kwargs):
                 ctx = torch.library.get_ctx()
                 fake_shape = [ctx.new_dynamic_size() for _ in range(2)]
@@ -163,6 +186,29 @@ class TestDraftExport(TestCase):
 
             inp = (torch.randn(3, 3), torch.randn(3, 3), torch.tensor(2))
             self.assertEqual(ep.module()(*inp), M()(*inp))
+
+    def test_dedup_data_dependent_failure(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                res = 0
+                for v in [x, y]:
+                    if v.item() > 10:
+                        res += v * v
+                    else:
+                        res += v + v
+
+                return z * res
+
+        inp = (torch.tensor(5), torch.tensor(3), torch.tensor(2))
+
+        ep, report = draft_export(M(), inp)
+        self.assertTrue(len(report.failures) > 0)
+        self.assertEqual(
+            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
+        )
+
+        inp = (torch.tensor(4), torch.tensor(2), torch.tensor(6))
+        self.assertEqual(ep.module()(*inp), M()(*inp))
 
     def test_offsets(self):
         class M(torch.nn.Module):
