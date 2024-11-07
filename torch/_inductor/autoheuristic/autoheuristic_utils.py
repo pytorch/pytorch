@@ -2,6 +2,7 @@ import functools
 from typing import Any, Callable, Dict, List, Tuple
 
 import torch
+from torch.monitor import _WaitCounter
 
 
 Feedback = float
@@ -113,9 +114,10 @@ class AHMetadata:
 
 
 def get_metadata_str_from_log(log_path: str) -> str:
-    with open(log_path, newline="") as file:
-        json_string = file.readline().strip()
-        return json_string
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(log_path, newline="") as file:
+            json_string = file.readline().strip()
+            return json_string
 
 
 def check_minsize(context: AHContext, minsize: int) -> bool:

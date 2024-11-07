@@ -48,7 +48,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -68,6 +67,8 @@ from torch._inductor.codegen.rocm.compile_command import (
 )
 from torch._inductor.custom_graph_pass import CustomGraphPass, CustomGraphPassType
 from torch._utils_internal import log_cache_bypass
+from torch.monitor import _WaitCounter
+from typing_extensions import TypeAlias
 
 from .remote_cache import create_cache
 from .runtime import autotune_cache
@@ -145,15 +146,14 @@ _LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 _IS_WINDOWS = sys.platform == "win32"
 
 if config.is_fbcode():
-    from triton.fb import build_paths
-    from triton.fb.build import _run_build_command
-
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
         log_global_cache_stats,
         log_global_cache_vals,
         use_global_cache,
     )
+    from triton.fb import build_paths
+    from triton.fb.build import _run_build_command
 else:
 
     def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:  # type: ignore[misc]
@@ -263,8 +263,9 @@ class CacheBase:
         local_cache_path = self.get_local_cache_path()
         if not local_cache_path.is_file():
             return {}
-        with open(local_cache_path) as local_cache_fp:
-            local_cache = json.load(local_cache_fp)
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(local_cache_path) as local_cache_fp:
+                local_cache = json.load(local_cache_fp)
         return local_cache["cache"]
 
     def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
@@ -307,8 +308,9 @@ class PersistentCache(CacheBase):
         global_cache_path = self.get_global_cache_path()
         if global_cache_path is None or not global_cache_path.is_file():
             return {}
-        with open(global_cache_path) as global_cache_fp:
-            global_cache = json.load(global_cache_fp)
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(global_cache_path) as global_cache_fp:
+                global_cache = json.load(global_cache_fp)
         return global_cache["cache"]
 
     def lookup(
@@ -476,8 +478,9 @@ def write_atomic(
         path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".{os.getpid()}.{threading.get_ident()}.tmp"
     write_mode = "w" if isinstance(content, str) else "wb"
-    with tmp_path.open(write_mode, encoding="utf-8" if encode_utf_8 else None) as f:
-        f.write(content)
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with tmp_path.open(write_mode, encoding="utf-8" if encode_utf_8 else None) as f:
+            f.write(content)
     try:
         tmp_path.rename(target=path)
     except FileExistsError as e_file_exist:
@@ -680,9 +683,10 @@ def build_code_hash(
         assert spec is not None
         module = spec.origin
         assert module is not None
-        with open(module, "rb") as f:
-            hasher.update(spec.name.encode("utf-8"))
-            hasher.update(f.read())
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(module, "rb") as f:
+                hasher.update(spec.name.encode("utf-8"))
+                hasher.update(f.read())
         if lib.ispkg:
             # need to also hash submodules
             build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
@@ -713,8 +717,9 @@ def torch_key() -> bytes:
                 build_code_hash([root], "", hasher)
                 for path in extra_files:
                     if os.path.exists(path):
-                        with open(path, "rb") as f:
-                            hasher.update(f.read())
+                        with _WaitCounter("pytorch.file_system_access").guard() as _:
+                            with open(path, "rb") as f:
+                                hasher.update(f.read())
                 return hasher.digest()
 
             return get_code_hash(_TORCH_PATH)
@@ -1069,8 +1074,11 @@ class FxGraphCache:
                 if os.path.exists(subdir):
                     for path in sorted(os.listdir(subdir)):
                         try:
-                            with open(os.path.join(subdir, path), "rb") as f:
-                                yield pickle.load(f)
+                            with _WaitCounter(
+                                "pytorch.file_system_access"
+                            ).guard() as _:
+                                with open(os.path.join(subdir, path), "rb") as f:
+                                    yield pickle.load(f)
                         except Exception:
                             log.warning(
                                 "fx graph cache unable to load compiled graph",
@@ -1654,8 +1662,9 @@ class CompiledFxGraph:
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
         if graph.cache_path:
-            with open(graph.cache_path) as f:
-                self.source_code = f.read()
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(graph.cache_path) as f:
+                    self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
         # TODO - ordered set
         self.device_types = set(graph.device_types)
@@ -1886,17 +1895,18 @@ class AotCodeCompiler:
                 run_command_and_check(compile_cmd)
 
             if is_large_consts:
-                with open(consts_o, "r+b") as f:
-                    f.seek(0)
-                    hdr = f.read(1024)
-                    # Search for magic number and write the actual data over it
-                    start_idx = hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
-                    assert start_idx != -1
-                    f.seek(start_idx)
-                    pos = 0
-                    while pos < len(consts):
-                        rc = f.write(consts[pos:])
-                        pos += rc
+                with _WaitCounter("pytorch.file_system_access").guard() as _:
+                    with open(consts_o, "r+b") as f:
+                        f.seek(0)
+                        hdr = f.read(1024)
+                        # Search for magic number and write the actual data over it
+                        start_idx = hdr.find(b"\xef\xcd\xab\x99\x78\x56\x34\x12")
+                        assert start_idx != -1
+                        f.seek(start_idx)
+                        pos = 0
+                        while pos < len(consts):
+                            rc = f.write(consts[pos:])
+                            pos += rc
             return consts_o
 
         from filelock import FileLock
@@ -1906,8 +1916,9 @@ class AotCodeCompiler:
         with lock:
             if serialized_extern_kernel_nodes:
                 extern_kernel_nodes_json = os.path.splitext(input_path)[0] + ".json"
-                with open(extern_kernel_nodes_json, "w") as f:
-                    f.write(serialized_extern_kernel_nodes)
+                with _WaitCounter("pytorch.file_system_access").guard() as _:
+                    with open(extern_kernel_nodes_json, "w") as f:
+                        f.write(serialized_extern_kernel_nodes)
 
             metadata = config.aot_inductor.metadata
             metadata["AOTI_DEVICE_KEY"] = device_type
@@ -1919,8 +1930,9 @@ class AotCodeCompiler:
                     v, (str)
                 ), "Metadata must only contain strings"
 
-            with open(meta_json, "w") as f:
-                f.write(json.dumps(config.aot_inductor.metadata))
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(meta_json, "w") as f:
+                    f.write(json.dumps(config.aot_inductor.metadata))
 
             output_so = (
                 config.aot_inductor.output_path
@@ -2049,11 +2061,12 @@ class AotCodeCompiler:
 
             log.debug("aot linkage command: %s", link_cmd)
 
-            # Append cmds to the end of codegen-ed wrapper file
-            with open(input_path, "a") as f:
-                f.write("\n")
-                f.write(f"// Compile cmd\n// {compile_cmd}\n")
-                f.write(f"// Link cmd\n// {link_cmd}\n")
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                # Append cmds to the end of codegen-ed wrapper file
+                with open(input_path, "a") as f:
+                    f.write("\n")
+                    f.write(f"// Compile cmd\n// {compile_cmd}\n")
+                    f.write(f"// Link cmd\n// {link_cmd}\n")
 
             if config.aot_inductor.package:
                 linker_flags = os.path.splitext(input_path)[0] + "_linker_flags.json"
@@ -2067,9 +2080,10 @@ class AotCodeCompiler:
                     weight_file = (
                         os.path.splitext(input_path)[0] + "_serialized_weights.bin"
                     )
-                    with open(weight_file, "wb") as f_weights:
-                        f_weights.write(serialized_weights)
-                        f_weights.write(struct.pack("q", magic_number))
+                    with _WaitCounter("pytorch.file_system_access").guard() as _:
+                        with open(weight_file, "wb") as f_weights:
+                            f_weights.write(serialized_weights)
+                            f_weights.write(struct.pack("q", magic_number))
 
             else:
                 if fbcode_aot_cpu_re:
@@ -2097,12 +2111,13 @@ class AotCodeCompiler:
                     page_size_ = resource.getpagesize()
                     page_size = max(16384, page_size_)
 
-                    with open(output_so, "a+b") as f_so:
-                        so_size = f_so.tell()
-                        # Page align the weights
-                        f_so.write(b" " * (page_size - so_size % page_size))
-                        f_so.write(serialized_weights)
-                        f_so.write(struct.pack("q", magic_number))
+                    with _WaitCounter("pytorch.file_system_access").guard() as _:
+                        with open(output_so, "a+b") as f_so:
+                            so_size = f_so.tell()
+                            # Page align the weights
+                            f_so.write(b" " * (page_size - so_size % page_size))
+                            f_so.write(serialized_weights)
+                            f_so.write(struct.pack("q", magic_number))
 
         if config.aot_inductor.package:
             # We want to return the directory that contains all the AOTI
@@ -2124,12 +2139,13 @@ class AotCodeCompiler:
 @functools.lru_cache
 def cpp_prefix_path() -> str:
     path = Path(__file__).parent / "codegen/cpp_prefix.h"
-    with path.open() as f:
-        content = f.read()
-        _, filename = write(
-            content,
-            "h",
-        )
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with path.open() as f:
+            content = f.read()
+            _, filename = write(
+                content,
+                "h",
+            )
     return normalize_path_separator(filename)
 
 
@@ -2948,13 +2964,14 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
             with filelock.FileLock(lockfile, LOCK_TIMEOUT):
                 if not os.path.exists(donefile):
-                    with open(hookfile, "w") as f:
-                        if device_type == "cuda":
-                            f.write(
-                                cls.standalone_runtime_cuda_init.format(
-                                    cls.find_header("HalideRuntimeCuda.h")
+                    with _WaitCounter("pytorch.file_system_access").guard() as _:
+                        with open(hookfile, "w") as f:
+                            if device_type == "cuda":
+                                f.write(
+                                    cls.standalone_runtime_cuda_init.format(
+                                        cls.find_header("HalideRuntimeCuda.h")
+                                    )
                                 )
-                            )
                     hl.compile_standalone_runtime(afile, hl.Target(target))
 
                     name, output_dir = get_name_and_dir_from_output_file_path(sofile)
@@ -2987,7 +3004,8 @@ def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
         if os.environ.get("HALIDE_REPRO") == "1":
             python, script, *cmd = getattr(e, "cmd", ("", "", ""))
             if os.path.basename(python).startswith("python"):
-                code = open(script).read()
+                with _WaitCounter("pytorch.file_system_access").guard() as _:
+                    code = open(script).read()
                 main = "    hl.main()"
                 assert code.count(main) == 1
 
@@ -3008,14 +3026,16 @@ def _worker_task_halide(lockfile: str, jobs: List[partial[Any]]) -> None:
                     "    ",
                 )
                 code = code.replace(main, repl)
-                with open("repro.py", "w") as fd:
-                    fd.write(code.lstrip())
+                with _WaitCounter("pytorch.file_system_access").guard() as _:
+                    with open("repro.py", "w") as fd:
+                        fd.write(code.lstrip())
                 raise RuntimeError(f"wrote repro.py: {e}") from e
         raise
 
 
 def touch(filename: str):  # type: ignore[no-untyped-def]
-    open(filename, "a").close()
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        open(filename, "a").close()
 
 
 @clear_on_fresh_inductor_cache

@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Union
 
 import torch
 from torch._inductor import config
+from torch.monitor import _WaitCounter
 
 
 _IS_WINDOWS = sys.platform == "win32"
@@ -374,18 +375,19 @@ def valid_vec_isa_list() -> List[VecISA]:
 
     arch = platform.machine()
     if arch == "s390x":
-        with open("/proc/cpuinfo") as _cpu_info:
-            while True:
-                line = _cpu_info.readline()
-                if not line:
-                    break
-                # process line
-                featuresmatch = re.match(r"^features\s*:\s*(.*)$", line)
-                if featuresmatch:
-                    for group in featuresmatch.groups():
-                        if re.search(r"[\^ ]+vxe[\$ ]+", group):
-                            isa_list.append(VecZVECTOR())
-                            break
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open("/proc/cpuinfo") as _cpu_info:
+                while True:
+                    line = _cpu_info.readline()
+                    if not line:
+                        break
+                    # process line
+                    featuresmatch = re.match(r"^features\s*:\s*(.*)$", line)
+                    if featuresmatch:
+                        for group in featuresmatch.groups():
+                            if re.search(r"[\^ ]+vxe[\$ ]+", group):
+                                isa_list.append(VecZVECTOR())
+                                break
     elif arch == "ppc64le":
         isa_list.append(VecVSX())
     elif arch == "aarch64":

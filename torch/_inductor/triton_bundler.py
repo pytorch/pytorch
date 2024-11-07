@@ -7,10 +7,10 @@ from typing import List, Optional, Tuple
 
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._utils_internal import justknobs_check
+from torch.monitor import _WaitCounter
 
 from .runtime.runtime_utils import triton_cache_dir
 from .utils import GPU_KERNEL_BIN_EXTS
-
 
 log = logging.getLogger(__name__)
 
@@ -161,16 +161,20 @@ class TritonBundler:
                         filepath = os.path.join(path, filename)
                         try:
                             assert os.path.isfile(filepath)
-                            with open(filepath, "rb") as file:
-                                payload = file.read()
-                                if filepath.endswith(".json"):
-                                    # Remove the path from payload
-                                    payload = payload.replace(
-                                        str.encode(path), TritonBundler._REPLACE_BYTES
+                            with _WaitCounter(
+                                "pytorch.file_system_access"
+                            ).guard() as _:
+                                with open(filepath, "rb") as file:
+                                    payload = file.read()
+                                    if filepath.endswith(".json"):
+                                        # Remove the path from payload
+                                        payload = payload.replace(
+                                            str.encode(path),
+                                            TritonBundler._REPLACE_BYTES,
+                                        )
+                                    artifacts.append(
+                                        TritonKernelArtifact(filename, payload)
                                     )
-                                artifacts.append(
-                                    TritonKernelArtifact(filename, payload)
-                                )
                             counters["inductor"]["triton_bundler_save_kernel"] += 1
                         except Exception:
                             log.debug("failed to collect triton kernel", exc_info=True)
@@ -239,13 +243,14 @@ class TritonBundler:
 
                 for artifact in artifacts.artifacts:
                     filepath = os.path.join(tmp_dir, artifact.filename)
-                    with open(filepath, "wb") as file:
-                        payload = artifact.payload
-                        if artifact.filename.endswith(".json"):
-                            payload = payload.replace(
-                                TritonBundler._REPLACE_BYTES, str.encode(directory)
-                            )
-                        file.write(payload)
+                    with _WaitCounter("pytorch.file_system_access").guard() as _:
+                        with open(filepath, "wb") as file:
+                            payload = artifact.payload
+                            if artifact.filename.endswith(".json"):
+                                payload = payload.replace(
+                                    TritonBundler._REPLACE_BYTES, str.encode(directory)
+                                )
+                            file.write(payload)
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"] += 1
                     extension = os.path.splitext(artifact.filename)[1]
                     if extension in GPU_KERNEL_BIN_EXTS.values():

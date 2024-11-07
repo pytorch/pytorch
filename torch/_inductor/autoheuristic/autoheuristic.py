@@ -20,6 +20,7 @@ from torch._inductor.autoheuristic.learned_heuristic_controller import (
 from torch._inductor.ir import ChoiceCaller
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import get_gpu_shared_memory
+from torch.monitor import _WaitCounter
 
 
 class LocalFeedback:
@@ -210,8 +211,9 @@ class AutoHeuristic:
         line += feature_values + "," + choice + "," + str(feedback_val)
         lines.append(line)
 
-        with open(log_path, "a") as f:
-            f.write("\n".join(lines) + "\n")
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(log_path, "a") as f:
+                f.write("\n".join(lines) + "\n")
 
 
 class AutoHeuristicSelectAlgorithm(AutoHeuristic):

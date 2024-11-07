@@ -8,6 +8,8 @@ import warnings
 from types import ModuleType
 from typing import Any, Callable, Dict
 
+from torch.monitor import _WaitCounter
+
 
 def _reload_triton_kernel_in_subproc(reload_module, kernel_name):
     return _module_to_triton_kernel(reload_module(), kernel_name)
@@ -32,19 +34,20 @@ def _reload_python_module_in_subproc(key, path):
 
 
 def _reload_python_module(key, path):
-    with open(path) as f:
-        try:
-            code = compile(f.read(), path, "exec", dont_inherit=True)
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to import {path}\n{type(e).__name__}: {e}"
-            ) from None
-        mod = ModuleType(f"{__name__}.{key}")
-        mod.__file__ = path
-        mod.key = key  # type: ignore[attr-defined]
-        exec(code, mod.__dict__, mod.__dict__)
-        sys.modules[mod.__name__] = mod
-        return mod
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(path) as f:
+            try:
+                code = compile(f.read(), path, "exec", dont_inherit=True)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to import {path}\n{type(e).__name__}: {e}"
+                ) from None
+            mod = ModuleType(f"{__name__}.{key}")
+            mod.__file__ = path
+            mod.key = key  # type: ignore[attr-defined]
+            exec(code, mod.__dict__, mod.__dict__)
+            sys.modules[mod.__name__] = mod
+            return mod
 
 
 @functools.lru_cache(None)

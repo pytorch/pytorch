@@ -8,7 +8,7 @@ from torch._inductor.async_compile import pre_fork_setup
 from torch._inductor.compile_worker.subproc_pool import SubprocMain
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import _set_triton_ptxas_path
-
+from torch.monitor import _WaitCounter
 
 log = logging.getLogger(__name__)
 
@@ -32,8 +32,9 @@ def main():
         args = parser.parse_args()
         if os.getppid() != args.parent:
             sys.exit(0)
-        read_fd = os.fdopen(args.read_fd, "rb")
-        write_fd = os.fdopen(args.write_fd, "wb")
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            read_fd = os.fdopen(args.read_fd, "rb")
+            write_fd = os.fdopen(args.write_fd, "wb")
 
         pre_fork_setup()
 

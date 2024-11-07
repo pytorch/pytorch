@@ -7,12 +7,13 @@ from itertools import count
 from typing import Dict, List, Optional, Tuple
 
 import sympy
-from sympy import Expr
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
+from sympy import Expr
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
+from torch.monitor import _WaitCounter
 
 from .. import config, ir
 from ..utils import _align, ALIGN_BYTES, cache_on_self, normalize_name
@@ -150,10 +151,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 #include <torch/csrc/inductor/aoti_runtime/model.h>
                 """
             )
-            with open(
-                os.path.join(os.path.dirname(__file__), "aoti_runtime", "interface.cpp")
-            ) as f:
-                self.header.splice(f.read())
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(
+                    os.path.join(
+                        os.path.dirname(__file__), "aoti_runtime", "interface.cpp"
+                    )
+                ) as f:
+                    self.header.splice(f.read())
         else:
             self.header.splice(
                 """

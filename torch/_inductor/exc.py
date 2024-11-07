@@ -6,13 +6,15 @@ import textwrap
 from functools import lru_cache
 from typing import Any, List
 
+from torch.monitor import _WaitCounter
 
 if os.environ.get("TORCHINDUCTOR_WRITE_MISSING_OPS") == "1":
 
     @lru_cache(None)
     def _record_missing_op(target: Any) -> None:
-        with open(f"{tempfile.gettempdir()}/missing_ops.txt", "a") as fd:
-            fd.write(str(target) + "\n")
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(f"{tempfile.gettempdir()}/missing_ops.txt", "a") as fd:
+                fd.write(str(target) + "\n")
 
 else:
 

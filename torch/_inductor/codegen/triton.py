@@ -24,7 +24,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-
+from torch.monitor import _WaitCounter
 import sympy
 
 import torch
@@ -3534,14 +3534,16 @@ class TritonScheduling(SIMDScheduling):
             def load_cache():
                 path = cache_file_path()
                 if os.path.exists(path):
-                    with open(path) as fd:
-                        return float(fd.read())
+                    with _WaitCounter("pytorch.file_system_access").guard() as _:
+                        with open(path) as fd:
+                            return float(fd.read())
                 return None
 
             def store_cache():
                 path = cache_file_path()
-                with open(path, "w") as fd:
-                    fd.write(str(ms))
+                with _WaitCounter("pytorch.file_system_access").guard() as _:
+                    with open(path, "w") as fd:
+                        fd.write(str(ms))
 
             log.debug(
                 "kernel src code for %s written to: %s",
@@ -3660,14 +3662,16 @@ class TritonScheduling(SIMDScheduling):
         def load_cache():
             path = cache_file_path()
             if os.path.exists(path):
-                with open(path) as fd:
-                    return tuple(float(e) for e in fd.read().split())
+                with _WaitCounter("pytorch.file_system_access").guard() as _:
+                    with open(path) as fd:
+                        return tuple(float(e) for e in fd.read().split())
             return (None, None)
 
         def store_cache():
             path = cache_file_path()
-            with open(path, "w") as fd:
-                fd.write(str(ms) + " " + str(ms_clone))
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(path, "w") as fd:
+                    fd.write(str(ms) + " " + str(ms_clone))
 
         total_ms, file_list = 0, []
         total_clone_ms = 0

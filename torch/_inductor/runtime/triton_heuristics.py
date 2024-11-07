@@ -18,6 +18,7 @@ import time
 from typing import Any, Container, Dict, List, Optional, Set, Tuple
 
 import torch
+from torch.monitor import _WaitCounter
 
 from ..triton_bundler import TritonBundler
 from .autotune_cache import AutotuneCache
@@ -170,8 +171,9 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name):
         args_str += f", {k}={v}"
 
     abs_path = os.path.abspath(sys.argv[0])
-    with open(f"{abs_path}.launch_params", "a") as f:
-        f.write(f"{kernel_name} | {args_str}\n")
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(f"{abs_path}.launch_params", "a") as f:
+            f.write(f"{kernel_name} | {args_str}\n")
 
 
 class CachingAutotuner(KernelInterface):
@@ -1072,23 +1074,24 @@ def end_graph(output_file):
         # most runtime-heavy kernels at the top of the list
         sorted_calls = sorted(collected_calls, key=lambda c: float(c[0]), reverse=True)
         try:
-            with open(output_file, "a") as file:
-                log.debug("Save profile bandwidth results to %s", output_file)
-                file.write("====================\n")
-                file.write(f"TRITON KERNELS BANDWIDTH INFO ({cur_file})\n")
-                for ms, num_gb, gb_per_s, kernel_name in sorted_calls:
-                    # also display the runtime percentage for each kernel
-                    percentage = f"{ms / overall_time * 100:.2f}%"
-                    suffix = f" \t {percentage} \t {kernel_name}"
-                    bw_info_str = create_bandwidth_info_str(
-                        ms,
-                        num_gb,
-                        gb_per_s,
-                        suffix=suffix,
-                        color=False,
-                    )
-                    file.write(bw_info_str + "\n")
-                file.write(f"{summary_str}\n\n")
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(output_file, "a") as file:
+                    log.debug("Save profile bandwidth results to %s", output_file)
+                    file.write("====================\n")
+                    file.write(f"TRITON KERNELS BANDWIDTH INFO ({cur_file})\n")
+                    for ms, num_gb, gb_per_s, kernel_name in sorted_calls:
+                        # also display the runtime percentage for each kernel
+                        percentage = f"{ms / overall_time * 100:.2f}%"
+                        suffix = f" \t {percentage} \t {kernel_name}"
+                        bw_info_str = create_bandwidth_info_str(
+                            ms,
+                            num_gb,
+                            gb_per_s,
+                            suffix=suffix,
+                            color=False,
+                        )
+                        file.write(bw_info_str + "\n")
+                    file.write(f"{summary_str}\n\n")
         except Exception as e:
             log.warning(
                 "failed to write profile bandwidth result into %s: %s",

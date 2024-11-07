@@ -13,6 +13,7 @@ import torch.utils._pytree as pytree
 from torch._inductor import exc
 from torch._inductor.cpp_builder import BuildOptionsBase, CppBuilder
 from torch.export._tree_utils import reorder_kwargs
+from torch.monitor import _WaitCounter
 
 from .pt2_archive_constants import AOTINDUCTOR_DIR, ARCHIVE_VERSION
 
@@ -110,8 +111,9 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
     file_name = os.path.splitext(cpp_file)[0]
 
     # Parse compile flags and build the .o file
-    with open(file_name + "_compile_flags.json") as f:
-        compile_flags = json.load(f)
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(file_name + "_compile_flags.json") as f:
+            compile_flags = json.load(f)
 
     compile_options = BuildOptionsBase(**compile_flags)
     object_builder = CppBuilder(
@@ -125,8 +127,9 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
     _run_command_and_check(compile_cmd)
 
     # Parse linker flags and build the .so file
-    with open(file_name + "_linker_flags.json") as f:
-        linker_flags = json.load(f)
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(file_name + "_linker_flags.json") as f:
+            linker_flags = json.load(f)
 
     linker_options = BuildOptionsBase(**linker_flags)
     so_builder = CppBuilder(
@@ -143,14 +146,15 @@ def compile_so(aoti_dir: str, aoti_files: List[str], so_path: str) -> str:
     # mmapped weights
     serialized_weights_filename = file_name + "_serialized_weights.bin"
     if serialized_weights_filename in aoti_files:
-        with open(serialized_weights_filename, "rb") as f_weights:
-            serialized_weights = f_weights.read()
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(serialized_weights_filename, "rb") as f_weights:
+                serialized_weights = f_weights.read()
 
-        with open(output_so, "a+b") as f_so:
-            so_size = f_so.tell()
-            # Page align the weights
-            f_so.write(b" " * (16384 - so_size % 16384))
-            f_so.write(serialized_weights)
+            with open(output_so, "a+b") as f_so:
+                so_size = f_so.tell()
+                # Page align the weights
+                f_so.write(b" " * (16384 - so_size % 16384))
+                f_so.write(serialized_weights)
 
     return output_so
 

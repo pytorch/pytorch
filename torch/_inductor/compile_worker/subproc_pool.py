@@ -13,7 +13,6 @@ import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from typing import Any, BinaryIO, Callable, Dict, Tuple, TypeVar
-from typing_extensions import Never, ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read
 # justknobs, e.g., in the Triton compiler. For internal, the import installs
@@ -21,6 +20,8 @@ from typing_extensions import Never, ParamSpec
 import torch._thread_safe_fork  # noqa: F401
 from torch._inductor import config
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
+from torch.monitor import _WaitCounter
+from typing_extensions import Never, ParamSpec
 
 
 log = logging.getLogger(__name__)
@@ -100,8 +101,9 @@ class SubprocPool:
 
         subproc_read_fd, write_fd = os.pipe()
         read_fd, subproc_write_fd = os.pipe()
-        self.write_pipe = os.fdopen(write_fd, "wb")
-        self.read_pipe = os.fdopen(read_fd, "rb")
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            self.write_pipe = os.fdopen(write_fd, "wb")
+            self.read_pipe = os.fdopen(read_fd, "rb")
 
         cmd = [
             sys.executable,

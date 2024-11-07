@@ -12,7 +12,7 @@ from typing import Dict, List, Set, Tuple, TYPE_CHECKING
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
-
+from torch.monitor import _WaitCounter
 
 # Prevent circular import
 if TYPE_CHECKING:
@@ -154,9 +154,10 @@ class MetricTable:
 
     def write_header(self):
         filename = self.output_filename()
-        with open(filename, "w") as fd:
-            writer = csv.writer(fd, lineterminator="\n")
-            writer.writerow(["model_name"] + self.column_names)
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(filename, "w") as fd:
+                writer = csv.writer(fd, lineterminator="\n")
+                writer.writerow(["model_name"] + self.column_names)
 
     def _write_row(self, row):
         filename = self.output_filename()
@@ -174,9 +175,10 @@ class MetricTable:
                 new_val = orig_val
             row[idx] = new_val
 
-        with open(filename, "a") as fd:
-            writer = csv.writer(fd, lineterminator="\n")
-            writer.writerow(row)
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(filename, "a") as fd:
+                writer = csv.writer(fd, lineterminator="\n")
+                writer.writerow(row)
 
     @staticmethod
     def register_table(name, column_names):

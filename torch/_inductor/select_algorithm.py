@@ -20,12 +20,13 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Un
 from unittest.mock import patch
 
 import sympy
-from filelock import FileLock
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+from filelock import FileLock
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
+from torch.monitor import _WaitCounter
 
 from . import config, ir
 from .autotune_process import (
@@ -1118,15 +1119,17 @@ def append_to_log(filename, data):
     lock = FileLock(lock_file)
     with lock:
         try:
-            with open(filename) as f:
-                log_data = json.load(f)
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(filename) as f:
+                    log_data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             log_data = []
 
         log_data.append(data)
 
-        with open(filename, "w") as f:
-            json.dump(log_data, f, indent=4)
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(filename, "w") as f:
+                json.dump(log_data, f, indent=4)
 
 
 class DataProcessorChoiceCallerWrapper:
@@ -1817,9 +1820,9 @@ def autotune_select_algorithm(*args, **kwargs):
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
 
     if "return_multi_template" not in kwargs:
-        kwargs[
-            "return_multi_template"
-        ] = torch._inductor.config.benchmark_epilogue_fusion
+        kwargs["return_multi_template"] = (
+            torch._inductor.config.benchmark_epilogue_fusion
+        )
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 

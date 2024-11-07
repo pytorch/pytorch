@@ -24,18 +24,18 @@ from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config, exc
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch.monitor import _WaitCounter
 from torch.torch_version import TorchVersion
 
 
 if config.is_fbcode():
-    from triton.fb import build_paths  # noqa: F401
-
     from torch._inductor.fb.utils import (
         log_global_cache_errors,
         log_global_cache_stats,
         log_global_cache_vals,
         use_global_cache,
     )
+    from triton.fb import build_paths  # noqa: F401
 else:
 
     def log_global_cache_errors(*args: Any, **kwargs: Any) -> None:
@@ -457,8 +457,9 @@ class BuildOptionsBase:
             "compile_only": self.get_compile_only(),
         }
 
-        with open(file, "w") as f:
-            json.dump(attrs, f)
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(file, "w") as f:
+                json.dump(attrs, f)
 
 
 def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:

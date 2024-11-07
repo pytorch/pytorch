@@ -6,6 +6,7 @@ import pathlib
 from typing import Any, List
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
+from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
@@ -317,22 +318,26 @@ class MultiKernelCall:
         assert self.picked_kernel is None
         path = self.cache_file_path()
         if path.exists():
-            with path.open() as fd:
-                self.picked_kernel = int(fd.read())
-                assert self.picked_kernel >= 0 and self.picked_kernel < len(
-                    self._kernels
-                )
-                log.debug(
-                    "Load picked kernel %d from cache file %s", self.picked_kernel, path
-                )
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with path.open() as fd:
+                    self.picked_kernel = int(fd.read())
+                    assert self.picked_kernel >= 0 and self.picked_kernel < len(
+                        self._kernels
+                    )
+                    log.debug(
+                        "Load picked kernel %d from cache file %s",
+                        self.picked_kernel,
+                        path,
+                    )
 
     def store_cache(self):
         assert self.picked_kernel is not None
         path = self.cache_file_path()
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        with path.open("w") as fd:
-            fd.write(str(self.picked_kernel))
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with path.open("w") as fd:
+                fd.write(str(self.picked_kernel))
         log.debug("Store picked kernel %d to cache file %s", self.picked_kernel, path)
 
     @property

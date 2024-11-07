@@ -70,7 +70,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self, TypeIs
 
 import torch
 import torch._guards
@@ -84,6 +83,8 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
+from torch.monitor import _WaitCounter
+from typing_extensions import Self, TypeIs
 
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
@@ -106,20 +107,17 @@ NodeOrConstant = Union[Constant, torch.fx.Node]
 class SearchFn(Protocol):
     __name__: str
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        ...
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 class ReplaceFn(Protocol):
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        ...
+    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
 class TraceFn(Protocol):
     def __call__(
         self, fn: Union[SearchFn, ReplaceFn], *args: Any, **kwargs: Any
-    ) -> torch.fx.GraphModule:
-        ...
+    ) -> torch.fx.GraphModule: ...
 
 
 T = TypeVar("T")
@@ -360,8 +358,7 @@ class PatternExpr(ABC):
     """
 
     @abstractmethod
-    def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult:
-        ...
+    def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult: ...
 
     def match(self, node: torch.fx.Node) -> MatchResult:
         try:
@@ -484,8 +481,7 @@ class _TargetExpr(PatternExpr):
 
     @property
     @abstractmethod
-    def op(self) -> str:
-        ...
+    def op(self) -> str: ...
 
     def fns_repr(self) -> str:
         first_repr = self.fns[0]
@@ -984,8 +980,9 @@ class PatternPrettyPrinter:
 
 
 class _PassDictsType(Protocol):
-    def __getitem__(self, k: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
-        ...
+    def __getitem__(
+        self, k: Tuple[str, torch.fx.node.Target]
+    ) -> List[PatternEntry]: ...
 
 
 @dataclasses.dataclass
@@ -1470,13 +1467,14 @@ def _serialize_pattern(
 
     file_template = get_file_template()
 
-    with open(SERIALIZED_PATTERN_PATH / f"{pattern_name}.py", write_mode) as f:
-        if write_mode == "w":
-            f.write(file_template)
-        else:
-            f.write("\n\n")
-        f.write(serialized_pattern)
-        f.write("\n")
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(SERIALIZED_PATTERN_PATH / f"{pattern_name}.py", write_mode) as f:
+            if write_mode == "w":
+                f.write(file_template)
+            else:
+                f.write("\n\n")
+            f.write(serialized_pattern)
+            f.write("\n")
 
     return pattern
 

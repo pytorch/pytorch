@@ -8,6 +8,7 @@ import sympy
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
+from torch.monitor import _WaitCounter
 
 from .. import config, ir
 from ..utils import sympy_product
@@ -104,12 +105,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             return
 
         super().write_header()
-        with open(
-            os.path.join(
-                os.path.dirname(__file__), "aoti_runtime", "implementation.cpp"
-            )
-        ) as f:
-            self.header.splice(f.read())
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(
+                os.path.join(
+                    os.path.dirname(__file__), "aoti_runtime", "implementation.cpp"
+                )
+            ) as f:
+                self.header.splice(f.read())
 
     def codegen_input_numel_asserts(self):
         for name, buf in V.graph.graph_inputs.items():

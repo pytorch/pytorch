@@ -8,6 +8,7 @@ from unittest import mock
 import torch
 import torch._export
 from torch._inductor.utils import is_cpu_device
+from torch.monitor import _WaitCounter
 
 from .runtime.runtime_utils import cache_dir
 
@@ -40,42 +41,44 @@ def load_aoti_eager_cache(
 
     try:
         with aoti_eager_op_conf_lock(op_func_name_with_overload):
-            with open(op_conf) as f:
-                json_data = json.load(f)
-                for item in json_data:
-                    # Get absolution path for kernel library
-                    kernel_lib_abs_path = device_kernel_cache / item["kernel_path"]
-                    item["kernel_path"] = kernel_lib_abs_path.as_posix()
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(op_conf) as f:
+                    json_data = json.load(f)
+                    for item in json_data:
+                        # Get absolution path for kernel library
+                        kernel_lib_abs_path = device_kernel_cache / item["kernel_path"]
+                        item["kernel_path"] = kernel_lib_abs_path.as_posix()
 
-                    # Check if the kernel library exists
-                    if not kernel_lib_abs_path.exists():
-                        return []
+                        # Check if the kernel library exists
+                        if not kernel_lib_abs_path.exists():
+                            return []
 
-                    for metadata in item["meta_info"]:
-                        if metadata.get("is_dynamic"):
-                            raise NotImplementedError(
-                                "Only support static shape for now"
-                            )
-                        if (
-                            "device_type" in metadata
-                            and metadata["device_type"] == "cpu"
-                        ):
-                            metadata["device_index"] = -1
-                        for dtype_key in ["dtype", "dtype_value"]:
-                            if dtype_key in metadata:
-                                metadata[dtype_key] = getattr(
-                                    torch, metadata[dtype_key].split(".")[-1]
+                        for metadata in item["meta_info"]:
+                            if metadata.get("is_dynamic"):
+                                raise NotImplementedError(
+                                    "Only support static shape for now"
                                 )
-                        if "layout_value" in metadata:
-                            metadata["layout_value"] = getattr(
-                                torch, metadata["layout_value"].split(".")[-1]
-                            )
-                        if "memory_format_value" in metadata:
-                            metadata["memory_format_value"] = getattr(
-                                torch, metadata["memory_format_value"].split(".")[-1]
-                            )
+                            if (
+                                "device_type" in metadata
+                                and metadata["device_type"] == "cpu"
+                            ):
+                                metadata["device_index"] = -1
+                            for dtype_key in ["dtype", "dtype_value"]:
+                                if dtype_key in metadata:
+                                    metadata[dtype_key] = getattr(
+                                        torch, metadata[dtype_key].split(".")[-1]
+                                    )
+                            if "layout_value" in metadata:
+                                metadata["layout_value"] = getattr(
+                                    torch, metadata["layout_value"].split(".")[-1]
+                                )
+                            if "memory_format_value" in metadata:
+                                metadata["memory_format_value"] = getattr(
+                                    torch,
+                                    metadata["memory_format_value"].split(".")[-1],
+                                )
 
-                return json_data
+                    return json_data
     except Exception as e:
         err_msg = f"Failed to load aoti eager cache: {e}"
         log.exception(err_msg)
@@ -272,24 +275,26 @@ def aoti_compile_with_persistent_cache(
             op_conf = persistent_cache / f"{op_func_name_with_overload}.json"
             mode = "r" if op_conf.exists() else "w"
             with aoti_eager_op_conf_lock(op_func_name_with_overload):
-                with open(op_conf, mode) as op_conf_file:
-                    try:
-                        json_data = json.load(op_conf_file)
-                    except Exception as e:
-                        json_data = []
+                with _WaitCounter("pytorch.file_system_access").guard() as _:
+                    with open(op_conf, mode) as op_conf_file:
+                        try:
+                            json_data = json.load(op_conf_file)
+                        except Exception as e:
+                            json_data = []
 
-                    assert isinstance(json_data, list)
-                    for item in json_data:
-                        assert isinstance(item, dict)
-                        # Same kernel meta info already exists in the json file
-                        if item["meta_info"] == kernel_metadata_items:
-                            update_json = False
-                            break
+                        assert isinstance(json_data, list)
+                        for item in json_data:
+                            assert isinstance(item, dict)
+                            # Same kernel meta info already exists in the json file
+                            if item["meta_info"] == kernel_metadata_items:
+                                update_json = False
+                                break
 
                 if update_json:
                     json_data.append(kernel_meta_info)
-                    with open(op_conf, "w") as op_conf_file:
-                        json.dump(json_data, op_conf_file, indent=4)
+                    with _WaitCounter("pytorch.file_system_access").guard() as _:
+                        with open(op_conf, "w") as op_conf_file:
+                            json.dump(json_data, op_conf_file, indent=4)
 
             return kernel_lib_path
         except Exception as e:

@@ -2,9 +2,10 @@ import hashlib
 from abc import ABC, abstractmethod
 from functools import lru_cache
 from typing import Any, Callable, Optional, Tuple, Union
-from typing_extensions import TypeAlias
 
 import torch.fx.graph
+from torch.monitor import _WaitCounter
+from typing_extensions import TypeAlias
 
 
 class CustomGraphPass(ABC):
@@ -66,7 +67,8 @@ def get_hash_for_files(paths: Tuple[str], extra: str = "") -> bytes:
     hasher = hashlib.sha256()
     hasher.update(extra.encode("utf-8"))
     for path in paths:
-        with open(path, "rb") as f:
-            hasher.update(path.encode("utf-8"))
-            hasher.update(f.read())
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(path, "rb") as f:
+                hasher.update(path.encode("utf-8"))
+                hasher.update(f.read())
     return hasher.digest()

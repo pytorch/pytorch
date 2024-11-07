@@ -7,10 +7,11 @@ import os
 import os.path
 import re
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
-from typing_extensions import override
 
 import torch
+from torch.monitor import _WaitCounter
 from torch.utils._triton import has_triton, has_triton_package
+from typing_extensions import override
 
 from ..remote_cache import (
     create_cache,
@@ -442,16 +443,18 @@ class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
     def _get(self, key: str) -> Optional[bytes]:
         try:
-            with open(key, "rb") as fd:
-                return fd.read()
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(key, "rb") as fd:
+                    return fd.read()
         except FileNotFoundError:
             return None
 
     @override
     def _put(self, key: str, data: bytes) -> None:
         os.makedirs(os.path.dirname(key), exist_ok=True)
-        with open(key, "wb") as fd:
-            fd.write(data)
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(key, "wb") as fd:
+                fd.write(data)
 
 
 class LocalAutotuneCache(RemoteCache[JsonDataTy]):

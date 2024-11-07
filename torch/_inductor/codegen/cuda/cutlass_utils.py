@@ -10,6 +10,7 @@ from typing import Any, List, Optional
 import sympy
 
 import torch
+from torch.monitor import _WaitCounter
 
 from ... import config
 from ...ir import Layout
@@ -34,8 +35,9 @@ def _gen_cutlass_file(
 ) -> None:
     orig_full_path = os.path.abspath(os.path.join(src_dir, file_name))
     text = ""
-    with open(orig_full_path) as f:
-        text = f.read()
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(orig_full_path) as f:
+            text = f.read()
     text = _rename_cutlass_import(text, cutlass_modules)
     dst_full_path = os.path.abspath(
         os.path.join(
@@ -43,8 +45,9 @@ def _gen_cutlass_file(
             file_name,
         )
     )
-    with open(dst_full_path, "w") as f:
-        f.write(text)
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(dst_full_path, "w") as f:
+            f.write(text)
 
 
 @functools.lru_cache(None)

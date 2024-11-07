@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
+from torch.monitor import _WaitCounter
 
 
 # Set the subdirectory name
@@ -121,14 +122,16 @@ class CompilerBisector:
     @classmethod
     def write_lines_to_file(cls, file_path: str, lines: List[str]) -> None:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, "w") as file:
-            file.writelines(lines)
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(file_path, "w") as file:
+                file.writelines(lines)
 
     @classmethod
     def read_lines_from_file(cls, file_path: str) -> List[str]:
         if os.path.exists(file_path):
-            with open(file_path) as file:
-                return file.readlines()
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with open(file_path) as file:
+                    return file.readlines()
         return []
 
     @classmethod

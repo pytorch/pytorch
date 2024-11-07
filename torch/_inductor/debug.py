@@ -21,6 +21,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
+from torch.monitor import _WaitCounter
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
@@ -361,8 +362,11 @@ class DebugContext:
         **kwargs: Any,
     ) -> Iterator[IO[Any]]:
         assert self._path
-        with open(os.path.join(self._path, filename), write_mode, *args, **kwargs) as f:
-            yield f
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with open(
+                os.path.join(self._path, filename), write_mode, *args, **kwargs
+            ) as f:
+                yield f
 
     def filename(self, suffix: str) -> str:
         assert self._path
@@ -376,8 +380,9 @@ class DebugContext:
             tar_file = os.path.join(
                 self._path, f"{os.path.basename(self._path)}.tar.gz"
             )
-            with tarfile.open(tar_file, "w:gz") as tar:
-                tar.add(self._path, arcname=os.path.basename(self._path))
+            with _WaitCounter("pytorch.file_system_access").guard() as _:
+                with tarfile.open(tar_file, "w:gz") as tar:
+                    tar.add(self._path, arcname=os.path.basename(self._path))
             config.trace.upload_tar(tar_file)
 
     def __enter__(self) -> None:
@@ -409,7 +414,8 @@ class DebugContext:
         level: int,
     ) -> None:
         log = logging.getLogger("torch._inductor")
-        fd = self._stack.enter_context(self.fopen(filename))
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            fd = self._stack.enter_context(self.fopen(filename))
         ch = logging.StreamHandler(fd)
         ch.setLevel(level)
         ch.setFormatter(
@@ -437,13 +443,14 @@ class DebugContext:
     def _save_profile_data(self) -> None:
         assert self._prof
         self._prof.dump_stats(self.filename("compile.prof"))
-        with self.fopen("compile.stats") as fd:
-            stats = pstats.Stats(self._prof, stream=fd)
-            stats.strip_dirs()
-            stats.sort_stats("cumtime")
-            stats.print_stats(100)
-            stats.sort_stats("tottime")
-            stats.print_stats(100)
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with self.fopen("compile.stats") as fd:
+                stats = pstats.Stats(self._prof, stream=fd)
+                stats.strip_dirs()
+                stats.sort_stats("cumtime")
+                stats.print_stats(100)
+                stats.sort_stats("tottime")
+                stats.print_stats(100)
 
     def __getattr__(self, name: str) -> Optional[Callable[..., None]]:
         if config.trace.enabled and getattr(config.trace, name):
@@ -472,38 +479,42 @@ class DebugFormatter:
         gm: torch.fx.GraphModule,
         inputs: List[torch.Tensor],
     ) -> None:
-        with self.fopen("fx_graph_runnable.py") as fd:
-            save_dir = None
-            if torch._inductor.config.trace.save_real_tensors:
-                inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(inputs)
-                save_dir = os.path.dirname(fd.name)
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with self.fopen("fx_graph_runnable.py") as fd:
+                save_dir = None
+                if torch._inductor.config.trace.save_real_tensors:
+                    inputs = torch._subclasses.fake_utils.try_convert_fake_to_real(
+                        inputs
+                    )
+                    save_dir = os.path.dirname(fd.name)
 
-            # dont try to use stable hash torchinductor compilation if saving real tensors
-            # and avoid recursively trying to save real tensors inside of the inductor compilation
-            # regardless
-            stable_hash = torch._inductor.config.trace.save_real_tensors
-            with torch._inductor.config.patch(
-                {"trace.enabled": False, "trace.save_real_tensors": False}
-            ):
-                save_graph_repro(
-                    fd,
-                    gm,
-                    inputs,
-                    "inductor",
-                    save_dir=save_dir,
-                    stable_hash=stable_hash,
-                )
-
-        with self.fopen("fx_graph_readable.py") as fd:
-            fd.write(gm.print_readable(print_output=False))
+                # dont try to use stable hash torchinductor compilation if saving real tensors
+                # and avoid recursively trying to save real tensors inside of the inductor compilation
+                # regardless
+                stable_hash = torch._inductor.config.trace.save_real_tensors
+                with torch._inductor.config.patch(
+                    {"trace.enabled": False, "trace.save_real_tensors": False}
+                ):
+                    save_graph_repro(
+                        fd,
+                        gm,
+                        inputs,
+                        "inductor",
+                        save_dir=save_dir,
+                        stable_hash=stable_hash,
+                    )
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with self.fopen("fx_graph_readable.py") as fd:
+                fd.write(gm.print_readable(print_output=False))
 
     def fx_graph_transformed(
         self,
         gm: torch.fx.GraphModule,
         inputs: List[torch.Tensor],
     ) -> None:
-        with self.fopen("fx_graph_transformed.py") as fd:
-            fd.write(gm.print_readable(print_output=False))
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with self.fopen("fx_graph_transformed.py") as fd:
+                fd.write(gm.print_readable(print_output=False))
 
     def ir_pre_fusion(self, nodes: SchedulerNodeList) -> None:
         self._write_ir("ir_pre_fusion.txt", nodes)
@@ -516,11 +527,12 @@ class DebugFormatter:
         filename: str,
         nodes: SchedulerNodeList,
     ) -> None:
-        with self.fopen(filename) as fd:
-            log.info("Writing debug ir to  %s", fd.name)
-            for node in nodes:
-                fd.write(node.debug_str())
-                fd.write("\n\n\n")
+        with _WaitCounter("pytorch.file_system_access").guard() as _:
+            with self.fopen(filename) as fd:
+                log.info("Writing debug ir to  %s", fd.name)
+                for node in nodes:
+                    fd.write(node.debug_str())
+                    fd.write("\n\n\n")
 
     def graph_diagram(self, nodes: SchedulerNodeList) -> None:
         draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
@@ -670,8 +682,9 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
 
     fn_name = "compile_fx_inner"
     path = f"{folder}/{fn_name}_{next(save_args_cnt)}.pkl"
-    with open(path, "wb") as f:
-        pickle.dump((args_to_save, kwargs_to_save), f)
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(path, "wb") as f:
+            pickle.dump((args_to_save, kwargs_to_save), f)
 
     if log.isEnabledFor(logging.DEBUG):
         message = f"""
@@ -692,8 +705,9 @@ load_args_and_run_compile_fx_inner({path!r})
 def load_args_and_run_compile_fx_inner(path: str) -> Any:
     from torch._inductor.compile_fx import compile_fx_inner
 
-    with open(path, "rb") as f:
-        args, kwargs = pickle.load(f)
+    with _WaitCounter("pytorch.file_system_access").guard() as _:
+        with open(path, "rb") as f:
+            args, kwargs = pickle.load(f)
 
     def handle_tensor(x: Any) -> Any:
         if isinstance(x, TensorMetadataHolder):
