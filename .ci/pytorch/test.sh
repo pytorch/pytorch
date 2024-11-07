@@ -1360,7 +1360,9 @@ test_executorch() {
   source .ci/scripts/setup-linux.sh cmake
 
   # NB: We need to install torchtune and ao as the dependencies for llama
-  source examples/models/llama3_2_vision/install_requirements.sh
+  pushd examples/models/llama3_2_vision
+  source install_requirements.sh
+  popd
 
   echo "Run ExecuTorch unit tests"
   pytest -v -n auto
