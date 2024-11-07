@@ -2812,6 +2812,7 @@ def reduce(tensor, dst, op=ReduceOp.SUM, group=None, async_op=False):
         work.wait()
 
 
+@_time_logger
 def _object_to_tensor(obj, device, group):
     f = io.BytesIO()
     _pickler(f).dump(obj)
@@ -2831,6 +2832,7 @@ def _object_to_tensor(obj, device, group):
     return byte_tensor, local_size
 
 
+@_time_logger
 def _tensor_to_object(tensor, tensor_size, group):
     if get_debug_level() == DebugLevel.DETAIL and is_nccl_available():
         backend = get_backend(group)
@@ -4722,6 +4724,7 @@ def new_group(
     pg_options=None,
     use_local_synchronization=False,
     group_desc=None,
+    device_id: Optional[torch.device] = None,
 ):
     """
     Create a new distributed group.
@@ -4774,6 +4777,9 @@ def new_group(
             in that non-member ranks don't need to call into API and don't
             join the barrier.
         group_desc (str, optional): a string to describe the process group.
+        device_id (torch.device, optional): a single, specific device
+            to "bind" this process to,  The `new_group` call will try to initialize
+            a communication backend immediately for the device if this field is given.
 
     Returns:
         A handle of distributed group that can be given to collective calls or
@@ -4797,6 +4803,7 @@ def new_group(
         None,
         use_local_synchronization=use_local_synchronization,
         group_desc=group_desc,
+        device_id=device_id,
     )
 
 
@@ -4808,6 +4815,7 @@ def _new_group_with_tag(
     pg_tag=None,
     use_local_synchronization=False,
     group_desc=None,
+    device_id: Optional[torch.device] = None,
 ):
     """
     Variant of ``new_group`` that exposes tag creation.
@@ -4818,7 +4826,12 @@ def _new_group_with_tag(
     global _world
 
     default_pg = _get_default_group()
-    device_id = default_pg.bound_device_id
+    if device_id is None:
+        device_id = default_pg.bound_device_id
+    elif default_pg.bound_device_id is not None:
+        assert (
+            device_id == default_pg.bound_device_id
+        ), "Mismatched bound device between new pg and the default pg."
     default_backend, default_store = _world.pg_map[default_pg]
     global_rank = default_pg.rank()
     global_world_size = default_pg.size()
@@ -5180,31 +5193,3 @@ def _get_process_group_name(pg: ProcessGroup) -> str:
 
 def _get_process_group_store(pg: ProcessGroup) -> Store:
     return _world.pg_map[pg][1]
-
-
-# This ops are not friendly to TorchDynamo. So, we decide to disallow these ops
-# in FX graph, allowing them to run them on eager, with torch.compile.
-dynamo_unsupported_distributed_c10d_ops = [
-    recv,
-    all_gather_object,
-    all_gather_coalesced,
-    all_to_all_single,
-    all_reduce,
-    gather_object,
-    all_to_all,
-    all_reduce_coalesced,
-    gather,
-    send_object_list,
-    recv_object_list,
-    broadcast_object_list,
-    barrier,
-    scatter,
-    scatter_object_list,
-    reduce,
-    all_gather,
-    reduce_scatter,
-    all_gather_into_tensor,
-    broadcast,
-    reduce_scatter_tensor,
-    send,
-]

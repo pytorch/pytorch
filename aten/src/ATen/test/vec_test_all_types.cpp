@@ -553,6 +553,17 @@ namespace {
           AssertVectorized<vec>(NAME_INFO(isnan), expected, actual).check();
         }
     }
+    TEST(NanFloat16, IsNan) {
+      for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
+        c10::Half val(ii, c10::Half::from_bits());
+        bool expected = std::isnan(val);
+        CACHE_ALIGN c10::Half actual_vals[vHalf::size()];
+        vHalf(val).isnan().store(actual_vals);
+        for (int jj = 0; jj < vHalf::size(); ++jj) {
+          EXPECT_EQ(expected, c10::bit_cast<uint16_t>(actual_vals[jj]) != 0) << "fp16 isnan failure for bit pattern " << std::hex << ii << std::dec;
+        }
+      }
+    }
     TYPED_TEST(LGamma, LGamma) {
         using vec = TypeParam;
         using UVT = UvalueType<vec>;
@@ -931,6 +942,28 @@ namespace {
             test_case,
             RESOLVE_OVERLOAD(filter_fmadd));
     }
+#if defined(CPU_CAPABILITY_NEON)
+    TEST(BitwiseFloatsAdditional, HalfToFloatFmadd) {
+        using vec = vhalf;
+        using VT = ValueType<vec>;
+
+        auto test_case = TestingCase<vec>::getBuilder()
+          .addDomain(CheckWithinDomains<VT>{
+              {{(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}, {(VT)-1000, (VT)1000}},
+              true, getDefaultTolerance<VT>()})
+          .setTestSeed(TestSeed());
+
+        test_ternary<vec>(
+            NAME_INFO(half_to_float_fmadd), RESOLVE_OVERLOAD(local_fmadd),
+            [](const vec& v0, const vec& v1, const vec& v2) {
+              const auto [v2_float0, v2_float1] = convert_half_float(v2);
+              const auto [result_float0, result_float1] = at::vec::fmadd(v0, v1, v2_float0, v2_float1);
+              return convert_float_half(result_float0, result_float1);
+            },
+            test_case,
+            RESOLVE_OVERLOAD(filter_fmadd));
+    }
+#endif
     template<typename vec, typename VT, int64_t mask>
     typename std::enable_if_t<(mask < 0 || mask> 255), void>
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
@@ -1747,6 +1780,7 @@ namespace {
       } while (0)
       TEST_CONVERT_TO(int8_t);
       TEST_CONVERT_TO(uint8_t);
+      TEST_CONVERT_TO(float);
     #undef TEST_CONVERT_TO
     }
 #endif

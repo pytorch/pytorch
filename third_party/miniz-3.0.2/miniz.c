@@ -6295,7 +6295,7 @@ mz_bool mz_zip_writer_add_mem_ex_v2(mz_zip_archive *pZip, const char *pArchive_n
 
 	if (!(level_and_flags & MZ_ZIP_FLAG_COMPRESSED_DATA))
 	{
-		if (!skip_crc32) {
+        if (!skip_crc32) {
             uncomp_crc32 = (mz_uint32)mz_crc32(MZ_CRC32_INIT, (const mz_uint8 *)pBuf, buf_size);
         }
 		uncomp_size = buf_size;
