@@ -66,7 +66,7 @@ class TestNumericDebugger(TestCase):
         m = prepare_pt2e(m, quantizer)
         debug_handle_map = _extract_debug_handles(m)
         res_counter = Counter(debug_handle_map.values())
-        repeated_debug_handle_ids = [4, 5, 6]
+        repeated_debug_handle_ids = [5, 6, 7]
         # 3 ids were repeated because we copy over the id from node to its output observer
         # torch.ops.aten.conv2d.default, torch.ops.aten.squeeze.dim and torch.ops.aten.conv1d.default
         for dh_id in repeated_debug_handle_ids:
@@ -78,7 +78,7 @@ class TestNumericDebugger(TestCase):
         res_counter = Counter(debug_handle_map.values())
         # same set of ids where repeated, because we copy over the id from observer/fake_quant to
         # dequantize node
-        repeated_debug_handle_ids = [4, 5, 6]
+        repeated_debug_handle_ids = [5, 6, 7]
         for dh_id in repeated_debug_handle_ids:
             self.assertEqual(res_counter[dh_id], 2)
 

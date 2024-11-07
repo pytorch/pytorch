@@ -19,13 +19,13 @@ def generate_numeric_debug_handle(graph_module: GraphModule) -> None:
     """Attach numeric_debug_handle_id for all nodes in the model except for placeholder node
     The graph nodes of input model is modified inplace.
     """
-    unique_id = -1
+    unique_id = 0
     # Find the max ID that exists in the graph first, in case part of the graph
     # has already been annotated. This way we guarantee there are no duplicate
     # handle IDs.
     for node in graph_module.graph.nodes:
         unique_id = max(
-            unique_id, node.meta.get(CUSTOM_KEY, {}).get(NUMERIC_DEBUG_HANDLE_KEY, -1)
+            unique_id, node.meta.get(CUSTOM_KEY, {}).get(NUMERIC_DEBUG_HANDLE_KEY, 0)
         )
     unique_id += 1
 
