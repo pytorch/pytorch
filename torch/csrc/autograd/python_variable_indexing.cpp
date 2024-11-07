@@ -59,7 +59,7 @@ Py_ssize_t THPVariable_length(PyObject* self) {
 // and tuples of those types. We also handle bools as if they were a
 // Variable[ByteTensor].
 
-static int64_t count_specified_dimensions(PyObject* index) {
+static inline int64_t count_specified_dimensions(PyObject* index) {
   // Count the number of indexed dimensions (everything but ellipsis and None)
   // -1 is a sentinel for __torch_function__
   int64_t count = 0;
@@ -85,7 +85,7 @@ static int64_t count_specified_dimensions(PyObject* index) {
   return count;
 }
 
-static void invalid_index(PyObject* obj) {
+[[noreturn]] static inline void invalid_index(PyObject* obj) {
   TORCH_CHECK_INDEX(
       false,
       "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
@@ -94,7 +94,9 @@ static void invalid_index(PyObject* obj) {
       ")");
 }
 
-static Variable sequenceToVariable(c10::TensorOptions options, PyObject* seq) {
+static inline Variable sequenceToVariable(
+    c10::TensorOptions options,
+    PyObject* seq) {
   return torch::utils::indexing_tensor_from_data(
       options, kLong, std::nullopt, seq);
 }
@@ -138,7 +140,7 @@ inline Variable valueToTensor(
   }
 }
 
-static void recordSliceTrace(PyObject* obj) {
+static inline void recordSliceTrace(PyObject* obj) {
   PySliceObject* sliceobj = (PySliceObject*)obj;
   if (THPVariable_Check(sliceobj->start)) {
     torch::jit::tracer::ArgumentStash::stashValue(
@@ -163,12 +165,12 @@ static void recordSliceTrace(PyObject* obj) {
   }
 }
 
-static void recordSelectTrace(const Tensor& index_tensor) {
+static inline void recordSelectTrace(const Tensor& index_tensor) {
   torch::jit::tracer::ArgumentStash::stashValue(
       std::string("index"), 1, index_tensor, torch::jit::IntType::get());
 }
 
-static Variable applySlicing(
+static inline Variable applySlicing(
     const Variable& self,
     PyObject* index,
     variable_list& outIndices,
@@ -258,7 +260,7 @@ static Variable applySlicing(
   return result;
 }
 
-static bool treatSequenceAsTuple(PyObject* index) {
+static inline bool treatSequenceAsTuple(PyObject* index) {
   if (PyTuple_Check(index)) {
     return true;
   }
@@ -311,7 +313,7 @@ static bool treatSequenceAsTuple(PyObject* index) {
   return false;
 }
 
-static THPObjectPtr wrapTuple(PyObject* index) {
+static inline THPObjectPtr wrapTuple(PyObject* index) {
   THPObjectPtr res;
   if (treatSequenceAsTuple(index)) {
     res = PySequence_Tuple(index);
@@ -408,7 +410,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   END_HANDLE_TH_ERRORS
 }
 
-static void dispatch_set_item(
+void dispatch_set_item(
     const Tensor& self,
     ArrayRef<at::indexing::TensorIndex> indices,
     const Tensor& value,

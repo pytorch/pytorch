@@ -539,7 +539,7 @@ void Pickler::pushSpecializedList(
   push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
-static double swapDouble(double value) {
+static inline double swapDouble(double value) {
   const char* bytes = reinterpret_cast<const char*>(&value);
   double flipped = 0;
   char* out_bytes = reinterpret_cast<char*>(&flipped);
