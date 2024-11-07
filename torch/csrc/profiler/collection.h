@@ -378,7 +378,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 
   template <typename T, typename Fn>
-  void visit_if_base(Fn&& fn) const {
+  void visit_if_base(const Fn& fn) const {
     visit([&](const auto& extra_fields) {
       using extra_fields_t = typename std::remove_cv_t<
           typename std::remove_reference_t<decltype(extra_fields)>>;
