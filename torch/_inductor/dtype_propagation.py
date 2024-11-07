@@ -12,8 +12,7 @@ T = TypeVar("T")
 
 class DTypeArg(Protocol):
     @property
-    def dtype(self) -> torch.dtype:
-        ...
+    def dtype(self) -> torch.dtype: ...
 
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
@@ -97,6 +96,15 @@ class DtypePropagationOpsHandler:
                     self, op, functools.partial(self.return_dtype, dtype=torch.bool)
                 )
 
+        from torch._inductor.ops_handler import OpsHandler
+
+        ops_set = {s for s in dir(OpsHandler) if s[0] != "_"}
+        unimplemented_ops = ops_set - set(dir(self))
+        torch._check(
+            len(unimplemented_ops) == 0,
+            lambda: f"Unimplemented dtype rule for ops: {unimplemented_ops}",
+        )
+
     # metaprogrammed in __init__
 
     @staticmethod
@@ -108,11 +116,6 @@ class DtypePropagationOpsHandler:
         return dtype
 
     # op rules
-
-    @staticmethod
-    def default_handler(*args):
-        # Fallback to FP32 dtype
-        return torch.float32
 
     @staticmethod
     def constant(value, dtype) -> torch.dtype:
@@ -202,3 +205,118 @@ class DtypePropagationOpsHandler:
     @staticmethod
     def load(name, index) -> torch.dtype:
         return V.graph.get_dtype(name)
+
+    @staticmethod
+    def or_(x0: T, x1: T) -> T:
+        raise RuntimeError("TODO: Implement or_")
+
+    @staticmethod
+    def floor(x0: T) -> T:
+        raise RuntimeError("TODO: Implement floor")
+
+    @staticmethod
+    def ceil_to_int(x: T, dtype: torch.dtype) -> T:
+        raise RuntimeError("TODO: Implement ceil_to_int")
+
+    @staticmethod
+    def int_truediv(x0: T, x1: T) -> T:
+        raise RuntimeError("TODO: Implement int_truediv")
+
+    @staticmethod
+    def scan(
+        dtypes: Tuple[torch.dtype, ...],
+        combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
+        values: Tuple[T, ...],
+    ) -> Tuple[T, ...]:
+        raise RuntimeError("TODO: Implement scan")
+
+    @staticmethod
+    def invert(x0: T) -> T:
+        raise RuntimeError("TODO: Implement invert")
+
+    @staticmethod
+    def matmul(x0: T, x1: T) -> T:
+        raise RuntimeError("TODO: Implement matmul")
+
+    @staticmethod
+    def fmod(x0: T, x1: T) -> T:
+        raise RuntimeError("TODO: Implement fmod")
+
+    @staticmethod
+    def round_to_int(x: T, dtype: torch.dtype) -> T:
+        raise RuntimeError("TODO: Implement round_to_int")
+
+    @staticmethod
+    def xor(x0: T, x1: T) -> T:
+        raise RuntimeError("TODO: Implement xor")
+
+    @staticmethod
+    def identity(x: T) -> T:
+        raise RuntimeError("TODO: Implement identity")
+
+    @staticmethod
+    def frexp(x: T):
+        raise RuntimeError("TODO: Implement frexp")
+
+    @staticmethod
+    def sort(
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[T, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[T, ...]:
+        raise RuntimeError("TODO: Implement sort")
+
+    @staticmethod
+    def trunc(x0: T) -> T:
+        raise RuntimeError("TODO: Implement trunc")
+
+    @staticmethod
+    def bucketize(
+        values: T,
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: T,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ) -> T:
+        raise RuntimeError("TODO: Implement bucketize")
+
+    @staticmethod
+    def rshift(x0: T, x1: T) -> T:
+        raise RuntimeError("TODO: Implement rshift")
+
+    @staticmethod
+    def round(x0: T) -> T:
+        raise RuntimeError("TODO: Implement round")
+
+    @staticmethod
+    def getitem(x0: T, x1: T) -> T:
+        raise RuntimeError("TODO: Implement getitem")
+
+    @staticmethod
+    def trunc_to_int(x: T, dtype: torch.dtype) -> T:
+        raise RuntimeError("TODO: Implement trunc_to_int")
+
+    @staticmethod
+    def floor_to_int(x: T, dtype: torch.dtype) -> T:
+        raise RuntimeError("TODO: Implement floor_to_int")
+
+    @staticmethod
+    def truncdiv(x0: T, x1: T) -> T:
+        raise RuntimeError("TODO: Implement truncdiv")
+
+    @staticmethod
+    def floordiv(x0: T, x1: T) -> T:
+        raise RuntimeError("TODO: Implement floordiv")
+
+    @staticmethod
+    def round_decimal(x0: T, x1: T) -> T:
+        raise RuntimeError("TODO: Implement round_decimal")
+
+    @staticmethod
+    def lshift(x0: T, x1: T) -> T:
+        raise RuntimeError("TODO: Implement lshift")
+
+    @staticmethod
+    def libdevice_abs(x0: T) -> T:
+        raise RuntimeError("TODO: Implement libdevice_abs")
