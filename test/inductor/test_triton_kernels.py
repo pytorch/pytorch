@@ -3,7 +3,6 @@
 # Skip do not assign a lambda expression, use a def
 import functools
 import logging
-import os
 from unittest.mock import patch
 
 import torch
@@ -1986,12 +1985,6 @@ def forward(self, arg0_1, arg1_1):
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
-
-            # make sure the original all-zero x is
-            # restored before every kernel launch,
-            # including in autotuning
-            tl.device_assert(tl.sum(x) == 0)
-
             output = x + 1
             tl.store(in_ptr0 + offsets, output, mask=mask)
 
@@ -2002,26 +1995,16 @@ def forward(self, arg0_1, arg1_1):
             increment_kernel[grid](x, n_elements=n_elements)
             return x
 
-        # kind of a hack to use torch.int32 here, because
-        # for int tensors compile-time autotuning generates
-        # all-zero sample inputs. otherwise, without knowing
-        # what the original x is, we can't assert that every
-        # kenrel call gets the original x.
-        x = torch.zeros(4, dtype=torch.int32, device=GPU_TYPE)
+        x = torch.rand(4, device=GPU_TYPE)
+        prev = x.clone()
 
-        try:
-            # need TRITON_DEBUG=1 for tl.device_assert to have effect
-            old_triton_debug = os.environ.get("TRITON_DEBUG", None)
-            os.environ["TRITON_DEBUG"] = "1"
-            with torch._inductor.config.patch(
-                {"triton.autotune_at_compile_time": autotune_at_compile_time}
-            ):
-                f(x)
-        finally:
-            if old_triton_debug is not None:
-                os.environ["TRITON_DEBUG"] = old_triton_debug
-            else:
-                os.environ.pop("TRITON_DEBUG")
+        with torch._inductor.config.patch(
+            {"triton.autotune_at_compile_time": autotune_at_compile_time}
+        ):
+            f(x)
+
+        # make sure x was restored after autotuning
+        torch.testing.assert_close(x, prev + 1)
 
     @requires_gpu
     @parametrize("dtype", (torch.float16, torch.float32, torch.float64))
