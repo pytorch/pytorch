@@ -5499,8 +5499,14 @@ class UserDefinedTritonKernel(ExternKernel):
         configs = []
         restore_value_args = []
         if isinstance(kernel, Autotuner):
-            for i in kernel.restore_idx:
-                restore_value_args.append(kernel.fn.arg_names[i])
+            # https://github.com/triton-lang/triton/pull/5083
+            # changes kernel.restore_idx to kernel.restore_value
+            if hasattr(kernel, "restore_idx"):
+                for i in kernel.restore_idx:
+                    restore_value_args.append(kernel.fn.arg_names[i])
+            else:
+                assert hasattr(kernel, "restore_value")
+                restore_value_args.extend(kernel.restore_value)
             configs = kernel.configs
             kernel = kernel.fn
         return kernel, configs, restore_value_args

@@ -715,6 +715,8 @@ def triton_kernel_wrapper_mutation_dense(
     # https://github.com/triton-lang/triton/issues/5082
     # TODO: remove this when the Triton issue above is fixed
     args = []
+    # copy kwargs and constant_args here to
+    # avoid mutating the original inputs
     kwargs = kwargs.copy()
     constant_args = constant_args.copy()
     for name in kernel.arg_names:
@@ -1076,7 +1078,13 @@ class TritonHOPifier:
                         != kernel.early_config_prune
                     )
                     # Set via reset_to_zero argument
-                    or len(kernel.reset_idx) != 0
+                    # https://github.com/triton-lang/triton/pull/5083
+                    # changes kernel.reset_idx to kernel.reset_to_zero
+                    or (hasattr(kernel, "reset_idx") and len(kernel.reset_idx) != 0)
+                    or (
+                        hasattr(kernel, "reset_to_zero")
+                        and len(kernel.reset_to_zero) != 0
+                    )
                     or (
                         "use_cuda_graph" in defaults
                         and defaults["use_cuda_graph"].default != kernel.use_cuda_graph
