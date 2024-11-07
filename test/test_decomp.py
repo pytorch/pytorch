@@ -424,6 +424,11 @@ CROSS_REF_BACKWARD_EXCLUDE_SET = {
     # Decomposed backward formula is not as precise
     ("cpu", torch.bfloat16, "nn.functional.hardswish"),
     ("cuda", torch.float16, "nn.functional.cross_entropy"),
+        (
+        None,
+        None,
+        "bernoulli",
+    ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
 }
 
 all_decomposed = set()
@@ -563,6 +568,13 @@ class TestDecomp(TestCase):
     @suppress_warnings
     @ops(_decomp_test_ops_core_autograd, allowed_dtypes=(torch.float64,))
     def test_quick_core_backward(self, device, dtype, op):
+        test_keys = [
+            (torch.device(device).type, dtype, op.name),
+            (None, dtype, op.name),
+            (None, None, op.name),
+        ]
+        if any(key in CROSS_REF_BACKWARD_EXCLUDE_SET for key in test_keys):
+            self.skipTest(f"{op.name} in {dtype} not supported")
         for sample_input in op.sample_inputs(device, dtype, requires_grad=True):
             aten_name = op.decomp_aten_name or op.aten_name
             args = [sample_input.input] + list(sample_input.args)
