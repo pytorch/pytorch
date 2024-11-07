@@ -382,6 +382,49 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_nodes = 1
             self._test_common(mod, (v,), matcher_count, matcher_nodes)
 
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_linear_input_non_contiguous_3D_wo_bias(self):
+        # Activation is 3D, non-contiguous and without Bias
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4096, 1024, bias=False)
+
+            def forward(self, x):
+                x = torch.ops.aten.permute.default(x, [0, 2, 1, 3])
+                x = torch.ops.aten.reshape.default(x, [4, 1, 4096])
+                return self.linear(x)
+
+        mod = M().eval()
+        v = torch.randn(4, 32, 1, 128)
+
+        dtypes = [torch.float]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+
+        for dtype in dtypes:
+            torch._dynamo.reset()
+            autocast_enabled = (
+                True if dtype in [torch.bfloat16, torch.float16] else False
+            )
+            with torch.no_grad(), torch.autocast(
+                device_type="cpu", enabled=autocast_enabled, dtype=dtype
+            ):
+                expected = mod(v)
+                actual, (source_code,) = run_and_get_code(
+                    torch.compile(mod, fullgraph=True),
+                    v,
+                )
+                self.assertIn(
+                    "torch.ops.mkldnn._linear_pointwise.default"
+                    if autocast_enabled
+                    else "torch.ops.mkl._mkl_linear.default",
+                    source_code,
+                )
+                torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+
     def test_linear_add_bias(self):
         class M(torch.nn.Module):
             def __init__(self, dtype, unary_fn, cast_bias):
@@ -623,10 +666,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 is_inplace = binary_list[binary_fn][2]
                 # view + linear + view(joint_graph+freeze pass)
                 match_count = match_count + 5 if is_inplace else match_count + 3
-                match_nodes = match_nodes + 7 if is_inplace else match_nodes + 5
+                match_nodes = match_nodes + 8 if is_inplace else match_nodes + 5
             mod = M(binary_fn, input_shape[-1], out_feature, bias).eval()
             v = torch.randn(input_shape)
             other = torch.randn(input_shape[:-1] + [out_feature]).to(dtype)
+
             self._test_common(
                 mod,
                 (
@@ -2876,6 +2920,9 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
     test_conv2d_binary_dynamic_shapes = TestPatternMatcher.test_conv2d_binary
     test_conv3d_binary_dynamic_shapes = TestPatternMatcher.test_conv3d_binary
     test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
+    test_linear_input_non_contiguous_3D_wo_bias_dynamic_shapes = (
+        TestPatternMatcher.test_linear_input_non_contiguous_3D_wo_bias
+    )
 
     def test_conv_transpose2d_dynamic_shapes(self):
         # We don't support conv_transpose2d for now.
