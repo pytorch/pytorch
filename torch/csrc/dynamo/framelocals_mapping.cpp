@@ -1,6 +1,6 @@
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 
-#if IS_PYTHON_3_12_PLUS
+#if IS_PYTHON_3_11_PLUS
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
@@ -35,9 +35,12 @@ PyObject* get_framelocals_mapping(_PyInterpreterFrame* frame) {
     if (kind & CO_FAST_FREE && !(co->co_flags & CO_OPTIMIZED)) {
       return;
     }
+
+#if IS_PYTHON_3_12_PLUS
     if (kind & CO_FAST_HIDDEN) {
       return;
     }
+#endif
 
     if (kind & CO_FAST_FREE) {
       CHECK(value != nullptr && PyCell_Check(value));

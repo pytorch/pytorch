@@ -154,12 +154,9 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 
 
 #else
+
 #define THP_EVAL_API_FRAME_OBJECT PyFrameObject
 
-static int
-THP_PyFrame_FastToLocalsWithError(THP_EVAL_API_FRAME_OBJECT *frame, int *free_vars_copied) {
-  return PyFrame_FastToLocalsWithError(frame);
-}
 #endif
 
 static PyObject* dynamo__custom_eval_frame_shim(
@@ -295,8 +292,7 @@ inline static PyObject* dynamo_eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
-    int throw_flag,
-    int free_vars_copied) {
+    int throw_flag) {
 
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
@@ -345,13 +341,6 @@ inline static PyObject* dynamo_eval_custom_code_impl(
     fastlocals_new[i] = NULL;
   }
 #endif
-
-  // for 3.11+, if free_vars_copied is true, we do not need to
-  // run the first COPY_FREE_VARS since THP_PyFrame_FastToLocalsWithError
-  // already did the equivalent action.
-  if (free_vars_copied && _Py_OPCODE(_PyCode_CODE(F_CODE(shadow))[0]) == COPY_FREE_VARS) {
-    PREV_INSTR(shadow) = _PyCode_CODE(F_CODE(shadow));
-  }
 
 #else
 
@@ -483,16 +472,14 @@ inline static PyObject* dynamo_eval_custom_code(
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
     const char* trace_annotation,
-    int throw_flag,
-    int free_vars_copied) {
+    int throw_flag) {
 
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(trace_annotation);
   PyObject* result = dynamo_eval_custom_code_impl(
     tstate,
     frame,
     code,
-    throw_flag,
-    free_vars_copied
+    throw_flag
   );
   _pytorch_record_function_exit(rf);
   return result;
@@ -596,11 +583,10 @@ static PyObject* dynamo__custom_eval_frame(
   }
 
 
-  int free_vars_copied = 0;
-  #if IS_PYTHON_3_12_PLUS
+  #if IS_PYTHON_3_11_PLUS
   PyObject *locals = get_framelocals_mapping(frame);
   #else
-  if (THP_PyFrame_FastToLocalsWithError(frame, &free_vars_copied) < 0) {
+  if (PyFrame_FastToLocalsWithError(frame) < 0) {
     DEBUG_TRACE("error %s", get_frame_name(frame));
     *should_clear_frame = 1;
     return NULL;
@@ -654,7 +640,7 @@ static PyObject* dynamo__custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
-    return dynamo_eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, 0);
+    return dynamo_eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag);
   }
   DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
@@ -678,7 +664,7 @@ static PyObject* dynamo__custom_eval_frame(
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
     Py_DECREF(locals);
-    return dynamo_eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, free_vars_copied);
+    return dynamo_eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag);
   }
   // cache miss
   CacheEntry* cache_entry = extract_cache_entry(extra);
@@ -730,7 +716,7 @@ static PyObject* dynamo__custom_eval_frame(
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
     return dynamo_eval_custom_code(tstate, frame, CacheEntry_get_code(new_cache_entry),
-      CacheEntry_get_trace_annotation(new_cache_entry), throw_flag, free_vars_copied);
+      CacheEntry_get_trace_annotation(new_cache_entry), throw_flag);
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
     Py_DECREF(result);
