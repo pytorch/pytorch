@@ -139,7 +139,6 @@ class DynamicType : public SharedType {
     Arguments() = default;
     Arguments(c10::ArrayRef<TypePtr>);
     Arguments(const std::vector<c10::string_view>&, c10::ArrayRef<TypePtr>);
-    Arguments(const std::vector<std::string_view>&, c10::ArrayRef<TypePtr>);
     std::vector<LabeledDynamicType> elems;
   };
 
@@ -157,7 +156,7 @@ class DynamicType : public SharedType {
   static TORCH_API DynamicTypePtr create(Type& ty);
 
   explicit DynamicType(Tag, Arguments);
-  explicit DynamicType(Tag, std::string_view, Arguments);
+  explicit DynamicType(Tag, c10::string_view, Arguments);
 
   DynamicType(DynamicType&& other) = delete;
   DynamicType(const DynamicType&) = delete;
