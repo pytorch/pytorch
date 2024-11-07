@@ -5142,14 +5142,20 @@ def bernoulli(
     *,
     generator: Optional[torch.Generator] = None,
 ) -> torch.Tensor:
-    raw_p = torch.rand(self.size(), generator = generator, dtype = self.dtype, layout =  self.layout, device = self.device)
-    p = torch.where(raw_p <= self, torch.ones(self.size(), dtype = self.dtype, layout = self.layout, device = self.device), torch.zeros(self.size(), dtype = self.dtype, layout = self.layout, device = self.device))
+    if generator is None:
+        raw_p = torch.rand(self.size(), dtype = self.dtype, layout =  self.layout, device = self.device)
+    else:
+        raw_p = torch.rand(self.size(), generator = generator, dtype = self.dtype, layout =  self.layout, device = self.device)
+    p = (raw_p < self).to(self.dtype)
     return p
 
 @register_decomposition(aten.bernoulli.p)
 def bernoulli_p(self, p, *, generator: Optional[torch.Generator] = None):
-    raw_p = torch.rand(self.size(), generator = generator, dtype = self.dtype, layout =  self.layout, device = self.device)
-    p = torch.where(raw_p <= p, torch.ones(self.size(), dtype = self.dtype, layout = self.layout, device = self.device), torch.zeros(self.size(), dtype = self.dtype, layout = self.layout, device = self.device))
+    if generator is None:
+        raw_p = torch.rand(self.size(), dtype = self.dtype, layout =  self.layout, device = self.device)
+    else:
+        raw_p = torch.rand(self.size(), generator = generator, dtype = self.dtype, layout =  self.layout, device = self.device)
+    p = (raw_p < p).to(self.dtype)
     return p
 
 def isin_default(elements, test_elements, *, invert=False):
