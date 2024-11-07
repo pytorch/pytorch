@@ -583,18 +583,7 @@ static PyObject* dynamo__custom_eval_frame(
   }
 
 
-  #if IS_PYTHON_3_11_PLUS
   PyObject *locals = get_framelocals_mapping(frame);
-  #else
-  if (PyFrame_FastToLocalsWithError(frame) < 0) {
-    DEBUG_TRACE("error %s", get_frame_name(frame));
-    *should_clear_frame = 1;
-    return NULL;
-  }
-  PyObject *locals = frame->f_locals;
-  Py_INCREF(locals);
-  #endif
-
   PyObject* backend = get_backend(callback);
 
 
