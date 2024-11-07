@@ -23,6 +23,7 @@ from torch._dynamo.utils import detect_fake_mode, lazy_format_graph_code
 from torch._guards import CompileContext, TracingContext
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import fx_placeholder_vals
@@ -290,14 +291,19 @@ def collect_fw_donated_buffer_idxs(
 
     storage_refs = set()
     for t in itertools.chain(fw_ins, user_fw_outs, bw_outs):
-        if isinstance(t, FakeTensor):
+        # Only access storage if a tensor has storage (not sparse)
+        if t is not None and isinstance(t, FakeTensor) and not is_sparse_any(t):
             storage_refs.add(StorageWeakRef(t.untyped_storage()))
 
     num_saved_tensor = len(saved_tensors)
     donated_buffer_idxs = []
     for i in range(num_saved_tensor):
         t = saved_tensors[i]
-        if StorageWeakRef(t.untyped_storage()) not in storage_refs:
+        if (
+            t is not None
+            and not is_sparse_any(t)
+            and StorageWeakRef(t.untyped_storage()) not in storage_refs
+        ):
             donated_buffer_idxs.append(i)
 
     return donated_buffer_idxs
@@ -316,9 +322,18 @@ def collect_bw_donated_buffer_idxs(
     bw_outs = next(reversed(bw_module.graph.find_nodes(op="output"))).args[0]
     fw_outs = next(reversed(fw_module.graph.find_nodes(op="output"))).args[0]
 
-    fw_ins = [n.meta["val"] if hasattr(n, "meta") else None for n in fw_ins]
-    fw_outs = [n.meta["val"] if hasattr(n, "meta") else None for n in fw_outs]
-    bw_outs = [n.meta["val"] if hasattr(n, "meta") else None for n in bw_outs]
+    fw_ins = [
+        n.meta["val"] if (hasattr(n, "meta") and "val" in n.meta) else None
+        for n in fw_ins
+    ]
+    fw_outs = [
+        n.meta["val"] if (hasattr(n, "meta") and "val" in n.meta) else None
+        for n in fw_outs
+    ]
+    bw_outs = [
+        n.meta["val"] if (hasattr(n, "meta") and "val" in n.meta) else None
+        for n in bw_outs
+    ]
 
     user_fw_outs = fw_outs[: fw_metadata.num_forward]
     saved_tensors = fw_outs[fw_metadata.tensors_saved_for_backwards_slice]
@@ -607,7 +622,9 @@ def aot_dispatch_autograd(
                 payload_fn=lambda: bw_module_str,
             )
 
-        with track_graph_compiling(aot_config, "forward"):
+        # AMP is already traced out in joint graph. we do not wish to reapply it accidentally
+        # in the compiler.
+        with track_graph_compiling(aot_config, "forward"), torch._C._DisableAutocast():
             # flat_args at this point might still be subclasses-
             # make sure to pass the unwrapped fake tensors into the compiler!
             adjusted_flat_args = joint_inputs[0]
@@ -672,7 +689,7 @@ def aot_dispatch_autograd(
         # NB: It's important to compile backwards ahead of time, as this may
         # add extra guards which we need to apply to the Dynamo cache at
         # forwards
-        with track_graph_compiling(aot_config, "backward"):
+        with track_graph_compiling(aot_config, "backward"), torch._C._DisableAutocast():
             placeholder_list = fx_placeholder_vals(bw_module)
 
             forward_saved_for_backwards_strides = None
@@ -724,28 +741,24 @@ def aot_dispatch_autograd(
 
             compiled_bw_func = None
             if num_symints_saved_for_bw > 0:
-                context = torch._C._DisableAutocast if disable_amp else nullcontext
-                with context():
-                    try:
-                        compiled_bw_func = aot_config.bw_compiler(
-                            bw_module, placeholder_list
-                        )
-                    except Exception as e:
-                        exc = e
-                        trace_structured(
-                            "artifact",
-                            metadata_fn=lambda: {
-                                "name": "eager_compile_backwards_failure",
-                                "encoding": "string",
-                            },
-                            payload_fn=lambda: "\n".join(
-                                traceback.format_exception(exc)
-                            ),
-                        )
-                        log.warning(
-                            "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
-                            exc_info=True,
-                        )
+                try:
+                    compiled_bw_func = aot_config.bw_compiler(
+                        bw_module, placeholder_list
+                    )
+                except Exception as e:
+                    exc = e
+                    trace_structured(
+                        "artifact",
+                        metadata_fn=lambda: {
+                            "name": "eager_compile_backwards_failure",
+                            "encoding": "string",
+                        },
+                        payload_fn=lambda: "\n".join(traceback.format_exception(exc)),
+                    )
+                    log.warning(
+                        "failed to eagerly compile backwards for dynamic, suppressing in case backwards not needed",
+                        exc_info=True,
+                    )
             # Compiled autograd will run the bw_module in the backward pass,
             # so recompilation need happen anyway if the backward pass is ever
             # called.
@@ -760,7 +773,7 @@ def aot_dispatch_autograd(
             # becomes the lazy version again. One example is when dynamic shape is enabled
             # upfront, the bw_compiler will be called above which can cause extra
             # graph module recompilation on bw_module.
-            if torch._dynamo.compiled_autograd.in_compiled_autograd_region():
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 from torch.fx._lazy_graph_module import _LazyGraphModule
 
                 _LazyGraphModule.force_recompile(bw_module)

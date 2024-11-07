@@ -330,6 +330,11 @@ class TritonBlockPointerTest(InductorTestCase):
 
         view = self._discontiguous_tensor(view_size)
 
+        if num_triton_kernels == 2 and config.triton.cooperative_reductions:
+            # fewer kernels with cooperative reductions
+            num_triton_kernels = 1
+            num_block_pointers -= 2
+
         # Expect at least 1 block pointer for the input.
         # Add 2 more if we generate 2 kernels.
         result, (code,) = self.run_and_compare(
@@ -567,8 +572,8 @@ class TritonBlockPointerTest(InductorTestCase):
     @parametrize(
         "size,expected_num_block_pointers,expected_num_triton_kernels,expect_fallback",
         [
-            ((8, 8), 1, 2, True),  # Persistent Welford fallback
-            ((128, 128), 9, 3, False),  # Looped Welford reduction
+            ((8, 8), 1, 1, True),  # Persistent Welford fallback
+            ((128, 128), 9, 2, False),  # Looped Welford reduction
         ],
     )
     def test_2d_welford_reduction(
@@ -619,7 +624,7 @@ class TritonBlockPointerTest(InductorTestCase):
             torch.var_mean,
             view,
             expected_num_block_pointers=6,
-            expected_num_triton_kernels=3,
+            expected_num_triton_kernels=2,
             config_patches={"triton.prefer_nd_tiling": True},
         )
 

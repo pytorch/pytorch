@@ -19,10 +19,8 @@ from typing import (
 import sympy
 from sympy import Integer, Symbol
 
-from torch.utils._ordered_set import OrderedSet
-
 from .. import config, metrics
-from ..runtime.hints import DeviceProperties, ReductionHint
+from ..runtime.hints import DeviceProperties
 from ..runtime.runtime_utils import next_power_of_2
 from ..runtime.triton_heuristics import grid_combo_kernels
 from ..scheduler import BaseSchedulerNode
@@ -37,6 +35,7 @@ from .common import (
     WorkspaceArg,
 )
 from .simd import SIMDScheduling
+from .simd_kernel_features import SIMDKernelFeatures
 from .triton import gen_common_triton_imports, TritonKernel
 from .triton_utils import config_of, signature_to_meta
 
@@ -467,9 +466,7 @@ class ComboKernel(Kernel):
     @staticmethod
     def create_triton_kernel(
         tiling: Dict[str, sympy.Expr],
-        index_dtype: str,
-        mutations: OrderedSet[str],
-        reduction_hint: ReductionHint,
+        features: SIMDKernelFeatures,
         optimize_mask: bool,
     ) -> TritonKernel:
         """
@@ -478,11 +475,11 @@ class ComboKernel(Kernel):
         """
         return TritonKernel(
             tiling,
-            index_dtype=index_dtype,
-            mutations=mutations,
+            features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
-            reduction_hint=reduction_hint,
             optimize_mask=optimize_mask,
+            # foreach kernels don't work with cooperative reductions
+            override_cooperative_reduction=False,
         )
 
     def codegen_static_numels_sub_kernel(
@@ -697,7 +694,7 @@ class ComboKernel(Kernel):
                 @triton.jit
             """
         elif sub_kernel.inside_reduction:
-            reduction_hint = sub_kernel.reduction_hint
+            reduction_hint = sub_kernel.features.get_reduction_hint()
             heuristics_line = f"""
                 @triton_heuristics.{heuristics}(
                     size_hints={size_hints!r},
