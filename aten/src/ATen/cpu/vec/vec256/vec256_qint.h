@@ -54,8 +54,8 @@ struct Vectorizedqi {
 #endif
 
  public:
-  Vectorizedqi() {}
-  Vectorizedqi(__m256i v) : vals(v) {}
+  constexpr Vectorizedqi() {}
+  constexpr Vectorizedqi(__m256i v) : vals(v) {}
   operator __m256i() const {
     return vals;
   }
@@ -278,12 +278,12 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
 
  public:
     using Vectorizedqi::Vectorizedqi;
-    Vectorized() {}
+    constexpr Vectorized() {}
 
-    Vectorized(__m256i vals_) { vals = vals_;}
+    constexpr Vectorized(__m256i vals_) { vals = vals_;}
 
     // Broadcast constructor
-    Vectorized(const c10::qint32& val) {
+    constexpr Vectorized(const c10::qint32& val) {
         value_type uw = val.val_;
         vals = _mm256_set1_epi32(uw);
     }

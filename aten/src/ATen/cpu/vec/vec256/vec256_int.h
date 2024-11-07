@@ -22,8 +22,8 @@ protected:
     return _mm256_xor_si256(ones, v);
   }
 public:
-  Vectorizedi() {}
-  Vectorizedi(__m256i v) : values(v) {}
+  constexpr Vectorizedi() {}
+  constexpr Vectorizedi(__m256i v) : values(v) {}
   operator __m256i() const {
     return values;
   }
@@ -48,9 +48,9 @@ public:
     return 4;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
-  Vectorized(int64_t v) { values = _mm256_set1_epi64x(v); }
-  Vectorized(int64_t val1, int64_t val2, int64_t val3, int64_t val4) {
+  constexpr Vectorized() {}
+  constexpr Vectorized(int64_t v) { values = _mm256_set1_epi64x(v); }
+  constexpr Vectorized(int64_t val1, int64_t val2, int64_t val3, int64_t val4) {
     values = _mm256_setr_epi64x(val1, val2, val3, val4);
   }
   template <int64_t mask>
@@ -169,9 +169,9 @@ public:
     return 8;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
-  Vectorized(int32_t v) { values = _mm256_set1_epi32(v); }
-  Vectorized(int32_t val1, int32_t val2, int32_t val3, int32_t val4,
+  constexpr Vectorized() {}
+  constexpr Vectorized(int32_t v) { values = _mm256_set1_epi32(v); }
+  constexpr Vectorized(int32_t val1, int32_t val2, int32_t val3, int32_t val4,
          int32_t val5, int32_t val6, int32_t val7, int32_t val8) {
     values = _mm256_setr_epi32(val1, val2, val3, val4, val5, val6, val7, val8);
   }
@@ -327,9 +327,9 @@ public:
     return 16;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
-  Vectorized(int16_t v) { values = _mm256_set1_epi16(v); }
-  Vectorized(int16_t val1, int16_t val2, int16_t val3, int16_t val4,
+  constexpr Vectorized() {}
+  constexpr Vectorized(int16_t v) { values = _mm256_set1_epi16(v); }
+  constexpr Vectorized(int16_t val1, int16_t val2, int16_t val3, int16_t val4,
          int16_t val5, int16_t val6, int16_t val7, int16_t val8,
          int16_t val9, int16_t val10, int16_t val11, int16_t val12,
          int16_t val13, int16_t val14, int16_t val15, int16_t val16) {

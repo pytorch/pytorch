@@ -28,19 +28,19 @@ public:
   static constexpr size_type size() {
     return 16;
   }
-  Vectorized() {}
-  Vectorized(__m512 v) : values(v) {}
-  Vectorized(float val) {
+  constexpr Vectorized() {}
+  constexpr Vectorized(__m512 v) : values(v) {}
+  constexpr Vectorized(float val) {
     values = _mm512_set1_ps(val);
   }
-  Vectorized(float val1, float val2, float val3, float val4,
+  constexpr Vectorized(float val1, float val2, float val3, float val4,
          float val5, float val6, float val7, float val8,
          float val9, float val10, float val11, float val12,
          float val13, float val14, float val15, float val16) {
     values = _mm512_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8,
                             val9, val10, val11, val12, val13, val14, val15, val16);
   }
-  Vectorized(const float (&arr)[16])
+  constexpr Vectorized(const float (&arr)[16])
       : Vectorized(arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7],
                    arr[8], arr[9], arr[10], arr[11], arr[12], arr[13], arr[14], arr[15]) {}
   operator __m512() const {

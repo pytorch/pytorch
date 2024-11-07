@@ -157,15 +157,15 @@ public:
   static constexpr size_type size() {
     return kSize;
   }
-  Vectorized() : values{static_cast<T>(0)} {}
-  Vectorized(T val) {
+  constexpr Vectorized() : values{static_cast<T>(0)} {}
+  constexpr Vectorized(T val) {
     for (int i = 0; i != size(); i++) {
       values[i] = val;
     }
   }
   template<typename... Args,
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
-  Vectorized(Args... vals) : values{vals...}{
+  constexpr Vectorized(Args... vals) : values{vals...}{
   }
   Vectorized(const T(&arr)[kSize]) {
     std::memcpy(values, arr, sizeof(values));

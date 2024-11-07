@@ -28,15 +28,15 @@ public:
   static constexpr size_type size() {
     return 2;
   }
-  Vectorized() {}
-  Vectorized(__m256d v) : values(v) {}
-  Vectorized(c10::complex<double> val) {
+  constexpr Vectorized() {}
+  constexpr Vectorized(__m256d v) : values(v) {}
+  constexpr Vectorized(c10::complex<double> val) {
     double real_value = val.real();
     double imag_value = val.imag();
     values = _mm256_setr_pd(real_value, imag_value,
                             real_value, imag_value);
   }
-  Vectorized(c10::complex<double> val1, c10::complex<double> val2) {
+  constexpr Vectorized(c10::complex<double> val1, c10::complex<double> val2) {
     values = _mm256_setr_pd(val1.real(), val1.imag(),
                             val2.real(), val2.imag());
   }

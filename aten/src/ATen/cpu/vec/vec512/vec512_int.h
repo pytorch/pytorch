@@ -23,8 +23,8 @@ protected:
     return _mm512_xor_si512(ones, v);
   }
 public:
-  Vectorizedi() {}
-  Vectorizedi(__m512i v) : values(v) {}
+  constexpr Vectorizedi() {}
+  constexpr Vectorizedi(__m512i v) : values(v) {}
   operator __m512i() const {
     return values;
   }
@@ -49,9 +49,9 @@ public:
     return 8;
   }
   using Vectorizedi::Vectorizedi;
-  Vectorized() {}
-  Vectorized(int64_t v) { values = _mm512_set1_epi64(v); }
-  Vectorized(int64_t val1, int64_t val2, int64_t val3, int64_t val4,
+  constexpr Vectorized() {}
+  constexpr Vectorized(int64_t v) { values = _mm512_set1_epi64(v); }
+  constexpr Vectorized(int64_t val1, int64_t val2, int64_t val3, int64_t val4,
          int64_t val5, int64_t val6, int64_t val7, int64_t val8) {
     values = _mm512_setr_epi64(val1, val2, val3, val4,
                                 val5, val6, val7, val8);

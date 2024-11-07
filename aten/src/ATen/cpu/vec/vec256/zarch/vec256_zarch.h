@@ -383,12 +383,12 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   static constexpr size_type size() {
     return VECTOR_WIDTH / sizeof(ElementType);
   }
-  Vectorized() {}
+  constexpr Vectorized() {}
 
-  C10_ALWAYS_INLINE Vectorized(vtype v) : _vec0{v}, _vec1{v} {}
-  C10_ALWAYS_INLINE Vectorized(const vinner_data &v) : _vec0{v.first}, _vec1{v.second} {}
-  C10_ALWAYS_INLINE Vectorized(vtype v1, vtype v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(T s)
+  constexpr C10_ALWAYS_INLINE Vectorized(vtype v) : _vec0{v}, _vec1{v} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(const vinner_data &v) : _vec0{v.first}, _vec1{v.second} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vtype v1, vtype v2) : _vec0{v1}, _vec1{v2} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(T s)
       : _vec0{vec_splats((ElementType)s)}, _vec1{vec_splats((ElementType)s)} {}
 
   template <typename U, typename DUMMY = void>

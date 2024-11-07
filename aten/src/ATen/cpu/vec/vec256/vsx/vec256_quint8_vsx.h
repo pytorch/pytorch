@@ -50,7 +50,7 @@ struct Vectorized<c10::quint8> {
   } __attribute__((__may_alias__));
 
  public:
-  Vectorized() {}
+  constexpr Vectorized() {}
   using size_type = int;
   static constexpr size_type size() {
     return 32;
@@ -68,16 +68,16 @@ struct Vectorized<c10::quint8> {
   using vec_internal_type = vuint8;
   using vec_internal_mask_type = vbool8;
   // Broadcast constructor
-  C10_ALWAYS_INLINE Vectorized(const c10::quint8& val)
+  constexpr C10_ALWAYS_INLINE Vectorized(const c10::quint8& val)
       : _vec0(vec_splats(val.val_)), _vec1(vec_splats(val.val_)) {}
 
-  C10_ALWAYS_INLINE Vectorized(const Vectorized<c10::quint8>& other)
+  constexpr C10_ALWAYS_INLINE Vectorized(const Vectorized<c10::quint8>& other)
       : _vec0{other._vec0}, _vec1(other._vec1) {}
 
-  C10_ALWAYS_INLINE Vectorized(vuint8 v) : _vec0{v}, _vec1{v} {}
-  C10_ALWAYS_INLINE Vectorized(vbool8 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vectorized(vuint8 v1, vuint8 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool8 v1, vbool8 v2) : _vecb0{v1}, _vecb1{v2} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vuint8 v) : _vec0{v}, _vec1{v} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vbool8 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vuint8 v1, vuint8 v2) : _vec0{v1}, _vec1{v2} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vbool8 v1, vbool8 v2) : _vecb0{v1}, _vecb1{v2} {}
 
   C10_ALWAYS_INLINE const vec_internal_type& vec0() const {
     return _vec0;

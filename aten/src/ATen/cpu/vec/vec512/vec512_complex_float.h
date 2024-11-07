@@ -29,9 +29,9 @@ public:
   static constexpr size_type size() {
     return 8;
   }
-  Vectorized() {}
-  Vectorized(__m512 v) : values(v) {}
-  Vectorized(c10::complex<float> val) {
+  constexpr Vectorized() {}
+  constexpr Vectorized(__m512 v) : values(v) {}
+  constexpr Vectorized(c10::complex<float> val) {
     float real_value = val.real();
     float imag_value = val.imag();
     values = _mm512_setr_ps(real_value, imag_value,
@@ -43,7 +43,7 @@ public:
                             real_value, imag_value,
                             real_value, imag_value);
   }
-  Vectorized(c10::complex<float> val1, c10::complex<float> val2,
+  constexpr Vectorized(c10::complex<float> val1, c10::complex<float> val2,
             c10::complex<float> val3, c10::complex<float> val4,
             c10::complex<float> val5, c10::complex<float> val6,
             c10::complex<float> val7, c10::complex<float> val8) {

@@ -118,16 +118,16 @@ class Vectorized<c10::Half> {
 
  public:
    // constructor
-  Vectorized() {}
-  Vectorized(float16x8_t v) : values(v) {}
+  constexpr Vectorized() {}
+  constexpr Vectorized(float16x8_t v) : values(v) {}
 
   // A ctor that accepts c10::Half is needed to fit interface with vec_base.h
   // A second constructor that takes float16_t is also included
-  Vectorized(c10::Half val)
-      : values{vdupq_n_f16((float16_t)val)} {
+  constexpr Vectorized(c10::Half val)
+      : values(vdupq_n_f16((float16_t)val)) {
   }
-  Vectorized(float16_t val) : values{vdupq_n_f16(val)} {}
-  Vectorized(
+  constexpr Vectorized(float16_t val) : values(vdupq_n_f16(val)) {}
+  constexpr Vectorized(
       float16_t val0,
       float16_t val1,
       float16_t val2,

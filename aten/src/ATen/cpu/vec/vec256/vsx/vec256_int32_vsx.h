@@ -31,14 +31,14 @@ class Vectorized<int32_t> {
   static constexpr size_type size() {
     return 8;
   }
-  Vectorized() {}
-  C10_ALWAYS_INLINE Vectorized(vint32 v) : _vec0{v}, _vec1{v} {}
-  C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vectorized(vint32 v1, vint32 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(int32_t scalar)
+  constexpr Vectorized() {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vint32 v) : _vec0{v}, _vec1{v} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vint32 v1, vint32 v2) : _vec0{v1}, _vec1{v2} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(int32_t scalar)
       : _vec0{vec_splats(scalar)}, _vec1{vec_splats(scalar)} {}
-  C10_ALWAYS_INLINE Vectorized(
+  constexpr C10_ALWAYS_INLINE Vectorized(
       int32_t scalar1,
       int32_t scalar2,
       int32_t scalar3,

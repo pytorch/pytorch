@@ -3104,8 +3104,6 @@ void quantized_groupnorm_nhwc_kernel(
     int64_t x_zp = X.q_zero_point();
     float x_scale = X.q_scale();
     fVec x_zp_vec((float)x_zp);
-    fVec one_vec(1.0f);
-    fVec zero_vec(0.0f);
     float x_fake_scale = 1.0f;
     fVec x_fake_scale_vec(x_fake_scale);
     fVec x_fake_scale_zp_neg_premul_vec = x_fake_scale_vec * x_zp_vec.neg();

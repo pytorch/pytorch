@@ -47,7 +47,7 @@ struct Vectorized<c10::qint32> {
   } __attribute__((__may_alias__));
 
  public:
-  Vectorized() {}
+  constexpr Vectorized() {}
 
   using size_type = int;
   static constexpr size_type size() {
@@ -65,12 +65,12 @@ struct Vectorized<c10::qint32> {
   using value_type = c10::qint32::underlying;
   using vec_internal_type = vint32;
   using vec_internal_mask_type = vbool32;
-  C10_ALWAYS_INLINE Vectorized(vint32 v) : _vec0{v}, _vec1{v} {}
-  C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vectorized(vint32 v1, vint32 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vint32 v) : _vec0{v}, _vec1{v} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vint32 v1, vint32 v2) : _vec0{v1}, _vec1{v2} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
 
-  Vectorized(const c10::qint32& val)
+  constexpr Vectorized(const c10::qint32& val)
       : _vec0(vec_splats(val.val_)), _vec1(vec_splats(val.val_)) {}
 
   static Vectorized<c10::qint32> C10_ALWAYS_INLINE

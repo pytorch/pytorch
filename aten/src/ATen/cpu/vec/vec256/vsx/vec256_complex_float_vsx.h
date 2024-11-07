@@ -36,21 +36,21 @@ class Vectorized<ComplexFlt> {
   static constexpr size_type size() {
     return 4;
   }
-  Vectorized() {}
+  constexpr Vectorized() {}
 
-  C10_ALWAYS_INLINE Vectorized(vfloat32 v) : _vec0{v}, _vec1{v} {}
-  C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vectorized(vfloat32 v1, vfloat32 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vfloat32 v) : _vec0{v}, _vec1{v} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vfloat32 v1, vfloat32 v2) : _vec0{v1}, _vec1{v2} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
 
-  Vectorized(ComplexFlt val) {
+  constexpr Vectorized(ComplexFlt val) {
     float real_value = val.real();
     float imag_value = val.imag();
     _vec0 = vfloat32{real_value, imag_value, real_value, imag_value};
     _vec1 = vfloat32{real_value, imag_value, real_value, imag_value};
   }
 
-  Vectorized(ComplexFlt val1, ComplexFlt val2, ComplexFlt val3, ComplexFlt val4) {
+  constexpr Vectorized(ComplexFlt val1, ComplexFlt val2, ComplexFlt val3, ComplexFlt val4) {
     _vec0 = vfloat32{val1.real(), val1.imag(), val2.real(), val2.imag()};
     _vec1 = vfloat32{val3.real(), val3.imag(), val4.real(), val4.imag()};
   }

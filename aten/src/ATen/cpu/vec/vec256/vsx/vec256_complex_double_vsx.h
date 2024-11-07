@@ -33,19 +33,19 @@ class Vectorized<ComplexDbl> {
   static constexpr size_type size() {
     return 2;
   }
-  Vectorized() {}
-  C10_ALWAYS_INLINE Vectorized(vfloat64 v) : _vec0{v}, _vec1{v} {}
-  C10_ALWAYS_INLINE Vectorized(vbool64 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vectorized(vfloat64 v1, vfloat64 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool64 v1, vbool64 v2) : _vecb0{v1}, _vecb1{v2} {}
+  constexpr Vectorized() {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vfloat64 v) : _vec0{v}, _vec1{v} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vbool64 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vfloat64 v1, vfloat64 v2) : _vec0{v1}, _vec1{v2} {}
+  constexpr C10_ALWAYS_INLINE Vectorized(vbool64 v1, vbool64 v2) : _vecb0{v1}, _vecb1{v2} {}
 
-  Vectorized(ComplexDbl val) {
+  constexpr Vectorized(ComplexDbl val) {
     double real_value = val.real();
     double imag_value = val.imag();
     _vec0 = vfloat64{real_value, imag_value};
     _vec1 = vfloat64{real_value, imag_value};
   }
-  Vectorized(ComplexDbl val1, ComplexDbl val2) {
+  constexpr Vectorized(ComplexDbl val1, ComplexDbl val2) {
     _vec0 = vfloat64{val1.real(), val1.imag()};
     _vec1 = vfloat64{val2.real(), val2.imag()};
   }

@@ -72,12 +72,12 @@ public:
   static constexpr size_type size() {
     return 4;
   }
-  Vectorized() {}
-  Vectorized(float32x4_t v) : values(v) {}
-  Vectorized(float val) : values{vdupq_n_f32(val)} {}
-  Vectorized(float val0, float val1, float val2, float val3) :
+  constexpr Vectorized() {}
+  constexpr Vectorized(float32x4_t v) : values(v) {}
+  constexpr Vectorized(float val) : values(vdupq_n_f32(val)) {}
+  constexpr Vectorized(float val0, float val1, float val2, float val3) :
          values{val0, val1, val2, val3} {}
-  Vectorized(float (&arr)[4]) : Vectorized(arr[0], arr[1], arr[2], arr[3]) {}
+  constexpr Vectorized(float (&arr)[4]) : Vectorized(arr[0], arr[1], arr[2], arr[3]) {}
   operator float32x4_t() const {
     return values;
   }

@@ -175,13 +175,13 @@ public:
   static constexpr size_type size() {
     return 16;
   }
-  Vectorized16() {}
-  Vectorized16(__m256i v) : values(v) {}
-  Vectorized16(T val) {
+  constexpr Vectorized16() {}
+  constexpr Vectorized16(__m256i v) : values(v) {}
+  constexpr Vectorized16(T val) {
     value_type uw = val.x;
     values = _mm256_set1_epi16(uw);
   }
-  Vectorized16(T val1, T val2, T val3, T val4,
+  constexpr Vectorized16(T val1, T val2, T val3, T val4,
          T val5, T val6, T val7, T val8,
          T val9, T val10, T val11, T val12,
          T val13, T val14, T val15, T val16) {
