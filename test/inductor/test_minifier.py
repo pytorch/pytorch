@@ -200,6 +200,45 @@ with torch.no_grad():
 """
         return self._run_full_test(run_code, None, expected_error, isolate=True)
 
+    # Test that compile errors in AOTInductor can be repro'd (both CPU and CUDA)
+    def _test_aoti_unflattened_inputs(self, device, expected_error):
+        # NB: The program is intentionally quite simple, just enough to
+        # trigger one minification step, no more (dedicated minifier tests
+        # should exercise minifier only)
+
+        # It tests that the minifier can handle unflattened inputs and kwargs
+        run_code = f"""\
+class Model(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = torch.nn.Linear(10, 16)
+        self.relu = torch.nn.ReLU()
+        self.sigmoid = torch.nn.Sigmoid()
+
+    def forward(self, inp, *, k):
+        x = inp["x"]
+        y = inp["y"]
+        x = self.fc1(x)
+        y = self.fc1(y)
+        k = self.fc1(k)
+        x = self.relu(x)
+        x = self.sigmoid(x)
+        return x + y + k
+
+with torch.no_grad():
+    model = Model().to("{device}")
+    val = torch.randn(8, 10).to("{device}")
+    example_inputs = ({{"x": val.clone(), "y": val.clone()}},)
+    kwargs = {{"k": val.clone()}}
+    ep = torch.export.export(
+        model, example_inputs, kwargs
+    )
+    torch._inductor.aoti_compile_and_package(
+        ep, example_inputs, kwargs
+    )
+"""
+        return self._run_full_test(run_code, None, expected_error, isolate=True)
+
     @unittest.skipIf(IS_JETSON, "Fails on Jetson")
     @inductor_config.patch(
         {
@@ -221,6 +260,19 @@ class Repro(torch.nn.Module):
         return (relu,)""",
         )
 
+        res = self._test_aoti_unflattened_inputs("cpu", "CppCompileError")
+        self.assertExpectedInline(
+            res.repro_module(),
+            """\
+class Repro(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, linear):
+        relu = torch.ops.aten.relu.default(linear);  linear = None
+        return (relu,)""",
+        )
+
     @requires_gpu
     @inductor_config.patch(
         {
@@ -230,6 +282,19 @@ class Repro(torch.nn.Module):
     )
     def test_aoti_gpu_compile_error(self):
         res = self._test_aoti(GPU_TYPE, "SyntaxError")
+        self.assertExpectedInline(
+            res.repro_module(),
+            """\
+class Repro(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, linear):
+        relu = torch.ops.aten.relu.default(linear);  linear = None
+        return (relu,)""",
+        )
+
+        res = self._test_aoti_unflattened_inputs(GPU_TYPE, "SyntaxError")
         self.assertExpectedInline(
             res.repro_module(),
             """\

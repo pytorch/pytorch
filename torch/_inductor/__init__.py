@@ -16,7 +16,6 @@ __all__ = [
     "list_mode_options",
     "list_options",
     "cudagraph_mark_step_begin",
-    "_aoti_compile_and_package_inner",
 ]
 
 
@@ -90,6 +89,7 @@ def aoti_compile_and_package(
     ), f"Expect package path to end with .pt2, got {package_path}"
 
     inductor_configs = inductor_configs or {}
+    inductor_configs["aot_inductor.package"] = True
 
     if inductor_configs.get("aot_inductor.output_path"):
         raise RuntimeError(
@@ -108,26 +108,32 @@ def aoti_compile_and_package(
 
 
 def _aoti_compile_and_package_inner(
-    m,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
+    gm: torch.fx.GraphModule,
+    flat_example_inputs: Tuple[Any],
+    # args: Tuple[Any],
+    # kwargs: Optional[Dict[str, Any]] = None,
     *,
+    inductor_configs: Optional[Dict[str, Any]],
     load_and_run: bool = False,
     package_path: Optional[str] = None,
-    inductor_configs: Optional[Dict[str, Any]] = None,
 ):
     """
     See docstring for aoti_compile_and_package.
+
+    `inductor_configs` should contain the serialized input and output specs.
 
     If `load_and_run` is True, this function will load the compiled model and run it.
     This is for the minifier to check the correctness of the compiled model.
     """
     from torch._inductor.package import package_aoti
 
-    inductor_configs = inductor_configs or {}
-    inductor_configs["aot_inductor.package"] = True
+    from .compile_fx import compile_fx_aot
 
-    aoti_files = aot_compile(m, args, kwargs, options=inductor_configs)  # type: ignore[arg-type]
+    aoti_files = compile_fx_aot(
+        gm,
+        flat_example_inputs,  # type: ignore[arg-type]
+        config_patches=inductor_configs,
+    )
 
     if package_path is None:
         package_path = aoti_files + ".pt2"
@@ -137,7 +143,7 @@ def _aoti_compile_and_package_inner(
 
     if load_and_run:
         compiled_model = aoti_load_package(package_path)
-        aoti_result = compiled_model(*args)
+        aoti_result = compiled_model(*flat_example_inputs)
     return package_path
 
 
@@ -149,19 +155,21 @@ def aoti_compile_and_package_debug_wrapper(
     package_path: Optional[str] = None,
     inductor_configs: Optional[Dict[str, Any]] = None,
 ):
-    m = exported_program.module()
-    assert isinstance(m, torch.fx.GraphModule)
+    gm = exported_program.module()
+
+    flat_example_inputs, options = _flatten_inputs(
+        gm, args, kwargs, options=inductor_configs
+    )
 
     use_minifier = torch._inductor.config.aot_inductor.dump_aoti_minifier
 
     try:
         return _aoti_compile_and_package_inner(
-            m,
-            args,
-            kwargs,
+            gm,
+            flat_example_inputs,
             load_and_run=use_minifier,
             package_path=package_path,
-            inductor_configs=inductor_configs,
+            inductor_configs=options,
         )
 
     except Exception as e:
@@ -201,26 +209,14 @@ def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
     return load_package(path)
 
 
-def aot_compile(
+def _flatten_inputs(
     gm: torch.fx.GraphModule,
     args: Tuple[Any],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     options: Optional[Dict[str, Any]] = None,
-) -> str:
-    """
-    Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
-
-    Args:
-        gm: The FX graph to compile.
-        args:  Example arguments
-        kwargs: Example keyword arguments
-        options:  Optional dict of config options.  See `torch._inductor.config`.
-
-    Returns:
-        Path to the generated shared library
-    """
-    from .compile_fx import compile_fx_aot, graph_returns_tuple
+):
+    from .compile_fx import graph_returns_tuple
 
     assert graph_returns_tuple(gm), (
         "Graph output must be a tuple(). This is so that we can avoid "
@@ -282,6 +278,31 @@ def aot_compile(
             "aot_inductor.serialized_out_spec": serialized_out_spec,
         }
     )
+    return flat_example_inputs, options
+
+
+def aot_compile(
+    gm: torch.fx.GraphModule,
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    options: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
+
+    Args:
+        gm: The FX graph to compile.
+        args:  Example arguments
+        kwargs: Example keyword arguments
+        options:  Optional dict of config options.  See `torch._inductor.config`.
+
+    Returns:
+        Path to the generated shared library
+    """
+    from .compile_fx import compile_fx_aot
+
+    flat_example_inputs, options = _flatten_inputs(gm, args, kwargs, options=options)
 
     return compile_fx_aot(
         gm,
