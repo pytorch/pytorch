@@ -1443,7 +1443,7 @@ def forward(self, x_1, output_1):
             return output
 
         x = torch.randn(4, device=GPU_TYPE)
-        msg = "Only configs and keys are supported for triton.autotune"
+        msg = "Only configs, keys, and restore_value are supported for triton.autotune"
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
             f(x, x)
 
@@ -1962,6 +1962,53 @@ def forward(self, arg0_1, arg1_1):
 
         x = torch.randn(4, device=GPU_TYPE)
         f(x, x)
+
+    @requires_gpu
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    @common_utils.parametrize("autotune_at_compile_time", [True, False])
+    def test_triton_kernel_restore_value(self, backend, autotune_at_compile_time):
+        if autotune_at_compile_time and backend != "inductor":
+            raise unittest.SkipTest("compile-time autotuning only exists in inductor")
+
+        @triton.autotune(
+            configs=[
+                triton.Config({"BLOCK_SIZE": 16}, num_stages=3, num_warps=8),
+                triton.Config({"BLOCK_SIZE": 32}, num_stages=3, num_warps=8),
+            ],
+            key=[],
+            restore_value=["in_ptr0"],
+        )
+        @triton.jit
+        def increment_kernel(
+            in_ptr0,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            output = x + 1
+            tl.store(in_ptr0 + offsets, output, mask=mask)
+
+        @torch.compile(fullgraph=True, backend=backend)
+        def f(x):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            increment_kernel[grid](x, n_elements=n_elements)
+            return x
+
+        x = torch.rand(4, device=GPU_TYPE)
+        prev = x.clone()
+
+        with torch._inductor.config.patch(
+            {"triton.autotune_at_compile_time": autotune_at_compile_time}
+        ):
+            f(x)
+
+        # make sure x was restored after autotuning
+        torch.testing.assert_close(x, prev + 1)
 
     @requires_gpu
     @parametrize("dtype", (torch.float16, torch.float32, torch.float64))
