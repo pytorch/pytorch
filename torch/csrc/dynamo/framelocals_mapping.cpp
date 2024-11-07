@@ -24,7 +24,7 @@
 // Returns a new reference.
 FrameLocalsMapping* get_framelocals_mapping(_PyInterpreterFrame* frame) {
   if (!frame->stacktop) {
-    return py::dict().release().ptr();
+    return new FrameLocalsMapping();
   }
 
   PyCodeObject* co = F_CODE(frame);
@@ -126,7 +126,7 @@ FrameLocalsMapping* get_framelocals_mapping(PyFrameObject* frame) {
 
 #endif
 
-void free_framelocals_mapping(FrameLocalsMapping* map) {
+void framelocals_mapping_free(FrameLocalsMapping* map) {
   delete map;
 }
 
