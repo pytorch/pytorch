@@ -242,7 +242,6 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(ref, res)
         res.sum().backward()
 
-
         x = torch.randn(16, 1, requires_grad=True)
         y = torch.randn(4, 4, requires_grad=True)
         ref = fn(x, y)
@@ -281,7 +280,6 @@ class TestInvokeSubgraphCompile(TestCase):
 
         res = opt_fn(q, k, v)
         res.sum().backward()
-
 
     def test_dedupe(self):
         @wrap_with_invoke_subgraph

@@ -280,7 +280,6 @@ def _(mode, subgraph, identifier, operands):
         return subgraph(*operands)
 
 
-
 @invoke_subgraph.py_impl(ProxyTorchDispatchMode)
 def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, operands):
     # Check if we have already traced the subgraph.
