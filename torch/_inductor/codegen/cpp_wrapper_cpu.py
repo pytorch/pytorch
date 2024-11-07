@@ -837,24 +837,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         return [x.codegen_reference(self.wrapper_call) for x in V.graph.graph_outputs]
 
     def generate_return(self, output_refs: List[str]):
-        def use_thread_local_cached_output_tensor(idx, output):
-            cached_output_name = f"cached_output_{next(self.cached_output_id)}"
-            cache_type = "Tensor"
-            self.wrapper_call.writeline(
-                f"thread_local ThreadLocalCachedOutput{cache_type}<std::decay_t<decltype({output})>> "
-                f"{cached_output_name}({output});"
-            )
-            self.wrapper_call.writeline(
-                f"{cached_output_name}.copy_data_from({output});"
-            )
-            self.wrapper_call.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&output_handles[{idx}]));"
-            )
-            self.wrapper_call.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors({cached_output_name}.tensor(), "
-                f"output_handles[{idx}]));"
-            )
-
         cst_names = V.graph.constants.keys()
         output2idx: Dict[str, int] = {}
         for idx, output in enumerate(output_refs):
@@ -876,37 +858,21 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 )
                 continue
 
-            output_is_tensor_handle_expr = (
-                f"std::is_same_v<std::decay_t<decltype({output})>,"
-                "RAIIAtenTensorHandle> || "
-                f"std::is_same_v<std::decay_t<decltype({output})>,"
-                "AtenTensorHandle> || "
-                f"std::is_same_v<std::decay_t<decltype({output})>,"
-                "ConstantHandle>"
-            )
-            self.wrapper_call.writeline(
-                f"if constexpr ({output_is_tensor_handle_expr}) {{"
-            )
-            with self.wrapper_call.indent():
-                if is_constant_buffer:
-                    # See NOTE(return_constant) above.
+            if is_constant_buffer:
+                # See NOTE(return_constant) above.
+                self.wrapper_call.writeline(
+                    f"aoti_torch_clone({output}, &output_handles[{idx}]);"
+                )
+            else:
+                if output in output2idx:
+                    src_idx = output2idx[output]
                     self.wrapper_call.writeline(
-                        f"aoti_torch_clone({output}, &output_handles[{idx}]);"
+                        f"output_handles[{idx}] = output_handles[{src_idx}];"
                     )
                 else:
-                    if output in output2idx:
-                        src_idx = output2idx[output]
-                        self.wrapper_call.writeline(
-                            f"output_handles[{idx}] = output_handles[{src_idx}];"
-                        )
-                    else:
-                        self.wrapper_call.writeline(
-                            f"output_handles[{idx}] = {output}.release();"
-                        )
-            self.wrapper_call.writeline("} else {")
-            with self.wrapper_call.indent():
-                use_thread_local_cached_output_tensor(idx, output)
-            self.wrapper_call.writeline("}")
+                    self.wrapper_call.writeline(
+                        f"output_handles[{idx}] = {output}.release();"
+                    )
 
             if output not in output2idx:
                 output2idx[output] = idx
