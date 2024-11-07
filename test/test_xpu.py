@@ -445,6 +445,8 @@ print(torch.xpu.device_count())
                     self.assertGreaterEqual(compiler_version, 20250000)
                 elif b"libsycl-preview.so" in result:
                     self.assertLess(compiler_version, 20250000)
+                else:
+                    self.assertTrue(False, "Unexpected libsycl library")
 
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
