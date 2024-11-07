@@ -1018,7 +1018,7 @@ bool tensors_definitely_do_not_overlap(const Tensor& x, const Tensor& y) {
  */
 std::unordered_set<int64_t> compute_overlapping_tensors(
     const std::vector<Tensor>& tensors) {
-  std::unordered_set<int64_t> aliased_tensor_indices{};
+  std::unordered_set<int64_t> aliased_tensor_indices;
   for (int64_t i = 0; i < static_cast<int64_t>(tensors.size()); i++) {
     auto tensor_i = tensors[i];
     for (int64_t j = 0; j < i; j++) {
@@ -1044,7 +1044,7 @@ bool check_overlapping(
     const std::vector<Tensor>& overlapping,
     const std::vector<Tensor>& non_overlapping) {
   // Merge the tensor lists.
-  std::vector<Tensor> tensors{};
+  std::vector<Tensor> tensors;
   tensors.reserve(overlapping.size() + non_overlapping.size());
   tensors.insert(tensors.end(), overlapping.begin(), overlapping.end());
   tensors.insert(tensors.end(), non_overlapping.begin(), non_overlapping.end());
@@ -1064,9 +1064,9 @@ bool check_overlapping(
  * Class responsible for collecting and checking the storage overlap relations.
  *
  * The way GuardManager is implemented, when STORAGE_OVERLAPPING guard check is
- * run on a given tensor, we don't know if it is an overlapping or non-overlapping
- * tensor. There's no order to which GuardManager runs the guard check so that
- * we can split it in 2.
+ * run on a given tensor, we don't know if it is an overlapping or
+ * non-overlapping tensor. There's no order to which GuardManager runs the guard
+ * check so that we can split it in 2.
  *
  * Since we are only interested in the classification of each tensor (not
  * necessarily the order), we can just issue 2 STORAGE_OVERLAPPING guards
@@ -1082,9 +1082,7 @@ class StorageOverlapChecker {
       size_t expected_overlapping,
       size_t expected_non_overlapping)
       : _expected_overlapping(expected_overlapping),
-        _expected_non_overlapping(expected_non_overlapping),
-        _overlapping(),
-        _non_overlapping() {}
+        _expected_non_overlapping(expected_non_overlapping) {}
 
   /**
    * Adds a tensor to the corresponding storage, based on whether it should be
