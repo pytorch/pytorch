@@ -3026,6 +3026,15 @@ def _polyfilled_function_ids() -> Set[int]:
 
 @FunctionIdSet
 def _numpy_function_ids() -> Dict[int, str]:
+    unsupported_funcs = {
+        "seed",
+        "ranf",
+        "get_bit_generator",
+        "RandomState",
+        "set_bit_generator",
+        "sample",
+    }
+
     def is_supported(k, v, mod):
         if not callable(v):
             return False
@@ -3033,7 +3042,11 @@ def _numpy_function_ids() -> Dict[int, str]:
             return True
         if v.__module__ == mod.__name__:
             return True
-        if v.__module__ == "numpy.random.mtrand" and mod.__name__ == "numpy.random":
+        if (
+            v.__module__ == "numpy.random.mtrand"
+            and mod.__name__ == "numpy.random"
+            and k not in unsupported_funcs
+        ):
             return True
         return False
 
