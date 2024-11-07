@@ -2532,46 +2532,63 @@ def _register_qlinear_weight_prepack():
 def _register_smooth_quant_int_mm_pattern():
     """
     The pattern is:
-      (no bias) reshape -> _int_mm -> convert_element_type -> (expand -> mul) -> mul -> reshape
+      (no bias) reshape -> _int_mm -> convert_element_type -> (expand ->) mul -> mul -> reshape
     or
-      (with bias) pattern_no_bias -> add -> reshape -> reshape
+      (with bias) pattern_no_bias -> add (-> reshape -> reshape)
     """
-    pattern_no_bias = CallFunction(
-        aten.reshape.default,
-        CallFunction(
-            aten.mul.Tensor,
+
+    # When torch.compile'ing with dynamic=True, the expand node and the two tailing reshape nodes exist
+    # When torch.compile'ing with dynamic=False, they don't exist
+    def get_pattern_no_bias(expand_a_scale: bool):
+        return CallFunction(
+            aten.reshape.default,
             CallFunction(
                 aten.mul.Tensor,
                 CallFunction(
-                    prims.convert_element_type.default,
+                    aten.mul.Tensor,
                     CallFunction(
-                        aten._int_mm.default,
+                        prims.convert_element_type.default,
                         CallFunction(
-                            aten.reshape.default,
-                            KeywordArg("a"),
-                            KeywordArg("in_shape"),
+                            aten._int_mm.default,
+                            CallFunction(
+                                aten.reshape.default,
+                                KeywordArg("a"),
+                                KeywordArg("in_shape"),
+                            ),
+                            KeywordArg("b"),
                         ),
-                        KeywordArg("b"),
+                        KeywordArg("dtype"),
                     ),
-                    KeywordArg("dtype"),
+                    (
+                        CallFunction(
+                            aten.expand.default,
+                            KeywordArg("x_scale"),
+                            Arg(),
+                        )
+                        if expand_a_scale
+                        else KeywordArg("x_scale")
+                    )
                 ),
-                CallFunction(
-                    aten.expand.default,
-                    KeywordArg("x_scale"),
-                    Arg(),
-                ),
+                KeywordArg("w_scale"),
             ),
-            KeywordArg("w_scale"),
-        ),
-        KeywordArg("out_shape_no_bias"),
+            KeywordArg("out_shape_no_bias"),
+        )
+    # for torch.compile(dynamic=False)
+    pattern_no_bias_1 = get_pattern_no_bias(expand_a_scale=False)
+    pattern_with_bias_1 = CallFunction(
+        aten.add.Tensor,
+        pattern_no_bias_1,
+        KeywordArg("bias"),
     )
-    pattern_with_bias = CallFunction(
+    # for torch.compile(dynamic=True)
+    pattern_no_bias_2 = get_pattern_no_bias(expand_a_scale=True)
+    pattern_with_bias_2 = CallFunction(
         aten.reshape.default,
         CallFunction(
             aten.reshape.default,
             CallFunction(
                 aten.add.Tensor,
-                pattern_no_bias,
+                pattern_no_bias_2,
                 KeywordArg("bias"),
             ),
             Arg(),
@@ -2580,21 +2597,37 @@ def _register_smooth_quant_int_mm_pattern():
     )
 
     def _validate_pattern(match: Match):
-        return len(match.nodes) in [7, 10]
+        if not len(match.nodes) in [6, 7, 10]:
+            return False
+        if len(match.nodes) == 10:
+            # Check the two tailing reshape nodes can be fused
+            if match.nodes[9].args[1] != match.nodes[6].args[1]:
+                return False
+        if len(match.nodes) == 10 or (len(match.nodes) == 7 and match.nodes[6].target is aten.add.Tensor):
+            bias_idx = 7 if len(match.nodes) == 10 else 6
+            # Check bias shape
+            bias_node = match.nodes[bias_idx].args[1]
+            if not isinstance(bias_node, torch.fx.node.Node):
+                return False
+            if len(bias_node.meta.get("tensor_meta").shape) != 1:
+                return False
+        return True
 
-    for pattern in [pattern_with_bias, pattern_no_bias]:
+    pattern_to_pass_number = {
+        pattern_no_bias_2: 0,
+        pattern_with_bias_2: 0,
+        pattern_no_bias_1: 1,
+        pattern_with_bias_1: 1,
+    }
+    for pattern, pass_number in pattern_to_pass_number.items():
 
         @register_freezing_graph_pattern(
             pattern,
             extra_check=_validate_pattern,
-            pass_number=0,
+            pass_number=pass_number,
         )
         def _int_mm_weight_prepack(match: Match, *args, **kwargs):
             bias = kwargs.get("bias", None)
-            if bias is not None:
-                if len(bias.meta.get("tensor_meta").shape) != 1:
-                    # we expect bias is a vector
-                    return
             x = kwargs["a"]
             weight = kwargs["b"]
             dtype = kwargs["dtype"]
@@ -2687,18 +2720,19 @@ def _register_smooth_quant_int_mm_pattern():
                         aten.mul.Tensor, args=(new_linear_node, x_scale)
                     )
                     # Add bias and reshape
+                    out_shape = kwargs.get("out_shape_with_bias", kwargs["out_shape_no_bias"])
                     if bias is not None:
                         new_out_node = match.graph.call_function(
                             aten.add.Tensor, args=(new_out_node, bias)
                         )
                         new_out_node = match.graph.call_function(
                             aten.reshape.default,
-                            args=(new_out_node, kwargs["out_shape_with_bias"]),
+                            args=(new_out_node, out_shape),
                         )
                     else:
                         new_out_node = match.graph.call_function(
                             aten.reshape.default,
-                            args=(new_out_node, kwargs["out_shape_no_bias"]),
+                            args=(new_out_node, out_shape),
                         )
                     out_node.replace_all_uses_with(new_out_node)
                     new_out_node.meta.update(out_node.meta)
