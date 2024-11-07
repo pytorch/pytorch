@@ -391,5 +391,6 @@ class TestFakeTensorExport(common_utils.TestCase):
             onnx_model.graph.initializers["weight"].const_value.numpy(), 42.0
         )
 
+
 if __name__ == "__main__":
     common_utils.run_tests()
