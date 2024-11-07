@@ -2238,13 +2238,8 @@ class FakeTensorMode(TorchDispatchMode):
         ):
             # Automatically infer a Fake kernel if there isn't one.
             if not library_utils.has_fake_kernel(func):
-                result = inferred_fake_kernel_from_real_out(self, func, real_out)
-
-                dtrace_structured(
-                    "generated_fake_kernel",
-                    metadata_fn=lambda: {
-                        "op": str(func),
-                    },
+                result = inferred_fake_kernel_from_real_out(
+                    self, func, real_out, flat_args, args_spec
                 )
                 return maybe_propagate_real_tensors(result)
 
@@ -2689,7 +2684,6 @@ _DISPATCH_HANDLE_DIRECTLY = ordered_set(
     torch.ops.aten.dense_dim.default,
     torch.ops.aten.sparse_dim.default,
 )
-
 from torch._subclasses.fake_impls import (  # noqa: F401
     _device_not_kwarg_ops,
     _is_tensor_constructor,
@@ -2716,7 +2710,11 @@ def dump_cache_stats() -> None:
 
 
 def inferred_fake_kernel_from_real_out(
-    mode: FakeTensorMode, op: torch._ops.OpOverload, real_out: Any
+    mode: FakeTensorMode,
+    op: torch._ops.OpOverload,
+    real_out: Any,
+    flat_args: Any,
+    args_spec: pytree.TreeSpec,
 ) -> Any:
     assert mode.shape_env is not None
 
@@ -2788,4 +2786,29 @@ def inferred_fake_kernel_from_real_out(
             )
 
     fake_flat_out = [make_fake(t) for t in real_flat_out]
+
+    def maybe_get_tensor_meta(tensor):
+        if not isinstance(tensor, torch.Tensor):
+            return None
+        return {
+            "shape": tensor.shape,
+            "strides": tensor.stride(),
+            "dtype": tensor.dtype,
+            "device": tensor.device,
+            "layout": tensor.layout,
+        }
+
+    def get_profile():
+        return {
+            "flat_args_profile": [maybe_get_tensor_meta(arg) for arg in flat_args],
+            "args_spec": pytree.treespec_dumps(args_spec),
+            "flat_out_profile": [maybe_get_tensor_meta(out) for out in real_flat_out],
+            "out_spec": pytree.treespec_dumps(spec),
+        }
+
+    dtrace_structured(
+        "generated_fake_kernel",
+        metadata_fn=lambda: {"op": str(op), "op_profile": get_profile()},
+    )
+
     return pytree.tree_unflatten(fake_flat_out, spec)
