@@ -1350,6 +1350,9 @@ test_executorch() {
 
   pushd /executorch
 
+  # NB: We need to install torchtune and ao as the dependencies for llama
+  bash examples/models/llama3_2_vision/install_requirements.sh
+
   export PYTHON_EXECUTABLE=python
   export EXECUTORCH_BUILD_PYBIND=ON
   export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
@@ -1358,9 +1361,6 @@ test_executorch() {
   # from the PR
   # shellcheck disable=SC1091
   source .ci/scripts/setup-linux.sh cmake
-
-  # NB: We need to install torchtune and ao as the dependencies for llama
-  bash examples/models/llama3_2_vision/install_requirements.sh
 
   echo "Run ExecuTorch unit tests"
   pytest -v -n auto
