@@ -12,6 +12,7 @@ import sys
 import threading
 import types
 import warnings
+import weakref
 from typing import Dict, Generic, List, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
@@ -36,7 +37,6 @@ from ..source import (
     ODictGetItemSource,
     RandomValueSource,
     UnspecializedParamBufferSource,
-    WeakRefCallSource,
 )
 from ..utils import (
     build_checkpoint_variable,
@@ -54,7 +54,7 @@ from ..utils import (
     tensortype_to_dtype,
     unpatched_nn_module_getattr,
 )
-from .base import MutableLocal, VariableTracker
+from .base import ValueMutationNew, VariableTracker
 from .dicts import DefaultDictVariable
 
 
@@ -303,7 +303,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             and not kwargs
             and "__subclasses__" not in self.value.__dict__
         ):
-            options = {"mutable_local": MutableLocal()}
+            options = {"mutation_type": ValueMutationNew()}
             subs_as_vars: List[VariableTracker] = []
             for sub in self.value.__subclasses__():
                 source = AttrSource(tx.import_source(sub.__module__), sub.__name__)
@@ -368,7 +368,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 {},
                 collections.defaultdict,
                 args[0],
-                mutable_local=MutableLocal(),
+                mutation_type=ValueMutationNew(),
             )
         elif is_typeddict(self.value):
             if self.value.__optional_keys__:
@@ -397,8 +397,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             else:
                 unimplemented("deque() with invalid kwargs not supported")
             return variables.lists.DequeVariable(
-                items, maxlen=maxlen, mutable_local=MutableLocal()
+                items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
+        elif self.value is weakref.ref:
+            return variables.WeakRefVariable(args[0])
         elif self.value is functools.partial:
             if not args:
                 unimplemented("functools.partial malformed")
@@ -521,7 +523,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
         elif variables.CustomizedDictVariable.is_matching_cls(self.value):
-            options = {"mutable_local": MutableLocal()}
+            options = {"mutation_type": ValueMutationNew()}
             return variables.CustomizedDictVariable.create(
                 self.value, args, kwargs, options
             )
@@ -533,7 +535,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 variables.BuiltinVariable(list).call_function(tx, args, kwargs).items,
                 user_cls=self.value,
                 user_cls_source=self.source,
-                mutable_local=MutableLocal(),
+                mutation_type=ValueMutationNew(),
             )
         elif (
             self.value in self._in_graph_classes()
@@ -571,7 +573,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return tensor_variable
         elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
-            options = {"mutable_local": MutableLocal()}
+            options = {"mutation_type": ValueMutationNew()}
             return variables.EnumVariable.create(self.value, args[0], options)
         elif self.value is random.Random:
             if len(args) == 1 and isinstance(args[0], variables.ConstantVariable):
@@ -1107,11 +1109,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             # Attribute has a __get__ method. Create a user defined object vt
             # for the subobj, and then trace the __get__ method.
-            descriptor_var = UserDefinedObjectVariable(subobj, source=source)
-
-            get_source = self.source
-            if self.source:
-                get_source = AttrSource(self.source, "__get__")
+            descriptor_source = None
+            descriptor_get_source = None
+            if self.cls_source:
+                # To access the method descriptor from the udf object w/o using
+                # inspect.getattr_static, we can look into the class __dict__
+                descriptor_source = GetItemSource(
+                    AttrSource(self.cls_source, "__dict__"), name
+                )
+                descriptor_get_source = AttrSource(descriptor_source, "__get__")
+                descriptor_var = VariableTracker.build(tx, subobj, descriptor_source)
+            else:
+                # Sourceless Builder does not support user defined objects
+                descriptor_var = UserDefinedObjectVariable(subobj)
 
             # The arguments of the __get__ function are (self, instance, owner)
             # self - descriptor_var
@@ -1119,8 +1129,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # owner - class object
             owner_var = UserDefinedClassVariable(type(self.value))
             return variables.UserMethodVariable(
-                subobj.__get__.__func__, descriptor_var, source=get_source
-            ).call_function(tx, [descriptor_var, self, owner_var], {})
+                subobj.__get__.__func__, descriptor_var, source=descriptor_get_source
+            ).call_function(tx, [self, owner_var], {})
         elif isinstance(subobj, types.FunctionType) or (
             isinstance(subobj, types.MethodType)
             and isinstance(self.value, torch.nn.Module)
@@ -1309,24 +1319,6 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         )
 
 
-class WeakRefVariable(UserDefinedObjectVariable):
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
-    def __init__(self, value, **kwargs) -> None:
-        super().__init__(value, **kwargs)
-
-    def call_function(
-        self,
-        tx: "InstructionTranslator",
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        call_source = None
-        referent = self.value()
-        source = self.source and WeakRefCallSource(self.source)
-        return VariableTracker.build(tx, referent, source)
-
-
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
     @staticmethod
     def is_matching_object(obj):
@@ -1361,13 +1353,13 @@ class RemovableHandleVariable(VariableTracker):
 
     def __init__(
         self,
-        mutable_local=None,
+        mutation_type=None,
         # index of the registration in the side_effects owned register_hook/handle list, used during removal.
         idx=None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self.mutable_local = mutable_local
+        self.mutation_type = mutation_type
         self.idx = idx
 
     def call_method(self, tx: "InstructionTranslator", method_name, args, kwargs):
