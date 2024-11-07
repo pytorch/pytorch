@@ -260,6 +260,16 @@ class _missing:
     pass
 
 
+def is_bound_tensor_method(value):
+    return (
+        callable(value)
+        and not torch._dynamo.utils.object_has_getattribute(value)
+        and hasattr(value, "__self__")
+        and isinstance(value.__self__, torch.Tensor)
+        and getattr(torch.Tensor, value.__name__, None)
+    )
+
+
 @dataclasses.dataclass
 class GraphArg:
     source: Source
@@ -828,6 +838,13 @@ class VariableBuilder:
                     (self.tx.output.side_effects.get_ca_final_callbacks_var(),),
                     {},
                 )
+            )
+        elif is_bound_tensor_method(value):
+            # This handles bound tensor methods which are not detected by lookup_callable
+            self_source = AttrSource(self.source, "__self__")
+            return GetAttrVariable(
+                VariableTracker.build(self.tx, value.__self__, self_source),
+                value.__name__,
             )
         elif callable(value) and trace_rules.lookup_callable(value) is not None:
             if is_callable_allowed(value):
@@ -2891,6 +2908,10 @@ class SourcelessBuilder:
             return EnumVariable(value)
         elif isinstance(value, (type, abc.ABCMeta)):
             return UserDefinedClassVariable(value)
+        elif is_bound_tensor_method(value):
+            return GetAttrVariable(
+                SourcelessBuilder.create(tx, value.__self__), value.__name__
+            )
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
         elif isinstance(value, torch.fx.graph_module.GraphModule):

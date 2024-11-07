@@ -273,7 +273,6 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
 
         real_value = getattr(_input_associated_real_value, name)
-
         attr_source = AttrSource(self.source, name)
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
         return VariableTracker.build(tx, real_value, attr_source)
