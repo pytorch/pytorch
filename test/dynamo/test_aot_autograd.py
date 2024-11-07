@@ -1469,7 +1469,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             f, overlapping_args, non_overlapping_args
         )
         self.assertExpectedInline(
-            guard_failure[0],
+            guard_failure,
             """0/0: ___check_overlapping(overlapping=[L['args'][1], L['args'][2]], non_overlapping=[L['args'][0]])""",
         )
 
@@ -1493,7 +1493,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         )
         self.assertExpectedInline(
             guard_failure,
-            """0/0: check_overlapping(overlapping=[L['a'], L['b']], non_overlapping=[L['c'], L['d']])""",
+            """0/0: ___check_overlapping(overlapping=[L['a'], L['b']], non_overlapping=[L['c'], L['d']])""",
         )
 
     def _test_no_storage_overlap_guards(self, f, argsfn):
