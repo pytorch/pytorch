@@ -2587,7 +2587,7 @@ def _automatic_dynamic(
             log.debug("automatic dynamic %s marked dynamic", name)
             mark_size = [auto_unset] * e.dim()
             mark_size[i] = auto_dynamic
-            frame_state_entry |= FrameStateSizeEntry(size=mark_size)
+            frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
 
         # NB: both static and dynamic have precedence over
         automatic_dynamic_size = (
