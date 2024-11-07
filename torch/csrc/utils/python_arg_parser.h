@@ -101,7 +101,6 @@ enum class ParameterType {
   SCALAR,
   INT64,
   SYM_INT,
-  SYM_FLOAT,
   DOUBLE,
   COMPLEX,
   TENSOR_LIST,
@@ -122,7 +121,6 @@ enum class ParameterType {
   FLOAT_LIST,
   SCALAR_LIST,
   SYM_INT_LIST,
-  SYM_FLOAT_LIST,
   DISPATCH_KEY_SET
 };
 
