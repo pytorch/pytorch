@@ -1508,7 +1508,7 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
     bool result = check_nopybind(value);
 
     if (!result) {
-      return GuardDebugInfo(false, "Symbolic shape guard failed!", 0);
+      return GuardDebugInfo(false, verbose_code_parts(), 0);
     }
     return GuardDebugInfo(true, 1);
   }

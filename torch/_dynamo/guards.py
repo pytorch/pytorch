@@ -1826,6 +1826,10 @@ class GuardBuilder(GuardBuilderBase):
             from torch._inductor.codecache import CppCodeCache
             from torch._inductor.codegen.cpp_utils import cexpr
 
+            all_symbols = set()
+            for expr, symbols_to_sources in sympy_code_parts:
+                all_symbols.update([symbol.name for symbol in symbols_to_sources])
+
             # Install all the symbolic guards in one SYMBOLIC_SHAPE_GUARD
             all_sources: Dict[Source, Symbol] = {}
             all_exprs = []
@@ -1838,6 +1842,12 @@ class GuardBuilder(GuardBuilderBase):
                         if symbol.name == mangled_name:
                             all_sources[sources[0]] = symbol
                         else:
+                            old_mangled_name = mangled_name
+                            count = 0
+                            while mangled_name in all_symbols:
+                                mangled_name = f"{old_mangled_name}_{count}"
+                                count += 1
+                            all_symbols.add(mangled_name)
                             new_symbol = sympy.Symbol(mangled_name)
                             all_sources[sources[0]] = new_symbol
                             replacements[symbol] = new_symbol
@@ -1855,10 +1865,10 @@ class GuardBuilder(GuardBuilderBase):
                     self.get_guard_manager_from_source(IndexedSource(source, i))
                     for i, source in enumerate(all_sources)
                 ]
-                all_symbols = list(all_sources.values())
 
                 values_str = ", ".join(
-                    f"{symbol} = values[{i}]" for i, symbol in enumerate(all_symbols)
+                    f"{symbol} = values[{i}]"
+                    for i, symbol in enumerate(all_sources.values())
                 )
                 func_str = textwrap.dedent(
                     f"""
@@ -1884,7 +1894,7 @@ class GuardBuilder(GuardBuilderBase):
             else:
                 install_symbolic_shape_guard(
                     guard_managers,
-                    len(all_symbols),
+                    len(all_sources),
                     cguard,
                     clib,
                     verbose_code_parts,
