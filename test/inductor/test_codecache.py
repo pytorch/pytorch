@@ -732,11 +732,19 @@ class TestFxGraphCache(TestCase):
             out0 = mod1(x)
             out1 = torch.compile(mod1)(x)
             self.assertEqual(out0, out1)
+
         # For mahcine that has mkldnn_fp16 support, the weight_pack in mkldnn_fusion.py
         # wroks, which result in mkldnn format tensor, then the exception
         # BypassFxGraphCache("mkldnn tensors unpickleable") is raised, and cause the
         # fxgraph not cached.
-        if device == "cpu" and torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        def is_cpu_mkldnn_fp16_supported():
+            return (
+                device == "cpu"
+                and torch.backends.mkldnn.is_available()
+                and torch.ops.mkldnn._is_mkldnn_fp16_supported()
+            )
+
+        if is_cpu_mkldnn_fp16_supported():
             fxgraph_cache_bypass_cnt = 1
             fxgraph_cache_miss_cnt = 0
             fxgraph_cache_hit_cnt = 0
@@ -768,7 +776,7 @@ class TestFxGraphCache(TestCase):
             out1 = torch.compile(mod2)(x)
             self.assertEqual(out0, out1)
 
-        if device == "cpu" and torch.ops.mkldnn._is_mkldnn_fp16_supported():
+        if is_cpu_mkldnn_fp16_supported():
             fxgraph_cache_bypass_cnt = 1
             fxgraph_cache_miss_cnt = 0
             fxgraph_cache_hit_cnt = 0
