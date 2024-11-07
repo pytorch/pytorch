@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 import torch
+import torch.version
 import torch.xpu._gpu_trace as gpu_trace
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
@@ -22,6 +23,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_UBSAN,
     TEST_XPU,
     TestCase,
+    find_library_location,
+    IS_LINUX,
 )
 from torch.utils.checkpoint import checkpoint_sequential
 
@@ -430,7 +433,17 @@ print(torch.xpu.device_count())
 
     def test_torch_version_xpu(self):
         self.assertTrue(len(torch.version.xpu) == 8)
-        self.assertTrue(int(torch.version.xpu) >= 20230000)
+        compiler_version = int(torch.version.xpu)
+        self.assertTrue(compiler_version >= 20230000)
+        if IS_LINUX:
+            library = find_library_location("libtorch_xpu.so")
+            cmd = f"ldd {library}"
+            results = subprocess.check_output(cmd, shell=True).strip().split(b"\n")
+            for result in results:
+                if b"libsycl.so" in result:
+                    self.assertGreaterEqual(compiler_version, 20250000)
+                elif b"libsycl-preview.so" in result:
+                    self.assertLess(compiler_version, 20250000)
 
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
