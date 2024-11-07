@@ -532,6 +532,7 @@ class ConvertFrameAssert:
                 for a in f_locals.values()
                 if type(a) is contextlib._GeneratorContextManager
             )
+            assert ctx is not None
             skip_code(frame.f_code)
             skip_code(ctx.gen.gi_frame.f_code)
 

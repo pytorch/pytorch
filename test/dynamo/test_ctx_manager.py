@@ -2270,7 +2270,7 @@ class CPythonContextManagerTestCase(torch._dynamo.test_case.TestCase):
             yield
             yield
 
-        @torch.compile(backend="eager")
+        @torch.compile(backend="eager", fullgraph=True)
         def f(t):
             ctx = whoo()
             ctx.__enter__()
