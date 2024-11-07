@@ -36,7 +36,6 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._dynamo.utils import clone_input
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
