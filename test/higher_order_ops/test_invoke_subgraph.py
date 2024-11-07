@@ -10,7 +10,7 @@ import torch._inductor
 import torch._inductor.decomposition
 from functorch.compile import aot_function, nop
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
-from torch._higher_order_ops.invoke_subgraph import wrap_with_invoke_subgraph
+from torch._higher_order_ops.invoke_subgraph import mark_compile_region
 from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
@@ -26,7 +26,7 @@ class TestInvokeSubgraph(TestCase):
             return torch.mul(x, y)
 
         def fn(x, y):
-            return wrap_with_invoke_subgraph(gn)(x, y)
+            return mark_compile_region(gn)(x, y)
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
@@ -49,7 +49,7 @@ class TestInvokeSubgraph(TestCase):
             return torch.mul(x, y)
 
         def fn(x, y):
-            return wrap_with_invoke_subgraph(gn)(x, y)
+            return mark_compile_region(gn)(x, y)
 
         x = torch.randn(8, requires_grad=True)
         y = torch.randn(8, requires_grad=True)
@@ -71,11 +71,11 @@ class TestInvokeSubgraph(TestCase):
     def test_multiple(self):
         n_layers = 2
 
-        @wrap_with_invoke_subgraph
+        @mark_compile_region
         def cos(x):
             return torch.cos(x)
 
-        @wrap_with_invoke_subgraph
+        @mark_compile_region
         def sin(x):
             return torch.sin(x)
 
@@ -102,7 +102,7 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(len(subgraph_attr_names), expected)
 
     def test_simple(self):
-        @wrap_with_invoke_subgraph
+        @mark_compile_region
         def gn(x, y):
             return torch.mul(x, y)
 
@@ -137,7 +137,7 @@ class TestInvokeSubgraphCompile(TestCase):
                 a = grad_out.view(12, 5)
                 return torch.cos(torch.reshape(a, (3, 4, 5)))
 
-        @wrap_with_invoke_subgraph
+        @mark_compile_region
         def gn(x):
             return CustomOp.apply(x)
 
@@ -163,7 +163,7 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
 
     def test_dedupe(self):
-        @wrap_with_invoke_subgraph
+        @mark_compile_region
         def gn(x, y):
             return torch.mul(x, y)
 
@@ -245,7 +245,7 @@ class GraphModule(torch.nn.Module):
     def test_nonlocal_update(self):
         counter = 2
 
-        @wrap_with_invoke_subgraph
+        @mark_compile_region
         def gn(x, y):
             nonlocal counter
             return (torch.mul(x, y) * counter,)
@@ -310,7 +310,7 @@ class GraphModule(torch.nn.Module):
             )
 
     def test_normalize_gm(self):
-        @wrap_with_invoke_subgraph
+        @mark_compile_region
         def gn(x, y):
             # Different graph give different names to intermediate nodes
             for _ in range(5):
@@ -368,7 +368,7 @@ class GraphModule(torch.nn.Module):
             )
 
     def test_input_mutation(self):
-        @wrap_with_invoke_subgraph
+        @mark_compile_region
         def gn(x, y):
             x.add_(1)
             return torch.mul(x, y)
@@ -388,7 +388,7 @@ class GraphModule(torch.nn.Module):
     def test_simple_module(self):
         mod = torch.nn.Linear(8, 8)
 
-        @wrap_with_invoke_subgraph
+        @mark_compile_region
         def gn(x):
             return mod(x)
 
@@ -420,7 +420,7 @@ class GraphModule(torch.nn.Module):
             opt_fn(x)
 
     def test_input_aliasing(self):
-        @wrap_with_invoke_subgraph
+        @mark_compile_region
         def gn(x, y):
             return (x, torch.mul(x, y))
 
@@ -438,7 +438,7 @@ class GraphModule(torch.nn.Module):
             opt_fn(x, y)
 
     def test_kwargs_only(self):
-        @wrap_with_invoke_subgraph
+        @mark_compile_region
         def gn(x, *, y):
             return x * y
 
@@ -459,7 +459,7 @@ class GraphModule(torch.nn.Module):
                 super().__init__()
                 self.linear = torch.nn.Linear(8, 8)
 
-            @wrap_with_invoke_subgraph
+            @mark_compile_region
             def helper(self, x):
                 return self.linear(x)
 
@@ -516,7 +516,7 @@ class GraphModule(torch.nn.Module):
         class Mod(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.submod = wrap_with_invoke_subgraph(SubMod())
+                self.submod = mark_compile_region(SubMod())
 
             def forward(self, x):
                 return x + self.submod(x) * self.submod(x) + x
