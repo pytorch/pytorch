@@ -213,7 +213,6 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
   hipError_t err; // TODO: Error handling
   using aotriton::v2::flash::attn_fwd;
-  using aotriton::TensorView;
   using sdp::aotriton_adapter::mk_aotensor;
   using sdp::aotriton_adapter::mk_aoscalartensor;
   using sdp::aotriton_adapter::mk_philoxtensor;
@@ -371,7 +370,6 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
   if (max_seqlen_k > 0) {
     hipError_t err; // TODO: Error handling
     using aotriton::v2::flash::attn_fwd_compact_varlen;
-    using aotriton::TensorView;
     using sdp::aotriton_adapter::mk_aotensor;
     using sdp::aotriton_adapter::mk_aoscalartensor;
     using sdp::aotriton_adapter::mk_philoxtensor;
