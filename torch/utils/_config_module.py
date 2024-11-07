@@ -5,6 +5,7 @@ import inspect
 import io
 import os
 import pickle
+import sys
 import tokenize
 import unittest
 import warnings
@@ -54,6 +55,7 @@ class Config:
     justknob: Optional[str] = None
     env_name_default: Optional[str] = None
     env_name_force: Optional[str] = None
+    value_type: Optional[type] = None
 
     def __init__(
         self,
@@ -61,12 +63,14 @@ class Config:
         justknob: Optional[str] = None,
         env_name_default: Optional[str] = None,
         env_name_force: Optional[str] = None,
+        value_type: Optional[type] = None,
     ):
         # python 3.9 does not support kw_only on the dataclass :(.
         self.default = default
         self.justknob = justknob
         self.env_name_default = env_name_default
         self.env_name_force = env_name_force
+        self.value_type = value_type
 
 
 # Types saved/loaded in configs
@@ -99,6 +103,10 @@ def install_config_module(module: ModuleType) -> None:
         prefix: str,
     ) -> None:
         """Walk the module structure and move everything to module._config"""
+        if sys.version_info[:2] < (3, 10):
+            type_hints = getattr(source, "__annotations__", {})
+        else:
+            type_hints = inspect.get_annotations(source)
         for key, value in list(source.__dict__.items()):
             if (
                 key.startswith("__")
@@ -111,7 +119,10 @@ def install_config_module(module: ModuleType) -> None:
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
-                config[name] = _ConfigEntry(Config(default=value))
+                annotated_type = type_hints.get(key, None)
+                config[name] = _ConfigEntry(
+                    Config(default=value, value_type=annotated_type)
+                )
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, Config):
@@ -192,6 +203,8 @@ _UNSET_SENTINEL = object()
 class _ConfigEntry:
     # The default value specified in the configuration
     default: Any
+    # The type of the configuration value
+    value_type: type
     # The value specified by the user when they overrode the configuration
     # _UNSET_SENTINEL indicates the value is not set.
     user_override: Any = _UNSET_SENTINEL
@@ -203,6 +216,9 @@ class _ConfigEntry:
 
     def __init__(self, config: Config):
         self.default = config.default
+        self.value_type = (
+            config.value_type if config.value_type is not None else type(self.default)
+        )
         self.justknob = config.justknob
         if config.env_name_default is not None:
             if (env_value := _read_env_variable(config.env_name_default)) is not None:
@@ -313,6 +329,9 @@ class ConfigModule(ModuleType):
                 continue
             config[key] = copy.deepcopy(getattr(self, key))
         return config
+
+    def get_type(self, config_name: str) -> type:
+        return self._config[config_name].value_type
 
     def save_config(self) -> bytes:
         """Convert config to a pickled blob"""

@@ -13,6 +13,7 @@ e_set = {1}
 e_tuple = (1,)
 e_dict = {1: 2}
 e_none: Optional[bool] = None
+e_optional: Optional[bool] = True
 e_ignored = True
 _e_ignored = True
 magic_cache_config_ignored = True
