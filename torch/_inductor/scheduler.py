@@ -875,9 +875,8 @@ class SchedulerNode(BaseSchedulerNode):
 
         # Don't normalize since normalization will merge loops which
         # makes it hard to decide new loop orders.
-        should_normalize = (
-            not config.loop_ordering_after_fusion
-            or self.node.get_device().type != "cuda"
+        should_normalize = not config.loop_ordering_after_fusion or not is_gpu(
+            self.node.get_device().type
         )
 
         if isinstance(self.node, ir.TemplateBuffer):
@@ -2282,7 +2281,7 @@ class Scheduler:
             # Even for CPU, if we are using the halide backend, we still need
             # the merge loops steps below
             if not isinstance(node, (SchedulerNode, FusedSchedulerNode)) or (
-                node.get_device().type != "cuda" and config.cpu_backend != "halide"
+                (not is_gpu(node.get_device().type)) and config.cpu_backend != "halide"
             ):
                 continue
             for snode in node.get_nodes():
