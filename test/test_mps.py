@@ -152,7 +152,7 @@ def mps_ops_grad_modifier(ops):
 
     MACOS_12_3_XFAILLIST_GRAD = {
         # Unsupported Border padding mode, forward pass success as fallback to cpu
-        'grid_sampler_2d': [torch.float32],
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],
         # Unimplemented
         'logaddexp2': [torch.float32],
 
@@ -165,7 +165,7 @@ def mps_ops_grad_modifier(ops):
         'masked.log_softmax': [torch.float32, torch.float16],
 
         # Unsupported Border padding mode, forward pass success as fallback to cpu
-        'grid_sampler_2d': [torch.float32],
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],
 
         # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
         # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
@@ -350,7 +350,6 @@ def mps_ops_modifier(ops):
         'transpose_copy',
         'T',
         'unbind',
-        'unbind_copy',
         'unflatten',
         'unfold',
         'unfold_copy',
@@ -639,7 +638,7 @@ def mps_ops_modifier(ops):
 
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
-        'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],  # Unsupported Border padding mode
         # inconsistency errors between cpu and mps, max seen atol is 2
         'nn.functional.interpolatebilinear': [torch.uint8],
     }
@@ -6793,9 +6792,18 @@ class TestMPS(TestCaseMPS):
     # Test silu
 
     def test_silu(self):
-        def helper(shape):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
+        def helper(shape, contiguous=True):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float)
+            x = cpu_x.detach().clone().to('mps')
+
+            if not contiguous and (0 not in shape and len(shape) >= 2):
+                # Tranposing will make the tensor non-contiguous
+                cpu_x = cpu_x.transpose(0, 1)
+                x = x.transpose(0, 1)
+                assert not x.is_contiguous()
+
+            cpu_x.requires_grad_()
+            x.requires_grad_()
 
             silu_result = torch.nn.SiLU()(x)
             silu_result_cpu = torch.nn.SiLU()(cpu_x)
@@ -6811,7 +6819,8 @@ class TestMPS(TestCaseMPS):
 
         # Test empty shape too
         for shape in [[], (2, 3), (2, 8, 4, 5)]:
-            helper(shape)
+            for contiguous in [True, False]:
+                helper(shape, contiguous)
 
     def test_cast_mps_to_cpu(self):
         def helper(src_dtype, dst_dtype):
@@ -8123,6 +8132,7 @@ class TestMPS(TestCaseMPS):
             self.assertNotEqual(x.max().item(), 0)
 
     # Test exponential
+    @unittest.skip("This does not test anything")
     def test_exponential(self):
         def helper(shape, lamda, dtype=torch.float32):
 
@@ -8326,6 +8336,7 @@ class TestMPS(TestCaseMPS):
         helper(10000)
         helper((10000, 40))
 
+    @unittest.skip("This does not test anything")
     def test_multinomial(self):
         # Test with num_dist = 1
         def helper(probs, compare_mean, compare_var, num_samples=5, replacement=True):
@@ -8814,7 +8825,8 @@ class TestNNMPS(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path)
+            # weights_only=False as this is a legacy use case that loads a module
+            m = torch.load(path, weights_only=False)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
@@ -8831,7 +8843,8 @@ class TestNNMPS(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path, encoding='utf-8')
+            # weights_only=False as this is a legacy use case that loads a module
+            m = torch.load(path, encoding='utf-8', weights_only=False)
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
@@ -8855,8 +8868,10 @@ class TestNNMPS(NNTestCase):
 
     # Printing of non_contiguous should not crash
     def test_print_non_contiguous(self):
-        print(torch.ones(100, 100, device='mps').nonzero())
-        print(torch.ones(100, 100, device='mps').nonzero().contiguous())
+        # print(obj) is equivalent to calling `x=str(obj); print(x)`
+        # Use assertTrue in case to make sure non-empty string is returned
+        self.assertTrue(str(torch.ones(100, 100, device='mps').nonzero()))
+        self.assertTrue(str(torch.ones(100, 100, device='mps').nonzero().contiguous()))
 
     def test_zero_grad(self):
         i = torch.randn(2, 5, requires_grad=True)
@@ -11526,6 +11541,17 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual((60, 20, 5), z.stride())
         self.assertTrue(z.is_contiguous())
 
+    def test_empty_reduce(self, device="mps"):
+        x = torch.rand(0, 3, device=device)
+        self.assertTrue(x.mean().isnan())
+        self.assertEqual(x.count_nonzero(), 0)
+        self.assertEqual(x.sum(), 0)
+        self.assertEqual(x.nansum(), 0)
+        self.assertRaises(RuntimeError, lambda: x.amax())
+        self.assertRaises(IndexError, lambda: x.amax(dim=0))
+        self.assertRaises(RuntimeError, lambda: x.amin())
+        self.assertRaises(IndexError, lambda: x.amin(dim=0))
+
     def test_index_getitem_copy_bools_slices(self, device="mps"):
         true = torch.tensor(1, dtype=torch.uint8, device=device)
         false = torch.tensor(0, dtype=torch.uint8, device=device)
@@ -12078,6 +12104,10 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.triplet_margin_loss',
         'nn.functional.triplet_margin_with_distance_loss',
         'nn.functional.batch_norm',
+        # NOTE: nn.functional.group_norm is here because 1 ULP difference in the mean
+        # output from the forward pass (tolerable) blew up into 8 ULP difference from
+        # the backward pass, and MPS uses fp16 accumulation anyway.
+        'nn.functional.group_norm',
         'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
         'nn.functional.cross_entropy',
