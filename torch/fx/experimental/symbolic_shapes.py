@@ -774,7 +774,7 @@ def has_free_unbacked_symbols(x: IterateExprs) -> bool:
         if symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
             return True
     return False
-    
+
 
 # Like free_symbols, but filtered to only report unbacked symbols
 def free_unbacked_symbols(x: IterateExprs) -> OrderedSet[sympy.Symbol]:
@@ -784,13 +784,6 @@ def free_unbacked_symbols(x: IterateExprs) -> OrderedSet[sympy.Symbol]:
         for s in free_symbols(x)
         if symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT))
     )
-
-
-def have_free_unbacked_symbol(x: IterateExprs) -> bool:
-    for s in free_symbols(x):
-        if symbol_is_type(s, (SymT.UNBACKED_INT, SymT.UNBACKED_FLOAT)):
-            return True
-    return False
 
 
 # WARNING: Don't use this on Dynamo produced graphs, they don't have meta
