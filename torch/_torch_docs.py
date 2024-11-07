@@ -3199,7 +3199,7 @@ elements of :attr:`input` in the dimension :attr:`dim`.
 For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
 
     .. math::
-        \text{{logcumsumexp}}(x)_{{ij}} = \log \sum\limits_{{j=0}}^{{i}} \exp(x_{{ij}})
+        \text{{logcumsumexp}}(x)_{{ij}} = \log \sum\limits_{{k=0}}^{{j}} \exp(x_{{ik}})
 
 Args:
     {input}
@@ -5329,7 +5329,7 @@ Returns a new tensor with boolean elements representing if each element of
 Closeness is defined as:
 
 .. math::
-    \lvert \text{input}_i - \text{other}_i \rvert \leq \texttt{atol} + \texttt{rtol} \times \lvert \text{other}_i \rvert
+    \lvert \text{input}_i - \text{other}_i \rvert \leq \texttt{rtol} \times \lvert \text{other}_i \rvert + \texttt{atol}
 """
     + r"""
 
@@ -5341,8 +5341,8 @@ they are equal, with NaNs being considered equal to each other when
 Args:
     input (Tensor): first tensor to compare
     other (Tensor): second tensor to compare
-    atol (float, optional): absolute tolerance. Default: 1e-08
     rtol (float, optional): relative tolerance. Default: 1e-05
+    atol (float, optional): absolute tolerance. Default: 1e-08
     equal_nan (bool, optional): if ``True``, then two ``NaN`` s will be considered equal. Default: ``False``
 
 Examples::
