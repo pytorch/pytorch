@@ -1,197 +1,101 @@
 #pragma once
 
-#include <torch/nn/cloneable.h>
-#include <torch/nn/functional/normalization.h>
-#include <torch/nn/modules/_functions.h>
-#include <torch/nn/options/normalization.h>
-#include <torch/nn/pimpl.h>
-#include <torch/types.h>
-
-#include <cstddef>
-#include <utility>
-#include <vector>
+#include <torch/nn/functional/instancenorm.h>
+#include <torch/nn/modules/batchnorm.h>
+#include <torch/nn/options/instancenorm.h>
 
 namespace torch::nn {
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LayerNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/// Base class for all (dimension-specialized) instance norm modules
+template <size_t D, typename Derived>
+class InstanceNormImpl
+    : public torch::nn::NormImplBase<D, Derived, InstanceNormOptions> {
+ private:
+  inline Tensor apply_instance_norm(const Tensor& input) {
+    // Convert input tensor to match the dtype of running stats and parameters
+    auto input_dtype = input.dtype();
+    
+    // Ensure the running mean, variance, weight, and bias have the same dtype as input
+    auto mean = this->running_mean.to(input_dtype);
+    auto var = this->running_var.to(input_dtype);
+    auto weight = this->weight.to(input_dtype);
+    auto bias = this->bias.to(input_dtype);
 
-/// Applies Layer Normalization over a mini-batch of inputs as described in
-/// the paper `Layer Normalization`_ .
-/// See https://pytorch.org/docs/main/nn.html#torch.nn.LayerNorm to learn
-/// about the exact behavior of this module.
-///
-/// See the documentation for `torch::nn::LayerNormOptions` class to learn what
-/// constructor arguments are supported for this module.
-///
-/// Example:
-/// ```
-/// LayerNorm model(LayerNormOptions({2,
-/// 2}).elementwise_affine(false).eps(2e-5));
-/// ```
-class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
+    return torch::nn::functional::detail::instance_norm(
+        input,
+        mean,
+        var,
+        weight,
+        bias,
+        this->is_training() || !this->options.track_running_stats(),
+        this->options.momentum(),
+        this->options.eps());
+  }
+
+  inline Tensor handle_no_batch_input(const Tensor& input) {
+    return this->apply_instance_norm(input.unsqueeze(0)).squeeze(0);
+  }
+
  public:
-  LayerNormImpl(std::vector<int64_t> normalized_shape)
-      : LayerNormImpl(LayerNormOptions(std::move(normalized_shape))) {}
-  explicit LayerNormImpl(LayerNormOptions options_);
+  using torch::nn::NormImplBase<D, Derived, InstanceNormOptions>::NormImplBase;
 
-  void reset() override;
+  Tensor forward(const Tensor& input) {
+    this->_check_input_dim(input);
 
-  void reset_parameters();
+    // Check if input does not have a batch-dim
+    if (input.dim() == D + 1) {
+      return this->handle_no_batch_input(input);
+    }
 
-  /// Pretty prints the `LayerNorm` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
+    return this->apply_instance_norm(input);
+  }
 
-  /// Applies layer normalization over a mini-batch of inputs as described in
-  /// the paper `Layer Normalization`_ .
-  ///
-  /// The mean and standard-deviation are calculated separately over the last
-  /// certain number dimensions which have to be of the shape specified by
-  /// input `normalized_shape`.
-  ///
-  /// `Layer Normalization`: https://arxiv.org/abs/1607.06450
-  Tensor forward(const Tensor& input);
-
-  /// The options with which this module was constructed.
-  LayerNormOptions options;
-
-  /// The learned weight.
-  /// Initialized to ones if the `elementwise_affine` option is set to `true`
-  /// upon construction.
-  Tensor weight;
-
-  /// The learned bias.
-  /// Initialized to zeros `elementwise_affine` option is set to `true` upon
-  /// construction.
-  Tensor bias;
+  void pretty_print(std::ostream& stream) const override {
+    stream << std::boolalpha << "torch::nn::InstanceNorm" << D << "d("
+           << this->options.num_features() << ", "
+           << "eps=" << this->options.eps() << ", "
+           << "momentum=" << this->options.momentum() << ", "
+           << "affine=" << this->options.affine() << ", "
+           << "track_running_stats=" << this->options.track_running_stats()
+           << ")";
+  }
 };
 
-/// A `ModuleHolder` subclass for `LayerNormImpl`.
-/// See the documentation for `LayerNormImpl` class to learn what methods it
-/// provides, and examples of how to use `LayerNorm` with
-/// `torch::nn::LayerNormOptions`. See the documentation for `ModuleHolder` to
-/// learn about PyTorch's module storage semantics.
-TORCH_MODULE(LayerNorm);
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ InstanceNorm1d
+class TORCH_API InstanceNorm1dImpl
+    : public InstanceNormImpl<1, InstanceNorm1dImpl> {
+ protected:
+  void _check_input_dim(const Tensor& input) override;
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LocalResponseNorm
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-/// Applies local response normalization over an input signal composed
-/// of several input planes, where channels occupy the second dimension.
-/// Applies normalization across channels.
-/// See https://pytorch.org/docs/main/nn.html#torch.nn.LocalResponseNorm to
-/// learn about the exact behavior of this module.
-///
-/// See the documentation for `torch::nn::LocalResponseNormOptions` class to
-/// learn what constructor arguments are supported for this module.
-///
-/// Example:
-/// ```
-/// LocalResponseNorm
-/// model(LocalResponseNormOptions(2).alpha(0.0002).beta(0.85).k(2.));
-/// ```
-class TORCH_API LocalResponseNormImpl
-    : public Cloneable<LocalResponseNormImpl> {
  public:
-  LocalResponseNormImpl(int64_t size)
-      : LocalResponseNormImpl(LocalResponseNormOptions(size)) {}
-  explicit LocalResponseNormImpl(const LocalResponseNormOptions& options_);
-
-  Tensor forward(const Tensor& input);
-
-  void reset() override;
-
-  /// Pretty prints the `LocalResponseNormImpl` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
-
-  /// The options with which this `Module` was constructed.
-  LocalResponseNormOptions options;
+  using InstanceNormImpl<1, InstanceNorm1dImpl>::InstanceNormImpl;
 };
 
-/// A `ModuleHolder` subclass for `LocalResponseNormImpl`.
-/// See the documentation for `LocalResponseNormImpl` class to learn what
-/// methods it provides, and examples of how to use `LocalResponseNorm` with
-/// `torch::nn::LocalResponseNormOptions`. See the documentation for
-/// `ModuleHolder` to learn about PyTorch's module storage semantics.
-TORCH_MODULE(LocalResponseNorm);
+TORCH_MODULE(InstanceNorm1d);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CrossMapLRN2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ InstanceNorm2d
+class TORCH_API InstanceNorm2dImpl
+    : public InstanceNormImpl<2, InstanceNorm2dImpl> {
+ protected:
+  void _check_input_dim(const Tensor& input) override;
 
-/// See the documentation for `torch::nn::CrossMapLRN2dOptions` class to learn
-/// what constructor arguments are supported for this module.
-///
-/// Example:
-/// ```
-/// CrossMapLRN2d model(CrossMapLRN2dOptions(3).alpha(1e-5).beta(0.1).k(10));
-/// ```
-class TORCH_API CrossMapLRN2dImpl
-    : public torch::nn::Cloneable<CrossMapLRN2dImpl> {
  public:
-  CrossMapLRN2dImpl(int64_t size)
-      : CrossMapLRN2dImpl(CrossMapLRN2dOptions(size)) {}
-  explicit CrossMapLRN2dImpl(const CrossMapLRN2dOptions& options_)
-      : options(options_) {}
-
-  void reset() override;
-
-  /// Pretty prints the `CrossMapLRN2d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
-
-  torch::Tensor forward(const torch::Tensor& input);
-
-  CrossMapLRN2dOptions options;
+  using InstanceNormImpl<2, InstanceNorm2dImpl>::InstanceNormImpl;
 };
 
-/// A `ModuleHolder` subclass for `CrossMapLRN2dImpl`.
-/// See the documentation for `CrossMapLRN2dImpl` class to learn what methods it
-/// provides, and examples of how to use `CrossMapLRN2d` with
-/// `torch::nn::CrossMapLRN2dOptions`. See the documentation for `ModuleHolder`
-/// to learn about PyTorch's module storage semantics.
-TORCH_MODULE(CrossMapLRN2d);
+TORCH_MODULE(InstanceNorm2d);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GroupNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ InstanceNorm3d
+class TORCH_API InstanceNorm3dImpl
+    : public InstanceNormImpl<3, InstanceNorm3dImpl> {
+ protected:
+  void _check_input_dim(const Tensor& input) override;
 
-/// Applies Group Normalization over a mini-batch of inputs as described in
-/// the paper `Group Normalization`_ .
-/// See https://pytorch.org/docs/main/nn.html#torch.nn.GroupNorm to learn
-/// about the exact behavior of this module.
-///
-/// See the documentation for `torch::nn::GroupNormOptions` class to learn what
-/// constructor arguments are supported for this module.
-///
-/// Example:
-/// ```
-/// GroupNorm model(GroupNormOptions(2, 2).eps(2e-5).affine(false));
-/// ```
-class TORCH_API GroupNormImpl : public torch::nn::Cloneable<GroupNormImpl> {
  public:
-  GroupNormImpl(int64_t num_groups, int64_t num_channels)
-      : GroupNormImpl(GroupNormOptions(num_groups, num_channels)) {}
-  explicit GroupNormImpl(const GroupNormOptions& options_);
-
-  void reset() override;
-
-  void reset_parameters();
-
-  /// Pretty prints the `GroupNorm` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
-
-  Tensor forward(const Tensor& input);
-
-  /// The options with which this module was constructed.
-  GroupNormOptions options;
-
-  /// The learned weight.
-  Tensor weight;
-
-  /// The learned bias.
-  Tensor bias;
+  using InstanceNormImpl<3, InstanceNorm3dImpl>::InstanceNormImpl;
 };
 
-/// A `ModuleHolder` subclass for `GroupNormImpl`.
-/// See the documentation for `GroupNormImpl` class to learn what methods it
-/// provides, and examples of how to use `GroupNorm` with
-/// `torch::nn::GroupNormOptions`. See the documentation for `ModuleHolder` to
-/// learn about PyTorch's module storage semantics.
-TORCH_MODULE(GroupNorm);
+TORCH_MODULE(InstanceNorm3d);
 
 } // namespace torch::nn
+
