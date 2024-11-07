@@ -47,6 +47,7 @@ from torch._C._dynamo.guards import (
     DictGuardManager,
     install_no_tensor_aliasing_guard,
     install_object_aliasing_guard,
+    install_storage_overlapping_guard,
     RootGuardManager,
 )
 from torch._dynamo.source import (
@@ -313,23 +314,6 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
-def check_overlapping(overlapping, non_overlapping):
-    from torch._functorch._aot_autograd.input_output_analysis import (
-        _tensors_definitely_do_not_overlap,
-    )
-
-    tensors = overlapping + non_overlapping
-    overlapping_indices = set()
-
-    for i in range(len(tensors)):
-        for j in range(i):
-            if not _tensors_definitely_do_not_overlap(tensors[i], tensors[j]):
-                overlapping_indices.add(i)
-                overlapping_indices.add(j)
-
-    return overlapping_indices == set(range(len(overlapping)))
-
-
 _CLOSURE_VARS: Optional[Dict[str, object]] = None
 
 
@@ -356,7 +340,6 @@ def _get_closure_vars():
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
-            "___check_overlapping": check_overlapping,
         }
     return _CLOSURE_VARS
 
@@ -2371,13 +2354,23 @@ class CheckFunctionManager:
                 )
                 add_code_part(code_part, None, True)
             elif isinstance(guard, StorageOverlap):
+                overlapping_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.overlapping_sources
+                ]
+                non_overlapping_guard_managers = [
+                    builder.get_guard_manager_from_source(s)
+                    for s in guard.non_overlapping_sources
+                ]
                 code_part = (
-                    """___check_overlapping("""
+                    """check_overlapping("""
                     f"""overlapping=[{", ".join(s.name() for s in guard.overlapping_sources)}], """
                     f"""non_overlapping=[{", ".join(s.name() for s in guard.non_overlapping_sources)}])"""
                 )
-                builder.add_python_lambda_leaf_guard_to_root(
-                    [code_part], [code_part], closure_vars=_get_closure_vars()
+                install_storage_overlapping_guard(
+                    overlapping_guard_managers,
+                    non_overlapping_guard_managers,
+                    [code_part],
                 )
                 add_code_part(code_part, None, True)
             else:

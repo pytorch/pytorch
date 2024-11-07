@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch._C._dynamo.guards import compute_overlapping_tensors
 from torch._dynamo.exc import Unsupported
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
 from torch._guards import StorageOverlap
@@ -273,84 +274,6 @@ def create_synthetic_base_metadata(
     )
 
 
-def _get_last_mem_address(x):
-    out = x.storage_offset()
-    for size, stride in zip(x.size(), x.stride()):
-        out += (size - 1) * stride
-    return out
-
-
-# Assumption: x and y are known to share a storage, and we are trying to determine
-# if their memory is actually completely disjoint, based on sizes/strides/storage_offset
-def _tensors_definitely_do_not_overlap(x, y):
-    if x is y:
-        return False
-    if x.numel() == 0 or y.numel() == 0:
-        return True
-
-    # Make x always on the left
-    if x.storage_offset() > y.storage_offset():
-        x, y = y, x
-    # Short-circuit in the "obvious" overlapping case: both tensors are contiguous
-    if x.is_contiguous() and y.is_contiguous():
-        if x.storage_offset() + x.numel() > y.storage_offset():
-            # definitely overlap
-            return False
-        else:
-            # definitely no overlap
-            return True
-
-    # Short-circuit: if last memory address of x is < start of y, then not overlapping.
-    x_last = _get_last_mem_address(x)
-    if x_last < y.storage_offset():
-        return True
-
-    if x.dim() == 2 and y.dim() == 2 and x.stride(1) == 1 and y.stride(1) == 1:
-        # This cases is needed for the shampoo optimizer.
-        # All tensors are 2d (non-contiguous), have the same outer stride, and have an inner stride of 1
-        # (so rows are contiguous)
-        if x.stride(0) == y.stride(0):
-            offset_delta = y.storage_offset() - x.storage_offset()
-            if offset_delta < x.size(1):
-                # definitely overlaps (row 0 of y overlaps with row 0 of x)
-                # Example:
-                #   base = torch.arange(32).reshape(4, 8)
-                #   x = base.narrow(1, 0, 4)
-                #     x: size=(4, 4), stride=(8, 1), offset=0
-                #   y = base.narrow(1, 3, 4)
-                #     y: size=(4, 4), stride=(8, 1), offset=3
-                return False
-            x_total_elems_covered = x.stride(0) * (x.size(0) - 1) + x.size(1)
-            if x_total_elems_covered <= offset_delta:
-                # definitely does not overlap (last byte of x is before start of y)
-                # Example:
-                #   x: size=(4, 4), stride=(8, 1), offset=0 (last byte is 27)
-                #   y: size=(4, 4), stride=(8, 1), offset=28 (start byte is 28)
-                return True
-            # At this point, we want to check if the 0th row of y
-            # overlaps with **some** row of x.
-            # We can check this by shifting y backward by the shared stride, repeatedly,
-            # until the first row of y is before the first row of x.
-            # Then we can check if these rows overlap.
-            # We can accomplish this by modding our offset by the stride.
-            offset_delta_mod = offset_delta % x.stride(0)
-            # Example:
-            # 0 1 2 3
-            # 9 10 11 12
-            # 18 19 20 21
-            # 27 28 29 30
-            #   x: size=(4, 4), stride=(9, 1), offset=0
-            #   y: size=(4, 4), stride=(9, 1), offset=22 (this would not overlap)
-            #   y: size=(4, 4), stride=(9, 1), offset=23 (this would not overlap)
-            #   y: size=(4, 4), stride=(9, 1), offset=24 (this would overlap)
-            #   y: size=(4, 4), stride=(9, 1), offset=25 (this would overlap)
-            # If the interval [modded_offset, modded_offset + x_size] falls entirely
-            # without
-            if offset_delta_mod + y.size(1) <= x.stride(0):
-                return True
-    return False
-
-
 def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
     max_aliased_inps_w_dyn_shapes = (
         config._max_aliased_inputs_with_dynamic_shapes_enabled
@@ -418,15 +341,11 @@ are aliased and mutated, and they should be dynamic, please file an issue.
             suppress_guards = shape_env.suppress_guards
 
     with suppress_guards():
-        for j in range(num_aliases):
-            for i in range(j):
-                j_ = aliased_input_indices[j]
-                i_ = aliased_input_indices[i]
-                if not _tensors_definitely_do_not_overlap(
-                    fwd_inputs[i_], fwd_inputs[j_]
-                ):
-                    actual_aliased_indices.add(i_)
-                    actual_aliased_indices.add(j_)
+        aliased_fwd_inputs = [fwd_inputs[i] for i in aliased_input_indices]
+        actual_aliased_indices = {
+            aliased_input_indices[i]
+            for i in compute_overlapping_tensors(aliased_fwd_inputs)
+        }
 
     no_overlap_indices = list(set(aliased_input_indices) - actual_aliased_indices)
 

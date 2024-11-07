@@ -1463,7 +1463,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         guard_failure = self._get_guard_failure_on_overlapping_view_inputs(f, overlapping_args, non_overlapping_args)
         self.assertExpectedInline(
             guard_failure[0],
-            """0/0: ___check_overlapping(overlapping=[L['args'][1], L['args'][2]], non_overlapping=[L['args'][0]])""",
+            """0/0: check_overlapping(overlapping=[L['args'][1], L['args'][2]], non_overlapping=[L['args'][0]])""",
         )
 
     def test_different_inputs_overlapping_set_with_mutation(self):
