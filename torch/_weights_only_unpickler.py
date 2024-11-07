@@ -159,6 +159,11 @@ def _tensor_rebuild_functions():
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
 def _get_allowed_globals():
+    dtensor_module = (
+        torch.distributed.tensor
+        if hasattr(torch.distributed, "tensor")
+        else torch.distributed._tensor
+    )
     rc: Dict[str, Any] = {
         "collections.OrderedDict": OrderedDict,
         "collections.Counter": Counter,
@@ -171,13 +176,13 @@ def _get_allowed_globals():
         "builtins.bytearray": bytearray,  # for bytearray
         "builtins.set": set,  # for set
         # DTensor related
-        "torch.distributed.tensor.DTensor": torch.distributed.tensor.DTensor,
-        "torch.distributed.tensor._dtensor_spec.DTensorSpec": torch.distributed.tensor._dtensor_spec.DTensorSpec,
         "torch.distributed.device_mesh.DeviceMesh": torch.distributed.device_mesh.DeviceMesh,
-        "torch.distributed.tensor.placement_types.Shard": torch.distributed.tensor.placement_types.Shard,
-        "torch.distributed.tensor.placement_types.Replicate": torch.distributed.tensor.placement_types.Replicate,
-        "torch.distributed.tensor.placement_types.Partial": torch.distributed.tensor.placement_types.Partial,
-        "torch.distributed.tensor._dtensor_spec.TensorMeta": torch.distributed.tensor._dtensor_spec.TensorMeta,
+        "torch.distributed.tensor._dtensor_spec.DTensorSpec": dtensor_module._dtensor_spec.DTensorSpec,
+        "torch.distributed.tensor._dtensor_spec.TensorMeta": dtensor_module._dtensor_spec.TensorMeta,
+        "torch.distributed.tensor.DTensor": dtensor_module.DTensor,
+        "torch.distributed.tensor.placement_types.Shard": dtensor_module.placement_types.Shard,
+        "torch.distributed.tensor.placement_types.Replicate": dtensor_module.placement_types.Replicate,
+        "torch.distributed.tensor.placement_types.Partial": dtensor_module.placement_types.Partial,
     }
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
