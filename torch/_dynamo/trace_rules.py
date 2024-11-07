@@ -2956,6 +2956,12 @@ class FunctionIdSet:
     ) -> None:
         self.lazy_initializer = lazy_initializer
 
+    def clear(self):
+        if self.function_ids is not None:
+            self.function_ids.clear()
+        if self.function_names is not None:
+            self.function_names.clear()
+
     def __call__(self) -> Set[int]:
         if self.function_ids is None:
             value = self.lazy_initializer()
