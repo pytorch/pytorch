@@ -418,8 +418,6 @@ class ContextlibContextManagerFunctionVariable(BaseUserFunctionVariable):
         except exc.ObservedException as e:
             tx.exn_vt_stack.extend(tracer.exn_vt_stack)
             raise e
-        # except exc.Unsupported as e:
-        #     raise exc.SkipCodeRecursiveException from e
 
 
 class UserMethodVariable(UserFunctionVariable):
