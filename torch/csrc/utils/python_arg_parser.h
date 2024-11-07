@@ -101,7 +101,6 @@ enum class ParameterType {
   SCALAR,
   INT64,
   SYM_INT,
-  SYM_FLOAT,
   DOUBLE,
   COMPLEX,
   TENSOR_LIST,
@@ -122,7 +121,6 @@ enum class ParameterType {
   FLOAT_LIST,
   SCALAR_LIST,
   SYM_INT_LIST,
-  SYM_FLOAT_LIST,
   DISPATCH_KEY_SET
 };
 
@@ -704,12 +702,7 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     PyObject* obj =
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
-      if (torch::is_symfloat(py::handle(obj))) {
-        res[idx] = py::cast<c10::SymFloat>(py::handle(obj))
-                       .guard_float(__FILE__, __LINE__);
-      } else {
-        res[idx] = THPUtils_unpackDouble(obj);
-      }
+      res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception&) {
       throw TypeError(
           "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
