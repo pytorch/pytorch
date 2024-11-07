@@ -1216,7 +1216,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             make_attr(tx, combine_fn_name),
             xs_proxy,
             dim.as_proxy(),
-            additional_inputs_proxy
+            additional_inputs_proxy,
         )
 
         with tx.fake_mode:

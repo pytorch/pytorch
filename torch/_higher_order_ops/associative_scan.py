@@ -133,11 +133,11 @@ def associative_scan(
             "Combine_mode must either 'pointwise' or 'generic', but got {combine_mode}"
         )
 
-    # if not torch._dynamo.is_compiling():
-    #     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-    #         return torch.compile(associative_scan, fullgraph=True)(
-    #             combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode
-    #         )
+    if not torch._dynamo.is_compiling():
+        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+            return torch.compile(associative_scan, fullgraph=True)(
+                combine_fn, xs, dim, reverse=reverse, combine_mode=combine_mode
+            )
 
     leaves, spec = pytree.tree_flatten(xs)
 
@@ -227,7 +227,9 @@ def associative_scan(
             spec=spec,
             num_leaves=len(leaves),
         )
-        result_flat = generic_associative_scan(combine_fn, leaves, dim, additional_inputs=[])
+        result_flat = generic_associative_scan(
+            combine_fn, leaves, dim, additional_inputs=[]
+        )
     else:
         combine_fn = functools.partial(
             wrap_combine_fn_flat,
@@ -429,7 +431,10 @@ def associative_scan_functionalize(ctx, combine_fn, xs, dim, additional_inputs):
             _maybe_run_with_interpreter(combine_fn)
         )
         ret = associative_scan_op(
-            functional_combine_fn, unwrapped_xs, unwrapped_dim, unwrapped_additional_inputs
+            functional_combine_fn,
+            unwrapped_xs,
+            unwrapped_dim,
+            unwrapped_additional_inputs,
         )
     return ctx.wrap_tensors(ret)
 

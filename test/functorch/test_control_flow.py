@@ -3283,7 +3283,7 @@ class AssociativeScanTests(TestCase):
                 model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
                 inputs=inp,
             )
-            
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -3306,40 +3306,46 @@ class AssociativeScanTests(TestCase):
         def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
             def inner(xi):
                 return xi * H2
+
             ret = inner(y)
             return x + ret * H1
-        
+
         def fct_nested_outside_fake(x: torch.Tensor, y: torch.Tensor):
             def inner(xi):
                 return xi * H2
+
             ret = inner(y)
             return x + ret * H1
-        
+
         H1_i = torch.rand(4, 5, device=device)
 
-        # TODO: This triggers the vmap randomness error:
-        # RuntimeError: vmap: called random operation while in randomness error mode. 
+        # TODO: Using random tensors in the `combine_fn` triggers the vmap randomness error:
+        # RuntimeError: vmap: called random operation while in randomness error mode.
         # Please either use the 'same' or 'different' randomness flags on vmap or perform the randomness operation out of vmap
         def fct_nested_inside(x: torch.Tensor, y: torch.Tensor):
             # H2_i = torch.rand(4, 1, device=device)
             H2_i = torch.ones(4, 1, device=device) * 42
+
             def inner(xi):
                 return xi * H2_i
+
             ret = inner(y)
             return x + ret * H1
-        
+
         def fct_nested_inside_fake(x: torch.Tensor, y: torch.Tensor):
             # H2_i = torch.rand(4, 1, device=device)
             H2_i = torch.ones(4, 1, device=device) * 42
+
             def inner(xi):
                 return xi * H2_i
+
             ret = inner(y)
             return x + ret * H1
 
         inp = torch.randn(3, 4, 5, device=device)
 
         for fct, fct_fake, param in [
-            (fct_nested_outside, fct_nested_outside_fake, (H1,H2)),
+            (fct_nested_outside, fct_nested_outside_fake, (H1, H2)),
             (fct_nested_inside, fct_nested_inside_fake, (H1_i,)),
         ]:
             kwargs = {
@@ -3356,7 +3362,7 @@ class AssociativeScanTests(TestCase):
                 model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
                 inputs=inp,
             )
-            
+
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
@@ -3373,41 +3379,64 @@ class AssociativeScanTests(TestCase):
     def test_associative_scan_freevars_fct(
         self, compile_mode, combine_mode, reverse, device
     ):
-        # TODO: This testcase does not work
         def additional_fct_no_add_inp(x, y):
             return x * y
 
         def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
-            ret = associative_scan(additional_fct_no_add_inp, y, 1)
+            ret = additional_fct_no_add_inp(y, y)
             return x + ret
-        
-        def fct_nested_outside_fake(x: torch.Tensor, y: torch.Tensor):
-            ret = _fake_associative_scan(additional_fct_no_add_inp, y, 1)
-            return x + ret
-        
-        # H1_i = torch.rand(4, 5, device=device)
-        # TODO: Write here a testcase where the additional input contains some lifted parameters
 
         inp = torch.randn(3, 4, 5, device=device)
 
-        for fct, fct_fake, param in [
-            (fct_nested_outside, fct_nested_outside_fake, ()),
-            # (fct_nested_inside, fct_nested_inside_fake, (H1_i,)),
-        ]:
-            kwargs = {
-                "dim": 0,
-                "reverse": reverse,
-                "compile_mode": compile_mode,
-                "combine_fn": fct,
-                "combine_mode": combine_mode,
-            }
-            kwargs_fake = self._prepare_fake_kwargs(kwargs)
-            kwargs_fake["combine_fn"] = fct_fake
-            self._run_test(
-                model=AssociativeScanModels.CombineFn(**kwargs),
-                model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
-                inputs=inp,
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_nested_outside,
+            "combine_mode": combine_mode,
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
+
+    @unittest.skipIf(not SM70OrLater, "triton")
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("reverse", [False, True])
+    @parametrize("device", [torch.device("cpu"), torch.device("cuda")])
+    def test_associative_scan_freevars_fct_generic(self, compile_mode, reverse, device):
+        def additional_fct_no_add_inp(x, y):
+            return x * y
+
+        def fct_nested_outside(x: torch.Tensor, y: torch.Tensor):
+            ret = associative_scan(
+                additional_fct_no_add_inp, y, 1, combine_mode="generic"
             )
+            return x + ret
+
+        def fct_nested_outside_fake(x: torch.Tensor, y: torch.Tensor):
+            ret = _fake_associative_scan(additional_fct_no_add_inp, y, 1)
+            return x + ret
+
+        inp = torch.randn(3, 4, 5, device=device)
+
+        kwargs = {
+            "dim": 0,
+            "reverse": reverse,
+            "compile_mode": compile_mode,
+            "combine_fn": fct_nested_outside,
+            "combine_mode": "generic",
+        }
+        kwargs_fake = self._prepare_fake_kwargs(kwargs)
+        kwargs_fake["combine_fn"] = fct_nested_outside_fake
+        self._run_test(
+            model=AssociativeScanModels.CombineFn(**kwargs),
+            model_fake=AssociativeScanModels.CombineFn(**kwargs_fake),
+            inputs=inp,
+        )
 
     @unittest.skipIf(not SM70OrLater, "triton")
     @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
