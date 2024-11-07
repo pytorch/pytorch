@@ -1187,7 +1187,7 @@ target_include_directories(torch_cpu PRIVATE
   ${TORCH_SRC_DIR}/csrc)
 
 target_include_directories(torch_cpu PRIVATE
-  ${TORCH_ROOT}/third_party/miniz-2.1.0)
+  ${TORCH_ROOT}/third_party/miniz-3.0.2)
 
 target_include_directories(torch_cpu PRIVATE
   ${TORCH_ROOT}/third_party/kineto/libkineto/include)
