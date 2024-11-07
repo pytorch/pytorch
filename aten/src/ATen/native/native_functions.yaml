@@ -2824,6 +2824,7 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd: full_like
   autogen: full_like.out
+  tags: core
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
