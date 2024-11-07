@@ -19,7 +19,7 @@ from torch.distributed._symmetric_memory import (
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, SM90OrLater
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
@@ -882,6 +882,10 @@ class LoweringTest(MultiProcessTestCase):
 class SymmMemSingleProcTest(TestCase):
     @skipIfRocm
     @requires_cuda
+    @skipIf(
+        _get_torch_cuda_version() < (12, 0),
+        "stream_write_value32 currently only supports cuda version>=12.0",
+    )
     def test_stream_write_value32(self):
         tensor = torch.zeros(4, dtype=torch.uint32, device="cuda")
         expect = torch.tril(torch.ones(4, 4, device="cuda")).to(torch.uint32)
