@@ -1642,7 +1642,11 @@ class _ModuleStackTracer(PythonKeyTracer):
                 submodules = self.__dict__["_modules"]
                 assert isinstance(submodules, dict)
                 return {
-                    key: AttrProxy(value, tracer.proxy_paths[self] + "." + str(key))
+                    key: (
+                        AttrProxy(value, tracer.proxy_paths[self] + "." + str(key))  # type: ignore[misc]
+                        if value is not None
+                        else value
+                    )
                     for key, value in submodules.items()
                 }
 

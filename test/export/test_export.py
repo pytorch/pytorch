@@ -7258,6 +7258,25 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
         # this doesn't work today
         gm_unflat_strict = unflatten(ep)
 
+    def test_modules_access_for_deleted_submodule(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.foo = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                for name, mod in self._modules.items():
+                    if mod is None:
+                        continue
+                    pass
+                return self.linear(x)
+
+        mod = Foo()
+        mod.foo = None
+        mod(torch.randn(10, 10))
+        export(mod, (torch.randn(10, 10),), strict=False)
+
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
