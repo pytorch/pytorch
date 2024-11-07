@@ -368,21 +368,6 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-py3-clang9-mobile-custom-build-static:
-    name: linux-focal-py3-clang9-mobile-custom-build-static
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-py3-clang9-mobile-custom-build-static
-      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
-      build-generates-artifacts: false
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1 },
-        ]}
-    secrets: inherit
-
   linux-focal-py3_9-clang9-xla-build:
     name: linux-focal-py3_9-clang9-xla
     uses: ./.github/workflows/_linux-build.yml
@@ -471,32 +456,6 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single:
-    if: github.repository_owner == 'pytorch'
-    name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
-    uses: ./.github/workflows/_android-build-test.yml
-    with:
-      build-environment: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
-      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-        ]}
-    secrets: inherit
-
-  linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit:
-    if: github.repository_owner == 'pytorch'
-    name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
-    uses: ./.github/workflows/_android-build-test.yml
-    with:
-      build-environment: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
-      docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
-        ]}
-    secrets: inherit
-
   linux-jammy-py3_9-gcc11-mobile-lightweight-dispatch-build:
     name: linux-jammy-py3.9-gcc11-mobile-lightweight-dispatch-build
     uses: ./.github/workflows/_linux-build.yml
@@ -560,30 +519,6 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.test-matrix }}
-    secrets: inherit
-
-  linux-jammy-py3-clang12-executorch-build:
-    name: linux-jammy-py3-clang12-executorch
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3-clang12-executorch
-      docker-image-name: pytorch-linux-jammy-py3-clang12-executorch
-      test-matrix: |
-        { include: [
-          { config: "executorch", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-        ]}
-    secrets: inherit
-
-  linux-jammy-py3-clang12-executorch-test:
-    name: linux-jammy-py3-clang12-executorch
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-py3-clang12-executorch-build
-    with:
-      build-environment: linux-jammy-py3-clang12-executorch
-      docker-image: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3-clang12-executorch-build.outputs.test-matrix }}
     secrets: inherit
 
   linux-focal-py3_12-clang10-experimental-split-build:
