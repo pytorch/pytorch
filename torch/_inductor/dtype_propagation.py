@@ -11,7 +11,8 @@ T = TypeVar("T")
 
 class DTypeArg(Protocol):
     @property
-    def dtype(self) -> torch.dtype: ...
+    def dtype(self) -> torch.dtype:
+        ...
 
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
