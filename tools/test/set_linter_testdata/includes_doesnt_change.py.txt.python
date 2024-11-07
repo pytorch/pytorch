@@ -1,0 +1,24 @@
+# mypy: ignore-errors
+
+import collections
+import types
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+import torch
+import torch.fx
+from torch._guards import Source
+
+from ..utils import (
+    namedtuple_fields,
+    odict_values,
+    OrderedSet,
+    set_example_value,
+)
+from .base import MutableLocal, VariableTracker, VariableTrackerContainer
+
+if TYPE_CHECKING:
+    from torch._dynamo.codegen import PyCodegen
+
+
+class BaseListVariable(VariableTrackerContainer):
+    our_container = OrderedSet
