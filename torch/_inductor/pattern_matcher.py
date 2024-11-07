@@ -70,7 +70,7 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Self, TypeGuard
+from typing_extensions import Self, TypeIs
 
 import torch
 import torch._guards
@@ -78,7 +78,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
-from torch._inductor.config import trace as trace_config
 from torch._prims_common import is_integer_dtype
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -314,10 +313,10 @@ class FailedMatch(RuntimeError):
 MatchResult = Union[Match, FailedMatch]
 
 
-def is_match(m: MatchResult) -> TypeGuard[Match]:
+def is_match(m: MatchResult) -> TypeIs[Match]:
     """
-    TypeGuards cannot act on `self`. Thus this function exists to let mypy
-    recognize FailedMatch.__bool__ as a TypeGuard.
+    TypeIs cannot act on `self`. Thus this function exists to let mypy
+    recognize FailedMatch.__bool__ as a TypeIs.
     """
     return bool(m)
 
@@ -591,18 +590,25 @@ class _TargetArgsExpr(_TargetExpr):
     def pytree_flatten(
         args: Sequence[Any], kwargs: Mapping[Any, Any]
     ) -> Tuple[Sequence[Any], Union[_SimpleSpec, pytree.TreeSpec]]:
-        def norm_spec(s: pytree.TreeSpec) -> pytree.TreeSpec:
-            if s.type is None:
-                return s
-            mapping = {immutable_list: list, tuple: list, immutable_dict: dict}
-            return pytree.TreeSpec(
-                mapping.get(s.type, s.type),
-                s.context,
-                list(map(norm_spec, s.children_specs)),
-            )
+        type_mapping = {immutable_list: tuple, list: tuple, immutable_dict: dict}
 
-        flat, spec = pytree.tree_flatten([args, kwargs])
-        spec = norm_spec(spec)
+        def convert_type(x: Any) -> Any:
+            cls = type(x)
+            convert_fn = type_mapping.get(cls)
+            if convert_fn is not None:
+                return pytree.tree_map(
+                    convert_type,
+                    convert_fn(x),
+                    is_leaf=lambda x: type(x) in type_mapping,
+                )
+            return x
+
+        normalized_args_tree = pytree.tree_map(
+            convert_type,
+            (args, kwargs),
+            is_leaf=lambda x: type(x) in type_mapping,
+        )
+        flat, spec = pytree.tree_flatten(normalized_args_tree)
         return flat, spec
 
     def __repr__(self) -> str:
@@ -1759,7 +1765,7 @@ class PatternMatcherPass:
     def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
-    def apply(self, gm: torch.fx.GraphModule) -> int:
+    def apply(self, gm: Union[torch.fx.GraphModule, torch.fx.Graph]) -> int:
         if not self.patterns:
             return 0
         if isinstance(gm, torch.fx.GraphModule):
@@ -1787,9 +1793,8 @@ class PatternMatcherPass:
         if has_call_module:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
         pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
-        with GraphTransformObserver(
-            gm, pass_name, trace_config.log_url_for_graph_xform
-        ):
+        assert isinstance(gm, torch.fx.GraphModule)
+        with GraphTransformObserver(gm, pass_name):
             for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
                 target = extract_target(node)
                 if node.op == "call_module":

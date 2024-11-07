@@ -1,5 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import functools
 import itertools
 import logging
 import operator
@@ -17,7 +18,6 @@ from torch._inductor.virtualized import ops
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
-from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
 from ..codegen.common import BackendFeature, has_backend_feature
@@ -65,19 +65,6 @@ pass_patterns = [
 ]
 
 
-def apply_pass(pass_fn: Callable[[], object], name: Optional[str] = None) -> None:
-    # TODO - we should just make this part of GraphTransformObserver
-    from torch._inductor.bisect_helper import BisectionManager
-
-    debug_info: Optional[Callable[[], str]] = None
-    if name is not None:
-        debug_info = lambda: name  # noqa: E731
-
-    if BisectionManager.disable_subsystem("inductor", "post_grad_passes", debug_info):
-        return
-    pass_fn()
-
-
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
@@ -85,6 +72,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     The IR here has been normalized and functionalized.
     """
+    GraphTransformObserver = functools.partial(
+        torch.fx.passes.graph_transform_observer.GraphTransformObserver,
+        subsystem="post_grad_passes",
+    )
+
     if not torch._dynamo.config.skip_fsdp_hooks:
         remove_fsdp2_unsharded_param_graph_input_usage(gm.graph)
 
@@ -93,28 +85,28 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         gm.graph.eliminate_dead_code()
 
     if is_inference and config.reorder_for_locality:
-        apply_pass(lambda: reorder_for_locality(gm.graph), "reorder_for_locality")
+        GraphTransformObserver(gm, "reorder_for_locality").apply_graph_pass(
+            reorder_for_locality
+        )
 
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
-        with GraphTransformObserver(
-            gm, "post_grad_custom_pre_pass", config.trace.log_url_for_graph_xform
-        ):
-            apply_pass(
-                lambda: post_grad_custom_pre_pass(gm.graph), "post_grad_custom_pre_pass"
-            )
+        GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
+            post_grad_custom_pre_pass
+        )
 
     if config.pattern_matcher:
         lazy_init()
         optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
-        apply_pass(
-            lambda: group_batch_fusion_passes(gm.graph, pre_grad=False),
-            "group_batch_fusion_passes",
+        GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
+            functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
-        apply_pass(lambda: remove_noop_ops(gm.graph), "remove_noop_ops")
+        GraphTransformObserver(gm, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
         for i, patterns in enumerate(pass_patterns):
-            apply_pass(lambda: patterns.apply(gm.graph), f"pass_pattern_{i}")  # type: ignore[arg-type]
+            GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
+                patterns.apply
+            )
         for pass_name in config.post_grad_fusion_options:
             # skip all patterns for group batch fusions
             if pass_name in POST_GRAD_FUSIONS:
@@ -123,11 +115,13 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             inductor_before_change = save_inductor_dict(
                 [pattern_matcher_pass.pass_name]
             )
-            apply_pass(lambda: pattern_matcher_pass.apply(gm.graph), pass_name)  # type: ignore[arg-type]
+            GraphTransformObserver(gm, pass_name).apply_graph_pass(
+                pattern_matcher_pass.apply
+            )
             if not is_same_dict(counters["inductor"], inductor_before_change):
-                optimus_scuba_log[
-                    f"{pattern_matcher_pass.pass_name}_post_grad"
-                ] = upload_graph(gm.graph)
+                optimus_scuba_log[f"{pattern_matcher_pass.pass_name}_post_grad"] = (
+                    upload_graph(gm.graph)
+                )
         if config.b2b_gemm_pass:
             B2B_GEMM_PASS.apply(gm.graph)  # type: ignore[arg-type]
 
@@ -135,42 +129,45 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         micro_pipeline_tp_pass(gm.graph)
 
     if config._fuse_ddp_communication:
-        apply_pass(
-            lambda: fuse_ddp_communication(
-                gm.graph,
+        GraphTransformObserver(gm, "fuse_ddp_communication").apply_graph_pass(
+            lambda graph: fuse_ddp_communication(
+                graph,
                 config._fuse_ddp_communication_passes,
                 config._fuse_ddp_bucket_size,
-            ),
-            "fuse_ddp_communication",
+            )
         )
 
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
-        with GraphTransformObserver(
-            gm, "post_grad_custom_post_pass", config.trace.log_url_for_graph_xform
-        ):
-            apply_pass(
-                lambda: post_grad_custom_post_pass(gm.graph),
-                "post_grad_custom_post_pass",
-            )
+        GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
+            post_grad_custom_post_pass
+        )
 
-    apply_pass(lambda: stable_topological_sort(gm.graph), "stable_sort")
+    GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
 
-    apply_pass(lambda: move_constructors_to_gpu(gm.graph), "move_constructors_to_cuda")
+    GraphTransformObserver(gm, "move_constructors_to_cuda").apply_graph_pass(
+        move_constructors_to_gpu
+    )
 
     fake_tensor_updater.incremental_update()
 
     # Keep these last, since they introduces mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
-    apply_pass(lambda: reinplace_inplaceable_ops(gm.graph), "reinplace_inplaceable_ops")
-    apply_pass(
-        lambda: decompose_auto_functionalized(gm.graph), "decompose_auto_functionalized"
+    GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
+        reinplace_inplaceable_ops
+    )
+    GraphTransformObserver(
+        gm, "decompose_triton_kernel_wrapper_functional"
+    ).apply_graph_pass(decompose_triton_kernel_wrapper_functional)
+    GraphTransformObserver(gm, "decompose_auto_functionalized").apply_graph_pass(
+        decompose_auto_functionalized
+    )
+    GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
+        comms.reinplace_fsdp_all_gather
     )
 
-    apply_pass(
-        lambda: comms.reinplace_fsdp_all_gather(gm.graph), "reinplace_fsdp_all_gather"
+    GraphTransformObserver(gm, "lower_scan_to_while_loop").apply_gm_pass(
+        lower_scan_to_while_loop_pass
     )
-
-    apply_pass(lambda: lower_scan_to_while_loop_pass(gm))
 
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
@@ -745,9 +742,48 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 graph.erase_node(node)
 
 
+def decompose_triton_kernel_wrapper_functional(graph):
+    """Decomposes triton_kernel_wrapper_functional nodes into clones and the underlying
+    mutation node.
+
+    We assume that the reinplacing pass runs before this; the reinplacing pass
+    tells us (via rewriting the arguments or .meta to those nodes) which
+    Tensors we should clone and which Tensors are safe to reinplace.
+    """
+    graph_pass = PatternMatcherPass()
+
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional_dense,
+        )
+
+        flat_args, spec = pytree.tree_flatten((args, kwargs))
+
+        # NB: we combine (args, kwargs) into flat args for replacing.
+        # This is replace_by_example uses make_fx which does not support
+        # tracing a function with kwargs.
+        def decomp(*flat_args):
+            args, kwargs = pytree.tree_unflatten(flat_args, spec)
+            return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
+
+        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
+
+    graph_pass.apply(graph)
+
+    for node in graph.find_nodes(
+        op="call_function",
+        target=torch.ops.higher_order.triton_kernel_wrapper_functional,
+    ):
+        raise AssertionError("triton_kernel_wrapper_functional was not removed")
+
+
 def decompose_auto_functionalized(graph):
-    """Decomposes auto_functionalized and triton_kernel_wrapper_functional
-    nodes into clones and the underlying mutation node.
+    """Decomposes auto_functionalized nodes into clones and the underlying
+    mutation node.
 
     We assume that the reinplacing pass runs before this; the reinplacing pass
     tells us (via rewriting the arguments or .meta to those nodes) which
@@ -776,26 +812,6 @@ def decompose_auto_functionalized(graph):
             assert len(args) == 1
             mode = args[0]
             return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
-
-        match.replace_by_example(decomp, flat_args, run_functional_passes=False)
-
-    @register_graph_pattern(
-        CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
-        pass_dict=graph_pass,
-    )
-    def _(match: Match, *args, **kwargs):
-        from torch._higher_order_ops.triton_kernel_wrap import (
-            triton_kernel_wrapper_functional_dense,
-        )
-
-        flat_args, spec = pytree.tree_flatten((args, kwargs))
-
-        # NB: we combine (args, kwargs) into flat args for replacing.
-        # This is replace_by_example uses make_fx which does not support
-        # tracing a function with kwargs.
-        def decomp(*flat_args):
-            args, kwargs = pytree.tree_unflatten(flat_args, spec)
-            return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
 
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
@@ -839,12 +855,6 @@ def decompose_auto_functionalized(graph):
     ):
         raise AssertionError("auto_functionalized_v2 was not removed")
 
-    for node in graph.find_nodes(
-        op="call_function",
-        target=torch.ops.higher_order.triton_kernel_wrapper_functional,
-    ):
-        raise AssertionError("triton_kernel_wrapper_functional was not removed")
-
 
 def lower_scan_to_while_loop_pass(gm: torch.fx.GraphModule):
     graph_pass = PatternMatcherPass()
@@ -871,7 +881,9 @@ def lower_scan_to_while_loop_pass(gm: torch.fx.GraphModule):
         assert isinstance(specialized_dim, int)
         fake_scan_length = fx_xs[0].meta["val"].size()[specialized_dim]
 
-        def lower_to_while_loop(*args):
+        def lower_to_while_loop(*args, **kwargs):
+            assert len(kwargs) == 0
+
             def maybe_reverse_idx(loop_idx: Union[torch.SymInt, int]):
                 return loop_idx if not reverse else fake_scan_length - loop_idx - 1
 
@@ -913,13 +925,54 @@ def lower_scan_to_while_loop_pass(gm: torch.fx.GraphModule):
                 additional_inputs,
                 scan_length,
             ) = pytree.tree_unflatten(args, tree_spec)
-            next_carry, y_subgraph_outs = run_subgraph(
-                init, xs, additional_inputs, maybe_reverse_idx(0)
+
+            def resolve_shape_to_proxy(shape, sub_graph_args):
+                from torch.utils._sympy.interp import sympy_interp
+                from torch.utils._sympy.reference import PythonReferenceAnalysis
+
+                bound_symbols = {}
+                for arg in sub_graph_args:
+                    if isinstance(arg, torch.SymInt):
+                        bound_symbols[arg.node.expr] = arg
+                ret = []
+                for s in shape:
+                    if isinstance(s, torch.SymInt):
+                        ret.append(
+                            sympy_interp(
+                                PythonReferenceAnalysis,
+                                bound_symbols,
+                                s.node.expr,
+                            ),
+                        )
+                    else:
+                        assert isinstance(s, int)
+                        ret.append(s)
+                return ret
+
+            _, ys_outputs = _extract_carry_and_out(
+                cur_node.meta["val"], num_init_leaves
             )
-            ys_outs = [y.repeat(scan_length, *([1] * y.ndim)) for y in y_subgraph_outs]
+            ys_outs = []
+            for ys_out in ys_outputs:
+                shape_proxies = resolve_shape_to_proxy(
+                    ys_out.size(), pytree.tree_leaves(args)
+                )
+                stride_proxies = resolve_shape_to_proxy(
+                    ys_out.stride(), pytree.tree_leaves(args)
+                )
+                ys_outs.append(
+                    torch.empty_strided(
+                        shape_proxies,
+                        stride_proxies,
+                        device=ys_out.device,
+                        dtype=ys_out.dtype,
+                        layout=ys_out.layout,
+                        requires_grad=ys_out.requires_grad,
+                    )
+                )
 
             while_loop_operands, while_loop_spec = pytree.tree_flatten(
-                (next_carry, xs, additional_inputs, 1, ys_outs)
+                (init, xs, additional_inputs, 0, ys_outs)
             )
             last_carry, _, _, _, ys_outs = pytree.tree_unflatten(
                 torch.ops.higher_order.while_loop(
