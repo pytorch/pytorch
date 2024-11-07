@@ -37,6 +37,7 @@ def create_one_event(
         "output_dtypes": output_dtypes,
         "collective_seq_id": str(collective_seq_id),
         "p2p_seq_id": str(p2p_seq_id),
+        "time_created_ns": 0,
     }
 
 
