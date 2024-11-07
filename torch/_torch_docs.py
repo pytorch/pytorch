@@ -13829,7 +13829,7 @@ are freshly created instead of aliasing the input.
 add_docstr(
     torch.expand_copy,
     r"""
-Performs the same operation as :func:`torch.expand`, but all output tensors
+Performs the same operation as :func:`torch.Tensor.expand`, but all output tensors
 are freshly created instead of aliasing the input.
 """,
 )

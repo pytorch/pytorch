@@ -1996,7 +1996,7 @@ def gradcheck(
     .. warning::
        If any checked tensor in :attr:`input` has overlapping memory, i.e.,
        different indices pointing to the same memory address (e.g., from
-       :func:`torch.expand`), this check will likely fail because the numerical
+       :func:`torch.Tensor.expand`), this check will likely fail because the numerical
        gradients computed by point perturbation at such indices will change
        values at all other indices that share the same memory address.
 
@@ -2150,7 +2150,7 @@ def gradgradcheck(
     .. warning::
        If any checked tensor in :attr:`input` and :attr:`grad_outputs` has
        overlapping memory, i.e., different indices pointing to the same memory
-       address (e.g., from :func:`torch.expand`), this check will likely fail
+       address (e.g., from :func:`torch.Tensor.expand`), this check will likely fail
        because the numerical gradients computed by point perturbation at such
        indices will change values at all other indices that share the same
        memory address.
