@@ -26,18 +26,10 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 
-from .utils import _from_fun, _maybe_reenter_make_fx, create_fw_bw_graph
+from .utils import _from_fun, create_fw_bw_graph
 
 
 aten = torch._ops.ops.aten
-
-
-def get_gradient_mask(tensor_list):
-    return [True if v is not None and v.requires_grad else False for v in tensor_list]
-
-
-def mask_gradient(grads, mask):
-    return [g for g, m in zip(grads, mask) if m]
 
 
 def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
@@ -96,6 +88,15 @@ def create_fw_bw_graph_combinefn(combine_fn, xs):
             fw_xs_2 = [first_slice_copy(pytree.tree_map(_from_fun, x)) for x in xs]
             outs = combine_fn(*fw_xs_1, *fw_xs_2)
 
+            # TODO: Support partial Autograd for associative_scan later
+            if pytree.tree_any(
+                lambda t: not t.requires_grad,  # type: ignore[union-attr]
+                (outs),
+            ):
+                raise RuntimeError(
+                    "gradient flags of the combine_fn output differ from the xs. Consider checking for `torch.no_grad()` statements?"
+                )
+
             fw_outputs = [pytree.tree_map(_from_fun, o) for o in outs]
             if any(not isinstance(out, torch.Tensor) for out in fw_outputs):
                 raise RuntimeError(
@@ -110,18 +111,7 @@ def create_fw_bw_graph_combinefn(combine_fn, xs):
                 (*fw_outputs,),
             )
 
-            gradient_mask_post = get_gradient_mask(outs)
-
-            def wrapper(*args):
-                grads = joint_graph(*args)
-                grads = mask_gradient(grads, gradient_mask_post * 2)
-                return (*grads,)
-
-            joint_graph = _maybe_reenter_make_fx(wrapper)(
-                *fw_outputs, *fw_xs_1, *fw_xs_2
-            )
-
-        return fw_graph, joint_graph, gradient_mask_post
+        return fw_graph, joint_graph
 
 
 class AssociativeScanOp(HigherOrderOperator):
@@ -454,20 +444,14 @@ class ScanAutogradOp(torch.autograd.Function):
         ctx,
         fw_graph,
         joint_graph,
-        gradient_mask,
-        *flat_args,
+        *xs,
     ):
-        xs = flat_args
-
         ctx._joint_graph = joint_graph
-        ctx._dim = 0
-
         num_xs = len(xs)
         ctx._num_xs = num_xs
 
         scan_length = xs[0].shape[0]
         ctx._scan_length = scan_length
-        ctx._gradient_mask = gradient_mask
         ctx._mapped_joint_graph = torch.vmap(joint_graph, 0, 0)
 
         with torch._C._AutoDispatchBelowAutograd():
@@ -477,7 +461,7 @@ class ScanAutogradOp(torch.autograd.Function):
         return (*outs,)
 
     @staticmethod
-    def backward(ctx, *flat_grads_unmasked):
+    def backward(ctx, *flat_grads):
         r"""
         This function computes the gradients of the scan operation.
         It does so by factorizing the components of the chainrule into
@@ -574,8 +558,6 @@ class ScanAutogradOp(torch.autograd.Function):
         dim = 0
         scan_length = ctx._scan_length
         num_xs = ctx._num_xs
-        gradient_mask = ctx._gradient_mask
-        num_xs_masked = sum(gradient_mask)
 
         # Extract the inputs to the forward path and outputs from the forward path
         flat_args = ctx.saved_tensors
@@ -587,26 +569,11 @@ class ScanAutogradOp(torch.autograd.Function):
         # vmap joint graph over scan dimension
         mapped_joint_graph = ctx._mapped_joint_graph
 
-        # TODO: This function can be shared with scan
-        def expand_grads_with_None(real_grads, mask):
-            g_list = []
-            true_cnt = 0
-            for m in mask:
-                if m:
-                    g_list.append(real_grads[true_cnt])
-                    true_cnt += 1
-                else:
-                    g_list.append(None)
-            return g_list
-
         with torch._C._AutoDispatchBelowAutograd():
             """Step 1"""
             shifted_outs = [
                 torch.concat([ones, aten.slice(o, 0, 0, -1, 1)], 0) for o in outs
             ]
-
-            # Mask the gradients for the variables that do not require gradients for partial gradient support
-            flat_grads = [fg for fg, m in zip(flat_grads_unmasked, gradient_mask) if m]
 
             # Function to compute the gradients with respect
             # *) to the inputs (xs) -> grads_xs
@@ -637,8 +604,8 @@ class ScanAutogradOp(torch.autograd.Function):
             # Compute the grads_xs and grads_hs by collecting all the partial gradients
             grads_intermediate = compute_grad_hs_xs()
             grads_h_parts, grads_x_parts = (
-                grads_intermediate[:num_xs_masked],
-                grads_intermediate[num_xs_masked:],
+                grads_intermediate[:num_xs],
+                grads_intermediate[num_xs:],
             )
 
             # Helper variables to generate the gradient matrix
@@ -762,10 +729,7 @@ class ScanAutogradOp(torch.autograd.Function):
                 0,
             )
 
-            # Mask all gradients for input variables that do not require gradients
-            grads = expand_grads_with_None(grads, gradient_mask)
-
-            return *[None] * 3, *grads
+            return *[None] * 2, *grads
 
 
 @associative_scan_op.py_impl(DispatchKey.Autograd)
@@ -781,6 +745,15 @@ def associative_scan_autograd(combine_fn, xs):
         with torch._C._AutoDispatchBelowAutograd():
             return associative_scan_op(combine_fn, xs)
 
+    # TODO: Support partial Autograd for associative_scan later
+    if pytree.tree_any(
+        lambda t: not t.requires_grad,  # type: ignore[union-attr]
+        (xs),
+    ):
+        raise RuntimeError(
+            "associative_scan currently only supports Autograd if all xs require gradients."
+        )
+
     # TODO: The create_fw_bw is always invoked twice:
     # Once in the forward path and
     # once in the backward path, where it should only be invoked for the grad grad case.
@@ -794,13 +767,11 @@ def associative_scan_autograd(combine_fn, xs):
     (
         fw_graph,
         joint_graph,
-        gradient_mask,
     ) = create_fw_bw_graph_combinefn(combine_fn, xs)
 
     flat_out = ScanAutogradOp.apply(
         fw_graph,
         joint_graph,
-        gradient_mask,
         *xs,
     )
     return (*flat_out,)
