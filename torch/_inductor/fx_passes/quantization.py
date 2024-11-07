@@ -2567,12 +2567,13 @@ def _register_smooth_quant_int_mm_pattern():
                         )
                         if expand_a_scale
                         else KeywordArg("x_scale")
-                    )
+                    ),
                 ),
                 KeywordArg("w_scale"),
             ),
             KeywordArg("out_shape_no_bias"),
         )
+
     # for torch.compile(dynamic=False)
     pattern_no_bias_1 = get_pattern_no_bias(expand_a_scale=False)
     pattern_with_bias_1 = CallFunction(
@@ -2597,19 +2598,21 @@ def _register_smooth_quant_int_mm_pattern():
     )
 
     def _validate_pattern(match: Match):
-        if not len(match.nodes) in [6, 7, 10]:
+        if len(match.nodes) not in [6, 7, 10]:
             return False
         if len(match.nodes) == 10:
             # Check the two tailing reshape nodes can be fused
             if match.nodes[9].args[1] != match.nodes[6].args[1]:
                 return False
-        if len(match.nodes) == 10 or (len(match.nodes) == 7 and match.nodes[6].target is aten.add.Tensor):
+        if len(match.nodes) == 10 or (
+            len(match.nodes) == 7 and match.nodes[6].target is aten.add.Tensor
+        ):
             bias_idx = 7 if len(match.nodes) == 10 else 6
             # Check bias shape
             bias_node = match.nodes[bias_idx].args[1]
             if not isinstance(bias_node, torch.fx.node.Node):
                 return False
-            if len(bias_node.meta.get("tensor_meta").shape) != 1:
+            if len(bias_node.meta.get("tensor_meta").shape) != 1:  # type: ignore[union-attr]
                 return False
         return True
 
@@ -2720,7 +2723,9 @@ def _register_smooth_quant_int_mm_pattern():
                         aten.mul.Tensor, args=(new_linear_node, x_scale)
                     )
                     # Add bias and reshape
-                    out_shape = kwargs.get("out_shape_with_bias", kwargs["out_shape_no_bias"])
+                    out_shape = kwargs.get(
+                        "out_shape_with_bias", kwargs["out_shape_no_bias"]
+                    )
                     if bias is not None:
                         new_out_node = match.graph.call_function(
                             aten.add.Tensor, args=(new_out_node, bias)

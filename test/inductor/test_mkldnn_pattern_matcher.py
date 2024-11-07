@@ -145,7 +145,7 @@ class TestPatternMatcherBase(TestCase):
         dtype=None,
         is_dynamic=False,
         quantizer=None,
-        compile_options={},
+        compile_options={},  # noqa: B006
     ):
         counters.clear()
         torch._dynamo.reset()
@@ -2853,7 +2853,11 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.per_channel_quant = per_channel_quant
                 a_scale_per_tensor = torch.rand([1], dtype=dtype) * 0.01 + 0.01
                 a_scale_per_channel = torch.rand([M, 1], dtype=dtype) * 0.01 + 0.01
-                self.a_scale = a_scale_per_channel if self.per_channel_quant else a_scale_per_tensor
+                self.a_scale = (
+                    a_scale_per_channel
+                    if self.per_channel_quant
+                    else a_scale_per_tensor
+                )
                 self.b_scale = torch.rand([out_feature]) * 0.01 + 0.01
                 self.b_scale = self.b_scale.to(dtype)
                 self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
