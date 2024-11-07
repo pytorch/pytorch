@@ -135,6 +135,7 @@ class Verifier(metaclass=_VerifierMeta):
             math.ceil,
             math.floor,
             math.trunc,
+            round,
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
