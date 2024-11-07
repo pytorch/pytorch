@@ -2980,10 +2980,10 @@ class SourcelessUserDefinedObjectBuilder:
     def create(tx: "InstructionTranslator", value) -> VariableTracker:
         value_type = type(value)
         if issubclass(value_type, MutableMapping):
-            return MutableMappingVariable(value, mutable_local=ValueMutationNew())
+            return MutableMappingVariable(value, mutation_type=ValueMutationNew())
         elif isinstance(value, torch.nn.Module):
             return UnspecializedNNModuleVariable(
-                value, mutable_local=ValueMutationNew()
+                value, mutation_type=ValueMutationNew()
             )
         else:
-            return UserDefinedObjectVariable(value, mutable_local=ValueMutationNew())
+            return UserDefinedObjectVariable(value, mutation_type=ValueMutationNew())
