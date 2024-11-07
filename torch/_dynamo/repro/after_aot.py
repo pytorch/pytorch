@@ -25,6 +25,7 @@ from torch._dynamo.debug_utils import (
     backend_accuracy_fails,
     BuckTargetWriter,
     cast_to_fp64,
+    extra_deps,
     extra_imports,
     generate_config_string,
     helper_for_dump_minify,
@@ -36,6 +37,7 @@ from torch._dynamo.debug_utils import (
     NopInputReader,
     same_two_models,
 )
+from torch._dynamo.trace_rules import is_fbcode
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
@@ -225,6 +227,38 @@ def wrap_compiler_debug(
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
+def maybe_fbcode_instructions():
+    if is_fbcode:
+        extra_deps_formatted = "\n".join([f'        "{dep}",' for dep in extra_deps])
+        if len(extra_deps_formatted) > 0:
+            extra_deps_formatted = "\n" + extra_deps_formatted
+        return f"""\
+\"\"\"
+To run this script in fbcode:
+- Create a directory (//scripts/{{your_unixname}}/repro)
+- Put this file in scripts/{{your_unixname}}/repro/fx_graph_runnable.py
+- Add a TARGETS file that looks like the following
+- `buck2 run //scripts/{{your_unixname}}/repro:repro`
+
+NOTE: you may need additional deps to actually be able to run the script.
+```
+# Contents of TARGETS file
+load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+
+python_binary(
+    name = "repro",
+    main_src = "fx_graph_runnable.py",
+    deps = [
+        "//caffe2:torch",{extra_deps_formatted}
+    ],
+)
+```
+\"\"\"
+"""
+    else:
+        return ""
+
+
 def generate_compiler_repro_string(
     gm, args, *, stable_output=False, save_dir=None, stable_hash=False
 ):
@@ -243,6 +277,7 @@ isolate_fails_code_str = None
 
 {extra_imports}
 
+{maybe_fbcode_instructions()}
         """
     )
     if not stable_output:
@@ -269,7 +304,9 @@ isolate_fails_code_str = None
         elif arg is None:
             writer.const(placeholder)
         else:
-            raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
+            # It's better to produce a slightly wrong repro string than none
+            # at all
+            writer.unsupported(placeholder, arg)
 
     model_str += "\n".join(writer.lines()) + "\n"
 
