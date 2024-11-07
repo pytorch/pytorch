@@ -1150,6 +1150,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if isinstance(subobj, types.MethodType):
                 if dynamic_subobj.__self__ is not self.value:
+                    if not isinstance(dynamic_subobj.__func__, types.FunctionType):
+                        unimplemented(
+                            f"Found a method whose __func__ is not of FunctionType - {dynamic_subobj}"
+                        )
+
                     from .builder import SourcelessUserDefinedObjectBuilder
 
                     # This means that we are calling a method of some other object here.
