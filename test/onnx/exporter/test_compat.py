@@ -3,6 +3,11 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
+
+import onnx
+
 import torch
 from torch.onnx._internal.exporter import _compat
 from torch.testing._internal import common_utils
@@ -11,6 +16,22 @@ from torch.testing._internal import common_utils
 class SampleModelForDynamicShapes(torch.nn.Module):
     def forward(self, x, b):
         return x.relu(), b.sigmoid()
+
+
+class NestedModelForDynamicShapes(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.u = torch.nn.Buffer(torch.ones(1))
+        self.v = torch.nn.Buffer(torch.ones(1))
+
+    def forward(self, x, ys, zs, c):
+        y = ys[0] + ys[1] + zs["a"] + zs["b"]
+        self.v.add_(3)
+        w = self.u - self.v
+        if x.shape[0] < 3 and c.shape[0] != 4:
+            return x + w, x + y
+        else:
+            return x - w, x - y
 
 
 @common_utils.instantiate_parametrized_tests
@@ -93,6 +114,32 @@ class TestCompat(common_utils.TestCase):
             "e": {0: "dim"},
         }
         self.assertEqual(dynamic_axes, expected_dynamic_axes)
+
+        model = NestedModelForDynamicShapes()
+        input = (
+            torch.ones(5),
+            [torch.zeros(5), torch.ones(5)],
+            {"a": torch.zeros(5), "b": torch.ones(5)},
+            torch.ones(4),
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            filename = os.path.join(temp, "model.onnx")
+            torch.onnx.export(
+                model,
+                input,
+                filename,
+                dynamic_axes=dynamic_axes,
+                input_names=input_names,
+            )
+            onnx_model = onnx.load(filename)
+
+        self.assertTrue(
+            all(
+                input.type.tensor_type.shape.dim[0].dim_param
+                for input in onnx_model.graph.input
+            )
+        )
 
 
 if __name__ == "__main__":
