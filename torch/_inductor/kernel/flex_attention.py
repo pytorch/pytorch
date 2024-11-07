@@ -871,7 +871,8 @@ def flex_attention(
         ]
 
         # On ROCm convert num_stages to 1 to avoid shmem issues
-        configs = [(c[0], c[1], c[2], 1) for c in configs]
+        if torch.version.hip:
+            configs = [(c[0], c[1], c[2], 1) for c in configs]
 
     # Mark SPARSE_KV_BLOCK_SIZE & SPARSE_Q_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
