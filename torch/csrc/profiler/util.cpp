@@ -431,7 +431,9 @@ std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
 }
 
 std::unordered_map<std::string, std::string> saveNcclMeta(
+    // @lint-ignore CLANGTIDY
     const at::RecordFunction& fn,
+    // @lint-ignore CLANGTIDY
     bool truncate) {
   std::unordered_map<std::string, std::string> map;
 #ifdef USE_DISTRIBUTED
