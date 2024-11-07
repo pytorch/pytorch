@@ -36,7 +36,7 @@ std::vector<IValue> boxInputs(const ProcessedNode& pnode) {
 
 } // namespace
 
-C10_DEFINE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
+C10_DEFINE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor)
 
 bool nativeOpIsRegistered(const c10::Symbol& op_name) {
   const std::string name(op_name.toQualString());
