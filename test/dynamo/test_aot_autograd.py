@@ -1535,14 +1535,14 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
         self._test_no_storage_overlap_guards(f, overlapping_args)
 
-    def test_no_storage_overlap_guards_no_overlapping(self):
+    def test_no_storage_overlap_guards_no_aliasing(self):
         def f(a, b):
             a.add_(1)
             b.add_(1)
             return a
 
         def non_overlapping_args(input):
-            return input[:10], input[10:]
+            return input[:10], torch.arange(20)[5:15]
 
         self._test_no_storage_overlap_guards(f, non_overlapping_args)
 
