@@ -18,6 +18,7 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 import torch
 
 from .functions import (
+    CustomAdd,
     CeilToInt,
     CleanDiv,
     FloatPow,
@@ -73,6 +74,7 @@ def handlers():
         TruncToFloat: "trunc",
         Where: "where",
         sympy.Add: "add",
+        CustomAdd: "add",
         sympy.Mul: "mul",
         FloatPow: "pow",
         PowByNatural: "pow_by_natural",
