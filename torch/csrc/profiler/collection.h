@@ -677,7 +677,8 @@ TORCH_API bool get_cuda_sync_enabled();
 TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
 TORCH_API void set_cuda_sync_enabled_val(bool);
 
-// Comms related RecordFunctions will record information about tensor storage locations.
+// Comms related RecordFunctions will record information about tensor storage
+// locations.
 TORCH_API bool get_record_tensor_addrs_enabled();
 TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()>);
 TORCH_API void set_record_tensor_addrs_enabled_val(bool);

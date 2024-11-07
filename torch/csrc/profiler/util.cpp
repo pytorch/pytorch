@@ -1,6 +1,6 @@
 #include <torch/csrc/autograd/function.h>
-#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/collection.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/util.h>
 
 #include <c10/util/ArrayRef.h>
@@ -376,8 +376,8 @@ inline std::string format_list(ListLikeType list, bool truncate) {
   return fmt::format("\"[{}]\"", fmt::join(list.begin(), list.end(), ", "));
 }
 
-
-std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(const c10::IValue& val) {
+std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
+    const c10::IValue& val) {
   if (val.isTensor()) {
     // Store hints about where the input starts in memory.
     // Useful for debugging memory access patterns.
@@ -878,18 +878,21 @@ uint64_t computeFlops(
 
 // A function that takes an IValue
 // and returns a conventional string representation of the IValue
-// Currently it returns int representation of the last 8 bits of the address value
+// Currently it returns int representation of the last 8 bits of the address
+// value
 int getTensorStartHint(const at::Tensor& t) {
   const auto tensor_impl = t.unsafeGetTensorImpl();
   uintptr_t storage_addr = 0;
   storage_addr = reinterpret_cast<uintptr_t>(tensor_impl->storage().data());
   int last_8_bits = static_cast<int>(storage_addr & 0xFF);
-  // std::vector<std::string> resp = {std::to_string(storage_addr)/*, std::to_string(last_8_bits)*/};
-  // return vectorToString(resp);
+  // std::vector<std::string> resp = {std::to_string(storage_addr)/*,
+  // std::to_string(last_8_bits)*/}; return vectorToString(resp);
   return last_8_bits;
 }
 
-bool checkFunctionOutputsForLogging(const at::RecordFunction& fn, const char* fn_name) {
+bool checkFunctionOutputsForLogging(
+    const at::RecordFunction& fn,
+    const char* fn_name) {
   const auto& outputs = fn.outputs();
   auto num_outputs = fn.num_outputs();
   VLOG(2) << "outputs: " << num_outputs << " " << outputs.size() << '\n';
@@ -899,14 +902,16 @@ bool checkFunctionOutputsForLogging(const at::RecordFunction& fn, const char* fn
   // TORCH_INTERNAL_ASSERT(num_outputs <= outputs.size());
   if (num_outputs > outputs.size()) {
     LOG(WARNING) << "Profiler: RecordFunction " << fn_name
-                  << " expected num_outputs=" << num_outputs
-                  << " > outputs.size()=" << outputs.size();
+                 << " expected num_outputs=" << num_outputs
+                 << " > outputs.size()=" << outputs.size();
     return false;
   }
   return true;
 }
 
-bool checkFunctionInputsForLogging(const at::RecordFunction& fn, const char* fn_name) {
+bool checkFunctionInputsForLogging(
+    const at::RecordFunction& fn,
+    const char* fn_name) {
   auto num_inputs = fn.num_inputs();
   const auto inputs = fn.inputs();
   VLOG(2) << "inputs: " << num_inputs << " " << inputs.size() << '\n';
@@ -916,8 +921,8 @@ bool checkFunctionInputsForLogging(const at::RecordFunction& fn, const char* fn_
   // TORCH_INTERNAL_ASSERT(num_inputs <= inputs.size());
   if (num_inputs > inputs.size()) {
     LOG(WARNING) << "RecordFunction " << fn_name
-                  << " expected num_inputs=" << num_inputs
-                  << " > inputs.size()=" << inputs.size();
+                 << " expected num_inputs=" << num_inputs
+                 << " > inputs.size()=" << inputs.size();
     return false;
   }
   return true;
