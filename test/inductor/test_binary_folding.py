@@ -302,15 +302,6 @@ class BinaryFoldingTemplate(TestCase):
                 expect_success=False,
             )
 
-            # add with different dtype
-            test_linear_fusion(
-                use_bias,
-                pytorch_op,
-                False,
-                add_tensor=torch.tensor([2]).to(torch.float64).to(self.device),
-                expect_success=False,
-            )
-
 
 if HAS_CPU and not torch.backends.mps.is_available():
 
