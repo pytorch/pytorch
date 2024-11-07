@@ -132,7 +132,7 @@ void lookup(
         if (guard_error_hook) {
           py::handle guard_error_hook_handle(guard_error_hook);
           guard_error_hook_handle(
-              cache_entry.check_fn,
+              cache_entry.guard_manager,
               cache_entry.code,
               locals,
               index,
@@ -168,12 +168,12 @@ CacheEntry* create_cache_entry(
   auto new_iter = extra_state->cache_entry_list.begin();
   new_iter->_owner = extra_state;
   new_iter->_owner_loc = new_iter;
-  // Set check_fn references to extra_state and CacheEntry
+  // Set guard_manager references to extra_state and CacheEntry
   // Warning: lifetime is controlled by C++!
-  py::handle check_fn = py::handle(guarded_code).attr("check_fn");
-  check_fn.attr("cache_entry") =
+  py::handle guard_manager = py::handle(guarded_code).attr("guard_manager");
+  guard_manager.attr("cache_entry") =
       py::cast(*new_iter, py::return_value_policy::reference);
-  check_fn.attr("extra_state") =
+  guard_manager.attr("extra_state") =
       py::cast(extra_state, py::return_value_policy::reference);
   return &*new_iter;
 }
