@@ -59,5 +59,34 @@ class DynamoExporterTest(common_utils.TestCase):
         self.assertNotIn("Cast", [node.op_type for node in onnx_program.model.graph])
 
 
+    def test_onnx_export_controlflow(self):
+        class CondModel(torch.nn.Module):
+            def forward(self, x):
+                def true_fn(x):
+                    return x + 1.0
+
+                def false_fn(x):
+                    return x - 42.0
+
+                y = torch.cond(x.sum() > 0, true_fn, false_fn, [x])
+                return y
+
+        x = torch.tensor([1, 2])
+        model = CondModel()
+        assert torch.export.export(model, (x,))
+        onnx_program = torch.onnx.export(
+            model,
+            (x,),
+            input_names=["x"],
+            dynamo=True,
+            fallback=False,
+        )
+        onnx_model = onnx_program.model
+        # TODO: Preserve the subgraph names
+        self.assertIn("true_graph_0", onnx_model.functions)
+        self.assertIn("false_graph_0", onnx_model.functions)
+        onnx_testing.assert_onnx_program(onnx_program)
+
+
 if __name__ == "__main__":
     common_utils.run_tests()
