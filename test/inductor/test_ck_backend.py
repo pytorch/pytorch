@@ -364,6 +364,44 @@ class TestCKBackend(TestCase):
 
             torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @unittest.mock.patch.dict(
+        os.environ,
+        {"PATH": _get_path_without_sccache(), "PYTORCH_MIOPEN_SUGGEST_NHWC": "1"},
+    )
+    @parametrize("max_autotune_conv_backends", ("CK", "ATEN,CK,TRITON"))
+    def test_max_autotune_conv2d(self, max_autotune_conv_backends):
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+        tensor_options = {"device": "cuda", "dtype": torch.float32}
+
+        x = torch.randn(1, 8, 224, 224, **tensor_options)
+        w = torch.randn(64, 8, 7, 7, **tensor_options)
+        x_cl = x.to(memory_format=torch.channels_last)
+        w_cl = w.to(memory_format=torch.channels_last)
+
+        assert "rocm" in dir(config)
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "autotune_in_subproc": False,
+                "max_autotune_conv_backends": max_autotune_conv_backends,
+                "compile_threads": 4,
+                "rocm.ck_dir": self.ck_dir,
+                "rocm.n_max_profiling_configs": 4,
+            }
+        ):
+
+            @torch.compile(dynamic=False)
+            def conv2d(x, w):
+                return torch.conv2d(x, w)
+
+            Y_eager = torch.conv2d(x_cl, w_cl)
+            Y_compiled = conv2d(x_cl, w_cl)
+
+            torch.testing.assert_close(Y_compiled, Y_eager, atol=2e-4, rtol=2e-4)
+
 
 if __name__ == "__main__":
     from torch._inductor.utils import is_big_gpu
