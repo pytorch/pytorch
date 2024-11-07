@@ -66,6 +66,7 @@ if HAS_GPU:
     CONSTANT_C: tl.constexpr = 4
     STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
     BOOL_CONSTANT_C: tl.constexpr = True
+    FLOAT_CONSTANT_C = tl.constexpr(3.14)  # intentionally un-annotated
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
@@ -2171,6 +2172,33 @@ def forward(self, arg0_1, arg1_1):
         sin_triton_compiled(None, out_compiled)
         self.assertEqual(out, out_compiled)
 
+    @requires_gpu
+    def test_triton_kernel_global_constexpr(self):
+        @triton.jit
+        def triton_(in_ptr, out_ptr, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            x = tl.load(in_ptr + offsets)
+            output = x + FLOAT_CONSTANT_C
+            tl.store(out_ptr + offsets, output)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            BLOCK_SIZE = 256
+            grid = (triton.cdiv(x.numel(), BLOCK_SIZE),)
+            triton_[grid](x, y, BLOCK_SIZE)
+            return y
+
+        # make sure FLOAT_CONSTANT_C is NOT annotated
+        self.assertFalse("FLOAT_CONSTANT_C" in globals().get("__annotations__", {}))
+        # sanity check: STRING_CONSTANT_C _should_ be annotated
+        self.assertTrue("STRING_CONSTANT_C" in globals().get("__annotations__", {}))
+
+        x = torch.randn(512, device=GPU_TYPE)
+        expected = x + 3.14
+        actual = torch.compile(fn)(x)
+        self.assertEqual(expected, actual)
+
 
 def make_mutation_test(fn):
     @requires_gpu
@@ -3348,6 +3376,56 @@ class CustomOpTests(torch._inductor.test_case.TestCase):
         FileCheck().check("Compile-time auto-tuning code").check(
             "grid_wrapper_for_op_zeros_0"
         ).check_next("return (256").check_next("return (64").run(output)
+
+    @requires_gpu
+    def test_autotune_no_pre_or_post_hook(self):
+        def init_to_zero(name):
+            return lambda nargs: nargs[name].zero_()
+
+        # pre_hook requires running arbitrary code at runtime, which we cannot handle at this time
+        # https://github.com/pytorch/pytorch/issues/139059
+        @triton.autotune(
+            configs=[
+                triton.Config(
+                    {"BLOCK_SIZE": 1024},
+                    num_warps=4,
+                    num_stages=2,
+                    pre_hook=init_to_zero("output_ptr"),
+                )
+            ],
+            key=["n_elements"],
+        )
+        @triton.jit
+        def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+
+            x = tl.load(x_ptr + offsets, mask=mask)
+            y = tl.load(y_ptr + offsets, mask=mask)
+            output = x + y
+            tl.atomic_add(output_ptr + offsets, output, mask=mask)
+
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
+            n_elements = output.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, output, n_elements)
+            return output
+
+        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+
+        # should always pass
+        assert add(x, y).mean() == 2, "Problem with add kernel"
+
+        # this should cause an exception, since pre_hook is not allowed
+        msg = "pre_hook is not supported in triton.Autotune Configs"
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, msg):
+            add_compiled = torch.compile(add, mode="reduce-overhead", fullgraph=True)
+            add_compiled(x, y).mean()
 
 
 common_utils.instantiate_parametrized_tests(KernelTests)
