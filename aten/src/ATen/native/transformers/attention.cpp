@@ -664,7 +664,8 @@ Tensor _safe_softmax(
   const auto masked = self.isneginf();
   const auto masked_rows = all(masked, dim, true);
   const auto zero = at::scalar_tensor(0.0, at::TensorOptions().dtype(out.dtype()).device(out.device()));
-  return at::where(masked_rows, zero, out);
+  // reuse storage for out
+  return at::where_out(out, masked_rows, zero, out);
 }
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
