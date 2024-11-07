@@ -460,7 +460,7 @@ bool isOptimizableContainerType(
   return is_supported_type && inputsCanRunOutOfPlace(n, node_has_out_variant);
 }
 
-static inline void listConstructSlowPath(
+static void listConstructSlowPath(
     const ListType& list_type,
     const size_t size,
     ProcessedNode* p_node) {
@@ -507,9 +507,7 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-static inline void tupleConstructSlowPath(
-    const size_t size,
-    ProcessedNode* p_node) {
+static void tupleConstructSlowPath(const size_t size, ProcessedNode* p_node) {
   // prepare inputs
   switch (size) {
     case 1:
