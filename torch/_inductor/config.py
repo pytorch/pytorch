@@ -1200,16 +1200,6 @@ class rocm:
     # Currently RCR and F16 only
     use_preselected_instances: bool = False
 
-    # Default num_stages for gemm triton kernels on ROCm
-    try:
-        from .runtime.triton_helpers import get_backend_options
-    except ImportError:
-        get_backend_options = None  # Fallback if needed
-
-    options = get_backend_options() if get_backend_options else {}
-    default_num_stages = options.get("num_stages", 2)
-
-
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
 cpu_backend = "cpp"

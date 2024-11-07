@@ -1582,6 +1582,13 @@ def parallel_num_threads():
     return threads
 
 
+def get_backend_num_stages():
+    from .runtime.triton_helpers import get_backend_options
+
+    options = get_backend_options()
+    return options.get("num_stages", 2 if torch.version.hip else None)
+
+
 @functools.lru_cache(None)
 def get_device_tflops(dtype):
     from triton.testing import get_max_simd_tflops, get_max_tensorcore_tflops

@@ -14,7 +14,7 @@ from .. import config as inductor_config
 from ..codegen.wrapper import PythonWrapperCodegen
 from ..ir import Layout
 from ..runtime.runtime_utils import next_power_of_2
-from ..utils import ceildiv as cdiv
+from ..utils import ceildiv as cdiv, get_backend_num_stages
 
 
 log = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ def triton_config(num_stages, num_warps, **kwargs):
 
 
 def build_rocm_gemm_configs(configs):
-    rocm_num_stages = inductor_config.rocm.default_num_stages
+    rocm_num_stages = get_backend_num_stages()
     return tuple((c[0], c[1], c[2], rocm_num_stages, c[4]) for c in configs)
 
 
