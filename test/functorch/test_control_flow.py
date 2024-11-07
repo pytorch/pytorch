@@ -3799,13 +3799,21 @@ def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_bo
             gm.code.strip("\n"),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  clone = None
+    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  sub = None
+    add = torch.ops.aten.add.Tensor(arg2_1, 3.14);  add = None
+    sub_1 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  sub_1 = None
     sym_size_int = torch.ops.aten.sym_size.int(arg2_1, 0)
     sym_size_int_1 = torch.ops.aten.sym_size.int(arg2_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(arg3_1, 0)
     sym_size_int_3 = torch.ops.aten.sym_size.int(arg3_1, 1)
+    clone_1 = torch.ops.aten.clone.default(arg0_1);  clone_1 = None
+    sub_2 = torch.ops.aten.sub.Tensor(arg1_1, 1);  sub_2 = None
+    add_1 = torch.ops.aten.add.Tensor(arg2_1, 3.14);  add_1 = None
+    sub_3 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  sub_3 = None
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  while_loop_cond_graph_0 = while_loop_body_graph_0 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2]
@@ -3820,7 +3828,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     sub_6 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  sub_6 = None
     while_loop_cond_graph_1 = self.while_loop_cond_graph_1
     while_loop_body_graph_1 = self.while_loop_body_graph_1
-    while_loop_1 = torch.ops.higher_order.while_loop(while_loop_cond_graph_1, while_loop_body_graph_1, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_1 = while_loop_body_graph_1 = None
+    while_loop_1 = torch.ops.higher_order.while_loop(while_loop_cond_graph_1, while_loop_body_graph_1, (arg0_1, arg1_1, arg2_1, arg3_1), (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  while_loop_cond_graph_1 = while_loop_body_graph_1 = None
     getitem_4 = while_loop_1[0]
     getitem_5 = while_loop_1[1]
     getitem_6 = while_loop_1[2]
@@ -3831,7 +3839,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     div_1 = torch.ops.aten.div.Tensor(getitem_7, 2);  getitem_7 = div_1 = None
     while_loop_cond_graph_2 = self.while_loop_cond_graph_2
     while_loop_body_graph_2 = self.while_loop_body_graph_2
-    while_loop_2 = torch.ops.higher_order.while_loop(while_loop_cond_graph_2, while_loop_body_graph_2, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_2 = while_loop_body_graph_2 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
+    while_loop_2 = torch.ops.higher_order.while_loop(while_loop_cond_graph_2, while_loop_body_graph_2, (arg0_1, arg1_1, arg2_1, arg3_1), (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  while_loop_cond_graph_2 = while_loop_body_graph_2 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
     getitem_8 = while_loop_2[0]
     getitem_9 = while_loop_2[1]
     getitem_10 = while_loop_2[2]
@@ -3843,6 +3851,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
             outer_body.code.strip("\n"),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  clone = None
+    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  sub = None
+    add = torch.ops.aten.add.Tensor(arg2_1, 3.14);  add = None
+    sub_1 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  sub_1 = None
+    clone_1 = torch.ops.aten.clone.default(arg0_1);  clone_1 = None
+    sub_2 = torch.ops.aten.sub.Tensor(arg1_1, 1);  sub_2 = None
+    add_1 = torch.ops.aten.add.Tensor(arg2_1, 3.14);  add_1 = None
+    sub_3 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  sub_3 = None
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
     while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (arg7_1, arg7_1, arg7_1, arg7_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = arg7_1 = None
@@ -3861,6 +3877,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
             outer_body.code.strip("\n"),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  clone = None
+    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  sub = None
+    add = torch.ops.aten.add.Tensor(arg2_1, 3.14);  add = None
+    sub_1 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  sub_1 = None
+    clone_1 = torch.ops.aten.clone.default(arg0_1);  clone_1 = None
+    sub_2 = torch.ops.aten.sub.Tensor(arg1_1, 1);  sub_2 = None
+    add_1 = torch.ops.aten.add.Tensor(arg2_1, 3.14);  add_1 = None
+    sub_3 = torch.ops.aten.sub.Tensor(arg3_1, 2.71);  sub_3 = None
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
     while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (arg7_1, arg7_1, arg7_1, arg7_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = arg7_1 = None
