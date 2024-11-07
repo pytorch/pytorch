@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional, Protocol, Sequence, Tuple, TypeVar, Union
+from typing import Callable, Optional, Protocol, Sequence, Tuple, TypeVar, Union
+
+import sympy
 
 import torch
 from torch._inductor.virtualized import V
@@ -12,8 +14,7 @@ T = TypeVar("T")
 
 class DTypeArg(Protocol):
     @property
-    def dtype(self) -> torch.dtype:
-        ...
+    def dtype(self) -> torch.dtype: ...
 
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
@@ -23,7 +24,7 @@ class DTypeArg(Protocol):
 @functools.lru_cache(None)
 def get_promoted_dtype(
     *args: Sequence[Tuple[torch.dtype, bool]],
-    type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
 ):
     def construct_input(inp):
         if inp[1]:
@@ -33,14 +34,19 @@ def get_promoted_dtype(
 
     inps = [construct_input(arg) for arg in args]
     _, dtype = torch._prims_common.elementwise_dtypes(
-        *inps, type_promotion_kind=type_promotion_kind
+        *inps,
+        type_promotion_kind=(
+            type_promotion_kind
+            if type_promotion_kind
+            else ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
+        ),
     )
     return dtype
 
 
 def promote_types(
     args: Sequence[Union[DTypeArg, torch.types.Number, str]],
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND,
+    type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND] = None,
 ):
     dtype_prop_candidates = []
 
@@ -97,108 +103,235 @@ class DtypePropagationOpsHandler:
                     self, op, functools.partial(self.return_dtype, dtype=torch.bool)
                 )
 
+        from torch._inductor.ops_handler import OpsHandler
+
+        ops_set = {s for s in dir(OpsHandler) if s[0] != "_"}
+        unimplemented_ops = ops_set - set(dir(self))
+        torch._check(
+            len(unimplemented_ops) == 0,
+            lambda: f"Unimplemented dtype rule for ops: {unimplemented_ops}",
+        )
+
     # metaprogrammed in __init__
 
     @staticmethod
-    def op_dtype_rule(*args, type_promotion_kind) -> torch.dtype:
+    def op_dtype_rule(
+        *args: DTypeArg, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
+    ) -> torch.dtype:
         return promote_types(args, type_promotion_kind=type_promotion_kind)
 
     @staticmethod
-    def return_dtype(*args, dtype) -> torch.dtype:
+    def return_dtype(*args: DTypeArg, dtype: torch.dtype) -> torch.dtype:
         return dtype
 
     # op rules
 
     @staticmethod
-    def default_handler(*args):
-        # Fallback to FP32 dtype
-        return torch.float32
-
-    @staticmethod
-    def constant(value, dtype) -> torch.dtype:
+    def constant(value: torch.types.Number, dtype: torch.dtype) -> torch.dtype:
         return dtype
 
     @staticmethod
-    def load_seed(name, offset) -> torch.dtype:
+    def load_seed(name: str, offset: int) -> torch.dtype:
         return torch.float32
 
     @staticmethod
-    def randint64(seed, offset, low, high) -> torch.dtype:
+    def randint64(seed: int, offset: int, low: int, high: int) -> torch.dtype:
         return torch.int64
 
     @staticmethod
-    def masked(mask, body, other) -> torch.dtype:
+    def masked(mask: DTypeArg, body: DTypeArg, other: DTypeArg) -> torch.dtype:
         # TODO: inspect body to propagate dtype
         return torch.float32
 
     @staticmethod
-    def where(a, b, c) -> torch.dtype:
+    def where(a: DTypeArg, b: DTypeArg, c: DTypeArg) -> torch.dtype:
         return promote_types([b, c])
 
     @staticmethod
-    def index_expr(expr, dtype) -> torch.dtype:
+    def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> torch.dtype:
         return dtype
 
     @staticmethod
     def to_dtype(
-        x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
+        x: DTypeArg, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
     ) -> torch.dtype:
         return dtype
 
     @staticmethod
-    def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype) -> torch.dtype:
+    def to_dtype_bitcast(
+        x: DTypeArg, dtype: torch.dtype, src_dtype: torch.dtype
+    ) -> torch.dtype:
         return dtype
 
     @staticmethod
-    def gelu(x) -> torch.dtype:
-        return x.dtype
+    def gelu(x: DTypeArg) -> torch.dtype:
+        return promote_types([x])
 
     @staticmethod
-    def mul(a, b) -> torch.dtype:
+    def mul(a: DTypeArg, b: DTypeArg) -> torch.dtype:
         return promote_types([a, b])
 
     @staticmethod
-    def div(a, b) -> torch.dtype:
+    def div(a: DTypeArg, b: DTypeArg) -> torch.dtype:
         return promote_types([a, b])
 
     @staticmethod
-    def truediv(a, b) -> torch.dtype:
-        return promote_types(
-            [a, b],
-        )
-
-    @staticmethod
-    def pow(a, b) -> torch.dtype:
+    def truediv(a: DTypeArg, b: DTypeArg) -> torch.dtype:
         return promote_types([a, b])
 
     @staticmethod
-    def mod(a, b) -> torch.dtype:
+    def pow(a: DTypeArg, b: DTypeArg) -> torch.dtype:
         return promote_types([a, b])
 
     @staticmethod
-    def indirect_indexing(x, size, check=True, wrap_neg=True) -> torch.dtype:
+    def mod(a: DTypeArg, b: DTypeArg) -> torch.dtype:
+        return promote_types([a, b])
+
+    @staticmethod
+    def indirect_indexing(
+        x: DTypeArg, size: int, check: bool = True, wrap_neg: bool = True
+    ) -> torch.dtype:
         return torch.int64
 
     @staticmethod
-    def randn(seed, offset) -> torch.dtype:
+    def randn(seed: int, offset: int) -> torch.dtype:
         return torch.float
 
     @staticmethod
-    def rand(seed, offset) -> torch.dtype:
+    def rand(seed: int, offset: int) -> torch.dtype:
         return torch.float
 
     @staticmethod
-    def store_reduction(name, index, value) -> torch.dtype:
+    def store_reduction(name: str, index, value: DTypeArg) -> torch.dtype:
         return V.graph.get_dtype(name)
 
     @staticmethod
-    def reduction(dtype, src_dtype, reduction_type, value) -> torch.dtype:
+    def reduction(
+        dtype: torch.dtype, src_dtype: torch.dtype, reduction_type: str, value: DTypeArg
+    ) -> torch.dtype:
         return dtype
 
     @staticmethod
-    def store(name, index, value, mode=None) -> torch.dtype:
+    def store(
+        name: str, index, value: DTypeArg, mode: Optional[str] = None
+    ) -> torch.dtype:
         return V.graph.get_dtype(name)
 
     @staticmethod
-    def load(name, index) -> torch.dtype:
+    def load(name: str, index) -> torch.dtype:
         return V.graph.get_dtype(name)
+
+    @staticmethod
+    def floor(x: DTypeArg) -> torch.dtype:
+        return promote_types(
+            [x], type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
+
+    @staticmethod
+    def ceil_to_int(x: DTypeArg, dtype: torch.dtype) -> torch.dtype:
+        return dtype
+
+    @staticmethod
+    def int_truediv(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        return promote_types(
+            [x, y], type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
+
+    @staticmethod
+    def scan(
+        dtypes: Tuple[torch.dtype, ...],
+        combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
+        values: Tuple[T, ...],
+    ) -> Tuple[torch.dtype, ...]:
+        return dtypes
+
+    @staticmethod
+    def fmod(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        return promote_types([x, y])
+
+    @staticmethod
+    def round_to_int(x: DTypeArg, dtype: torch.dtype) -> torch.dtype:
+        return dtype
+
+    @staticmethod
+    def identity(x: DTypeArg) -> torch.dtype:
+        return promote_types([x])
+
+    @staticmethod
+    def frexp(x: DTypeArg):
+        # TODO - need to handle multiple outputs
+        return (x.dtype, torch.int32)
+
+    @staticmethod
+    def sort(
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[T, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[torch.dtype, ...]:
+        return dtypes
+
+    @staticmethod
+    def trunc(x: DTypeArg) -> torch.dtype:
+        return promote_types([x])
+
+    @staticmethod
+    def bucketize(
+        values: DTypeArg,
+        boundaries: Tuple[str, sympy.Expr, sympy.Expr, sympy.Expr],
+        boundary_indices: DTypeArg,
+        indexing_dtype: torch.dtype,
+        right: bool,
+    ) -> torch.dtype:
+        return indexing_dtype
+
+    @staticmethod
+    def rshift(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        return promote_types([x])
+
+    @staticmethod
+    def round(x: DTypeArg) -> torch.dtype:
+        return promote_types(
+            [x], type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
+
+    @staticmethod
+    def getitem(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        raise RuntimeError("Unexpected op: getitem")
+
+    @staticmethod
+    def trunc_to_int(x: DTypeArg, dtype: torch.dtype) -> torch.dtype:
+        return dtype
+
+    @staticmethod
+    def floor_to_int(x: DTypeArg, dtype: torch.dtype) -> torch.dtype:
+        return dtype
+
+    @staticmethod
+    def truncdiv(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        return promote_types([x, y])
+
+    @staticmethod
+    def floordiv(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        return promote_types([x, y])
+
+    @staticmethod
+    def round_decimal(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        # TODO - dont see it anywhere..
+        return promote_types([x])
+
+    @staticmethod
+    def lshift(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        return promote_types([x])
+
+    @staticmethod
+    def libdevice_abs(x: DTypeArg) -> torch.dtype:
+        return promote_types([x])
+
+    @staticmethod
+    def invert(x: DTypeArg) -> torch.dtype:
+        raise RuntimeError("Unexpected op: invert")
+
+    @staticmethod
+    def matmul(x: DTypeArg, y: DTypeArg) -> torch.dtype:
+        raise RuntimeError("Unexpected op: matmul")
