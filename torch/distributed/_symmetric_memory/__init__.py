@@ -690,10 +690,7 @@ def _fused_all_gather_matmul_native(
     A_shards = A.chunk(world_size)
 
     A_shards[rank].copy_(A_shard)
-    symm_mem.stream_write_value32(
-        int(A_signals.data_ptr()) + rank * A_signals.element_size(),
-        1,
-    )
+    _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
 
     out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
     for step in range(1, world_size):
@@ -702,10 +699,7 @@ def _fused_all_gather_matmul_native(
         with torch.cuda.stream(backend_stream):
             A_shards[src_rank].copy_(src_buf)
             # cuStreamWriteValue32 issues a system level fence before the write
-            symm_mem.stream_write_value32(
-                int(A_signals.data_ptr()) + src_rank * A_signals.element_size(),
-                1,
-            )
+            _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
 
     current_stream.wait_stream(backend_stream)
     backend_stream.wait_stream(current_stream)
