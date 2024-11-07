@@ -5,7 +5,7 @@
 #Pinned versions: 1.6
 #test that import:
 
-boto3==1.19.12
+boto3==1.35.42
 #Description: AWS SDK for python
 #Pinned versions: 1.19.12, 1.16.34
 #test that import:
@@ -30,9 +30,14 @@ dill==0.3.7
 #Pinned versions: 0.3.7
 #test that import: dynamo/test_replay_record.py test_dataloader.py test_datapipe.py test_serialization.py
 
-expecttest==0.1.6
+expecttest==0.2.1
 #Description: method for writing tests where test framework auto populates
 # the expected output based on previous runs
+#Pinned versions: 0.2.1
+#test that import:
+
+fbscribelogger==0.1.6
+#Description: write to scribe from authenticated jobs on CI
 #Pinned versions: 0.1.6
 #test that import:
 
@@ -85,7 +90,7 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.10.0
+mypy==1.11.2
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
 #Pinned versions: 1.10.0
@@ -113,7 +118,7 @@ numba==0.55.2 ; python_version == "3.10"
 
 #numpy
 #Description: Provides N-dimensional arrays and linear algebra
-#Pinned versions: 1.20
+#Pinned versions: 1.26.2
 #test that import: test_view_ops.py, test_unary_ufuncs.py, test_type_promotion.py,
 #test_type_info.py, test_torch.py, test_tensorexpr_pybind.py, test_tensorexpr.py,
 #test_tensorboard.py, test_tensor_creation_ops.py, test_static_runtime.py,
@@ -123,6 +128,9 @@ numba==0.55.2 ; python_version == "3.10"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
+numpy==1.22.4; python_version == "3.9" or python_version == "3.10"
+numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
+numpy==2.1.2; python_version >= "3.13"
 
 #onnxruntime
 #Description: scoring engine for Open Neural Network Exchange (ONNX) models
@@ -134,9 +142,9 @@ opt-einsum==3.3
 #Pinned versions: 3.3
 #test that import: test_linalg.py
 
-optree==0.12.1
+optree==0.13.0
 #Description: A library for tree manipulation
-#Pinned versions: 0.12.1
+#Pinned versions: 0.13.0
 #test that import: test_vmap.py, test_aotdispatch.py, test_dynamic_shapes.py,
 #test_pytree.py, test_ops.py, test_control_flow.py, test_modules.py,
 #common_utils.py, test_eager_transforms.py, test_python_dispatch.py,
@@ -248,7 +256,7 @@ tb-nightly==2.13.0a20230426
 #test that import:
 
 # needed by torchgen utils
-typing-extensions
+typing-extensions>=4.10.0
 #Description: type hints for python
 #Pinned versions:
 #test that import:
@@ -317,13 +325,12 @@ lxml==5.0.0
 
 PyGithub==2.3.0
 
-sympy==1.12.1 ; python_version == "3.8"
 sympy==1.13.1 ; python_version >= "3.9"
 #Description: Required by coremltools, also pinned in .github/requirements/pip-requirements-macOS.txt
 #Pinned versions:
 #test that import:
 
-onnx==1.16.1
+onnx==1.17.0
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
@@ -332,3 +339,31 @@ onnxscript==0.1.0.dev20240817
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
+
+parameterized==0.8.1
+#Description: Parameterizes unittests, both the tests themselves and the entire testing class
+#Pinned versions:
+#test that import:
+
+#Description: required for testing torch/distributed/_tools/sac_estimator.py
+#Pinned versions: 1.24.0
+#test that import: test_sac_estimator.py
+
+pwlf==2.2.1 ; python_version >= "3.8"
+#Description: required for testing torch/distributed/_tools/sac_estimator.py
+#Pinned versions: 2.2.1
+#test that import: test_sac_estimator.py
+
+
+# To build PyTorch itself
+astunparse
+PyYAML
+setuptools
+
+ninja==1.11.1 ; platform_machine == "aarch64"
+scons==4.5.2 ; platform_machine == "aarch64"
+
+pulp==2.9.0 ; python_version >= "3.8"
+#Description: required for testing ilp formulaiton under torch/distributed/_tools
+#Pinned versions: 2.9.0
+#test that import: test_sac_ilp.py

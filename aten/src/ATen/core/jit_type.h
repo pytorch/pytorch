@@ -326,7 +326,7 @@ struct TORCH_API ShapeSymbol {
   // is this symbol a fixed/static dimension
   bool is_static() const {
     return value_ >= 0;
-  };
+  }
   bool operator==(const ShapeSymbol& b) const {
     return value_ == b.value_;
   }
@@ -340,15 +340,15 @@ struct TORCH_API ShapeSymbol {
   int64_t static_size() const {
     TORCH_CHECK(is_static());
     return value_;
-  };
+  }
 
   int64_t value() const {
     return value_;
-  };
+  }
 
   static ShapeSymbol newSymbol() {
     return fromStaticSize(-static_cast<int64_t>(++num_symbols));
-  };
+  }
   friend TORCH_API std::ostream& operator<<(
       std::ostream& os,
       const ShapeSymbol& s);
@@ -938,7 +938,7 @@ struct TORCH_API DictType : public SharedType {
       case TypeKind::DeviceObjType:
         return DictTypePtr(new DictType(std::move(key), std::move(value)));
       default:
-        AT_ERROR(
+        TORCH_CHECK(false,
             "Cannot create dict for key type '",
             key->str(),
             "', only int, float, complex, Tensor, device and string keys are supported");
@@ -1154,7 +1154,7 @@ struct TORCH_API TupleType : public NamedType {
       const std::vector<TypePtr>& field_types);
 
   static TupleTypePtr createNamed(const std::optional<c10::QualifiedName>& name,
-      const std::vector<c10::string_view>& field_names,
+      const std::vector<std::string_view>& field_names,
       const std::vector<TypePtr>& field_types);
 
   static TupleTypePtr create(
@@ -1190,7 +1190,7 @@ struct TORCH_API TupleType : public NamedType {
   const std::shared_ptr<FunctionSchema>& schema() const {
     return schema_;
   }
-  std::optional<std::vector<c10::string_view>> names() const;
+  std::optional<std::vector<std::string_view>> names() const;
 
   static const TypeKind Kind = TypeKind::TupleType;
 
@@ -1278,7 +1278,8 @@ struct TORCH_API NumberType : public Type {
  protected:
   NumberType(TypeKind kind = TypeKind::NumberType) : Type(kind) {}
 
-  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(
+      [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
     return "number"; // technically not a valid python type, but
                      // we need to use it when parsing back in annotations
                      // for implicit conversions
@@ -1305,7 +1306,8 @@ struct TORCH_API FloatType : public NumberType {
 
  private:
   FloatType() : NumberType(TypeKind::FloatType) {}
-  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(
+      [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
     return "float";
   }
 };
@@ -1330,7 +1332,8 @@ struct TORCH_API ComplexType : public NumberType {
 
  private:
   ComplexType() : NumberType(TypeKind::ComplexType) {}
-  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(
+      [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
     return "complex";
   }
 };
@@ -1419,7 +1422,8 @@ struct TORCH_API IntType : public NumberType {
 
  private:
   IntType() : NumberType(TypeKind::IntType) {}
-  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(
+      [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
     return "int";
   }
 };
@@ -1453,7 +1457,8 @@ struct TORCH_API StringType : public Type {
     // we only use "str" (not "string") in both FunctionSchema and script
     return annotation_str();
   }
-  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(
+      [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
     return "str";
   }
   static const TypeKind Kind = TypeKind::StringType;
@@ -1473,7 +1478,8 @@ struct TORCH_API StorageType : public Type {
   std::string str() const override {
     return annotation_str();
   }
-  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(
+      [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
     return "Storage";
   }
   static const TypeKind Kind = TypeKind::StorageType;
@@ -1508,7 +1514,8 @@ struct TORCH_API FunctionType : public NamedType {
 
  private:
   FunctionType(torch::jit::Function* function);
-  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(
+      [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }
@@ -1954,6 +1961,12 @@ struct getTypePtr_<c10::string_view> final {
   }
 };
 template <>
+struct getTypePtr_<std::string_view> final {
+  static decltype(auto) call() {
+    return StringType::get();
+  }
+};
+template <>
 struct getTypePtr_<at::Dimname> final {
   static decltype(auto) call() {
     return StringType::get();
@@ -2191,7 +2204,7 @@ struct TORCH_API InterfaceType : public NamedType {
     return is_module_;
   }
   static const TypeKind Kind = TypeKind::InterfaceType;
-  ~InterfaceType() override;
+  ~InterfaceType() override = default;
  private:
   InterfaceType(QualifiedName name, bool is_module);
   static bool isSubTypeImpl(
@@ -2199,7 +2212,8 @@ struct TORCH_API InterfaceType : public NamedType {
       const InterfaceType& rhs,
       std::ostream* why_not);
 
-  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
+  std::string annotation_str_impl(
+      [[maybe_unused]] const TypePrinter& printer = nullptr) const override {
     return name()->qualifiedName();
   }
 

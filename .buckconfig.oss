@@ -21,6 +21,3 @@
   cxx = /usr/bin/clang++
   cxxpp = /usr/bin/clang++
   ld = /usr/bin/clang++
-
-[project]
-  default_flavors_mode=all

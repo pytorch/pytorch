@@ -273,6 +273,88 @@ class TestAutocastGPU(TestCase):
         finally:
             torch._C._set_cached_tensors_enabled(False)
 
+    # index_put under AMP follows a cast policy called "promote",
+    # https://github.com/pytorch/pytorch/blob/4fcd15a667df5b80e81db6563d8d3123a0cbd051/aten/src/ATen/autocast_mode.h#L205-L230
+    # That means:
+    #   (1) double precision is ignored,
+    #   (2) if any argument is float, then all arguments are promoted to float,
+    #   (3) if all arguments are of lower precision dtype, then all dtypes must be equal to the same amp autocast dtype.
+    # Since AMP autocast dtype is thread-local, it is not preserved across thread boundaries during autograd execution,
+    # and due to the multi-threaded nature of the autograd, the forward pass is being run in bfloat16, while the backward
+    # pass defaults to float16. The dtype mismatch leads to the error in the policy, as the criteria (3) is not satisfied.
+    # For more info see https://github.com/pytorch/pytorch/issues/132715.
+    def test_autocast_prioritize(self):
+        device = "cuda"
+        dtype = torch.bfloat16
+
+        with torch.autocast(device_type=device, enabled=True, dtype=dtype):
+            t = torch.randn([3, 4, 5], dtype=dtype, device=device, requires_grad=True)
+            index = torch.randint(
+                low=0, high=3, size=[3, 4, 5], dtype=torch.int64, device=device
+            )
+            val = torch.randn(1, dtype=dtype, device=device)
+
+            res = torch.index_put(t, [index], val)
+
+            loss = res.mean()
+            loss.backward()
+
+
+@unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
+class TestAutocastMPS(TestCase):
+    def test_cast_cache_is_global(self):
+        class CustomLinear(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, w_t):
+                ctx.save_for_backward(x, w_t)
+                return torch.nn.functional.linear(x, w_t)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                x, w_t = ctx.saved_tensors
+                with torch.autocast(device_type="mps"):
+                    dL_dX = torch.matmul(grad_output, w_t)
+                    dL_dW = torch.matmul(x.transpose(0, 1), grad_output).transpose(0, 1)
+                return dL_dX, dL_dW
+
+        data = torch.randn(2, 3).to("mps")
+        weight = torch.nn.Parameter(torch.randn(4, 3).to("mps"))
+        weight_dtype_cast_counter = 0
+
+        class WeightDTypeCastCounterMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if (
+                    func is torch.ops.aten._to_copy.default
+                    and args[0] is weight
+                    and kwargs["dtype"] is torch.float16
+                ):
+                    nonlocal weight_dtype_cast_counter
+                    weight_dtype_cast_counter += 1
+                return func(*args, **kwargs)
+
+            def __enter__(self):
+                # self.old_clear_cache = torch.clear_autocast_cache
+                # torch.clear_autocast_cache = lambda: None
+                return super().__enter__()
+
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                # torch.clear_autocast_cache = self.old_clear_cache
+                return super().__exit__(exc_type, exc_val, exc_tb)
+
+        with WeightDTypeCastCounterMode():
+            with torch.autocast(device_type="mps"):
+                output = CustomLinear.apply(data, weight)
+                s = output.sum()
+            s.backward()
+        self.assertEqual(weight_dtype_cast_counter, 2)
+
+    def test_mps_autocast_error_message(self):
+        with self.assertWarnsRegex(
+            UserWarning, "MPS Autocast only supports dtype of torch.float16 currently."
+        ):
+            with torch.autocast(device_type="mps", dtype=torch.bfloat16):
+                _ = torch.ones(10)
+
 
 class TestTorchAutocast(TestCase):
     def test_autocast_fast_dtype(self):
