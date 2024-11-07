@@ -84,6 +84,7 @@ from .source import (
     AttrProxySource,
     AttrSource,
     CallFunctionNoArgsSource,
+    CallMethodItemSource,
     ChainedSource,
     ConstDictKeySource,
     DefaultsSource,
@@ -1115,6 +1116,15 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x.get_base(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, CallMethodItemSource):
+            assert base_guard_manager  # to make mypy happy
+            out = base_guard_manager.lambda_manager(
+                # TODO: remove me before merge
+                python_lambda=lambda x: int(x.item()),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
