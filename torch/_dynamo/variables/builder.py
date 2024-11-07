@@ -1658,6 +1658,17 @@ class VariableBuilder:
             **options,
         )
 
+        if value._is_view():
+            # If value is a view, add its base tensor to the tracked fakes list.
+            # This is so we are able to access the correct source for its symbolic
+            # shape values, in case we need them.
+            wrap_to_fake_tensor_and_record(
+                value._base,
+                tx=self.tx,
+                source=AttrSource(source, "_base"),
+                is_tensor=True,
+            )
+
         guard_type = GuardBuilder.TENSOR_MATCH
 
         if isinstance(source, GradSource) and is_from_optimizer_source(source):

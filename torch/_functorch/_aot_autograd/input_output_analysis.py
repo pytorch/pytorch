@@ -10,6 +10,7 @@ In particular, the following analyses are provided:
 2. We also analyze the function signature for export graphs.
 """
 
+import contextlib
 import itertools
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -18,6 +19,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._dynamo.exc import Unsupported
 from torch._functorch._aot_autograd.schemas import PlainTensorMeta
+from torch._guards import StorageOverlap
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 
@@ -349,7 +351,7 @@ def _tensors_definitely_do_not_overlap(x, y):
     return False
 
 
-def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
+def compute_overlapping_inputs(aot_config, fwd_inputs, aliased_input_indices):
     max_aliased_inps_w_dyn_shapes = (
         config._max_aliased_inputs_with_dynamic_shapes_enabled
     )
@@ -403,13 +405,50 @@ are aliased and mutated, and they should be dynamic, please file an issue.
                 err_message,
                 case_name="dynamic_shapes_validation",
             )
-    for j in range(num_aliases):
-        for i in range(j):
-            j_ = aliased_input_indices[j]
-            i_ = aliased_input_indices[i]
-            if not _tensors_definitely_do_not_overlap(fwd_inputs[i_], fwd_inputs[j_]):
-                actual_aliased_indices.add(i_)
-                actual_aliased_indices.add(j_)
+
+    shape_env = None
+    suppress_guards = contextlib.nullcontext
+    tracing_context = torch._guards.TracingContext.try_get()
+
+    if tracing_context is not None:
+        shape_env = tracing_context.fake_mode.shape_env
+
+        # Check whether we can actually get the dynamo sources from within AOTAutograd.
+        if aot_config.aot_autograd_arg_pos_to_source and shape_env is not None:
+            suppress_guards = shape_env.suppress_guards
+
+    with suppress_guards():
+        for j in range(num_aliases):
+            for i in range(j):
+                j_ = aliased_input_indices[j]
+                i_ = aliased_input_indices[i]
+                if not _tensors_definitely_do_not_overlap(
+                    fwd_inputs[i_], fwd_inputs[j_]
+                ):
+                    actual_aliased_indices.add(i_)
+                    actual_aliased_indices.add(j_)
+
+    no_overlap_indices = list(set(aliased_input_indices) - actual_aliased_indices)
+
+    # Add the StorageOverlap AOTAutograd guard only if we are actually keeping track of
+    # dynamo sources inside AOTAutograd.
+    if (
+        tracing_context is not None
+        # We check that we have more than 1 aliased tensor, which should be true at
+        # this point, anyway.
+        and num_aliases > 1
+        and aot_config.aot_autograd_arg_pos_to_source
+    ):
+        overlapping_sources = [
+            aot_config.aot_autograd_arg_pos_to_source[i] for i in actual_aliased_indices
+        ]
+        non_overlapping_sources = [
+            aot_config.aot_autograd_arg_pos_to_source[i] for i in no_overlap_indices
+        ]
+        tracing_context.guards_context.aotautograd_guards.append(
+            StorageOverlap(overlapping_sources, non_overlapping_sources)
+        )
+
     return actual_aliased_indices
 
 

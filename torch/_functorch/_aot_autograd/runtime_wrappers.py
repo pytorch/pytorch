@@ -1020,6 +1020,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     ) -> Tuple[Callable, List[Tensor], ViewAndMutationMeta]:
         is_inference = not self.trace_joint
         flat_args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
+            aot_config,
             flat_args,
             fw_metadata.input_info,
             is_inference=is_inference,
@@ -1148,7 +1149,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
         @wraps(compiled_fn)
         def wrapped_compiled_fn(args):
             args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(
-                args, self.old_input_info, is_inference=is_inference
+                aot_config, args, self.old_input_info, is_inference=is_inference
             )
             assert synthetic_base_info is not None
             aliased_args_w_metadata_mutations = [
@@ -1252,6 +1253,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
 #   c_base = torch.Tensor(c.storage())
 #   f(c_base, b_base, a, d)
 def merge_view_inputs(
+    aot_config: AOTConfig,
     fwd_inputs: List[Any],
     mutated_input_info: List[InputAliasInfo],
     *,
@@ -1315,7 +1317,7 @@ def merge_view_inputs(
         # I don't bother with that case for now: here, we only bail out earlier if we detect that **every** pair
         # of tensors in the current group that shares a storage is non-overlapping.
         aliased_input_indices_no_false_sharing = compute_overlapping_inputs(
-            fwd_inputs, aliased_input_indices
+            aot_config, fwd_inputs, aliased_input_indices
         )
         if len(aliased_input_indices_no_false_sharing) <= 1:
             for curr_idx in aliased_input_indices:

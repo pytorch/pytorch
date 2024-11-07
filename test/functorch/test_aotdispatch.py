@@ -6650,6 +6650,24 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
 
         self.assertEqual(out, optout)
 
+    def test_inputs_overlapping_with_mutation_guard_base(self):
+        def f(x, y):
+            x.add_(1)
+            y.add_(1)
+            return x
+
+        def run(f):
+            base = torch.ones(10)
+            inputs = [base[1:], base[1:]]
+            return f(*inputs)
+
+        optf = torch.compile(backend="aot_eager", dynamic=True)(f)
+
+        out = run(f)
+        optout = run(optf)
+
+        self.assertEqual(out, optout)
+
 
 class MockFXGraphCache:
     """

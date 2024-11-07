@@ -65,6 +65,7 @@ from torch._guards import (
     GuardEnvExpr,
     GuardSource,
     Source,
+    StorageOverlap,
 )
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
@@ -312,6 +313,23 @@ def uninteresting_files():
     return {inspect.getfile(m) for m in mods}
 
 
+def check_overlapping(overlapping, non_overlapping):
+    from torch._functorch._aot_autograd.input_output_analysis import (
+        _tensors_definitely_do_not_overlap,
+    )
+
+    tensors = overlapping + non_overlapping
+    overlapping_indices = set()
+
+    for i in range(len(tensors)):
+        for j in range(i):
+            if not _tensors_definitely_do_not_overlap(tensors[i], tensors[j]):
+                overlapping_indices.add(i)
+                overlapping_indices.add(j)
+
+    return overlapping_indices == set(range(len(overlapping)))
+
+
 _CLOSURE_VARS: Optional[Dict[str, object]] = None
 
 
@@ -338,6 +356,7 @@ def _get_closure_vars():
             "___as_tensor": torch._as_tensor_fullprec,
             "torch": torch,
             "inspect": inspect,
+            "___check_overlapping": check_overlapping,
         }
     return _CLOSURE_VARS
 
@@ -396,14 +415,14 @@ def strip_getattr_getitem(name):
 
 def get_verbose_code_part(code_part: str, guard: Guard) -> str:
     extra = ""
-    if guard.user_stack:
-        for fs in reversed(guard.user_stack):
-            if fs.filename not in uninteresting_files():
-                extra = f"  # {format_frame(fs, line=True)}"
-                break
-    elif guard.stack:
-        extra = f"  # {format_frame(guard.stack.summary()[-1])}"
-
+    if guard is not None:
+        if guard.user_stack:
+            for fs in reversed(guard.user_stack):
+                if fs.filename not in uninteresting_files():
+                    extra = f"  # {format_frame(fs, line=True)}"
+                    break
+        elif guard.stack:
+            extra = f"  # {format_frame(guard.stack.summary()[-1])}"
     return f"{code_part:<60}{extra}"
 
 
@@ -1780,6 +1799,9 @@ class GuardBuilder(GuardBuilderBase):
         for code in code_parts:
             self._set_guard_export_info(guard, [code])
 
+        # Make ShapeEnv guards available for testing.
+        CompileContext.get().shape_env_guards.extend(verbose_code_parts)
+
         # Install all the symbolic guards in one lambda guard. These are run
         # at the very end of the RootGuardManager via epilogue guards.
         # TODO(anijain2305,williamwen42) - Consider moving this to C++.
@@ -2346,6 +2368,16 @@ class CheckFunctionManager:
                     builder.get_guard_manager_from_source(source_a),
                     builder.get_guard_manager_from_source(source_b),
                     [code_part],
+                )
+                add_code_part(code_part, None, True)
+            elif isinstance(guard, StorageOverlap):
+                code_part = (
+                    """___check_overlapping("""
+                    f"""overlapping=[{", ".join(s.name() for s in guard.overlapping_sources)}], """
+                    f"""non_overlapping=[{", ".join(s.name() for s in guard.non_overlapping_sources)}])"""
+                )
+                builder.add_python_lambda_leaf_guard_to_root(
+                    [code_part], [code_part], closure_vars=_get_closure_vars()
                 )
                 add_code_part(code_part, None, True)
             else:
