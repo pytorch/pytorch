@@ -156,10 +156,6 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
     setTimedoutError_ = false;
   }
 
-  bool getWatchDogDebugInfoFinishedFlag() {
-    return watchDogDebugInfoFinished_;
-  }
-
   // In the constructor of ProcessGroupNCCL. We don't allow the watchdog thread
   // to run any handling or desync report when the main thread is block wait.
   // Even if users set handling and turn on desyncDebug flag, they will get
@@ -169,14 +165,6 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
   void forceSetDesyncDebugFlag() {
     desyncDebug_ = true;
   }
-
- protected:
-  std::string getNCCLWatchdogDebugInfo() override {
-    LOG(INFO) << "overridden getNCCLWatchdogDebugInfo called";
-    watchDogDebugInfoFinished_ = true;
-    return "";
-  }
-  bool watchDogDebugInfoFinished_{false};
 
  private:
   bool setTimedoutError_{false};
@@ -237,16 +225,6 @@ class ProcessGroupNCCLDebugInfoStuck
       int size,
       c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
       : ProcessGroupNCCLNoHeartbeatCaught(store, rank, size, std::move(opts)) {}
-
- protected:
-  // Override the heartbeat monitor function to set a long timeout to mimic the
-  // stuck in getting debug info.
-  std::string getNCCLWatchdogDebugInfo() override {
-    std::this_thread::sleep_for(
-        std::chrono::seconds(heartbeatTimeoutInSec_ * 20));
-    watchDogDebugInfoFinished_ = true;
-    return "";
-  }
 };
 
 class ProcessGroupNCCLErrorsTest : public ::testing::Test {
@@ -490,10 +468,6 @@ TEST_F(ProcessGroupNCCLWatchdogTimeoutTest, testNCCLTimedoutDebugInfoFinished) {
   pg.forceTryWriteDebugInfo();
   watchdogTimeoutTestCommon(pg, 2);
 
-  // The flag is true shows that the heartbeat monitor thread does not kill
-  // the watchdog thread when it is getting debug info such as desync debug
-  // info.
-  EXPECT_TRUE(pg.getWatchDogDebugInfoFinishedFlag());
   // The flag is false shows that the heartbeat monitor thread does not
   // trigger process abort if getting debug info and destroy PG is fast.
   EXPECT_FALSE(pg.getErrorCaughtFlag());
@@ -506,9 +480,6 @@ TEST_F(ProcessGroupNCCLWatchdogTimeoutTest, testNCCLTimedoutDebugInfoStuck) {
   // Need to keep main thread sleep longer so that we can let heartbeat monitor
   // thread to finish the extra wait and flip the flag.
   watchdogTimeoutTestCommon(pg, 4);
-  // The flag is false shows that we get stuck in getting debug info such as
-  // desync debug info in the watchdog thread.
-  EXPECT_FALSE(pg.getWatchDogDebugInfoFinishedFlag());
   // The flag is true shows that the heartbeat monitor thread does trigger
   // process abort if getting debug info gets stuck.
   EXPECT_TRUE(pg.getErrorCaughtFlag());
