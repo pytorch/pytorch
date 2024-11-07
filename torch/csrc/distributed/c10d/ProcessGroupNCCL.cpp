@@ -2059,7 +2059,8 @@ void ProcessGroupNCCL::watchdogHandler() {
         work.checkAndSetException();
       }
       // Then check if work has timed out
-      bool timedout = work.checkTimeout();
+      // Skip if work has encountered an error
+      bool timedout = !work.exception() && work.checkTimeout();
 
       // Report desync state in case of timeout (if TORCH_NCCL_DESYNC_DEBUG is
       // turned on; otherwise, run() is no-op)
