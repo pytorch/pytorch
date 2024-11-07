@@ -63,7 +63,7 @@ from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
     all_types_and, floating_types, floating_and_complex_types, integral_types_and,
-    get_all_qint_dtypes,
+    get_all_qint_dtypes, all_types_complex_float8_and,
 )
 from torch.testing._internal.two_tensor import TwoTensor
 
@@ -237,7 +237,7 @@ class TestTorchDeviceType(TestCase):
         s[2:7] = 1
         self.assertEqual(s, storage_type(l))
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1991")
+    @xfailIfTorchDynamo
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
     def test_tensor_storage_type(self, device, dtype):
@@ -1337,7 +1337,8 @@ else:
     # point tensors with NaN and integer tensors with MAX_INT
     @skipXLA
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64))
+    @dtypes(*all_types_and_complex_and(
+        torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64, torch.complex32))
     def test_deterministic_empty(self, device, dtype):
         gen_fns = [
             lambda: torch.empty(10, 9, device=device, dtype=dtype),
@@ -2891,7 +2892,7 @@ else:
 
     # if the given input arg is not a list, it returns a list of single element: [arg]
     def _wrap_to_list(self, input_array):
-        return input_array if isinstance(input_array, list) else [input_array]
+        return list(input_array) if isinstance(input_array, (list, tuple)) else [input_array]
 
     # To ensure inf, -inf, and nan values do not cause divergence between Numpy and PyTorch.
     # There are two types of possible divergence:
@@ -3029,7 +3030,7 @@ else:
                     # Result is given just as real number and all the imaginary parts to be equal to zero.
                     self.assertEqual(expected[i].imag, torch.zeros(actual[i].shape), exact_dtype=False)
             else:
-                actual, expected = self._inf_nan_preprocess(list(actual), expected)
+                actual, expected = self._inf_nan_preprocess(list(actual), list(expected))
                 self.assertEqual(actual, expected, equal_nan=True, exact_dtype=False)
 
     @onlyNativeDeviceTypes
@@ -3554,7 +3555,7 @@ else:
     # FIXME: move to test indexing
     # The test fails for zero-dimensional tensors on XLA
     @onlyNativeDeviceTypes
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypes(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
     def test_index_select(self, device, dtype):
         num_src, num_out = 3, 5
 
@@ -3563,11 +3564,12 @@ else:
             return make_tensor(size_arg, dtype=dtype, device=device, low=None, high=None, noncontiguous=not contig)
 
         def ref_index_select(src, dim, idx):
-            # bfloat16 is just used on GPU, so it's not supported on numpy
-            if dtype == torch.bfloat16:
+            # some types not supported on numpy
+            not_np_dtypes = (torch.bfloat16, torch.float8_e5m2, torch.float8_e5m2fnuz, torch.float8_e4m3fn, torch.float8_e4m3fnuz)
+            if dtype in not_np_dtypes:
                 src = src.float()
             out = torch.from_numpy(np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim))
-            if dtype == torch.bfloat16:
+            if dtype in not_np_dtypes:
                 out = out.to(device=device, dtype=dtype)
             return out
 
@@ -5085,10 +5087,20 @@ else:
 
     @deviceCountAtLeast(1)
     @onlyCUDA
-    def test_storage_all_devices(self, devices):
+    @parametrize("non_blocking", (True, False))
+    def test_storage_all_devices(self, devices, non_blocking):
         for device in devices:
-            t = torch.tensor((), device=device)
+            t = torch.randn(6, device=device)
             self.assertEqual(t.dtype, t.storage().dtype)
+            s = t.untyped_storage()
+            s_cpu = s.to(device='cpu', non_blocking=non_blocking)
+            if non_blocking:
+                torch.cuda.synchronize()
+                self.assertTrue(s_cpu.is_pinned())
+            else:
+                self.assertFalse(s_cpu.is_pinned())
+            t_cpu = torch.empty(()).set_(s_cpu)
+            self.assertEqual(t.cpu(), t_cpu)
 
     # Note [lazy_clone_ tests with inductor enabled]
     # These `lazy_clone_` tests are written in a way that makes them pass in
@@ -6381,12 +6393,21 @@ else:
                     atol = 1e-2
                 self.assertEqual(src, dst.copy_(t), rtol=rtol, atol=atol)
 
-    @dtypes(*all_types_and_complex_and(
+    @dtypes(*all_types_complex_float8_and(
         torch.bool, torch.half, torch.bfloat16, torch.complex32,
         torch.uint16, torch.uint32, torch.uint64))
     def test_item(self, device, dtype):
-        if torch.device(device).type == 'xla' and dtype in [torch.uint16, torch.uint32, torch.uint64]:
-            self.skipTest('uint16,32,64 not implemented on XLA')
+        xla_unsupported_dtypes = [
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+            torch.float8_e4m3fn,
+            torch.float8_e5m2,
+            torch.float8_e4m3fnuz,
+            torch.float8_e5m2fnuz,
+        ]
+        if torch.device(device).type == 'xla' and dtype in xla_unsupported_dtypes:
+            self.skipTest('uint16,32,64,float8 not implemented on XLA')
         t = torch.ones((), device=device, dtype=dtype)
         self.assertEqual(1, t.item())
 
@@ -7549,10 +7570,10 @@ class TestTorch(TestCase):
             torch.mean(sample, dim=0), torch.full((d,), 0.5), atol=2, rtol=2
         )
         torch.testing.assert_close(
-            np.percentile(sample, 25, axis=0), np.repeat(0.25, d), atol=2, rtol=2
+            np.percentile(sample, 25, axis=0).astype(np.float64), np.repeat(0.25, d), atol=2, rtol=2
         )
         torch.testing.assert_close(
-            np.percentile(sample, 75, axis=0), np.repeat(0.75, d), atol=2, rtol=2
+            np.percentile(sample, 75, axis=0).astype(np.float64), np.repeat(0.75, d), atol=2, rtol=2
         )
 
     @skipIfTorchDynamo("np.float64 restored as float32 after graph break.")
@@ -10035,6 +10056,30 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         del s
         self.assertEqual(MyStorage.finalized_count, 1)
         self.assertTrue(m[0])
+
+    def test_tensor_ressurecting_clear(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/136358
+        # A Tensor with custom __dict__
+        # Autograd here is for the c++ reference later
+        t = torch.rand(2, requires_grad=True).clone()
+        t.foo = 2
+
+        # that is part of a cycle
+        l = []
+        l.append(l)
+        l.append(t)
+
+        # Keep the Tensor alive from c++
+        # Using autograd graph here (any other mean would work)
+        t2 = t ** 2
+        self.assertIs(t2.grad_fn._saved_self, t)
+
+        # Clear all python references and trigger the gc
+        del t, l
+        gc.collect()
+
+        # We used to loose the dict!
+        self.assertTrue(hasattr(t2.grad_fn._saved_self, "foo"))
 
     def test_tensor_slot_dealloc(self):
 

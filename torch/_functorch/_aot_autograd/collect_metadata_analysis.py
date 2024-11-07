@@ -12,7 +12,7 @@ import collections
 import contextlib
 import logging
 from functools import wraps
-from typing import Callable, DefaultDict, Dict, List, Optional
+from typing import Callable, DefaultDict, Dict, List, Optional, Set
 
 import torch
 import torch.utils._pytree as pytree
@@ -34,7 +34,7 @@ from .functional_utils import (
     from_fun,
     has_data_mutation,
     has_metadata_mutation,
-    has_same_metadata,
+    MetadataKey,
     to_fun,
     was_inductor_storage_resized,
 )
@@ -152,6 +152,9 @@ def run_functionalized_fw_and_collect_metadata(
     # Note: this is guaranteed to be set when running under dynamo
     static_input_indices: Optional[List[int]] = None,
     pre_dispatch: bool = False,
+    # is_export is technically only needed to avoid using functionalization V2
+    # during analysis
+    is_export: bool = False,
 ) -> Callable[..., ViewAndMutationMeta]:
     memo: Dict[Tensor, Tensor] = {}
 
@@ -183,7 +186,7 @@ def run_functionalized_fw_and_collect_metadata(
 
         # It doesn't matter if we run this under predispatch or not because it is
         # only for figuring out metadata
-        mode = FunctionalTensorMode(_allow_token_discovery=True)
+        mode = FunctionalTensorMode(_allow_token_discovery=True, export=is_export)
         suppress_pending = contextlib.nullcontext()
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
@@ -225,10 +228,6 @@ def run_functionalized_fw_and_collect_metadata(
                     "tensor subclasses"
                 )
 
-            if not isinstance(arg, Tensor):
-                new_arg = arg
-            else:
-                new_arg = from_fun(f_arg)
             mutates_metadata = has_metadata_mutation(
                 f_arg, arg, check_only_storage_mutation=False
             )
@@ -292,7 +291,11 @@ def run_functionalized_fw_and_collect_metadata(
         num_aliased_tensors_that_are_multi_output_views: DefaultDict = (
             collections.defaultdict(int)
         )
-        out_storage_to_tensors: DefaultDict = collections.defaultdict(set)
+
+        out_storage_to_metadata_key_to_tensors: DefaultDict[
+            Optional[StorageWeakRef], DefaultDict[MetadataKey, Set[torch.Tensor]]
+        ] = collections.defaultdict(lambda: collections.defaultdict(set))
+
         curr_storage = None
         for o in flat_f_outs:
             if isinstance(o, torch.Tensor):
@@ -383,7 +386,10 @@ def run_functionalized_fw_and_collect_metadata(
                 )
                 if is_cur_tensor_multi_out_view:
                     num_aliased_tensors_that_are_multi_output_views[curr_storage] += 1
-                out_storage_to_tensors[curr_storage].add(o)
+                if o.requires_grad:
+                    out_storage_to_metadata_key_to_tensors[curr_storage][
+                        MetadataKey.make(o)
+                    ].add(o)
 
         # maps the id of an intermediate base to its index in the output of the compiled forward
         intermediate_base_tensor_id_to_output_idx: Dict[int, int] = {}
@@ -428,10 +434,10 @@ def run_functionalized_fw_and_collect_metadata(
                 if not isinstance(o, Tensor)
                 else [
                     curr
-                    for curr in out_storage_to_tensors[curr_storage]
-                    if has_same_metadata(o, curr)
-                    and curr.requires_grad
-                    and o is not curr
+                    for curr in out_storage_to_metadata_key_to_tensors[curr_storage][
+                        MetadataKey.make(o)
+                    ]
+                    if o is not curr
                 ]
             )
 
@@ -693,12 +699,10 @@ from a multi-output view call"
 
         output_tangents_start_idx = len(f_input_tangents)
         output_tangents_end_idx = output_tangents_start_idx + len(f_output_tangents)
-        tangents_and_memory_formats = [
-            coerce_tangent_and_suggest_memory_format(tt)
+        traced_tangents = [
+            coerce_tangent_and_suggest_memory_format(tt)[0]
             for i, tt in enumerate(traced_tangents)
         ]
-        traced_tangents = [t[0] for t in tangents_and_memory_formats]
-        traced_tangent_memory_formats = [t[1] for t in tangents_and_memory_formats]
         nonlocal static_input_indices
         static_input_indices = static_input_indices or []
         if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
@@ -759,10 +763,11 @@ from a multi-output view call"
             num_intermediate_bases=len(intermediate_bases),
             keep_input_mutations=keep_input_mutations,
             traced_tangents=traced_tangents,
-            traced_tangent_memory_formats=traced_tangent_memory_formats,
             subclass_inp_meta=create_subclass_meta(flat_args),
             subclass_fw_graph_out_meta=create_subclass_meta(fw_graph_outs),
-            subclass_tangent_meta=create_subclass_meta(traced_tangents),
+            subclass_tangent_meta=create_subclass_meta(
+                traced_tangents, count_symints=False, with_memory_format=True
+            ),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
             static_input_indices=static_input_indices,

@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -46,7 +47,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.utils._triton import has_triton
+from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import checkpoint
 
 
@@ -439,7 +441,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             tmp_dt._local_tensor.stride(), tmp_dt_fake._local_tensor.stride()
         )
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent(self):
         # Partial -> Shard on an unbalanced tensor results in:
         # - A contiguous DTensor
@@ -515,7 +517,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         out_test = opt_mod(dt)
         self.assertEqual(out_ref, out_test)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_different_gradient_placement(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -622,6 +624,8 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref, res)
 
     def test_graph_input_is_async(self):
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(x):
@@ -633,6 +637,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         x2 = x_dt.redistribute(mesh, [Replicate()], async_op=True)
         x2 = x2.to_local()
+        self.assertTrue(isinstance(x2, AsyncCollectiveTensor))
         out = opt_fn(x2)
         # The important part: we get a wait_tensor() in the graph.
         # At runtime, the input to the graph is an AsyncCollectiveTensor,
@@ -647,7 +652,41 @@ def forward(self, primals_1):
     return (sin_1, primals_1, wait_tensor)""",
         )
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.expectedFailure
+    @skipIfTorchDynamo()
+    def test_unwrap_async_collective_tensor_tangent(self):
+        from torch.distributed._functional_collectives import AsyncCollectiveTensor
+
+        def fn(x):
+            return x.clone()
+
+        ref_x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        ref_y = fn(ref_x)
+
+        ref_y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        fn_comp = torch.compile(fn, fullgraph=True)
+
+        x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y = fn_comp(x)
+        y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        x2 = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y2 = fn_comp(x2)
+        y2.backward(
+            gradient=TwoTensor(
+                AsyncCollectiveTensor(torch.randn(2, 3)),
+                AsyncCollectiveTensor(torch.randn(2, 3)),
+            )
+        )
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_dtensor_partial_placement_graph_output(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -665,7 +704,7 @@ def forward(self, primals_1):
         out_dt = torch.matmul(tmp_dt, y_dt)
         out_dt.sum().backward()
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(1)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)

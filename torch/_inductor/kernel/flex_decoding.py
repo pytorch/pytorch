@@ -133,8 +133,11 @@ flex_decoding_template = TritonTemplate(
     offs_d = tl.arange(0, QK_HEAD_DIM)
     offs_vd = tl.arange(0, V_HEAD_DIM)
 
-    # KV_IDX / FULL_KV_IDX and KV_NUM_BLKS / FULL_KV_NUM_BLKS are always contiguous.
-    sparse_hz_offset = sparse_idx_z * SPARSE_HQ + sparse_idx_h
+    # Get HZ offsets for KV_NUM_BLKS and KV_IDX
+    stride_block_z, stride_block_h, stride_block_row, stride_block_col = {{stride("KV_NUM_BLKS")}}
+    sparse_block_hz_offset = sparse_idx_z * stride_block_z + sparse_idx_h * stride_block_h
+    stride_kv_z, stride_kv_h, stride_kv_row, stride_kv_col = {{stride("KV_IDX")}}
+    sparse_idx_hz_offset = sparse_idx_z * stride_kv_z + sparse_idx_h * stride_kv_h
 
     # Calculate KV blocks that belong this CTA.
     block_n_start = off_t * TILE_KV_MULTIPLE                        # n_offset inside sparse block
@@ -155,8 +158,9 @@ flex_decoding_template = TritonTemplate(
     # Apply both score_mod and mask_mod
 
     # find first kv block we are loading and the number of blocks we are loading
-    kv_indices = KV_IDX + sparse_hz_offset * SPARSE_KV_BLOCK_CNT
-    kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_hz_offset)
+    # Offset the kv_indices tensor by the correct batch and head
+    kv_indices = KV_IDX + sparse_idx_hz_offset
+    kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_block_hz_offset)
     indices_idx = block_n_start // SPARSE_KV_MULTIPLE
     off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
     off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
@@ -202,8 +206,8 @@ flex_decoding_template = TritonTemplate(
     # We know these blocks are guaranteed to be "full", so we don't need to
     # apply mask_mod to them - only score_mod
     if HAS_FULL_BLOCKS:
-        kv_indices = FULL_KV_IDX + sparse_hz_offset * SPARSE_KV_BLOCK_CNT
-        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_hz_offset)
+        kv_indices = FULL_KV_IDX + sparse_idx_hz_offset
+        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_block_hz_offset)
         indices_idx = block_n_start // SPARSE_KV_MULTIPLE
         off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
         off_n = tl.load(kv_indices + indices_idx) * SPARSE_KV_BLOCK_SIZE + off_n_block_in_sparse * BLOCK_N
@@ -341,8 +345,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
 
-    if not ((Bq == Bkv) or (Bq > 1 and Bkv == 1)):
-        raise RuntimeError(f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}")
+    assert V.graph.sizevars.evaluate_expr(
+        sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)
+    ), f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
 
     B = Bq
     kernel_options = dict(kernel_options)
@@ -389,6 +394,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
             full_kv_indices,
         ]
     )
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
 
     choices: List[Any] = []
     configs: List[Tuple[int, int, int]] = []
@@ -477,6 +484,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # Mark SPARSE_KV_BLOCK_SIZE as static shapes and add guards.
     SPARSE_KV_BLOCK_SIZE = V.graph.sizevars.evaluate_static_shape(SPARSE_KV_BLOCK_SIZE)
 
+    original_kernel_options = kernel_options.copy()
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
@@ -484,9 +492,10 @@ def create_flex_decoding_kernel(*args, **kwargs):
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0:
             continue
 
+        cur_kernel_options = original_kernel_options.copy()
         # Performance tuning
-        kernel_options.setdefault("BLOCK_N", BLOCK_N)
-        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         # Work around https://github.com/pytorch/pytorch/issues/129625
         if num_stages == 2:
@@ -513,7 +522,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            **kernel_options,
+            **cur_kernel_options,
         )
 
     inputs_for_flex_decoding = (

@@ -838,6 +838,32 @@ class TestConverter(TestCase):
                 orig_m(*inp),
             )
 
+    def test_convert_if_duplicate_attr_names(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.w = 1
+                self.h = 2
+
+            def forward(self, x: torch.Tensor, y: int):
+                self.w = self.w * 10
+                self.h = self.h * 20
+
+                if y > 10:
+                    res = self.w + x
+                else:
+                    res = self.h + x
+
+                if y < 10:
+                    res = self.w + res
+                else:
+                    res = self.h + res
+
+                return res
+
+        inp = (torch.ones(3), 5)
+        self._check_equal_ts_ep_converter(M(), inp, option=["script"])
+
     def test_ts2ep_converter_contains(self):
         class MIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):

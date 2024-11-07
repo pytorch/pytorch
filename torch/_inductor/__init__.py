@@ -1,8 +1,13 @@
 # mypy: allow-untyped-defs
-from typing import Any, Dict, List, Optional, Tuple
+
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch.fx
 import torch.utils._pytree as pytree
+
+
+if TYPE_CHECKING:
+    from torch._inductor.utils import InputType
 
 
 __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_begin"]
@@ -10,7 +15,7 @@ __all__ = ["compile", "list_mode_options", "list_options", "cudagraph_mark_step_
 
 def compile(
     gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
+    example_inputs: List["InputType"],
     options: Optional[Dict[str, Any]] = None,
 ):
     """
@@ -74,7 +79,9 @@ def aoti_compile_and_package(
     if not isinstance(exported_program, ExportedProgram):
         raise ValueError("Only ExportedProgram is supported")
 
-    assert package_path is None or package_path.endswith(".pt2")
+    assert package_path is None or package_path.endswith(
+        ".pt2"
+    ), f"Expect package path to end with .pt2, got {package_path}"
 
     inductor_configs = inductor_configs or {}
 
@@ -232,12 +239,14 @@ def list_mode_options(
         # enable max-autotune
         "max-autotune-no-cudagraphs": {
             "max_autotune": True,
+            "coordinate_descent_tuning": True,
         },
         # enable max-autotune
         # enable cudagraphs
         "max-autotune": {
             "max_autotune": True,
             "triton.cudagraphs": True,
+            "coordinate_descent_tuning": True,
         },
     }
     return mode_options[mode] if mode else mode_options  # type: ignore[return-value]
@@ -256,7 +265,7 @@ def list_options() -> List[str]:
 
     from torch._inductor import config
 
-    current_config: Dict[str, Any] = config.shallow_copy_dict()
+    current_config: Dict[str, Any] = config.get_config_copy()
 
     return list(current_config.keys())
 

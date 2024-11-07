@@ -10,17 +10,11 @@
 #include <fstream>
 #include <iostream>
 
-// TODO: Investigate why this is necessary, but fixes build problems in FRL
-#if __has_include("filesystem")
-#include <filesystem>
-namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
-
 #ifndef _WIN32
 #include <sys/stat.h>
+#else
+#include <filesystem>
+namespace fs = std::filesystem;
 #endif
 
 // TODO: C++17 has the filesystem header, which may replace these
@@ -42,7 +36,7 @@ bool file_exists(std::string& path) {
 #ifdef _WIN32
   return fs::exists(path);
 #else
-  struct stat rc;
+  struct stat rc {};
   return lstat(path.c_str(), &rc) == 0;
 #endif
 }
@@ -60,6 +54,13 @@ std::string create_temp_dir() {
   return temp_dir;
 #endif
 }
+
+#ifdef _WIN32
+const std::string k_separator = "\\";
+#else
+const std::string k_separator = "/";
+#endif
+
 } // namespace
 
 namespace torch::inductor {
@@ -292,6 +293,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   std::string cpp_filename = "";
   std::string consts_filename = "";
   std::string found_filenames = ""; // Saving for bookkeeping
+  std::string model_directory =
+      "data" + k_separator + "aotinductor" + k_separator + model_name;
 
   for (uint32_t i = 0; i < zip_archive.m_total_files; i++) {
     uint32_t filename_len =
@@ -309,11 +312,10 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     found_filenames += " ";
 
     // Only compile files in the specified model directory
-    std::string model_directory = "data/aotinductor/" + model_name;
     if (filename_str.length() >= model_directory.length() &&
         filename_str.substr(0, model_directory.length()) == model_directory) {
       std::string output_path_str = temp_dir;
-      output_path_str += "/";
+      output_path_str += k_separator;
       output_path_str += filename_str;
 
       // Create the parent directory if it doesn't exist
@@ -384,7 +386,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
     throw std::runtime_error("Unsupported device found: " + device);
   }
 
-  runner_ = registered_aoti_runner[device](so_path, 1, device, "");
+  std::string cubin_dir = temp_dir + k_separator + model_directory;
+  runner_ = registered_aoti_runner[device](so_path, 1, device, cubin_dir);
 
   std::remove(temp_dir.c_str());
 }

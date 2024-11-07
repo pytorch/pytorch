@@ -826,7 +826,10 @@ def forward(self, primals_1):
         new_out = out + aaaa
         with self.assertRaisesRegex(
             RuntimeError,
-            "The grad inputs should be same tensor subclass type as forward output",
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             new_out.sum().backward()
 
@@ -2463,6 +2466,7 @@ def forward(self, primals_1, primals_2):
         # Not checking equality of ref and x as Exception is expected
 
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
+    @skipIfTorchDynamo()
     def test_input_mutation_false_aliasing(self):
         def f(a, b):
             a.mul_(3)
@@ -2492,8 +2496,11 @@ def forward(self, primals_1, primals_2):
         )
         # Input mutations on subclasses with training graphs fail backward guards today.
         with self.assertRaisesRegex(
-            AssertionError,
-            "attempted to compile the backward with incorrect subclass metadata",
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             self.verify_aot_autograd(
                 f,
@@ -5410,6 +5417,7 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(out_ref.a, out_test.a)
         self.assertEqual(out_ref.b, out_test.b)
 
+    @skipIfTorchDynamo()
     def test_aot_dispatch_incorrect_backward(self):
         # a is a subclass, b is not
         def f(a, b):
@@ -5450,8 +5458,11 @@ def forward(self, tangents_1, tangents_2):
         # but we were wrong: in the below tests, it is a subclass.
         # This will eventually require a repartition + recompile
         with self.assertRaisesRegex(
-            AssertionError,
-            "incorrectly attempted to compile the backward with incorrect subclass metadata",
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
         ):
             (out_test[0] + out_test[1]).sum().backward()
 
@@ -6184,6 +6195,38 @@ class TestAOTModuleSimplified(AOTTestCase):
         out_buffer = out.values()
         ga, gb, gc = torch.autograd.grad(out_buffer.sum(), (a, b, c))
 
+    @skipIfTorchDynamo()
+    def test_wrong_guess_tangent_type(self):
+        def fn(x):
+            return x.clone()
+
+        ref_x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        ref_y = fn(ref_x)
+        ref_y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        fn_comp = torch.compile(fn, fullgraph=True)
+
+        x = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y = fn_comp(x)
+        y.backward(gradient=TwoTensor(torch.randn(2, 3), torch.randn(2, 3)))
+
+        x2 = TwoTensor(
+            torch.randn(2, 3, requires_grad=True), torch.randn(2, 3, requires_grad=True)
+        )
+        y2 = fn_comp(x2)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            """
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+""",  # noqa: F541
+        ):
+            y2.backward(gradient=torch.randn(2, 3))
+
     @torch._inductor.config.patch({"freezing": True})
     def test_inductor_freezing_with_subclasses(self):
         class M(torch.nn.Module):
@@ -6307,12 +6350,6 @@ symbolic_aot_autograd_failures = {
     xfail(
         "nn.functional.nll_loss", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail(
-        "_segment_reduce", "lengths"
-    ),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
-    xfail(
-        "_segment_reduce", "offsets"
-    ),  # aten.segment_reduce.default - couldn't find symbolic meta functio...
     xfail("trace", ""),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
         "_upsample_bilinear2d_aa"
@@ -6594,6 +6631,24 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             return result
 
         return torch_compile_wrapper
+
+    def test_inputs_overlapping_unsqueeze_with_mutation(self):
+        def f(x, y):
+            x.add_(1)
+            y.add_(1)
+            return x
+
+        def run(f):
+            base = torch.ones(10)
+            inputs = [base.unsqueeze(0), base.unsqueeze(0)]
+            return f(*inputs)
+
+        optf = torch.compile(backend="aot_eager", dynamic=True)(f)
+
+        out = run(f)
+        optout = run(optf)
+
+        self.assertEqual(out, optout)
 
 
 class MockFXGraphCache:

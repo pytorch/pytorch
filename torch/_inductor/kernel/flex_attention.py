@@ -17,11 +17,10 @@ from ..ir import (
     ExternKernel,
     FixedLayout,
     FlexibleLayout,
-    get_stride_order,
+    get_fill_order,
     InputBuffer,
     IRNode,
     StorageBox,
-    stride_order2fill_order,
     Subgraph,
     TensorBox,
 )
@@ -71,13 +70,20 @@ def create_placeholder(
     name: str, dtype: torch.dtype, device: torch.device
 ) -> TensorBox:
     """Creates a placeholder input buffers for producing subgraph_output."""
-    input_buffer = InputBuffer(name, FixedLayout(device, dtype, [], []))
+    input_buffer = InputBuffer(name=name, layout=FixedLayout(device, dtype, [], []))
     return TensorBox.create(input_buffer)
 
 
 def maybe_realize(args: List[Optional[IRNode]]):
     """Accepts a list of optional IRNodes and returns a list of realized IRNodes"""
-    return tree_map(lambda x: realize_inputs(x) if x is not None else None, args)
+    return tree_map(
+        lambda x: (
+            realize_inputs(x)
+            if x is not None and not isinstance(x, sympy.Symbol)
+            else x
+        ),
+        args,
+    )
 
 
 def get_float32_precision():
@@ -108,46 +114,47 @@ def build_subgraph_buffer(
         # TensorBox for each of these inputs. For the rest of the inputs we
         # expect that these are lifted inputs that fill up the '*other_buffers'
         # tuple and already have corresponding TensorBoxes passed in as args.
-        if node.op == "placeholder":
-            env[node] = args[cnt]
-            cnt += 1
-        elif node.op == "call_function":
-            # For call_function we use the default lowerings and pass in the
-            # already created TensorBoxes as args
+        with V.graph.set_current_node(node):
+            if node.op == "placeholder":
+                env[node] = args[cnt]
+                cnt += 1
+            elif node.op == "call_function":
+                # For call_function we use the default lowerings and pass in the
+                # already created TensorBoxes as args
 
-            args, kwargs = tree_map(
-                lambda x: env[x] if x in env else x, (node.args, node.kwargs)
-            )
-            env[node] = lowerings[node.target](*args, **kwargs)
-        elif node.op == "output":
+                args, kwargs = tree_map(
+                    lambda x: env[x] if x in env else x, (node.args, node.kwargs)
+                )
+                env[node] = lowerings[node.target](*args, **kwargs)
+            elif node.op == "output":
 
-            def convert_output_node_to_buffer(output):
-                if output is None:
-                    return None
-                output_node = output
-                output_buffer = env[output_node]
-                assert isinstance(output_buffer, TensorBox), (
-                    "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
-                    type(output_buffer),
-                )
-                assert isinstance(output_buffer.data, StorageBox), (
-                    "The output node for the flex attention subgraph must be a StorageBox, but got: ",
-                    type(output_buffer),
-                )
-                subgraph_buffer = ComputedBuffer(
-                    name=None,
-                    layout=FlexibleLayout(
-                        device=output_buffer.data.get_device(),
-                        dtype=output_buffer.data.get_dtype(),
-                        size=output_buffer.data.get_size(),
-                    ),
-                    data=output_buffer.data.data,  # type: ignore[arg-type]
-                )
-                return subgraph_buffer
+                def convert_output_node_to_buffer(output):
+                    if output is None:
+                        return None
+                    output_node = output
+                    output_buffer = env[output_node]
+                    assert isinstance(output_buffer, TensorBox), (
+                        "The output node  for flex attention's subgraph must be a TensorBox, but got: ",
+                        type(output_buffer),
+                    )
+                    assert isinstance(output_buffer.data, StorageBox), (
+                        "The output node for the flex attention subgraph must be a StorageBox, but got: ",
+                        type(output_buffer),
+                    )
+                    subgraph_buffer = ComputedBuffer(
+                        name=None,
+                        layout=FlexibleLayout(
+                            device=output_buffer.data.get_device(),
+                            dtype=output_buffer.data.get_dtype(),
+                            size=output_buffer.data.get_size(),
+                        ),
+                        data=output_buffer.data.data,  # type: ignore[arg-type]
+                    )
+                    return subgraph_buffer
 
-            # node.args[0] is either a single element or a list of elements
-            # representing all outputs of the function.
-            return tree_map(convert_output_node_to_buffer, node.args[0])
+                # node.args[0] is either a single element or a list of elements
+                # representing all outputs of the function.
+                return tree_map(convert_output_node_to_buffer, node.args[0])
 
     raise ValueError("FlexAttention was passed a subgraph with no output node!")
 
@@ -770,6 +777,9 @@ def flex_attention(
         ]
     )
 
+    score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
+    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
     assert V.graph.sizevars.evaluate_expr(
@@ -789,8 +799,7 @@ def flex_attention(
 
     # Construct output layout with strides matching the query.
     out_size = [B, Hq, seq_len_q, v_head_dim]
-    stride_order = get_stride_order(query.get_stride())
-    fill_order = stride_order2fill_order(stride_order)
+    fill_order = get_fill_order(query.get_stride())
     out_strides = construct_strides(out_size, fill_order)
 
     layout = FixedLayout(
@@ -849,7 +858,7 @@ def flex_attention(
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
-
+    original_kernel_options = kernel_options.copy()
     for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
         if SPARSE_KV_BLOCK_SIZE % BLOCK_N != 0 or SPARSE_Q_BLOCK_SIZE % BLOCK_M != 0:
             continue
@@ -857,12 +866,13 @@ def flex_attention(
         if num_stages == 2:
             continue
 
+        cur_kernel_options = original_kernel_options.copy()
         # Performance tuning
-        kernel_options.setdefault("BLOCK_M", BLOCK_M)
-        kernel_options.setdefault("BLOCK_N", BLOCK_N)
+        cur_kernel_options.setdefault("BLOCK_M", BLOCK_M)
+        cur_kernel_options.setdefault("BLOCK_N", BLOCK_N)
         # Blocksparse options
-        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
-        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_template.maybe_append_choice(
             choices=choices,
@@ -887,7 +897,7 @@ def flex_attention(
             num_stages=num_stages,
             num_warps=num_warps,
             call_sizes=query.get_size(),
-            **kernel_options,
+            **cur_kernel_options,
         )
     inputs_for_autotuning = (
         [
@@ -1780,7 +1790,7 @@ def flex_attention_backward(*args, **kwargs):
                 if BLOCK2 % BLOCK1 == 0
             ]
         )
-
+    original_kernel_options = kernel_options.copy()
     for BLOCK1, BLOCK2, num_warps, num_stages in configs:
         if (
             SPARSE_KV_BLOCK_SIZE % BLOCK1 != 0
@@ -1791,13 +1801,14 @@ def flex_attention_backward(*args, **kwargs):
             continue
 
         # Performance tuning
-        kernel_options.setdefault("BLOCK_M1", BLOCK1)
-        kernel_options.setdefault("BLOCK_N1", BLOCK2)
-        kernel_options.setdefault("BLOCK_M2", BLOCK2)
-        kernel_options.setdefault("BLOCK_N2", BLOCK1)
+        cur_kernel_options = original_kernel_options.copy()
+        cur_kernel_options.setdefault("BLOCK_M1", BLOCK1)
+        cur_kernel_options.setdefault("BLOCK_N1", BLOCK2)
+        cur_kernel_options.setdefault("BLOCK_M2", BLOCK2)
+        cur_kernel_options.setdefault("BLOCK_N2", BLOCK1)
         # Blocksparse options
-        kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
-        kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
+        cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
 
         flex_attention_backward_template.maybe_append_choice(
             choices=choices,
@@ -1825,7 +1836,7 @@ def flex_attention_backward(*args, **kwargs):
             call_sizes=query.get_size() + key.get_size()[1:3],
             num_stages=num_stages,
             num_warps=num_warps,
-            **kernel_options,
+            **cur_kernel_options,
         )
     inputs_for_autotuning = (
         [
@@ -1868,13 +1879,13 @@ def flex_attention_backward(*args, **kwargs):
         input_gen_fns=input_gen_fns,
     )  # [Bq, Hkv, seq_len_kv, k_head_dim]
 
-    if Bq == Bkv:
+    if V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv)):
         grad_key = broadcasted_grad_key
         grad_value = broadcasted_grad_value
     else:
-        assert (
-            Bq > 1 and Bkv == 1
-        ), f"Bq and Bkv must broadcast. Got Bq={Bq} and Bkv={Bkv}"
+        assert V.graph.sizevars.evaluate_expr(
+            sympy.Gt(Bq, 1) & sympy.Eq(Bkv, 1)
+        ), f"Bq and Bkv must broadcastable. Got Bq={V.graph.sizevars.evaluate_expr(Bq)} and Bkv={V.graph.sizevars.evaluate_expr(Bkv)}"  # noqa: B950
         grad_key = lowerings[aten.sum](broadcasted_grad_key, axis=0, keepdims=True)
         grad_value = lowerings[aten.sum](broadcasted_grad_value, axis=0, keepdims=True)
 

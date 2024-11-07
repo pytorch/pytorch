@@ -286,7 +286,7 @@ class ModularIndexing(sympy.Function):
         cls, base: sympy.Integer, divisor: sympy.Integer, modulus: sympy.Integer
     ) -> Optional[sympy.Basic]:
         if base == 0 or modulus == 1:
-            return sympy.Integer(0)
+            return sympy.S.Zero
 
         if (
             isinstance(base, sympy.Integer)
@@ -766,26 +766,40 @@ class MinMaxBase(Expr, LatticeOp):  # type: ignore[misc]
         Unlike the sympy implementation, we only look for zero and one, we don't
         do generic is connected test pairwise which is slow
         """
-        if len(values) == 2:
-            ix = 1 if cls is Max else 0
-            if values[0] in (0.0, 0) and values[1].is_nonnegative:
-                return {values[ix]}
-            elif values[1] in (0.0, 0) and values[0].is_nonnegative:
-                return {values[1 - ix]}
-            elif values[1] == 1 and values[0].is_positive:
-                return {values[1 - ix]}
-            elif values[0] == 1 and values[1].is_positive:
-                return {values[ix]}
 
-        if all(arg.is_Number for arg in values):
-            if cls is Max:
-                return {max(values)}
-            elif cls is Min:
-                return {min(values)}
+        # First, collapse all numeric arguments
+        other_values = set()
+        num_value = None
+        for arg in values:
+            if arg.is_Number:
+                if num_value is None:
+                    num_value = arg
+                else:
+                    if cls is Max:
+                        num_value = max(num_value, arg)
+                    elif cls is Min:
+                        num_value = min(num_value, arg)
+                    else:
+                        raise AssertionError(f"impossible {cls}")
             else:
-                raise AssertionError(f"impossible {cls}")
+                other_values.add(arg)
 
-        return set(values)
+        # Special cases when there is only one symbolic value
+        if num_value is None:
+            return other_values
+
+        if len(other_values) == 0:
+            return {num_value}
+
+        if len(other_values) == 1:
+            other_value = next(iter(other_values))
+            if num_value in (0.0, 0) and other_value.is_nonnegative:
+                return other_values if cls is Max else {num_value}
+            if num_value == 1 and other_value.is_positive:
+                return other_values if cls is Max else {num_value}
+
+        other_values.add(num_value)
+        return other_values
 
     _eval_is_algebraic = lambda s: _torf(i.is_algebraic for i in s.args)  # noqa: E731
     _eval_is_antihermitian = lambda s: _torf(  # noqa: E731
@@ -1183,10 +1197,14 @@ def make_opaque_unary_fn(name):
                     a = sympy.oo
                 if a is -int_oo:
                     a = -sympy.oo
+                if name == "log2":
+                    return sympy.log(a, 2)
                 return getattr(sympy, name)(a)
             return None
 
-    OpaqueUnaryFn.__name__ = "OpaqueUnaryFn_" + name
+    nm = "OpaqueUnaryFn_" + name
+    OpaqueUnaryFn.__name__ = nm
+    OpaqueUnaryFn.__qualname__ = nm
 
     return OpaqueUnaryFn
 
@@ -1205,3 +1223,4 @@ OpaqueUnaryFn_atan = make_opaque_unary_fn("atan")
 OpaqueUnaryFn_exp = make_opaque_unary_fn("exp")
 OpaqueUnaryFn_log = make_opaque_unary_fn("log")
 OpaqueUnaryFn_asinh = make_opaque_unary_fn("asinh")
+OpaqueUnaryFn_log2 = make_opaque_unary_fn("log2")

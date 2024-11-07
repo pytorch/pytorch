@@ -283,7 +283,19 @@ class RemoteAutotuneCache(RedisRemoteCache):
     pass
 
 
+class RemoteBundledAutotuneCache(RedisRemoteCache):
+    pass
+
+
 class RemoteFxGraphCache(RedisRemoteCache):
+    pass
+
+
+class RemoteAOTAutogradCache(RedisRemoteCache):
+    pass
+
+
+class RemoteDynamoPGOCache(RedisRemoteCache):
     pass
 
 

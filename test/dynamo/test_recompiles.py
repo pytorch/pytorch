@@ -334,6 +334,23 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             opt_f(torch.ones(3), i)
         self.assertEqual(counter.frame_count, 2)
 
+    def test_automatic_dynamic_on_closed_ints(self):
+        def f(x):
+            def g(y):
+                return y + x
+
+            return g
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter)
+        def h(x, g):
+            return g(x)
+
+        for i in range(10):
+            h(torch.randn(5), f(i))
+        self.assertEqual(counter.frame_count, 2)
+
     @patch.object(torch._dynamo.config, "cache_size_limit", 2)
     def test_run_mode_after_cache_limit_hit(self):
         def f(x, n):

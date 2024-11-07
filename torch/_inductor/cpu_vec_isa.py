@@ -53,7 +53,7 @@ class VecISA:
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
     _avx_code = """
-#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX)
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
@@ -138,10 +138,13 @@ cdll.LoadLibrary("__lib_path__")
 
             return True
 
-    @functools.lru_cache(None)  # noqa: B019
     def __bool__(self) -> bool:
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
+        return self.__bool__impl(config.cpp.vec_isa_ok)
+
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__impl(self, vec_isa_ok) -> bool:
+        if vec_isa_ok is not None:
+            return vec_isa_ok
 
         if config.is_fbcode():
             return True
@@ -151,13 +154,31 @@ cdll.LoadLibrary("__lib_path__")
 
 @dataclasses.dataclass
 class VecNEON(VecISA):
-    _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
+    _bit_width = 128  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec128/vec128_float_neon.h
     _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"]
     _arch_flags = ""  # Unused
-    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+    _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
 
     def __str__(self) -> str:
         return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
+
+    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+@dataclasses.dataclass
+class VecSVE(VecISA):
+    # this function can be repurposed for SVE with variable vec length
+    _bit_width = 256
+    _macro = [
+        "CPU_CAPABILITY_SVE",
+        "CPU_CAPABILITY_SVE256",
+        "AT_BUILD_ARM_VEC256_WITH_SLEEF",
+    ]
+    _arch_flags = "-march=armv8-a+sve -msve-vector-bits=256"
+    _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
+
+    def __str__(self) -> str:
+        return "asimd"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -307,7 +328,7 @@ def x86_isa_checker() -> List[str]:
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON()]
+supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON(), VecSVE()]
 
 
 def get_isa_from_cpu_capability(
@@ -317,9 +338,9 @@ def get_isa_from_cpu_capability(
 ):
     # AMX setting is not supported in eager
     # VecAMX will be prioritized for selection when setting ATEN_CPU_CAPABILITY to avx512
+    # TODO add sve256 support
     capability_to_isa_str = {
         "default": "INVALID_VEC_ISA",
-        "neon": "asimd",
         "zvector": "zvector",
         "vsx": "vsx",
         "avx2": "avx2",
@@ -368,7 +389,10 @@ def valid_vec_isa_list() -> List[VecISA]:
     elif arch == "ppc64le":
         isa_list.append(VecVSX())
     elif arch == "aarch64":
-        isa_list.append(VecNEON())
+        if torch.cpu._is_arm_sve_supported():
+            isa_list.append(VecSVE())
+        else:
+            isa_list.append(VecNEON())
     elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
