@@ -4,8 +4,9 @@ import unittest
 from typing import Optional
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
+
 
 # Protects against includes accidentally setting the default dtype
 assert torch.get_default_dtype() is torch.float32
@@ -17,9 +18,11 @@ E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
 
 
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
+@unittest.skipIf(not torch.cpu._is_amx_tile_supported(), "FP8 cannot run on the current CPU platform")
 class TestFP8MatmulCpu(TestCase):
     def _test_tautological_mm(
-        self, device: str = "cpu",
+        self,
+        device: str = "cpu",
         x_dtype: torch.dtype = e4m3_type,
         y_dtype: torch.dtype = e4m3_type,
         out_dtype: Optional[torch.dtype] = None,
@@ -61,7 +64,7 @@ class TestFP8MatmulCpu(TestCase):
     def test_float8_bias(self, device) -> None:
         (k, l, m) = (16, 48, 32)
         x = torch.ones((k, l), device=device).to(e4m3_type)
-        y = torch.full((m, l), .25, device=device, dtype=e4m3_type).t()
+        y = torch.full((m, l), 0.25, device=device, dtype=e4m3_type).t()
         bias = torch.full((m,), 4.0, device=device, dtype=torch.half)
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
@@ -74,6 +77,7 @@ class TestFP8MatmulCpu(TestCase):
         self.assertEqual(
             difference, torch.tensor(4.0, device=device).expand_as(out_fp32)
         )
+
 
 instantiate_device_type_tests(TestFP8MatmulCpu, globals(), only_for=("cpu"))
 
