@@ -162,11 +162,11 @@ THP_PyFrame_FastToLocalsWithError(THP_EVAL_API_FRAME_OBJECT *frame, int *free_va
 }
 #endif
 
-static PyObject* _custom_eval_frame_shim(
+static PyObject* dynamo__custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag);
-static PyObject* _custom_eval_frame(
+static PyObject* dynamo__custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
@@ -176,20 +176,20 @@ static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
                                         THP_EVAL_API_FRAME_OBJECT* frame, int throw_flag) = NULL;
 
 #if PY_VERSION_HEX >= 0x03090000
-static PyObject* custom_eval_frame_shim(
+static PyObject* dynamo_custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
-  return _custom_eval_frame_shim(tstate, frame, throw_flag);
+  return dynamo__custom_eval_frame_shim(tstate, frame, throw_flag);
 }
 #else
-static PyObject* custom_eval_frame_shim(THP_EVAL_API_FRAME_OBJECT* frame, int throw_flag) {
+static PyObject* dynamo_custom_eval_frame_shim(THP_EVAL_API_FRAME_OBJECT* frame, int throw_flag) {
   PyThreadState* tstate = PyThreadState_GET();
-  return _custom_eval_frame_shim(tstate, frame, throw_flag);
+  return dynamo__custom_eval_frame_shim(tstate, frame, throw_flag);
 }
 #endif
 
-inline static PyObject* eval_frame_default(
+inline static PyObject* dynamo_eval_frame_default(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
@@ -211,11 +211,11 @@ inline static PyObject* eval_frame_default(
 inline static void enable_eval_frame_shim(PyThreadState* tstate) {
 #if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
-      &custom_eval_frame_shim) {
+      &dynamo_custom_eval_frame_shim) {
     DEBUG_CHECK(previous_eval_frame == NULL);
     previous_eval_frame = _PyInterpreterState_GetEvalFrameFunc(tstate->interp);
     _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
-                                         &custom_eval_frame_shim);
+                                         &dynamo_custom_eval_frame_shim);
   }
 #else
   if (tstate->interp->eval_frame != &custom_eval_frame_shim) {
@@ -249,7 +249,7 @@ inline static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
-static inline PyObject* call_callback(
+static inline PyObject* dynamo_call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
     PyObject* locals,
@@ -291,7 +291,7 @@ static inline void clear_old_frame_if_python_312_plus(
 #endif
 }
 
-inline static PyObject* eval_custom_code_impl(
+inline static PyObject* dynamo_eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
@@ -453,7 +453,7 @@ inline static PyObject* eval_custom_code_impl(
   // calling eval_frame_default (i.e. here) and comment out the
   // clear_old_frame_if_python_312_plus call on the original frame.
 
-  PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
+  PyObject* result = dynamo_eval_frame_default(tstate, shadow, throw_flag);
 
 #if IS_PYTHON_3_12_PLUS
 
@@ -478,7 +478,7 @@ inline static PyObject* eval_custom_code_impl(
 }
 
 // This wrapper function adds a profiler event
-inline static PyObject* eval_custom_code(
+inline static PyObject* dynamo_eval_custom_code(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
@@ -487,7 +487,7 @@ inline static PyObject* eval_custom_code(
     int free_vars_copied) {
 
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter(trace_annotation);
-  PyObject* result = eval_custom_code_impl(
+  PyObject* result = dynamo_eval_custom_code_impl(
     tstate,
     frame,
     code,
@@ -498,7 +498,7 @@ inline static PyObject* eval_custom_code(
   return result;
 }
 
-static PyObject* _custom_eval_frame_shim(
+static PyObject* dynamo__custom_eval_frame_shim(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
@@ -510,11 +510,11 @@ static PyObject* _custom_eval_frame_shim(
   PyObject* callback = eval_frame_callback_get();
 
   if (callback == Py_None) {
-    return eval_frame_default(tstate, frame, throw_flag);
+    return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
   int should_clear_frame = 0;
-  PyObject* result = _custom_eval_frame(tstate, frame, throw_flag, callback, &should_clear_frame);
+  PyObject* result = dynamo__custom_eval_frame(tstate, frame, throw_flag, callback, &should_clear_frame);
   if (should_clear_frame) {
     clear_old_frame_if_python_312_plus(tstate, frame);
   }
@@ -530,7 +530,7 @@ static PyObject* cache_limit_hit_flag;
 // The should_clear_frame flag is used to indicate whether the frame should be
 // cleared by _custom_eval_frame's caller.
 // Generally should_clear_frame should be set if and only we don't eval_frame_default.
-static PyObject* _custom_eval_frame(
+static PyObject* dynamo__custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
@@ -575,18 +575,18 @@ static PyObject* _custom_eval_frame(
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
     DEBUG_TRACE("throw %s", get_frame_name(frame));
-    return eval_frame_default(tstate, frame, throw_flag);
+    return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
   ExtraState* extra = get_extra_state(F_CODE(frame));
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", get_frame_name(frame));
-    return eval_frame_default(tstate, frame, throw_flag);
+    return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
   if (extra == SKIP_CODE_RECURSIVE) {
     DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
     eval_frame_callback_set(Py_None);
-    PyObject* result = eval_frame_default(tstate, frame, throw_flag);
+    PyObject* result = dynamo_eval_frame_default(tstate, frame, throw_flag);
     eval_frame_callback_set(callback);
     return result;
   }
@@ -642,7 +642,7 @@ static PyObject* _custom_eval_frame(
         DEBUG_TRACE("skip recursive %s", get_frame_name(frame));
         eval_frame_callback_set(Py_None);
       }
-      PyObject *ret = eval_frame_default(tstate, frame, throw_flag);
+      PyObject *ret = dynamo_eval_frame_default(tstate, frame, throw_flag);
       if (extra_state_cache_limit_hit(extra)) {
         eval_frame_callback_set(callback);
       }
@@ -654,7 +654,7 @@ static PyObject* _custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
-    return eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, 0);
+    return dynamo_eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, 0);
   }
   DEBUG_CHECK(PyDict_CheckExact(locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
@@ -678,13 +678,13 @@ static PyObject* _custom_eval_frame(
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
     Py_DECREF(locals);
-    return eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, free_vars_copied);
+    return dynamo_eval_custom_code(tstate, frame, cached_code, trace_annotation, throw_flag, free_vars_copied);
   }
   // cache miss
   CacheEntry* cache_entry = extract_cache_entry(extra);
   FrameState* frame_state = extract_frame_state(extra);
   PyObject* result =
-      call_callback(callback, frame, locals, cache_entry, frame_state);
+      dynamo_call_callback(callback, frame, locals, cache_entry, frame_state);
   Py_DECREF(locals);
   if (result == NULL) {
     // internal exception, returning here will leak the exception into user code
@@ -700,7 +700,7 @@ static PyObject* _custom_eval_frame(
     // Dynamo returned skip_code_recursive_flag, so we should recursively skip code.
     DEBUG_TRACE("create skip recursive %s", get_frame_name(frame));
     set_extra_state(F_CODE(frame), SKIP_CODE_RECURSIVE);
-    PyObject* r = eval_frame_default(tstate, frame, throw_flag);
+    PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return r;
@@ -708,7 +708,7 @@ static PyObject* _custom_eval_frame(
     // Dynamo returned cache_limit_hit_flag, so we should recursively skip code.
     DEBUG_TRACE("create cache limit hit %s", get_frame_name(frame));
     set_extra_state_cache_limit_hit(extra, true);
-    PyObject* r = eval_frame_default(tstate, frame, throw_flag);
+    PyObject* r = dynamo_eval_frame_default(tstate, frame, throw_flag);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     return r;
@@ -729,7 +729,7 @@ static PyObject* _custom_eval_frame(
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
     *should_clear_frame = 1;
-    return eval_custom_code(tstate, frame, CacheEntry_get_code(new_cache_entry),
+    return dynamo_eval_custom_code(tstate, frame, CacheEntry_get_code(new_cache_entry),
       CacheEntry_get_trace_annotation(new_cache_entry), throw_flag, free_vars_copied);
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
@@ -737,7 +737,7 @@ static PyObject* _custom_eval_frame(
     set_extra_state(F_CODE(frame), SKIP_CODE);
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    return eval_frame_default(tstate, frame, throw_flag);
+    return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 }
 
