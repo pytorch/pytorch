@@ -13,7 +13,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 import boto3  # type: ignore[import]
 import requests
-import rockset  # type: ignore[import]
 
 
 PYTORCH_REPO = "https://api.github.com/repos/pytorch/pytorch"
@@ -128,6 +127,8 @@ def upload_to_rockset(
     workspace: str = "commons",
     client: Any = None,
 ) -> None:
+    import rockset  # type: ignore[import]
+
     if not client:
         client = rockset.RocksetClient(
             host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
