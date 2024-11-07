@@ -30,10 +30,15 @@ bool softAssertRaises() {
 }
 
 void logSoftAssert(
+    // @lint-ignore CLANGTIDY
     const char* func,
+    // @lint-ignore CLANGTIDY
     const char* file,
+    // @lint-ignore CLANGTIDY
     uint32_t line,
+    // @lint-ignore CLANGTIDY
     const char* cond,
+    // @lint-ignore CLANGTIDY
     const char* args) {
 #ifdef USE_KINETO
   std::string error;
@@ -50,10 +55,15 @@ void logSoftAssert(
 }
 
 void logSoftAssert(
+    // @lint-ignore CLANGTIDY
     const char* func,
+    // @lint-ignore CLANGTIDY
     const char* file,
+    // @lint-ignore CLANGTIDY
     uint32_t line,
+    // @lint-ignore CLANGTIDY
     const char* cond,
+    // @lint-ignore CLANGTIDY
     const std::string& args) {
 #ifdef USE_KINETO
   std::string error;
