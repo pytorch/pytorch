@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-#if IS_PYTHON_3_12_PLUS
+#if IS_PYTHON_3_11_PLUS
 typedef struct _PyInterpreterFrame _PyInterpreterFrame;
 PyObject* get_framelocals_mapping(_PyInterpreterFrame* frame);
 #endif
