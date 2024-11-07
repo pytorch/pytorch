@@ -395,7 +395,7 @@ struct TORCH_API FunctionSchema {
     const AliasInfo* aliasInfo = getCorrectList(argument.type)[argument.index].alias_info();
     return aliasInfo && aliasInfo->isWrite();
   }
-  bool is_mutable(c10::string_view name) const {
+  bool is_mutable(std::string_view name) const {
     std::optional<int> index = argumentIndexWithName(name);
     TORCH_INTERNAL_ASSERT(
         index != std::nullopt, "Schema has no argument named ", name);
@@ -432,7 +432,7 @@ struct TORCH_API FunctionSchema {
   // output => returns(), input => arguments()
   const std::vector<Argument>& getCorrectList(SchemaArgType type) const;
 
-  std::optional<int> argumentIndexWithName(c10::string_view name) const {
+  std::optional<int> argumentIndexWithName(std::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {
       if(name == arguments()[i].name())
         return i;
@@ -515,7 +515,7 @@ struct TORCH_API FunctionSchema {
     alias_kind_ = v;
   }
 
-  std::optional<c10::string_view> getNamespace() const {
+  std::optional<std::string_view> getNamespace() const {
     return name_.getNamespace();
   }
 

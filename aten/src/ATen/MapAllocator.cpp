@@ -61,7 +61,7 @@ constexpr const char* unknown_eventname = "eventname not specified";
 #endif
 }  // namespace (anonymous)
 
-MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags, size_t size)
+MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags, size_t size)
   : filename_(filename.empty() ? unknown_filename : filename)
   , size_(0) // to be filled later
 #ifdef _WIN32
@@ -369,7 +369,7 @@ MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags,
   c10::reportMemoryUsageToProfiler(base_ptr_, size_, 0, size_, c10::Device(c10::DeviceType::CPU));
 }
 
-MapAllocator::MapAllocator(c10::string_view filename, int flags, size_t size)
+MapAllocator::MapAllocator(std::string_view filename, int flags, size_t size)
   : MapAllocator(WITH_FD, filename, -1, flags, size)
 {}
 
@@ -435,11 +435,11 @@ void MapAllocator::close() {
 
 #else /* defined(_WIN32) || defined(HAVE_MMAP) */
 
-MapAllocator::MapAllocator(c10::string_view filename, int flags, size_t size) {
+MapAllocator::MapAllocator(std::string_view filename, int flags, size_t size) {
   TORCH_CHECK(false, "file mapping not supported on your system");
 }
 
-MapAllocator::MapAllocator(WithFd, c10::string_view filename, int fd, int flags, size_t size) {
+MapAllocator::MapAllocator(WithFd, std::string_view filename, int fd, int flags, size_t size) {
   TORCH_CHECK(false, "file mapping not supported on your system");
 }
 
@@ -584,7 +584,7 @@ RefcountedMapAllocator* RefcountedMapAllocator::fromDataPtr(const at::DataPtr& d
   return dptr.cast_context<RefcountedMapAllocator>(&deleteRefcountedMapAllocator);
 }
 
-at::DataPtr MapAllocator::makeDataPtr(c10::string_view filename, int flags, size_t size, size_t* actual_size_out) {
+at::DataPtr MapAllocator::makeDataPtr(std::string_view filename, int flags, size_t size, size_t* actual_size_out) {
   auto* context = new MapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = context->size();
   return {context->data(), context, &deleteMapAllocator, at::DeviceType::CPU};
