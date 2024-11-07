@@ -368,7 +368,6 @@ class InvokeSubgraphHopGraphs:
 
     new_fw_hop_gm: Optional[torch.fx.GraphModule] = None
     new_bw_hop_gm: Optional[torch.fx.GraphModule] = None
-    # This includes (*fw_outs, *saved_tensors, *num_sym_nodes)
     new_num_sym_nodes: Optional[int] = None
     new_num_saved_nodes: Optional[int] = None
 
@@ -507,10 +506,22 @@ def run_joint_graph_passes_on_hops(
                 # Save the new forward and backward graph modules
                 new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm
                 new_hop_graphs[identifier].new_bw_hop_gm = new_bw_hop_gm
-                new_hop_graphs[identifier].new_num_sym_nodes = signature.num_sym_nodes
-                new_hop_graphs[
-                    identifier
-                ].new_num_saved_nodes = signature.num_saved_nodes
+                new_hop_graphs[identifier].new_num_fw_outputs = num_outputs(
+                    new_fw_hop_gm
+                )
+
+                # Save the number of symints and saved tensors
+                new_fw_out_nodes = new_fw_hop_gm.graph.find_nodes(op="output")[0].args[
+                    0
+                ]
+                extra_outputs = new_fw_out_nodes[num_fw_outputs:]
+                symint_outputs = [n for n in extra_outputs if is_sym_node(n)]
+
+                new_hop_graphs[identifier].new_num_sym_nodes = len(symint_outputs)
+                new_hop_graphs[identifier].new_num_saved_nodes = len(
+                    extra_outputs
+                ) - len(symint_outputs)
+
                 new_hop_graphs[identifier].partitioning_done = True
 
     if not new_hop_graphs:
