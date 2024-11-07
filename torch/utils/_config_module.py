@@ -3,6 +3,7 @@ import copy
 import hashlib
 import inspect
 import io
+import os
 import pickle
 import tokenize
 import unittest
@@ -13,9 +14,72 @@ from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Union
 from typing_extensions import deprecated
 from unittest import mock
 
+from torch._utils_internal import justknobs_check
+
+
+@dataclass
+class Config:
+    """Represents a config with richer behaviour than just a default value.
+    ::
+        i.e.
+        foo = Config(justknob="//foo:bar", default=False)
+        install_config_module(...)
+
+    This configs must be installed with install_config_module to be used
+
+    Precedence Order:
+        env_name_force: If set, this environment variable overrides everything
+        user_override: If a user sets a value (i.e. foo.bar=True), that
+            has precedence over everything after this.
+        env_name_default: If set, this environment variable will override everything
+            after this.
+        justknob: If this pytorch installation supports justknobs, that will
+            override defaults, but will not override the user_override precendence.
+        default: This value is the lowest precendance, and will be used if nothing is
+            set.
+
+    Environment Variables:
+        These are interpreted to be either "0" or "1" to represent true and false.
+
+    Arguments:
+        justknob: the name of the feature / JK. In OSS this is unused.
+        default: is the value to default this knob to in OSS.
+        env_name_force: The environment variable to read that is a FORCE
+            environment variable. I.e. it overrides everything
+        env_name_default: The environment variable to read that changes the
+            default behaviour. I.e. user overrides take preference.
+    """
+
+    default: Any = True
+    justknob: Optional[str] = None
+    env_name_default: Optional[str] = None
+    env_name_force: Optional[str] = None
+
+    def __init__(
+        self,
+        default: Any = True,
+        justknob: Optional[str] = None,
+        env_name_default: Optional[str] = None,
+        env_name_force: Optional[str] = None,
+    ):
+        # python 3.9 does not support kw_only on the dataclass :(.
+        self.default = default
+        self.justknob = justknob
+        self.env_name_default = env_name_default
+        self.env_name_force = env_name_force
+
 
 # Types saved/loaded in configs
 CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
+
+
+def _read_env_variable(name: str) -> Optional[bool]:
+    value = os.environ.get(name)
+    if value == "1":
+        return True
+    if value == "0":
+        return False
+    return None
 
 
 def install_config_module(module: ModuleType) -> None:
@@ -26,7 +90,8 @@ def install_config_module(module: ModuleType) -> None:
     """
 
     class ConfigModuleInstance(ConfigModule):
-        _bypass_keys = set({"_is_dirty", "_hash_digest"})
+        # __annotations__ is written to by Sphinx autodoc
+        _bypass_keys = set({"_is_dirty", "_hash_digest", "__annotations__"})
 
     def visit(
         source: Union[ModuleType, type],
@@ -39,12 +104,19 @@ def install_config_module(module: ModuleType) -> None:
                 key.startswith("__")
                 or isinstance(value, (ModuleType, FunctionType))
                 or (hasattr(value, "__module__") and value.__module__ == "typing")
+                # Handle from torch.utils._config_module import Config
+                or (isinstance(value, type) and issubclass(value, Config))
             ):
                 continue
 
             name = f"{prefix}{key}"
             if isinstance(value, CONFIG_TYPES):
-                config[name] = _ConfigEntry(default=value)
+                config[name] = _ConfigEntry(Config(default=value))
+                if dest is module:
+                    delattr(module, key)
+            elif isinstance(value, Config):
+                config[name] = _ConfigEntry(value)
+
                 if dest is module:
                     delattr(module, key)
             elif isinstance(value, type):
@@ -123,6 +195,21 @@ class _ConfigEntry:
     # The value specified by the user when they overrode the configuration
     # _UNSET_SENTINEL indicates the value is not set.
     user_override: Any = _UNSET_SENTINEL
+    # The justknob to check for this config
+    justknob: Optional[str] = None
+    # environment variables are read at install time
+    env_value_force: Any = _UNSET_SENTINEL
+    env_value_default: Any = _UNSET_SENTINEL
+
+    def __init__(self, config: Config):
+        self.default = config.default
+        self.justknob = config.justknob
+        if config.env_name_default is not None:
+            if (env_value := _read_env_variable(config.env_name_default)) is not None:
+                self.env_value_default = env_value
+        if config.env_name_force is not None:
+            if (env_value := _read_env_variable(config.env_name_force)) is not None:
+                self.env_value_force = env_value
 
 
 class ConfigModule(ModuleType):
@@ -154,8 +241,19 @@ class ConfigModule(ModuleType):
     def __getattr__(self, name: str) -> Any:
         try:
             config = self._config[name]
+
+            if config.env_value_force is not _UNSET_SENTINEL:
+                return config.env_value_force
+
             if config.user_override is not _UNSET_SENTINEL:
                 return config.user_override
+
+            if config.env_value_default is not _UNSET_SENTINEL:
+                return config.env_value_default
+
+            if config.justknob is not None:
+                # JK only supports bools and ints
+                return justknobs_check(name=config.justknob, default=config.default)
 
             # Note that reference types can still be modified, so we
             # copy them to user_overrides in case the user overrides
@@ -164,6 +262,7 @@ class ConfigModule(ModuleType):
                 config.user_override = copy.deepcopy(config.default)
                 return config.user_override
             return config.default
+
         except KeyError as e:
             # make hasattr() work properly
             raise AttributeError(f"{self.__name__}.{name} does not exist") from e
@@ -204,7 +303,7 @@ class ConfigModule(ModuleType):
             if ignored_keys and key in ignored_keys:
                 if skip_default and not self._is_default(key):
                     warnings.warn(
-                        f"Skipping serialization of {key} value {self._config[key]}"
+                        f"Skipping serialization of {key} value {getattr(self, key)}"
                     )
                 continue
             if ignored_prefixes:
@@ -445,3 +544,12 @@ def patch_object(obj: object, name: str, value: object) -> object:
     if isinstance(obj, ConfigModule):
         return obj.patch(name, value)
     return mock.patch.object(obj, name, value)
+
+
+def get_tristate_env(name: str) -> Optional[bool]:
+    value = os.environ.get(name)
+    if value == "1":
+        return True
+    if value == "0":
+        return False
+    return None
