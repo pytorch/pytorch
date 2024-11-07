@@ -8,18 +8,9 @@ from functorch.experimental.control_flow import map
 from torch.nn.attention.flex_attention import _create_empty_block_mask, flex_attention
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import onlyCUDA
-<<<<<<< HEAD
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
-
-=======
-from torch.nn.attention.flex_attention import flex_attention, _create_empty_block_mask
-<<<<<<< HEAD
-from torch._higher_order_ops import invoke_subgraph
->>>>>>> 12729f2ef19 ([hop-db] Import invoke_subgraph to avoid Dynamo error on mac)
-=======
 from torch._higher_order_ops.invoke_subgraph import wrap_with_invoke_subgraph
->>>>>>> d6946411c6b ([invoke_subgraph] User facing API to support arbitrary args and kwargs)
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
