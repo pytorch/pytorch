@@ -3,6 +3,7 @@ import functools
 from typing import Optional, Protocol, Sequence, Tuple, TypeVar, Union
 
 import torch
+from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 
 
@@ -11,7 +12,8 @@ T = TypeVar("T")
 
 class DTypeArg(Protocol):
     @property
-    def dtype(self) -> torch.dtype: ...
+    def dtype(self) -> torch.dtype:
+        ...
 
 
 # Inputs need to be cacheable (e.g., not a CSEVar) in order for the cache to be effective
@@ -184,3 +186,19 @@ class DtypePropagationOpsHandler:
     @staticmethod
     def rand(seed, offset) -> torch.dtype:
         return torch.float
+
+    @staticmethod
+    def store_reduction(name, index, value) -> torch.dtype:
+        return V.graph.get_dtype(name)
+
+    @staticmethod
+    def reduction(dtype, src_dtype, reduction_type, value) -> torch.dtype:
+        return dtype
+
+    @staticmethod
+    def store(name, index, value, mode=None) -> torch.dtype:
+        return V.graph.get_dtype(name)
+
+    @staticmethod
+    def load(name, index) -> torch.dtype:
+        return V.graph.get_dtype(name)
