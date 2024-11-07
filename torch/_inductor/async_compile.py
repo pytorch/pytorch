@@ -266,7 +266,10 @@ class AsyncCompile:
         return self.submit(task)
 
     def rocm(
-        self, source_code, dst_file_ext, aot_compile=False,
+        self,
+        source_code,
+        dst_file_ext,
+        aot_compile=False,
     ):
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
 
