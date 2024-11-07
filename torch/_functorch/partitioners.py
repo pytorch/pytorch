@@ -282,13 +282,19 @@ def _remove_by_name(saved_values: List[fx.Node], name: str):
             break
 
 
+@dataclass
+class SignatureInfo:
+    num_saved_nodes: int
+    num_sym_nodes: int
+
+
 def _extract_fwd_bwd_modules(
     joint_module: fx.GraphModule,
     saved_values: List[fx.Node],
     saved_sym_nodes: List[fx.Node],
     *,
     num_fwd_outputs: int,
-) -> Tuple[fx.GraphModule, fx.GraphModule]:
+) -> Tuple[fx.GraphModule, fx.GraphModule, SignatureInfo]:
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
         joint_module, num_fwd_outputs=num_fwd_outputs
     )
@@ -378,12 +384,13 @@ def _extract_fwd_bwd_modules(
 
     fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
     bwd_module = fx._lazy_graph_module._make_graph_module(joint_module, bwd_graph)
-    return fwd_module, bwd_module
+    signature_info = SignatureInfo(len(saved_values), len(saved_sym_nodes))
+    return fwd_module, bwd_module, signature_info
 
 
 def default_partition(
     joint_module: fx.GraphModule, _joint_inputs, *, num_fwd_outputs
-) -> Tuple[fx.GraphModule, fx.GraphModule]:
+) -> Tuple[fx.GraphModule, fx.GraphModule, SignatureInfo]:
     """
     Partitions the :attr:`joint_module` in a manner that closely resembles the
     behavior observed in the original ``.forward()`` and ``.backward()`` of the
@@ -1782,7 +1789,7 @@ def min_cut_rematerialization_partition(
     compiler="inductor",
     *,
     num_fwd_outputs,
-) -> Tuple[fx.GraphModule, fx.GraphModule]:
+) -> Tuple[fx.GraphModule, fx.GraphModule, SignatureInfo]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
     Recomputing helps in trading off memory bandwidth with computation.
@@ -1908,7 +1915,7 @@ def min_cut_rematerialization_partition(
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
 
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
-    fw_module, bw_module = _extract_fwd_bwd_modules(
+    fw_module, bw_module, signatures = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
         saved_sym_nodes=saved_sym_nodes,
@@ -1950,7 +1957,7 @@ def min_cut_rematerialization_partition(
             "Count of Ops Rematerialized: ",
             sorted(counts.items(), key=lambda x: x[1], reverse=True),
         )
-    return fw_module, bw_module
+    return fw_module, bw_module, signatures
 
 
 def draw_graph(
