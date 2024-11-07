@@ -93,6 +93,8 @@ _STEP_THREE_ERROR_MESSAGE = textwrap.dedent(
     - Create an error report with `torch.onnx.export(..., report=True)`, and save the ExportedProgram as a pt2 file. Create an issue in the PyTorch GitHub repository against the {_BLUE}*onnx*{_END} component. Attach the error report and the pt2 model."""
 )
 
+_LOCAL_FUNCTION_DOMAIN: str = "__torch_subgraph__"
+
 logger = logging.getLogger(__name__)
 
 
@@ -433,7 +435,19 @@ def _handle_call_function_node_with_lowering(
     constant_farm: dict[Any, ir.Value],
     registry: _registration.ONNXRegistry,
     opset: onnxscript.values.Opset,
+    subgraphs: dict[str, torch.fx.Graph],
 ) -> None:
+    """Translate a call_function node to an ONNX node.
+
+    Args:
+        model: The ONNX model at construction.
+        node: The FX node to translate.
+        node_name_to_values: A mapping of FX node names to their produced ONNX ``Value``.
+        constant_farm: A mapping of constant values to existing ONNX ``Value``s.
+        registry: The registry of all aten to ONNX decomposition functions.
+        opset: The ONNX Script opset object for constructing ONNX nodes.
+        subgraphs: A mapping of subgraph names to their corresponding FX graphs.
+    """
     if node.target == operator.getitem:
         source = node.all_input_nodes[0]
         source_outputs = node_name_to_values[source.name]
