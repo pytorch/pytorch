@@ -171,18 +171,18 @@ def _get_allowed_globals():
         "builtins.bytearray": bytearray,  # for bytearray
         "builtins.set": set,  # for set
     }
-    dtensor_rc: Dict[str, Any] = {
-        # DTensor related
-        "torch.distributed.device_mesh.DeviceMesh": torch.distributed.device_mesh.DeviceMesh,
-        "torch.distributed.tensor._dtensor_spec.DTensorSpec": torch.distributed.tensor._dtensor_spec.DTensorSpec,
-        "torch.distributed.tensor._dtensor_spec.TensorMeta": torch.distributed.tensor._dtensor_spec.TensorMeta,
-        "torch.distributed.tensor.DTensor": torch.distributed.tensor.DTensor,
-        "torch.distributed.tensor.placement_types.Partial": torch.distributed.tensor.placement_types.Partial,
-        "torch.distributed.tensor.placement_types.Replicate": torch.distributed.tensor.placement_types.Replicate,
-        "torch.distributed.tensor.placement_types.Shard": torch.distributed.tensor.placement_types.Shard,
-    }
     # Only add the dtensor related classes if the dtensor module is available
     if hasattr(torch.distributed, "tensor"):
+        dtensor_rc: Dict[str, Any] = {
+            # DTensor related
+            "torch.distributed.device_mesh.DeviceMesh": torch.distributed.device_mesh.DeviceMesh,
+            "torch.distributed.tensor._dtensor_spec.DTensorSpec": torch.distributed.tensor._dtensor_spec.DTensorSpec,
+            "torch.distributed.tensor._dtensor_spec.TensorMeta": torch.distributed.tensor._dtensor_spec.TensorMeta,
+            "torch.distributed.tensor.DTensor": torch.distributed.tensor.DTensor,
+            "torch.distributed.tensor.placement_types.Partial": torch.distributed.tensor.placement_types.Partial,
+            "torch.distributed.tensor.placement_types.Replicate": torch.distributed.tensor.placement_types.Replicate,
+            "torch.distributed.tensor.placement_types.Shard": torch.distributed.tensor.placement_types.Shard,
+        }
         rc.update(dtensor_rc)
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
