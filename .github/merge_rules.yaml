@@ -329,6 +329,7 @@
 
 - name: DCP
   patterns:
+  - docs/source/distributed.checkpoint.rst
   - torch/distributed/checkpoint/**
   approved_by:
   - LucasLLC

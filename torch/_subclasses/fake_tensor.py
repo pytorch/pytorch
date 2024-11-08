@@ -435,7 +435,7 @@ class FakeTensorConverter:
 
             with no_dispatch():
                 value = t.item()
-            if not math.isnan(value):
+            if not math.isnan(value) and not math.isinf(value):
                 # Peephole strip out unnecessary torch.as_tensor(x).item()
                 if isinstance(source, FloatTensorSource):
                     item_source = source.base

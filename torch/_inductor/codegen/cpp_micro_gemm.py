@@ -626,7 +626,11 @@ template <bool accum>
 inline void {{kernel_name}}_amx_kernel_{{num_rows}}_{{num_columns}}(
     AMXState& amx_state,
     const {{input_t}}* {{restrict_keyword}} A,
+{%- if use_cached_dequantized_B %}
     const {{input_t}}* {{restrict_keyword}} B,
+{%- else %}
+    const {{input2_t}}* {{restrict_keyword}} B,
+{%- endif %}
     {{output_t}}* {{restrict_keyword}} C,
     int64_t K,
     int64_t lda,

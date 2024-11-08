@@ -268,7 +268,7 @@ TypePtr DynamicType::fallback() const {
         fallbacks.push_back(elem.ty->fallback());
       }
       if (name_) {
-        std::vector<std::string_view> fields;
+        std::vector<c10::string_view> fields;
         fields.reserve(arguments_.elems.size());
         for (const auto& elem : arguments_.elems) {
           // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
@@ -392,7 +392,7 @@ TORCH_API TupleTypePtr ivalue::TupleTypeFactory<TupleType>::fallback(
   return nullptr;
 #else
   const auto& dyn = type.expectRef<DynamicType>();
-  std::vector<std::string_view> fields;
+  std::vector<c10::string_view> fields;
   std::vector<TypePtr> types;
 
   for (const auto& elem : dyn.arguments().elems) {

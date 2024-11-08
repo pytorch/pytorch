@@ -112,7 +112,7 @@ def get_external_pr_data(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Upload external contribution stats to Rockset"
+        description="Upload external contribution stats to s3"
     )
     parser.add_argument(
         "--startDate",

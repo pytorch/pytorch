@@ -2,7 +2,7 @@
 import contextlib
 import sys
 import warnings
-from typing import cast, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, cast, List, Optional, Tuple, Type, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -600,6 +600,14 @@ class AsyncCollectiveTensor(torch.Tensor):
         assert meta is None
         elem = inner_tensors["elem"]
         return AsyncCollectiveTensor(elem)
+
+    def __coerce_same_metadata_as_tangent__(
+        self, expected_metadata: Any, expected_type: Optional[Type] = None
+    ):
+        if expected_type is not torch.Tensor:
+            return None
+
+        return self.trigger_wait()
 
     def __repr__(self) -> str:  # type: ignore[override]
         return f"AsyncCollectiveTensor({self.trigger_wait()})"

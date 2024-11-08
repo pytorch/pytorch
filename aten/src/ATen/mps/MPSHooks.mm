@@ -59,7 +59,7 @@ Allocator* MPSHooks::getMPSDeviceAllocator() const {
   return at::mps::GetMPSAllocator();
 }
 
-const Generator& MPSHooks::getDefaultMPSGenerator() const {
+const Generator& MPSHooks::getDefaultGenerator([[maybe_unused]] DeviceIndex device_index) const {
   return at::mps::detail::getDefaultMPSGenerator();
 }
 

@@ -396,6 +396,8 @@ class SideEffects:
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
     def codegen_save_tempvars(self, cg: PyCodegen):
+        # Make sure we codegen these modified VT to their source by default, so
+        # that mutation and aliasing are properly accounted for.
         for var in self._get_modified_vars():
             if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
                 var, variables.NewCellVariable
@@ -416,11 +418,10 @@ class SideEffects:
                 cg.extend_output(create_call_function(1, False))
                 cg.add_cache(var)
                 var.source = LocalSource(cg.tempvars[var])
-            elif var in cg.tempvars:
-                assert cg.tempvars.get(var) is None
-                # subsequent usage should point to the original variable
-                cg(var.source)
-                cg.add_cache(var)
+            else:
+                # The remaning cases here are `AttributeMutationExisting` and
+                # `MutableSideEffects`, which have sources already.
+                assert var.source is not None
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
@@ -521,7 +522,7 @@ class SideEffects:
         for var in self._get_modified_vars():
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
-                cg(var, allow_cache=False)
+                cg(var, allow_cache=False)  # Don't codegen via source
                 cg(var.source)  # type: ignore[attr-defined]
                 cg.extend_output(
                     [
@@ -542,7 +543,7 @@ class SideEffects:
                     [create_instruction("STORE_FAST", argval=varname_map["dict_to"])]
                 )
 
-                cg(var, allow_cache=False)
+                cg(var, allow_cache=False)  # Don't codegen via source
                 cg.extend_output(
                     [create_instruction("STORE_FAST", argval=varname_map["dict_from"])]
                 )
@@ -574,7 +575,7 @@ class SideEffects:
 
                 cg(var.source)  # type: ignore[attr-defined]
                 cg.load_method("update")
-                cg(var, allow_cache=False)
+                cg(var, allow_cache=False)  # Don't codegen via source
 
                 if var.should_reconstruct_all:
                     cg(var.source)  # type: ignore[attr-defined]

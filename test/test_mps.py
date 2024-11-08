@@ -4833,6 +4833,17 @@ class TestMPS(TestCaseMPS):
         loss_mps = lf(y_mps, y_hat_mps)
         self.assertEqual(loss, loss_mps)
 
+    def test_mse_loss_unsupported_types(self):
+        loss = nn.MSELoss()
+        for dtype in MPS_DTYPES:
+            a_mps = torch.tensor([0, 1, 2], dtype=dtype, device='mps')
+            a_cpu = torch.tensor([0, 1, 2], dtype=dtype, device='cpu')
+            if dtype.is_floating_point:
+                self.assertEqual(loss(a_mps, a_mps), loss(a_cpu, a_cpu))
+                continue
+            self.assertRaises(RuntimeError, lambda: loss(a_mps, a_mps))
+            self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
+
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
         def helper(shape, reduction):
