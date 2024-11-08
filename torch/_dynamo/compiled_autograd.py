@@ -278,7 +278,6 @@ class AutogradCompilerInstance:
         CompiledFunction = ctx._forward_cls
         metadata = CompiledFunction.metadata
         maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
-        ctx._bw_module = CompiledFunction._lazy_backward_info.bw_module
         del CompiledFunction
 
         @torch._dynamo.allow_in_graph
