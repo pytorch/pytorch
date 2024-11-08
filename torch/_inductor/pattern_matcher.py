@@ -1802,10 +1802,11 @@ def fx_to_pattern(
     inv_scalar_workaround = {v: k for k, v in scalar_workaround.items()}
     assert len(inv_scalar_workaround) == len(scalar_workaround)
 
-    def process_arg(x: T) -> Union[T, KeywordArg, Ignored]:
+    def process_arg(x: T, ignore_types_override: Optional[Sequence[Type[Any]]] = None) -> Union[T, KeywordArg, Ignored]:
+        current_ignore_types = ignore_types_override if ignore_types_override is not None else ignore_types
         if isinstance(x, (float, int)) and x in inv_scalar_workaround:
             return KeywordArg(inv_scalar_workaround[x])
-        if type(x) in ignore_types:
+        if type(x) in current_ignore_types:
             return Ignored()
         if isinstance(x, list) and all(isinstance(y, Ignored) for y in x) and x:
             return Ignored()
@@ -1838,11 +1839,17 @@ def fx_to_pattern(
         def call_function(
             self, target: str, args: Sequence[Any], kwargs: Mapping[str, Any]  # type: ignore[override]
         ) -> PatternExpr:
-            args, kwargs = pytree.tree_map(process_arg, (args, kwargs))
+            # Indexing is critical for matching getitem nodes, so we can't ignore int args here
+            if target == operator.getitem and int in ignore_types:
+                temp_ignore_types = tuple(t for t in ignore_types if t is not int)
+                process_arg_fun = functools.partial(process_arg, ignore_types_override=temp_ignore_types)
+            else:
+                process_arg_fun = process_arg
+            args, kwargs = pytree.tree_map(process_arg_fun, (args, kwargs))
             if list in ignore_types:
                 # Handle a burned in tensor size which are now [Ignored(), Ignored(), ...]
-                args = [process_arg(a) for a in args]
-                kwargs = {k: process_arg(a) for k, a in kwargs.items()}
+                args = [process_arg_fun(a) for a in args]
+                kwargs = {k: process_arg_fun(a) for k, a in kwargs.items()}
             return CallFunction(target, *args, **kwargs)
 
         def run_node(self, n: torch.fx.Node) -> Any:
