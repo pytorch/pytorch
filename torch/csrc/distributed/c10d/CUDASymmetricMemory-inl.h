@@ -5,9 +5,9 @@
 #endif
 
 #include <ATen/ATen.h>
-
+#if !defined(USE_ROCM)
 #include <cuda_bf16.h>
-
+#endif
 namespace c10d::symmetric_memory {
 
 template <typename T>
@@ -59,6 +59,7 @@ __device__ __forceinline__ uint32_t
 cas(uint32_t* addr, uint32_t compare, uint32_t val) {
 #if defined(USE_ROCM) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   CUDA_KERNEL_ASSERT(false);
+  return 0;
 #else
   uint32_t old_val;
   if constexpr (Sem == MemOpSem::Relaxed) {

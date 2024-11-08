@@ -38,7 +38,7 @@ Method Module::get_method(const std::string& name) const {
   if (auto method = find_method(name)) {
     return *method;
   }
-  AT_ERROR("Method '", name, "' is not defined.");
+  TORCH_CHECK(false, "Method '", name, "' is not defined.");
 }
 
 bool Module::compareMethodSchemas(

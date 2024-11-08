@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import dataclasses
+import enum
 import functools
 import itertools
 import logging
@@ -38,6 +39,7 @@ from ..utils import (
     DeferredLineBase,
     generate_assert,
     IndentedBuffer,
+    ir_dataclass,
     sympy_dot,
     sympy_subs,
     unique,
@@ -46,6 +48,7 @@ from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
+log = logging.getLogger(__name__)
 
 
 def data_type_logger(msg):
@@ -53,16 +56,113 @@ def data_type_logger(msg):
         schedule_log.debug("Data type propagation: %s", msg)
 
 
-@dataclasses.dataclass
+class WorkspaceZeroMode(enum.Enum):
+    UNINITIALIZED = 0
+    ZERO_ON_CALL = 1  # kernel may leave workspace dirty
+    ZERO_PER_GRAPH = 2  # must be re-zeroed by kernel
+
+    @staticmethod
+    def combine(a, b):
+        if a == b or b == WorkspaceZeroMode.UNINITIALIZED:
+            return a
+        if a == WorkspaceZeroMode.UNINITIALIZED:
+            return b
+        raise NotImplementedError(f"WorkspaceZeroMode.combine({a!r}, {b!r})")
+
+    @staticmethod
+    def from_bool(zero_fill):
+        if zero_fill:
+            return WorkspaceZeroMode.ZERO_ON_CALL
+        return WorkspaceZeroMode.UNINITIALIZED
+
+
+@ir_dataclass(frozen=True)
 class WorkspaceArg:
     """A temporary buffer used for a single kernel, then discarded.
 
     Not registered as a traditional buffer since there are no users,
     so it would be dead code eliminated.
+
+    Args:
+        nbytes: The size of the buffer in bytes.
+        zero_fill: Whether the buffer should be initialized to zero.
+
     """
 
-    nbytes: sympy.Expr
-    zero_fill: bool
+    count: sympy.Expr
+    zero_mode: WorkspaceZeroMode
+    device: torch.device
+    outer_name: str
+    inner_name: str = "ws_ptr"
+    dtype: torch.dtype = torch.uint8
+
+    @staticmethod
+    def unique_name(prefix="workspace_"):
+        return f"{prefix}{next(V.graph.workspace_id)}"
+
+    @staticmethod
+    def can_join(a, b) -> bool:
+        return (
+            a.inner_name == b.inner_name and a.dtype == b.dtype and a.device == b.device
+        )
+
+    @staticmethod
+    def join(a, b):
+        return WorkspaceArg(
+            count=a.count + b.count,
+            zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
+            dtype=a.dtype,
+            device=a.device,
+            inner_name=a.inner_name,
+            outer_name=a.outer_name,
+        )
+
+    @staticmethod
+    def maximum(a, b):
+        assert (
+            a.dtype == b.dtype and a.device == b.device and a.inner_name == b.inner_name
+        )
+        return WorkspaceArg(
+            count=sympy.Max(a.count, b.count),
+            zero_mode=WorkspaceZeroMode.combine(a.zero_mode, b.zero_mode),
+            dtype=a.dtype,
+            device=a.device,
+            inner_name=a.inner_name,
+            outer_name=a.outer_name,
+        )
+
+    # These methods let WorkspaceArg pretend it is a buffer to reuse allocation code
+    def get_device(self):
+        return self.device
+
+    def get_dtype(self):
+        return self.dtype
+
+    def get_layout(self):
+        from ..ir import FixedLayout
+
+        return FixedLayout(
+            device=self.device,
+            dtype=self.dtype,
+            size=[self.count],
+            stride=[1],
+        )
+
+    @property
+    def layout(self):
+        return self.get_layout()
+
+    def get_size(self):
+        return [self.count]
+
+    def get_stride(self):
+        return [1]
+
+    def get_name(self):
+        return self.outer_name
+
+    def get_inputs_that_alias_output(self):
+        return []
 
 
 @dataclasses.dataclass
@@ -70,7 +170,7 @@ class TensorArg:
     name: str
     buffer: str
     dtype: torch.dtype
-    offset: sympy.Expr = sympy.Integer(0)  # c++ only
+    offset: sympy.Expr = sympy.S.Zero  # c++ only
     alias_of: Optional[str] = None  # halide only
 
 
@@ -148,6 +248,9 @@ class DeviceOpOverrides:
         raise NotImplementedError
 
     def cpp_device_ptr(self):
+        raise NotImplementedError
+
+    def tma_descriptor_helpers(self):
         raise NotImplementedError
 
 
@@ -229,8 +332,7 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
             if cpp_wrapper
             else wrapper_codegen_obj.wrapper_codegen
         )
-    else:
-        return None
+    return None
 
 
 @functools.lru_cache(None)
@@ -580,8 +682,7 @@ class ExprPrinter(Printer):
         assert exp >= 0
         if exp > 0:
             return "*".join([self.paren(base)] * exp)
-        else:  # exp == 0
-            return "1"
+        return "1"
 
     # Explicit NotImplemented functions are to prevent default sympy printing
     # behavior, which will just barf out ToFloat(...) to your IR.  The error
@@ -1260,7 +1361,7 @@ class KernelArgs:
         self.output_buffers = {}
         self.inplace_buffers = {}
         self.sizevars = sizevars or {}
-        self.workspace_arg = None
+        self.workspace_args = []
 
     def __repr__(self):
         return "KernelArgs({})".format(
@@ -1315,14 +1416,73 @@ class KernelArgs:
             self.inplace_buffers[output_name] = buf
 
     def workspace(self, nbytes: sympy.Expr, zero_fill: bool):
-        if self.workspace_arg is None:
-            self.workspace_arg = WorkspaceArg(nbytes, zero_fill)
-            return "ws_ptr", 0
+        """
+        Allocate or extend a workspace buffer of nbytes bytes.
 
-        offset = self.workspace_arg.nbytes
-        zero_fill = zero_fill or self.workspace_arg.zero_fill
-        self.workspace_arg = WorkspaceArg(offset + nbytes, zero_fill)
-        return "ws_ptr", offset
+        This function manages the allocation of a workspace buffer. It either creates
+        a new WorkspaceArg or extends an existing one.
+
+        Note:
+        - Calling this function will in-place mutate the args by adding or updating
+        a WorkspaceArg.
+        - The codegen for generating the Python argdefs and call_defs will check
+        this field and allocate the buffer accordingly.
+        - A new argument "ws_ptr" will be present in the generated code.
+
+        Args:
+            nbytes (sympy.Expr): The number of bytes to allocate.
+            zero_fill (bool): Whether to initialize the buffer to zero.
+
+        Returns:
+            Tuple[str, int]: A tuple containing:
+                - "ws_ptr": A string identifier for the workspace pointer.
+                - offset: An integer representing the byte offset in the workspace.
+        """
+        arg = WorkspaceArg(
+            count=nbytes,
+            zero_mode=WorkspaceZeroMode.from_bool(zero_fill),
+            device=V.graph.get_current_device_or_throw(),
+            outer_name=WorkspaceArg.unique_name(),
+        )
+        for i, existing_arg in enumerate(self.workspace_args):
+            if WorkspaceArg.can_join(existing_arg, arg):
+                offset = existing_arg.count
+                self.workspace_args[i] = WorkspaceArg.join(existing_arg, arg)
+                return existing_arg.inner_name, offset
+            assert (
+                existing_arg.inner_name != arg.inner_name
+                and existing_arg.outer_name != arg.outer_name
+            )
+        self.workspace_args.append(arg)
+        return arg.inner_name, 0
+
+    def semaphores(self, min_size: sympy.Expr):
+        """
+        Lazily allocate a graph-wide semaphores buffer with at least min_size.  This is a single buffer shared by
+        all kernels and zero initialized once at graph start.  Each kernel must leave the buffer zeroed on exit.
+
+        Warning: multiple calls to this function will return the same buffer.
+
+        Args:
+            min_size: the number of int32 semaphores required
+
+        Returns:
+            name of the semaphores buffer
+        """
+        current_device = V.graph.get_current_device_or_throw()
+        arg = WorkspaceArg(
+            count=min_size,
+            zero_mode=WorkspaceZeroMode.ZERO_PER_GRAPH,
+            dtype=torch.uint32,
+            inner_name="sem_ptr",
+            outer_name=f"semaphores_{current_device.type}_{current_device.index}",
+            device=current_device,
+        )
+        for existing_arg in self.workspace_args:
+            if existing_arg.inner_name == arg.inner_name:
+                assert arg == existing_arg
+        self.workspace_args.append(arg)
+        return arg.inner_name
 
     def seed_offset(self, name, value):
         if value in self.sizevars:
@@ -1389,7 +1549,7 @@ class KernelArgs:
             arg_types.append(f"const {INDEX_TYPE}")
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
-        assert self.workspace_arg is None, "Workspace not supported on CPU "
+        assert not self.workspace_args, "Workspace not supported on CPU "
         return arg_defs, call_args, arg_types
 
     def python_argdefs(self):
@@ -1432,11 +1592,11 @@ class KernelArgs:
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
-        if self.workspace_arg is not None:
-            arg_defs.append("ws_ptr")
-            call_args.append("workspace")
-            precompile_args.append(self.workspace_arg)
-            arg_types.append(torch.uint8)
+        for arg in self.workspace_args:
+            arg_defs.append(arg.inner_name)
+            call_args.append(arg.outer_name)
+            precompile_args.append(arg)
+            arg_types.append(arg.dtype)
         return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
@@ -1485,11 +1645,17 @@ class CSEVariable:
     See example of TritonCSEVariable in triton.py
     """
 
-    def __init__(self, name, bounds: ValueRanges[Any]):
+    def __init__(
+        self,
+        name,
+        bounds: ValueRanges[Any],
+        dtype: Optional[torch.dtype] = None,
+    ):
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
         self.use_count = 1  # track how many tims this expression is used
+        self.dtype = dtype
 
     def __str__(self):
         return self.name
@@ -1556,16 +1722,16 @@ class CSE:
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer],
+        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer, DeferredLineBase],
         *,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write=True,
         assignment=True,
+        dtype: Optional[torch.dtype] = None,
     ) -> CSEVariable:
         if isinstance(expr, OpsValue):
             expr = expr.value
 
-        assert isinstance(expr, (str, CSEVariable, IndentedBuffer)), type(expr)
         assert write or assignment
         if isinstance(expr, CSEVariable):
             # If the expressions were always created with all the information, we could
@@ -1574,10 +1740,16 @@ class CSE:
             expr.bounds = expr.bounds.tighten(bounds)
             expr.use_count += 1
             return expr
-        cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
+        elif isinstance(expr, IndentedBuffer):
+            cache_key = expr.getvalue()
+        elif isinstance(expr, DeferredLineBase):
+            cache_key = expr.line
+        else:
+            assert isinstance(expr, str)
+            cache_key = expr
         var = self.cache.get(cache_key, None)
         if not var:
-            var = self.newvar(bounds)
+            var = self.newvar(bounds, dtype)
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
@@ -1589,6 +1761,11 @@ class CSE:
                         buffer.writeline(f"{self.prefix}{var} =")
                     buffer.splice(expr)
                     buffer.writeline(self.suffix)
+                elif isinstance(expr, DeferredLineBase):
+                    assert assignment
+                    buffer.writeline(
+                        expr._new_line(f"{self.prefix}{var} = {expr.line}{self.suffix}")
+                    )
                 else:
                     if assignment:
                         line = f"{self.prefix}{var} = {expr}{self.suffix}"
@@ -1601,11 +1778,215 @@ class CSE:
 
         return var
 
-    def newvar(self, bounds: ValueRanges[Any] = ValueRanges.unknown()) -> CSEVariable:
+    def newvar(
+        self,
+        bounds: ValueRanges[Any] = ValueRanges.unknown(),
+        dtype: Optional[torch.dtype] = None,
+    ) -> CSEVariable:
         var_name = f"{self.name_prefix}{next(self.iter_buffer_ids)}"
-        var = V.kernel.create_cse_var(var_name, bounds)
+        var = V.kernel.create_cse_var(var_name, bounds, dtype)
         self.varname_map[var_name] = var
         return var
+
+
+@functools.lru_cache(None)
+def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
+    def construct_input(inp):
+        if isinstance(inp, torch._prims_common.Number):
+            return inp
+        else:
+            assert hasattr(inp, "dtype")
+
+            # construct a tmp tensor to use dtype promotion util function
+            return torch.empty([1], dtype=inp.dtype)
+
+    inps = [construct_input(arg) for arg in args]
+    _, dtype = torch._prims_common.elementwise_dtypes(
+        *inps, type_promotion_kind=type_promotion_kind
+    )
+    return dtype
+
+
+def promote_types(args):
+    dtype_prop_candidates = []
+
+    # CSEVariable and scalar will be included in dtype_prop_candidates
+    for arg in args:
+        if isinstance(arg, str):
+            continue
+        elif (
+            isinstance(arg, OpsValue)
+            and isinstance(arg.value, CSEVariable)
+            and arg.value.dtype is not None
+        ):
+            dtype_prop_candidates.append(arg.value)
+        elif (isinstance(arg, CSEVariable) and arg.dtype is not None) or isinstance(
+            arg, torch._prims_common.Number
+        ):
+            dtype_prop_candidates.append(arg)  # type: ignore[arg-type]
+
+    dtype = get_promoted_dtype(
+        *dtype_prop_candidates,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    )
+
+    return dtype
+
+
+class DtypePropagationOpsHandler:
+    """
+    Propagate dtype from args to output
+    """
+
+    @staticmethod
+    def default_handler(*args):
+        # Fallback to FP32 dtype
+        return torch.float32
+
+    @staticmethod
+    def randint64(seed, offset, low, high):
+        return torch.int64
+
+    @staticmethod
+    def where(a, b, c):
+        return promote_types([b, c])
+
+    @staticmethod
+    def to_dtype_bitcast(x, dtype: torch.dtype, src_dtype: torch.dtype):
+        return dtype
+
+    @staticmethod
+    def load_seed(name, offset):
+        return torch.float32
+
+    @staticmethod
+    def masked(mask, body, other):
+        # TODO: inspect body to propagate dtype
+        return torch.float32
+
+    @staticmethod
+    def index_expr(expr, dtype):
+        return dtype
+
+    @staticmethod
+    def isnan(x):
+        return torch.bool
+
+    @staticmethod
+    def lt(a, b):
+        return torch.bool
+
+    @staticmethod
+    def to_dtype(x, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None):
+        return dtype
+
+    @staticmethod
+    def constant(value, dtype):
+        return dtype
+
+    @staticmethod
+    def mul(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def sub(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def add(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def div(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def abs(x):
+        return promote_types([x])
+
+    @staticmethod
+    def exp(x):
+        return promote_types([x])
+
+    @staticmethod
+    def truediv(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def pow(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def sqrt(x):
+        return promote_types([x])
+
+    @staticmethod
+    def rsqrt(x):
+        return promote_types([x])
+
+    @staticmethod
+    def sigmoid(x):
+        return promote_types([x])
+
+    @staticmethod
+    def gelu(x):
+        return promote_types([x])
+
+    @staticmethod
+    def neg(x):
+        return promote_types([x])
+
+    @staticmethod
+    def minimum(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def maximum(a, b):
+        return promote_types([a, b])
+
+    @staticmethod
+    def log(x):
+        return promote_types([x])
+
+    @staticmethod
+    def log1p(x):
+        return promote_types([x])
+
+    @staticmethod
+    def gt(a, b):
+        return torch.bool
+
+    @staticmethod
+    def ge(a, b):
+        return torch.bool
+
+    @staticmethod
+    def reciprocal(x):
+        return promote_types([x])
+
+    @staticmethod
+    def and_(a, b):
+        return torch.bool
+
+    @staticmethod
+    def bitwise_right_shift(a, b):
+        return a.dtype
+
+    @staticmethod
+    def bitwise_left_shift(a, b):
+        return a.dtype
+
+    @staticmethod
+    def sin(x):
+        return promote_types([x])
+
+    @staticmethod
+    def cos(x):
+        return promote_types([x])
+
+    @staticmethod
+    def mod(a, b):
+        return promote_types([a, b])
 
 
 class CodeGen:
@@ -1843,8 +2224,17 @@ class Kernel(CodeGen):
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
 
                     def do_cse(v):
+                        output_dtype = getattr(
+                            DtypePropagationOpsHandler,
+                            name,
+                            DtypePropagationOpsHandler.default_handler,
+                        )(*args)
+
                         csevar = V.kernel.cse.generate(
-                            V.kernel.compute, v, bounds=bounds
+                            V.kernel.compute,
+                            v,
+                            bounds=bounds,
+                            dtype=output_dtype,
                         )
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
@@ -1893,8 +2283,7 @@ class Kernel(CodeGen):
 
                     arg_bounds = list(map(arg_to_bound, args))
                     return getattr(CSEProxy.vr_analysis, name)(*arg_bounds)
-                else:
-                    return ValueRanges.unknown()
+                return ValueRanges.unknown()
 
             @staticmethod
             def indirect_indexing(
@@ -1988,8 +2377,7 @@ class Kernel(CodeGen):
                     CSEProxy._update_store_cache(name, value)
                 if name not in V.graph.removed_buffers:
                     return self.store(name, index, value, mode=mode)
-                else:
-                    return None  # type: ignore[return-value]
+                return None  # type: ignore[return-value]
 
             @staticmethod
             def store_reduction(name: str, index: sympy.Expr, value: CSEVariable):
@@ -2121,13 +2509,61 @@ class Kernel(CodeGen):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self.remove_kernel_local_buffers()
+        super().__exit__(exc_type, exc_val, exc_tb)
+
+    def remove_kernel_local_buffers(self) -> None:
         """
+        Any buffers that are both created and have a last use in the
+        same kernel can be removed.
+
         Note that V.graph.scheduler can be None when codegening triton template
         kernels.
         """
-        if V.graph.scheduler:
-            V.graph.scheduler.remove_kernel_local_buffers()
-        super().__exit__(exc_type, exc_val, exc_tb)
+        scheduler = V.graph.scheduler
+        if not scheduler:
+            return
+        fused_node_names = OrderedSet(
+            scheduler.name_to_buf[buf].defining_op.get_name()
+            for buf in self.store_buffer_names
+            if buf in scheduler.name_to_buf
+        )
+        names_to_remove: OrderedSet[str] = OrderedSet()
+        for name in self.store_buffer_names:
+            if (
+                name not in self.must_keep_buffers
+                and name not in self.args.input_buffers
+                and scheduler.can_buffer_be_removed_through_fusion(
+                    name, fused_node_names
+                )
+            ):
+                names_to_remove.add(name)
+
+        for name in names_to_remove:
+            if name in self.args.inplace_buffers:
+                buf = self.args.inplace_buffers[name]
+                if isinstance(buf, str) and buf.startswith("REMOVED"):
+                    continue
+                remove = all(n in names_to_remove for n in buf.other_names)
+                if remove:
+                    self.remove_inplace_buffer(name)
+                self.inplaced_to_remove.add(name)
+            else:
+                self.remove_buffer(name)
+
+    def remove_buffer(self, name: str) -> None:
+        # Assign a special value instead of deleting the entry
+        # because we still rely on output_buffers's length to
+        # generate unique arg name.
+        log.debug("remove_buffer(%r)", name)
+        self.args.output_buffers[name] = "REMOVED"
+        self.removed_buffers.add(name)
+
+    def remove_inplace_buffer(self, name: str) -> None:
+        log.debug("removing_inplace_buffer(%r)", name)
+        inner_name = self.args.inplace_buffers[name].inner_name
+        self.args.inplace_buffers[name] = inner_name.replace("in_out_ptr", "REMOVED")
+        self.removed_buffers.add(name)
 
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions
@@ -2193,47 +2629,46 @@ class KernelTemplate:
     @staticmethod
     def _template_from_string(source):
         env = jinja2_env()
-        if env is not None:
-            env.filters["indent_except_first"] = KernelTemplate.indent_except_first
-            from jinja2 import TemplateSyntaxError
+        if env is None:
+            return None
+        env.filters["indent_except_first"] = KernelTemplate.indent_except_first
+        from jinja2 import TemplateSyntaxError
 
-            class DetailedTemplateSyntaxError(TemplateSyntaxError):
-                def __init__(self, original_error):
-                    super().__init__(
-                        original_error.message,
-                        original_error.lineno,
-                        original_error.name,
-                        original_error.filename,
-                    )
-                    self.original_error = original_error
+        class DetailedTemplateSyntaxError(TemplateSyntaxError):
+            def __init__(self, original_error):
+                super().__init__(
+                    original_error.message,
+                    original_error.lineno,
+                    original_error.name,
+                    original_error.filename,
+                )
+                self.original_error = original_error
 
-                def __str__(self):
-                    error_info = f"Error in template at line {self.lineno}\n"
-                    error_info += f"Error message: {self.message}\n"
-                    if hasattr(self.original_error, "source"):
-                        lines = self.original_error.source.split("\n")
-                        error_info += "Context:\n"
-                        start = max(0, self.lineno - 2)
-                        end = min(len(lines), self.lineno + 2)
-                        for i in range(start, end):
-                            if i == self.lineno - 1:
-                                error_info += f"{i + 1}: --> {lines[i]}\n"
-                                if hasattr(self.original_error, "column"):
-                                    error_info += (
-                                        "     "
-                                        + " " * (self.original_error.column - 1)
-                                        + "^\n"
-                                    )
-                            else:
-                                error_info += f"{i + 1}:     {lines[i]}\n"
-                    return error_info
+            def __str__(self):
+                error_info = f"Error in template at line {self.lineno}\n"
+                error_info += f"Error message: {self.message}\n"
+                if hasattr(self.original_error, "source"):
+                    lines = self.original_error.source.split("\n")
+                    error_info += "Context:\n"
+                    start = max(0, self.lineno - 2)
+                    end = min(len(lines), self.lineno + 2)
+                    for i in range(start, end):
+                        if i == self.lineno - 1:
+                            error_info += f"{i + 1}: --> {lines[i]}\n"
+                            if hasattr(self.original_error, "column"):
+                                error_info += (
+                                    "     "
+                                    + " " * (self.original_error.column - 1)
+                                    + "^\n"
+                                )
+                        else:
+                            error_info += f"{i + 1}:     {lines[i]}\n"
+                return error_info
 
-            try:
-                return env.from_string(source)
-            except TemplateSyntaxError as e:
-                raise DetailedTemplateSyntaxError(e) from e
-
-        return None
+        try:
+            return env.from_string(source)
+        except TemplateSyntaxError as e:
+            raise DetailedTemplateSyntaxError(e) from e
 
     @staticmethod
     def _fake_get_dtype(fake_out):

@@ -14,7 +14,7 @@ inline void noop(Stack& n) {}
 int64_t normalizeIndex(int64_t idx, int64_t list_size);
 
 // reference function THPVariable_to in python_variable_methods.cpp
-static C10_UNUSED at::Tensor to_dispatch(
+[[maybe_unused]] static at::Tensor to_dispatch(
     at::Tensor self,
     std::optional<at::Device> device,
     std::optional<at::ScalarType> scalarType,

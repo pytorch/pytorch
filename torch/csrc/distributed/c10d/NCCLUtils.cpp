@@ -16,7 +16,7 @@
 namespace c10d {
 
 ncclComm_t NCCLComm::getNcclComm() {
-  std::unique_lock<std::mutex> lock(mutex_);
+  LockType lock(mutex_);
   if (aborted_) {
     auto commFailureMsg = commFailureReason_ != std::nullopt
         ? c10::str(" Original reason for failure was: ", *commFailureReason_)
@@ -30,25 +30,20 @@ ncclComm_t NCCLComm::getNcclComm() {
             ". ",
             commFailureMsg));
   }
-  if (!initialized_) {
-    waitUntilInitialized();
-  }
-
-  return ncclComm_;
-}
-
-void NCCLComm::waitUntilInitialized() {
-  // Wait for initialization to complete if in nonblocking mode.
-  // If timeout is reached, throw an exception.
-  if (nccl_use_nonblocking()) {
+  // In non-blocking mode, ensure comm is ready.
+  if (nonBlocking_) {
+    // If timeout is reached, throw an exception.
     C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
     // ncclComm_ should be initialized by now
   }
-  // In blocking mode, this function is nothing but setting initialized_ to
-  // true.
-  initialized_ = true;
-  LOG(INFO) << "Rank " << rank_ << ": NCCL communicator " << repr()
-            << " is initialized.";
+  if (!initialized_) {
+    // TODO: see if we can consolidate other `initialized_` flipping here.
+    // Maintaining it elsewhere is some work.
+    initialized_ = true;
+    LOG(INFO) << "Rank " << rank_ << ": NCCL communicator " << repr()
+              << " is initialized.";
+  }
+  return ncclComm_;
 }
 
 // TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
@@ -61,6 +56,14 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
     int rank,
     ncclConfig_t& config,
     std::vector<uint64_t>& ranks_ull) {
+  TORCH_CHECK(
+      color_id >= NCCL_SPLIT_NOCOLOR,
+      "Color must be a non-negative value or NCCL_SPLIT_NOCOLOR (-1)"
+      ", but got ",
+      color_id);
+  LOG(INFO) << "Rank " << source->rank_ << ": split from parent comm "
+            << source->repr() << " with color_id " << color_id << " and rank "
+            << rank;
   auto comm = std::make_shared<NCCLComm>();
   // This call will block until the source communicator is initialized
   auto sourceComm = source->getNcclComm();
@@ -82,12 +85,25 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
       ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
       sourceComm, // wait on parent comm
       std::nullopt);
+  if (color_id >= 0) {
+    // Waiting for parent comm above still does not seem to guarantee the child
+    // comm ptr is valid. Therefore we add a manual wait here for safety.
+    // TODO: remove this wait after NCCL fix the semantics.
+    auto startTime = std::chrono::steady_clock::now();
+    auto timeout = nccl_nonblocking_timeout();
+    while (!comm->ncclComm_) {
+      C10D_CHECK_TIMEOUT(startTime, timeout);
+      C10D_SCHED_SLEEP();
+    }
+  }
   // comm->ncclComm_ should have valid ptr by now, but not necessarily
-  // initialized. Rely on getNcclComm() -> waitUntilInitialized() to wait for
-  // its initialization.
+  // initialized. Rely on getNcclComm() to wait for its initialization.
 #endif
   ++source->ncclCommSplitCounter_;
   comm->rank_ = rank;
+  comm->nonBlocking_ = config.blocking == 0;
+  LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
+            << comm->repr() << " with color_id " << color_id;
   return comm;
 }
 #endif
@@ -148,32 +164,18 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
 }
 #endif
 
-bool nccl_use_nonblocking() {
-  static bool nccl_use_nonblocking_ =
-      c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING") == true;
-  if (nccl_use_nonblocking_) {
-    TORCH_WARN_ONCE("Using experimental non-blocking NCCL communicator.");
-  }
-  return nccl_use_nonblocking_;
-}
-
-int _parse_nccl_nonblocking_timeout() {
-  const char* val = getenv("TORCH_NCCL_NONBLOCKING_TIMEOUT");
-  int timeout = -1;
-  if (val) {
-    const std::string config(val);
-    timeout = std::stoi(config);
-    if (!nccl_use_nonblocking() && timeout > 0) {
-      TORCH_WARN(
-          "TORCH_NCCL_NONBLOCKING_TIMEOUT has no effect when TORCH_NCCL_USE_COMM_NONBLOCKING is false.");
-      timeout = -1;
+// Default value: 30 minutes
+int nccl_nonblocking_timeout() {
+  static int timeout = -2; // -2 means not initialized
+  if (timeout == -2) {
+    const auto val = c10::utils::get_env("TORCH_NCCL_NONBLOCKING_TIMEOUT");
+    if (val.has_value() && !val.value().empty()) {
+      timeout = stoi(val.value());
+    } else {
+      // Default value consistent with kBackendDefaultTimeout
+      timeout = 30 * 60;
     }
   }
-  return timeout;
-}
-
-int nccl_nonblocking_timeout() {
-  static int timeout = _parse_nccl_nonblocking_timeout();
   return timeout;
 }
 
@@ -343,7 +345,7 @@ void DebugInfoWriter::write(const std::string& ncclTrace) {
     return;
   }
 
-  file.write(ncclTrace.data(), ncclTrace.size());
+  file.write(ncclTrace.data(), static_cast<std::streamsize>(ncclTrace.size()));
   if (!file) {
     LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
                << filename_;
@@ -372,6 +374,33 @@ void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
       "debugInfoWriter already registered");
   hasWriterRegistered_.store(true);
   writer_ = std::move(writer);
+}
+
+// Returns the traceback of current entry, in string form.
+// Note: `getTraceback` invokes `torch::symbolize`, which may need to acquire
+// the GIL. If you don't want to block the current thread or take the risk of a
+// GIL deadlock, you can use an asynchronous calling mechanism like std::async.
+std::string NCCLTraceBuffer::Entry::getTraceback() {
+  torch::CapturedTraceback* traceback = traceback_.get();
+  torch::SymbolizedTracebacks s_tbs = torch::symbolize({traceback});
+  // We use 0 because we only have one traceback here.
+  const auto& s_tb = s_tbs.tracebacks.at(0);
+  std::stringstream oss;
+  for (auto idx : c10::irange(s_tb.size())) {
+    auto frame_id = s_tb[idx];
+    const auto& frame = s_tbs.all_frames.at(frame_id);
+    oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
+        << ":" << frame.lineno << '\n';
+  }
+  /* Resulted format is like:
+    #0 all_reduce from pytorch/torch/distributed/distributed_c10d.py:2696
+    #1 wrapper from pytorch/torch/distributed/c10d_logger.py:83
+    #2 bar from /home/user/repro.py:15
+    #3 foo from /home/user/repro.py:24
+    #4 main from /home/user/repro.py:34
+    #5 <module> from /home/user/repro.py:40
+  */
+  return oss.str();
 }
 
 std::optional<size_t> NCCLTraceBuffer::record(
@@ -493,6 +522,23 @@ std::vector<NCCLTraceBuffer::Entry> NCCLTraceBuffer::dump_entries() {
   return result;
 }
 
+// Returns the entry with the given id, if it exists. Otherwise, returns
+// std::nullopt.
+std::optional<NCCLTraceBuffer::Entry> NCCLTraceBuffer::getEntry(
+    std::optional<size_t> id) {
+  if (!enabled_ || !id) {
+    return std::nullopt;
+  }
+
+  std::unique_lock<std::mutex> guard(mutex_);
+  Entry entry = entries_.at(*id % max_entries_);
+  if (entry.id_ == *id) {
+    return entry;
+  } else {
+    return std::nullopt;
+  }
+}
+
 void NCCLTraceBuffer::retire_id(
     std::optional<size_t> id,
     bool compute_duration) {
@@ -537,7 +583,7 @@ void NCCLTraceBuffer::retire_id(
       return;
     }
     if (duration.has_value()) {
-      entry->duration_ = duration.value();
+      entry->duration_ = duration;
     }
   }
 }
@@ -597,7 +643,7 @@ const c10::List<c10::IValue> NCCLTraceBuffer::getCollectiveTrace(
       auto sizes = new_list();
       for (auto dim : dims) {
         auto arg_sizes = new_list();
-        for (C10_UNUSED auto i : c10::irange(dim)) {
+        for ([[maybe_unused]] auto i : c10::irange(dim)) {
           arg_sizes.push_back(*it++);
         }
         sizes.push_back(arg_sizes);
