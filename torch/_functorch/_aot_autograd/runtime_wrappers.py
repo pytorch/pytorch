@@ -69,7 +69,6 @@ from .utils import (
 zip = strict_zip
 
 
-@torch._dynamo.allow_in_graph
 def _backward_prologue_functional(
     ctx_saved_tensors, ctx_symints, metadata, maybe_subclass_metadata, *flat_args
 ):
@@ -1966,6 +1965,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             @staticmethod
             def _backward_impl(ctx, all_args):
                 if ctx._is_compiled_autograd_tracing():
+                    assert False
                     if lazy_backward_info is None:
                         raise RuntimeError(
                             """This compiled backward function was saved by AOTAutogradCache, which does not support

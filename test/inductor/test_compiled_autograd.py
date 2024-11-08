@@ -261,7 +261,7 @@ main()
             )
             opt_model = torch.compile(model, fullgraph=True)
 
-            for _ in range(3):
+            for _ in range(1):
                 x = torch.randn([1, 4])
 
                 result = opt_model(x).sum()

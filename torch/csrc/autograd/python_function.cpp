@@ -241,11 +241,12 @@ auto PyNode::defer_to_dynamo(
   THPObjectPtr r(PyObject_CallMethod(
       *compiler,
       "proxy_call_backward",
-      "OOOi",
+      "OOOiO",
       pyInputs.get(),
       fwdInputMetadatas.get(),
       saved_tensors.get(),
-      *_backward_idx));
+      *_backward_idx,
+      obj));
 
   if (!r)
     throw_python_error();

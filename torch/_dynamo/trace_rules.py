@@ -3246,6 +3246,7 @@ MOD_INLINELIST = [
     "torch._dynamo.compiled_autograd.ops",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
+    "torch._functorch._aot_autograd.runtime_wrappers",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
     "torch._functorch.functional_call",
