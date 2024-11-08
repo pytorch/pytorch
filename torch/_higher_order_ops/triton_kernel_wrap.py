@@ -216,7 +216,18 @@ def generate_ttir(
     ordered_tensor_names = [
         name for name, arg in ordered_args.items() if isinstance(arg, Tensor)
     ]
-    specialization = kernel._get_config(*ordered_args.values())
+
+    def _get_specialization(args):  # type: ignore[no-untyped-def]
+        try:
+            from triton.backends.compiler import AttrsDescriptor  # noqa: F401
+
+            target = triton.runtime.driver.active.get_current_target()
+            backend = triton.compiler.compiler.make_backend(target)
+            return backend.get_attrs_descriptor(args, kernel.params)
+        except ImportError:
+            return kernel._get_config(*args)
+
+    specialization = _get_specialization(ordered_args.values())
     constants = {
         name: arg for name, arg in ordered_args.items() if not isinstance(arg, Tensor)
     }
@@ -1027,7 +1038,6 @@ class TritonHOPifier:
             # We only support configs and keys arguments of triton.autotune
             # Make sure other arguments are defaulted
             defaults = inspect.signature(Autotuner.__init__).parameters
-
             # Newer version of triton change attribute name from warmup to num_warmup and rep to num_rep.
             # The call to get_first_attr is to maintain backward-compatibility.
             if (
@@ -1061,6 +1071,18 @@ class TritonHOPifier:
             ):
                 self.raise_unsupported(
                     "Only configs and keys are supported for triton.autotune"
+                )
+            if (
+                not torch._inductor.config.unsafe_ignore_unsupported_triton_autotune_args
+                and (
+                    # pre_hook requires running arbitrary code at runtime, which we cannot handle at this time
+                    # https://github.com/pytorch/pytorch/issues/139059
+                    # Check Config passed to autotuner in configs
+                    any(cfg.pre_hook is not None for cfg in kernel.configs)
+                )
+            ):
+                self.raise_unsupported(
+                    "pre_hook is not supported in triton.Autotune Configs"
                 )
 
     def call_getitem(

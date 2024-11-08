@@ -3,7 +3,7 @@
 
 import copy
 import unittest
-from typing import Set, Type
+from typing import Optional, Set, Type
 
 import torch
 import torch.fx
@@ -40,7 +40,7 @@ class TestDCE(TestCase):
         self,
         m: torch.nn.Module,
         expect_dce_changes: bool,
-        modules_to_be_leafs: Set[Type] = None,
+        modules_to_be_leafs: Optional[Set[Type]] = None,
         custom: bool = False,
     ):
         class TestTracer(torch.fx.Tracer):

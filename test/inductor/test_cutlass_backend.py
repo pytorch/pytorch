@@ -266,7 +266,7 @@ class TestCutlassBackend(TestCase):
         mixed_precision=False,
         fp16=True,
         expected_fuse_count=0,
-        mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+        mm: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
         batch_size: Optional[int] = None,
     ):
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (

@@ -7,7 +7,7 @@ import torch
 import torch._inductor.config as inductor_config
 from functorch import make_fx
 from torch import Tensor
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import ReinplaceCounters
 from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
@@ -32,11 +32,11 @@ device = GPU_TYPE
 
 
 def num_reinplacing_failures():
-    return counters["inductor"]["possibly_missed_reinplacing_opportunities"]
+    return ReinplaceCounters.get_total_missed()
 
 
 def miss_inplaced_bytes():
-    return counters["inductor"]["possibly_missed_reinplacing_bytes"]
+    return ReinplaceCounters.get_total_missed_bytes()
 
 
 @torch.library.custom_op("_reinplacing::sin", mutates_args={"result"})
@@ -86,7 +86,7 @@ def boo(x: torch.Tensor) -> None:
 
 class TestReinplacingPassCorrectness(InductorTestCase):
     def setUp(self):
-        counters.clear()
+        ReinplaceCounters.clear()
         return super().setUp()
 
     def _test(self, f):
@@ -139,7 +139,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self._test(f)
 
     def test_counters_functionalize_old(self):
-        counters.clear()
+        ReinplaceCounters.clear()
 
         def f(x):
             out = torch.empty_like(x)
@@ -159,7 +159,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(miss_inplaced_bytes(), 12)
 
     def test_counters_functionalize_v2(self):
-        counters.clear()
+        ReinplaceCounters.clear()
 
         def f(x):
             out = torch.empty_like(x)
@@ -315,7 +315,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                 with inductor_config.patch(
                     {"enable_auto_functionalized_v2": enable_v2}
                 ):
-                    counters.clear()
+                    ReinplaceCounters.clear()
 
                     def f(x):
                         out1 = torch.empty_like(x)
@@ -330,7 +330,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
                     self.assertEqual(num_reinplacing_failures(), 0)
 
     def test_multiple_mutations(self):
-        counters.clear()
+        ReinplaceCounters.clear()
 
         def f(x, out):
             sin(x, out)
@@ -346,7 +346,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         self.assertEqual(num_reinplacing_failures(), 0)
 
     def test_multiple_intermediate(self):
-        counters.clear()
+        ReinplaceCounters.clear()
 
         def f(x):
             out = torch.empty_like(x)
