@@ -18,8 +18,8 @@ graph LR
     S3 --> uts[upload-test-stats.yml]
     GHA --> uts
 
-    uts --json--> R[(s3)]
-    s3 --> R[(database)]
+    uts --json--> s3[(s3)]
+    s3 --> DB[(database)]
 ```
 
 Why this weird indirection? Because writing to the database requires special
