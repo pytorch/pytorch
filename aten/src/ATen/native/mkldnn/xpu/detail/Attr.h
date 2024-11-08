@@ -424,7 +424,7 @@ static inline void construct_attr_by_post_op(
   if (binary_post_op == "none") {
     construct_attr_for_unary(
         unary_post_op, unary_post_op_args, unary_post_op_algorithm, attr);
-  }
+  }1
 }
 
 } // namespace at::native::onednn
