@@ -4932,8 +4932,9 @@ class ExternKernel(InputsKernel):
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
 
-        if not exact_strides:  # Layout doesn't matter
-            # Either strides is None or []
+        if (
+            exact_strides is not None and len(exact_strides) == 0
+        ):  # Layout doesn't matter
             return x
 
         # require x to have the layout
