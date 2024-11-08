@@ -382,7 +382,7 @@ void RunTest(kernel_t kernel, const std::string& test_name,
 
     avg_bw /= test_iters;
 
-    printf("%s,%d,%d,%d,%d,%d,%.1f,%.1f,%.1f\n",
+    printf("{'test_name': '%s', 'wg_size': %d, 'vec': %d, 'M': %d, 'N': %d, 'K': %d, 'min_bw': %.1f, 'max_bw': %.1f, 'avg_bw': %.1f},\n",
         test_name.c_str(), wg_size, vec, M, N, K, min_bw, max_bw, avg_bw);
 
     _CHECK(hipEventDestroy(start));
@@ -398,29 +398,29 @@ void RunTests(const int M, const int N, const int K, void *buf_a, void *buf_c)
     for (int wg = 64; wg <= 1024 && wg <= elements; wg *= 2) {
         int elwise_wg = elements / wg;
         RunTest(copy_elwise_kernel<EL_TYPE, 1, false>, 
-                "Copy elementwise,N", elwise_wg, wg, 1, M, N, K, buf_a, buf_c);
+                "Copy_elementwise_N", elwise_wg, wg, 1, M, N, K, buf_a, buf_c);
         if (elements % 8 == 0) {
             RunTest(copy_elwise_kernel<EL_TYPE, 8, false>, 
-                "Copy elementwise,N", elwise_wg / 8, wg, 8, M, N, K, buf_a, buf_c);
+                "Copy_elementwise_N", elwise_wg / 8, wg, 8, M, N, K, buf_a, buf_c);
         }
         RunTest(copy_elwise_kernel<EL_TYPE, 1, true>, 
-                "Copy elementwise,T", elwise_wg, wg, 1, M, N, K, buf_a, buf_c);
+                "Copy_elementwise_T", elwise_wg, wg, 1, M, N, K, buf_a, buf_c);
 
         if (N % 8 == 0 && K % 8 == 0) {
             RunTest(copy_tile_kernel<EL_TYPE,  8, true>, 
-                    "Copy tile 8x8,T", elwise_wg, wg, 1, M, N, K, buf_a, buf_c);
+                    "Copy_tile_8x8_T", elwise_wg, wg, 1, M, N, K, buf_a, buf_c);
         }
     }
 
     int big_tile_wg = M * ((N + BIG_TILE_SIZE - 1) / BIG_TILE_SIZE) * ((K + BIG_TILE_SIZE - 1) / BIG_TILE_SIZE);
     RunTest(transpose_tile_big_kernel<EL_TYPE, 64>, 
-            "Custom transpose LDS tile 64x64,T", big_tile_wg, 64, 1, M, N, K, buf_a, buf_c);
+            "Custom_transpose_LDS_tile_64x64_T", big_tile_wg, 64, 1, M, N, K, buf_a, buf_c);
     RunTest(transpose_tile_big_kernel<EL_TYPE, 128>, 
-            "Custom transpose LDS tile 64x64,T", big_tile_wg, 128, 1, M, N, K, buf_a, buf_c);
+            "Custom_transpose_LDS_tile_64x64_T", big_tile_wg, 128, 1, M, N, K, buf_a, buf_c);
     RunTest(transpose_tile_big_kernel<EL_TYPE, 256>, 
-            "Custom transpose LDS tile 64x64,T", big_tile_wg, 256, 1, M, N, K, buf_a, buf_c);
+            "Custom_transpose_LDS_tile_64x64_T", big_tile_wg, 256, 1, M, N, K, buf_a, buf_c);
     RunTest(transpose_tile_big_kernel<EL_TYPE, 512>, 
-            "Custom transpose LDS tile 64x64,T", big_tile_wg, 512, 1, M, N, K, buf_a, buf_c);
+            "Custom_transpose_LDS_tile_64x64_T", big_tile_wg, 512, 1, M, N, K, buf_a, buf_c);
 
     // free(ref_cpu);
 }

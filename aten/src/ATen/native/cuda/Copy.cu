@@ -191,7 +191,7 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
       gpu_kernel_nocast(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   } else if (is_permute_021) {
-    printf("[%ld, %ld, %ld],\n", in_sizes[0], in_sizes[1], in_sizes[2]);
+    //printf("[%ld, %ld, %ld],\n", in_sizes[0], in_sizes[1], in_sizes[2]);
 
     /*
     printf("input dim:%d\n", in_sizes.size());
