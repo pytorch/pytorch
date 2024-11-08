@@ -4,10 +4,12 @@ from torch._inductor.test_case import TestCase
 from torch._dynamo.utils import same
 from torch import nn
 import os
+from triton.testing import do_bench
 
 # TODO: always test with large input. Skip the test if the GPU
 # does not have enough memory
 USE_LARGE_INPUT = os.environ.get("USE_LARGE_INPUT", "1") == "1"
+DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 @config.patch("AutoChunker.enable", True)
 class AutoChunkerTest(TestCase):
@@ -106,6 +108,10 @@ class AutoChunkerTest(TestCase):
         mod = LinearAndCEL().cuda().to(dtype)
         
         def f(x, y):
+            x.grad = None
+            mod.linear.weight.grad = None
+            mod.linear.bias.grad = None
+
             x = x * 2
             loss = mod(x, y)
             loss.backward()
@@ -118,16 +124,17 @@ class AutoChunkerTest(TestCase):
         y = torch.randint(0, V, (B, T)).cuda()
 
         expect = (f(x, y), x.grad, mod.linear.weight.grad, mod.linear.bias.grad)
-        x.grad = None
-        mod.linear.weight.grad = None
-        mod.linear.bias.grad = None
-
         torch.cuda.reset_peak_memory_stats()
         actual = (opt_f(x, y), x.grad, mod.linear.weight.grad, mod.linear.bias.grad)
         peak_memory = torch.cuda.max_memory_allocated()
         print(f"Peak memory {peak_memory / 10 ** 9 :.6f} GB")
 
         self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
+
+        if DO_PERF_TEST:
+            ms_eager = do_bench(lambda: f(x, y))
+            ms_opt = do_bench(lambda: opt_f(x, y))
+            print(f"Eager v.s. Compile perf: {ms_eager:.3f}ms v.s. {ms_opt:.3f}ms")
 
         self.assertEqual(metrics.num_auto_chunking, 1)
         expected_bound = B * T * V * x.dtype.itemsize

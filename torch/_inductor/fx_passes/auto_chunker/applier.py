@@ -47,9 +47,16 @@ class BaseChunkingApplier:
         # First index is node index,
         # Second index is chunk index.
         self.chunked_external_nodes: List[List[Node]] = []
-        self.chunks_for_recovering: List[List[Node]] = [
-            [] for _ in range(len(self.nodes_to_recover))
-        ]
+        self.chunks_for_recovering: Dict[Node, List[Node]] = {}
+        self.accumulators: Dict[Node, Node] = {}
+        for node in self.nodes_to_recover:
+            meta = get_chunking_meta(node)
+            assert meta
+            if meta.chunk_dim is not None:
+                self.chunks_for_recovering[node] = []
+            else:
+                # the accumulator nodes is created later
+                self.accumulators[node] = None
 
 
     def replace_tangent_to_one(self):
@@ -65,7 +72,7 @@ class BaseChunkingApplier:
         tangent_node.replace_all_uses_with(one)
         self.overriden_tangent = one
 
-    def _recover_to_unchunked_node(self, node, chunks):
+    def _recover_to_unchunked_node(self, node):
         """
         Recover the node from chunks and do the replacement.
         """
@@ -76,14 +83,12 @@ class BaseChunkingApplier:
         recovered = node
 
         if meta.chunk_dim is not None:
+            chunks = self.chunks_for_recovering[node]
             recovered = self.graph.call_function(
                 aten.cat.default,
                 (chunks, meta.chunk_dim))
         elif meta.need_sum:
-            recovered = chunks[0]
-            for other in chunks[1:]:
-                recovered = self.graph.call_function(
-                    aten.add.Tensor, (recovered, other))
+            recovered = self.accumulators[node]
 
         # do scaling last
         if meta.scale_by is not None:
@@ -96,8 +101,8 @@ class BaseChunkingApplier:
 
     def recover_to_unchunked_nodes(self):
         with self.graph.inserting_before(self.source_user):
-            for node, chunks in zip(self.nodes_to_recover, self.chunks_for_recovering):
-                self._recover_to_unchunked_node(node, chunks)
+            for node in self.nodes_to_recover:
+                self._recover_to_unchunked_node(node)
 
     def erase_original_nodes(self):
         # Traveral reversely to erase user first
@@ -155,6 +160,8 @@ class SubgraphChunkingApplier(BaseChunkingApplier):
         for node_idx, external_node in enumerate(self.chunking_subgraph.external_nodes):
             env[external_node] = _create_placeholder_node(external_node)
         env[self.overriden_tangent] = _create_placeholder_node(self.overriden_tangent)
+        for _, accum in self.accumulators.items():
+            env[accum] = _create_placeholder_node(accum)
 
         for original_node in self.chunking_subgraph.subgraph_nodes:
             if original_node.op == "placeholder":
@@ -185,6 +192,19 @@ class SubgraphChunkingApplier(BaseChunkingApplier):
             print(f"Create node in new_graph for: {original_node.format_node()}") # TODO
             env[original_node] = new_graph.node_copy(original_node, lambda x: env[x])
 
+        # Do the accumulation inside this subgraph
+        for node, accum in self.accumulators.items():
+            lhs = env[node]
+            rhs = env[accum]
+
+            # add `addend` and `accum`
+            add_out = new_graph.call_function(
+                aten.add.Tensor, (lhs, rhs)
+            )
+
+            # override the chunk value
+            env[node] = add_out
+
         out_values = []
         for node in self.nodes_to_recover:
             out_values.append(env[node])
@@ -203,6 +223,10 @@ class SubgraphChunkingApplier(BaseChunkingApplier):
         setattr(self.parent_gm, gm_attr, sub_gm)
 
         fake_tensor_prop(sub_gm)
+
+        # Mark this sub graph module so we don't recursively chunking
+        # it.
+        sub_gm.meta["produced_by_chunker"] = True
         return sub_gm
     
     def build_subgraphs(self):
@@ -229,11 +253,22 @@ class SubgraphChunkingApplier(BaseChunkingApplier):
                 args.append(node)
         args.append(self.overriden_tangent)
 
+        for _, accum in self.accumulators.items():
+            args.append(accum)
+
         output_node = self.graph.call_function(torch.ops.higher_order.invoke_subgraph,
                 (sub_gm, None, args), {})
 
-        for i in range(len(self.nodes_to_recover)):
-            self.chunks_for_recovering[i].append(self.graph.call_function(operator.getitem, (output_node, i)))
+        output_node_dict = {}
+        for i, orig_node in enumerate(self.nodes_to_recover):
+            output_node_dict[orig_node] = self.graph.call_function(operator.getitem, (output_node, i))
+
+        for orig_node, node_list in self.chunks_for_recovering.items():
+            chunk = output_node_dict[orig_node]
+            node_list.append(chunk)
+
+        for orig_node in self.accumulators:
+            self.accumulators[orig_node] = output_node_dict[orig_node]
 
 
     def call_subgraph_for_each_chunk(self):
@@ -243,9 +278,23 @@ class SubgraphChunkingApplier(BaseChunkingApplier):
                 sub_gm = self.graph.get_attr(self.chunk_size_to_gm_attr[chunk_size])
                 self._call_subgraph(sub_gm, chunk_id)
 
+    def create_accumulators(self):
+        with self.graph.inserting_before(self.source_user):
+            for node in self.accumulators:
+                fake_tensor = node.meta["val"]
+                accum = self.graph.call_function(
+                    aten.full.default,
+                    (fake_tensor.shape, 0),
+                    _factory_args(fake_tensor))
+                # reuse the meta['val']
+                accum.meta = {"val": fake_tensor}
+                self.accumulators[node] = accum
+        
+
     def apply(self):
         self.replace_tangent_to_one()
         self.chunk_external_nodes()
+        self.create_accumulators()
         self.build_subgraphs()
 
         # call subgraphs
@@ -311,7 +360,8 @@ class UnrollChunkingApplier(BaseChunkingApplier):
                 env[original_node] = self._recreate_node_with_replacement(original_node, env)
         # collect the chunks for recovering
         for idx, node in enumerate(self.nodes_to_recover):
-            self.chunks_for_recovering[idx].append(env[node])
+            # self.chunks_for_recovering[idx].append(env[node])
+            assert False
 
     def create_chunked_subgraph(self):
         for chunk_id in range(self.num_chunk):

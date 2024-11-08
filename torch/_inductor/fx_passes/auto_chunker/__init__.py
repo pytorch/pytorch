@@ -684,11 +684,15 @@ class AutoChunker:
         self.gm is transformed inplace.
         """
 
+        if self.gm.meta.get("produced_by_chunker", False):
+            # Don't chunk a graph produced by the chunker
+            return self.gm
+
         log.debug("Joint graph before chunking:\n%s", self.gm.print_readable(False))
 
         if not self.has_single_scalar_gradient_output():
             log.debug("The graph does not have a single scalar gradient.")
-            return
+            return self.gm
 
         gm = self.gm
         graph = gm.graph

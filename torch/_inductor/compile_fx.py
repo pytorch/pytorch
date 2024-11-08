@@ -345,11 +345,23 @@ def _recursive_pre_grad_passes(
 
 
 def _recursive_joint_graph_passes(gm: GraphModule) -> GraphModule:
-    for subgraph_name in _get_subgraph_names(gm):
+    def _run_on_sub_graph_module(subgraph_name):
         subgraph = getattr(gm, subgraph_name)
         new_subgraph = _recursive_joint_graph_passes(subgraph)
         setattr(gm, subgraph_name, new_subgraph)
-    return joint_graph_passes(gm)
+
+    old_subgraph_names = _get_subgraph_names(gm)
+    for subgraph_name in old_subgraph_names:
+        _run_on_sub_graph_module(subgraph_name)
+
+    out_gm = joint_graph_passes(gm)
+
+    # Some joint graph passes may create new sub graph module. Run one round
+    # for the newly created graph modules.
+    for subgraph_name in _get_subgraph_names(out_gm):
+        if subgraph_name not in old_subgraph_names:
+            _run_on_sub_graph_module(subgraph_name)
+    return out_gm
 
 
 def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> None:
