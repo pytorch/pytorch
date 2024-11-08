@@ -33,9 +33,9 @@ class SampleRule(ABC):
 
     def __post_init__(self):
         if self.match_fn is None:
-            raise ValueError("XFailRule must have match_fn set to be useful")
+            raise ValueError("rule must have match_fn set to be useful")
 
-    # returns (matched, relevant context if matched, or nullcontext otherwise)
+    # returns True if the rule applies or False otherwise
     def match(self, device, dtype, op, sample) -> bool:
         return self.match_fn(device, dtype, op, sample)
 
