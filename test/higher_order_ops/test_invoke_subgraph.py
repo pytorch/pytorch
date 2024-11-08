@@ -218,6 +218,37 @@ class TestInvokeSubgraphCompile(TestCase):
         # between eager and Triton.
         res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
 
+    def test_symint_from_fwd_to_bwd(self):
+        @mark_compile_region
+        def gn(x, y):
+            a = torch.sum(x, (1,), keepdim=True).view(y.shape[1], y.shape[0])
+            return torch.matmul(a, y)
+
+        def fn(x, y):
+            return gn(x, y)
+
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+
+        x = torch.randn(64, 1, requires_grad=True)
+        y = torch.randn(8, 8, requires_grad=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+
+        x = torch.randn(256, 1, requires_grad=True)
+        y = torch.randn(16, 16, requires_grad=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+        res.sum().backward()
+
+        x = torch.randn(16, 1, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        ref = fn(x, y)
+        res = opt_fn(x, y)
+        self.assertEqual(ref, res)
+        res.sum().backward()
+
     def test_dedupe(self):
         @mark_compile_region
         def gn(x, y):
