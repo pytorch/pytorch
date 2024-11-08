@@ -520,6 +520,9 @@ class ProcessGroup:
     @property
     def group_desc(self) -> str: ...
 
+class FakeProcessGroup(Backend):
+    def __init__(self, rank: int, world_size: int) -> None: ...
+
 class ProcessGroupGloo(Backend):
     class Device: ...
 
