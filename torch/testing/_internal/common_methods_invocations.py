@@ -3320,7 +3320,10 @@ def sample_inputs_sort(op_info, device, dtype, requires_grad, **kwargs):
     flag = [True, False]
     for dim, descending, stable in product(dims, flag, flag):
         # default schema without stable sort
-        yield SampleInput(small_3d_unique(), dim, descending)
+        if not (dtype == torch.bool and torch.device(device).type == 'cuda'):
+            # bool and cuda requires stable sort for stable results, at least
+            # for the return index
+            yield SampleInput(small_3d_unique(), dim, descending)
         # schema with stable sort, no CUDA support yet
         if torch.device(device).type == 'cpu':
             yield SampleInput(
@@ -18477,11 +18480,13 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('sort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_sort,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], device_type='cuda'),
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
@@ -19506,12 +19511,14 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('msort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_msort,
            skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
+                            dtypes=[torch.bool], device_type='cuda'),
            )),
     OpInfo('movedim',
            aliases=('moveaxis',),
@@ -20408,7 +20415,8 @@ op_db: List[OpInfo] = [
     OpInfo(
         "norm",
         sample_inputs_func=sample_inputs_norm,
-        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         # TODO Benchmark again with the new implementation
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -20470,7 +20478,8 @@ op_db: List[OpInfo] = [
         "norm",
         variant_test_name="inf",
         sample_inputs_func=sample_inputs_norm_inf,
-        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
@@ -20791,10 +20800,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        dtypes=floating_types_and(torch.float16),
-        backward_dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
-        backward_dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
             # RuntimeError: input->type()->kind() == TypeKind::OptionalType
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":252,
@@ -20804,8 +20810,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.grid_sample",
-        dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
@@ -20814,8 +20819,7 @@ op_db: List[OpInfo] = [
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
         "grid_sampler_2d",
-        dtypes=floating_types(),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_gradgrad=False,
@@ -21324,7 +21328,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "argsort",
         dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_sort,
         supports_out=False,
         supports_autograd=False,
@@ -21334,6 +21338,13 @@ op_db: List[OpInfo] = [
                 "TestJit",
                 "test_variant_consistency_jit",
                 dtypes=(torch.float32,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_non_standard_bool_values",
+                dtypes=[torch.bool],
+                device_type='cuda',
             ),
         ),
     ),
