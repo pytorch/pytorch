@@ -89,6 +89,16 @@ supported_const_comparison_op_values = dict.fromkeys(
 )
 
 
+def is_bound_tensor_method(value):
+    return (
+        callable(value)
+        and not torch._dynamo.utils.object_has_getattribute(value)
+        and hasattr(value, "__self__")
+        and isinstance(value.__self__, torch.Tensor)
+        and getattr(value.__self__, value.__name__, None)
+    )
+
+
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
 
@@ -273,14 +283,19 @@ class TensorVariable(VariableTracker):
             raise NotImplementedError
 
         real_value = getattr(_input_associated_real_value, name)
-        if callable(real_value):
-            # Callables have more nuanced handling, and we should let the existing system delegate here.
-            # Raising was past behavior and so should always be sound to fall back.
-            # Note - at a certain point we may want to handle
-            raise NotImplementedError
 
         attr_source = AttrSource(self.source, name)
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
+
+        # Typically we'd want to use variable builder here
+        # but unfortunately id(real_value.__self__) is not id(<original value>)
+        if is_bound_tensor_method(real_value):
+            from .misc import GetAttrVariable
+
+            return GetAttrVariable(
+                self, name, source=attr_source, py_type=type(real_value)
+            )
+
         return VariableTracker.build(tx, real_value, attr_source)
 
     def method_attr_ndim(self, tx):
@@ -522,16 +537,16 @@ class TensorVariable(VariableTracker):
         # Only override builtin tensor methods
         # The user can manually add override handling
         # with a decorator for other methods (e.g. a dispatch subclass with other methods)
-        has_torch_function_override = False
+        is_base_tensor_method = False
         try:
             inspect.getattr_static(torch.Tensor, name)
-            has_torch_function_override = True
+            is_base_tensor_method = True
         except AttributeError:
-            has_torch_function_override = False
+            is_base_tensor_method = False
 
         if (
             can_dispatch_torch_function(tx, tuple([self] + list(args)), kwargs)
-            and has_torch_function_override
+            and is_base_tensor_method
         ):
             if self.source:
                 func_var = VariableBuilder(
