@@ -8,7 +8,6 @@ import torch.fx as fx
 from torch._prims_common import get_computation_dtype
 from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._utils_internal import JustKnobsConfig
-from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.symbolic_shapes import ShapeEnv  # noqa: TCH001
 from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
@@ -252,6 +251,6 @@ def tensorify_python_scalars(
         if len(proxy.node.users) == 0 and proxy.node.op != "placeholder":
             graph.erase_node(proxy.node)
 
-    graph_code_log.debug(
-        "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
-    )
+    # graph_code_log.debug(
+    #     "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
+    # )
