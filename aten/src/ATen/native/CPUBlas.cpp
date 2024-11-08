@@ -322,6 +322,24 @@ void gemm(
    const float beta,
    at::BFloat16 *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+
+#if AT_MKLDNN_ENABLED()
+#ifdef __aarch64__
+   // MKLDNN also supports ARM for bf16, and the bypass is only
+   // currently intended for x86/x86_64.
+   const bool use_bf16_gemv_trans = false;
+#else
+   const bool bf16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
+     !cpuinfo_has_x86_avx512bf16();
+   const bool use_bf16_gemv_trans = bf16_gemv_trans_would_be_faster &&
+     transa == TransposeType::Transpose &&
+     transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
+#endif
+   if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif
+
 #if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
@@ -343,22 +361,7 @@ void gemm(
       return;
    }
 #endif
-#if AT_MKLDNN_ENABLED()
-#ifdef __aarch64__
-   // MKLDNN also supports ARM for bf16, and the bypass is only
-   // currently intended for x86/x86_64.
-   const bool use_bf16_gemv_trans = false;
-#else
-   const bool bf16_gemv_trans_would_be_faster = cpuinfo_initialize() &&
-     !cpuinfo_has_x86_avx512bf16();
-   const bool use_bf16_gemv_trans = bf16_gemv_trans_would_be_faster &&
-     transa == TransposeType::Transpose &&
-     transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
-#endif
-   if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
-     return;
-   }
-#endif
+
    gemm_stub(
       at::kCPU, at::kBFloat16,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
@@ -402,6 +405,13 @@ void gemm(
     const float beta,
     float *c, int64_t ldc) {
   internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+
+// TODO: ADI: add heuristic based on shape to dispatch to sbgemm_ vs MKLDNN
+#if AT_MKLDNN_ENABLED()
+   if (mkldnn_bf16f32_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
+     return;
+   }
+#endif
 #if AT_BUILD_WITH_BLAS() && defined(BLAS_HAS_SBGEMM)
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
