@@ -186,7 +186,7 @@ test_torchbench_perf() {
   torchbench_setup_macos
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir $TEST_REPORTS_DIR
+  mkdir -p $TEST_REPORTS_DIR
 
   echo "Setup complete, launching torchbench training performance run"
   PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
@@ -209,7 +209,7 @@ test_torchbench_smoketest() {
   torchbench_setup_macos
 
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir $TEST_REPORTS_DIR
+  mkdir -p $TEST_REPORTS_DIR
 
   echo "Setup complete, launching torchbench training performance run"
   PYTHONPATH=$(pwd)/torchbench python benchmarks/dynamo/torchbench.py --performance --only hf_T5 --backend eager --training --devices mps --output "$TEST_REPORTS_DIR/torchbench_training.csv"
@@ -231,7 +231,7 @@ test_torchbench_smoketest() {
 test_hf_perf() {
   print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir $TEST_REPORTS_DIR
+  mkdir -p $TEST_REPORTS_DIR
   conda_benchmark_deps
   torchbench_setup_macos
 
@@ -251,7 +251,7 @@ test_hf_perf() {
 test_timm_perf() {
   print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir $TEST_REPORTS_DIR
+  mkdir -p $TEST_REPORTS_DIR
   conda_benchmark_deps
   torchbench_setup_macos
 

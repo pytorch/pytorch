@@ -32,6 +32,7 @@ permissions: read-all
 
 jobs:
   macos-perf-py3-arm64-build:
+    if: github.repository_owner == 'pytorch'
     name: macos-perf-py3-arm64
     uses: ./.github/workflows/_mac-build.yml
     with:
