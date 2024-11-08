@@ -53,6 +53,7 @@ PyObject* Dim_init() {
 
 #undef NEED_OPCODE_TABLES
 #undef Py_BUILD_CORE
+#endif
 
 // C++ API functions for objects to
 // * construct the object, returning a ref-counted handle

@@ -14,3 +14,4 @@
 
 #undef NEED_OPCODE_TABLES
 #undef Py_BUILD_CORE
+#endif
