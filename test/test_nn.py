@@ -22,7 +22,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.utils.rnn as rnn_utils
-from torch.nn.utils import clip_grad_norm_, clip_grad_value_
+from torch.nn.utils import clip_grad_norm_, clip_grad_value_, clip_grads_with_norm_, get_total_norm
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 from torch.nn.utils.fusion import fuse_linear_bn_weights
@@ -12816,6 +12816,20 @@ if __name__ == '__main__':
         norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type, foreach=foreach)
         norm_after = compute_norm(norm_type)
         self.assertEqual(norm, norm_before)
+        self.assertEqual(norm_after, max_norm)
+        self.assertLessEqual(norm_after, norm_before)
+        compare_scaling(grads)
+
+        # decomposed APIs should behave as expected
+        grads = torch.arange(1., 101, device=device).view(10, 10), torch.ones(10, device=device).div(1000)
+        for p, g in zip(l.parameters(), grads):
+            p._grad = g.clone().view_as(p)
+        norm_before = compute_norm(norm_type)
+        grads = [p.grad for p in l.parameters()]
+        total_norm = get_total_norm(grads, norm_type=norm_type, foreach=foreach)
+        clip_grads_with_norm_(l.parameters(), max_norm, total_norm, foreach=foreach)
+        norm_after = compute_norm(norm_type)
+        self.assertEqual(total_norm, norm_before)
         self.assertEqual(norm_after, max_norm)
         self.assertLessEqual(norm_after, norm_before)
         compare_scaling(grads)
