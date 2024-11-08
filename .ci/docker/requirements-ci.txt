@@ -312,7 +312,7 @@ tensorboard==2.13.0
 #test that import: test_tensorboard
 
 pywavelets==1.4.1 ; python_version < "3.12"
-pywavelets==1.5.0 ; python_version >= "3.12"
+pywavelets==1.7.0 ; python_version >= "3.12"
 #Description: This is a requirement of scikit-image, we need to pin
 # it here because 1.5.0 conflicts with numpy 1.21.2 used in CI
 #Pinned versions: 1.4.1
