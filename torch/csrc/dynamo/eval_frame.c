@@ -249,7 +249,7 @@ static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
-static inline PyObject* dynamo_call_callback(
+static PyObject* dynamo_call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
     PyObject* locals,
@@ -280,7 +280,7 @@ static inline PyObject* dynamo_call_callback(
   return res;
 }
 
-static inline void clear_old_frame_if_python_312_plus(
+static void clear_old_frame_if_python_312_plus(
   PyThreadState* tstate,
   THP_EVAL_API_FRAME_OBJECT* frame) {
 #if IS_PYTHON_3_12_PLUS
