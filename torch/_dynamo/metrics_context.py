@@ -1,10 +1,8 @@
-from typing import Any, Callable, Dict, Optional, Type, Union
+from typing import Any, Callable, Dict, Optional, Type
 from typing_extensions import TypeAlias
 
 
-OnExitType: TypeAlias = Callable[
-    [Dict[str, Any], Optional[Type[BaseException]], Optional[BaseException]], None
-]
+OnExitType: TypeAlias = Callable[[Dict[str, Any]], None]
 
 
 class MetricsContext:
@@ -42,56 +40,43 @@ class MetricsContext:
         self._level -= 1
         assert self._level >= 0
         if self._level == 0:
-            self._on_exit(self._metrics, exc_type, exc_value)
+            self._on_exit(self._metrics)
 
-    def recording(self) -> bool:
-        """
-        Return True if we've entered the context manager.
-        """
-        return self._level > 0
-
-    def _check(self) -> None:
-        """
-        Raise if we haven't entered the contextmanager.
-        """
-        if self._level == 0:
-            raise RuntimeError("Cannot set metrics outside of a MetricsContext")
-
-    def increment(self, metric: str, value: Union[str, float]) -> None:
+    def increment(self, metric: str, value: int) -> None:
         """
         Increment a metric by a given amount.
         """
-        # TODO: do we want to be safe and grab a lock whenever modifying an entry? For
-        # example, I saw that we may be adding a helper thread for the remote cache and
-        # the get/put timing could be bumped on that helper...
-        self._check()
+        if self._level == 0:
+            raise RuntimeError(f"Cannot increment {metric} outside of a MetricsContext")
         if metric not in self._metrics:
             self._metrics[metric] = 0
         self._metrics[metric] += value
 
-    def set(self, metric: str, value: Any) -> None:
+    def set(self, metric: str, value: Any, overwrite: bool = False) -> None:
         """
-        Set a metric to a given value. Use set_once to raise if the metric is set
-        more than once.
+        Set a metric to a given value. If overwrite=False (the default), raise if the
+        metric has been assigned previously in the current context.
         """
-        self._check()
-        self._metrics[metric] = value
-
-    def set_once(self, metric: str, value: Any) -> None:
-        """
-        Set a metric to a given value. Raise if the metrics has been set previously
-        in the current context.
-        """
-        self._check()
-        if metric in self._metrics:
+        if self._level == 0:
+            raise RuntimeError(f"Cannot set {metric} outside of a MetricsContext")
+        if not overwrite and metric in self._metrics:
             raise RuntimeError(
                 f"Metric '{metric}' has already been set in the current context"
             )
         self._metrics[metric] = value
 
-    def update(self, values: Dict[str, Any]) -> None:
+    def update(self, values: Dict[str, Any], overwrite: bool = False) -> None:
         """
-        Set multiple metrics.
+        Set multiple metrics directly. This method does NOT increment. If overwrite=False
+        (the default), raise if any metric has been assigned previously in the current
+        context.
         """
-        self._check()
+        if self._level == 0:
+            raise RuntimeError("Cannot update metrics outside of a MetricsContext")
+        if not overwrite:
+            existing = self._metrics.keys() & values.keys()
+            if existing:
+                raise RuntimeError(
+                    f"Metric(s) {existing} have already been set in the current context"
+                )
         self._metrics.update(values)

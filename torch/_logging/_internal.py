@@ -1129,6 +1129,21 @@ def get_structured_logging_overhead() -> Optional[float]:
         return None
 
 
+def trace_structured_artifact(
+    name: str,  # this will go in metadata
+    encoding: str,
+    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+) -> None:
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": name,
+            "encoding": encoding,
+        },
+        payload_fn=payload_fn,
+    )
+
+
 def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
@@ -1139,7 +1154,7 @@ def trace_structured(
     suppress_context: bool = False,
     expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
-):
+) -> None:
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
     too long (e.g., less than 1MB)

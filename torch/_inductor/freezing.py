@@ -248,9 +248,7 @@ def convert_conv_weights_to_channels_last(gm: torch.fx.GraphModule):
     This pass is performed before freezing so the added nodes can be constant
     folded by freezing.
     """
-    with dynamo_timed(
-        "convert_conv_weights_to_channels_last", log_pt2_compile_event=False
-    ):
+    with dynamo_timed("convert_conv_weights_to_channels_last"):
         convs = [n for n in gm.graph.nodes if n.target == aten.convolution.default]
         for conv in convs:
             weight_node = conv.args[1]

@@ -534,9 +534,7 @@ try:
             self._assertions.add(ref)
 
         def validate(self) -> None:
-            with dynamo_timed(
-                "TranslationValidator.validate", log_pt2_compile_event=False
-            ):
+            with dynamo_timed("TranslationValidator.validate"):
                 return self._validate()
 
         def _validate(self) -> None:
@@ -728,6 +726,8 @@ def bisect(shape_env):
             return fake
         if isinstance(fake, torch.SymInt):
             return torch.SymInt(fake.node.with_shape_env(shape_env))
+        if isinstance(fake, torch.SymFloat):
+            return torch.SymFloat(fake.node.with_shape_env(shape_env))
         assert isinstance(fake, FakeTensorMeta)
         return FakeTensorMeta(
             tuple(new_with_shape_env(shape_env, s) for s in fake.size()),

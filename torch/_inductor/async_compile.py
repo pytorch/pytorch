@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
+from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config
 from torch._inductor.codecache import (
     CodeCacheFuture,
@@ -265,12 +266,19 @@ class AsyncCompile:
 
         return self.submit(task)
 
-    def rocm(self, source_code, dst_file_ext, aot_compile=False):
+    def rocm(
+        self,
+        source_code,
+        dst_file_ext,
+        aot_compile=False,
+    ):
         kernel_code_log.info("ROCm Kernel:\n%s", source_code)
 
         def task():
             if aot_compile:
                 _ = ROCmCodeCache.compile(source_code, dst_file_ext="o")
+            if config.rocm.generate_test_runner:
+                _ = ROCmCodeCache.compile(source_code, dst_file_ext="exe")
             return ROCmCodeCache.load(source_code, dst_file_ext)[0]
 
         return self.submit(task)
@@ -286,36 +294,37 @@ class AsyncCompile:
             return LambdaFuture(get_result)
 
     def wait(self, scope: Dict[str, Any]) -> None:
-        num_kernels = len(
-            [
-                value
-                for key, value in scope.items()
-                if isinstance(value, (Future, CodeCacheFuture))
-            ]
-        )
-        pbar = tqdm(
-            total=num_kernels,
-            desc="Inductor Compilation",
-            disable=config.disable_progress,
-            delay=0,
-        )
-        if get_compile_threads() > 1:
-            for key, result in scope.items():
-                if config.verbose_progress and not isinstance(pbar, _Faketqdm):
-                    pbar.set_postfix_str(key)
-                if isinstance(result, (Future, CodeCacheFuture)):
-                    try:
-                        scope[key] = result.result()
-                    except BrokenProcessPool as e:
-                        raise RuntimeError(
-                            "A compilation subprocess exited unexpectedly. This "
-                            "is likely due to a crash. To facilitate debugging, "
-                            "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
-                            "to cause compilation to occur in the main process."
-                        ) from e
-                    pbar.update(1)
+        with dynamo_timed("async_compile.wait"):
+            num_kernels = len(
+                [
+                    value
+                    for key, value in scope.items()
+                    if isinstance(value, (Future, CodeCacheFuture))
+                ]
+            )
+            pbar = tqdm(
+                total=num_kernels,
+                desc="Inductor Compilation",
+                disable=config.disable_progress,
+                delay=0,
+            )
+            if get_compile_threads() > 1:
+                for key, result in scope.items():
+                    if config.verbose_progress and not isinstance(pbar, _Faketqdm):
+                        pbar.set_postfix_str(key)
+                    if isinstance(result, (Future, CodeCacheFuture)):
+                        try:
+                            scope[key] = result.result()
+                        except BrokenProcessPool as e:
+                            raise RuntimeError(
+                                "A compilation subprocess exited unexpectedly. This "
+                                "is likely due to a crash. To facilitate debugging, "
+                                "you can re-run with TORCHINDUCTOR_COMPILE_THREADS=1 "
+                                "to cause compilation to occur in the main process."
+                            ) from e
+                        pbar.update(1)
 
-        _compile_end()
+            _compile_end()
 
 
 if (

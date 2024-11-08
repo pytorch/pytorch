@@ -406,10 +406,15 @@ class BaseSchedulerNode:
             and hasattr(V.kernel, "args")
         ):
             return
+        fused_nodes = {
+            node.get_name()
+            for node in self.scheduler.name_to_fused_node[self.get_name()].get_nodes()
+        }
 
+        ordered_reads = sorted(self.read_writes.reads, key=lambda x: x.name)
         # NOTE remove V.graph.removed_operations once deps issue is fixed
         inconsequential_nodes = (
-            (self.ancestors - {self.get_name()})
+            self.ancestors
             | V.graph.removed_operations
             | self.scheduler.completed_operations
         )
@@ -870,9 +875,8 @@ class SchedulerNode(BaseSchedulerNode):
 
         # Don't normalize since normalization will merge loops which
         # makes it hard to decide new loop orders.
-        should_normalize = (
-            not config.loop_ordering_after_fusion
-            or self.node.get_device().type != "cuda"
+        should_normalize = not config.loop_ordering_after_fusion or not is_gpu(
+            self.node.get_device().type
         )
 
         if isinstance(self.node, ir.TemplateBuffer):
@@ -1755,7 +1759,7 @@ class Scheduler:
     __dep_size_hint_cache: Dict[Dep, int]
 
     def __init__(self, nodes: List[ir.Operation]) -> None:
-        with dynamo_timed("Scheduler.__init__", log_pt2_compile_event=False):
+        with dynamo_timed("Scheduler.__init__"):
             self._init(nodes)
 
     def _init(self, nodes: List[ir.Operation]) -> None:
@@ -2277,7 +2281,7 @@ class Scheduler:
             # Even for CPU, if we are using the halide backend, we still need
             # the merge loops steps below
             if not isinstance(node, (SchedulerNode, FusedSchedulerNode)) or (
-                node.get_device().type != "cuda" and config.cpu_backend != "halide"
+                (not is_gpu(node.get_device().type)) and config.cpu_backend != "halide"
             ):
                 continue
             for snode in node.get_nodes():
@@ -2348,7 +2352,8 @@ class Scheduler:
         device = nodes[0].get_device()
         self.current_device = device
         backend = self.get_backend(device)
-        return backend.benchmark_fused_nodes(nodes)
+        with dynamo_timed("benchmark_fused_nodes"):
+            return backend.benchmark_fused_nodes(nodes)
 
     def finalize_multi_template_buffers(self) -> None:
         def replace_operation_buffer(
@@ -2778,6 +2783,66 @@ class Scheduler:
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
         """
+        Return true if fusing the two nodes can potentially increasing peak memory.
+
+        The implementation is more like a heuristic since we don't really know if we are at peak
+        or not when trying to fuse these two ndoes. The order of nodes may change later which makes the
+        peak memory estimation hard.
+
+        Here is how we decide the LOWER BOUND of extra memory allocation if we fuse these 2 nodes:
+        1. find all buffers read by each node with a single user. These buffers are supposed to
+           be reused if we don't fuses these 2 nodes
+        2. find the intersection of these buffers for the two node and sum the total buffer size.
+           If we don't fuse these two nodes, we can at lease avoid this much memory allocation.
+           Note that the extra memory allocation is not necessarily causing peak memory increase.
+           This is just a heuristic.
+
+        We return true only if the saving for fusion can not trade off the extra memory allocation.
+        """
+
+        from .codegen.wrapper import buffer_reuse_key
+
+        def _find_single_user_inputs(
+            node: BaseSchedulerNode,
+        ) -> List[ir.Buffer]:
+            output = []
+            for rd in node.read_writes.reads:
+                name = rd.name
+                if name not in self.name_to_buf:
+                    continue
+                buf = self.name_to_buf[name]
+                if len(buf.users) == 1:
+                    output.append(buf.node)
+            return output
+
+        # Check inputs that can be potentially reused
+        lhs_dep_nodes = _find_single_user_inputs(node1)
+        rhs_dep_nodes = _find_single_user_inputs(node2)
+
+        lhs_reuse_keys = {buffer_reuse_key(buf) for buf in lhs_dep_nodes}
+        rhs_reuse_keys = {buffer_reuse_key(buf) for buf in rhs_dep_nodes}
+
+        common_reuse_keys = lhs_reuse_keys.intersection(rhs_reuse_keys)
+
+        memory_overhead = 0
+        for key in common_reuse_keys:
+            try:
+                memory_overhead += int(key[2])
+            except ValueError:
+                # not an interger. Fallback is to fuse
+                return False
+
+        bw_saving = self.score_fusion_memory(node1, node2)
+
+        # The factor 32 here is quite arbitrary.
+        if V.graph.sizevars.statically_known_gt(memory_overhead, 32 * bw_saving):
+            return True
+        return False
+
+    def are_long_distant_nodes(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """
         This function prevents fusion for nodes that can increase memory
         footprint. This problem is more common in horizontal fusion, where nodes
         that are far apart in the original order get fused, lengthening the live
@@ -3044,6 +3109,10 @@ class Scheduler:
             why("exceeds max fusion")
             return False  # heuristic not needed for correctness
 
+        if self.can_fusion_increase_peak_memory(node1, node2):
+            why("Fusion will increase peak memory")
+            return False
+
         if node1.get_operation_names() & node2.ancestors:
             # node2 depends on node1 outputs
             if not self.can_fuse_vertical(node1, node2):
@@ -3057,8 +3126,8 @@ class Scheduler:
             ):
                 why("score_fusion_memory_threshold")
                 return False
-            if self.can_fusion_increase_peak_memory(node1, node2):
-                why("will increase peak memory")
+            if self.are_long_distant_nodes(node1, node2):
+                why("Nodes are too far away. Fusing them may increase peak memory.")
                 return False
             return self.get_backend(device).can_fuse_horizontal(node1, node2)
 
@@ -3411,7 +3480,7 @@ class Scheduler:
         )
 
     def codegen(self) -> None:
-        with dynamo_timed("Scheduler.codegen", log_pt2_compile_event=False):
+        with dynamo_timed("Scheduler.codegen"):
             return self._codegen()
 
     def _codegen(self) -> None:

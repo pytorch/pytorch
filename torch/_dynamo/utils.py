@@ -43,6 +43,7 @@ from typing import (
     DefaultDict,
     Deque,
     Dict,
+    Generator,
     Iterable,
     Iterator,
     KeysView,
@@ -74,7 +75,11 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext
 from torch._guards import Source, TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
-from torch._utils_internal import log_chromium_event_internal, log_compilation_event
+from torch._utils_internal import (
+    log_chromium_event_internal,
+    log_compilation_event,
+    signpost_event,
+)
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
@@ -136,10 +141,57 @@ log = logging.getLogger(__name__)
 # profiling compilation time by function
 compilation_time_metrics: Dict[str, List[float]] = {}
 
-# cumulative times for any CompilationMetric field populated by dynamo_timed
-cumulative_time_spent: Dict[str, float] = collections.defaultdict(float)
+# This supports calculate_time_spent(), which reports cumulative times (in seconds)
+# across the process for any "phase" populated by dynamo_timed. Reset if
+# reset_frame_count() is called.
+cumulative_time_spent_s: Dict[str, float] = collections.defaultdict(float)
 
 timer_counter = itertools.count()
+
+
+# Abstraction on top of counters.
+class ReInplaceTrigger(enum.Enum):
+    AUTO_FUNC_V1 = 1
+    AUTO_FUNC_V2 = 2
+    TRITON_OPS = 3
+
+
+class ReinplaceCounters:
+    _values: DefaultDict[str, int] = collections.defaultdict(int)
+
+    # Track sizes of known not re-inplaced tensors (exclude dynamic shapes).
+    @classmethod
+    def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int):
+        cls._values[f"missed_bytes_{trigger.name}"] += bytes
+
+    # Track number of not re-inplaced tensors.
+    @classmethod
+    def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int):
+        cls._values[f"missed_tensors_{trigger}"] += count
+
+    @classmethod
+    def clear(cls):
+        cls._values.clear()
+
+    @classmethod
+    def get_total_missed(cls):
+        sum = 0
+        for trigger in ReInplaceTrigger:
+            sum += cls._values.get(f"missed_tensors_{trigger}", 0)
+        return sum
+
+    @classmethod
+    def get_total_missed_bytes(cls):
+        sum = 0
+        for trigger in ReInplaceTrigger:
+            sum += cls._values.get(f"missed_bytes_{trigger.name}", 0)
+        return sum
+
+    @classmethod
+    def log(cls):
+        # if not empty log.
+        if cls._values:
+            signpost_event("inductor", "reinplace_counters", cls._values)
 
 
 def tabulate(
@@ -168,7 +220,7 @@ def increment_frame() -> None:
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def reset_frame_count() -> None:
     global curr_frame
-    cumulative_time_spent.clear()
+    cumulative_time_spent_s.clear()
     compilation_time_metrics.clear()
     curr_frame = 0
 
@@ -181,14 +233,16 @@ def increment_op_count(cnt: int) -> None:
     op_count += cnt
 
 
-# Get total time spent so far for each phase
+# Get the total time in seconds for each "phase"
 # For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
 def calculate_time_spent() -> Dict[str, float]:
     total_by_key = {}
-    for phase, timing in cumulative_time_spent.items():
-        total_by_key[phase] = float(timing) / 1e9
+    for phase, timing in cumulative_time_spent_s.items():
+        total_by_key[phase] = timing / 1e9
 
-    total_by_key["total_wall_time"] = total_by_key.get("entire_frame_compile", 0)
+    total_by_key["total_wall_time"] = total_by_key.get(
+        "entire_frame_compile", 0
+    ) + total_by_key.get("entire_backward_compile", 0)
     return total_by_key
 
 
@@ -213,68 +267,85 @@ def print_time_report() -> None:
 # gathered). While compiling, use the setters or timer in MetricsContext to update fields
 # in the current context. For example:
 #
-# To set a single field:
-#   METRICS_CONTEXT.set("metric_name", value)
+# To set a single field once (use overwrite=True to overwrite):
+#   get_metrics_context().set("metric_name", value)
 #
-# To set multiple fields:
-#   METRICS_CONTEXT.update({"name1": val1, "name2": val2})
+# To set multiple fields at once (use overwrite=True to overwrite):
+#   get_metrics_context().update({"name1": val1, "name2": val2})
 #
-# To increment a numeric field:
-#   METRICS_CONTEXT.increment("metric_name", value)
+# To increment an integer field:
+#   get_metrics_context().increment("metric_name", value)
 #
-# To record execution time, METRICS_CONTEXT works with dynamo_timed:
+# To record execution time, MetricsContext works with dynamo_timed:
 #    def foo(...):
+#        # Updates the "metric_us" field.
 #        with dynamo_timed("metric", dynamo_compile_column="metric_us")
 #            ...
 #
-METRICS_CONTEXT: MetricsContext
+_METRICS_CONTEXT: MetricsContext
 
 
-# dynamo_timed is a context manager
-# By wrapping a function in dynamo_timed, we can get a few things:
-#
-# 1) Logging timings to pt2_compile_events.
-# 2) Logging timings to CompilationMetrics (including dynamo_compile).
-# 3) Chromium events.
-# 4) Storing a record in compilation_time_metrics
-#    For example:
-#
-#     def _foo(...):
-#         with dynamo_timed("_foo"):
-#             ...
-#
-#     Would show up as an entry in our timing dict:
-#     OrderedDict([('_foo', [0.083690, 0.23949, 3.1425e-05])])
-#     This is extremely useful for granular debugging.
-#
-# Although it is tempting to use dynamo_timed as a decorator, please do not.
-# In its decorator form it makes cProfile traces less useful as dynamo_timed
-# suddenly becomes a bottleneck for lots of function calls (as only one parent
-# pointer is recorded).
+def get_metrics_context() -> MetricsContext:
+    return _METRICS_CONTEXT
+
+
 @contextmanager
 def dynamo_timed(
-    event_name: str,
-    # TODO: do we really want event and fn name?
-    fn_name: Optional[str] = None,
-    log_pt2_compile_event: bool = True,
+    key: str,
+    # TODO(masneral): Deprecate this param.
+    phase_name: Optional[str] = None,
+    log_pt2_compile_event: bool = False,
+    # TODO(masnesral): fwd_only is ignored. Remove it.
+    fwd_only: bool = True,
     metadata: Optional[Dict[str, object]] = None,
-    # TODO: should this be called compilation_metric instead?
     dynamo_compile_column: Optional[str] = None,
-):
+) -> Generator[Any, None, None]:
     """
-    event_name: Event name, e.g., as seen in pt2_compile_events.
-    fn_name: Optional function name for profile record; otherwise use event name.
-    log_pt2_compile_event: Whether to log to internal pt2 compile event.
-    metadata: Extra metadata put in pt2_compile_events.
-    dynamo_compile_column: Name for the dyname_compile column; must be in _us.
+    dynamo_timed is a context manager
+    By wrapping a function in dynamo_timed, we can get a few things:
+
+    1) Log timings to pt2_compile_events.
+    2) Log timings to CompilationMetrics (dynamo_compile).
+    3) Chromium events.
+    4) Storing a record in compilation_time_metrics
+       For example:
+
+        def _foo(...):
+            with dynamo_timed("_foo"):
+                ...
+
+        Would show up as an entry in our timing dict:
+        OrderedDict([('_foo', [0.083690, 0.23949, 3.1425e-05])])
+        This is extremely useful for granular debugging.
+
+    Although it is tempting to use dynamo_timed as a decorator, please do not.
+    In its decorator form it makes cProfile traces less useful as dynamo_timed
+    suddenly becomes a bottleneck for lots of function calls (as only one parent
+    pointer is recorded).
+
+    Params:
+    - key: key into compile_time_metrics. If phase_name is not provided, this is
+      also the event name used for pt2_compile_events logs and chromium events.
+    - phase_name: Optional override for the event name.
+    - log_pt2_compile_event: Whether to log a pt2 compile event internally.
+    - metadata: Extra metadata to put in pt2_compile_events.
+    - dynamo_compile_column: If provided, updates the specified CompilationMetrics
+      field to be logged to dyname_compile column. We expect all columns to be _us;
+      therefore, the field name must end with "_us".
     """
     # We're standardizing on microseconds for dynamo_compile timings.
     if dynamo_compile_column is not None:
         assert dynamo_compile_column.endswith("_us")
 
-    mkey = fn_name if fn_name else event_name
-    if mkey not in compilation_time_metrics:
-        compilation_time_metrics[mkey] = []
+    if phase_name:
+        event_name = phase_name
+        fn_name = key
+    else:
+        event_name = key
+        fn_name = None
+
+    if key not in compilation_time_metrics:
+        compilation_time_metrics[key] = []
 
     event_metadata = {}
     if metadata:
@@ -287,31 +358,24 @@ def dynamo_timed(
     chromium_log.log_event_start(event_name, start_ns, event_metadata)
 
     try:
-        with torch.profiler.record_function(f"{mkey} (dynamo_timed)"):
+        with torch.profiler.record_function(f"{key} (dynamo_timed)"):
             yield
     finally:
         end_ns = time.time_ns()
         time_spent = end_ns - start_ns
-        compilation_time_metrics[mkey].append(float(time_spent) / 1e9)
+        compilation_time_metrics[key].append(time_spent / 1e9)
         chromium_log.log_event_end(
             event_name, end_ns, {}, start_ns, log_pt2_compile_event
         )
         if dynamo_compile_column:
-            assert METRICS_CONTEXT is not None
-            # TODO: This conditional is here because we have a case where we try to
-            # increment remote_fx_graph_cache counters, but we're in the autotune path,
-            # which is running in a Triton-compiling subprocess. How shall we handle
-            # this situation initially? We can enter the METRICS_CONTEXT in the
-            # subprocs, for example, but it occurs to me that any accounting we'd
-            # attempt in the subprocs is a larger problem.
-            if METRICS_CONTEXT.recording():
-                METRICS_CONTEXT.increment(dynamo_compile_column, time_spent // 1e3)
+            metrics_context = get_metrics_context()
+            metrics_context.increment(dynamo_compile_column, time_spent // 1000)
             # TODO: the events that we capture in calculate_time_spent() seem a little
             # arbitrary. Currently, it's only those fields that are present in
             # CompilationMetrics (but note that we accumulate by the associated event
             # name, not the field name in CompilationMetrics). Do we want to keep it
-            # this way for now?
-            cumulative_time_spent[event_name] += time_spent
+            # this way?
+            cumulative_time_spent_s[event_name] += time_spent
 
 
 @overload
@@ -762,7 +826,6 @@ class CompilationMetrics:
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
     has_guarded_code: Optional[bool] = None
-    possibly_missed_reinplacing_opportunities: Optional[int] = None
     remote_cache_time_saved_s: Optional[float] = None
     structured_logging_overhead_s: Optional[float] = None
     config_suppress_errors: Optional[bool] = None
@@ -770,6 +833,7 @@ class CompilationMetrics:
     specialize_float: Optional[bool] = None
     dynamo_config: Optional[str] = None
     is_forward: Optional[bool] = None
+    num_triton_bundles: Optional[int] = None
     remote_fx_graph_cache_get_time_ms: Optional[int] = None
     remote_fx_graph_cache_put_time_ms: Optional[int] = None
     start_time_us: Optional[int] = None
@@ -778,15 +842,17 @@ class CompilationMetrics:
     aot_autograd_cumulative_compile_time_us: Optional[int] = None
     inductor_cumulative_compile_time_us: Optional[int] = None
     inductor_code_gen_cumulative_compile_time_us: Optional[int] = None
-    triton_compile_time_us: Optional[int] = None
-    runtime_cudagraphify_time_us: Optional[int] = None
-    runtime_triton_autotune_time_us: Optional[int] = None
+    triton_compile_time_us: Optional[int] = None  # TODO: instrument
+    runtime_cudagraphify_time_us: Optional[int] = None  # TODO: instrument
+    runtime_triton_autotune_time_us: Optional[int] = None  # TODO: instrument
     dynamo_compile_time_before_restart_us: Optional[int] = None
-    cuda_synchronize_time_us: Optional[int] = None
+    cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
     distributed_ephemeral_timeout_us: Optional[int] = None
     structured_logging_overhead_us: Optional[int] = None
     remote_fx_graph_cache_get_time_us: Optional[int] = None
     remote_fx_graph_cache_put_time_us: Optional[int] = None
+    backward_cumulative_compile_time_us: Optional[int] = None
+    end_time_us: Optional[int] = None
     log_format_version: int = LOG_FORMAT_VERSION
 
 
@@ -835,27 +901,29 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics):
     )
 
 
-def record_compilation_metrics(metrics: Dict[str, Any], exc_type, exc_value):
-    # Temporary: populate legacy fields from their replacements.
+def record_compilation_metrics(metrics: Dict[str, Any]):
+    # TODO: Temporary; populate legacy fields from their replacements.
     # Remove when we decide we can really deprecate them.
-    def legacy(field):
+    def us_to_s(field):
         metric = metrics.get(field, None)
-        if not metric:
-            return None
-        return float(metric) / 1e6
+        return metric / 1e6 if metric is not None else None
+
+    def us_to_ms(field):
+        metric = metrics.get(field, None)
+        return metric // 1000 if metric is not None else None
 
     legacy_metrics = {
-        "entire_frame_compile_time_s": legacy("dynamo_cumulative_compile_time_us"),
-        "backend_compile_time_s": legacy("aot_autograd_cumulative_compile_time_us"),
-        "inductor_compile_time_s": legacy("inductor_cumulative_compile_time_us"),
-        "code_gen_time_s": legacy("inductor_code_gen_cumulative_compile_time_us"),
-        "remote_cache_time_saved_s": legacy("distributed_ephemeral_timeout_us"),
-        #
-        # TODO: I kinda don't want to deal with these two because they're different
-        # from the above. We only recently added them. Too risky to remove now?
-        #
-        # "remote_fx_graph_cache_get_time_ms": remote_fx_graph_cache_get_time_us,
-        # "remote_fx_graph_cache_put_time_ms": remote_fx_graph_cache_put_time_us,
+        "entire_frame_compile_time_s": us_to_s("dynamo_cumulative_compile_time_us"),
+        "backend_compile_time_s": us_to_s("aot_autograd_cumulative_compile_time_us"),
+        "inductor_compile_time_s": us_to_s("inductor_cumulative_compile_time_us"),
+        "code_gen_time_s": us_to_s("inductor_code_gen_cumulative_compile_time_us"),
+        "remote_cache_time_saved_s": us_to_s("distributed_ephemeral_timeout_us"),
+        "remote_fx_graph_cache_get_time_ms": us_to_ms(
+            "remote_fx_graph_cache_get_time_us"
+        ),
+        "remote_fx_graph_cache_put_time_ms": us_to_ms(
+            "remote_fx_graph_cache_put_time_us"
+        ),
     }
 
     compilation_metrics = CompilationMetrics(**{**metrics, **legacy_metrics})
@@ -879,7 +947,7 @@ def record_compilation_metrics(metrics: Dict[str, Any], exc_type, exc_value):
 
 
 # record_compilation_metrics is called by the singleton MetricsContext exit handler.
-METRICS_CONTEXT = MetricsContext(on_exit=record_compilation_metrics)
+_METRICS_CONTEXT = MetricsContext(on_exit=record_compilation_metrics)
 
 
 def set_compilation_metrics_limit(new_size: int) -> None:
@@ -2128,6 +2196,15 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
+    if node.name in ["interpolate", "is_integer", "wrapped_gradient"]:
+        # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
+        args = tuple(
+            float(arg)
+            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+            else arg
+            for arg in args
+        )
+
     try:
         with tx.fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
@@ -2650,6 +2727,21 @@ def is_utils_checkpoint(obj):
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
+
+
+def is_invoke_subgraph(obj):
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
+
+    return obj is invoke_subgraph_placeholder
+
+
+def build_invoke_subgraph_variable(**options):
+    from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
+
+    return TorchHigherOrderOperatorVariable.make(
+        torch._higher_order_ops.invoke_subgraph,
+        **options,
+    )
 
 
 def build_checkpoint_variable(**options):

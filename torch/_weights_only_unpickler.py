@@ -83,29 +83,27 @@ _blocklisted_modules = [
     "nt",
 ]
 
-_marked_safe_globals_list: List[Any] = []
+_marked_safe_globals_set: Set[Any] = set()
 
 
 def _add_safe_globals(safe_globals: List[Any]):
-    global _marked_safe_globals_list
-    _marked_safe_globals_list += safe_globals
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
 
 
 def _get_safe_globals() -> List[Any]:
-    global _marked_safe_globals_list
-    return _marked_safe_globals_list
+    global _marked_safe_globals_set
+    return list(_marked_safe_globals_set)
 
 
 def _clear_safe_globals():
-    global _marked_safe_globals_list
-    _marked_safe_globals_list = []
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = set()
 
 
 def _remove_safe_globals(globals_to_remove: List[Any]):
-    global _marked_safe_globals_list
-    _marked_safe_globals_list = list(
-        set(_marked_safe_globals_list) - set(globals_to_remove)
-    )
+    global _marked_safe_globals_set
+    _marked_safe_globals_set = _marked_safe_globals_set - set(globals_to_remove)
 
 
 class _safe_globals:
@@ -128,7 +126,7 @@ class _safe_globals:
 # _get_allowed_globals due to the lru_cache
 def _get_user_allowed_globals():
     rc: Dict[str, Any] = {}
-    for f in _marked_safe_globals_list:
+    for f in _marked_safe_globals_set:
         module, name = f.__module__, f.__name__
         rc[f"{module}.{name}"] = f
     return rc
@@ -171,6 +169,19 @@ def _get_allowed_globals():
         "builtins.bytearray": bytearray,  # for bytearray
         "builtins.set": set,  # for set
     }
+    # Only add the dtensor related classes if the dtensor module is available
+    if hasattr(torch.distributed, "tensor"):
+        dtensor_rc: Dict[str, Any] = {
+            # DTensor related
+            "torch.distributed.device_mesh.DeviceMesh": torch.distributed.device_mesh.DeviceMesh,
+            "torch.distributed.tensor._dtensor_spec.DTensorSpec": torch.distributed.tensor._dtensor_spec.DTensorSpec,
+            "torch.distributed.tensor._dtensor_spec.TensorMeta": torch.distributed.tensor._dtensor_spec.TensorMeta,
+            "torch.distributed.tensor.DTensor": torch.distributed.tensor.DTensor,
+            "torch.distributed.tensor.placement_types.Partial": torch.distributed.tensor.placement_types.Partial,
+            "torch.distributed.tensor.placement_types.Replicate": torch.distributed.tensor.placement_types.Replicate,
+            "torch.distributed.tensor.placement_types.Shard": torch.distributed.tensor.placement_types.Shard,
+        }
+        rc.update(dtensor_rc)
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
         rc[str(t)] = t
@@ -322,15 +333,19 @@ class Unpickler:
                 else:
                     raise UnpicklingError(
                         f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
-                        f"Please use `torch.serialization.add_safe_globals([{name}])` to allowlist "
-                        "this global if you trust this class/function."
+                        f"Please use `torch.serialization.add_safe_globals([{name}])` or the "
+                        f"`torch.serialization.safe_globals([{name}])` context manager to allowlist this global "
+                        "if you trust this class/function."
                     )
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()
                 if cls is torch.nn.Parameter:
                     self.append(torch.nn.Parameter(*args))
-                elif cls in _get_user_allowed_globals().values():
+                elif (
+                    cls in _get_user_allowed_globals().values()
+                    or cls in _get_allowed_globals().values()
+                ):
                     self.append(cls.__new__(cls, *args))
                 else:
                     raise UnpicklingError(
@@ -358,18 +373,23 @@ class Unpickler:
                     inst.__setstate__(state)
                 elif type(inst) is OrderedDict:
                     inst.__dict__.update(state)
-                elif type(inst) in _get_user_allowed_globals().values():
+                elif (
+                    type(inst) in _get_user_allowed_globals().values()
+                    or type(inst) in _get_allowed_globals().values()
+                ):
                     if hasattr(inst, "__setstate__"):
                         inst.__setstate__(state)
-                    elif hasattr(inst, "__slots__"):
-                        # if slots are defined, state will be a tuple (state, slotstate)
-                        state, slotstate = state
-                        for k, v in slotstate.items():
-                            setattr(inst, k, v)
+                    else:
+                        # mimics load_build in pickle
+                        # https://github.com/python/cpython/blob/f0c6fccd08904787a39269367f09f263d496114c/Lib/pickle.py#L1854-L1867
+                        slotstate = None
+                        if isinstance(state, tuple) and len(state) == 2:
+                            state, slotstate = state
                         if state:
                             inst.__dict__.update(state)
-                    else:
-                        inst.__dict__.update(state)
+                        if slotstate:
+                            for k, v in slotstate.items():
+                                setattr(inst, k, v)
                 else:
                     raise UnpicklingError(
                         "Can only build Tensor, Parameter, OrderedDict or types allowlisted "

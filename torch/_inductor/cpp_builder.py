@@ -346,7 +346,7 @@ def _run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
 
 
 def run_compile_cmd(cmd_line: str, cwd: str) -> bytes:
-    with dynamo_timed("compile_file", log_pt2_compile_event=False):
+    with dynamo_timed("compile_file"):
         return _run_compile_cmd(cmd_line, cwd)
 
 
@@ -545,6 +545,8 @@ def _get_optimization_cflags() -> List[str]:
             cflags.append("ffp-contract=off")
 
         if sys.platform != "darwin":
+            # on macos, unknown argument: '-fno-tree-loop-vectorize'
+            cflags.append("fno-tree-loop-vectorize")
             # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
             # `-march=native` is unrecognized option on M1
             if not config.is_fbcode():

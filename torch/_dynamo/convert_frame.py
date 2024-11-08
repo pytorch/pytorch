@@ -30,7 +30,7 @@ import torch
 import torch._logging
 from torch._C._dynamo.guards import GlobalStateGuard
 from torch._dynamo.distributed import get_compile_pg
-from torch._dynamo.utils import CompileTimeInstructionCounter, METRICS_CONTEXT
+from torch._dynamo.utils import CompileTimeInstructionCounter, get_metrics_context
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
@@ -93,6 +93,7 @@ from .guards import (
     GuardedCode,
 )
 from .hooks import Hooks
+from .pgo import put_code_state
 from .replay_record import ExecutionRecord
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .symbolic_convert import (
@@ -693,10 +694,9 @@ def _compile(
         with contextlib.ExitStack() as stack:
             stack.enter_context(
                 dynamo_timed(
-                    "entire_frame_compile",
-                    fn_name="_compile.compile_inner",
+                    "_compile.compile_inner",
+                    phase_name="entire_frame_compile",
                     dynamo_compile_column="dynamo_cumulative_compile_time_us",
-                    log_pt2_compile_event=False,
                 )
             )
             stack.enter_context(
@@ -861,9 +861,11 @@ def _compile(
     chromium_event_log.reset()
     chromium_start_time = time.time_ns()
     chromium_event_log.log_event_start("dynamo", chromium_start_time, {})
+
+    metrics_context = get_metrics_context()
     with _use_lazy_graph_module(config.use_lazy_graph_module), compile_context(
         CompileContext(compile_id)
-    ), METRICS_CONTEXT:
+    ), metrics_context:
         restart_reasons: set[str] = set()
         # This is shared across restarts
         mutated_closure_cell_ids: Set[int] = set()
@@ -969,17 +971,25 @@ def _compile(
         fail_reason: Optional[str] = None
         fail_user_frame_filename: Optional[str] = None
         fail_user_frame_lineno: Optional[int] = None
-        start_possibly_missed_reinplacing_opportunities = torch._dynamo.utils.counters[
-            "inductor"
-        ]["possibly_missed_reinplacing_opportunities"]
-        start_possibly_missed_reinplacing_bytes = torch._dynamo.utils.counters[
-            "inductor"
-        ]["start_possibly_missed_reinplacing_bytes"]
+        torch._dynamo.utils.ReinplaceCounters.clear()
         guarded_code = None
         try:
             guarded_code = compile_inner(code, one_graph, hooks, transform)
+
+            # NB: We only put_code_state in success case.  Success case here
+            # does include graph breaks; specifically, if a graph break still
+            # resulted in a partially compiled graph, we WILL return here.  An
+            # Unsupported exception will only bubble to the top level if we
+            # are unable to compile the frame at all.  In this case, there's
+            # no point in uploading the code state, because we will always
+            # fail exactly the same way even without the update.  (It's useful
+            # to upload for graph break though, because this can prevent
+            # extra graph break compilations.)
+            put_code_state()
+
             return guarded_code
         except Exception as e:
+            # TODO(masnesral): Populating the exception info should be automatic
             fail_type = type(e).__qualname__
             fail_reason = str(e)
             # NB: e's msg is mutated here to add user stack, but we DON'T want
@@ -1018,10 +1028,19 @@ def _compile(
                     f"{type(e).__qualname__}: {str(e)}"
                 ).with_traceback(e.__traceback__) from None
         finally:
+            # === WARNING WARNING WARNING ===
+            # If you commit a bug here, it will suppress writing to
+            # dynamo_compile table, and we will not have telemetry.
+            # Be extra careful when making changes here!
+            #
+            # TODO to masnesral: feel free to delete these comments
+            # to resolve any merge conflict you have
+
             if tracer:
                 tracer.output.local_scope = {}
 
-            duration_ns = time.time_ns() - start_time_ns
+            end_time_ns = time.time_ns()
+            duration_ns = end_time_ns - start_time_ns
 
             from .utils import curr_frame
 
@@ -1036,24 +1055,7 @@ def _compile(
                 compliant_custom_ops = {
                     op.__qualname__ for op in output.compliant_custom_ops
                 }
-                possibly_missed_reinplacing_opportunities = (
-                    torch._dynamo.utils.counters["inductor"][
-                        "possibly_missed_reinplacing_opportunities"
-                    ]
-                    - start_possibly_missed_reinplacing_opportunities
-                )
-                possibly_missed_reinplacing_bytes = (
-                    torch._dynamo.utils.counters["inductor"][
-                        "possibly_missed_reinplacing_bytes"
-                    ]
-                    - start_possibly_missed_reinplacing_bytes
-                )
-                if possibly_missed_reinplacing_bytes != 0:
-                    signpost_event(
-                        "inductor",
-                        "auto_functionalize",
-                        {"missed_reinplacing_bytes": possibly_missed_reinplacing_bytes},
-                    )
+                torch._dynamo.utils.ReinplaceCounters.log()
             else:
                 guard_count = None
                 shape_env_guard_count = None
@@ -1065,7 +1067,6 @@ def _compile(
                 restart_reasons = set()
                 # If compilation failed, the entire time is wasted
                 dynamo_time_before_restart = duration_ns / 1e9
-                possibly_missed_reinplacing_opportunities = None
 
             structured_logging_overhead_s = (
                 torch._logging.get_structured_logging_overhead()
@@ -1113,6 +1114,8 @@ def _compile(
                 "graph_op_count": graph_op_count,
                 "graph_node_count": graph_node_count,
                 "graph_input_count": graph_input_count,
+                # TODO(masnesral): start_time and end_time shouldn't need to be
+                # populated manually.
                 "start_time": start_time_ns / 1e9,
                 "fail_type": fail_type,
                 "fail_reason": fail_reason,
@@ -1123,7 +1126,6 @@ def _compile(
                 "restart_reasons": restart_reasons,
                 "dynamo_time_before_restart_s": dynamo_time_before_restart,
                 "has_guarded_code": guarded_code is not None,
-                "possibly_missed_reinplacing_opportunities": possibly_missed_reinplacing_opportunities,
                 "structured_logging_overhead_s": structured_logging_overhead_s,
                 "config_suppress_errors": config.suppress_errors,
                 "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
@@ -1131,20 +1133,18 @@ def _compile(
                 "dynamo_config": json.dumps(config_dict),
                 "is_forward": True,
                 "start_time_us": start_time_ns // 1000,
+                "end_time_us": end_time_ns // 1000,
                 "duration_us": duration_ns // 1000,
-                "triton_compile_time_us": None,  # TODO: instrument
-                "runtime_cudagraphify_time_us": None,  # TODO: instrument in separate event
-                "runtime_triton_autotune_time_us": None,  # TODO: instrument in separate event
                 "dynamo_compile_time_before_restart_us": to_int_us(
                     dynamo_time_before_restart
                 ),
-                "cuda_synchronize_time_us": None,  # TODO: instrument
                 "structured_logging_overhead_us": to_int_us(
                     structured_logging_overhead_s
                 ),
             }
-            METRICS_CONTEXT.update(metrics)
+            metrics_context.update(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
+            # === END WARNING WARNING WARNING ===
 
     chromium_event_log.log_event_end(
         "dynamo", time.time_ns(), {}, chromium_start_time, True
