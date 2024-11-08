@@ -244,6 +244,9 @@ def generate_conda_matrix(os: str) -> List[Dict[str, str]]:
     python_versions = FULL_PYTHON_VERSIONS
     if os == "linux" or os == "windows":
         arches += CUDA_ARCHES
+        # skip CUDA 12.6 builds on Windows
+        if os == "windows" and "12.6" in arches:
+            arches.remove("12.6")
     for python_version in python_versions:
         # We don't currently build conda packages for rocm
         for arch_version in arches:
@@ -282,7 +285,9 @@ def generate_libtorch_matrix(
             arches += ROCM_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES
-
+            # skip CUDA 12.6 builds on Windows
+            if "12.6" in arches:
+                arches.remove("12.6")
     if libtorch_variants is None:
         libtorch_variants = [
             "shared-with-deps",
@@ -347,6 +352,9 @@ def generate_wheels_matrix(
             arches += CPU_CXX11_ABI_ARCH + CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
+            # skip CUDA 12.6 builds on Windows
+            if "12.6" in arches:
+                arches.remove("12.6")
         elif os == "linux-aarch64":
             # Only want the one arch as the CPU type is different and
             # uses different build/test scripts
