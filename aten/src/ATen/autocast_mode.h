@@ -23,37 +23,36 @@ TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
 
 // deprecated CUDA-specific autocast APIs
-[[deprecated(
-    "at::autocast::is_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kCUDA) instead.")]] TORCH_API inline bool
-is_enabled() {
+C10_DEPRECATED_MESSAGE(
+    "at::autocast::is_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kCUDA) instead.")
+TORCH_API inline bool is_enabled() {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
       "() is deprecated. Please use at::autocast::is_autocast_enabled(at::kCUDA) instead.")
   return is_autocast_enabled(at::kCUDA);
 }
-[[deprecated(
-    "at::autocast::set_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kCUDA, enabled) instead.")]] TORCH_API inline void
-set_enabled(bool enabled) {
+C10_DEPRECATED_MESSAGE(
+    "at::autocast::set_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kCUDA, enabled) instead.")
+TORCH_API inline void set_enabled(bool enabled) {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
       "(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kCUDA, enabled) instead.")
   set_autocast_enabled(at::kCUDA, enabled);
 }
-[[deprecated(
-    "at::autocast::get_autocast_gpu_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(at::kCUDA) instead.")]] TORCH_API inline at::
-    ScalarType
-    get_autocast_gpu_dtype() {
+C10_DEPRECATED_MESSAGE(
+    "at::autocast::get_autocast_gpu_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(at::kCUDA) instead.")
+TORCH_API inline at::ScalarType get_autocast_gpu_dtype() {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
       "() is deprecated. Please use at::autocast::get_autocast_dtype(at::kCUDA) instead.")
   return get_autocast_dtype(at::kCUDA);
 }
-[[deprecated(
-    "at::autocast::set_autocast_gpu_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(at::kCUDA, dtype) instead.")]] TORCH_API inline void
-set_autocast_gpu_dtype(at::ScalarType dtype) {
+C10_DEPRECATED_MESSAGE(
+    "at::autocast::set_autocast_gpu_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(at::kCUDA, dtype) instead.")
+TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
   TORCH_WARN_DEPRECATION(
       "at::autocast::",
       __func__,
@@ -62,10 +61,11 @@ set_autocast_gpu_dtype(at::ScalarType dtype) {
 }
 
 #define DECLARE_DEPRECATED_AUTOCAST_APIS(name, device_type)                                          \
-  [[deprecated(                                                                                      \
+  C10_DEPRECATED_MESSAGE(                                                                            \
       "at::autocast::is_" #name                                                                      \
       "_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(" #device_type         \
-      ") instead.")]] TORCH_API inline bool is_##name##_enabled() {                                  \
+      ") instead.")                                                                                  \
+  TORCH_API inline bool is_##name##_enabled() {                                                      \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -74,11 +74,11 @@ set_autocast_gpu_dtype(at::ScalarType dtype) {
     return is_autocast_enabled(device_type);                                                         \
   }                                                                                                  \
                                                                                                      \
-  [[deprecated(                                                                                      \
+  C10_DEPRECATED_MESSAGE(                                                                            \
       "at::autocast::set_" #name                                                                     \
       "_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(" #device_type \
-      ", enabled) instead.")]] TORCH_API inline void                                                 \
-      set_##name##_enabled(bool enabled) {                                                           \
+      ", enabled) instead.")                                                                         \
+  TORCH_API inline void set_##name##_enabled(bool enabled) {                                         \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -87,11 +87,11 @@ set_autocast_gpu_dtype(at::ScalarType dtype) {
     set_autocast_enabled(device_type, enabled);                                                      \
   }                                                                                                  \
                                                                                                      \
-  [[deprecated(                                                                                      \
+  C10_DEPRECATED_MESSAGE(                                                                            \
       "at::autocast::get_autocast_" #name                                                            \
       "_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(" #device_type            \
-      ") instead.")]] TORCH_API inline at::ScalarType                                                \
-      get_autocast_##name##_dtype() {                                                                \
+      ") instead.")                                                                                  \
+  TORCH_API inline at::ScalarType get_autocast_##name##_dtype() {                                    \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \
@@ -100,11 +100,11 @@ set_autocast_gpu_dtype(at::ScalarType dtype) {
     return get_autocast_dtype(device_type);                                                          \
   }                                                                                                  \
                                                                                                      \
-  [[deprecated(                                                                                      \
+  C10_DEPRECATED_MESSAGE(                                                                            \
       "at::autocast::set_autocast_" #name                                                            \
       "_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(" #device_type       \
-      ", dtype) instead.")]] TORCH_API inline void                                                   \
-      set_autocast_##name##_dtype(at::ScalarType dtype) {                                            \
+      ", dtype) instead.")                                                                           \
+  TORCH_API inline void set_autocast_##name##_dtype(at::ScalarType dtype) {                          \
     TORCH_WARN_DEPRECATION(                                                                          \
         "at::autocast::",                                                                            \
         __func__,                                                                                    \

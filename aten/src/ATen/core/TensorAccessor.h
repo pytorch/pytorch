@@ -263,8 +263,9 @@ public:
 // Can't put this directly into the macro function args because of commas
 #define AT_X GenericPackedTensorAccessor<T, N, PtrTraits, index_t>
 
+// Old name for `GenericPackedTensorAccessor`
 template <typename T, size_t N, template <typename U> class PtrTraits = DefaultPtrTraits, typename index_t = int64_t>
-using PackedTensorAccessor [[deprecated("Old name for `GenericPackedTensorAccessor`")]] = AT_X;
+C10_DEFINE_DEPRECATED_USING(PackedTensorAccessor, AT_X)
 
 #undef AT_X
 

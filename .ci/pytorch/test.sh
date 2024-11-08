@@ -81,7 +81,7 @@ if [[ "$BUILD_ENVIRONMENT" == *clang9* ]]; then
   #
   # int main(int argv) {
   #   Tensor b = empty({3, 4});
-  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), c10::nullopt);
+  #   auto z = call(b, b.sym_sizes(), b.sym_strides(), std::nullopt);
   # }
   export VALGRIND=OFF
 fi
@@ -284,7 +284,7 @@ test_python_shard() {
 
   # modify LD_LIBRARY_PATH to ensure it has the conda env.
   # This set of tests has been shown to be buggy without it for the split-build
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
 
   assert_git_not_dirty
 }
@@ -296,7 +296,7 @@ test_python() {
 }
 
 
-test_dynamo_shard() {
+test_dynamo_wrapped_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
@@ -310,7 +310,8 @@ test_dynamo_shard() {
     --exclude-distributed-tests \
     --exclude-torch-export-tests \
     --shard "$1" "$NUM_TEST_SHARDS" \
-    --verbose
+    --verbose \
+    --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -379,22 +380,34 @@ test_inductor_cpp_wrapper() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
-  python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
+  # Run certain inductor unit tests with cpp wrapper. In the end state, we should be able to run all the inductor
+  # unit tests with cpp wrapper.
+  python test/run_test.py --include inductor/test_torchinductor.py --verbose
+
+
+  # Run inductor benchmark tests with cpp wrapper.
+  # Skip benchmark tests if it's in rerun-disabled-mode.
+  if [[ "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" == "1" ]]; then
+    echo "skip dynamo benchmark tests for rerun-disabled-test"
+  else
+    echo "run dynamo benchmark tests with cpp wrapper"
+    python benchmarks/dynamo/timm_models.py --device cuda --accuracy --amp \
     --training --inductor --disable-cudagraphs --only vit_base_patch16_224 \
     --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
-  python benchmarks/dynamo/check_accuracy.py \
-    --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
-    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_timm_training.csv"
+    python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_timm_training.csv"
 
-  python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-    --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-  python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-    --bfloat16 --inference --inductor --only llama --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-  python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
-    --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
-  python benchmarks/dynamo/check_accuracy.py \
-    --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
-    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
+    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+      --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
+    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+      --bfloat16 --inference --inductor --only llama --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
+    python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+      --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
+    python benchmarks/dynamo/check_accuracy.py \
+      --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
+      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
+  fi
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -801,7 +814,7 @@ test_without_numpy() {
   # Regression test for https://github.com/pytorch/pytorch/issues/66353
   python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch;print(torch.tensor([torch.tensor(0.), torch.tensor(1.)]))"
   # Regression test for https://github.com/pytorch/pytorch/issues/109387
-  if [[ "${TEST_CONFIG}" == *dynamo* ]]; then
+  if [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
     python -c "import sys;sys.path.insert(0, 'fake_numpy');import torch;torch.compile(lambda x:print(x))('Hello World')"
   fi
   popd
@@ -1354,7 +1367,7 @@ test_executorch() {
   echo "Run ExecuTorch regression tests for some models"
   # TODO(huydhn): Add more coverage here using ExecuTorch's gather models script
   # shellcheck disable=SC1091
-  source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
+  source .ci/scripts/test_model.sh mv3 cmake xnnpack-quantization-delegation ''
 
   popd
 
@@ -1474,9 +1487,9 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
       test_inductor_distributed
     fi
   fi
-elif [[ "${TEST_CONFIG}" == *dynamo* ]]; then
+elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
-  test_dynamo_shard "${SHARD_NUMBER}"
+  test_dynamo_wrapped_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
     test_aten
   fi
