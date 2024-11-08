@@ -2824,7 +2824,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
-    def test_error_detection(self):
+    def test_error_detection_and_propagation(self):
         def assert_fut_success(fut):
             self.assertEqual(WorkResult(fut.value()), WorkResult.SUCCESS)
 
