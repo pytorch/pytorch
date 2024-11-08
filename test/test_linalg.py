@@ -62,6 +62,7 @@ def set_tunableop_defaults():
 
     # disable TunableOp and restore to default values
     torch.cuda.tunable.enable(False)
+    torch.cuda.tunable.record_untuned_enable(False)
     torch.cuda.tunable.tuning_enable(True)
     torch.cuda.tunable.set_max_tuning_duration(30)
     torch.cuda.tunable.set_max_tuning_iterations(100)
