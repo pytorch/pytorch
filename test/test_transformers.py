@@ -2118,6 +2118,102 @@ class TestSDPACpuOnly(NNTestCase):
                 self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
                 self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
 
+    @parametrize("batch_size", [2, 12])
+    @parametrize("q_seq_len", [11, 384, 1030])
+    @parametrize("kv_seq_len", [17, 384])
+    @parametrize("n_head", [3, 16])
+    @parametrize("head_dim", [16, 64])
+    @parametrize("mask_dtype", [None, torch.float32, torch.bfloat16])
+    @parametrize("mask_dim", [0, 2, 4])
+    def test_scaled_dot_product_int8_cpu(
+        self,
+        device,
+        batch_size,
+        q_seq_len,
+        kv_seq_len,
+        n_head,
+        head_dim,
+        mask_dtype,
+        mask_dim,
+    ):
+        def sdpa_int8_ref(
+            q, k, v, attn_mask,
+            q_zp, q_scale,
+            k_zp, k_scale,
+            v_zp, v_scale,
+            a_zp, a_scale,
+            o_zp, o_scale
+        ):
+            q = (q.to(torch.float) - q_zp) * q_scale
+            k = (k.to(torch.float) - k_zp) * k_scale
+            v = (v.to(torch.float) - v_zp) * v_scale
+            scale_factor = 1 / math.sqrt(q.size(-1))
+            attn = q @ k.transpose(-2, -1) * scale_factor
+            if attn_mask is not None:
+                attn = attn + attn_mask.to(torch.float)
+            attn = attn.softmax(dim=-1)
+            attn = torch.clamp(torch.round(attn / a_scale) + a_zp, min=0, max=255)
+            attn = (attn - a_zp) * a_scale
+            res = attn @ v
+            res = torch.clamp(torch.round(res / o_scale) + o_zp, min=0, max=255)
+            return res.to(torch.uint8)
+
+        tol = Tolerances(2.0, 5e-6)
+        q_zp = 127
+        q_scale = 1.7907238006591797
+        k_zp = 125
+        k_scale = 1.8039721250534058
+        v_zp = 127
+        v_scale = 1.839004635810852
+        a_zp = 120
+        a_scale = 0.003919653594493866
+        o_zp = 128
+        o_scale = 1.8191684484481812
+        for mask_shape in itertools.product(
+            [q_seq_len, 1], [kv_seq_len, 1]
+        ) if mask_dim == 2 else itertools.product(
+            [batch_size, 1], [n_head, 1], [q_seq_len, 1], [kv_seq_len, 1]
+        ):
+            make_tensor = partial(rand_sdpa_tensor, type="dense", device=device, dtype=torch.float32, requires_grad=False)
+            q_shape = SdpaShape(batch_size, n_head, q_seq_len, head_dim)
+            kv_shape = SdpaShape(batch_size, n_head, kv_seq_len, head_dim)
+            q = make_tensor(q_shape) * 100
+            k = make_tensor(kv_shape) * 100
+            v = make_tensor(kv_shape) * 100
+            q = q.to(torch.uint8)
+            k = k.to(torch.uint8)
+            v = v.to(torch.uint8)
+            q2, k2, v2 = q.clone(), k.clone(), v.clone()
+
+            q = q.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
+            k = k.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+            v = v.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+
+            q2 = q2.view(batch_size, q_seq_len, n_head, head_dim).transpose(1, 2)
+            k2 = k2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+            v2 = v2.view(batch_size, kv_seq_len, n_head, head_dim).transpose(1, 2)
+
+            attn_mask = torch.randn(mask_shape, dtype=mask_dtype, device=device) if mask_dtype else None
+
+            math_ref = sdpa_int8_ref(
+                q2, k2, v2,
+                attn_mask=attn_mask,
+                q_zp=q_zp, q_scale=q_scale,
+                k_zp=k_zp, k_scale=k_scale,
+                v_zp=v_zp, v_scale=v_scale,
+                a_zp=a_zp, a_scale=a_scale,
+                o_zp=o_zp, o_scale=o_scale)
+            actual = torch.ops.aten._scaled_dot_product_int8(
+                q, k, v,
+                attn_mask=attn_mask, dropout_p=0.0, is_causal=False,
+                q_zp=q_zp, q_scale=q_scale,
+                k_zp=k_zp, k_scale=k_scale,
+                v_zp=v_zp, v_scale=v_scale,
+                a_zp=a_zp, a_scale=a_scale,
+                o_zp=o_zp, o_scale=o_scale)
+
+            self.assertEqual(actual, math_ref, atol=tol.atol, rtol=tol.rtol)
+
     def test_sdpa_with_inf(self, device):
         # https://github.com/pytorch/pytorch/issues/127055.
         full = torch.full((600, 600), float("-inf"), device=device)
