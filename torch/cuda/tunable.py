@@ -397,12 +397,17 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         warnings.warn(f"error: unknown op {op_sig}")
 
 
+def _check_tuning_assertions() -> None:
+    r"""Helper function for multi-GPU tuning case. Need to check that TunableOp feature
+    is enabled and that tuning is enabled.
+    """
+    assert is_enabled()
+    assert tuning_is_enabled()
+
+
 def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
     r"""Process one or more files and distribute work over one or more GPUs."""
     unique_gemm_entries = _gather_unique_untuned_gemm_from_files(filename_pattern)
-
-    assert is_enabled()
-    assert tuning_is_enabled()
 
     total_gpus = torch.cuda.device_count()
 
@@ -410,6 +415,7 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
     mp_context = mp.get_context("spawn")
 
+    checks = []  # empty list to hold futures
     futures = []  # empty list to hold futures
 
     # GEMM are assigned to GPUs in a round robin manner
@@ -417,6 +423,19 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
     with concurrent.futures.ProcessPoolExecutor(
         max_workers=num_gpus, mp_context=mp_context
     ) as executor:
+        # The workers are a separate process. TunableOp will be
+        # enabled in the child processes if the environment variable
+        # is set. However, if we enable TunableOp via the API
+        # the workers do not inherit this state. As a precaution,
+        # we need to check that TuningOp feature and tuning is
+        # enabled in the pool of processes.
+        for g in range(num_gpus):
+            check = executor.submit(_check_tuning_assertions)
+            checks.append(check)
+
+        for check in concurrent.futures.as_completed(checks):
+            check.result()
+
         for line in unique_gemm_entries:
             future = executor.submit(_process_single_offline_gemm, line, h)
             futures.append(future)
