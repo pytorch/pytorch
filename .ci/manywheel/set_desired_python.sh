@@ -24,6 +24,7 @@ elif [[ -n "$DESIRED_PYTHON" && "$DESIRED_PYTHON" != cp* ]]; then
     fi
 fi
 
-export DESIRED_PYTHON_BIN_DIR="/opt/python/$DESIRED_PYTHON/bin"
+pydir="/opt/python/$DESIRED_PYTHON"
+export DESIRED_PYTHON_BIN_DIR="${pydir}/bin"
 export PATH="$DESIRED_PYTHON_BIN_DIR:$PATH"
 echo "Will build for Python version: ${DESIRED_PYTHON}"
