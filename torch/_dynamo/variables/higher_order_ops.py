@@ -2620,25 +2620,9 @@ def canonicalize(gmod, root_gmod):
         nonlocal node_counter
         return f"node_{next(node_counter)}"
 
-    get_attr_counter = itertools.count(0)
-
-    sub_mods = {}
-
-    def next_get_attr_name():
-        nonlocal get_attr_counter
-        return f"get_attr_{next(get_attr_counter)}"
-
     for node in gmod.graph.nodes:
         if node.op == "placeholder":
             env[node] = new_graph.placeholder(next_placeholder_name())
-        elif node.op == "get_attr" and isinstance(
-            getattr(gmod, node.target), torch.fx.GraphModule
-        ):
-            # Recursively canonicalize the subgraph.
-            new_sub_gm = canonicalize(getattr(gmod, node.target), root_gmod)
-            new_attr_name = next_get_attr_name()
-            sub_mods[new_attr_name] = new_sub_gm
-            env[node] = new_graph.get_attr(new_attr_name)
         else:
             # Can't use node_copy because node.name will not be unique.
             args = map_arg(node.args, lambda x: env[x])
@@ -2649,7 +2633,7 @@ def canonicalize(gmod, root_gmod):
         env[node].meta = copy.copy(node.meta)
 
     new_graph.lint()
-    new_gmod = torch.fx.GraphModule({**root_gmod, **sub_mods}, new_graph)
+    new_gmod = torch.fx.GraphModule(root_gmod, new_graph)
     return new_gmod
 
 

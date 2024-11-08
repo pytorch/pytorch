@@ -17,22 +17,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TestCase,
 )
-from torch.utils.checkpoint import (
-    CheckpointPolicy,
-    create_selective_checkpoint_contexts,
-)
-
-
-def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
-    def _custom_policy(ctx, func, *args, **kwargs):
-        if no_recompute_list is not None and func in no_recompute_list:
-            return CheckpointPolicy.MUST_SAVE
-        if must_recompute_list is not None and func in must_recompute_list:
-            return CheckpointPolicy.MUST_RECOMPUTE
-        else:
-            return CheckpointPolicy.PREFER_RECOMPUTE
-
-    return _custom_policy
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
@@ -638,88 +622,6 @@ class GraphModule(torch.nn.Module):
         ref = fn(x)
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         res = opt_fn(x)
-
-    def test_ac(self):
-        def fn1(x):
-            return torch.cos(x)
-
-        @mark_compile_region
-        def fn1_checkpoint(x):
-            return torch.utils.checkpoint.checkpoint(fn1, x, use_reentrant=False)
-
-        def fn2(x):
-            return torch.sin(x)
-
-        @mark_compile_region
-        def fn2_checkpoint(x):
-            return torch.utils.checkpoint.checkpoint(fn2, x, use_reentrant=False)
-
-        def fn(x):
-            return (
-                fn1_checkpoint(x)
-                # repeat the same fn1_checkpoint to see that we dedupe
-                + fn1_checkpoint(x)
-                # Check that a new fn2_checkpoint goes through a different HOP
-                + fn2_checkpoint(x)
-            )
-
-        x = torch.randn(8, requires_grad=True)
-        ref = fn(x)
-
-        x_clone = x.clone().detach().requires_grad_(True)
-        backend = AotEagerAndRecordGraphs()
-        res = torch.compile(fn, backend=backend, fullgraph=True)(x_clone)
-
-        # Run backward
-        ref.sum().backward()
-        res.sum().backward()
-
-        self.assertEqual(ref, res)
-        self.assertEqual(x.grad, x_clone.grad)
-
-        # Check that the Dynamo and AOT graphs have just one subgraph module
-        self.assertEqual(len(backend.graphs), 1)
-        self.assertEqual(len(backend.fw_graphs), 1)
-        self.assertEqual(len(backend.bw_graphs), 1)
-        self.count_unique_get_attr_nodes(backend.graphs[0], [], 2)
-        self.count_unique_get_attr_nodes(backend.fw_graphs[0], [], 2)
-        self.count_unique_get_attr_nodes(backend.bw_graphs[0], [], 2)
-
-        res = torch.compile(fn, backend="inductor", fullgraph=True)(x_clone)
-        self.assertEqual(ref, res)
-
-    def test_selective_ac(self):
-        def context_fn_must_recompute_mm():
-            must_recompute_list = [
-                torch.ops.aten.mm.default,
-            ]
-            return create_selective_checkpoint_contexts(
-                _get_custom_policy(
-                    must_recompute_list=must_recompute_list,
-                ),
-            )
-
-        def gn(x):
-            return torch.sigmoid(torch.matmul(x, x))
-
-        @mark_compile_region
-        def checkpoint(x):
-            return torch.utils.checkpoint.checkpoint(
-                gn,
-                x,
-                use_reentrant=False,
-                context_fn=context_fn_must_recompute_mm,
-            )
-
-        def fn(x):
-            return checkpoint(x)
-
-        x = torch.randn(8, requires_grad=True)
-        ref = fn(x)
-
-        x_clone = x.clone().detach().requires_grad_(True)
-        backend = AotEagerAndRecordGraphs()
-        res = torch.compile(fn, backend=backend, fullgraph=True)(x_clone)
         self.assertEqual(ref, res)
 
 
