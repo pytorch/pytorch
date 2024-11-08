@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.9", "3.10", "3.11", "3.12" ]
+        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13" ]
         device: ["cuda", "rocm", "xpu"]
         include:
           - device: "rocm"
@@ -103,6 +103,9 @@ jobs:
             ;;
           3.12)
             PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
+            ;;
+          3.13)
+            PYTHON_EXECUTABLE=/opt/python/cp313-cp313/bin/python
             ;;
           *)
             echo "Unsupported python version ${PY_VERS}"
@@ -212,8 +215,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.9", "3.10", "3.11", "3.12" ]
-    timeout-minutes: 40
+        py_vers: [ "3.9", "3.10", "3.11", "3.12, "3.13" ]
+    timeout-minutes: 90
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       PY_VERS: ${{ matrix.py_vers }}
