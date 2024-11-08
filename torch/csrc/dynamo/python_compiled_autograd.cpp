@@ -520,7 +520,8 @@ static variable_list call_function(
     const variable_list& inputs,
     const ivalue_list& saved_state,
     int64_t num_outputs,
-    const std::string& debug) {
+    const std::string& debug,
+    bool is_pynode) {
   // Need this to do PyObject* -> IValue conversion
   std::vector<at::TypePtr> schema;
   schema.reserve(saved_state.size());
@@ -567,7 +568,7 @@ static variable_list call_function(
   // (it can either inline it or plop it straight into the FX graph).
   py::handle handle(py_compiler);
   py::object stuff = handle.attr(name)(
-      py_func, inputs, py::handle(py_saved_state), num_outputs, debug);
+      py_func, inputs, py::handle(py_saved_state), num_outputs, debug, is_pynode);
 
   // Convert the output from PyObject* to vector<Tensor>
   auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(stuff);
@@ -813,6 +814,7 @@ CacheNode* _compiled_autograd_impl(
         pyobj = pynode->obj;
       }
 
+      bool is_pynode = pyobj != Py_None;
       check(PyObject_CallFunction(
           set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
 
@@ -834,7 +836,8 @@ CacheNode* _compiled_autograd_impl(
           inputs,
           saved_state,
           call.node->num_outputs(),
-          call.node->name());
+          call.node->name(),
+          is_pynode);
       // variable_list outputs = call.node->apply_with_saved(inputs, saved);
 
       saved.debug_asserts();
@@ -851,7 +854,8 @@ CacheNode* _compiled_autograd_impl(
           outputs,
           input_metadata_state,
           outputs.size(),
-          "validate_outputs");
+          "validate_outputs",
+          is_pynode);
 
       saved.after(call.node->next_edges());
       saved.debug_asserts();

@@ -184,6 +184,7 @@ class AutogradCompilerInstance:
         self.hooks_proxy: Optional[Proxy] = None
         self.graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
         self.old_inline_behavior = True
+        # self.old_inline_behavior = False
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
@@ -206,7 +207,8 @@ class AutogradCompilerInstance:
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-        args_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
+        self.sizes_proxy_lookup = {}
+        args_proxy, self.sizes_proxy, scalars_proxy, self.hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
             for name in self.graph_placeholders
         )
@@ -229,7 +231,9 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-        self.bind_tensors_to_proxies(sizes, sizes_proxy, sizes_origins)
+        for i,symint in enumerate(sizes):
+            self.sizes_proxy_lookup[id(symint.node)] = i
+        self.bind_tensors_to_proxies(sizes, self.sizes_proxy, sizes_origins)
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -299,15 +303,23 @@ class AutogradCompilerInstance:
         with disable_proxy_modes_tracing():
             return torch.zeros(0)
 
-    def apply_functional(self, fn, inputs, stack, num_outputs, debug_name):
+    def apply_functional(self, fn, inputs, stack, num_outputs, debug_name, is_pynode):
         if self.old_inline_behavior:
             result = fn(inputs, *stack)
+            return result
+        if is_pynode:
+            # lift using inline approach
+            result = fn(inputs, *stack)
+            proxy_out = self.to_proxy(result)
+            # but throw away results
+            result = [self.allocate_dummy(*inputs, *stack) for _ in range(num_outputs)]
+            self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(num_outputs)])
             return result
         # TODO: if the node is a python autograd.Function or a CompiledFunctionBackward,
         # we should probably "plop" the subgraph into the graph instead
         # of allow_in_graph the node through Dynamo.
         proxy_inputs, proxy_stack = pytree.tree_map(
-            lambda t: self.to_proxy(t) if isinstance(t, torch.Tensor) else t,
+            self.try_to_proxy,
             (inputs, stack),
         )
 
@@ -327,6 +339,7 @@ class AutogradCompilerInstance:
             return []
 
         op = ops.add(debug_name, fn)
+        # lookup the correct symint
         proxy_out = self.fx_tracer.create_proxy(
             "call_function", op, args=(proxy_inputs, *proxy_stack), kwargs={}
         )
@@ -334,10 +347,10 @@ class AutogradCompilerInstance:
         self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(num_outputs)])
         return result
 
-    def validate_outputs(self, fn, outputs, stack, _0, _1):
+    def validate_outputs(self, fn, outputs, stack, _0, _1, _2):
         if self.old_inline_behavior:
             return fn(outputs, *stack)
-        proxy_outputs, proxy_stack = pytree.tree_map(lambda t: self.to_proxy(t) if isinstance(t, torch.Tensor) else t, (outputs, stack))
+        proxy_outputs, proxy_stack = pytree.tree_map(self.try_to_proxy, (outputs, stack))
         op = ops.add("validate_outputs", fn)
         new_proxy_outputs = self.fx_tracer.create_proxy(
             "call_function",
@@ -635,6 +648,14 @@ class AutogradCompilerInstance:
         proxy_tensor = fetch_object_proxy(self.fx_tracer, t)
         assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
         return proxy_tensor.proxy
+
+    def try_to_proxy(self, t):
+        if isinstance(t, torch.Tensor):
+            return self.to_proxy(t)
+        if isinstance(t, torch.SymInt):
+            idx = self.sizes_proxy_lookup[id(t.node)]
+            return self.sizes_proxy[idx]
+        return t
 
     def bind_tensors_to_proxies(
         self, tensors, proxies, origins: Optional[List[Tuple[int, str]]] = None
