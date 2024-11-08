@@ -6791,20 +6791,18 @@ class InvokeSubgraph(ExternKernel):
         # strides as that of subgraph inputs.
         operands = [cls.realize_input(x) for x in operands]
 
-<<<<<<< HEAD
         def handle_sym_expr(stride):  # type: ignore[no-untyped-def]
             return [s.node.expr if isinstance(s, torch.SymInt) else s for s in stride]
-=======
-        # def handle_sym_expr(stride):
-        #     return [s.node.expr if isinstance(s, torch.SymInt) else s for s in stride]
->>>>>>> 3344412e1b4 ([dont review][dont merge] All fixes to make TorchTune work)
 
-        # fake_strides = [fake_operand.stride() for fake_operand in fake_operands]
-        # fake_strides = [handle_sym_expr(stride) for stride in fake_strides]
-        # operands = [
-        #     cls.require_exact_strides(x, fake_strides[idx])
-        #     for idx, x in enumerate(operands)
-        # ]
+        new_operands = []
+        for idx, operand in enumerate(operands):
+            if isinstance(operand, ShapeAsConstantBuffer):
+                new_operands.append(operand)
+            else:
+                example_stride = handle_sym_expr(fake_operands[idx].stride())
+                new_operands.append(cls.require_exact_strides(operand, example_stride))
+
+        operands = new_operands
 
         if subgraph.graph is None:
             # create and lower subgraphs
@@ -6816,11 +6814,18 @@ class InvokeSubgraph(ExternKernel):
             with V.set_graph_handler(subgraph.graph):
                 subgraph.graph.run(*fake_operands)
 
-        # for o in operands:
-        #     print(o, type(o))
-        outputs = subgraph.graph.graph_outputs  # type: ignore[union-attr]
-        device = operands[-1].get_device()
-        dtype = operands[-1].get_dtype()
+        outputs = subgraph.graph.graph_outputs
+
+        # Find the device - operands could be integers from shapes, so we can't
+        # use operands[0]
+        device = None
+        dtype = None
+        for operand in operands:
+            if not isinstance(operand, ShapeAsConstantBuffer):
+                device = operand.get_device()
+                dtype = operand.get_dtype()
+                break
+        assert device is not None
 
         invoke_subgraph = InvokeSubgraph(
             subgraph=subgraph,
