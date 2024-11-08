@@ -471,7 +471,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     if config.AutoChunker.enable:
         from .auto_chunker import AutoChunker
 
-        graph = AutoChunker(graph).chunk_batch_dimension()
+        graph = AutoChunker.chunk(graph)
 
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):

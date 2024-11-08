@@ -248,6 +248,12 @@ class Collector:
         # TODO: this is specific for training now. Need revise if we have
         # inference usecase.
         tangent = get_tangent_node(graph)
+        if tangent.meta["val"].numel() != 1:
+            raise CantChunk("The graph does not have a single scalar gradient.")
+
+        last_fwd_node = next(iter(tangent.users))._prev
+        if last_fwd_node not in chunking_subgraph_nodes:
+            raise CantChunk("Can only chunk all the way to the end of the graph")
         chunking_subgraph_nodes |= set(cls._find_reachable_nodes(tangent,
             _can_expand))
 
