@@ -116,10 +116,10 @@ aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
 torch/csrc/mtia/ @egienvalue
 
 # Profiler
-torch/csrc/autograd/profiler* @aaronenyeshi @sraikund16
-torch/autograd/profiler* @aaronenyeshi @sraikund16
-torch/csrc/profiler/ @aaronenyeshi @sraikund16
-torch/profiler/ @aaronenyeshi @sraikund16
+torch/csrc/autograd/profiler* @sraikund16
+torch/autograd/profiler* @sraikund16
+torch/csrc/profiler/ @sraikund16
+torch/profiler/ @sraikund16
 
 # AOTDispatch tests
 test/functorch/test_aotdispatch.py @ezyang @Chillee

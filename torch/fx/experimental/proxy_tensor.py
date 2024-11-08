@@ -1176,11 +1176,11 @@ def dispatch_trace(
 def wrap_key(
     f: Callable[_P, R], tensors: _P.args, tracer: _ProxyTracer, pre_dispatch: bool
 ) -> Callable[_P, R]:
-    flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
+    flat_tensors, _tensors_spec = pytree.tree_flatten(tensors)
 
     @functools.wraps(f)
     def wrapped(*proxies: _P.args, **_unused: _P.kwargs) -> R:
-        flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
+        flat_proxies, _proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
         with disable_proxy_modes_tracing() as m:
             assert isinstance(m, ProxyTorchDispatchMode)
@@ -1369,12 +1369,24 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     def _compute_proxy(
         self, func: OpOverload, args: Tuple[object, ...], out: PySymType
     ) -> Proxy:
-        n_args = tuple(
-            get_proxy_slot(a, self.tracer).force().node
-            if isinstance(a, py_sym_types)
-            else a
-            for a in args
-        )
+        # Handle torch.sym_sum
+        n_args: Tuple[object, ...]
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            n_args = (
+                tuple(
+                    get_proxy_slot(a, self.tracer).force().node
+                    if isinstance(a, py_sym_types)
+                    else a
+                    for a in args[0]
+                ),
+            )
+        else:
+            n_args = tuple(
+                get_proxy_slot(a, self.tracer).force().node
+                if isinstance(a, py_sym_types)
+                else a
+                for a in args
+            )
 
         # func doesn't have a __torch_function__ that Proxy can interpose, so
         # we gotta do it manually
@@ -1554,6 +1566,14 @@ class _ModuleStackTracer(PythonKeyTracer):
     def __init__(self, scope_root: GraphModule) -> None:
         super().__init__()
         self.scope_root = scope_root
+        self.enable_attr_proxy = False
+        self.submodule_paths = {}
+        for name, m in self.scope_root.named_modules(remove_duplicate=False):
+            if m in self.submodule_paths:
+                self.enable_attr_proxy = True
+            else:
+                self.submodule_paths[m] = name
+
         self.proxy_paths: WeakKeyDictionary[_AttrProxy, str] = WeakKeyDictionary()
         self.attr_proxy_map: WeakKeyDictionary[Module, _AttrProxy] = WeakKeyDictionary()
         self.proxy_modules: WeakKeyDictionary[_AttrProxy, Module] = WeakKeyDictionary()
@@ -1622,7 +1642,11 @@ class _ModuleStackTracer(PythonKeyTracer):
                 submodules = self.__dict__["_modules"]
                 assert isinstance(submodules, dict)
                 return {
-                    key: AttrProxy(value, tracer.proxy_paths[self] + "." + str(key))
+                    key: (
+                        AttrProxy(value, tracer.proxy_paths[self] + "." + str(key))  # type: ignore[misc]
+                        if value is not None
+                        else value
+                    )
                     for key, value in submodules.items()
                 }
 
@@ -1647,7 +1671,11 @@ class _ModuleStackTracer(PythonKeyTracer):
     def getattr(
         self, attr: str, attr_val: object, parameter_proxy_cache: Dict[str, Proxy]
     ) -> object:
-        if not isinstance(attr_val, Module) or isinstance(attr_val, fx.GraphModule):
+        if (
+            not isinstance(attr_val, Module)
+            or isinstance(attr_val, fx.GraphModule)
+            or not self.enable_attr_proxy
+        ):
             return super().getattr(attr, attr_val, parameter_proxy_cache)
         if isinstance(attr_val, _AttrProxy):
             return attr_val
@@ -1733,7 +1761,7 @@ class _ModuleStackTracer(PythonKeyTracer):
 
         try:
             return Tracer.call_module(self, m, forward, args, kwargs)
-        except _ModuleNotInstalledAsSubmoduleError as e:
+        except _ModuleNotInstalledAsSubmoduleError:
             warnings.warn(
                 f"Unable to find the path of the module {m}. "
                 "This might be because the module was not properly registered "
@@ -2215,10 +2243,10 @@ def maybe_handle_decomp(
     args: Tuple[object, ...],
     kwargs: Dict[str, object],
 ) -> object:
-    from torch._inductor.bisect_helper import BisectionManager
+    from torch._inductor.compiler_bisector import CompilerBisector
 
     if op in CURRENT_DECOMPOSITION_TABLE:
-        if BisectionManager.disable_subsystem(
+        if CompilerBisector.disable_subsystem(
             "aot_eager_decomp_partition", "decomposition", lambda: repr(op)
         ):
             return NotImplemented

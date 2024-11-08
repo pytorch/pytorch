@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import os
-from itertools import chain, count
+from itertools import chain, count, zip_longest
 from typing import Any, Callable, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import sympy
@@ -97,13 +97,7 @@ class DeferredGpuDefaultGrid:
         assert (
             params is not None
         ), f"{self.kernel_name} not found in CudaKernelParamCache"
-        block_cfg = {
-            "XBLOCK": params["x_block"],
-            "YBLOCK": params["y_block"],
-            "ZBLOCK": params["z_block"],
-            "RBLOCK": params["r_block"],
-        }
-        return grid_fn(block_cfg)
+        return grid_fn(params["meta"])
 
 
 class DeferredGpuGridLine(DeferredLineBase):
@@ -191,6 +185,10 @@ class CppWrapperGpu(CppWrapperCpu):
             maybe_hipify_code_wrapper(self.device_codegen.kernel_driver())
         )
 
+    @functools.lru_cache(None)  # noqa: B019
+    def write_tma_descriptor_helpers_once(self):
+        self.header.splice(self.device_codegen.tma_descriptor_helpers())
+
     def write_get_raw_stream(self, index, graph=None):
         name = f"stream{index}"
         self.writeline(
@@ -257,7 +255,29 @@ class CppWrapperGpu(CppWrapperCpu):
         )
 
     def generate_tma_descriptor(self, desc):
-        raise NotImplementedError("Host-side TMA descriptors NYI in C++ wrapper.")
+        self.write_tma_descriptor_helpers_once()
+
+        # generate data pointer for the source tensor
+        source = self.generate_args_decl(
+            call_args=[self.val_to_arg_str(desc.tensor)],
+            arg_types=[desc.tensor.get_dtype()],
+            arg_signatures=[None],
+        )
+
+        desc_name = desc.name
+        self.writeline(f"alignas(64) CUtensorMap {desc_name};")
+
+        # `source` is in the form of `&var_x`, where `var_x` is the data pointer
+        # (CUdeviceptr); we dereference `source` and cast to `void*` to pass to
+        # the data pointer of the source tensor ot the helper function
+        # `init{1,2}DTMADescriptor`
+        ptr = f"reinterpret_cast<void*>(*({source}))"
+        dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.dims)
+        block_dims = ", ".join(self.val_to_arg_str(dim) for dim in desc.block_dims)
+        element_size = self.val_to_arg_str(desc.element_size)
+        fn = f"init{desc.rank}DTMADescriptor"
+        args = f"&{desc_name}, {ptr}, {dims}, {block_dims}, {element_size}"
+        self.writeline(f"{fn}({args});")
 
     @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
@@ -286,11 +306,21 @@ class CppWrapperGpu(CppWrapperCpu):
         self.writeline("}")
         return kernel_var_name
 
-    def generate_args_decl(self, call_args, arg_types):
+    def generate_args_decl(self, call_args, arg_types, arg_signatures):
         new_args = []
-        for arg, arg_type in zip(call_args, arg_types):
+
+        # Add more cases for other types as needed
+        signature2dtype = {
+            "i32": "int32_t",
+            "i64": "int64_t",
+            "fp32": "float",
+        }
+
+        def process_args(arg, arg_type, arg_signature=None):
             var_name = f"var_{next(self.arg_var_id)}"
-            if isinstance(arg_type, torch_dtype):
+            # ignore nvTmaDesc, as host-side TMA descriptors need
+            # to be passed to the compiled Triton kernel by value
+            if isinstance(arg_type, torch_dtype) and arg_signature != "nvTmaDesc":
                 if arg.endswith(".item()"):
                     # Need to declare a scalar in this case
                     arg = arg[:-7]
@@ -312,9 +342,25 @@ class CppWrapperGpu(CppWrapperCpu):
                 self.writeline(f"int {var_name} = {self.expr_printer(arg)};")
             elif arg_type in (sympy.Float, float):
                 self.writeline(f"float {var_name} = {self.expr_printer(arg)};")
+            # For symbolic call arguments, examine the arg signatures from triton meta
+            # to explicitly cast to the right type
+            # Reason: `auto` can infer unexpected type against kernel input signature.
+            elif (
+                isinstance(arg_type, type(SymbolicCallArg))
+                and arg_signature is not None
+                and arg_signature in signature2dtype.keys()
+            ):
+                self.writeline(
+                    f"{signature2dtype[arg_signature]} {var_name} = {self.expr_printer(arg)};"
+                )
             else:
                 self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
             new_args.append(f"&{var_name}")
+
+        for arg, arg_type, arg_signature in zip_longest(
+            call_args, arg_types, arg_signatures
+        ):
+            process_args(arg, arg_type, arg_signature)
 
         return ", ".join(new_args)
 
@@ -375,7 +421,7 @@ class CppWrapperGpu(CppWrapperCpu):
             )
 
         if device_index is None:
-            current_device = V.graph.scheduler.get_current_device_or_throw()
+            current_device = V.graph.get_current_device_or_throw()
             device_index = current_device.index
         stream = (
             "stream"
@@ -392,18 +438,26 @@ class CppWrapperGpu(CppWrapperCpu):
             # args with value 1 are added into equal_to_1 and constants
             # in triton_meta (in the Python codegen) which makes them
             # inlined in the PTX and compiled CUBIN
+            arg_signatures = []
             if (
                 triton_meta is not None
-                and "configs" in triton_meta
-                and triton_meta["configs"]
+                and triton_meta.get("configs")
+                and triton_meta.get("signature")
             ):
                 equal_to_1 = triton_meta["configs"][0].equal_to_1
                 call_args = [
                     arg for i, arg in enumerate(call_args) if i not in equal_to_1
                 ]
                 arg_types = [t for i, t in enumerate(arg_types) if i not in equal_to_1]
+                # extract the arg signatures from triton_meta
+                arg_signatures = triton_meta["signature"].values()
+                arg_signatures = [
+                    v for i, v in enumerate(arg_signatures) if i not in equal_to_1
+                ]
 
-            call_args_str = self.generate_args_decl(call_args, arg_types)
+            call_args_str = self.generate_args_decl(
+                call_args, arg_types, arg_signatures
+            )
             kernel_args_var = f"kernel_args_var_{next(self.kernel_callsite_id)}"
             self.writeline(f"void* {kernel_args_var}[] = {{{call_args_str}}};")
 
@@ -442,8 +496,7 @@ class CppWrapperGpu(CppWrapperCpu):
             for arg_type, arg in zip(arg_types, call_args):
                 new_arg = arg
                 if arg_type.endswith("*") and arg != "nullptr":
-                    new_arg = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"auto* {new_arg} = get_data_ptr_wrapper({arg});")
+                    new_arg = f"{arg}.data_ptr()"
                 casted.append(f"({arg_type}){new_arg}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")

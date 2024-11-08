@@ -1,3 +1,4 @@
+#include <c10/util/env.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/cache.h>
 #include <torch/csrc/lazy/core/config.h>
@@ -57,7 +58,7 @@ hash_t OpKind::hash() const {
 }
 
 bool Node::enableDynamicShape() {
-  static bool enabled = std::getenv("LTC_ENABLE_DYNAMIC_SHAPES") != nullptr;
+  static bool enabled = c10::utils::has_env("LTC_ENABLE_DYNAMIC_SHAPES");
   return enabled || FLAGS_ltc_enable_dynamic_shapes;
 }
 
@@ -96,8 +97,6 @@ Node::Node(OpKind op, OpList operands, size_t num_outputs)
 Node::Node(OpKind op, Shape shape, size_t num_outputs) : Node(op, num_outputs) {
   shapes_.push_back(std::move(shape));
 }
-
-Node::~Node() = default;
 
 // Retrieves the full shape of the IR Node.
 c10::ArrayRef<Shape> Node::shapes() const {

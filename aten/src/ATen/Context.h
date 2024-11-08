@@ -11,6 +11,7 @@
 #include <ATen/detail/AcceleratorHooksInterface.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/detail/HIPHooksInterface.h>
+#include <ATen/detail/HPUHooksInterface.h>
 #include <ATen/detail/IPUHooksInterface.h>
 #include <ATen/detail/MAIAHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
@@ -43,19 +44,9 @@ class TORCH_API Context {
 
     if (device_type == at::kCPU) {
       return at::detail::getDefaultCPUGenerator();
-    } else if (device_type == at::kCUDA) {
-      return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
-    } else if (device_type == at::kMPS) {
-      return at::detail::getMPSHooks().getDefaultMPSGenerator();
-    } else if (device_type == at::kXPU) {
-      return at::detail::getXPUHooks().getDefaultXPUGenerator(device.index());
-    } else if (device_type == at::kIPU) {
-      return at::detail::getIPUHooks().getDefaultIPUGenerator(device.index());
-    } else if (device_type == at::kPrivateUse1) {
-      return at::detail::getPrivateUse1Hooks().getDefaultGenerator(
-          device.index());
     } else {
-      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
+      return getAcceleratorHooksInterface(device_type)
+          .getDefaultGenerator(device.index());
     }
   }
 
@@ -76,9 +67,13 @@ class TORCH_API Context {
       return at::detail::getMTIAHooks();
     } else if (device_type == at::kHIP) {
       return at::detail::getHIPHooks();
+    } else if (device_type == at::kHPU) {
+      return at::detail::getHPUHooks();
     } else {
-      AT_ERROR(
-          c10::DeviceTypeName(device_type), " device type not an accelerator.");
+      TORCH_CHECK(
+          false,
+          c10::DeviceTypeName(device_type),
+          " device type not an accelerator.");
     }
   }
 
@@ -149,6 +144,9 @@ class TORCH_API Context {
   static bool hasCuBLASLt() {
     return detail::getCUDAHooks().hasCuBLASLt();
   }
+  static bool hasROCM() {
+    return detail::getCUDAHooks().hasROCM();
+  }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
@@ -170,6 +168,10 @@ class TORCH_API Context {
   static bool hasMAIA() {
     return c10::impl::hasDeviceGuardImpl(c10::DeviceType::MAIA);
   }
+  static bool hasHPU() {
+    return detail::getHPUHooks().hasHPU();
+  }
+
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
   }
@@ -346,18 +348,28 @@ class TORCH_API Context {
 
   // Preserved for BC
   void lazyInitCUDA() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitCUDA is deprecated. Please use lazyInitDevice(at::kCUDA) instead.")
     lazyInitDevice(at::kCUDA);
   }
   void lazyInitHIP() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitHIP is deprecated. Please use lazyInitDevice(at::kHIP) instead.")
     lazyInitDevice(at::kHIP);
   }
   void lazyInitXPU() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitXPU is deprecated. Please use lazyInitDevice(at::kXPU) instead.")
     lazyInitDevice(at::kXPU);
   }
   void lazyInitMTIA() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitMTIA is deprecated. Please use lazyInitDevice(at::kMTIA) instead.")
     lazyInitDevice(at::kMTIA);
   }
   void lazyInitPrivateUse1() {
+    TORCH_WARN_DEPRECATION(
+        "lazyInitPrivateUse1 is deprecated. Please use lazyInitDevice(at::kPrivateUse1) instead.")
     lazyInitDevice(at::kPrivateUse1);
   }
 
@@ -483,6 +495,10 @@ inline bool hasXPU() {
   return globalContext().hasXPU();
 }
 
+inline bool hasHPU() {
+  return globalContext().hasHPU();
+}
+
 // Despite its name, this function returns the number of *CUDA* GPUs.
 inline size_t getNumGPUs() {
   // WARNING: DO NOT ADD LOGIC TO HANDLE OTHER DEVICE TYPES TO THIS
@@ -576,6 +592,10 @@ inline void manual_seed(uint64_t seed) {
 //     NoTF32Guard disable_tf32;
 struct TORCH_API NoTF32Guard {
   NoTF32Guard();
+  NoTF32Guard(NoTF32Guard&& other) = delete;
+  NoTF32Guard(const NoTF32Guard&) = delete;
+  NoTF32Guard& operator=(const NoTF32Guard&) = delete;
+  NoTF32Guard& operator=(NoTF32Guard&&) = delete;
   ~NoTF32Guard();
   static bool should_disable_tf32();
 
@@ -585,6 +605,10 @@ struct TORCH_API NoTF32Guard {
 
 struct TORCH_API ROCmBackwardPassGuard {
   ROCmBackwardPassGuard();
+  ROCmBackwardPassGuard(ROCmBackwardPassGuard&& other) = delete;
+  ROCmBackwardPassGuard(const ROCmBackwardPassGuard&) = delete;
+  ROCmBackwardPassGuard& operator=(const ROCmBackwardPassGuard&) = delete;
+  ROCmBackwardPassGuard& operator=(ROCmBackwardPassGuard&&) = delete;
   ~ROCmBackwardPassGuard();
   static bool is_backward_pass();
 };

@@ -6,10 +6,9 @@
 #include <c10/core/Scalar.h>
 #include <c10/util/irange.h>
 
-#include <sstream>
 #include <type_traits>
 
-namespace at { namespace native { inline namespace CPU_CAPABILITY {
+namespace at::native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -70,7 +69,7 @@ inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
 
 template <typename F>
 inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
-  for (C10_UNUSED const auto j : c10::irange(n)) {
+  for ([[maybe_unused]] const auto j : c10::irange(n)) {
     f();
     data[0] += strides[0];
     data[1] += strides[1];
@@ -115,7 +114,7 @@ inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_
 
 template<typename traits, typename res_t>
 static void set_result(const int index, const res_t result, const TensorIteratorBase &iter, const int num_outputs) {
-  // static_assert(std::is_same<res_t, typename traits::arg2_t>::value, "data types must match");
+  // static_assert(std::is_same_v<res_t, typename traits::arg2_t>, "data types must match");
   if (index < num_outputs) {
     char *out = (char *) iter.data_ptr(index);
     *(res_t *) out = result;
@@ -203,7 +202,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
       typename c_traits::result_type>::value,
     "all accumulate types must match");
   static_assert(
-    std::is_default_constructible<acc_t>::value,
+    std::is_default_constructible_v<acc_t>,
     "the accumulate type must be default-constructible"
   );
   const int num_outputs = iter.noutputs();
@@ -230,7 +229,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
       int max_threads = at::get_num_threads();
       AT_ASSERT(max_threads > 0);
       static_assert(
-        !std::is_same<acc_t, bool>::value,
+        !std::is_same_v<acc_t, bool>,
         "Concurrently modifying different references into std::vector<bool> is UB."
       );
       std::vector<acc_t> buffer((unsigned)max_threads, init);
@@ -308,4 +307,4 @@ void binary_kernel_reduce_lastdim(TensorIteratorBase& iter, reduce_func_t reduce
   sub_iter.for_each(loop, grain_size);
 }
 
-}}}  // namespace at::native::<anonymous>
+}} // namespace at::native::<anonymous>
