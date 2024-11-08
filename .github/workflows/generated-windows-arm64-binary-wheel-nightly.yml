@@ -72,7 +72,7 @@ jobs:
         run: |
           if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
             Write-Host "Git is not installed. Installing Git..."
-            curl -L -o "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe" "https://github.com/git-for-windows/git/releases/download/v2.46.0.windows.1/Git-2.46.0-64-bit.exe"
+            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.46.0.windows.1/Git-2.46.0-64-bit.exe" -OutFile "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe"
             Start-Process -FilePath "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-' -NoNewWindow -Wait
             [System.Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';C:\Program Files\Git\bin', [System.EnvironmentVariableTarget]::Machine)
           } else {
@@ -261,7 +261,7 @@ jobs:
         run: |
           if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
             Write-Host "Git is not installed. Installing Git..."
-            curl -L -o "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe" "https://github.com/git-for-windows/git/releases/download/v2.46.0.windows.1/Git-2.46.0-64-bit.exe"
+            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.46.0.windows.1/Git-2.46.0-64-bit.exe" -OutFile "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe"
             Start-Process -FilePath "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-' -NoNewWindow -Wait
             [System.Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';C:\Program Files\Git\bin', [System.EnvironmentVariableTarget]::Machine)
           } else {
@@ -450,7 +450,7 @@ jobs:
         run: |
           if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
             Write-Host "Git is not installed. Installing Git..."
-            curl -L -o "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe" "https://github.com/git-for-windows/git/releases/download/v2.46.0.windows.1/Git-2.46.0-64-bit.exe"
+            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.46.0.windows.1/Git-2.46.0-64-bit.exe" -OutFile "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe"
             Start-Process -FilePath "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-' -NoNewWindow -Wait
             [System.Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';C:\Program Files\Git\bin', [System.EnvironmentVariableTarget]::Machine)
           } else {
@@ -639,7 +639,7 @@ jobs:
         run: |
           if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
             Write-Host "Git is not installed. Installing Git..."
-            curl -L -o "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe" "https://github.com/git-for-windows/git/releases/download/v2.46.0.windows.1/Git-2.46.0-64-bit.exe"
+            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.46.0.windows.1/Git-2.46.0-64-bit.exe" -OutFile "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe"
             Start-Process -FilePath "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-' -NoNewWindow -Wait
             [System.Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';C:\Program Files\Git\bin', [System.EnvironmentVariableTarget]::Machine)
           } else {
