@@ -56,6 +56,9 @@ def setup_torchbench_cwd():
         "../../torchbenchmark",
         "../../torchbench",
         "../../benchmark",
+        "../../../torchbenchmark",
+        "../../../torchbench",
+        "../../../benchmark",
     ):
         if exists(torchbench_dir):
             break
@@ -135,8 +138,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["device"]["cuda"]
 
     @property
-    def skip_models_for_freezing(self):
-        return self._skip["freezing"]
+    def skip_models_for_freezing_cuda(self):
+        return self._skip["freezing"]["cuda"]
+
+    @property
+    def skip_models_for_freezing_cpu(self):
+        return self._skip["freezing"]["cpu"]
 
     @property
     def slow_models(self):

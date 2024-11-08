@@ -206,6 +206,9 @@ class TORCH_API CppFunction final {
 
   ~CppFunction();
 
+  CppFunction(const CppFunction&) = delete;
+  CppFunction& operator=(const CppFunction&) = delete;
+
   CppFunction(CppFunction&&) noexcept = default;
 
   CppFunction& operator=(CppFunction&&) = default;
@@ -563,6 +566,7 @@ class TORCH_API Library final {
   Library& operator=(const Library&) = delete;
   Library(Library&&) = default;
   Library& operator=(Library&&) = default;
+  ~Library() = default;
 
   // Some notes about the API design here.  We had the following constraints:
   //
@@ -754,13 +758,16 @@ class TORCH_API Library final {
   }
 
   template <typename Func>
+  // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
   Library& impl(detail::SelectiveStr<false>, Func&& /*raw_f*/) & {
     return *this;
   }
   template <typename Dispatch, typename Func>
   Library& impl(
       detail::SelectiveStr<false>,
+      // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       Dispatch&& /*key*/,
+      // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
       Func&& /*raw_f*/) & {
     return *this;
   }

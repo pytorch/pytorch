@@ -112,9 +112,9 @@
 #
 #   - `wrap_opt_if`, is a 2-argument function that accepts a tensor
 #     variable and a boolean condition that dictates whether to save that
-#     variable in a graph. The result of this function is `c10::optional<Tensor>`,
+#     variable in a graph. The result of this function is `std::optional<Tensor>`,
 #     and it is `::std::nullopt` when the condition evalutes to `false`,
-#     otherwise it is the variable wrapped in `c10::optional<Tensor>`.
+#     otherwise it is the variable wrapped in `std::optional<Tensor>`.
 #     For example, wrap_opt_if(var_0, grad_input_mask[1] || grad_input_mask[2])
 #     would mean that `var_0` is saved as long as the second (grad_input_mask[1])
 #     or the third (grad_input_mask[2]) argument requires gradients.
@@ -278,6 +278,7 @@
 
 - name: affine_grid_generator(Tensor theta, SymInt[] size, bool align_corners) -> Tensor
   theta: affine_grid_generator_backward_symint(grad, size, align_corners)
+  result: auto_linear
 
 - name: alias(Tensor(a) self) -> Tensor(a)
   self: grad
@@ -1130,8 +1131,14 @@
   result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.expand_symint(self.sym_sizes()) / self.sym_numel()
+      result: auto_linear
+    AutogradNestedTensor:
+      # TODO: replace this with grad.expand_as(self) / self.sym_numel() when that is supported
+      self: (ones_like(self) * grad) / self.sym_numel()
+      result: auto_linear
 
 - name: mean.dim(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: mean_backward(grad, self.sym_sizes(), dim, self.sym_numel(), keepdim)
@@ -1668,8 +1675,14 @@
   result: auto_element_wise
 
 - name: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand_symint(self.sym_sizes())
-  result: auto_linear
+  dispatch:
+    Default:
+      self: grad.expand_symint(self.sym_sizes())
+      result: auto_linear
+    AutogradNestedTensor:
+      # TODO: replace this with grad.expand_as(self) when that is supported
+      self: ones_like(self) * grad
+      result: auto_linear
 
 - name: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   dispatch:
@@ -1956,18 +1969,6 @@
       self: values_backward(grad, self)
     AutogradNestedTensor:
       self: at::_nested_view_from_buffer(grad.contiguous(), self._nested_tensor_size(), self._nested_tensor_strides(), self._nested_tensor_storage_offsets())
-
-- name: _nested_jagged_to_strided(Tensor(a) self) -> Tensor(a)
-  self: "_nested_view_from_jagged(grad.values().view_as(at::_nested_get_values(self)),
-          at::_nested_get_offsets(self),
-          at::_nested_get_jagged_dummy(self),
-          at::_nested_get_lengths(self),
-          at::_nested_get_ragged_idx(self),
-          at::_nested_get_min_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_min_seqlen(self)) : c10::nullopt,
-          at::_nested_get_max_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_max_seqlen(self)) : c10::nullopt)"
-
-- name: _nested_strided_to_jagged(Tensor(a) self) -> Tensor(a)
-  self: at::_nested_jagged_to_strided(grad)
 
 # Why is _values() not differentiable?
 # See NOTE [ Sparse: autograd and API ]
@@ -2837,8 +2838,13 @@
   cpu_nested_shape_example: non_differentiable
 
 - name: to_padded_tensor(Tensor self, float padding, SymInt[]? output_size=None) -> Tensor
-  self: at::_nested_from_padded(grad, self._nested_tensor_size())
+  self: "self.layout() == c10::kJagged ? at::_nested_from_padded_tensor_symint(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? std::optional<Tensor>(at::_nested_get_min_seqlen(self)) : ::std::nullopt, at::_nested_get_max_seqlen(self).defined() ? std::optional<Tensor>(at::_nested_get_max_seqlen(self)) : ::std::nullopt, std::optional<c10::SymInt>(at::_nested_get_values(self).sym_size(0))) : at::_nested_from_padded(grad, self._nested_tensor_size())"
   padding: non_differentiable
+
+- name: _nested_from_padded_tensor(Tensor padded, Tensor offsets, Tensor dummy, int ragged_idx=1, Tensor? min_seqlen=None, Tensor? max_seqlen=None, SymInt? sum_S=None) -> Tensor
+  padded: grad.to_padded_tensor_symint(0.0, at::OptionalArrayRef<c10::SymInt>(padded.sym_sizes()))
+  offsets: non_differentiable
+  dummy: non_differentiable
 
 - name:  _nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, Tensor offsets) -> Tensor(a)
   self: grad.values()
@@ -2852,11 +2858,12 @@
   dummy: non_differentiable
 
 - name: _nested_get_values(Tensor(a) self) -> Tensor(a)
-  self: "_nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_min_seqlen(self)) : ::std::nullopt, at::_nested_get_max_seqlen(self).defined() ? c10::optional<Tensor>(at::_nested_get_max_seqlen(self)) : ::std::nullopt)"
+  self: "_nested_view_from_jagged(grad, at::_nested_get_offsets(self), at::_nested_get_jagged_dummy(self), at::_nested_get_lengths(self), at::_nested_get_ragged_idx(self), at::_nested_get_min_seqlen(self).defined() ? std::optional<Tensor>(at::_nested_get_min_seqlen(self)) : ::std::nullopt, at::_nested_get_max_seqlen(self).defined() ? std::optional<Tensor>(at::_nested_get_max_seqlen(self)) : ::std::nullopt)"
 
 # Transformer
 - name:  _safe_softmax(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   self: _softmax_backward_data(grad, result, dim, self.scalar_type())
+  result: result * (self_t - safe_logsumexp_jvp(self_p, self_t, {dim}, true))
 
 - name: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> (Tensor output, Tensor log_sumexp, Tensor philox_seed, Tensor philox_offset)
   output_differentiability: [True, False, False, False]
@@ -2882,7 +2889,7 @@
   output_differentiability: [True, False, False, False, False, False, False, False, False]
   query, key, value: _scaled_dot_product_cudnn_attention_backward_symint(grad, query, key, value, output, logsumexp, philox_seed, philox_offset, attn_bias, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p, is_causal, scale)
 
-- name: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- name: _scaled_dot_product_fused_attention_overrideable(Tensor query, Tensor key, Tensor value, Tensor? attn_bias=None, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   output_differentiability: [True, False, False, False, False, False, False, False, False]
   query, key, value, attn_bias: _scaled_dot_product_fused_attention_overrideable_backward_symint(grad, query, key, value, attn_bias, grad_input_mask, output, logsumexp, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p, is_causal, philox_seed, philox_offset, scale)
 

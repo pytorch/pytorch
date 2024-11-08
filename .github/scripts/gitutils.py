@@ -445,7 +445,6 @@ def retries_decorator(
                     print(
                         f'Attempt {idx} of {num_retries} to call {f.__name__} failed with "{e}"'
                     )
-                    pass
             return cast(T, rc)
 
         return wrapper

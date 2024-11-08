@@ -74,8 +74,7 @@ static bool is_empty_tensor(const Tensor& self) {
 }
 
 static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::string op_name, UnaryOpBlock unaryBlock) {
-  TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
-              "MPS support unary op with uint8 natively starting from macOS 13.0");
+  static const bool is_macOS_15_0_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS);
 
   auto output = output_;
   bool needsCopyToOutput = false;
@@ -98,7 +97,7 @@ static void unary_op_noresize(const Tensor& self, const Tensor& output_, std::st
 
     // If self is non-densely mapped in storage, create a dense output-like representation
     at::Tensor self_;
-    if (!is_dense_in_storage(self)) {
+    if (!is_dense_in_storage(self) && !is_macOS_15_0_or_newer) {
       self_ = at::empty_like(output, self.scalar_type());
       mps::mps_copy_(self_, self, false);
     } else {
@@ -150,19 +149,8 @@ MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
     return inputTensor;
   }
 
-  if (!is_macos_13_or_newer()) {
-    MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0 dataType:inputTensor.dataType];
-    MPSGraphTensor* predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
-                                                          secondaryTensor:zeroTensor
-                                                                     name:nil];
-    return [mpsGraph selectWithPredicateTensor:predicateTensor
-                           truePredicateTensor:[mpsGraph ceilWithTensor:inputTensor name:nil]
-                          falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
-                                          name:nil];
-  } else {
-    return [mpsGraph truncateWithTensor:inputTensor name:nil];
-  }
-};
+  return [mpsGraph truncateWithTensor:inputTensor name:nil];
+}
 
 MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
   MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 dataType:inputTensor.dataType];
@@ -237,7 +225,6 @@ CREATE_MPS_STRUCTURED_UNARY_ROUNDING_TORCH_IMPL_FUNC(round_out_mps, round)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(exp2_out_mps, exponentBase2)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(sqrt_out_mps, squareRoot)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(rsqrt_out_mps, reverseSquareRoot)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(neg_out_mps, negative)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log_out_mps, logarithm)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log10_out_mps, logarithmBase10)
@@ -254,6 +241,19 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(cosh_out_mps, cosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
+
+TORCH_IMPL_FUNC(rsqrt_out_mps)(const Tensor& self, const Tensor& output) {
+  mps::unary_op(self, output, "rsqrt_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+#ifdef __MAC_15_0
+    if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
+      return [mpsGraph reciprocalSquareRootWithTensor:inputTensor name:nil];
+    }
+#endif // __MAC_15_0
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
+    return [mpsGraph reverseSquareRootWithTensor:inputTensor name:nil];
+    C10_DIAGNOSTIC_POP()
+  });
+}
 
 Tensor& abs_out_mps(const Tensor& self, Tensor& output) {
   using namespace mps;
@@ -444,17 +444,6 @@ static void cumulative_op_impl(const Tensor& self,
               "(original dim is ",
               dim,
               ")");
-  if (!is_macos_13_or_newer()) {
-    TORCH_WARN_ONCE(op_name, " supported by MPS on MacOS 13+, please upgrade");
-    Tensor cpu_result;
-    if (cumulativeOpType == MPSCumulativeOpType::CUMSUM) {
-      cpu_result = self.to(at::Device(kCPU)).cumsum(dim, dtype);
-    } else if (cumulativeOpType == MPSCumulativeOpType::CUMPROD) {
-      cpu_result = self.to(at::Device(kCPU)).cumprod(dim, dtype);
-    }
-    at::_copy_from_and_resize(cpu_result, result);
-    return;
-  }
   TORCH_CHECK(!self.is_complex(), "cumulative ops are not yet supported for complex");
   auto input = dtype.has_value() ? self.to(dtype.value()) : self;
 

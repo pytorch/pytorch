@@ -137,6 +137,10 @@ class GeneratedFileCleaner:
                 os.rmdir(d)
 
 
+# Follow UNIX convention for paths to use '/' instead of '\\' on Windows
+def _to_unix_path(path: str) -> str:
+    return path.replace(os.sep, '/')
+
 def match_extensions(filename: str, extensions: Iterable) -> bool:
     """Helper method to see if filename ends with certain extension"""
     return any(filename.endswith(e) for e in extensions)
@@ -173,8 +177,8 @@ def matched_files_iter(
                 dirs.remove("third_party")
                 dirs.append("third_party/nvfuser")
         for filename in filenames:
-            filepath = os.path.join(abs_dirpath, filename)
-            rel_filepath = os.path.join(rel_dirpath, filename)
+            filepath = _to_unix_path(os.path.join(abs_dirpath, filename))
+            rel_filepath = _to_unix_path(os.path.join(rel_dirpath, filename))
             # We respect extensions, UNLESS you wrote the entire
             # filename verbatim, in which case we always accept it
             if (
@@ -821,7 +825,7 @@ def preprocessor(
         hipify_result.current_state = CurrentState.DONE
         return hipify_result
 
-    rel_filepath = os.path.relpath(filepath, output_directory)
+    rel_filepath = _to_unix_path(os.path.relpath(filepath, output_directory))
 
     with open(fin_path, encoding='utf-8') as fin:
         if fin.readline() == HIPIFY_C_BREADCRUMB:
@@ -864,7 +868,7 @@ def preprocessor(
     def mk_repl(templ, include_current_dir=True):
         def repl(m):
             f = m.group(1)
-            dirpath, filename = os.path.split(f)
+            filename = os.path.basename(f)
             if (
                 f.startswith(("ATen/cuda",
                               "ATen/native/cuda",
@@ -1112,6 +1116,9 @@ def hipify(
     # Copy from project directory to output directory if not done already.
     if not os.path.exists(output_directory):
         shutil.copytree(project_directory, output_directory)
+
+    includes = list(map(_to_unix_path, includes))
+    ignores = list(map(_to_unix_path, ignores))
 
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,

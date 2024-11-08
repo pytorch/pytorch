@@ -231,6 +231,7 @@ Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor
     }
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor FunctionalInverses::split_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t mutated_view_idx, c10::SymInt split_size, int64_t dim) {
     // It would be nice if this logic could be re-used from autograd's split_backward(), but I don't think it can.
     // For functionalization, we have only have one of the tensors from the TensorList outputed by split(), and we want to layer i
@@ -255,7 +256,7 @@ Tensor FunctionalInverses::split_with_sizes_inverse(const Tensor& base, const Te
     dim = at::maybe_wrap_dim(dim, base.dim());
     auto dim_size = base.sym_size(dim);
     c10::SymInt start = 0;
-    for (auto i = 0; i < mutated_view_idx; ++i) {
+    for (int64_t i = 0; i < mutated_view_idx; ++i) {
         start += split_sizes[i];
     }
     auto end = start + split_sizes[mutated_view_idx];
@@ -328,28 +329,6 @@ Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const 
     return nt;
   } else {
     return nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
-  }
-}
-
-Tensor FunctionalInverses::_nested_strided_to_jagged_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
-  // Mutated view is a jagged NT
-  auto cpp_nt = at::_nested_jagged_to_strided(mutated_view);
-
-  if (inverse_return_mode != InverseReturnMode::NeverView) {
-    return cpp_nt;
-  } else {
-    return cpp_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
-  }
-}
-
-Tensor FunctionalInverses::_nested_jagged_to_strided_inverse(const at::Tensor & base, const at::Tensor & mutated_view, at::functionalization::InverseReturnMode inverse_return_mode) {
-  // Mutated view is a strided NT
-  auto python_nt = at::_nested_strided_to_jagged(mutated_view);
-
-  if (inverse_return_mode != InverseReturnMode::NeverView) {
-    return python_nt;
-  } else {
-    return python_nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
   }
 }
 
@@ -474,6 +453,7 @@ Tensor FunctionalInverses::chunk_inverse(const at::Tensor & base, const at::Tens
     return split_with_sizes_inverse(base, mutated_view, inverse_return_mode, mutated_view_idx, split_sizes, dim);
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor FunctionalInverses::narrow_inverse(const at::Tensor & base, const at::Tensor & mutated_view, InverseReturnMode inverse_return_mode, int dim, c10::SymInt start, c10::SymInt length) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.

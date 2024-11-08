@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <c10/util/irange.h>
@@ -340,8 +341,7 @@ struct CodeImpl {
       int reg = registerFor(input);
       bool moved = input->uses().size() == ++use_count_[input];
 
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      OpCode op;
+      OpCode op{};
       if (input->node()->kind() == prim::Constant) {
         op = LOADC;
       } else if (moved) {
@@ -946,7 +946,11 @@ struct MobileCodeImpl : CodeImpl {
       bool support_default_args_before_out,
       bool emit_promoted_ops,
       size_t remaining_bailout_depth)
-      : CodeImpl(graph, function_name, remaining_bailout_depth, false),
+      : CodeImpl(
+            graph,
+            std::move(function_name),
+            remaining_bailout_depth,
+            false),
         emit_default_input_instructions_(emit_default_input_instructions),
         support_default_args_before_out_(support_default_args_before_out),
         emit_promoted_ops_(emit_promoted_ops) {

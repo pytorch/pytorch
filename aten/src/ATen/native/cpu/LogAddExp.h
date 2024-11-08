@@ -3,7 +3,7 @@
 #include <c10/util/complex.h>
 #include <ATen/NumericUtils.h>
 
-namespace at { namespace native {
+namespace at::native {
 inline namespace CPU_CAPABILITY {
 
 // custom min and max to be used in logcumsumexp for complex arguments
@@ -58,4 +58,4 @@ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, cons
 }
 
 } // end namespace
-}} //end at::native
+} //end at::native

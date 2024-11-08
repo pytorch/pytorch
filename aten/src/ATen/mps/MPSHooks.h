@@ -12,14 +12,15 @@ namespace at::mps {
 // The real implementation of MPSHooksInterface
 struct MPSHooks : public at::MPSHooksInterface {
   MPSHooks(at::MPSHooksArgs) {}
-  void initMPS() const override;
+  void init() const override;
 
   // MPSDevice interface
   bool hasMPS() const override;
   bool isOnMacOSorNewer(unsigned major, unsigned minor) const override;
 
   // MPSGeneratorImpl interface
-  const Generator& getDefaultMPSGenerator() const override;
+  const Generator& getDefaultGenerator(
+      DeviceIndex device_index = -1) const override;
 
   // MPSStream interface
   void deviceSynchronize() const override;

@@ -1,3 +1,6 @@
+#include <ATen/PythonTorchFunctionTLS.h>
+#include <c10/core/SafePyObject.h>
+#include <c10/core/impl/PyInterpreter.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -14,6 +17,8 @@
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
 
+#include <torch/csrc/dynamo/debug_macros.h>
+
 #ifdef USE_CUDA
 #include <ATen/cuda/EmptyTensor.h>
 #endif
@@ -23,6 +28,7 @@
 #endif
 
 #include <sstream>
+#include <tuple>
 #include <utility>
 
 // For TupleIteratorGetItemAccessor, we need a fast way to retrieve the
@@ -42,7 +48,8 @@
 
 // Manually create _PyTupleIterObject struct
 typedef struct {
-  PyObject_HEAD Py_ssize_t it_index;
+  PyObject_HEAD
+  Py_ssize_t it_index;
   PyTupleObject* it_seq; /* Set to NULL when iterator is exhausted */
 } _PyTupleIterObject;
 
@@ -495,7 +502,8 @@ static PyMethodDef TensorGuards_methods[] = {
     {nullptr} /* Sentinel */
 };
 
-static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)};
+static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
+};
 
 // TODO (janimesh) - Remove the PyObject_HEAD part when C++ guard manager is
 // merged.
@@ -506,7 +514,12 @@ struct GlobalStateGuard {
   inline void init() {
     auto& ctx = at::globalContext();
     _grad_mode = at::GradMode::is_enabled();
+    // The below two flags disambiguate
+    // if torch function disabled state is
+    // 1) enabled, 2) all disabled, 3) subclasses disabled
+    // we guard on the stack separately
     _torch_function = torch::torch_function_enabled();
+    _torch_function_all_disabled = at::impl::torch_function_all_disabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
     _allow_tf32 = ctx.allowTF32CuBLAS();
@@ -520,6 +533,8 @@ struct GlobalStateGuard {
     auto& ctx = at::globalContext();
     return (_grad_mode == at::GradMode::is_enabled() &&
             _torch_function == torch::torch_function_enabled() &&
+            _torch_function_all_disabled ==
+                at::impl::torch_function_all_disabled() &&
             _deterministic_algorithms == ctx.deterministicAlgorithms() &&
             _deterministic_algorithms_warn_only ==
                 ctx.deterministicAlgorithmsWarnOnly() &&
@@ -557,6 +572,7 @@ struct GlobalStateGuard {
 
   bool _grad_mode;
   bool _torch_function;
+  bool _torch_function_all_disabled;
   bool _deterministic_algorithms;
   bool _deterministic_algorithms_warn_only;
   bool _allow_tf32;
@@ -604,7 +620,8 @@ static PyMethodDef GlobalStateGuard_methods[] = {
      METH_NOARGS,
      "Return string reason for guard check failing"},
     {nullptr}};
-static PyTypeObject GlobalStateGuardType = {PyVarObject_HEAD_INIT(nullptr, 0)};
+static PyTypeObject GlobalStateGuardType = { PyVarObject_HEAD_INIT(nullptr, 0)
+};
 
 static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(type(obj)) == expected`
@@ -640,7 +657,7 @@ static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
 
 static std::unordered_map<PyObject*, uint64_t> dict_version_map;
 static int dict_version_watcher_id;
-static uint64_t global_dict_version_id = 0;
+static uint64_t global_dict_version_id = 1;
 static int dict_version_watch_callback(
     PyDict_WatchEvent event,
     PyObject* dict,
@@ -869,6 +886,11 @@ std::string get_exception_message() {
 }
 
 bool is_immutable_object(py::handle example_value) {
+  static py::object config_module = py::module_::import("torch._dynamo.config");
+  bool is_tensor_immutable =
+      config_module.attr("skip_tensor_guards_with_matching_dict_tags")
+          .cast<bool>();
+
   if (PyTuple_Check(example_value.ptr())) {
     // Check that each element is immutable
     for (Py_ssize_t i = 0; i < PyTuple_Size(example_value.ptr()); ++i) {
@@ -879,10 +901,11 @@ bool is_immutable_object(py::handle example_value) {
     }
     return true;
   }
+
   return PyLong_Check(example_value.ptr()) ||
       PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
-      THPVariable_Check(example_value.ptr());
+      (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
 }
 
 bool is_parameter(py::handle tensor) {
@@ -1097,7 +1120,7 @@ class EQUALS_MATCH : public LeafGuard {
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // Fast path - pointer equality check. Pointer equality checks are ok
     // because objects guarded with EQUALS_MATCH are immutable.
-    if (value != _value.ptr() && value != _first_passing_value.ptr()) {
+    if (value != _value.ptr()) {
       // Check type
       if (Py_TYPE(value) != _value_type) {
         return false;
@@ -1107,11 +1130,6 @@ class EQUALS_MATCH : public LeafGuard {
       if (result == -1) {
         PyErr_Clear();
         return false;
-      }
-
-      // Cache the value here.
-      if (!_first_passing_value && result) {
-        _first_passing_value = py::cast<py::object>(value);
       }
       return result;
     }
@@ -1124,11 +1142,6 @@ class EQUALS_MATCH : public LeafGuard {
   // selected objects which do not have high memory footprint, so holding on to
   // these objects is ok.
   py::object _value;
-
-  // Cache the first value whose pointer is not equal to value.ptr(). This is
-  // useful in nn module guards where getattr name is a string, which is same as
-  // a key in the __dict__ but the pointer is different.
-  py::object _first_passing_value;
 
   // Type of the value
   PyTypeObject* _value_type;
@@ -1461,8 +1474,8 @@ class DYNAMIC_INDICES : public LeafGuard {
     }
 
     static PyObject* issubset_str = PyUnicode_InternFromString("issubset");
-    PyObject* call_result = PyObject_CallMethodOneArg(
-        indices, issubset_str, _dynamic_indices.ptr()); // new ref
+    PyObject* call_result = PyObject_CallMethodObjArgs(
+        indices, issubset_str, _dynamic_indices.ptr(), nullptr); // new ref
     bool result = PyObject_IsTrue(call_result);
     Py_DECREF(call_result);
     Py_DECREF(indices);
@@ -1688,6 +1701,15 @@ class GuardManager {
   // guards and does not change the fail count. For simplicity, we duplicate
   // the code here.
   virtual bool check_nopybind(PyObject* value) { // borrowed ref
+
+    if (!this->check_leaf_guards_nopybind(value)) {
+      return false;
+    }
+
+    return this->check_accessors_nopybind(value);
+  }
+
+  bool check_leaf_guards_nopybind(PyObject* value) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       if (!guard->check_nopybind(value)) { // early exit
@@ -1697,6 +1719,10 @@ class GuardManager {
       }
     }
 
+    return true;
+  }
+
+  bool check_accessors_nopybind(PyObject* value) {
     bool matches_dict_tag = false;
     uint64_t new_tag = 0;
     if (_is_dict) {
@@ -1749,6 +1775,7 @@ class GuardManager {
       // swapping).
       _dict_tag = new_tag;
     }
+
     return result;
   }
 
@@ -1757,6 +1784,19 @@ class GuardManager {
   virtual GuardDebugInfo check_verbose_nopybind(
       PyObject* value) { // borrowed ref
     int num_guards_executed = 0;
+
+    const GuardDebugInfo& debug_info =
+        check_leaf_guards_verbose_nopybind(value, num_guards_executed);
+    if (!debug_info.result) {
+      return debug_info;
+    }
+
+    return check_accessors_verbose_nopybind(value, num_guards_executed);
+  }
+
+  GuardDebugInfo check_leaf_guards_verbose_nopybind(
+      PyObject* value,
+      int& num_guards_executed) {
     // Iterate over leaf guards
     for (const auto& guard : _leaf_guards) {
       const GuardDebugInfo& debug_info = guard->check_verbose_nopybind(value);
@@ -1767,6 +1807,12 @@ class GuardManager {
       }
     }
 
+    return GuardDebugInfo(true, num_guards_executed);
+  }
+
+  GuardDebugInfo check_accessors_verbose_nopybind(
+      PyObject* value,
+      int& num_guards_executed) {
     // Iterate over accessors
     for (const auto& accessor : _accessors) {
       const GuardDebugInfo& debug_info =
@@ -1916,7 +1962,22 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    if (!GuardManager::check_nopybind(value)) {
+    if (!GuardManager::check_leaf_guards_nopybind(value)) {
+      _reset_relational_guard_state();
+      return false;
+    }
+
+    // Run accessor guards without TorchFunction enabled
+    // Dynamo should only be adding guards on values without
+    // torch function at this point, because if there
+    // was a torch function, we should've traced through it
+    const at::impl::TorchFunctionDisabledState old_state =
+        at::impl::PythonTorchFunctionTLS::get_disabled_state();
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+
+    if (!GuardManager::check_accessors_nopybind(value)) {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
       _reset_relational_guard_state();
       return false;
     }
@@ -1924,10 +1985,13 @@ class RootGuardManager : public GuardManager {
     // Iterate over epilogue leaf guards.
     for (const auto& guard : _epilogue_lambda_guards) {
       if (!guard->check_nopybind(value)) { // early exit
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return false;
       }
     }
+
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return true;
   }
@@ -1948,13 +2012,33 @@ class RootGuardManager : public GuardManager {
       _local_state = state;
     }
 
-    GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
-    if (!debug_info.result) {
+    int num_guards_executed = 0;
+
+    // Run leaf guards
+    // This includes the GlobalStateGuard and the Torch Function Mode stack
+    // guard, which require Torch Function to be in its unmodified state
+    const GuardDebugInfo& debug_info_leaf =
+        GuardManager::check_leaf_guards_verbose_nopybind(
+            value, num_guards_executed);
+
+    if (!debug_info_leaf.result) {
       _reset_relational_guard_state();
-      return debug_info;
+      return debug_info_leaf;
     }
 
-    int num_guards_executed = debug_info.num_guards_executed;
+    const at::impl::TorchFunctionDisabledState old_state =
+        at::impl::PythonTorchFunctionTLS::get_disabled_state();
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ALL_DISABLED);
+    const GuardDebugInfo& debug_info_accessors =
+        GuardManager::check_accessors_verbose_nopybind(
+            value, num_guards_executed);
+
+    if (!debug_info_accessors.result) {
+      at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
+      _reset_relational_guard_state();
+      return debug_info_accessors;
+    }
 
     // Iterate over epilogue leaf guards
     for (const auto& guard : _epilogue_lambda_guards) {
@@ -1962,11 +2046,13 @@ class RootGuardManager : public GuardManager {
           guard->check_verbose_nopybind(value);
       num_guards_executed++;
       if (!tmp_debug_info.result) {
+        at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
             false, tmp_debug_info.verbose_code_parts, num_guards_executed);
       }
     }
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
     _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
@@ -2460,6 +2546,26 @@ std::unique_ptr<GuardManager> make_guard_manager(
     std::string source,
     py::handle example_value,
     py::handle guard_manager_enum) {
+#if IS_PYBIND_2_13_PLUS
+  using fourobjects =
+      std::tuple<py::object, py::object, py::object, py::object>;
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<fourobjects>
+      storage;
+
+  auto& [guard_manager_enum_class, base_guard_manager_enum, dict_guard_manager_enum, dict_subclass_guard_manager_enum] =
+      storage
+          .call_once_and_store_result([]() -> fourobjects {
+            py::object guard_manager_enum_class =
+                py::module_::import("torch._dynamo.guards")
+                    .attr("GuardManagerType");
+            return {
+                guard_manager_enum_class,
+                guard_manager_enum_class.attr("GUARD_MANAGER"),
+                guard_manager_enum_class.attr("DICT_GUARD_MANAGER"),
+                guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER")};
+          })
+          .get_stored();
+#else
   static py::object guard_manager_enum_class =
       py::module_::import("torch._dynamo.guards").attr("GuardManagerType");
   static py::object base_guard_manager_enum =
@@ -2468,6 +2574,7 @@ std::unique_ptr<GuardManager> make_guard_manager(
       guard_manager_enum_class.attr("DICT_GUARD_MANAGER");
   static py::object dict_subclass_guard_manager_enum =
       guard_manager_enum_class.attr("DICT_SUBCLASS_GUARD_MANAGER");
+#endif
   if (py::isinstance<py::dict>(example_value)) {
     // The purpose of having both DictGuardManager and DictSubclassGuardManager
     // is to handle the variability in how dictionaries and their subclasses
@@ -2509,6 +2616,46 @@ std::unique_ptr<GuardManager> make_guard_manager(
   }
   return std::make_unique<GuardManager>(root, std::move(source));
 }
+
+class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
+ public:
+  TORCH_FUNCTION_MODE_STACK(
+      const py::list& initial_stack,
+      py::object verbose_code_parts)
+      : LeafGuard(std::move(verbose_code_parts)), _ref_stack() {
+    Py_ssize_t len = PyList_Size(initial_stack.ptr());
+    for (Py_ssize_t idx = 0; idx < len; idx++) {
+      PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
+      auto type = Py_TYPE(mode);
+      this->_ref_stack.push_back(type);
+    }
+  }
+
+  bool check_nopybind(PyObject* value) override {
+    // Ignore value arg, only used to satisfy the interface
+    const size_t len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
+    const size_t ref_stack_size = this->_ref_stack.size();
+
+    if (len != ref_stack_size) {
+      return false;
+    }
+
+    for (int64_t idx = 0; (size_t)idx < len; idx++) {
+      std::shared_ptr<c10::SafePyObject> mode =
+          at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
+
+      PyTypeObject* mode_type = Py_TYPE(mode->ptr(getPyInterpreter()));
+      if (mode_type != _ref_stack.at(idx)) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+ private:
+  std::vector<PyTypeObject*> _ref_stack;
+};
 
 class TENSOR_MATCH : public LeafGuard {
  public:
@@ -2818,7 +2965,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "DictGetItemGuardAccessor(" + py::str(_key).cast<std::string>() +
+    return "DictGetItemGuardAccessor(" + py::repr(_key).cast<std::string>() +
         ")";
   }
 
@@ -3376,6 +3523,69 @@ class WeakRefCallGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Implements function call no args - e.g, torch.cuda.current_device()
+ */
+class CallFunctionNoArgsGuardAccessor : public GuardAccessor {
+ public:
+  CallFunctionNoArgsGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value,
+      py::handle guard_manager_enum)
+      : GuardAccessor(
+            root,
+            std::move(name),
+            std::move(source),
+            example_value,
+            guard_manager_enum) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
+      override { // borrowed ref
+    if (!PyCallable_Check(obj)) {
+      return false;
+    }
+
+    PyObject* x = PyObject_CallNoArgs(obj);
+    if (x == nullptr) {
+      // Call failed, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+
+    bool result = _guard_manager->check_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    if (!PyCallable_Check(obj)) {
+      return GuardDebugInfo(
+          false, std::string("Not a callable obj ") + get_source(), 0);
+    }
+
+    PyObject* x = PyObject_CallNoArgs(obj);
+    if (x == nullptr) {
+      // Call failed, clear the exception and return debug info.
+      std::string exc_message = get_exception_message();
+      PyErr_Clear();
+      return GuardDebugInfo(false, exc_message, 0);
+    }
+
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    Py_DECREF(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "CallFunctionNoArgsGuardAccessor()";
+  }
+};
+
+/**
  * Similar to PythonLambdaLeafGuard, this class is a way to allow developers to
  * supply accessor as a python function. This is useful for from_numpy source.
  */
@@ -3523,6 +3733,10 @@ PyObject* torch_c_dynamo_guards_init() {
   if (m == nullptr)
     return nullptr;
 
+#ifdef Py_GIL_DISABLED
+  PyUnstable_Module_SetGIL(m, Py_MOD_GIL_NOT_USED);
+#endif
+
   Py_INCREF(&TensorGuardsType);
   if (PyModule_AddObject(m, "TensorGuards", (PyObject*)&TensorGuardsType) < 0) {
     Py_DECREF(&TensorGuardsType);
@@ -3604,6 +3818,13 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(py::init<py::list>())
       .def("check_verbose", &GLOBAL_STATE::check_verbose)
       .def("__call__", &GLOBAL_STATE::check);
+  py::class_<
+      TORCH_FUNCTION_MODE_STACK,
+      LeafGuard,
+      std::shared_ptr<TORCH_FUNCTION_MODE_STACK>>(
+      py_m, "TORCH_FUNCTION_MODE_STACK")
+      .def(py::init<py::list, py::list>())
+      .def("__call__", &TORCH_FUNCTION_MODE_STACK::check);
   py::class_<DATA_PTR_MATCH, LeafGuard, std::shared_ptr<DATA_PTR_MATCH>>(
       py_m, "DATA_PTR_MATCH")
       .def(py::init<py::object, py::list>())
@@ -3711,6 +3932,12 @@ PyObject* torch_c_dynamo_guards_init() {
       GuardAccessor,
       std::unique_ptr<WeakRefCallGuardAccessor>>(
       py_m, "WeakRefCallGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      CallFunctionNoArgsGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<CallFunctionNoArgsGuardAccessor>>(
+      py_m, "CallFunctionNoArgsGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
       TupleIteratorGetItemAccessor,
@@ -3828,6 +4055,14 @@ PyObject* torch_c_dynamo_guards_init() {
           [](GuardManager& self, py::object verbose_code_parts) -> void {
             self.add_leaf_guard(
                 std::make_shared<GLOBAL_STATE>(std::move(verbose_code_parts)));
+          })
+      .def(
+          "add_torch_function_mode_stack_guard",
+          [](GuardManager& self,
+             const py::list& initial_stack,
+             py::object verbose_code_parts) -> void {
+            self.add_leaf_guard(std::make_shared<TORCH_FUNCTION_MODE_STACK>(
+                initial_stack, std::move(verbose_code_parts)));
           })
       .def(
           "add_data_ptr_guard",
@@ -4011,6 +4246,26 @@ PyObject* torch_c_dynamo_guards_init() {
             // A unique key is used to save as the accessor key.
             py::str unique_key("__weakref_call_accessor__");
             return self.get_child_manager<WeakRefCallGuardAccessor>(
+                std::move(unique_key),
+                std::move(source),
+                example_value,
+                guard_manager_enum);
+          },
+          py::arg("source"),
+          py::arg("example_value"),
+          py::arg("guard_manager_enum"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "call_function_no_args_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value,
+             py::handle guard_manager_enum) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__call_function_no_args_accessor__");
+            return self.get_child_manager<CallFunctionNoArgsGuardAccessor>(
                 std::move(unique_key),
                 std::move(source),
                 example_value,

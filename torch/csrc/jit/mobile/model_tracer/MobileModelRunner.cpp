@@ -1,9 +1,7 @@
 #include <torch/csrc/jit/mobile/model_tracer/MobileModelRunner.h>
 #include <torch/csrc/jit/mobile/model_tracer/TensorUtils.h>
 
-namespace torch {
-namespace jit {
-namespace mobile {
+namespace torch::jit::mobile {
 
 std::vector<std::vector<at::IValue>> MobileModelRunner::
     ivalue_to_bundled_inputs(const c10::IValue& bundled_inputs) {
@@ -53,8 +51,8 @@ std::unordered_map<std::string, std::string> MobileModelRunner::
 
   std::unordered_map<std::string, std::string> ret;
   for (auto& input : all_inputs) {
-    at::IValue function_name = input.key();
-    at::IValue nested_dict = input.value();
+    const at::IValue& function_name = input.key();
+    const at::IValue& nested_dict = input.value();
     CAFFE_ENFORCE(
         function_name.isString(),
         "Expected function with inputs to be a string ",
@@ -74,8 +72,8 @@ std::unordered_map<std::string, std::string> MobileModelRunner::
     std::unordered_map<std::string, std::vector<std::string>>
         function_and_info_dict;
     for (auto& entry : function_and_info_ival_dict) {
-      at::IValue key = entry.key();
-      at::IValue value = entry.value();
+      const at::IValue& key = entry.key();
+      const at::IValue& value = entry.value();
       CAFFE_ENFORCE(
           key.isString(),
           "Expected extra information key to be a string ",
@@ -232,6 +230,4 @@ void MobileModelRunner::for_each_tensor_in_bundled_inputs(
     for_each_tensor_in_ivalue(iv, func);
   }
 }
-} // namespace mobile
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::mobile

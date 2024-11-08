@@ -12,6 +12,7 @@ from torch.export.graph_signature import (
     CustomObjArgument,
     InputKind,
     SymIntArgument,
+    SymBoolArgument,
     TensorArgument,
     TokenArgument,
 )
@@ -134,6 +135,7 @@ class Verifier(metaclass=_VerifierMeta):
             math.ceil,
             math.floor,
             math.trunc,
+            round,
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
@@ -149,11 +151,11 @@ class Verifier(metaclass=_VerifierMeta):
         """
         Additional checks that are specific to some dialects.
         """
-        pass
 
     @final
     def check(self, ep: "ExportedProgram") -> None:
         self._check_graph_module(ep.graph_module)
+        _verify_exported_program_module_call_graph(ep)
         _verify_exported_program_signature(ep)
 
     @final
@@ -188,6 +190,9 @@ class Verifier(metaclass=_VerifierMeta):
                 # Predispatch export is able to contain autograd ops.
                 # These will be modeled as HOO later
                 torch._C._set_grad_enabled,
+                torch.amp.autocast_mode._enter_autocast,
+                torch.amp.autocast_mode._exit_autocast,
+                torch.fx.experimental.symbolic_shapes.cast_symbool_to_symint_guardless,
             )
 
             if not isinstance(op, _allowed_op_types()):
@@ -272,6 +277,25 @@ class TrainingIRVerifier(Verifier):
     dialect = "TRAINING"
 
 
+def _verify_exported_program_module_call_graph(exported_program) -> None:
+    module_call_graph = exported_program.module_call_graph
+    nodes = {
+        node.name for node in exported_program.graph.nodes
+    }
+    for entry in module_call_graph:
+        if entry.signature is not None:
+            for arg in entry.signature.inputs:
+                if arg.name and arg.name not in nodes:
+                    raise SpecViolationError(
+                        f"Input {arg.name} does not exist in the graph."
+                    )
+            for arg in entry.signature.outputs:
+                if arg.name and arg.name not in nodes:
+                    raise SpecViolationError(
+                        f"Output {arg.name} does not exist in the graph."
+                    )
+
+
 def _verify_exported_program_signature(exported_program) -> None:
     # Check ExportedProgram signature matches
     gs = exported_program.graph_signature
@@ -282,11 +306,11 @@ def _verify_exported_program_signature(exported_program) -> None:
     if len(input_node_names) != len(gs.input_specs):
         raise SpecViolationError(
             f"Number of graph inputs ({len(input_node_names)}) "
-            f"does not match number of inputs in the graph signature ({len(gs.user_inputs)})"
+            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})"
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):
-        if isinstance(input_spec.arg, (TensorArgument, SymIntArgument)):
+        if isinstance(input_spec.arg, (TensorArgument, SymIntArgument, SymBoolArgument)):
             if input_spec.arg.name != node:
                 raise SpecViolationError(
                     f"Input spec name {input_spec.arg.name} does not match node name {node}"

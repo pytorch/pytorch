@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from time import perf_counter_ns
@@ -209,6 +210,7 @@ class profile:
         use_cpu=True,
         experimental_config=None,
         acc_events=False,
+        custom_trace_id_callback=None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
@@ -224,8 +226,11 @@ class profile:
             self.use_device: Optional[str] = "cuda"
         else:
             self.use_device = use_device
-        # TODO Consider changing function_events into data structure with size cap
-        self.function_events: Optional[EventList] = None
+        # TODO Consider changing _function_events into data structure with size cap
+        self._function_events: Optional[EventList] = None
+        self._old_function_events: Optional[EventList] = None
+        # Function event processing is done lazily
+        self._needs_processing = False
         self.entered = False
         self.record_shapes = record_shapes
         self.with_flops = with_flops
@@ -242,7 +247,8 @@ class profile:
         self.profiling_start_time_ns = 0
         self.profiling_end_time_ns = 0
         self._stats = _ProfilerStats()
-
+        self.custom_trace_id_callback = custom_trace_id_callback
+        self.trace_id = ""
         if not self.use_cpu:
             assert (
                 use_kineto
@@ -302,7 +308,22 @@ class profile:
             len(self.kineto_activities) > 0
         ), "No activities specified for the profiler"
 
-    def config(self):
+    def default_trace_id(self):
+        # Generate a UUID
+        uuid_raw = uuid.uuid4()
+
+        return f"{uuid_raw.int:032X}"
+
+    def create_trace_id(self):
+        if self.custom_trace_id_callback:
+            return self.custom_trace_id_callback()
+        return self.default_trace_id()
+
+    def config(self, create_trace_id=False):
+        # only need to generate new trace id upon prepare trace not start trace
+        if create_trace_id:
+            trace_id = self.create_trace_id()
+            self.trace_id = trace_id
         return ProfilerConfig(
             self.profiler_kind,
             self.record_shapes,
@@ -311,6 +332,7 @@ class profile:
             self.with_flops,
             self.with_modules,
             self.experimental_config,
+            self.trace_id,
         )
 
     def __enter__(self):
@@ -325,7 +347,7 @@ class profile:
     def _prepare_trace(self):
         self.entered = True
         t0 = perf_counter_ns()
-        _prepare_profiler(self.config(), self.kineto_activities)
+        _prepare_profiler(self.config(create_trace_id=True), self.kineto_activities)
         t1 = perf_counter_ns()
         self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
 
@@ -333,7 +355,7 @@ class profile:
         self.entered = True
         _run_on_profiler_start()
         t0 = perf_counter_ns()
-        _enable_profiler(self.config(), self.kineto_activities)
+        _enable_profiler(self.config(create_trace_id=False), self.kineto_activities)
         t1 = perf_counter_ns()
         self._stats.profiler_enable_call_duration_us = int((t1 - t0) / 1000)
         self.profiling_start_time_ns = t1
@@ -346,9 +368,10 @@ class profile:
             if hasattr(device_module, "synchronize"):
                 device_module.synchronize()
 
-        old_function_events: Optional[EventList] = None
-        if self.function_events and self.acc_events:
-            old_function_events = self.function_events
+        if self._function_events and self.acc_events:
+            self._old_function_events = self._function_events
+        self._function_events = None
+        self._needs_processing = True
 
         t0 = perf_counter_ns()
 
@@ -358,45 +381,69 @@ class profile:
         self.profiling_end_time_ns = t0
 
         _run_on_profiler_stop()
+
+        self._stats.profiling_window_duration_sec = (
+            (self.profiling_end_time_ns - self.profiling_start_time_ns) * 1.0 / 1e9
+        )
+
+        # If we plan to accumulate events we should post process the function events
+        # right away to retain the state across mulitple start/stop calls
+        if self.acc_events:
+            self._ensure_function_events()
+        return False
+
+    def __repr__(self):
+        if self._needs_processing:
+            self._ensure_function_events()
+        if self._function_events is None:
+            return "<unfinished torch.autograd.profile>"
+        return repr(self._function_events)
+
+    def __str__(self):
+        if self._needs_processing:
+            self._ensure_function_events()
+        if self._function_events is None:
+            return "<unfinished torch.autograd.profile>"
+        return str(self._function_events)
+
+    def _ensure_function_events(self):
+        """Process function events lazily if required"""
+        if self._function_events is not None:
+            return
+        self._needs_processing = False
+
         t0 = perf_counter_ns()
-        parsed_results = self._parse_kineto_results(self.kineto_results)
+        parsed_results = []
+        if self.kineto_results:
+            parsed_results = self._parse_kineto_results(self.kineto_results)
         t1 = perf_counter_ns()
         self._stats.parse_kineto_call_duration_us = int((t1 - t0) / 1000)
 
-        self.function_events = EventList(
+        self._function_events = EventList(
             parsed_results,
             use_device=self.use_device,
             profile_memory=self.profile_memory,
             with_flops=self.with_flops,
         )
         t0 = perf_counter_ns()
-        self.function_events._build_tree()
+        self._function_events._build_tree()
         t1 = perf_counter_ns()
         self._stats.function_events_build_tree_call_duration_us = int((t1 - t0) / 1000)
+        self._stats.number_of_events = len(self._function_events)
 
-        self._stats.number_of_events = len(self.function_events)
-        self._stats.profiling_window_duration_sec = (
-            (self.profiling_end_time_ns - self.profiling_start_time_ns) * 1.0 / 1e9
-        )
+        if self._old_function_events and self.acc_events:
+            for evt in self._old_function_events:
+                self._function_events.append(evt)
+            self._old_function_events = None
 
-        if old_function_events:
-            for evt in old_function_events:
-                self.function_events.append(evt)
-        return False
-
-    def __repr__(self):
-        if self.function_events is None:
-            return "<unfinished torch.autograd.profile>"
-        return repr(self.function_events)
-
-    def __str__(self):
-        if self.function_events is None:
-            return "<unfinished torch.autograd.profile>"
-        return str(self.function_events)
-
-    def _check_finish(self):
-        if self.function_events is None:
+        if self._function_events is None:
             raise RuntimeError("Profiler didn't finish running")
+
+    @property
+    def function_events(self):
+        if self._function_events is None or self._needs_processing:
+            self._ensure_function_events()
+        return self._function_events
 
     def table(
         self,
@@ -408,9 +455,9 @@ class profile:
         header=None,
         top_level_events_only=False,
     ):
-        self._check_finish()
-        assert self.function_events is not None
-        return self.function_events.table(
+        self._ensure_function_events()
+        assert self._function_events is not None
+        return self._function_events.table(
             sort_by=sort_by,
             row_limit=row_limit,
             max_src_column_width=max_src_column_width,
@@ -427,19 +474,19 @@ class profile:
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
-        self._check_finish()
         if kineto_available():
             self.kineto_results.save(path)  # type: ignore[union-attr]
         else:
-            return self.function_events.export_chrome_trace(path)  # type: ignore[union-attr]
+            self._ensure_function_events()
+            return self._function_events.export_chrome_trace(path)  # type: ignore[union-attr]
 
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
-        self._check_finish()
-        assert self.function_events is not None, "Expected profiling results"
+        self._ensure_function_events()
+        assert self._function_events is not None, "Expected profiling results"
         assert self.with_stack, "export_stacks() requires with_stack=True"
-        return self.function_events.export_stacks(path, metric)
+        return self._function_events.export_stacks(path, metric)
 
     def toggle_collection_dynamic(
         self, enabled: bool, activities: Iterable[ProfilerActivity]
@@ -450,16 +497,18 @@ class profile:
         return _toggle_collection_dynamic(enabled, set(activities))
 
     def key_averages(self, group_by_input_shape=False, group_by_stack_n=0):
-        self._check_finish()
-        assert self.function_events is not None, "Expected profiling results"
-        return self.function_events.key_averages(group_by_input_shape, group_by_stack_n)
+        self._ensure_function_events()
+        assert self._function_events is not None, "Expected profiling results"
+        return self._function_events.key_averages(
+            group_by_input_shape, group_by_stack_n
+        )
 
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
-        self._check_finish()
-        assert self.function_events is not None, "Expected profiling results"
-        return self.function_events.total_average()
+        self._ensure_function_events()
+        assert self._function_events is not None, "Expected profiling results"
+        return self._function_events.total_average()
 
     total_average.__doc__ = EventList.total_average.__doc__
 
@@ -469,9 +518,9 @@ class profile:
 
         The total time is a sum of all self times across all the events.
         """
-        self._check_finish()
-        assert self.function_events is not None
-        return self.function_events.self_cpu_time_total
+        self._ensure_function_events()
+        assert self._function_events is not None
+        return self._function_events.self_cpu_time_total
 
     def _parse_kineto_results(self, result: _ProfilerResult):
         # result.events() has most of the events - PyTorch op-level and device-level events

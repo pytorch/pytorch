@@ -66,6 +66,11 @@ RUN bash ./install_cuda.sh 12.4
 RUN bash ./install_magma.sh 12.4
 RUN ln -sf /usr/local/cuda-12.4 /usr/local/cuda
 
+FROM cuda as cuda12.6
+RUN bash ./install_cuda.sh 12.6
+RUN bash ./install_magma.sh 12.6
+RUN ln -sf /usr/local/cuda-12.6 /usr/local/cuda
+
 FROM cpu as rocm
 ARG PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
@@ -89,7 +94,7 @@ RUN bash ./install_rocm_magma.sh && rm install_rocm_magma.sh
 
 # Install AOTriton
 COPY ./common/common_utils.sh common_utils.sh
-COPY ./common/aotriton_version.txt aotriton_version.txt
+COPY ./aotriton_version.txt aotriton_version.txt
 COPY ./common/install_aotriton.sh install_aotriton.sh
 RUN bash ./install_aotriton.sh /opt/rocm && rm install_aotriton.sh aotriton_version.txt
 ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton

@@ -8,6 +8,11 @@ on:
         type: string
         description: |
           A JSON description of what configs to run later on.
+      runner_prefix:
+        required: false
+        type: string
+        description: |
+          Prefix for runner label
 
 defaults:
   run:
@@ -16,7 +21,7 @@ defaults:
 jobs:
   filter:
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.large]
+    runs-on: [self-hosted, "${{ inputs.runner_prefix }}linux.large"]
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
@@ -55,11 +60,11 @@ jobs:
       - name: Setup miniconda
         uses: pytorch/test-infra/.github/actions/setup-miniconda@main
         with:
-          python-version: 3.8
+          python-version: 3.9
           environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
 
       - name: Install Buck
-        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+        uses: nick-fields/retry@v3.0.0
         with:
           timeout_minutes: 10
           max_attempts: 5
@@ -69,7 +74,7 @@ jobs:
             sudo apt install ./buck.2021.01.12.01_all.deb
 
       - name: Download third party libraries and generate wrappers
-        uses: nick-fields/retry@3e91a01664abd3c5cd539100d10d33b9c5b68482
+        uses: nick-fields/retry@v3.0.0
         with:
           timeout_minutes: 10
           max_attempts: 5

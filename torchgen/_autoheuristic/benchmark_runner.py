@@ -57,7 +57,9 @@ class BenchmarkRunner:
         args = self.parser.parse_args()
         if args.use_heuristic:
             torch._inductor.config.autoheuristic_use = self.name
+            torch._inductor.config.autoheuristic_collect = ""
         else:
+            torch._inductor.config.autoheuristic_use = ""
             torch._inductor.config.autoheuristic_collect = self.name
         torch._inductor.config.autoheuristic_log_path = args.o
         if args.device is not None:
@@ -66,12 +68,10 @@ class BenchmarkRunner:
         self.main(args.num_samples, args.num_reps)
 
     @abstractmethod
-    def run_benchmark(self, *args: Any) -> None:
-        ...
+    def run_benchmark(self, *args: Any) -> None: ...
 
     @abstractmethod
-    def create_input(self) -> Tuple[Any, ...]:
-        ...
+    def create_input(self) -> Tuple[Any, ...]: ...
 
     def main(self, num_samples: int, num_reps: int) -> None:
         for _ in tqdm(range(num_samples)):

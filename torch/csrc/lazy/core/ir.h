@@ -20,8 +20,7 @@
 
 C10_DECLARE_bool(ltc_enable_dynamic_shapes);
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 static const hash_t kHashSeed(static_cast<uint32_t>(0x5a2d296e9));
 
@@ -96,20 +95,13 @@ class TORCH_API Node {
       std::vector<Shape>&& shapes,
       size_t num_outputs = 1);
 
-  // Construct node with operands and shape generated from a function
-  Node(
-      OpKind op,
-      OpList operands,
-      const std::function<Shape()>& shape_fn,
-      size_t num_outputs = 1);
-
   // Construct node with operands and no shape
   Node(OpKind op, OpList operands, size_t num_outputs = 1);
 
   // Construct node with shape and no operands
   Node(OpKind op, Shape shape, size_t num_outputs = 1);
 
-  virtual ~Node();
+  virtual ~Node() = default;
 
   const OpKind& op() const {
     return op_;
@@ -172,7 +164,7 @@ class TORCH_API Node {
 
  protected:
   // Adds node's index output number as operand.
-  void AddOperand(NodePtr node, size_t index = 0);
+  void AddOperand(const NodePtr& node, size_t index = 0);
 
   std::vector<Shape> shapes_;
   // A node holds a real reference to its operands.
@@ -289,8 +281,7 @@ struct TORCH_API Value {
   size_t index = 0;
 };
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy
 
 namespace c10 {
 // Explicit template instantiation to make ArrayRef<Value> work

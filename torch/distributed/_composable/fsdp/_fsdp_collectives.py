@@ -1,23 +1,24 @@
 # mypy: allow-untyped-decorators
-from typing import List, NamedTuple, Optional, Tuple, Union
+from typing import cast, List, NamedTuple, Optional, Tuple, Union
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
-from torch.distributed._tensor import DTensor
+from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
+from torch.distributed.tensor import DTensor
 
 from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
     _to_dtype_if_needed,
+    compiled_autograd_enabled,
 )
-from ._fsdp_param import FSDPParam
+from ._fsdp_param import FSDPParam, ShardedState
 
 
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
-    all_gather_event: Optional[torch.cuda.Event]
+    all_gather_event: Optional[torch.Event]
     all_gather_work: Optional[dist.distributed_c10d.Work]
     # For each parameter, the all-gather input dtype for each input
     param_all_gather_input_dtypes: List[List[torch.dtype]]
@@ -128,15 +129,14 @@ def foreach_all_gather(
     fsdp_params: List[FSDPParam],
     group: dist.ProcessGroup,
     async_op: bool,
-    all_gather_copy_in_stream: torch.cuda.Stream,
-    all_gather_stream: torch.cuda.Stream,
+    all_gather_copy_in_stream: torch.Stream,
+    all_gather_stream: torch.Stream,
     device: torch.device,
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
-    with torch.cuda.stream(all_gather_copy_in_stream):
-        param_all_gather_inputs: List[List[torch.Tensor]] = [
-            fsdp_param.all_gather_inputs for fsdp_param in fsdp_params
-        ]
+    device_handle = _get_device_handle(device.type)
+    with device_handle.stream(all_gather_copy_in_stream):
+        param_all_gather_inputs = _get_param_all_gather_inputs(fsdp_params)
         (
             param_all_gather_input_dtypes,
             param_all_gather_input_numels,
@@ -161,7 +161,7 @@ def foreach_all_gather(
         )
         del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
-    with torch.cuda.stream(all_gather_stream):
+    with device_handle.stream(all_gather_stream):
         all_gather_work = dist.all_gather_into_tensor(
             output_tensor=all_gather_output,
             input_tensor=all_gather_input,
@@ -180,6 +180,58 @@ def foreach_all_gather(
 
 
 @torch.no_grad()
+def _get_param_all_gather_inputs(
+    fsdp_params: List[FSDPParam],
+) -> List[List[torch.Tensor]]:
+    if compiled_autograd_enabled():
+        return [fsdp_param.all_gather_inputs for fsdp_param in fsdp_params]
+
+    # Intentionally try to run a fast-path that bypasses abstractions for the
+    # common FSDP case of bf16/fp32 mixed precision in order to use foreach
+    # copy for lower CPU overhead and more efficient copying in eager
+    def use_foreach_copy(fsdp_param: FSDPParam) -> bool:
+        return (
+            fsdp_param.param_dtype is not None
+            and not fsdp_param.offload_to_cpu
+            and not hasattr(fsdp_param._sharded_local_tensor, "fsdp_pre_all_gather")
+        )
+
+    param_all_gather_inputs: List[List[torch.Tensor]] = [[] for _ in fsdp_params]
+    foreach_copy_indices: List[int] = []
+    foreach_copy_inputs: List[torch.Tensor] = []
+    foreach_copy_input_numels: List[int] = []
+
+    # 1st pass: for foreach-copy parameters, get inputs and metadata for the
+    # foreach copy, and for the others, actually get their all-gather inputs
+    for i, fsdp_param in enumerate(fsdp_params):
+        if use_foreach_copy(fsdp_param):
+            foreach_copy_indices.append(i)
+            all_gather_input = (
+                fsdp_param._sharded_param_data
+                if fsdp_param.sharded_state == ShardedState.SHARDED
+                else cast(torch.Tensor, fsdp_param._sharded_post_forward_param_data)
+            )
+            foreach_copy_inputs.append(all_gather_input)
+            foreach_copy_input_numels.append(all_gather_input.numel())
+        else:
+            param_all_gather_inputs[i] = fsdp_param.all_gather_inputs
+
+    # 2nd pass: use foreach copy to compute the remaining all-gather inputs
+    if foreach_copy_inputs:
+        fsdp_param_0 = fsdp_params[foreach_copy_indices[0]]
+        param_dtype, device = fsdp_param_0.param_dtype, fsdp_param_0.device
+        flat_foreach_copy_input = torch.empty(
+            (sum(foreach_copy_input_numels),), device=device, dtype=param_dtype
+        )
+        splits = torch.split(flat_foreach_copy_input, foreach_copy_input_numels)
+        torch._foreach_copy_(splits, foreach_copy_inputs)
+        for i, split in zip(foreach_copy_indices, splits):
+            param_all_gather_inputs[i] = [split]
+
+    return param_all_gather_inputs
+
+
+@torch.no_grad()
 def foreach_all_gather_copy_out(
     all_gather_result: AllGatherResult,
     fsdp_params: List[FSDPParam],
@@ -193,38 +245,75 @@ def foreach_all_gather_copy_out(
         param_all_gather_input_numels,
         all_gather_input_split_sizes,
     ) = all_gather_result
+    _dtype, device = all_gather_output.dtype, all_gather_output.device
+    device_handle = _get_device_handle(device.type)
     if all_gather_event is not None:  # sync op
-        torch.cuda.current_stream().wait_event(all_gather_event)
+        device_handle.current_stream().wait_event(all_gather_event)
     if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
     world_size, device = group.size(), all_gather_output.device
+
+    split_with_sizes_out: List[torch.Tensor] = []
+    shard_i_copy_infos: List[Tuple[FSDPParam, List[torch.Tensor]]] = []
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
-        if ca.compiled_autograd_enabled:
-            fsdp_param.init_all_gather_outputs(
-                all_gather_input_numels,
-                all_gather_input_dtypes,
-                world_size,
-                device,
-                # NOTE: Under compile, make sure we always recreate all_gather_outputs
-                # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
-                force_recreate=True,
-            )
-        else:
-            fsdp_param.init_all_gather_outputs(
-                all_gather_input_numels, all_gather_input_dtypes, world_size, device
-            )  # no-op after 1st call
+        # NOTE: Under compile, make sure we always recreate all_gather_outputs
+        # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
+        force_recreate = compiled_autograd_enabled()
+        fsdp_param.init_all_gather_outputs(
+            all_gather_input_numels,
+            all_gather_input_dtypes,
+            world_size,
+            device,
+            force_recreate=force_recreate,
+        )
+        if not force_recreate:
             fsdp_param.alloc_all_gather_outputs()
+        param_all_gather_outputs = fsdp_param.all_gather_outputs
+        if fsdp_param.fsdp_placement.dim != 0:
+            # Copy to a temporary and then chunk-cat into the final all-gather
+            # output tensors
+            param_all_gather_outputs = [
+                torch.empty_like(t) for t in param_all_gather_outputs
+            ]
+            shard_i_copy_infos.append((fsdp_param, param_all_gather_outputs))
+        split_with_sizes_out.extend(param_all_gather_outputs)
+
     all_gather_output = all_gather_output.view(world_size, -1)
-    gen = (t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs)
     if all_gather_output.dtype == torch.uint8:
-        out = [t.view(world_size, -1).view(torch.uint8) for t in gen]
+        out = [t.view(world_size, -1).view(torch.uint8) for t in split_with_sizes_out]
     else:
-        out = [t.view(world_size, -1) for t in gen]
+        out = [t.view(world_size, -1) for t in split_with_sizes_out]
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output, all_gather_input_split_sizes, dim=1, out=out
     )
+
+    for fsdp_param, param_all_gather_outputs in shard_i_copy_infos:
+        # Chunk-cat from the temporary to the final all-gather output tensors
+        shard_dim = fsdp_param.fsdp_placement.dim
+        for param_all_gather_output, target_all_gather_output in zip(
+            param_all_gather_outputs, fsdp_param.all_gather_outputs
+        ):
+            padded_sharded_size = (
+                fsdp_param.padded_sharded_param_size
+                if fsdp_param.sharded_state == ShardedState.SHARDED
+                else cast(
+                    torch.Tensor, fsdp_param._sharded_post_forward_param_data
+                ).size()
+            )
+            pre_param_size = list(padded_sharded_size)
+            pre_param_size[0] *= world_size
+            chunks = torch.chunk(
+                param_all_gather_output.view(pre_param_size), world_size, dim=0
+            )
+            post_param_size = list(padded_sharded_size)
+            post_param_size[shard_dim] *= world_size
+            cat_out = target_all_gather_output.view(post_param_size)
+            torch.cat(chunks, dim=shard_dim, out=cat_out)
+            torch._C._autograd._unsafe_set_version_counter(
+                target_all_gather_output, target_all_gather_output._version - 1
+            )
 
 
 @torch.no_grad()
@@ -232,16 +321,16 @@ def foreach_reduce(
     fsdp_params: List[FSDPParam],
     unsharded_grads: List[torch.Tensor],
     reduce_scatter_group: dist.ProcessGroup,
-    reduce_scatter_stream: torch.cuda.Stream,
+    reduce_scatter_stream: torch.Stream,
     orig_dtype: torch.dtype,
     reduce_dtype: Optional[torch.dtype],
     device: torch.device,
     reduce_scatter_reduce_op: Optional[Union[dist.ReduceOp, dist.ReduceOp.RedOpType]],
     all_reduce_group: Optional[dist.ProcessGroup],  # not `None` iff HSDP
-    all_reduce_stream: torch.cuda.Stream,
+    all_reduce_stream: torch.Stream,
     all_reduce_grads: bool,
     partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
-) -> Tuple[torch.Tensor, torch.cuda.Event, torch.cuda.Event, Optional[torch.Tensor]]:
+) -> Tuple[torch.Tensor, torch.Event, torch.Event, Optional[torch.Tensor]]:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
     autograd, so clearing the list frees the gradients.
@@ -259,6 +348,14 @@ def foreach_reduce(
         reduce_scatter_group, all_reduce_group, reduce_dtype
     )
     world_size = reduce_scatter_group.size()
+    for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
+        if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
+            continue
+        assert (
+            unsharded_grad.size(shard_dim) % world_size == 0
+        ), f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+        chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
+        unsharded_grads[i] = torch.cat(chunks, dim=0)
     padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
     )
@@ -267,12 +364,13 @@ def foreach_reduce(
     reduce_scatter_input = torch.empty(
         (reduce_scatter_input_numel,), dtype=reduce_dtype, device=device
     )
+    device_handle = _get_device_handle(device.type)
     foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
-    current_stream = torch.cuda.current_stream()
+    current_stream = device_handle.current_stream()
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
-    with torch.cuda.stream(reduce_scatter_stream):
+    with device_handle.stream(reduce_scatter_stream):
         reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
         _div_if_needed(reduce_scatter_input, predivide_factor)
         if reduce_scatter_reduce_op is None:
@@ -305,13 +403,13 @@ def foreach_reduce(
                 reduce_output += partial_reduce_output
             post_reduce_stream = all_reduce_stream
             all_reduce_stream.wait_stream(reduce_scatter_stream)
-            with torch.cuda.stream(all_reduce_stream):
+            with device_handle.stream(all_reduce_stream):
                 dist.all_reduce(
                     reduce_output,
                     group=all_reduce_group,
                     op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
                 )
-    with torch.cuda.stream(post_reduce_stream):
+    with device_handle.stream(post_reduce_stream):
         _div_if_needed(reduce_output, postdivide_factor)
         reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
         # View out and accumulate sharded gradients
@@ -319,6 +417,8 @@ def foreach_reduce(
         for padded_unsharded_size, fsdp_param in zip(
             padded_unsharded_sizes, fsdp_params
         ):
+            # Assume even sharding for Shard(i), i > 0; otherwise would require
+            # copy-out for contiguous strides
             new_sharded_grad = torch.as_strided(
                 reduce_output,
                 size=fsdp_param.sharded_size,
@@ -349,7 +449,7 @@ def foreach_reduce(
                     new_sharded_grad
                 )
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
-            if not ca.compiled_autograd_enabled:
+            if not compiled_autograd_enabled():
                 for hook in (
                     getattr(fsdp_param.sharded_param, "_post_accumulate_grad_hooks", {})
                     or {}

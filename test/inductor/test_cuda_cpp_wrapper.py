@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import itertools
 import sys
 import unittest
 from typing import NamedTuple
@@ -16,6 +17,7 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 try:
     try:
         from . import (
+            test_combo_kernels,
             test_foreach,
             test_pattern_matcher,
             test_select_algorithm,
@@ -23,11 +25,13 @@ try:
             test_torchinductor_dynamic_shapes,
         )
     except ImportError:
-        import test_foreach
-        import test_pattern_matcher
-        import test_select_algorithm
-        import test_torchinductor
-        import test_torchinductor_dynamic_shapes
+        import test_combo_kernels  # @manual=fbcode//caffe2/test/inductor:combo_kernels-library
+
+        import test_foreach  # @manual=fbcode//caffe2/test/inductor:foreach-library
+        import test_pattern_matcher  # @manual=fbcode//caffe2/test/inductor:pattern_matcher-library
+        import test_select_algorithm  # @manual=fbcode//caffe2/test/inductor:select_algorithm-library
+        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
+        import test_torchinductor_dynamic_shapes  # @manual=fbcode//caffe2/test/inductor:test_inductor-library_dynamic_shapes
 except unittest.SkipTest:
     if __name__ == "__main__":
         sys.exit(0)
@@ -61,25 +65,6 @@ test_failures_cuda_wrapper = {
 }
 
 
-if config.abi_compatible:
-    xfail_list = []
-    for test_name in xfail_list:
-        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cuda_wrapper",), is_skip=False
-        )
-        test_failures_cuda_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
-    skip_list = []
-    for test_name in skip_list:
-        test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
-            ("cuda_wrapper",), is_skip=True
-        )
-        test_failures_cuda_wrapper[
-            f"{test_name}_dynamic_shapes"
-        ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
-
-
 def make_test_case(
     name,
     device,
@@ -88,6 +73,7 @@ def make_test_case(
     slow=False,
     func_inputs=None,
     code_string_count=None,
+    check_code=True,
 ):
     test_name = f"{name}_{device}" if device else name
     if code_string_count is None:
@@ -110,13 +96,14 @@ def make_test_case(
                 _, code = test_torchinductor.run_and_get_cpp_code(
                     func, *func_inputs if func_inputs else []
                 )
-                self.assertEqual("CppWrapperCodeCache" in code, True)
-                self.assertTrue(
-                    all(
-                        code.count(string) == code_string_count[string]
-                        for string in code_string_count
+                if check_code:
+                    self.assertEqual("CppWrapperCodeCache" in code, True)
+                    self.assertTrue(
+                        all(
+                            code.count(string) == code_string_count[string]
+                            for string in code_string_count
+                        )
                     )
-                )
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -139,6 +126,7 @@ if RUN_CUDA:
         name: str
         device: str = "cuda"
         tests: InductorTestCase = test_torchinductor.GPUTests()
+        check_code: bool = True
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
@@ -184,13 +172,25 @@ if RUN_CUDA:
         BaseTest("test_sum_dtype"),  # float64
         BaseTest("test_sum_int"),  # bool, int64, int8, uint8
         BaseTest("test_transpose"),  # multiple outputs, buffer clear
-        BaseTest("test_unspec_inputs"),
+        *[
+            BaseTest(f"test_unspec_inputs_{str(dtype)[6:]}")
+            for dtype in test_torchinductor.test_dtypes
+        ],
+        BaseTest("test_consecutive_split_cumprod"),
         BaseTest("test_pointwise_hermite_polynomial_he"),
         BaseTest("test_pointwise_hermite_polynomial_h"),
         BaseTest(
             "test_foreach_cpp_wrapper",
             tests=test_foreach.ForeachTests(),
         ),  # test foreach
+        BaseTest(
+            "test_enable_dynamic_shapes_cpp_wrapper",
+            tests=test_foreach.ForeachTests(),
+        ),
+        BaseTest(
+            "test_dynamic_shapes_persistent_reduction_mixed_x_dim",
+            tests=test_combo_kernels.ComboKernelDynamicShapesTests(),
+        ),
         BaseTest(
             "test_cat_slice_cat",
             tests=test_pattern_matcher.TestPatternMatcher(),
@@ -214,25 +214,42 @@ if RUN_CUDA:
         ),
         BaseTest("test_fft_real_input"),
         BaseTest("test_fft_real_input_real_output"),
-        BaseTest("test_dtypeview"),
+        *[
+            # some dtypes may raise exception and be skipped in test_dtypeview, so set check_code to False here
+            BaseTest(
+                f"test_dtypeview_{str(dtype_x)[6:]}_{str(dtype_y)[6:]}",
+                check_code=False,
+            )
+            for dtype_x, dtype_y in itertools.product(
+                test_torchinductor.test_dtypes, test_torchinductor.test_dtypes
+            )
+        ],
         BaseTest("test_dtypeview_fusion"),
+        # skip if not enough SMs
+        BaseTest(
+            "test_addmm",
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
+        # skip if not enough SMs
+        BaseTest(
+            "test_linear_relu",
+            tests=test_select_algorithm.TestSelectAlgorithm(),
+        ),
     ]:
-        make_test_case(item.name, item.device, item.tests)
+        make_test_case(item.name, item.device, item.tests, check_code=item.check_code)
 
     from torch._inductor.utils import is_big_gpu
 
     if is_big_gpu(0):
-        for item in [
-            BaseTest(
-                "test_addmm",
-                tests=test_select_algorithm.TestSelectAlgorithm(),
-            ),
-            BaseTest(
-                "test_linear_relu",
-                tests=test_select_algorithm.TestSelectAlgorithm(),
-            ),
-        ]:
-            make_test_case(item.name, item.device, item.tests)
+        skip_list = ["test_addmm", "test_linear_relu"]
+        # need to skip instead of omit, otherwise fbcode ci can be flaky
+        for test_name in skip_list:
+            test_failures_cuda_wrapper[
+                f"{test_name}_cuda"
+            ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
+            test_failures_cuda_wrapper[
+                f"{test_name}_cuda_dynamic_shapes"
+            ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=True)
 
     test_torchinductor.copy_tests(
         CudaWrapperTemplate, TestCudaWrapper, "cuda_wrapper", test_failures_cuda_wrapper
@@ -253,5 +270,6 @@ if RUN_CUDA:
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
+    print(f"FS: run_cuda {RUN_CUDA}")
     if RUN_CUDA:
         run_tests(needs="filelock")
