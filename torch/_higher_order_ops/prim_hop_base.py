@@ -163,22 +163,30 @@ class PrimHOPBaseFunction(torch.autograd.Function):
         # TODO: Something special needs to happen with min cut partitioner
         with suspend_functionalization(), disable_functional_mode(), torch.enable_grad():
             with disable_proxy_modes_tracing():
-                from .utils import _from_fun, create_fw_bw_graph
+                from .invoke_subgraph import create_fw_bw_graph
+                from .utils import _from_fun
 
                 fw_inputs = pytree.tree_map(_from_fun, operands)
                 fw_outputs = subgraph(*fw_inputs)
-                _, joint_graph = create_fw_bw_graph(
-                    subgraph, False, fw_inputs, fw_outputs
+                _, joint_graph, _ = create_fw_bw_graph(
+                    subgraph, fw_inputs, grad_outputs
                 )
+
+        # The joint graph returns (*grad_inputs, *fwd_outputs).
+        # We only need the grad_inputs.
+        def bwd_fn(*args):
+            operands = args[: -len(grad_outputs)]
+            grad_outs = args[-len(grad_outputs) :]
+            result = joint_graph(*operands, *grad_outs)
+            grad_inputs = result[: -len(grad_outputs)]
+            return grad_inputs
 
         return (
             None,
             None,
             None,
             *ctx.hop(
-                joint_graph,
-                (*grad_outputs, *operands),
-                **kwargs,
+                FunctionWithNoFreeVars(bwd_fn), (*operands, *grad_outputs), **kwargs
             ),
         )
 
