@@ -1894,6 +1894,7 @@ class VariableBuilder:
             torch._dynamo.config.specialize_float
             or is_constant_source(self.get_source())
             or math.isnan(value)
+            or math.isinf(value)
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
