@@ -17,6 +17,7 @@ from torch.utils._sympy.functions import (
     Mod,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
+    OpaqueUnaryFn_log2,
     OpaqueUnaryFn_sqrt,
     PowByNatural,
     RoundDecimal,
@@ -142,6 +143,10 @@ class ReferenceAnalysis:
     def add(a, b):
         return _keep_float(operator.add)(a, b)
 
+    @classmethod
+    def sym_sum(cls, args):
+        return sympy.Add(*args)
+
     @staticmethod
     def mul(a, b):
         return _keep_float(operator.mul)(a, b)
@@ -157,6 +162,10 @@ class ReferenceAnalysis:
     @staticmethod
     def log(x):
         return OpaqueUnaryFn_log(x)
+
+    @staticmethod
+    def log2(x):
+        return OpaqueUnaryFn_log2(x)
 
     @staticmethod
     def sqrt(x):
@@ -206,6 +215,17 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     def not_(a):
         return torch.sym_not(a)
 
+    @classmethod
+    def sym_sum(cls, args):
+        if len(args) == 0:
+            return 0
+        if len(args) == 1:
+            return args[0]
+        acc = cls.add(args[0], args[1])
+        for i in range(2, len(args)):
+            acc = cls.add(acc, args[i])
+        return acc
+
     @staticmethod
     def floordiv(a, b):
         return a // b
@@ -231,6 +251,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def log(x):
         raise AssertionError("log is not valid shape sympy expr")
+
+    @staticmethod
+    def log2(x):
+        return torch._sym_log2(x)  # type: ignore[attr-defined]
 
     @staticmethod
     def sqrt(x):
@@ -282,6 +306,14 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
     @staticmethod
     def round_decimal(a, b):
         return round(a, ndigits=b)
+
+
+# Like PythonReferenceAnalysis, but some export-unfriendly choices of
+# operators to make things faster
+class OptimizedPythonReferenceAnalysis(PythonReferenceAnalysis):
+    @staticmethod
+    def sym_sum(args):
+        return torch.sym_sum(args)
 
 
 def _to_dtype(x: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
@@ -448,6 +480,10 @@ class TensorReferenceAnalysis:
     @staticmethod
     def log(x):
         return torch.ops.aten.log.default(x)
+
+    @staticmethod
+    def log2(x):
+        return torch.ops.aten.log2.default(x)
 
     @staticmethod
     def sqrt(x):

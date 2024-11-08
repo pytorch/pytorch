@@ -70,6 +70,7 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
+from tools.testing.upload_artifacts import zip_and_upload_artifacts
 
 
 # Make sure to remove REPO_ROOT after import is done
@@ -287,19 +288,20 @@ if dist.is_available():
         }
     if dist.is_nccl_available():
         DISTRIBUTED_TESTS_CONFIG["nccl"] = {
-            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+            "WORLD_SIZE": f"{torch.cuda.device_count()}",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-nccl",
         }
     if dist.is_gloo_available():
         DISTRIBUTED_TESTS_CONFIG["gloo"] = {
-            "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+            # TODO: retire testing gloo with CUDA
+            "WORLD_SIZE": f"{torch.cuda.device_count()}",
             "TEST_REPORT_SOURCE_OVERRIDE": "dist-gloo",
         }
     # Test with UCC backend is deprecated.
     # See https://github.com/pytorch/pytorch/pull/137161
     # if dist.is_ucc_available():
     #     DISTRIBUTED_TESTS_CONFIG["ucc"] = {
-    #         "WORLD_SIZE": "2" if torch.cuda.device_count() == 2 else "3",
+    #         "WORLD_SIZE": f"{torch.cuda.device_count()}",
     #         "TEST_REPORT_SOURCE_OVERRIDE": "dist-ucc",
     #         "UCX_TLS": "tcp,cuda",
     #         "UCC_TLS": "nccl,ucp,cuda",
@@ -1330,6 +1332,10 @@ def parse_args():
         action="store_false",
         help="Run tests without translation validation.",
     )
+    parser.add_argument(
+        "--upload-artifacts-while-running",
+        action="store_true",
+    )
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -1676,6 +1682,8 @@ def run_tests(
 
     def parallel_test_completion_callback(failure):
         test_failed = handle_error_messages(failure)
+        if IS_CI and options.upload_artifacts_while_running:
+            zip_and_upload_artifacts(test_failed)
         if (
             test_failed
             and not options.continue_through_error
@@ -1768,6 +1776,8 @@ def main():
     selected_tests = get_selected_tests(options)
 
     test_prioritizations = import_results()
+    if len(test_prioritizations.get_all_tests()) == 0:
+        options.enable_td = False
     test_prioritizations.amend_tests(selected_tests)
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)

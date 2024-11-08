@@ -55,7 +55,8 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
     int64_t BLANK,
     bool deterministic,
     bool zero_infinity) {
-  AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
+  TORCH_CHECK(
+      false, "cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
 }
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
@@ -66,7 +67,8 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
     int64_t BLANK,
     bool deterministic,
     bool zero_infinity) {
-  AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 8 support");
+  TORCH_CHECK(
+      false, "cudnn_ctc_loss: ATen not compiled with cuDNN >= 8 support");
 }
 
 } // namespace native

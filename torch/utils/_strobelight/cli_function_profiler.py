@@ -226,7 +226,7 @@ class StrobelightCLIFunctionProfiler:
                 return
 
             self._get_results()
-        except Exception as error:
+        except Exception:
             logger.warning("error during stop_strobelight", exc_info=True)
 
     # Return true if strobelight started and is running. Never throw.
@@ -240,7 +240,7 @@ class StrobelightCLIFunctionProfiler:
             logger.info("strobelight profiling running")
             return True
 
-        except Exception as error:
+        except Exception:
             logger.warning("error during start_strobelight:", exc_info=True)
             if strobelight_started:
                 self._stop_strobelight_no_throw(collect_results=False)
