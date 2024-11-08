@@ -2948,7 +2948,7 @@ def _generate_qdq_quantized_model(
                       for input in inputs)
         if has_xpu:
             quantizer = XPUInductorQuantizer()
-            assert (not is_qat) and (not is_dynamic), "QAT and dyanmic quantization is not supported at XPU backend currently"
+            assert (not is_qat) and (not is_dynamic), "QAT and dynamic quantization is not supported at XPU backend currently"
             quantizer.set_global(xpuiq.get_default_xpu_inductor_quantization_config())
         else:
             quantizer = X86InductorQuantizer()
