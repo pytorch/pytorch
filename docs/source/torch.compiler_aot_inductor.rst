@@ -185,3 +185,15 @@ display results akin to the following:
     0.4883
     0.4703
     [ CUDAFloatType{2,1} ]
+
+
+Troubleshooting
+---------------------------
+Below are some useful tools for debugging AOT Inductor.
+
+.. toctree::
+   :caption: Debugging Tools
+   :maxdepth: 1
+
+   logging
+   torch.compiler_aot_inductor_minifier
