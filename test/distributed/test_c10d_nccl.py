@@ -62,6 +62,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
     TestCase,
+    IS_FBCODE
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -617,11 +618,22 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # rank 0 hasn't split yet, but rank 1 did for the
         # nocolor... so split count matches rank count coincidentally
         # in each of the proceses this test spawned!
-        # when using ncclCommCreateFromRanks() in version 2.21+,
-        # unused ranks are not included in split
-        version = torch.cuda.nccl.version()
-        is_nccl_2_21 = version >= (2, 21)
-        exp_count = 0 if (is_nccl_2_21 or self.rank == 0) else 1
+        exp_count = self.rank
+        is_nccl_2_21 = False
+        # FBCODE internally uses ncclCommCreateFromRanks in nccl version 2.21+
+        # which doesn't include inactive ranks in the split and therefore
+        # the expected count at this point is 0 for all ranks.
+        # However, externally even for nccl version 2.21+, we use ncclCommSplit
+        # which includes all ranks in the split, the inactive ones are used with
+        # NOCOLOR. Therefore, rank 0 will have a split of 0 as it has not done a comm yet
+        # and rank 1 will have a split of 1 (inactive though).
+        # This change allows the UT to run for both cases.
+        if IS_FBCODE:
+            # when using ncclCommCreateFromRanks() in version 2.21+,
+            # unused ranks are not included in split
+            version = torch.cuda.nccl.version()
+            is_nccl_2_21 = version >= (2, 21)
+            exp_count = 0 if (is_nccl_2_21 or self.rank == 0) else 1
         self.assertEqual(backend.comm_split_count(), exp_count)
         if self.rank == 0:
             dist.broadcast(tensor, 0, group=ng)
