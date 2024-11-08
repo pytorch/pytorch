@@ -8312,7 +8312,7 @@ COMPILE_BACKWARD_FAILURES = [
             and "(NT, T) broadcasting all 1s" in sample.name
             and "noncontig_holes" in sample.name
         ),
-        name="binary_unbind_data_dependency",
+        name="binary_backward_unbind_data_dependency",
     ),
     # ditto
     XFailRule(
@@ -8322,7 +8322,28 @@ COMPILE_BACKWARD_FAILURES = [
             op.full_name == "nn.functional.rms_norm"
             and sample.input._lengths is not None
         ),
-        name="rms_norm_unbind_data_dependency",
+        name="rms_norm_backward_unbind_data_dependency",
+    ),
+    # Bug: no idea what's going on here; needs investigation within AOTAutograd
+    XFailRule(
+        error_type=AssertionError,
+        error_msg="Node mul_1 was invalid, but is output",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "nan_to_num" and "noncontig_transposed" in sample.name
+        ),
+        name="crazy_aot_autograd_bug1_backward",
+    ),
+    # clone() -> contiguous format on an non-contiguous NJT with holes currently uses
+    # unbind(), leading to data-dependent error in torch.compile
+    XFailRule(
+        error_type=torch._dynamo.exc.Unsupported,
+        error_msg="Backend compiler failed with a fake tensor exception",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "clone"
+            and "noncontig_holes" in sample.name
+            and sample.kwargs.get("memory_format", None) == torch.preserve_format
+        ),
+        name="clone_unbind_data_dependency_backward",
     ),
     *COMPILE_FORWARD_FAILURES,
     *BACKWARD_FAILURES,
