@@ -6,7 +6,12 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch._inductor import config
-from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import (
+    IS_JETSON,
+    IS_MACOS,
+    skipIfXpu,
+    TEST_WITH_ASAN,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
 
@@ -222,6 +227,7 @@ class Repro(torch.nn.Module):
         )
 
     @requires_gpu
+    @skipIfXpu(msg="AOTI for XPU not enabled yet")
     @inductor_config.patch(
         {
             "triton.inject_relu_bug_TESTING_ONLY": "compile_error",
