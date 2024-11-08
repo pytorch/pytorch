@@ -7,8 +7,6 @@
 #include <ATen/core/grad_mode.h>
 #include <c10/core/MemoryFormat.h>
 #include <oneapi/dnnl/dnnl.hpp>
-#include <oneapi/dnnl/dnnl_graph.hpp>
-#include <oneapi/dnnl/dnnl_graph_sycl.hpp>
 #include <oneapi/dnnl/dnnl_sycl.hpp>
 #include <oneapi/dnnl/dnnl_version.h>
 
