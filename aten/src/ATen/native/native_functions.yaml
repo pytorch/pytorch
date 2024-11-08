@@ -2821,6 +2821,7 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd: full_like
   autogen: full_like.out
+  tags: core
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -6489,6 +6490,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA, MPS: where_self_out
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_where_out
 
 - func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
   variants: function

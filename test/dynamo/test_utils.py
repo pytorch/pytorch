@@ -113,7 +113,7 @@ class TestDynamoTimed(TestCase):
 
     def test_compile_times(self):
         self.run_forward_backward()
-        res = utils.compile_times()
+        res = utils.compile_times(repr="str")
         self.assertExpectedInline(
             res,
             """\
