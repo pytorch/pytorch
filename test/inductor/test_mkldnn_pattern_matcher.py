@@ -145,6 +145,7 @@ class TestPatternMatcherBase(TestCase):
         dtype=None,
         is_dynamic=False,
         quantizer=None,
+        compile_options={},  # noqa: B006
     ):
         counters.clear()
         torch._dynamo.reset()
@@ -188,7 +189,7 @@ class TestPatternMatcherBase(TestCase):
             with torch.no_grad(), maybe_autocast:
                 clone_inputs = self._clone_inputs(inputs)
                 expected = mod(*inputs)
-                actual = torch.compile(mod)(*clone_inputs)
+                actual = torch.compile(mod, **compile_options)(*clone_inputs)
                 torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
                 if matcher_count is not None:
                     self.assertEqual(
@@ -2835,8 +2836,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
             (with bias) pattern_no_bias -> add -> reshape -> reshape
         """
         M = 16
-        in_feature = 64
-        out_feature = 128
+        in_feature = 32
+        out_feature = 64
         q_min, q_max = -32, 31
 
         class Mod(torch.nn.Module):
@@ -2850,22 +2851,24 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     q_min, q_max, [in_feature, out_feature], dtype=torch.int8
                 )
                 self.per_channel_quant = per_channel_quant
+                a_scale_per_tensor = torch.rand([1], dtype=dtype) * 0.01 + 0.01
+                a_scale_per_channel = torch.rand([M, 1], dtype=dtype) * 0.01 + 0.01
+                self.a_scale = (
+                    a_scale_per_channel
+                    if self.per_channel_quant
+                    else a_scale_per_tensor
+                )
                 self.b_scale = torch.rand([out_feature]) * 0.01 + 0.01
                 self.b_scale = self.b_scale.to(dtype)
                 self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
 
-            def forward(self, a, a_scale_per_tensor, a_scale_per_channel):
+            def forward(self, a):
                 out_shape = a.shape[:-1] + (self.b.size(-1),)
                 a_reshaped = a.reshape(-1, a.size(-1))
                 c = torch._int_mm(a_reshaped, self.b)
                 c = c.to(self.dtype)
                 c_shape = c.shape
-                a_scale = (
-                    a_scale_per_channel
-                    if self.per_channel_quant
-                    else a_scale_per_tensor
-                )
-                a_scale = a_scale.expand(c.shape)
+                a_scale = self.a_scale.expand(c.shape)
                 c = c * a_scale
                 c = c * self.b_scale
                 if self.has_bias:
@@ -2882,32 +2885,32 @@ class TestPatternMatcher(TestPatternMatcherBase):
             else [torch.float]
         )
         per_channel_list = [True, False]
-        for has_bias, dtype, per_channel_quant in itertools.product(
-            has_bias_list, dype_list, per_channel_list
+        dynamic_list = [True, False]
+        for has_bias, dtype, per_channel_quant, dynamic in itertools.product(
+            has_bias_list, dype_list, per_channel_list, dynamic_list
         ):
             mod = Mod(dtype, has_bias, per_channel_quant).eval()
             a = torch.randint(q_min, q_max, [1, M, in_feature], dtype=torch.int8)
-            a_scale_per_tensor = torch.rand([1], dtype=dtype) * 0.01 + 0.01
-            a_scale_per_channel = torch.rand([M, 1], dtype=dtype) * 0.01 + 0.01
-            a_scale_per_tensor, a_scale_per_channel = (
-                a_scale_per_tensor.to(dtype),
-                a_scale_per_channel.to(dtype),
-            )
 
             def matcher_check_fn():
                 self.assertEqual(
                     counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
                 )
+                if dynamic:
+                    nodes_count = 10 if has_bias else 7
+                else:
+                    nodes_count = 7 if has_bias else 6
                 self.assertEqual(
                     counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
-                    10 if has_bias else 7,
+                    nodes_count,
                 )
 
             self._test_common(
                 mod,
-                (a, a_scale_per_tensor, a_scale_per_channel),
+                (a,),
                 matcher_check_fn=matcher_check_fn,
                 check_autocast=dtype,
+                compile_options={"dynamic": dynamic},
             )
 
 
