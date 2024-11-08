@@ -1,4 +1,4 @@
-name: Build conda docker images
+name: Build almalinux docker images
 
 on:
   workflow_dispatch:
@@ -11,14 +11,14 @@ on:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
     paths:
-      - '.ci/docker/conda/*'
+      - '.ci/docker/almalinux/*'
       - '.ci/docker/common/*'
-      - .github/workflows/build-conda-images.yml
+      - .github/workflows/build-almalinux-images.yml
   pull_request:
     paths:
-      - '.ci/docker/conda/*'
+      - '.ci/docker/almalinux/*'
       - '.ci/docker/common/*'
-      - .github/workflows/build-conda-images.yml
+      - .github/workflows/build-almalinux-images.yml
 
 env:
   DOCKER_REGISTRY: "docker.io"
@@ -70,4 +70,4 @@ jobs:
           max_attempts: 3
           retry_wait_seconds: 90
           command: |
-            .ci/docker/conda/build.sh conda-builder${{ matrix.cuda_version == 'cpu' && ':' || ':cuda' }}${{matrix.cuda_version}}
+            .ci/docker/almalinux/build.sh almalinux-builder${{ matrix.cuda_version == 'cpu' && ':' || ':cuda' }}${{matrix.cuda_version}}
