@@ -60,6 +60,16 @@ DynamicType::Arguments::Arguments(c10::ArrayRef<TypePtr> args) {
 }
 
 DynamicType::Arguments::Arguments(
+    const std::vector<std::string_view>& names,
+    c10::ArrayRef<TypePtr> args)
+    : Arguments(args) {
+  TORCH_INTERNAL_ASSERT(names.size() == args.size());
+  for (size_t i = 0; i < args.size(); i++) {
+    elems[i].label = std::string{names[i]};
+  }
+}
+
+DynamicType::Arguments::Arguments(
     const std::vector<c10::string_view>& names,
     c10::ArrayRef<TypePtr> args)
     : Arguments(args) {
@@ -105,7 +115,7 @@ DynamicTypePtr DynamicType::create(Type& other) {
 DynamicType::DynamicType(Tag tag, Arguments arguments)
     : SharedType(Kind), tag_(tag), arguments_(std::move(arguments)) {}
 
-DynamicType::DynamicType(Tag tag, c10::string_view name, Arguments arguments)
+DynamicType::DynamicType(Tag tag, std::string_view name, Arguments arguments)
     : SharedType(Kind),
       tag_(tag),
       name_(std::string{name}),
