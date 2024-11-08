@@ -3810,6 +3810,25 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(3, z)
         self.assertEqual(3, k)
 
+    def test_free_var_and_local_name_collision(self):
+        x = 10
+        def make_func():
+            def func():
+                return x
+            return func
+
+        @torch.compile(backend="eager")
+        def root(t):
+            x = 0
+            func = make_func()
+            res = func()
+            return t + 1, x, res
+
+        res = root(torch.ones(1))
+        self.assertTrue(torch.allclose(torch.ones(1) + 1, res[0]))
+        self.assertEqual(0, res[1])
+        self.assertEqual(10, res[2])
+
     def test_top_package_import(self):
         def fn(x):
             import torch.fx

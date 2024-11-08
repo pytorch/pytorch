@@ -76,7 +76,13 @@ def wrap_args_kwargs(tx: "InstructionTranslator", result):
             result[k] = wrap_bound_arg(tx, v)
 
 
-def init_cellvars(parent, result, code):
+def init_cellvars(
+    parent, result: Dict[str, VariableTracker], code
+) -> Dict[str, VariableTracker]:
+    """
+    Return a mapping from local name to new cells created directly by `code`,
+    and make sure that mapping is disjoint from `result`.
+    """
     closure_cells = {}
     side_effects = parent.output.side_effects
 
@@ -84,6 +90,8 @@ def init_cellvars(parent, result, code):
     for name in code.co_cellvars:
         closure_cells[name] = side_effects.track_cell_new()
         if name in result:
+            # This handles when a function argument is a cell (e.g., captured by
+            # a nested func). See `MAKE_CELL` bytecode for more info.
             side_effects.store_cell(closure_cells[name], result.pop(name))
 
     return closure_cells
@@ -197,6 +205,15 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         return self.fn.__globals__
 
     def bind_args(self, parent, args, kwargs):
+        """
+        Assume `args` and `kwargs` are VariableTracker arguments for a call to
+        this function, create new bindings for interpreting the function call.
+
+        Return 2 `Dict[str, VariableTracker]` mappings:
+        - closure_cells: locals that are cells created directly by this
+          function's frame.
+        - result: all other locals
+        """
         assert not self.is_constant
         tx = parent.output.root_tx
         wrap = functools.partial(wrap_bound_arg, tx=tx)
@@ -244,69 +261,57 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         for idx, name, cell in zip(
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
-            if name == "__class__":
-                source = AttrSource(self.source, "__class__") if self.source else None
-                result[name] = variables.UserDefinedClassVariable(
-                    cell.cell_contents,
-                    source=source,
-                )
-            else:
-                var = tx.match_nested_cell(name, cell)
-                if var is not None:
-                    # optimization for cleaner codegen
-                    result[name] = var
-                elif self.source:
-                    side_effects = parent.output.side_effects
-                    if cell in side_effects:
-                        out = side_effects[cell]
-                    else:
-                        closure_cell = GetItemSource(
-                            AttrSource(self.source, "__closure__"), idx
-                        )
-                        closure_cell_contents = AttrSource(
-                            closure_cell, "cell_contents"
-                        )
-                        try:
-                            contents_var = VariableTracker.build(
-                                parent, cell.cell_contents, closure_cell_contents
-                            )
-                        except ValueError:
-                            # Cell has not yet been assigned
-                            contents_var = variables.DeletedVariable()
-
-                        if id(cell) not in tx.mutated_closure_cell_ids:
-                            # Optimistically don't allocate the cell, to
-                            # reduce the number of side effects.  This is
-                            # important for cond, as without it, any accesses
-                            # to closures create side effects and cond doesn't
-                            # support side effects.  If we're wrong and this
-                            # closure cell gets written to, we will restart
-                            # the analysis with this cell's name in the
-                            # mutated list here
-                            result[name] = contents_var
-                            # Map the variable to the original cell so we can
-                            # look it up later, see
-                            # `InliningInstructionTranslator.STORE_DEREF`.
-                            tx.contents_var_to_mutated_cell[contents_var] = cell
-                            continue
-
-                        # cells are written to with "cell_contents",
-                        # so the source should just be the closure_cell, not its contents
-                        out = side_effects.track_cell_existing(closure_cell, cell)
-                        side_effects.store_cell(
-                            out,
-                            contents_var,
-                        )
-
-                    result[name] = out
-
+            var = tx.match_nested_cell(name, cell)
+            if var is not None:
+                # optimization for cleaner codegen
+                result[name] = var
+            elif self.source:
+                side_effects = parent.output.side_effects
+                if cell in side_effects:
+                    out = side_effects[cell]
                 else:
-                    result[name] = VariableTracker.build(tx, cell.cell_contents)
+                    closure_cell = GetItemSource(
+                        AttrSource(self.source, "__closure__"), idx
+                    )
+                    closure_cell_contents = AttrSource(closure_cell, "cell_contents")
+                    try:
+                        contents_var = VariableTracker.build(
+                            parent, cell.cell_contents, closure_cell_contents
+                        )
+                    except ValueError:
+                        # Cell has not yet been assigned
+                        contents_var = variables.DeletedVariable()
+
+                    if id(cell) not in tx.mutated_closure_cell_ids:
+                        # Optimistically don't allocate the cell, to
+                        # reduce the number of side effects.  This is
+                        # important for cond, as without it, any accesses
+                        # to closures create side effects and cond doesn't
+                        # support side effects.  If we're wrong and this
+                        # closure cell gets written to, we will restart
+                        # the analysis with this cell's name in the
+                        # mutated list here
+                        result[name] = contents_var
+                        # Map the variable to the original cell so we can
+                        # look it up later, see
+                        # `InliningInstructionTranslator.STORE_DEREF`.
+                        tx.contents_var_to_mutated_cell[contents_var] = cell
+                        continue
+
+                    # cells are written to with "cell_contents",
+                    # so the source should just be the closure_cell, not its contents
+                    out = side_effects.track_cell_existing(closure_cell, cell)
+                    side_effects.store_cell(
+                        out,
+                        contents_var,
+                    )
+
+                closure_cells[name] = out
+
+            else:
+                result[name] = VariableTracker.build(tx, cell.cell_contents)
 
         return result, closure_cells
-
-    def export_freevars(self, parent, child):
-        pass
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         source = self.source and AttrSource(self.source, name)
@@ -471,7 +476,6 @@ def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kw
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
-        "closure_scope",
         "f_globals",
         *BaseUserFunctionVariable._nonvar_fields,
     }
@@ -485,7 +489,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         kwdefaults,
         annotations,
         closure,
-        closure_scope,
         wrapped_reconstructible=None,
         **kwargs,
     ) -> None:
@@ -500,9 +503,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.kwdefaults = kwdefaults
         self.annotations = annotations
         self.closure = closure
-        if closure is None:
-            closure_scope = None
-        self.closure_scope = closure_scope
         # Either a source or a VT with .can_reconstruct() == True
         self.wrapped_reconstructible: Optional[
             Union[Source, VariableTracker]
@@ -581,12 +581,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
                 result[name] = cell
 
         return result, closure_cells
-
-    def export_freevars(self, parent, child):
-        code = self.get_code()
-        for var in code.co_freevars:
-            if var in child.symbolic_locals:
-                parent.symbolic_locals[var] = child.symbolic_locals[var]
 
     def reconstruct(self, codegen):
         codegen.add_push_null(
