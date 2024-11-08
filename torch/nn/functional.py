@@ -3230,7 +3230,7 @@ def poisson_nll_loss(
 def gaussian_nll_loss(
     input: Tensor,
     target: Tensor,
-    var: Tensor | float,
+    var: Union[Tensor, float],
     full: bool = False,
     eps: float = 1e-6,
     reduction: str = "mean",
