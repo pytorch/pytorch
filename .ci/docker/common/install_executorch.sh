@@ -46,7 +46,11 @@ setup_executorch() {
   # Setup swiftshader and Vulkan SDK which are required to build the Vulkan delegate
   as_jenkins bash .ci/scripts/setup-vulkan-linux-deps.sh
 
-  # Build ExecuTorch later after we install PyTorch built from source
+  export PYTHON_EXECUTABLE=python
+  export EXECUTORCH_BUILD_PYBIND=ON
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
+
+  as_jenkins .ci/scripts/setup-linux.sh cmake
   popd
 }
 

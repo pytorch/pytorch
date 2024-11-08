@@ -55,7 +55,7 @@ export LLVM_DIR=/opt/llvm/lib/cmake/llvm
 if [[ "$BUILD_ENVIRONMENT" == *executorch* ]]; then
   # To build test_edge_op_registration
   export BUILD_EXECUTORCH=ON
-  export USE_CUDA=0
+  export USE_CUDA=1
 fi
 
 if ! which conda; then
