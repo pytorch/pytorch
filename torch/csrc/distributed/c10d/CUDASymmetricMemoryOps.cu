@@ -512,8 +512,16 @@ at::Tensor memset32_(
       "symm_mem::memset32_: input must be a flat, contiguous uint32 tensor.");
 
   TORCH_CHECK(
-      offset > 0 && count > 0,
-      "symm_mem::memset32_: offset and count must be positive integers.");
+      offset >= 0,
+      "symm_mem::memset32_: offset must be greater than or equal to 0 (got ",
+      offset,
+      ")");
+
+  TORCH_CHECK(
+      count > 0,
+      "symm_mem::memset32_: count must be a positive integer (got ",
+      count,
+      ")");
 
   TORCH_CHECK(
       val >= 0 &&
@@ -523,7 +531,7 @@ at::Tensor memset32_(
 
   auto element_size = c10::elementSize(input.scalar_type());
   TORCH_CHECK(
-      offset + count < input.numel(),
+      offset + count <= input.numel(),
       "symm_mem::memset32_: offset + count (",
       offset + count,
       ") exceeded the numel of the input (",
