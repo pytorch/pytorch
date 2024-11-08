@@ -167,6 +167,16 @@ def _detect_input_alias(gm):
             def check_alias(out):
                 if (
                     out is not None
+                    # we could have integer outputs for cond_fn of while_loop
+                    # where the cond_fn looks like:
+                    # def cond_fn(idx):
+                    #   return idx < 0
+                    # while_loop(cond_fn, body_fn, (0,))
+                    # and we trace the cond_fn with (0, )
+                    # We could create an symint for the constant inputs so the otuput
+                    # is still an fx.Node but it doesn't matter if a symint is aliasing the input or not
+                    # and will need special treatment for the storage logic anyway.
+                    and isinstance(out, torch.fx.Node)
                     and "val" in out.meta
                     and isinstance(out.meta["val"], torch.Tensor)
                 ):

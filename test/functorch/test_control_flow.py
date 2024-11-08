@@ -246,9 +246,28 @@ def _while_loop_tests():
 
             return while_loop(cond_fn, body_fn, (iter, x))
 
+    class IntegerCarry(torch.nn.Module):
+        def forward(self, x):
+            i = 0
+            s = x.shape[0]
+
+            def cond_fn(i, s, x):
+                return i < s
+
+            def body_fn(i, s, x):
+                return i + 1, s, x.sin() + i
+
+            return while_loop(cond_fn, body_fn, (i, s, x))
+
+    # Nested case with closure
+
+    # more test:
+    # Take the output of a preivous tensor op (e.g. tolist) or a size call, dynamic and non-dynamic
+
     nested2 = Nested()
     simple_with_linear = SimpleWithLinear()
     nested_with_linear = NestedWithLinear()
+    integer_carry = IntegerCarry()
 
     x = torch.zeros(1)
     y = torch.zeros(1)
@@ -269,6 +288,7 @@ def _while_loop_tests():
             nested_with_linear,
             (torch.tensor(3), torch.randn(2, 2)),
         ),
+        "integer_carry": (integer_carry, (torch.randn(2, 2),)),
     }
 
 
@@ -3328,7 +3348,13 @@ class TestControlFlowTraced(TestCase):
     def _check_tracing(self, fn, args, allow_non_fake_inputs=False):
         graphs = {}
         eager_res = fn(*args)
-        for tracing_mode in ["symbolic", "real", "fake"]:
+        # We doesn't test "symbolic" anymore because "symbolic" isn't being used in
+        # export/torch.compile stack.
+        # To enable "symbolic", we need to add SymInt input support in dynamo. note: this is
+        # different from the case where we have int inputs and we turn it into symint but
+        # literally a torch.SymInt input to a compiled region.
+        # We've done similar things for SymBool input for cond but the ROI seems really low.
+        for tracing_mode in ["real", "fake"]:
             graph = make_fx(
                 fn,
                 tracing_mode=tracing_mode,
@@ -3437,7 +3463,7 @@ def forward(self, L_ctx_saved_tensors_0_ : torch.Tensor, L_ctx_pred : torch.Tens
         fn, inp = WHILE_LOOP_TESTS["nested"]
         graphs = self._check_tracing(fn, inp)
         self.assertExpectedInline(
-            graphs["symbolic"].code.strip("\n"),
+            graphs["fake"].code.strip("\n"),
             """\
 def forward(self, out_iter_1, it_1, y_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
@@ -3450,7 +3476,7 @@ def forward(self, out_iter_1, it_1, y_1):
     """,  # noqa: B950
         )
         self.assertExpectedInline(
-            graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
+            graphs["fake"].while_loop_cond_graph_0.code.strip("\n"),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     sum_1 = torch.ops.aten.sum.default(arg0_1);  arg0_1 = None
@@ -3459,7 +3485,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     """,
         )
         self.assertExpectedInline(
-            graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"),
+            graphs["fake"].while_loop_body_graph_0.code.strip("\n"),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
@@ -3495,7 +3521,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             graphs = self._check_tracing(fn, inp)
         if func_type == "no":
             self.assertExpectedInline(
-                graphs["symbolic"].code.strip("\n"),
+                graphs["fake"].code.strip("\n"),
                 """\
 def forward(self, x_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
@@ -3506,7 +3532,7 @@ def forward(self, x_1):
     """,  # noqa: B950
             )
             self.assertExpectedInline(
-                graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
+                graphs["fake"].while_loop_cond_graph_0.code.strip("\n"),
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
@@ -3518,7 +3544,7 @@ def forward(self, arg0_1):
     """,
             )
             self.assertExpectedInline(
-                graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"),
+                graphs["fake"].while_loop_body_graph_0.code.strip("\n"),
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
@@ -3530,7 +3556,7 @@ def forward(self, arg0_1):
             )
         elif func_type == "python":
             self.assertExpectedInline(
-                graphs["symbolic"].code.strip("\n"),
+                graphs["fake"].code.strip("\n"),
                 """\
 def forward(self, arg0_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
@@ -3541,7 +3567,7 @@ def forward(self, arg0_1):
     """,  # noqa: B950
             )
             self.assertExpectedInline(
-                graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
+                graphs["fake"].while_loop_cond_graph_0.code.strip("\n"),
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
@@ -3553,7 +3579,7 @@ def forward(self, arg0_1):
     """,
             )
             self.assertExpectedInline(
-                graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"),
+                graphs["fake"].while_loop_body_graph_0.code.strip("\n"),
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
@@ -3565,7 +3591,7 @@ def forward(self, arg0_1):
             )
         else:
             self.assertExpectedInline(
-                graphs["symbolic"].code.strip("\n"),
+                graphs["fake"].code.strip("\n"),
                 """\
 def forward(self, x_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
@@ -3576,7 +3602,7 @@ def forward(self, x_1):
     """,  # noqa: B950
             )
             self.assertExpectedInline(
-                graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
+                graphs["fake"].while_loop_cond_graph_0.code.strip("\n"),
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
@@ -3588,7 +3614,7 @@ def forward(self, arg0_1):
     """,
             )
             self.assertExpectedInline(
-                graphs["symbolic"].while_loop_body_graph_0.code.strip("\n"),
+                graphs["fake"].while_loop_body_graph_0.code.strip("\n"),
                 """\
 def forward(self, arg0_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
@@ -3707,7 +3733,7 @@ def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_bo
     def test_while_loop_nested2_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested2"]
         graphs = self._check_tracing(fn, inp)
-        gm = graphs["symbolic"]
+        gm = graphs["fake"]
         outer_body = gm.while_loop_body_graph_0
         outer_cond = gm.while_loop_cond_graph_0
         inner_body = outer_body.while_loop_body_graph_0
@@ -3785,6 +3811,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
     return gt
     """,
         )
+
+    def test_while_int_carry(self):
+        pass
 
     def test_cond_nested_traced(self):
         def true_nested(y):
@@ -3875,34 +3904,30 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
         def f(a, b):
             return cond(a.sum() > 0, torch.add, torch.mul, (a, b))
 
-        gm = self._check_tracing(f, (a, b))["symbolic"]
+        gm = self._check_tracing(f, (a, b))["fake"]
         self.assertExpectedInline(
             gm.code.strip(),
             """\
 def forward(self, a_1, b_1):
     sum_1 = torch.ops.aten.sum.default(a_1)
     gt = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
-    sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(a_1, 1)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(b_1, 0)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(b_1, 1)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [a_1, b_1, sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3]);  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
+    cond = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [a_1, b_1]);  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = None
     getitem = cond[0];  cond = None
     return getitem""",  # noqa: B950
         )
         self.assertExpectedInline(
             gm.true_graph_0.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
+def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
     return (add,)""",
         )
         self.assertExpectedInline(
             gm.false_graph_0.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
+def forward(self, arg0_1, arg1_1):
     mul = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
     return (mul,)""",
         )
@@ -3936,9 +3961,9 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
             z = torch.add(y, y)
             return z
 
-        symbolic_traced_graph = self._check_tracing(
-            f, (torch.ones(4), torch.Tensor([True]))
-        )["symbolic"]
+        symbolic_traced_graph = make_fx(f, tracing_mode="symbolic")(
+            torch.ones(4), torch.Tensor([True])
+        )
         graph_shape_env = symbolic_traced_graph.shape_env
 
         def _node_shape_env_iter(gm):
