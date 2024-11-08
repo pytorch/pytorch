@@ -1,3 +1,4 @@
+#include <c10/util/env.h>
 #include <torch/csrc/lazy/core/config.h>
 
 // NOLINTBEGIN(misc-use-internal-linkage)
@@ -77,9 +78,9 @@ namespace torch::lazy {
 std::string& getLTCForceFallback() {
   static std::string config;
   static bool _ignore = [&]() {
-    char* envptr = std::getenv("LTC_FORCE_FALLBACK");
-    if (envptr) {
-      config = std::string(envptr);
+    auto env = c10::utils::get_env("LTC_FORCE_FALLBACK");
+    if (env) {
+      config = std::move(env.value());
     }
     return true;
   }();
