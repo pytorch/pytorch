@@ -2,6 +2,7 @@ workspace(name = "pytorch")
 
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("//tools/rules:workspace.bzl", "new_patched_local_repository")
+load("@tsl//third_party/gpus:cuda_configure.bzl", "cuda_configure")
 
 http_archive(
     name = "rules_cc",
