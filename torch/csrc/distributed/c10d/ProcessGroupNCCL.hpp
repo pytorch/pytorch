@@ -598,10 +598,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     return true;
   }
 
-  bool supportsCoalescing() const override {
-    return true;
-  }
-
   void startCoalescing() override;
 
   c10::intrusive_ptr<Work> endCoalescing() override;

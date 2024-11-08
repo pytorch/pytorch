@@ -811,7 +811,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         backendTypeToBackend_.find(backendType_) != backendTypeToBackend_.end(),
         "Could not find the default backend type ",
-        uint16_t(backendType_),
+        backendType_,
         " for Process Group with name ",
         getBackendName(),
         ".");
@@ -832,9 +832,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     TORCH_CHECK(
         backendTypeToBackend_.find(backendType) != backendTypeToBackend_.end(),
         "Could not find backend type ",
-        uint16_t(backendType),
-        " for Process Group with name ",
-        backendTypeToString(backendType),
+        backendType,
         ".");
     return backendTypeToBackend_.at(backendType);
   }
