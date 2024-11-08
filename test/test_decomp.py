@@ -424,7 +424,7 @@ CROSS_REF_BACKWARD_EXCLUDE_SET = {
     # Decomposed backward formula is not as precise
     ("cpu", torch.bfloat16, "nn.functional.hardswish"),
     ("cuda", torch.float16, "nn.functional.cross_entropy"),
-        (
+    (
         None,
         None,
         "bernoulli",
