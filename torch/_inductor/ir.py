@@ -4931,6 +4931,11 @@ class ExternKernel(InputsKernel):
         assert order is not None or exact_strides is not None
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
+
+        if not exact_strides:  # Layout doesn't matter
+            # Either strides is None or []
+            return x
+
         # require x to have the layout
         if is_storage_and_layout(x):
             while isinstance(x.get_layout(), NonOwningLayout):
