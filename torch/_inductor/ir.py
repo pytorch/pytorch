@@ -3692,6 +3692,10 @@ class InputBuffer(Buffer):
         return 1
 
 
+class DonatedBuffer(InputBuffer):
+    pass
+
+
 class ConstantBuffer(InputBuffer):
     override_device: Optional[torch.device] = None
 

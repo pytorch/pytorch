@@ -74,6 +74,7 @@ from .exc import (
 )
 from .ir import (
     Constant,
+    DonatedBuffer,
     FixedLayout,
     get_device_type,
     InputBuffer,
@@ -483,6 +484,9 @@ class GraphLowering(torch.fx.Interpreter):
 
         # state used by for Kernel.workspace
         self.workspace_id = itertools.count()
+
+        # track the current placeholder index that we are processing
+        self.placeholder_idx = -1
 
     def has_feature(
         self, device: Union[torch._inductor.ir.IRNode, device], feature: BackendFeature
@@ -960,6 +964,7 @@ class GraphLowering(torch.fx.Interpreter):
     def placeholder(
         self, target: str, args: Tuple[object], kwargs: Dict[str, object]  # type: ignore[override]
     ) -> Union[Expr, TensorBox, None]:
+        self.placeholder_idx += 1
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
         if isinstance(example, SymTypes):
@@ -990,13 +995,30 @@ class GraphLowering(torch.fx.Interpreter):
             sizes, strides = self.static_sizes_strides(example)
         else:
             sizes, strides = self.symbolic_sizes_strides(example)  # type: ignore[assignment]
-        # TODO(jansel): handle input aliasing
-        tensor = TensorBox.create(
-            InputBuffer(
-                name=target,
-                layout=FixedLayout(example.device, example.dtype, sizes, strides),
+
+        tracing_context = torch._guards.TracingContext.try_get()
+        if (
+            self.is_backward
+            and tracing_context is not None
+            and tracing_context.fw_metadata
+            and tracing_context.fw_metadata.bw_donated_idxs
+            and self.placeholder_idx in tracing_context.fw_metadata.bw_donated_idxs
+        ):
+            tensor = TensorBox.create(
+                DonatedBuffer(
+                    name=target,
+                    layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                )
             )
-        )
+        else:
+            # TODO(jansel): handle input aliasing
+            tensor = TensorBox.create(
+                InputBuffer(
+                    name=target,
+                    layout=FixedLayout(example.device, example.dtype, sizes, strides),
+                )
+            )
+
         self.graph_inputs[target] = tensor
         self.graph_input_names.append(target)
         self.graph_inputs_original[target] = tensor.data.data
