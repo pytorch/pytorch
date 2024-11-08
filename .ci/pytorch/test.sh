@@ -1360,7 +1360,7 @@ test_executorch() {
   # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
   # from the PR
   # shellcheck disable=SC1091
-  source .ci/scripts/setup-linux.sh cmake
+  bash .ci/scripts/setup-linux.sh cmake
 
   echo "Run ExecuTorch unit tests"
   pytest -v -n auto
