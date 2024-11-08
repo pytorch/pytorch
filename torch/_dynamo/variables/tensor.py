@@ -292,7 +292,9 @@ class TensorVariable(VariableTracker):
         if is_bound_tensor_method(real_value):
             from .misc import GetAttrVariable
 
-            return GetAttrVariable(self, name, source=attr_source)
+            return GetAttrVariable(
+                self, name, source=attr_source, py_type=type(real_value)
+            )
 
         return VariableTracker.build(tx, real_value, attr_source)
 
