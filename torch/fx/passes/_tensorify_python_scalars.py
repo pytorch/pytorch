@@ -279,17 +279,6 @@ def tensorify_python_scalars(
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
-    for node in graph.nodes:
-        # Need to do one more run because metas can now be inconsistent.
-        # eg. previously eg(_local_scalar_dense, inf) would have meta['val'] = False
-        # but after the previously specialization, this val is now True.
-        if (
-            callable(node.target)
-            and len(node.args) > 1
-            and all(isinstance(a, float) for a in node.args)
-        ):
-            node.meta["val"] = node.target(*node.args, **node.kwargs)
-
     graph_code_log.debug(
         "%s", lazy_format_graph_code("tensorify_python_scalars", gm, colored=True)
     )
