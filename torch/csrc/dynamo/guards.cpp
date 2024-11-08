@@ -1628,6 +1628,7 @@ class GuardAccessor {
  * entries.
  */
 
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class GuardManager {
  public:
   GuardManager() = delete;
