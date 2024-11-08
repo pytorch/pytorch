@@ -115,7 +115,6 @@ C++ or Python APIs.
 import concurrent.futures
 import glob
 import multiprocessing as mp
-import os
 import shutil
 import warnings
 from typing import Optional, Tuple
@@ -297,19 +296,20 @@ def _gather_tunableop_results() -> None:
     gemm_lines = set()
     validator_lines = []
 
-    tunable_filename_env = os.getenv("PYTORCH_TUNABLEOP_FILENAME")
+    results_filename = get_filename()
 
-    # There are three possible filename scenarios to handle:
-    # - No filename was specified through the environment variable
-    # - A regular filename was specified
-    # - A filename that contains '%d' in the string which represents
-    #   the GPU ordinal
-    if tunable_filename_env is None:
-        filename_pattern = "tunableop_results?.csv"
-    elif "%d" in tunable_filename_env:
-        filename_pattern = tunable_filename_env.replace("%d", "?")
-    else:
-        filename_pattern = tunable_filename_env.replace(".", "?.")
+    # Create a filename_pattern that can be used in glob.
+    # Looks complicated, below but need to accommodate the most
+    # use case. Assume filename pattern has an ordinal to the
+    # left of the dot, as in filename1.csv
+    dot_pos = results_filename.find(".")
+    if dot_pos != -1 and dot_pos > 0:
+        # Replace the character just to the left of the dot
+        filename_pattern = (
+            results_filename[: dot_pos - 1] + "?" + results_filename[dot_pos:]
+        )
+
+    assert filename_pattern is not None
 
     FirstFile = False
     matching_files = glob.glob(filename_pattern)
