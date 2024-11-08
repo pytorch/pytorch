@@ -539,7 +539,7 @@ class FilterVariable(IteratorVariable):
             item = _next()
             self.index += 1
             res = self.fn.call_function(tx, [item], {})
-            if variables.UserFunctionVariable(polyfills.filter_is_true).call_function(
+            if variables.UserFunctionVariable(polyfills.predicate).call_function(
                 tx, [res], {}
             ):
                 return item
