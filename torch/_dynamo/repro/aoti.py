@@ -363,15 +363,16 @@ def repro_minify(options, exported_program, config_patches):
         if gm is None:
             return False
 
+        assert isinstance(gm, torch.fx.GraphModule)
         # update serialized_in_spec and serialized_out_spec
         flat_example_inputs, local_config_patches = _flatten_inputs(
-            gm, tuple_inputs, options=config_patches
+            gm, flat_example_inputs, options=config_patches
         )
 
         try:
             _aoti_compile_and_package_inner(
                 gm,
-                tuple_inputs,
+                flat_example_inputs,
                 load_and_run=True,
                 inductor_configs=local_config_patches,
             )
