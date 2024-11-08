@@ -251,6 +251,13 @@ def register_ops_with_aoti_compile(ns, op_set, dispatch_key, torch_compile_op_li
                 continue
 
 
+def get_divisible_by_16(cfg):
+    # attribute was renamed between triton versions, from "divisible_by_16" to "divisibility_16"
+    if hasattr(cfg, "divisibility_16"):
+        return cfg.divisibility_16
+    return cfg.divisible_by_16
+
+
 class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
@@ -762,6 +769,16 @@ def skip_if_halide(fn):
     def wrapper(self):
         if is_halide_backend(self.device):
             raise unittest.SkipTest("halide not supported")
+        return fn(self)
+
+    return wrapper
+
+
+def skip_if_dynamic(fn):
+    @functools.wraps(fn)
+    def wrapper(self):
+        if ifdynstaticdefault(True, False) or torch._dynamo.config.dynamic_shapes:
+            raise unittest.SkipTest("associtaive_scan doesn's support lifted SymInts.")
         return fn(self)
 
     return wrapper
@@ -2031,6 +2048,7 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
+    @skip_if_dynamic  # TODO: support lifted symints when dynamic
     def test_custom_scan_op(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2056,6 +2074,7 @@ class CommonTemplate:
         self.assertEqual(expect, actual)
 
     @skip_if_halide  # scan ops
+    @skip_if_dynamic  # TODO: support lifted symints when dynamic
     def test_custom_scan_op_compiled(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2083,6 +2102,7 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
+    @skip_if_dynamic  # TODO: support lifted symints when dynamic
     def test_custom_scan_op_multi_input(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2107,6 +2127,7 @@ class CommonTemplate:
 
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     @skip_if_halide  # scan ops
+    @skip_if_dynamic  # TODO: support lifted symints when dynamic
     def test_custom_scan_would_split(self):
         if self.device != "cuda":
             raise unittest.SkipTest("associative_scan only supported on GPU")
@@ -2159,6 +2180,7 @@ class CommonTemplate:
         self.common(fn, [packed])
 
     @skipCUDAIf(True, "No _weight_int8pack_mm implementation on CUDA")
+    @skipIfXpu(msg="No _weight_int8pack_mm implementation on XPU")
     def test_int8_weight_only_quant(self):
         def convert_weight_to_int8pack(b):
             b_int8pack, b_scales, _ = _dynamically_quantize_per_channel(
@@ -11895,8 +11917,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 self.assertEqual(len(kernels), 2)
 
             for kernel_id, expected in expected_divisible.items():
-                divisible_by_16 = (
-                    kernels[kernel_id].triton_meta["configs"][0].divisible_by_16
+                divisible_by_16 = get_divisible_by_16(
+                    kernels[kernel_id].triton_meta["configs"][0]
                 )
                 self.assertEqual(divisible_by_16, expected)
 
@@ -11906,12 +11928,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
         def test_codegen_config_option_dont_assume_alignment(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x.sin() + x.cos()
-
-            def get_divisible_by_16(cfg):
-                # attribute was renamed between triton versions, from "divisible_by_16" to "divisibility_16"
-                if hasattr(cfg, "divisibility_16"):
-                    return cfg.divisibility_16
-                return cfg.divisible_by_16
 
             # We want code that assumes alignment if the initial input is 16-byte aligned
             for offset in (0, 1, 2, 3, 4):
