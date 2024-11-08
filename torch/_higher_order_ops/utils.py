@@ -78,7 +78,7 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
-def reenter_make_fx(fn, symintify_int=False):
+def reenter_make_fx(fn):
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
 
     @functools.wraps(fn)
@@ -86,21 +86,6 @@ def reenter_make_fx(fn, symintify_int=False):
         assert (
             _CURRENT_MAKE_FX_TRACER is not None
         ), "Cannot reenter make_fx when we're not under a make_fx tracing session"
-
-        if symintify_int:
-            fake_mode = torch._guards.detect_fake_mode()
-
-            def _symintify_int(t):
-                if isinstance(t, int):
-                    unbacked_idx = fake_mode.shape_env.create_unbacked_symint()
-                    _ = torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
-                        fake_mode.shape_env, unbacked_idx
-                    )
-                    return unbacked_idx
-                return t
-
-            args = tuple(_symintify_int(arg) for arg in args)
-
         return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
             _maybe_run_with_interpreter(fn), *args
         )
@@ -182,6 +167,16 @@ def _detect_input_alias(gm):
             def check_alias(out):
                 if (
                     out is not None
+                    # we could have integer outputs for cond_fn of while_loop
+                    # where the cond_fn looks like:
+                    # def cond_fn(idx):
+                    #   return idx < 0
+                    # while_loop(cond_fn, body_fn, (0,))
+                    # and we trace the cond_fn with (0, )
+                    # We could create an symint for the constant inputs so the otuput
+                    # is still an fx.Node but it doesn't matter if a symint is aliasing the input or not
+                    # and will need special treatment for the storage logic anyway.
+                    and isinstance(out, torch.fx.Node)
                     and "val" in out.meta
                     and isinstance(out.meta["val"], torch.Tensor)
                 ):
