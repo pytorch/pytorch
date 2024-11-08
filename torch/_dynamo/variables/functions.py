@@ -76,25 +76,21 @@ def wrap_args_kwargs(tx: "InstructionTranslator", result):
             result[k] = wrap_bound_arg(tx, v)
 
 
-def init_cellvars(
-    parent, result: Dict[str, VariableTracker], code
-) -> Dict[str, VariableTracker]:
+def init_cellvars(parent, result: Dict[str, VariableTracker], code):
     """
-    Return a mapping from local name to new cells created directly by `code`,
-    and make sure that mapping is disjoint from `result`.
+    Update `result` to add mapping from local name to new cells created
+    directly by `code`, or update SideEffects in `parent` if the a local cell is
+    already in `result` (cell argument).
     """
-    closure_cells = {}
     side_effects = parent.output.side_effects
 
-    # for name in itertools.chain(code.co_cellvars, code.co_freevars):
     for name in code.co_cellvars:
-        closure_cells[name] = side_effects.track_cell_new()
+        new_cell = side_effects.track_cell_new()
         if name in result:
             # This handles when a function argument is a cell (e.g., captured by
             # a nested func). See `MAKE_CELL` bytecode for more info.
-            side_effects.store_cell(closure_cells[name], result.pop(name))
-
-    return closure_cells
+            side_effects.store_cell(new_cell, result.pop(name))
+        result[name] = new_cell
 
 
 def _create_nested_fn(
@@ -204,15 +200,10 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def get_globals(self):
         return self.fn.__globals__
 
-    def bind_args(self, parent, args, kwargs):
+    def bind_args(self, parent, args, kwargs) -> Dict[str, VariableTracker]:
         """
         Assume `args` and `kwargs` are VariableTracker arguments for a call to
-        this function, create new bindings for interpreting the function call.
-
-        Return 2 `Dict[str, VariableTracker]` mappings:
-        - closure_cells: locals that are cells created directly by this
-          function's frame.
-        - result: all other locals
+        this function, create new bindings for initial locals.
         """
         assert not self.is_constant
         tx = parent.output.root_tx
@@ -255,7 +246,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         result = dict(bound.arguments.items())
 
         wrap_args_kwargs(tx, result)
-        closure_cells = init_cellvars(parent, result, fn.__code__)
+        init_cellvars(parent, result, fn.__code__)
         closure = self.fn.__closure__ or ()
         assert len(closure) == len(self.fn.__code__.co_freevars)
         for idx, name, cell in zip(
@@ -295,9 +286,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 # remove it.
                 cell_var.mutation_type = None
 
-            closure_cells[name] = cell_var
+            result[name] = cell_var
 
-        return result, closure_cells
+        return result
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         source = self.source and AttrSource(self.source, name)
@@ -548,14 +539,14 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         bound.apply_defaults()
         result = dict(bound.arguments.items())
         wrap_args_kwargs(parent.output.root_tx, result)
-        closure_cells = init_cellvars(parent, result, code)
+        init_cellvars(parent, result, code)
 
         for idx, name in enumerate(code.co_freevars):
             assert name not in result
             cell = self.closure.items[idx]
-            closure_cells[name] = cell
+            result[name] = cell
 
-        return result, closure_cells
+        return result
 
     def reconstruct(self, codegen):
         codegen.add_push_null(

@@ -149,11 +149,7 @@ class ComptimeContext:
         Retrieve the compile-time known information about a local.
         """
         tx = self.__get_tx(stacklevel)
-
-        if name in tx.symbolic_locals:
-            var = tx.symbolic_locals[name]
-        else:
-            var = tx.closure_cells[name]
+        var = tx.symbolic_locals[name]
 
         # Auto-dereference when accessing cell locals in python.
         if isinstance(var, NewCellVariable):
