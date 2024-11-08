@@ -1615,7 +1615,7 @@ class BuiltinVariable(VariableTracker):
 
     def call_filter(self, tx: "InstructionTranslator", fn, seq):
         seq = seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
-        return variables.FilterVariable(fn, seq, mutable_local=MutableLocal())
+        return variables.FilterVariable(fn, seq, mutation_type=ValueMutationNew())
 
     def call_getattr(
         self,
