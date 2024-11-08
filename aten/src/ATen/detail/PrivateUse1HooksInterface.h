@@ -1,20 +1,18 @@
 #pragma once
 
+#include <ATen/core/Generator.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
 #include <c10/core/Storage.h>
 #include <c10/util/Exception.h>
-
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
-
 namespace at {
 
 struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
   ~PrivateUse1HooksInterface() override = default;
-
-  const at::Generator& getDefaultGenerator(
-      c10::DeviceIndex device_index) const override {
+  virtual const at::Generator& getDefaultGenerator(
+      c10::DeviceIndex device_index) const {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false,
         "You should register `PrivateUse1HooksInterface` for PrivateUse1 before call `getDefaultGenerator`.");
