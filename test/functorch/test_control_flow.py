@@ -3759,13 +3759,9 @@ def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_bo
             gm.code.strip("\n"),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
-    sym_size_int = torch.ops.aten.sym_size.int(arg2_1, 0)
-    sym_size_int_1 = torch.ops.aten.sym_size.int(arg2_1, 1)
-    sym_size_int_2 = torch.ops.aten.sym_size.int(arg3_1, 0)
-    sym_size_int_3 = torch.ops.aten.sym_size.int(arg3_1, 1)
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (sym_size_int, sym_size_int_1, sym_size_int_2, sym_size_int_3));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = sym_size_int = sym_size_int_1 = sym_size_int_2 = sym_size_int_3 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2]
@@ -3776,10 +3772,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         self.assertExpectedInline(
             outer_body.code.strip("\n"),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (arg7_1, arg7_1, arg7_1, arg7_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = arg7_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2]
@@ -3794,10 +3790,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
         self.assertExpectedInline(
             outer_body.code.strip("\n"),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), (arg7_1, arg7_1, arg7_1, arg7_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = arg7_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2]
@@ -3812,7 +3808,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
         self.assertExpectedInline(
             inner_body.code.strip("\n"),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
     sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
     add = torch.ops.aten.add.Tensor(arg2_1, 3.14);  arg2_1 = None
@@ -3823,7 +3819,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
         self.assertExpectedInline(
             inner_cond.code.strip("\n"),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1):
+def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     gt = torch.ops.aten.gt.Scalar(arg1_1, 0);  arg1_1 = None
     return gt
     """,
