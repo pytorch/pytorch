@@ -54,7 +54,7 @@ class QConvoneDNNXPU final {
       TORCH_CHECK(
           attr == "none" || attr == "relu" || attr == "hardtanh" ||
               attr == "hardswish" || attr == "swish",
-          "We support quantized convolution without post-op(attr==None) and combinations for Quantized Conv + ReLU, Hardtanh, and Hardswish are supported. However, encountered unsupported post operation:",
+          "We support quantized convolution without any post-ops or combinations for Quantized Conv + ReLU, Hardtanh, and Hardswish are supported. However, encountered unsupported post operation:",
           attr,
           ".");
     }
