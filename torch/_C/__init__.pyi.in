@@ -915,6 +915,7 @@ class Argument:
     kwarg_only: _bool
     is_out: _bool
     alias_info: Optional[AliasInfo]
+    is_write: _bool
 
 class FunctionSchema:
     arguments: List[Argument]
