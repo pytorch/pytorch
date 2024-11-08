@@ -1638,7 +1638,7 @@ class Tensor(torch._C.TensorBase):
         elif self.device.type == "xpu":
             device_type = DLDeviceType.kDLOneAPI
         elif self.device.type == "privateuse1":
-            device_type = DLDeviceType.kDLPrivateUse1
+            device_type = DLDeviceType.kDLExtDev
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)

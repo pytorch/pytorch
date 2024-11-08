@@ -93,8 +93,6 @@ typedef enum {
   kDLHexagon = 16,
   /*! \brief Microsoft AI Accelerator */
   kDLMAIA = 17,
-  /*! \brief PrivateUse1 device */
-  KDLPrivateUse1 = 18,
 } DLDeviceType;
 
 /*!

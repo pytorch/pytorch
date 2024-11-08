@@ -122,7 +122,7 @@ static DLDevice getDLDevice(const Tensor& tensor, c10::DeviceIndex device_id) {
       ctx.device_type = DLDeviceType::kDLMAIA;
       break;
     case DeviceType::PrivateUse1:
-      ctx.device_type = DLDeviceType::KDLPrivateUse1;
+      ctx.device_type = DLDeviceType::kDLExtDev;
       break;
     default:
       TORCH_CHECK(false, "Cannot pack tensors on " + tensor.device().str());
@@ -152,7 +152,7 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
     case DLDeviceType::kDLMAIA:
       return at::Device(DeviceType::MAIA, static_cast<c10::DeviceIndex>(ctx.device_id));
-    case DLDeviceType::KDLPrivateUse1:
+    case DLDeviceType::kDLExtDev:
       return at::Device(DeviceType::PrivateUse1, static_cast<c10::DeviceIndex>(ctx.device_id));
     default:
       TORCH_CHECK(
