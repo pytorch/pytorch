@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import math
-from typing import Dict, Optional
+from typing import Dict
 
 import sympy
 
@@ -9,8 +9,6 @@ from torch._inductor import config
 from torch._inductor.codegen.simd import IterationRangesRoot
 from torch._inductor.codegen.triton import triton_compute_type, TritonKernel
 from torch._inductor.runtime.triton_heuristics import split_scan_grid
-from torch.utils._ordered_set import OrderedSet
-from torch._prims_common import prod
 from torch.utils._sympy.functions import CeilDiv
 
 
