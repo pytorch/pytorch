@@ -2406,6 +2406,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(type(res), filter)
         self.assertTrue(isinstance(res, filter))
 
+    def test_filter_with_graph_break(self):
+        def f(a):
+            a += 1
+
+            def g(x):
+                nonlocal a
+                a += 1
+                return x > 0
+
+            m = filter(g, [1, 2, 3, 4, 5])
+            a += next(m)  # won't graph break
+            torch._dynamo.graph_break()
+            a += next(m)  # will graph break
+            return a
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnts)
+        self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_pow_int(self):
         def fn(a, b):
             return torch.pow(a, b)

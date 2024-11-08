@@ -539,7 +539,9 @@ class FilterVariable(IteratorVariable):
             item = _next()
             self.index += 1
             res = self.fn.call_function(tx, [item], {})
-            if polyfills.filter_is_true(res):
+            if variables.UserFunctionVariable(polyfills.filter_is_true).call_function(
+                tx, [res], {}
+            ):
                 return item
 
     def reconstruct_items(self, codegen):
@@ -553,10 +555,7 @@ class FilterVariable(IteratorVariable):
             codegen(self.iterable)
 
     def reconstruct(self, codegen):
-        codegen.add_push_null(
-            lambda: codegen.load_import_from("builtins", "filter"),
-            call_function_ex=True,
-        )
+        codegen.add_push_null(lambda: codegen.load_import_from("builtins", "filter"))
         codegen(self.fn)
         self.reconstruct_items(codegen)
         codegen.extend_output(create_call_function(2, False))
