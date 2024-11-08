@@ -1153,7 +1153,7 @@ def _make_node_magic(method, func):
                 else:
                     out = PythonMod(self.expr, other.expr)
             elif method == "add":
-                out = func(self.expr_allow_custom_add, other.expr_allow_custom_add, optimize_incremental_summations=True)
+                out = func(self.expr_allow_custom_add, other.expr_allow_custom_add)
             else:
                 # TODO: consider constant prop here
                 out = func(self.expr, other.expr)
