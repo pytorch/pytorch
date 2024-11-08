@@ -117,8 +117,6 @@ void lookup(
     const char** trace_annotation) {
   size_t index = 0;
   CacheEntry* found = nullptr;
-  py::dict f_locals_dict = py::reinterpret_steal<py::object>(
-      (PyObject*)framelocals_mapping_to_dict(f_locals));
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
     // Check backend. Py_False means run only mode.
 
@@ -128,10 +126,12 @@ void lookup(
     if (valid) {
       try {
         valid = torch::dynamo::run_root_guard_manager(
-            cache_entry.root_mgr, f_locals_dict.ptr());
+            cache_entry.root_mgr, f_locals);
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
           py::handle guard_error_hook_handle(guard_error_hook);
+          py::dict f_locals_dict = py::reinterpret_steal<py::object>(
+              (PyObject*)framelocals_mapping_to_dict(f_locals));
           guard_error_hook_handle(
               cache_entry.guard_manager,
               cache_entry.code,

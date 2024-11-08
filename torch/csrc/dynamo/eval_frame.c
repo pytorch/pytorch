@@ -260,8 +260,7 @@ static inline PyObject* dynamo_call_callback(
   if (frame == NULL) {
     return NULL;
   }
-  PyDictObject* locals_dict = framelocals_mapping_to_dict(locals);
-  frame->locals = locals_dict;
+  frame->locals = framelocals_mapping_to_dict(locals);
 #else
   PyObject* frame = Py_NewRef(_frame);
 #endif
@@ -273,9 +272,6 @@ static inline PyObject* dynamo_call_callback(
     frame,
     cache_entry_pyobj,
     frame_state);
-  #if IS_PYTHON_3_11_PLUS
-  Py_DECREF(frame->locals);
-  #endif
   Py_DECREF(frame);
   Py_DECREF(cache_entry_pyobj);
   return res;

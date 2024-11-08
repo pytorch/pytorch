@@ -3,7 +3,6 @@
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/cpython_includes.h>
 #include <torch/csrc/dynamo/debug_macros.h>
-#include <torch/csrc/utils/pybind.h>
 
 #include <internal/pycore_code.h>
 
@@ -50,7 +49,7 @@ FrameLocalsMapping* get_framelocals_mapping(_PyInterpreterFrame* frame) {
 
     if (value != nullptr) {
       auto name = PyUnicode_AsUTF8(PyTuple_GET_ITEM(co->co_localsplusnames, i));
-      (*map)[name] = value;
+      map->set(name, value);
     }
   };
 
@@ -89,7 +88,7 @@ FrameLocalsMapping* get_framelocals_mapping(PyFrameObject* frame) {
         if (value == nullptr) {
           map->erase(name);
         } else {
-          (*map)[name] = value;
+          map->set(name, value);
         }
       };
 
@@ -131,9 +130,5 @@ void framelocals_mapping_free(FrameLocalsMapping* map) {
 }
 
 PyDictObject* framelocals_mapping_to_dict(FrameLocalsMapping* map) {
-  py::dict d;
-  for (auto& [name, value] : *map) {
-    d[py::str(name)] = py::cast<py::object>(value);
-  }
-  return (PyDictObject*)d.release().ptr();
+  return map->to_dict();
 }

@@ -7,9 +7,40 @@
 #include <string>
 #include <unordered_map>
 
+#include <torch/csrc/dynamo/utils.h>
+#include <torch/csrc/utils/pybind.h>
+
 extern "C" {
 
-typedef std::unordered_map<std::string, PyObject*> FrameLocalsMapping;
+typedef struct VISIBILITY_HIDDEN FrameLocalsMapping {
+ private:
+  std::unordered_map<std::string, PyObject*> _map;
+  py::object _dict{py::none()};
+
+ public:
+  void set(const std::string& key, PyObject* value) {
+    _map[key] = value;
+  }
+
+  void erase(const std::string& key) {
+    _map.erase(key);
+  }
+
+  bool dict_realized() const {
+    return _dict.is_none();
+  }
+
+  // Borrowed reference
+  PyDictObject* to_dict() {
+    if (this->dict_realized()) {
+      _dict = py::dict();
+      for (auto& [name, value] : _map) {
+        _dict[py::str(name)] = py::cast<py::object>(value);
+      }
+    }
+    return (PyDictObject*)_dict.ptr();
+  }
+} FrameLocalsMapping;
 
 #else
 
@@ -27,7 +58,7 @@ FrameLocalsMapping* get_framelocals_mapping(PyFrameObject* frame);
 
 void framelocals_mapping_free(FrameLocalsMapping* map);
 
-// New reference
+// Borrowed reference
 PyDictObject* framelocals_mapping_to_dict(FrameLocalsMapping* map);
 
 #ifdef __cplusplus
