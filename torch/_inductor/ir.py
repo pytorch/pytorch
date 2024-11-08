@@ -4639,9 +4639,6 @@ class ExternKernel(InputsKernel):
 
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None) -> None:
         self.cpp_kernel_name = cpp_kernel_name
-        self.cpp_kernel_overload_name = None
-        self.cpp_kernel_key = None
-        self.cpp_op_schema = None
         if not V.graph.cpp_wrapper or not isinstance(
             self.op_overload, torch._ops.OpOverload
         ):
@@ -4663,19 +4660,6 @@ class ExternKernel(InputsKernel):
                 self.cpp_kernel_name = f"at::_ops::{opname}::call"
             else:
                 self.cpp_kernel_name = kernel._schema.name
-
-        # Set up info for runtime schema lookup
-        # TODO: The logics here may be further simplified.
-        from .codegen.wrapper import get_cpp_op_schema
-
-        self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = (
-            f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"
-        )
-        try:
-            self.cpp_op_schema = get_cpp_op_schema(kernel)
-        except Exception:
-            self.cpp_op_schema = ""
 
     def set_python_kernel_name(self, python_kernel_name: Optional[str]) -> None:
         self.python_kernel_name = python_kernel_name
@@ -5490,24 +5474,33 @@ class TMADescriptor(ExternKernel):
 
 
 class UserDefinedTritonKernel(ExternKernel):
-    def get_kernel_and_configs(self):  # type: ignore[no-untyped-def]
+    def get_kernel_and_metadata(self):  # type: ignore[no-untyped-def]
         from triton.runtime.autotuner import Autotuner
 
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
         configs = []
+        restore_value_args = []
         if isinstance(kernel, Autotuner):
+            # https://github.com/triton-lang/triton/pull/5083
+            # changes kernel.restore_idx to kernel.restore_value
+            if hasattr(kernel, "restore_idx"):
+                for i in kernel.restore_idx:
+                    restore_value_args.append(kernel.fn.arg_names[i])
+            else:
+                assert hasattr(kernel, "restore_value")
+                restore_value_args.extend(kernel.restore_value)
             configs = kernel.configs
             kernel = kernel.fn
-        return kernel, configs
+        return kernel, configs, restore_value_args
 
     def codegen(self, wrapper) -> None:  # type: ignore[no-untyped-def]
-        kernel, configs = self.get_kernel_and_configs()
+        kernel, configs, restore_value_args = self.get_kernel_and_metadata()
 
         # Definition of kernel
         new_name, triton_meta = wrapper.define_user_defined_triton_kernel(
-            kernel, configs, self.kwargs
+            kernel, configs, self.kwargs, restore_value_args
         )
         raw_args = [
             self.get_kwargs_value(k) for k in self.ordered_kwargs_for_cpp_kernel
@@ -5614,7 +5607,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_idx = kernel_idx
         self.grid = grid
 
-        kernel, configs = self.get_kernel_and_configs()
+        kernel, configs, _ = self.get_kernel_and_metadata()
 
         # If we are autotuning, not all arguments will be passed
         self.ordered_kwargs_for_cpp_kernel = [
@@ -6403,9 +6396,6 @@ class FallbackKernel(ExternKernelAlloc):
                 self.python_kernel_name,
                 self.cpp_kernel_name,
                 args,
-                self.cpp_op_schema,
-                self.cpp_kernel_key,
-                self.cpp_kernel_overload_name,
                 self.op_overload,
                 exported_args,
                 [*self.outputs, *self.mutation_outputs],
@@ -7158,17 +7148,12 @@ class _CollectiveKernel(FallbackKernel):
     # This is identical to FallbackKernel.set_cpp_kernel(), minus the
     # part that checks against input aliasing and mutation.
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None) -> None:
-        from .codegen.wrapper import get_cpp_op_schema
-
         assert (
             type(self.op_overload) is torch._ops.OpOverload
         ), "Setting cpp kernel needs a valid op_overload"
         kernel = self.op_overload
         self.cpp_kernel_name = kernel._schema.name
-        self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
 
-        self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.ordered_kwargs_for_cpp_kernel = [
             x.name for x in kernel._schema.arguments if x.kwarg_only
         ]
