@@ -2249,6 +2249,7 @@ class PythonWrapperCodegen(CodeGen):
             return
 
         self.push_codegened_graph(subgraph.graph)
+        self.writeline("")
         self.writeline(f"{self.comment} subgraph: {subgraph.name}")
         self.codegen_subgraph_prefix(subgraph, outer_inputs, outer_outputs)
 

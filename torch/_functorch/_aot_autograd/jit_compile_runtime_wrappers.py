@@ -506,9 +506,6 @@ def run_joint_graph_passes_on_hops(
                 # Save the new forward and backward graph modules
                 new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm
                 new_hop_graphs[identifier].new_bw_hop_gm = new_bw_hop_gm
-                new_hop_graphs[identifier].new_num_fw_outputs = num_outputs(
-                    new_fw_hop_gm
-                )
 
                 # Save the number of symints and saved tensors
                 new_fw_out_nodes = new_fw_hop_gm.graph.find_nodes(op="output")[0].args[

@@ -458,11 +458,16 @@ class GraphModule(torch.nn.Module):
             return gn(x)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        x = torch.randn(8, 8, requires_grad=True)
+        # requires_grad is False deliberately to force None the joint_graph
+        # outputs
+        x = torch.randn(8, 8, requires_grad=False)
 
         ref = mod(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+        ref.sum().backward()
+        res.sum().backward()
 
     def test_fail_with_direct_invoke_subgraph(self):
         from torch._higher_order_ops import invoke_subgraph
