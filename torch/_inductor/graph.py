@@ -2034,12 +2034,17 @@ class GraphLowering(torch.fx.Interpreter):
             return self.compile_to_module().call
 
     def get_output_names(self) -> List[str]:
-        return [
-            node.get_name()
-            for node in self.graph_outputs
-            if not isinstance(node, ir.NoneAsConstantBuffer)
-            and not isinstance(node, ir.ShapeAsConstantBuffer)
-        ]
+        names = []
+        shape_counter = itertools.count(0)
+        none_counter = itertools.count(0)
+        for node in self.graph_outputs:
+            if isinstance(node, ir.NoneAsConstantBuffer):
+                names.append(f"{self.name}_none{next(none_counter)}")
+            elif isinstance(node, ir.ShapeAsConstantBuffer):
+                names.append(f"{self.name}_shape{next(shape_counter)}")
+            else:
+                names.append(node.get_name())
+        return names
 
     def is_unspec_arg(self, name: str) -> bool:
         # dynamo wraps unspec variable as 0d CPU tensor,
