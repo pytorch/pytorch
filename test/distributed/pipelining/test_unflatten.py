@@ -20,7 +20,7 @@ class Block(torch.nn.Module):
         x = self.conv(x)
         x = self.lin0(x)
         pipe_split()
-        x.add_(constant)
+        x.add(constant)
         x = self.lin1(x)
         return self.relu(x)
 

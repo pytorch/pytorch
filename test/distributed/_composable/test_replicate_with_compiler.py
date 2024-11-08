@@ -318,7 +318,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
     # todo: This pass mucks things up since Inductor thinks its inference
     # and can apply this. Should turn off these passes in compiled autograd
     @torch._inductor.config.patch(
-        reorder_for_locality=False, reorder_for_peak_memory=False
+        reorder_for_locality=False,
+        reorder_for_peak_memory=False,
+        # The correctness of this test relies on the pointless permute ops
+        # in the joint graph does not get eliminated..
+        pattern_matcher=False,
     )
     def test_bucketing_coalesced_op(self):
         # Gradient is None
@@ -356,7 +360,11 @@ class ReplicateTest(MultiProcessInductorTestCase):
     # todo: This pass mucks things up since Inductor thinks its inference
     # and can apply this. Should turn off these passes in compiled autograd
     @torch._inductor.config.patch(
-        reorder_for_locality=False, reorder_for_peak_memory=False
+        reorder_for_locality=False,
+        reorder_for_peak_memory=False,
+        # The correctness of this test relies on the pointless permute ops
+        # in the joint graph does not get eliminated..
+        pattern_matcher=False,
     )
     def test_bucketing_concat_op(self):
         # Gradient is None

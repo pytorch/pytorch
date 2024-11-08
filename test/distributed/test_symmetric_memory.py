@@ -847,7 +847,7 @@ class LoweringTest(MultiProcessTestCase):
         self.assertNotIn("return (buf0", code_3)
 
 
-class SymmMemUtilTest(TestCase):
+class SymmMemSingleProcTest(TestCase):
     @skipIfRocm
     @requires_cuda
     def test_memset32(self):
