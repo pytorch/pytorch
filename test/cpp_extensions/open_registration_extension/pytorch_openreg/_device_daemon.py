@@ -32,6 +32,9 @@ class Allocator:
             del self.allocated[ptr]
             return True
 
+    def is_allocated(self, ptr):
+        return ptr in self.allocated
+
     def tensor_from_meta(self, meta):
         # Usual case, we're receiving a known Tensor
         found_base = self.allocated.get(meta.data_ptr, None)
@@ -87,19 +90,27 @@ class Driver:
 
         # State of our driver
         self.curr_device_idx = 0
-        self.curr_stream = 0
+        self.curr_streams = {}
+
+        # Allocated memory belongs to which device
+        self.memory_belong = {}
+        self.host_allocator = Allocator()
+
         # Constant properties of our device
-        self.num_devices = 7
+        self.num_devices = 2
+        self.devices = []
 
-        self.req_queue = mp_context.Queue()
-        self.ans_queue = mp_context.Queue()
+        for i in range(self.num_devices):
+            req_queue = mp_context.Queue()
+            ans_queue = mp_context.Queue()
+            runner = mp_context.Process(
+                target=_Executor(i).run_forever,
+                args=(req_queue, ans_queue),
+                daemon=True,
+            )
+            runner.start()
+            self.devices.append((req_queue, ans_queue, runner))
 
-        self.runner = mp_context.Process(
-            target=_Executor().run_forever,
-            args=(self.req_queue, self.ans_queue),
-            daemon=True,
-        )
-        self.runner.start()
         self.is_initialized = True
 
     def exec(self, cmd, *args):
@@ -109,15 +120,20 @@ class Driver:
         if cmd in Driver.registry:
             res = Driver.registry[cmd](self, *args)
         else:
-            validate_send_queue_args(cmd, args)
-            self.req_queue.put((cmd,) + args)
-            res = self.ans_queue.get()
+            res = self.run_on_executor(self.curr_device_idx, cmd, *args)
 
         log.info("Main process result for %s received: %s", cmd, safe_str(res))
         if res == "ERROR":
             raise RuntimeError(f"Error in daemon while executing {cmd}, see logs")
         else:
             return res
+
+    def run_on_executor(self, device_idx, cmd, *args):
+        req_queue, ans_queue, _ = self.devices[device_idx]
+        stream = self.getStream(device_idx)
+        validate_send_queue_args(cmd, args)
+        req_queue.put((stream, cmd) + args)
+        return ans_queue.get()
 
     registry = {}
 
@@ -142,15 +158,67 @@ class Driver:
         self.curr_device_idx = int(args[0])
         return res
 
+    @register(registry)
+    def malloc(self, size):
+        ptr = self.run_on_executor(self.curr_device_idx, "malloc", size)
+        self.memory_belong[ptr] = self.curr_device_idx
+        return ptr
+
+    @register(registry)
+    def free(self, ptr):
+        device_idx = self.memory_belong.pop(ptr, None)
+        if device_idx is None:
+            return False
+        return self.run_on_executor(device_idx, "free", ptr)
+
+    @register(registry)
+    def isPinnedPtr(self, ptr):
+        return self.host_allocator.is_allocated(ptr)
+
+    @register(registry)
+    def hostMalloc(self, size):
+        return self.host_allocator.malloc(size)
+
+    @register(registry)
+    def hostFree(self, ptr):
+        return self.host_allocator.free(ptr)
+
+    @register(registry)
+    def getNewStream(self, device_idx, priority):
+        return self.run_on_executor(device_idx, "getNewStream", priority)
+
+    @register(registry)
+    def queryStream(self, stream):
+        return self.run_on_executor(
+            stream.device_index, "queryStream", stream.stream_id
+        )
+
+    @register(registry)
+    def getStream(self, device_idx):
+        return self.curr_streams.get(device_idx, 0)
+
+    @register(registry)
+    def exchangeStream(self, stream):
+        stream_id = self.curr_streams.get(stream.device_index, 0)
+        self.curr_streams[stream.device_index] = stream.stream_id
+        return stream_id
+
+    @register(registry)
+    def synchronizeStream(self, stream):
+        self.run_on_executor(stream.device_index, "synchronizeStream", stream.stream_id)
+
 
 class _Executor:
-    def __init__(self):
+    def __init__(self, id):
+        self.id = id
         self.allocator = Allocator()
+        self.stream = 0
 
     def run_forever(self, req_queue, ans_queue):
         # Serve all requests
         while True:
-            cmd, *args = req_queue.get()
+            # Ignore stream since cpu backend doesn't support asynchronous execution
+            _, cmd, *args = req_queue.get()
             log.info("Worker executing: %s", cmd)
             if cmd in _Executor.registry:
                 res = _Executor.registry[cmd](self, *args)
@@ -193,6 +261,20 @@ class _Executor:
     def recv_data(self, host_tensor, dev_mem):
         dev_tensor = OpenRegTensorData.from_meta(self.allocator, dev_mem)
         dev_tensor.copy_(host_tensor)
+
+    @register(registry)
+    def getNewStream(self, priority):
+        self.stream += 1
+        return self.stream
+
+    @register(registry)
+    def queryStream(self, stream):
+        return True
+
+    @register(registry)
+    def synchronizeStream(self, stream):
+        # no-op
+        pass
 
 
 driver = Driver()

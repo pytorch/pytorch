@@ -45,12 +45,10 @@ struct formatter<std::error_code> {
 
 } // namespace fmt
 
-namespace c10d {
-namespace detail {
+namespace c10d::detail {
 
 inline std::error_code lastError() noexcept {
   return std::error_code{errno, std::generic_category()};
 }
 
-} // namespace detail
-} // namespace c10d
+} // namespace c10d::detail

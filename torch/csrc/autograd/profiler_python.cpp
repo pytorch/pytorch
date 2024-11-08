@@ -554,7 +554,8 @@ struct TraceContext {
 
 // CPython boilerplate to define `TraceContext` as a proper python object.
 static PyTypeObject TraceContextType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "TraceContext", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0)
+    "TraceContext", /* tp_name */
     sizeof(TraceContext), /* tp_basicsize */
     0, /* tp_itemsize */
     nullptr, /* tp_dealloc */
@@ -1016,7 +1017,7 @@ class PostProcess {
     ska::flat_hash_map<size_t, std::pair<size_t, kineto::DeviceAndResource>>
         tid_map;
     auto it = out.rbegin();
-    for (C10_UNUSED auto _ : c10::irange(initial_size, out.size())) {
+    for ([[maybe_unused]] auto _ : c10::irange(initial_size, out.size())) {
       const auto python_tid =
           std::get<ExtraFields<E>>((*it)->extra_fields_).python_tid_;
       if ((*it)->start_tid_ == NoTID && SOFT_ASSERT(E == EventType::PyCall)) {

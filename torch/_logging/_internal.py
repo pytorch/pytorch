@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import hashlib
+import importlib.util
 import itertools
 import json
 import logging
@@ -13,7 +14,6 @@ import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from importlib import __import__
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
@@ -42,6 +42,8 @@ LOG_ENV_VAR = "TORCH_LOGS"
 LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
 TRACE_ENV_VAR = "TORCH_TRACE"
+
+LOG_TRACE_HANDLER: Optional["LazyTraceHandler"] = None
 
 
 @dataclass
@@ -724,11 +726,8 @@ def _parse_log_settings(settings):
 
 
 def _is_valid_module(qname):
-    try:
-        __import__(qname)
-        return True
-    except ImportError:
-        return False
+    spec = importlib.util.find_spec(qname)
+    return spec is not None
 
 
 def _update_log_state_from_env():
@@ -975,12 +974,14 @@ def _init_logs(log_file_name=None):
     # initializing it until we actually need to log anything.  This is
     # important because JK initializes a C++ singleton, which will pork our
     # process if we subsequently fork.
-    handler = LazyTraceHandler(trace_dir_name)
+    global LOG_TRACE_HANDLER
+    if LOG_TRACE_HANDLER is None:
+        LOG_TRACE_HANDLER = LazyTraceHandler(trace_dir_name)
     # This log is ALWAYS at debug level.  We will additionally test if there
     # are any handlers before deciding to actually call logging on this.  Do
     # not manually call
     trace_log.setLevel(logging.DEBUG)
-    trace_log_handler = _track_handler(handler)
+    trace_log_handler = _track_handler(LOG_TRACE_HANDLER)
     trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
     trace_log.addHandler(trace_log_handler)
 
@@ -1129,6 +1130,21 @@ def get_structured_logging_overhead() -> Optional[float]:
         return None
 
 
+def trace_structured_artifact(
+    name: str,  # this will go in metadata
+    encoding: str,
+    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+) -> None:
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": name,
+            "encoding": encoding,
+        },
+        payload_fn=payload_fn,
+    )
+
+
 def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
@@ -1139,7 +1155,7 @@ def trace_structured(
     suppress_context: bool = False,
     expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
-):
+) -> None:
     """
     metadata is an arbitrary JSON compatible struct, but it's expected to not be
     too long (e.g., less than 1MB)
@@ -1200,6 +1216,35 @@ def trace_structured(
             # Convert to seconds from nanoseconds, add it to the frame compile total
             structured_logging_overhead_s = (time.time_ns() - start_time) / 1e9
             add_structured_logging_overhead(structured_logging_overhead_s)
+
+
+GET_DTRACE_STRUCTURED = False
+
+
+def dtrace_structured(
+    name: str,
+    # NB: metadata expected to be dict so adding more info is forward compatible
+    # Tuple[str, int] is a special case for string interning
+    metadata_fn: Callable[[], Union[Dict[str, Any], Tuple[str, int]]] = dict,
+    *,
+    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    suppress_context: bool = False,
+    expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
+    record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
+):
+    """
+    For logging more detailed information used for debugging. This may result in
+    the program becoming slow.
+    """
+    if GET_DTRACE_STRUCTURED:
+        trace_structured(
+            name,
+            metadata_fn,
+            payload_fn=payload_fn,
+            suppress_context=suppress_context,
+            expect_trace_id=expect_trace_id,
+            record_logging_overhead=record_logging_overhead,
+        )
 
 
 import torch._guards

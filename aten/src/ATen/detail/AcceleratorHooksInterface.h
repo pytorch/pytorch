@@ -1,9 +1,13 @@
 #pragma once
 
+#include <ATen/core/Generator.h>
+
+#include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
-#include <c10/core/Allocator.h>
+
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
+
 namespace at {
 
 // AcceleratorHooksInterface is a shared interface provided by all
@@ -18,6 +22,10 @@ struct TORCH_API AcceleratorHooksInterface {
 
   // Whether the device at device_index is fully initialized or not.
   virtual bool hasPrimaryContext(DeviceIndex device_index) const = 0;
+
+  virtual void init() const {
+    TORCH_CHECK(false, "Backend doesn`t support init()");
+  }
 
   virtual DeviceIndex deviceCount() const {
     return 0;
@@ -50,7 +58,22 @@ struct TORCH_API AcceleratorHooksInterface {
     TORCH_CHECK(false, "Backend doesn't support getPinnedMemoryAllocator()");
     return nullptr;
   }
+
+  virtual Device getDeviceFromPtr(void* data) const {
+    TORCH_CHECK(false, "Backend doesn't support getDeviceFromPtr()");
+  }
+
+  virtual const Generator& getDefaultGenerator(
+      C10_UNUSED DeviceIndex device_index = -1) const {
+    TORCH_CHECK(false, "Backend doesn`t support getDefaultGenerator()");
+  }
+
+  virtual Generator getNewGenerator(
+      C10_UNUSED DeviceIndex device_index = -1) const {
+    TORCH_CHECK(false, "Backend doesn`t support getNewGenerator()");
+  }
 };
 
 } // namespace at
+
 C10_DIAGNOSTIC_POP()

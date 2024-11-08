@@ -4,7 +4,7 @@ import contextlib
 import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Union, Protocol, Tuple, Sequence, overload, Deque, Type
-from typing_extensions import TypeGuard
+from typing_extensions import TypeIs
 from collections import deque
 
 import torch
@@ -314,6 +314,17 @@ class TensorWithFlatten(Protocol):
     def stride(self, dim: int) -> int:
         ...
 
+    @overload
+    def size(self, dim: None = None) -> Tuple[int, ...]:
+        ...
+
+    @overload
+    def size(self, dim: int) -> int:
+        ...
+
+    def storage_offset(self) -> int:
+        ...
+
     def dim(self) -> int:
         ...
 
@@ -354,7 +365,7 @@ class TensorWithFlatten(Protocol):
 
 
 
-def is_traceable_wrapper_subclass(t: object) -> TypeGuard[TensorWithFlatten]:
+def is_traceable_wrapper_subclass(t: object) -> TypeIs[TensorWithFlatten]:
     """
     Returns whether or not a tensor subclass that implements __torch_dispatch__
     is 'traceable' with torch.compile.
@@ -391,7 +402,7 @@ def is_traceable_wrapper_subclass(t: object) -> TypeGuard[TensorWithFlatten]:
         and hasattr(t, "__tensor_unflatten__")
     )
 
-def is_traceable_wrapper_subclass_type(t: Type) -> TypeGuard[Type[TensorWithFlatten]]:
+def is_traceable_wrapper_subclass_type(t: Type) -> TypeIs[Type[TensorWithFlatten]]:
     """Same as above, but takes a type argument instead of an instance."""
     return (issubclass(t, torch.Tensor) and t != torch.Tensor
             and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__"))
@@ -452,7 +463,6 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     assert isinstance(func, torch._ops.OpOverload)
     assert isinstance(args, tuple)
     assert isinstance(outs, (list, tuple))
-    flat_outs = torch.utils._pytree.tree_leaves(outs)
 
     def alias_non_inplace_storage(arg, ret):
         # This is hopefully a reasonable assert:

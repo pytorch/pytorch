@@ -81,12 +81,14 @@ def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Ca
 
         def error_on_ctx():
             raise RuntimeError(
-                f"Attempted to call get_ctx() for the meta implementation "
-                f"for {qualname} (implemented at {source})"
-                f"You have presumably called get_ctx() because the operator "
-                f"has a data-dependent output shape; if so, there is no "
-                f"such meta implementation and this error is the correct "
-                f"behavior."
+                f"{qualname} ({source}): You're trying to run this operator "
+                f"with meta Tensors (as opposed to FakeTensors), but this "
+                f"operator may return an output Tensor with data-dependent shape. Meta "
+                f"Tensors don't support operators with outputs that have data-dependent shapes "
+                f"but FakeTensors do. "
+                f"If your operator does not return an output with data-dependent shape, "
+                f"make sure the FakeTensor and/or meta kernel does not call "
+                f"torch.library.get_ctx(). Otherwise, please use FakeTensors."
             )
 
         with set_ctx_getter(error_on_ctx):
@@ -200,8 +202,12 @@ class FakeImplCtx:
                 f"non-negative sizes."
             )
 
-        result = self._shape_env.create_unbacked_symint()
-        torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
-            result, min=min, max=max
-        )
-        return result
+        return allocate_size(self._shape_env, min, max)
+
+
+def allocate_size(shape_env, min_val=0, max_val=None):
+    result = shape_env.create_unbacked_symint()
+    torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
+        result, min=min_val, max=max_val
+    )
+    return result

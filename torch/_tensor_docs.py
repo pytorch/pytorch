@@ -1498,6 +1498,15 @@ In-place version of :meth:`~Tensor.cumprod`
 )
 
 add_docstr_all(
+    "cumsum",
+    r"""
+cumsum(dim, dtype=None) -> Tensor
+
+See :func:`torch.cumsum`
+""",
+)
+
+add_docstr_all(
     "cumsum_",
     r"""
 cumsum_(dim, dtype=None) -> Tensor

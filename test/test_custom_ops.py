@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    scoped_load_inline,
     skipIfTorchDynamo,
     subtest,
     TestCase,
@@ -465,6 +466,62 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
 class TestCustomOp(CustomOpTestCaseBase):
     test_ns = "_test_custom_op"
+
+    def test_deploy_interaction(self):
+        # run in a different process to avoid parallel issues when we monkeypatch torch._running_with_deploy
+        script = """
+import torch
+torch._running_with_deploy = lambda: True
+
+# creating the library is a no-op, so you can DEF multiple times
+m1 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
+m2 = torch.library.Library("mylib4392", "DEF")  # noqa: TOR901
+
+m = torch.library.Library("aten", "FRAGMENT")  # noqa: TOR901
+
+# define is a no-op
+m.define("foobarbaz9996(Tensor x) -> Tensor")
+assert not hasattr(torch.ops.aten, "foobarbaz9996"), "m.define should have been a noop"
+
+def sin_override(x):
+    raise AssertionError("m.impl should have been a noop")
+
+# impl is a no-op
+m.impl("sin", sin_override, "CompositeImplicitAutograd")
+x = torch.randn(3)
+y = torch.sin(x)
+
+# should be a no-op
+@torch.library.custom_op("mylib::foobar", mutates_args={})
+def foobar(x: torch.Tensor) -> torch.Tensor:
+    return x.sin()
+
+# should be a no-op
+@foobar.register_fake
+def _(x):
+    return torch.empty_like(x)
+
+# should be a no-op
+m2.define("foobarbaz9996(Tensor x) -> Tensor")
+
+# should be a no-op
+@torch.library.register_fake("mylib4392::foobarbaz9996")
+def _(x):
+    return torch.empty_like(x)
+        """
+        script = script.strip()
+        env = os.environ.copy()
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                # On Windows, opening the subprocess with the default CWD makes `import torch`
+                # fail, so just set CWD to this script's directory
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+                env=env,
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(msg=("Subprocess exception:\n" + e.output.decode("utf-8")))
 
     @requires_compile
     def test_functionalize_error(self):
@@ -1565,7 +1622,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
     def test_meta_for_data_dependent_shape_operation(self):
         x = torch.randn(10, device="meta")
-        with self.assertRaisesRegex(RuntimeError, "data-dependent output shape"):
+        with self.assertRaisesRegex(RuntimeError, "data-dependent shape"):
             numpy_nonzero(x)
 
     def test_basic_make_fx(self):
@@ -2050,7 +2107,8 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
         with self.assertRaisesRegex(RuntimeError, "Expected one of cpu, cuda"):
             torch.library.impl("blah::blah", "somethingsomething")
 
-    def test_autograd_function_backed_op(self):
+    @scoped_load_inline
+    def test_autograd_function_backed_op(self, load_inline):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;
@@ -2072,13 +2130,13 @@ torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
   return CustomOpAutogradFunction::apply(x);
 }
 
-TORCH_LIBRARY(mylib, m) {
+TORCH_LIBRARY(test_autograd_function_backed_op, m) {
     m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
 }
         """
 
-        module = torch.utils.cpp_extension.load_inline(
-            name="mylib",
+        module = load_inline(
+            name="test_autograd_function_backed_op",
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
@@ -2086,7 +2144,11 @@ TORCH_LIBRARY(mylib, m) {
 
         x = torch.ones(2, 2, requires_grad=True)
         temp = x.clone().detach()
-        out = torch.ops.mylib.custom_op_backed_by_autograd_fn(x)
+        out = (
+            torch.ops.test_autograd_function_backed_op.custom_op_backed_by_autograd_fn(
+                x
+            )
+        )
         loss = out.sum()
         loss.backward()
         self.assertEqual(x.grad, temp)
@@ -3520,6 +3582,11 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(called)
         self.assertEqual(result, x * y)
 
+        x = torch.randn(3)
+        y = torch.randn(3)
+        result = torch.vmap(torch.vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+        self.assertEqual(result, y.unsqueeze(-1) * x)
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_op_decorator(self):
         @torch.library.custom_op("mylib::f", mutates_args=())
@@ -3545,6 +3612,11 @@ Please use `add.register_fake` to add an fake impl.""",
         result = torch.vmap(f)(x, y)
         self.assertTrue(called)
         self.assertEqual(result, x * y)
+
+        x = torch.randn(3)
+        y = torch.randn(2)
+        result = torch.vmap(torch.vmap(f, in_dims=(0, None)), in_dims=(None, 0))(x, y)
+        self.assertEqual(result, y.unsqueeze(-1) * x)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_library_register_vmap_register_multiple_times(self):

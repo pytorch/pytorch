@@ -450,7 +450,7 @@ def forward(self, x_1):
 
     def test_pre_dispatch_functionalization(self):
         def f(x):
-            a = FunctionalTensorMode(pre_dispatch=True)
+            a = FunctionalTensorMode(pre_dispatch=True, export=True)
             with a:
                 x_unwrapped = FunctionalTensor.to_functional(x)
                 y = torch.matmul(x_unwrapped, x_unwrapped)
@@ -475,7 +475,7 @@ def forward(self, x_1):
 
     def test_pre_dispatch_functionalization_view_op(self):
         def f(x):
-            a = FunctionalTensorMode(pre_dispatch=True)
+            a = FunctionalTensorMode(pre_dispatch=True, export=True)
             with a:
                 x_unwrapped = FunctionalTensor.to_functional(x)
                 y = torch.matmul(x_unwrapped, x_unwrapped)
@@ -1519,11 +1519,6 @@ def forward(self, x_1, y_1):
             z3 = x3.item()
             torch._check(z1 == z2 + z3)
             return y * 2
-            if z2 + z3 == z1:
-                return y * 2
-            else:
-                return y + 3
-
         # NB: inputs are done as CUDA to ensure they aren't queried to be
         # backed
 
@@ -1989,10 +1984,7 @@ only_fake_tensor_failures = {
     xfail('narrow'),
 }
 
-fake_tensor_failures = {
-    # ASAN failures due to divide by 0
-    skip('nn.functional.nll_loss'),
-}
+fake_tensor_failures = set()
 
 symbolic_tensor_failures = {
     xfail('combinations', ''),
