@@ -38,6 +38,7 @@
 #include <ATen/ops/_foreach_tan_native.h>
 #include <ATen/ops/_foreach_tanh_native.h>
 #include <ATen/ops/_foreach_trunc_native.h>
+#include <ATen/ops/_foreach_where_native.h>
 #include <ATen/ops/_foreach_zero_native.h>
 
 #include <ATen/ops/empty_like_native.h>
@@ -402,6 +403,13 @@ void foreach_tensor_abs_cuda_(TensorList tensors) {
   }
 
   all_types_complex_bfloat16_half_bool_<Abs>(tensors);
+}
+
+std::vector<Tensor> foreach_tensor_where_scalar_other_cuda(
+    const at::Tensor& condition,
+    TensorList tensors,
+    const at::Scalar& other) {
+  TORCH_CHECK(false, "foreach_where not support for cuda");
 }
 
 void foreach_tensor_zero_cuda_(TensorList tensors) {
