@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import pprint
 from unittest import mock
 
 import torch
 from torch._dynamo import config, utils
 from torch._inductor.test_case import TestCase
+from torch._inductor.utils import clear_inductor_caches
 
 
 class TestUtils(TestCase):
@@ -84,23 +86,15 @@ class TestModel(torch.nn.Module):
 
 class TestDynamoTimed(TestCase):
     """
-    Test the utilities surrounding dynamo_timed.
+    Test utilities surrounding dynamo_timed.
     """
 
     def setUp(self):
         super().setUp()
         utils.reset_frame_count()
         torch._dynamo.reset()
-
-        # We can't easily test that timing is actually correct. Mock time to always
-        # return the same value and all runtimes will be zero.
-        time_patch = mock.patch("time.time", return_value=0.001)
-        time_patch.start()
-        self.addCleanup(time_patch.stop)
-
-        time_ns_patch = mock.patch("time.time_ns", return_value=100000)
-        time_ns_patch.start()
-        self.addCleanup(time_ns_patch.stop)
+        clear_inductor_caches()
+        torch._inductor.codecache.torch_key.cache_clear()
 
     def run_forward_backward(self):
         model = torch.compile(TestModel())
@@ -111,39 +105,56 @@ class TestDynamoTimed(TestCase):
         loss = loss_fn(output, target)
         loss.backward()
 
-    def test_compile_times(self):
-        self.run_forward_backward()
-        res = utils.compile_times(repr="str")
+    @config.patch("log_compilation_metrics", True)
+    # We can't easily test that timing is actually accurate. Mock time to always
+    # return the same value; all durations will be zero.
+    @mock.patch("time.time", return_value=0.001)
+    @mock.patch("time.time_ns", return_value=100000)
+    def test_dynamo_timed(self, mock_time, mock_time_ns):
+        """
+        Run a compilation that includes a forward and a backward and validate
+        various recorded metrics. This test could be broken into several, but the
+        compilation is somewhat expensive. Instead of resetting and compiling the
+        same thing multiple times, we may as well compile once and just check all
+        the things that are affected by a single dynamo_timed.
+        """
+        # The logging function is different for OSS vs. internal Let's just mock the
+        # and capture all the CompilationMetric objects it sees.
+        compilation_events = []
+        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+            self.run_forward_backward()
+            compilation_events = [arg[0][0] for arg in log_event.call_args_list]
+
+        # Validate utils.compile_times(). Unfortunately, we can't test the output
+        # reliably because it depends on whether 'tabulate' is installed. So we'll
+        # inspect the dict it prints instead:
         self.assertExpectedInline(
-            res,
+            pprint.pformat(utils.compilation_time_metrics),
             """\
-TorchDynamo compilation metrics:
-Function                              Runtimes (s)
-------------------------------------  --------------
-_compile.compile_inner                0.0000
-OutputGraph.call_user_compiler        0.0000
-_recursive_pre_grad_passes            0.0000
-create_aot_dispatcher_function        0.0000
-compile_fx.<locals>.fw_compiler_base  0.0000
-compile_fx_inner                      0.0000, 0.0000
-_recursive_post_grad_passes           0.0000, 0.0000
-GraphLowering.run                     0.0000, 0.0000
-GraphLowering.compile_to_module       0.0000, 0.0000
-Scheduler.__init__                    0.0000, 0.0000
-Scheduler.codegen                     0.0000, 0.0000
-PythonWrapperCodegen.generate         0.0000, 0.0000
-PyCodeCache.load_by_key_path          0.0000, 0.0000
-async_compile.wait                    0.0000, 0.0000
-compile_file                          0.0000, 0.0000
-compile_fx.<locals>.bw_compiler       0.0000""",  # noqa: B950
+{'GraphLowering.compile_to_module': [0.0, 0.0],
+ 'GraphLowering.run': [0.0, 0.0],
+ 'OutputGraph.call_user_compiler': [0.0],
+ 'PyCodeCache.load_by_key_path': [0.0, 0.0],
+ 'PythonWrapperCodegen.generate': [0.0, 0.0],
+ 'Scheduler.__init__': [0.0, 0.0],
+ 'Scheduler.codegen': [0.0, 0.0],
+ '_compile.compile_inner': [0.0],
+ '_recursive_post_grad_passes': [0.0, 0.0],
+ '_recursive_pre_grad_passes': [0.0],
+ 'async_compile.wait': [0.0, 0.0],
+ 'compile_file': [0.0, 0.0, 0.0, 0.0],
+ 'compile_fx.<locals>.bw_compiler': [0.0],
+ 'compile_fx.<locals>.fw_compiler_base': [0.0],
+ 'compile_fx_inner': [0.0, 0.0],
+ 'create_aot_dispatcher_function': [0.0],
+ 'inductor_codecache_torch_key': [0.0]}""",  # noqa: B950
         )
 
-    def test_calculate_time_spent(self):
-        self.run_forward_backward()
-        res = utils.calculate_time_spent()
-        # Formatting makes reading diffs much easier.
+        # Now validate utils.calculate_time_spent(). Formatting the return
+        # value makes reading diffs much easier.
+        time_spent = utils.calculate_time_spent()
         self.assertExpectedInline(
-            pprint.pformat(res),
+            pprint.pformat(time_spent),
             """\
 {'backend_compile': 0.0,
  'code_gen': 0.0,
@@ -152,20 +163,15 @@ compile_fx.<locals>.bw_compiler       0.0000""",  # noqa: B950
  'total_wall_time': 0.0}""",  # noqa: B950
         )
 
-    @config.patch("log_compilation_metrics", True)
-    def test_log_compilation_event(self):
-        # Mock the internal logging function and just capture all the
-        # CompilationMetric objects it sees.
-        with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
-            self.run_forward_backward()
-            events = [arg[0][0] for arg in log_event.call_args_list]
+        # Now validate the CompilationMetrics logs. We expect a log for the
+        # forward and a log for the backward.
+        self.assertTrue(len(compilation_events) == 2)
+        self.assertTrue(
+            all(isinstance(e, utils.CompilationMetrics) for e in compilation_events)
+        )
 
-        # We expect a log for the forward and a log for the backward.
-        self.assertTrue(len(events) == 2)
-        self.assertTrue(all(isinstance(e, utils.CompilationMetrics) for e in events))
-
-        # Remove some fields that aren't helpful for test stability.
-        for e in events:
+        # Remove a few fields that aren't helpful for test stability.
+        for e in compilation_events:
             e.dynamo_config = None
             e.co_filename = None
             e.co_firstlineno = None
@@ -173,7 +179,7 @@ compile_fx.<locals>.bw_compiler       0.0000""",  # noqa: B950
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
         self.assertExpectedInline(
-            pprint.pformat(events[0]),
+            pprint.pformat(compilation_events[0]),
             """\
 CompilationMetrics(compile_id='0/0',
                    frame_key='1',
@@ -230,7 +236,7 @@ CompilationMetrics(compile_id='0/0',
 
         # Second event is for the backward
         self.assertExpectedInline(
-            pprint.pformat(events[1]),
+            pprint.pformat(compilation_events[1]),
             """\
 CompilationMetrics(compile_id='0/0',
                    frame_key=None,
