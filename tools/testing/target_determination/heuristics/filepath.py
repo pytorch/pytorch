@@ -54,15 +54,15 @@ custom_matchers: dict[str, Callable[[str], bool]] = {
 def get_keywords(file: str) -> list[str]:
     keywords = []
     for folder in Path(file).parts[:-1]:
-        folder = sanitize_folder_name(folder)
+        folder = sanitize_name(folder)
         keywords.append(folder)
 
     file_name = Path(file).stem.split("_")
-    keywords.extend([sanitize_folder_name(x) for x in file_name])
+    keywords.extend([sanitize_name(x) for x in file_name])
     return [kw for kw in keywords if kw not in not_keyword]
 
 
-def sanitize_folder_name(folder_name: str) -> str:
+def sanitize_name(folder_name: str) -> str:
     if folder_name.startswith("_"):
         folder_name = folder_name[1:]
 
