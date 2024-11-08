@@ -318,7 +318,7 @@ pywavelets==1.5.0 ; python_version >= "3.12"
 #Pinned versions: 1.4.1
 #test that import:
 
-lxml==5.0.0
+lxml==5.3.0
 #Description: This is a requirement of unittest-xml-reporting
 
 # Python-3.9 binaries
