@@ -61,11 +61,8 @@ def set_tunableop_defaults():
         return
 
     # disable TunableOp and restore to default values
-    ordinal = torch.cuda.current_device()
-    filename = f"tunableop_results{ordinal}.csv"
     torch.cuda.tunable.enable(False)
     torch.cuda.tunable.tuning_enable(True)
-    torch.cuda.tunable.set_filename(filename)  # reset back to default filename for next unit test
     torch.cuda.tunable.set_max_tuning_duration(30)
     torch.cuda.tunable.set_max_tuning_iterations(100)
 
