@@ -859,18 +859,38 @@ void validate_outputs(
     const edge_list& edges,
     variable_list& grads,
     const std::function<std::string(const std::string&)>& format_error) {
-  if (grads.size() != edges.size()) {
+  // TODO(rzou): probably too many heap allocations here...
+  auto input_metadata = collect_input_metadata(edges);
+  validate_outputs(input_metadata, grads, format_error);
+}
+
+std::vector<c10::optional<InputMetadata>> collect_input_metadata(const edge_list& edges) {
+  std::vector<c10::optional<InputMetadata>> input_metadata;
+  for (const auto& edge : edges) {
+    if (!edge.is_valid()) {
+      input_metadata.emplace_back(c10::nullopt);
+      continue;
+    }
+    input_metadata.emplace_back(edge.function->input_metadata(edge.input_nr));
+  }
+  return input_metadata;
+}
+
+void validate_outputs(
+    const std::vector<c10::optional<InputMetadata>>& input_metadata,
+    variable_list& grads,
+    const std::function<std::string(const std::string&)>& format_error) {
+  if (grads.size() != input_metadata.size()) {
     std::stringstream ss;
     ss << "invalid number of gradients - expected ";
-    ss << edges.size() << ", but got " << grads.size();
+    ss << input_metadata.size() << ", but got " << grads.size();
     TORCH_CHECK(false, format_error(ss.str()));
   }
   for (const auto i : c10::irange(grads.size())) {
-    const auto& edge = edges[i];
-    if (!edge.is_valid())
+    if (!input_metadata[i].has_value()) {
       continue;
-
-    const auto& metadata = edge.function->input_metadata(edge.input_nr);
+    }
+    const auto& metadata = input_metadata[i].value();
     auto& grad = grads[i];
     if (!grad.defined()) {
       // FIXME: TestJit.test_ge_optimized fails this assertion.

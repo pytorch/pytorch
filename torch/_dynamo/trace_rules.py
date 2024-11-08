@@ -3243,8 +3243,10 @@ if torch.distributed.is_available():
 MOD_INLINELIST = [
     "torch._decomp",
     "torch._dynamo._trace_wrapped_higher_order_op",
+    "torch._dynamo.compiled_autograd.ops",
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
+    "torch._functorch._aot_autograd.runtime_wrappers",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
     "torch._functorch.functional_call",

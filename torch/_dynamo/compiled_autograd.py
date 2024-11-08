@@ -10,6 +10,7 @@ import torch
 from torch._dynamo.external_utils import (
     call_backward,
     call_hook,
+    call_aot_bwd_impl,
     FakeCompiledAutogradEngine,
 )
 from torch._dynamo.source import GetItemSource, LocalSource
@@ -28,6 +29,7 @@ from torch.fx.experimental.proxy_tensor import (
     PythonKeyTracer,
     track_tensor_tree,
 )
+import torch.utils._pytree as pytree
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.utils._traceback import CapturedTraceback
@@ -137,6 +139,35 @@ def maybe_clone(x):
         return clone_preserve_strides(x)
     return x
 
+counter = 0
+
+class OpNamespace:
+    def __init__(self):
+        self.next_id = {}
+
+    def add(self, base_name, fn):
+        if base_name not in self.next_id:
+            self.next_id[base_name] = 0
+        nid = self.next_id[base_name]
+        name = f"{base_name}_{nid}"
+        self.next_id[base_name] += 1
+        result = Op(name, fn)
+        torch._dynamo.allow_in_graph(result)
+        setattr(self, name, result)
+        return result
+
+class Op:
+    def __init__(self, name, fn):
+        self.fn = fn
+        self.__name__ = name
+        self.__module__ = "torch._dynamo.compiled_autograd.ops"
+
+    def __call__(self, *args, **kwargs):
+        return self.fn(*args, **kwargs)
+
+
+ops = OpNamespace()
+
 
 class AutogradCompilerInstance:
     def __init__(self, compiler_fn) -> None:
@@ -153,6 +184,8 @@ class AutogradCompilerInstance:
         self.proxy_mode = ProxyTorchDispatchMode(self.fx_tracer, "symbolic")
         self.hooks_proxy: Optional[Proxy] = None
         self.graph_placeholders = ["inputs", "sizes", "scalars", "hooks"]
+        # self.old_inline_behavior = True
+        self.old_inline_behavior = False
 
     def wrap_fake(self, x, source):
         assert isinstance(x, torch.Tensor)
@@ -175,7 +208,8 @@ class AutogradCompilerInstance:
         self.fx_tracer.root = torch.nn.Module()
         self.fx_tracer.graph = torch.fx.Graph(tracer_cls=PythonKeyTracer)
         self.fx_tracer.tensor_attrs = {}
-        args_proxy, sizes_proxy, scalars_proxy, self.hooks_proxy = (
+        self.sizes_proxy_lookup = {}
+        args_proxy, self.sizes_proxy, scalars_proxy, self.hooks_proxy = (
             self.fx_tracer.create_proxy("placeholder", name, (), {})
             for name in self.graph_placeholders
         )
@@ -198,7 +232,9 @@ class AutogradCompilerInstance:
             )
             for idx, val in enumerate(sizes)
         ]
-        self.bind_tensors_to_proxies(sizes, sizes_proxy, sizes_origins)
+        for i,symint in enumerate(sizes):
+            self.sizes_proxy_lookup[id(symint.node)] = i
+        self.bind_tensors_to_proxies(sizes, self.sizes_proxy, sizes_origins)
 
         for idx, val in enumerate(scalars):
             source = self.source("scalars", idx)
@@ -229,25 +265,119 @@ class AutogradCompilerInstance:
         self.stack.enter_context(disable_autocast_cache())
         return inputs, sizes, scalars
 
+    def proxy_call_aot_backward(
+        self,
+        pinputs,
+        psaved_tensors,
+        pctx,
+        ctx,
+    ):
+        psymints = [self.try_to_proxy(e) for e in ctx._get_compiled_autograd_symints()]
+
+        # NOTE: we should only close over constants
+        CompiledFunction = ctx._forward_cls
+        metadata = CompiledFunction.metadata
+        maybe_subclass_metadata = CompiledFunction.maybe_subclass_metadata
+        ctx._bw_module = CompiledFunction._lazy_backward_info.bw_module
+        del CompiledFunction
+
+        @torch._dynamo.allow_in_graph
+        def call_aot_bwd_prologue(ctx_saved_tensors, ctx_symints, *flat_args):
+            # TODO: backward state
+            out = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(
+                ctx_saved_tensors,
+                ctx_symints,
+                metadata,
+                maybe_subclass_metadata,
+                *flat_args,
+            )
+            return out
+
+        # def call_aot_bwd_prologue(
+        #     *args: Any,
+        # ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+        #     all_args = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(fakectx, *args)
+
+        #     # non-traceable calls originally in call_aot_bwd_impl
+        #     if forward_cls._lazy_backward_info is None:
+        #         raise RuntimeError(
+        #             """This compiled backward function was saved by AOTAutogradCache, which does not support
+        #         compiled autograd. Please turn off AOTAutogradCache using `TORCHINDUCTOR_AUTOGRAD_CACHE=0`."""
+        #         )
+
+        #     # assert fakectx.symints is not None
+        #     # assert fakectx.bw_module is not None
+        #     if hasattr(forward_cls, "_backward_state_indices"):
+        #         # probably need to pass proxy to this func
+        #         assert fakectx._compiled_autograd_backward_state.proxy is not None
+        #         all_args.append(fakectx._compiled_autograd_backward_state)
+
+        #     return all_args
+
+        @torch._dynamo.allow_in_graph
+        def call_aot_bwd_epilogue(
+            out: List[torch.Tensor],
+        ) -> Union[torch.Tensor, tuple[torch.Tensor, ...]]:
+            return torch._functorch._aot_autograd.runtime_wrappers._backward_epilogue_functional(metadata, maybe_subclass_metadata, out)
+
+        pall_args = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_aot_bwd_prologue,
+            args=(
+                psaved_tensors,
+                psymints,
+                *pinputs,
+            ),
+            kwargs={},
+        )
+        pout = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_aot_bwd_impl,
+            args=(
+                pctx,
+                psaved_tensors,
+                pall_args,
+            ),
+            kwargs={},
+        )
+        proxies = self.fx_tracer.create_proxy(
+            kind="call_function",
+            target=call_aot_bwd_epilogue,
+            args=(
+                pout,
+            ),
+            kwargs={},
+        )
+        return proxies
+
     def proxy_call_backward(
         self,
         inputs,
         output_metadatas,
         saved_tensors,
         backward_idx: int,
+        ctx: torch.autograd.function.BackwardCFunction,
     ):
         assert self.hooks_proxy is not None
-        backward_c_function = self.hooks_proxy[backward_idx]  # type: ignore[index]
-        proxies = self.fx_tracer.create_proxy(
-            kind="call_function",
-            target=call_backward,
-            args=(
-                backward_c_function,
-                self.to_proxy(saved_tensors),
-                *self.to_proxy(inputs),
-            ),
-            kwargs={},
-        )
+        pctx = self.hooks_proxy[backward_idx]  # type: ignore[index]
+        psaved_tensors = self.to_proxy(saved_tensors)
+        pinputs = self.to_proxy(inputs)
+        proxies = None
+        if hasattr(ctx._forward_cls, "_aot_id"):
+            # AOT backward
+            proxies = self.proxy_call_aot_backward(pinputs, psaved_tensors, pctx, ctx)
+        else:
+            proxies = self.fx_tracer.create_proxy(
+                kind="call_function",
+                target=call_backward,
+                args=(
+                    pctx,
+                    psaved_tensors,
+                    *pinputs,
+                ),
+                kwargs={},
+            )
+        assert proxies is not None
 
         with disable_proxy_modes_tracing():
             # create fake Tensors
@@ -263,6 +393,81 @@ class AutogradCompilerInstance:
                 )
             self.bind_tensors_to_proxies(grad_ins, proxies)
         return tuple(grad_ins)
+
+    def allocate_dummy(self, *examples):
+        with disable_proxy_modes_tracing():
+            return torch.zeros(0)
+
+    def apply_functional(self, fn, inputs, stack, num_outputs, debug_name, is_pynode):
+        if self.old_inline_behavior:
+            result = fn(inputs, *stack)
+            return result
+        if is_pynode:
+            # lift using inline approach
+            result = fn(inputs, *stack)
+            proxy_out = self.to_proxy(result)
+            # but throw away results
+            result = [self.allocate_dummy(*inputs, *stack) for _ in range(num_outputs)]
+            self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(num_outputs)])
+            return result
+        # TODO: if the node is a python autograd.Function or a CompiledFunctionBackward,
+        # we should probably "plop" the subgraph into the graph instead
+        # of allow_in_graph the node through Dynamo.
+        proxy_inputs, proxy_stack = pytree.tree_map(
+            self.try_to_proxy,
+            (inputs, stack),
+        )
+
+        # TODO(xmfan): determine this more reliably
+        if debug_name == "torch::autograd::AccumulateGrad":
+            assert len(proxy_stack) == 1
+            assert len(proxy_inputs) == 1
+            proxy_param = proxy_stack[0]
+            proxy_grad = proxy_inputs[0]
+            proxy_out = self.fx_tracer.create_proxy(
+                "call_function",
+                torch._dynamo.polyfills.accumulate_grad,
+                args=(proxy_param, proxy_grad),
+                kwargs={},
+            )
+            assert num_outputs == 0
+            return []
+
+        op = ops.add(debug_name, fn)
+        # lookup the correct symint
+        proxy_out = self.fx_tracer.create_proxy(
+            "call_function", op, args=(proxy_inputs, *proxy_stack), kwargs={}
+        )
+        result = [self.allocate_dummy(*inputs, *stack) for _ in range(num_outputs)]
+        self.bind_tensors_to_proxies(result, [proxy_out[i] for i in range(num_outputs)])
+        return result
+
+    def validate_outputs(self, fn, outputs, stack, _0, _1, _2):
+        if self.old_inline_behavior:
+            return fn(outputs, *stack)
+        proxy_outputs, proxy_stack = pytree.tree_map(self.try_to_proxy, (outputs, stack))
+        op = ops.add("validate_outputs", fn)
+        new_proxy_outputs = self.fx_tracer.create_proxy(
+            "call_function",
+            op,
+            args=(proxy_outputs, *proxy_stack),
+            kwargs={})
+        self.bind_tensors_to_proxies(outputs, new_proxy_outputs)
+        return outputs
+
+    def accumulate(self, old_var, new_var):
+        if self.old_inline_behavior:
+            return torch.add(old_var, new_var)
+        old_var_proxy = self.to_proxy(old_var)
+        new_var_proxy = self.to_proxy(new_var)
+        proxy_out = self.fx_tracer.create_proxy(
+            "call_function",
+            torch.add,
+            args=(old_var_proxy, new_var_proxy),
+            kwargs={})
+        result = self.allocate_dummy(old_var)
+        self.bind_tensors_to_proxies([result], [proxy_out])
+        return result
 
     def proxy_call_hook(self, hook, *args, **kwargs):
         return self.fx_tracer.create_proxy(
@@ -535,11 +740,17 @@ class AutogradCompilerInstance:
             return [self.to_proxy(x) for x in t]
         if isinstance(t, tuple):
             return tuple(self.to_proxy(x) for x in t)
-        # can it be torch.SymInt as the code used to imply?
-        assert isinstance(t, torch.Tensor)
         proxy_tensor = fetch_object_proxy(self.fx_tracer, t)
         assert isinstance(proxy_tensor, torch.fx.experimental.proxy_tensor._ProxyTensor)
         return proxy_tensor.proxy
+
+    def try_to_proxy(self, t):
+        if isinstance(t, torch.Tensor):
+            return self.to_proxy(t)
+        if isinstance(t, torch.SymInt):
+            idx = self.sizes_proxy_lookup[id(t.node)]
+            return self.sizes_proxy[idx]
+        return t
 
     def bind_tensors_to_proxies(
         self, tensors, proxies, origins: Optional[List[Tuple[int, str]]] = None

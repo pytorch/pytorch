@@ -34,8 +34,12 @@ using tensor_list = std::vector<at::Tensor>;
 using variable_list = std::vector<Variable>;
 using edge_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
+using ivalue_list = std::vector<c10::IValue>;
+using functional_apply_t = std::function<
+    variable_list(const variable_list&, const std::vector<c10::IValue>&)>;
 using IndexRange = std::pair<size_t, size_t>;
 using torch::dynamo::autograd::CompiledNodeArgs;
+using torch::dynamo::autograd::SavedState;
 using torch::dynamo::autograd::SwapSavedVariables;
 
 // Custom deleter to prevent stack overflows.
@@ -602,6 +606,17 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       SwapSavedVariables& saved) {
     throw std::runtime_error(
         std::string("apply_with_saved not implemented: ") + name());
+  }
+
+  virtual ivalue_list retrieve_saved(SwapSavedVariables& saved) {
+    throw std::runtime_error(
+        std::string("retrieve_saved not implemented: ") + name());
+  }
+  virtual std::function<
+      variable_list(const variable_list&, const std::vector<c10::IValue>&)>
+  get_functional() {
+    throw std::runtime_error(
+        std::string("get_functional not implemented: ") + name());
   }
 
  protected:
