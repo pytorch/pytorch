@@ -10,7 +10,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import onlyCUDA
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo, OpInfo, SampleInput
-
+from torch._higher_order_ops import invoke_subgraph
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -123,8 +123,7 @@ def sample_inputs_invoke_subgraph(opinfo, device, dtype, requires_grad, **kwargs
 def simple_invoke_subgraph(x):
     def fn(x):
         return (torch.sin(x),)
-
-    return torch._higher_order_ops.invoke_subgraph(fn, None, (x,))
+    return invoke_subgraph(fn, None, (x,))
 
 
 def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwargs):

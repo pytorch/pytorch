@@ -144,6 +144,8 @@ frame_phase_timing: Dict[str, Dict[str, float]] = collections.defaultdict(
     lambda: collections.defaultdict(float)
 )
 
+codecache_metrics: Counter[str] = collections.Counter()
+
 timer_counter = itertools.count()
 
 
@@ -419,6 +421,9 @@ def dynamo_timed(
                                 remote_cache_time_saved_s=remote_cache_time_saved,
                                 structured_logging_overhead_s=structured_logging_overhead_s,
                                 is_forward=False,  # is_forward
+                                num_triton_bundles=codecache_metrics.get(
+                                    "num_triton_bundles", None
+                                ),
                                 remote_fx_graph_cache_get_time_ms=to_int_ms(
                                     remote_fx_graph_cache_get_time
                                 ),
@@ -899,6 +904,7 @@ class CompilationMetrics:
     specialize_float: Optional[bool] = None
     dynamo_config: Optional[str] = None
     is_forward: Optional[bool] = None
+    num_triton_bundles: Optional[int] = None
     remote_fx_graph_cache_get_time_ms: Optional[int] = None
     remote_fx_graph_cache_put_time_ms: Optional[int] = None
     start_time_us: Optional[int] = None
@@ -2233,7 +2239,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
-    if node.name in ["interpolate", "is_integer"]:
+    if node.name in ["interpolate", "is_integer", "wrapped_gradient"]:
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
             float(arg)
