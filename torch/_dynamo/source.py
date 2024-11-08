@@ -224,6 +224,51 @@ class AttrSource(ChainedSource):
         return f"{self.base.name()}.{self.member}"
 
 
+@dataclasses.dataclass(frozen=True)
+class AutoDerefLocalSource(ChainedSource):
+    """
+    In Python, reads and writes to local cell objects (variables captured by a
+    frame, or created in a frame by captured by a nested frame) are
+    automatically dereferenced.
+
+    At the language level, this means accessing the `cell_contents` attribute of
+    the cell object, rather than the object itself.
+
+    At the bytecode level, this means turning LOAD_FAST into LOAD_DEREF, and
+    STORE_FAST into STORE_DEREF.
+
+    This class represents the source to the _contents_ of such a cell object,
+    encapsulating the python and bytecode level idiosyncracies of what would
+    otherwise have been a simple `AttrSource(cell_source, "cell_contents")`
+    """
+
+    def __post_init__(self):
+        assert type(self.base) is LocalSource
+
+    def reconstruct(self, codegen):
+        # Emit more readable and performant bytecode.
+        assert isinstance(self.base, LocalSource)  # tame mypy
+        codegen.load_deref(self.base.local_name)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        # The requirements for `Source.name` are
+        # 1. debugging-friendly
+        # 2. with appropriate scope, `eval()` will turn it into the target
+        #    python value.
+        # 3. can be used for caching guard managers.
+        #
+        # (2) requires us to return `self.base.name()` here, because that's the
+        # only general way for obtaining the contents object via `eval`.
+        #
+        # What about name collision that can affect (3)? Well, auto-deferenced
+        # cells should never have any guards on them (only guards on the
+        # contents), so this name collision shouldn't matter.
+        return self.base.name()
+
+
 # Represents tensor.grad source. It could be represented by AttrSource as well.
 # But, we could access grad field on tensor directly in C++ without going
 # through the Python bytecodes. Therefore, we use a separate source for grad

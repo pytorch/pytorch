@@ -54,6 +54,7 @@ from .replay_record import DummyModule, ExecutionRecorder
 from .resume_execution import ContinueExecutionCache, ReenterWith
 from .source import (
     AttrSource,
+    AutoDerefLocalSource,
     GetItemSource,
     GlobalSource,
     GlobalWeakRefSource,
@@ -97,8 +98,8 @@ from .variables.lists import (
     TupleVariable,
 )
 from .variables.misc import (
-    ClosureVariable,
     GetAttrVariable,
+    NewCellVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
@@ -847,102 +848,13 @@ class InstructionTranslatorBase(
         return self._cell_and_freevars
 
     def prune_dead_locals(self):
+        # Only keep the locals that must remain on the stack.
         reads = livevars_analysis(self.instructions, self.current_instruction)
-        # implicit use by super()
-        # reads = reads | {"__class__"}
-        # output variables?
-        reads = reads | set(self.freevars())
-
-        # First we prune the non-cell local vars, this allows us to prune more
-        # cell local vars later on (e.g., if we manage to prune a
-        # `NestedUserFunctionVariable` that makes use of some cell locals).
-        cellvars = set(self.cellvars())
         self.symbolic_locals = {
-            k: v for k, v in self.symbolic_locals.items() if k in cellvars or k in reads
+            k: v for k, v in self.symbolic_locals.items() if k in reads
         }
-
-        # Then we prune the side effects, which might enable us to prune more
-        # cellvars afterwards.
+        # "Garbage collect the heap".
         self.output.side_effects.prune_dead_object_new(self)
-
-        # Then we prune the cell locals.
-        #
-        # Note that we keep certain cell locals, because the current mechanism
-        # for codegen closure initialization for nested function creation is:
-        # 1. `NestedUserFunctionVariable` codegen assumes its closure has been
-        #    initialized properly by its creator, i.e., the tuple of cells will
-        #    be populated with correct content before the function is used.
-        # 2. `OutputGraph::compile_subgraph`, we populate the tuple of cells
-        #    _after_ emitting the `MAKE_FUNCTION` bytecode, via `STORE_DEREF`;
-        #    these `STORE_DEREF` are generated partly based on the current
-        #    `symbolic_locals`.
-        # As a result, we must be careful not to prune the cell locals that'll
-        # allow `OutputGraph` to generate the proper `STORE_DEREF`.
-        #
-        # On the other hand, we do want to prune away the truly dead ones, e.g.,
-        # say after we invoke a nested function, and the function is never used
-        # again. So here we do some conservative pruning, by tracing from a
-        # series of must-live root variables -- for any reachable cell, it must
-        # be kept alive.
-        #
-        # TODO(#137123) there are extra complexities due to side-effects (e.g.,
-        # the nested function leaking out into backward hook or globals). We
-        # could probably improve the variable tracing here to include the
-        # relevant variables in `output.side_effects`.
-        if self.output.side_effects.is_empty():
-            cellvars_that_must_live = set()
-            visited = set()
-
-            def visit(var: VariableTracker):
-                if var in visited:
-                    return
-                visited.add(var)
-
-                # Avoid realizing the lazy variable which could end up adding a
-                # graph input which isn't needed, this is sound because there's
-                # there doesn't seem to be a way to go from a
-                # `LazyVariableTracker` to `ClosureVariable`. TODO is this
-                # really true in general?
-                if isinstance(var, LazyVariableTracker):
-                    return
-
-                # We need to do this explicitly to walk the entire use chain,
-                # e.g., from a `ClosureVariable` to its underlying
-                # `NestedUserFunctionVariable`, rather than just stopping at the
-                # `ClosureVariable` with a name.
-                if isinstance(var, ClosureVariable):
-                    cellvars_that_must_live.add(var.name)
-
-                    # We only recur if the closure variable has been initialized.
-                    actual_var = self.symbolic_locals.get(var.name, None)
-                    if actual_var is not None:
-                        VariableTracker.visit(visit, actual_var)
-
-            # Populate `cellvars_that_must_live`
-            #
-            # NOTE: Don't trace from the cell locals which aren't explicitly
-            # read anymore; if they are indirectly used, they will be reached by
-            # other roots. These initially excluded cells are the ones that will
-            # hopefully be pruned.
-            local_roots = [
-                var
-                for name, var in self.symbolic_locals.items()
-                if name not in cellvars or name in reads
-            ]
-            VariableTracker.visit(
-                visit, (local_roots, self.stack, self.output.backward_state)
-            )
-            # Manually release the self-referential nested function, which
-            # captures `self.symbolic_locals` and affects parts of PT test/logic
-            # that are sensitive to when certain objects get released.
-            del visit
-
-            # Only keep locals that will be read, or are cellvars that must live.
-            self.symbolic_locals = {
-                k: v
-                for k, v in self.symbolic_locals.items()
-                if k in reads or k in cellvars_that_must_live
-            }
 
     def call_function(
         self,
@@ -1158,7 +1070,7 @@ class InstructionTranslatorBase(
         return [*reversed([self.pop() for _ in range(n)])]
 
     def _load_closure(self, name):
-        return ClosureVariable(name=name)
+        return self.symbolic_locals[name]
 
     def _load_fast(self, name):
         if self.exec_recorder and name in self.f_locals:
@@ -1193,13 +1105,12 @@ class InstructionTranslatorBase(
 
     def LOAD_DEREF(self, inst):
         assert inst.argval in self.cell_and_freevars()
+        cell = self.symbolic_locals[inst.argval]
+        contents_var = self.output.side_effects.load_cell(cell)
+        self.push(contents_var)
 
         if self.exec_recorder and inst.argval in self.f_locals:
             self.exec_recorder.add_local_var(inst.argval, self.f_locals[inst.argval])
-
-        if inst.argval not in self.symbolic_locals:
-            unimplemented(f"undefined LOAD_DEREF {inst.argval}")
-        self.push(self.symbolic_locals[inst.argval])
 
     def _store_fast(self, name):
         loaded_vt = self.pop()
@@ -1212,7 +1123,14 @@ class InstructionTranslatorBase(
     def DELETE_FAST(self, inst):
         del self.symbolic_locals[inst.argval]
 
-    STORE_DEREF = STORE_FAST
+    def STORE_DEREF(self, inst):  # type: ignore[override]
+        cell = self.symbolic_locals[inst.argval]
+        val = self.pop()
+        self.output.side_effects.store_cell(cell, val)
+
+        assert isinstance(cell, NewCellVariable)  # tame mypy
+        if cell.root_frame_local_name is not None:
+            val.set_name_hint(cell.root_frame_local_name)
 
     def LOAD_CLOSURE(self, inst):
         self.push(self._load_closure(inst.argval))
@@ -2686,8 +2604,8 @@ class InstructionTranslatorBase(
         inline_depth: int,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
-        # Whether to use the execution recorder.
-        use_recorder: bool = False,
+        # This determines whether to use the execution recorder.
+        f_func: Optional[types.FunctionType] = None,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -2724,9 +2642,9 @@ class InstructionTranslatorBase(
         self.f_code: types.CodeType = f_code
 
         # Execution record for replaying errors
-        if use_recorder and config.replay_record_enabled:
+        if f_func is not None and config.replay_record_enabled:
             self.exec_recorder = ExecutionRecorder(
-                code=f_code, code_options=code_options
+                func=f_func, code_options=code_options
             )
         else:
             self.exec_recorder = None
@@ -2781,7 +2699,7 @@ class InstructionTranslator(InstructionTranslatorBase):
     def __init__(
         self,
         instructions: List[Instruction],
-        f_code,
+        f_func,
         f_locals,
         f_globals,
         f_builtins,
@@ -2795,6 +2713,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
     ) -> None:
+        f_code = f_func.__code__
         _step_logger()(
             logging.INFO,
             f"torchdynamo start tracing {f_code.co_name} {code_options['co_filename']}:{code_options['co_firstlineno']}",
@@ -2826,7 +2745,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             inline_depth=0,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
-            use_recorder=True,
+            f_func=f_func,
         )
 
         self._throw_if_in_functorch()
@@ -2841,19 +2760,78 @@ class InstructionTranslator(InstructionTranslatorBase):
                     self.one_graph
                 ), "Export without one graph - something has gone wrong."
 
-            args_info = inspect.getargs(f_code)
-            input_names: Set[str] = set(args_info.args)
-            if args_info.varargs:
-                input_names.add(args_info.varargs)
-            if args_info.varkw:
-                input_names.add(args_info.varkw)
-            self.symbolic_locals = {
-                name: variables.LazyVariableTracker.create(
-                    f_locals[name],
-                    source=LocalSource(name, is_input=name in input_names),
+            self.symbolic_locals = {}
+            # Populate `symbolic_locals` with non-cell variables.
+            cell_and_freevars: Set[str] = set(self.cell_and_freevars())
+            for name, value in f_locals.items():
+                if name not in cell_and_freevars:
+                    var = LazyVariableTracker.create(
+                        value, LocalSource(name, is_input=True)
+                    )
+                    self.symbolic_locals[name] = var
+
+            # Populate `symbolic_locals` with cells created by this frame.
+            side_effects = self.output.side_effects
+            for name in self.cellvars():
+                if name in f_locals:
+                    # This models cells that are also function inputs.
+                    value = f_locals[name]
+                    # NOTE: in `f_locals` cells are already dereferenced, so we
+                    # can't easily retrieve the original cell objects. However,
+                    # we create a new cell object for the sake of internal
+                    # consistency (variable for each existing cell has an
+                    # associated python cell object).
+                    #
+                    # But this isn't the original cell object, why is this safe?
+                    # That's because
+                    #
+                    # 1. Dynamo only uses these cell objects for their ids, so that
+                    # if we encounter the same cell (if it's captured by some
+                    # pre-existing function), we'll reuse the original
+                    # `NewCellVariable` instance we created for the cell object.
+                    #
+                    # 2. In this case the original cell object should've
+                    # never been accessed by anyone else, as Dynamo intercepts
+                    # the frame right after its evaluation starts, i.e., right
+                    # after these cell objects are created. Thus they cannot be
+                    # captured by any pre-existig function.
+                    dummy_cell = types.CellType(value)
+                    cell_source = LocalSource(name, is_input=True)
+                    contents_source = AutoDerefLocalSource(cell_source)
+                    contents_var: VariableTracker = LazyVariableTracker.create(
+                        value, contents_source
+                    )
+                    cell_var = side_effects.track_cell_existing(
+                        cell_source, dummy_cell, contents_var
+                    )
+                    side_effects.store_cell(cell_var, contents_var)
+                    cell_var.root_frame_local_name = name
+                    self.symbolic_locals[name] = cell_var
+                else:
+                    # This models cells used later in `f_code`; it effectively
+                    # implements `MAKE_CELL` on these names.
+                    cell_var = side_effects.track_cell_new()
+                    cell_var.root_frame_local_name = name
+                    self.symbolic_locals[name] = cell_var
+
+            # Populate `symbolic_locals` with cells captured by this frame.
+            # TODO refactor with the above and `UserFunctionVariable.bind_args`.
+            closure = f_func.__closure__ or ()
+            for idx, name, cell in zip(itertools.count(), self.freevars(), closure):
+                cell_source = LocalSource(name)
+                contents_source = AutoDerefLocalSource(cell_source)
+                try:
+                    contents_var = LazyVariableTracker.create(
+                        cell.cell_contents, contents_source
+                    )
+                except ValueError:
+                    # Cell has not yet been assigned
+                    contents_var = variables.DeletedVariable()
+                cell_var = side_effects.track_cell_existing(
+                    cell_source, cell, contents_var
                 )
-                for name, value in f_locals.items()
-            }
+                cell_var.root_frame_local_name = name
+                self.symbolic_locals[name] = cell_var
 
             self.symbolic_torch_function_state = SymbolicTorchFunctionState(
                 torch_function_mode_stack
@@ -2866,11 +2844,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self.symbolic_locals = variables.LazyVariableTracker.realize_all(
                     self.symbolic_locals
                 )
-
-            self._freevars_ids = {}
-            for name in self.code_options["co_freevars"]:
-                if name in f_locals:
-                    self._freevars_ids[name] = id(f_locals[name])
 
     def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
@@ -2907,17 +2880,6 @@ class InstructionTranslator(InstructionTranslatorBase):
 
     def run(self):
         super().run()
-
-    def match_nested_cell(self, name, cell):
-        """Match a cell in this method to one in a function we are inlining"""
-        try:
-            value = cell.cell_contents
-        except ValueError:
-            return None
-        # TODO(jansel): check the id of the cell rather than the contents
-        if id(value) != self._freevars_ids.get(name):
-            return None
-        return self.symbolic_locals[name]
 
     def should_compile_partial_graph(self):
         if sys.version_info >= (3, 11):
@@ -3331,39 +3293,20 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         return TracingContext.current_frame(self.parent.frame_summary())
 
     def STORE_DEREF(self, inst):  # type: ignore[override]
-        if inst.argval in self.closure_cells:
-            cell = self.closure_cells[inst.argval]
-            val = self.pop()
-            if isinstance(cell, ClosureVariable):
-                if not self.output.is_root_tracer():
-                    unimplemented(
-                        "HigherOrderOperator: Mutating a variable not in the current scope (ClosureVariable)"
-                    )
-                self.output.root_tx.symbolic_locals[cell.name] = val
-            else:
-                self.output.side_effects.store_cell(cell, val)
-        else:
-            unimplemented("write to __closure__ while inlining")
+        assert inst.argval in self.closure_cells
+        cell = self.closure_cells[inst.argval]
+        val = self.pop()
+        self.output.side_effects.store_cell(cell, val)
 
     def LOAD_DEREF(self, inst):
-        if inst.argval in self.closure_cells:
-            cell = self.closure_cells[inst.argval]
-            if isinstance(cell, ClosureVariable):
-                self.push(self.output.root_tx.symbolic_locals[cell.name])
-            else:
-                self.push(self.output.side_effects.load_cell(cell))
-        else:
-            super().LOAD_DEREF(inst)
+        assert inst.argval in self.closure_cells
+        cell = self.closure_cells[inst.argval]
+        self.push(self.output.side_effects.load_cell(cell))
 
     def _load_closure(self, name):
         assert name in self.cell_and_freevars()
-        if name in self.closure_cells:
-            return self.closure_cells[name]
-        else:
-            # We model unmodified cells captured by `UserFunctionVariable` as
-            # their contents, in `self.symbolic_locals`. See
-            # `UserFunctionVariable::bind_args`.
-            return self.symbolic_locals[name]
+        assert name in self.closure_cells
+        return self.closure_cells[name]
 
     def should_compile_partial_graph(self):
         return False  # inlining functions is all-or-nothing

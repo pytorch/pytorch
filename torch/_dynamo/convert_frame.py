@@ -548,7 +548,7 @@ class ConvertFrameAssert:
 
         with compile_context(CompileContext(compile_id)):
             return _compile(
-                frame.f_code,
+                frame.f_func,
                 frame.f_globals,
                 frame.f_locals,
                 frame.f_builtins,
@@ -599,7 +599,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
 
 
 def _compile(
-    code: CodeType,
+    func: FunctionType,
     globals: Dict[str, object],
     locals: Dict[str, object],
     builtins: Dict[str, object],
@@ -628,6 +628,7 @@ def _compile(
     dynamo_time_before_restart: float = 0.0
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
+    code: CodeType = func.__code__
 
     tf_mode_stack: List[
         torch.overrides.TorchFunctionMode
@@ -642,7 +643,7 @@ def _compile(
         speculation_log.restart()
         tracer = InstructionTranslator(
             instructions,
-            code,
+            func,
             locals,
             globals,
             builtins,
@@ -1327,7 +1328,7 @@ def replay(filename: str) -> None:
 
     try:
         _compile(
-            record.code,
+            record.func,
             record.globals,
             record.locals,
             record.builtins,

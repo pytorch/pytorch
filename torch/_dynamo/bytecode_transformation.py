@@ -1257,11 +1257,8 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             instructions[i].arg = (arg_tuple[0] << 4) + (arg_tuple[1] & 15)
         elif instructions[i].opcode in HAS_LOCAL:
             if should_compute_arg():
-                if (
-                    sys.version_info >= (3, 13)
-                    and instructions[i].argval not in varnames
-                ):
-                    # instructions like LOAD_FAST used for both local and free vars
+                # instructions like LOAD_FAST used for both local and free vars
+                if instructions[i].argval in freenames:
                     instructions[i].arg = freenames[instructions[i].argval]
                 else:
                     instructions[i].arg = varnames[instructions[i].argval]

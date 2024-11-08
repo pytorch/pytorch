@@ -330,20 +330,6 @@ class ComptimeVariable(VariableTracker):
         return variables.ConstantVariable.create(None)
 
 
-class ClosureVariable(UnknownVariable):
-    _nonvar_fields = {
-        "name",
-        *UnknownVariable._nonvar_fields,
-    }
-
-    def __init__(self, name, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.name = name
-
-    def reconstruct(self, codegen):
-        codegen.append_output(codegen.create_load_closure(self.name))
-
-
 class NewCellVariable(VariableTracker):
     # If the cell existed before Dynamo tracing started, this will be the
     # VariableTracker that represents the cell content.
@@ -352,6 +338,10 @@ class NewCellVariable(VariableTracker):
     # SideEffects, rather than being reflected here. One can think of
     # `NewCellVariable` as a special case for `UserDefinedObjectVariable`.
     pre_existing_contents: Optional[VariableTracker]
+
+    # If this cell was a part of the root frame's locals (either captured or
+    # created by the root frame), this will be set to the local name.
+    root_frame_local_name: Optional[str] = None
 
     def __init__(
         self, pre_existing_contents: Optional[VariableTracker] = None, **kwargs

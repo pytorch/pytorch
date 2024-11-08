@@ -415,11 +415,16 @@ class SideEffects:
             if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
                 var, variables.NewCellVariable
             ):
-                cg.add_push_null(
-                    lambda: cg.load_import_from(utils.__name__, "make_cell")
-                )
-                cg.extend_output(create_call_function(0, False))
-                cg.add_cache(var)
+                if var.root_frame_local_name is None:
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(utils.__name__, "make_cell")
+                    )
+                    cg.extend_output(create_call_function(0, False))
+                    cg.add_cache(var)
+                else:
+                    # This avoids having to create extra `make_cell` calls.
+                    # TODO generalize this for cells created during inlining.
+                    cg.tempvars[var] = var.root_frame_local_name
                 var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
@@ -634,6 +639,18 @@ class SideEffects:
                 )
                 cg.call_function(1, False)
                 cg.append_output(create_instruction("POP_TOP"))
+
+            elif (
+                isinstance(var, variables.NewCellVariable)
+                and var.root_frame_local_name is not None
+            ):
+                # Emit more readable and performant bytecode.
+                # TODO generalize this for cells created during inlining.
+                if var in self.store_attr_mutations:
+                    contents_var = self.load_cell(var)
+                    cg(contents_var)
+                    cg.store_deref(var.root_frame_local_name)
+
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
