@@ -215,7 +215,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.9", "3.10", "3.11", "3.12, "3.13" ]
+        py_vers: [ "3.9", "3.10", "3.11", "3.12" ]
     timeout-minutes: 40
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cpu
