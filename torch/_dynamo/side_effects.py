@@ -5,6 +5,7 @@ import inspect
 import warnings
 import weakref
 from collections.abc import MutableMapping
+from types import CellType
 from typing import Any, Dict, List, Optional, Set, Type
 
 import torch.nn
@@ -146,21 +147,28 @@ class SideEffects:
             self.store_attr_mutations[item] = {}
         self.store_attr_mutations[item][name] = value
 
-    def load_attr(self, item, name, deleted_ok=False):
-        assert self.is_attribute_mutation(item)
+    def load_attr(self, item, name, deleted_ok=False, check=False):
+        if check:
+            assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented("read deleted attribute")
         return result
 
     def store_cell(self, cellvar, value):
+        if cellvar.is_immutable():
+            unimplemented("Dynamo currently doesn't support writing to such cell")
         assert isinstance(cellvar, variables.NewCellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
 
     def load_cell(self, cellvar):
         assert isinstance(cellvar, variables.NewCellVariable)
-        return self.load_attr(cellvar, "cell_contents")
+        if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
+            return self.load_attr(cellvar, "cell_contents", check=False)
+        if cellvar.pre_existing_contents:
+            return cellvar.pre_existing_contents
+        unimplemented("cannot read uninitialized cell")
 
     def load_global(self, gvar: VariableTracker, name: str):
         assert isinstance(gvar, variables.VariableTracker)
@@ -192,6 +200,8 @@ class SideEffects:
         ) and name in self.store_attr_mutations.get(item, ())
 
     def is_modified(self, item):
+        if item.is_immutable():
+            return False
         if isinstance(item.mutation_type, AttributeMutationNew):
             return True
         if self.is_attribute_mutation(item):
@@ -298,13 +308,16 @@ class SideEffects:
         self.keepalive.append(obj)
         return variable
 
-    def track_cell_existing(self, source: Source, item: Any):
+    def track_cell_existing(
+        self, source: Source, cell: CellType, contents: VariableTracker
+    ):
         variable = variables.NewCellVariable(
             mutation_type=AttributeMutationExisting(),
+            pre_existing_contents=contents,
             source=source,
         )
-        self.id_to_variable[id(item)] = variable
-        self.keepalive.append(item)
+        self.id_to_variable[id(cell)] = variable
+        self.keepalive.append(cell)
         return variable
 
     def track_global_existing(self, source: Source, item: Any):
@@ -402,11 +415,16 @@ class SideEffects:
             if isinstance(var.mutation_type, AttributeMutationNew) and isinstance(
                 var, variables.NewCellVariable
             ):
-                cg.add_push_null(
-                    lambda: cg.load_import_from(utils.__name__, "make_cell")
-                )
-                cg.extend_output(create_call_function(0, False))
-                cg.add_cache(var)
+                if var.root_frame_local_name is None:
+                    cg.add_push_null(
+                        lambda: cg.load_import_from(utils.__name__, "make_cell")
+                    )
+                    cg.extend_output(create_call_function(0, False))
+                    cg.add_cache(var)
+                else:
+                    # This avoids having to create extra `make_cell` calls.
+                    # TODO generalize this for cells created during inlining.
+                    cg.tempvars[var] = var.root_frame_local_name
                 var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutation_type, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
@@ -621,6 +639,18 @@ class SideEffects:
                 )
                 cg.call_function(1, False)
                 cg.append_output(create_instruction("POP_TOP"))
+
+            elif (
+                isinstance(var, variables.NewCellVariable)
+                and var.root_frame_local_name is not None
+            ):
+                # Emit more readable and performant bytecode.
+                # TODO generalize this for cells created during inlining.
+                if var in self.store_attr_mutations:
+                    contents_var = self.load_cell(var)
+                    cg(contents_var)
+                    cg.store_deref(var.root_frame_local_name)
+
             elif self.is_attribute_mutation(var):
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
