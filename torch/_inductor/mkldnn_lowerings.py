@@ -381,6 +381,16 @@ def register_onednn_fusion_ops():
             scalars,
             algorithm,
         ):
+            # To align with qlinear where x_scale and x_zp are converted to Tensor
+            assert type(x_scale) == float
+            x_scale = V.graph.add_tensor_constant(
+                torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
+            )
+            assert type(x_zp) == int
+            x_zp = V.graph.add_tensor_constant(
+                torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
+            )
+
             return TensorBox.create(
                 mkldnn_ir.QConvPointWisePT2E.create(
                     x,
@@ -406,16 +416,17 @@ def register_onednn_fusion_ops():
         @register_lowering(
             torch.ops.onednn.qconv2d_pointwise.binary, type_promotion_kind=None
         )
+        @register_lowering(
+            torch.ops.onednn.qconv2d_pointwise.binary_tensor, type_promotion_kind=None
+        )
         def qconvolution_binary(
             x: TensorBox,
             x_scale,
             x_zp,
-            accum: TensorBox,
-            accum_scale,
-            accum_zp,
             packed_weight: TensorBox,
             w_scale: TensorBox,
             w_zp: TensorBox,
+            accum: TensorBox,
             bias: TensorBox,
             stride,
             padding,
@@ -424,12 +435,24 @@ def register_onednn_fusion_ops():
             o_inv_scale,
             o_zero_point,
             output_dtype,
+            accum_scale,
+            accum_zp,
             binary_attr,
             alpha,
             unary_attr,
             unary_scalars,
             unary_algorithmm,
         ):
+            # To align with qlinear where x_scale and x_zp are converted to Tensor
+            assert type(x_scale) == float
+            x_scale = V.graph.add_tensor_constant(
+                torch.tensor(x_scale, dtype=torch.float32), name="x_scale"
+            )
+            assert type(x_zp) == int
+            x_zp = V.graph.add_tensor_constant(
+                torch.tensor(x_zp, dtype=torch.int32), name="x_zp"
+            )
+
             if (
                 binary_attr == "sum"
                 and output_dtype in [torch.float32, torch.bfloat16]
@@ -446,12 +469,10 @@ def register_onednn_fusion_ops():
                     x,
                     x_scale,
                     x_zp,
-                    accum,
-                    accum_scale,
-                    accum_zp,
                     packed_weight,
                     w_scale,
                     w_zp,
+                    accum,
                     bias,
                     stride,
                     padding,
@@ -460,6 +481,8 @@ def register_onednn_fusion_ops():
                     o_inv_scale,
                     o_zero_point,
                     output_dtype,
+                    accum_scale,
+                    accum_zp,
                     binary_attr,
                     alpha,
                     unary_attr,
