@@ -1020,9 +1020,11 @@ class TestForeach(TestCase):
         intersperse_empty_tensors = w_empty and op.name != "_foreach_max"
 
         N = 600
-        indices_with_empty_tensors = set() if not intersperse_empty_tensors else set([
-            200, 300, 301, 400, 401, 402, 404, 598
-        ])
+        indices_with_empty_tensors = (
+            set()
+            if not intersperse_empty_tensors
+            else {200, 300, 301, 400, 401, 402, 404, 598}
+        )
         tensorlist = [
             make_tensor((2, 3), dtype=dtype, device=device, noncontiguous=False)
             if i not in indices_with_empty_tensors
@@ -1075,14 +1077,18 @@ class TestForeach(TestCase):
         kwargs = {}
         if op.name == "_foreach_norm":
             kwargs["ord"] = 2
-            disable_fastpath = dtype not in floating_types_and(torch.half, torch.bfloat16)
+            disable_fastpath = dtype not in floating_types_and(
+                torch.half, torch.bfloat16
+            )
 
-        tensorlist = [make_tensor((N,), dtype=dtype, device=device, noncontiguous=False)]
+        tensorlist = [
+            make_tensor((N,), dtype=dtype, device=device, noncontiguous=False)
+        ]
         # foreach_max cannot handle empty tensors as max over empty is undefined
         if w_empty and op.name != "_foreach_max":
             tensorlist += [
                 torch.empty(0, dtype=dtype, device=device),
-                make_tensor((N,), dtype=dtype, device=device, noncontiguous=False)
+                make_tensor((N,), dtype=dtype, device=device, noncontiguous=False),
             ]
         inputs = (tensorlist,)
         wrapped_op, ref, _, _ = self._get_funcs(op)
