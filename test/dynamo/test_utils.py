@@ -107,10 +107,10 @@ class TestDynamoTimed(TestCase):
         various recorded metrics. This test could be broken into several, but the
         compilation is somewhat expensive. Instead of resetting and compiling the
         same thing multiple times, we may as well compile once and just check all
-        the things that are affected by a single dynamo_timed.
+        the things that are affected by dynamo_timed.
         """
-        # The logging function is different for OSS vs. internal Let's just mock the
-        # and capture all the CompilationMetric objects it sees.
+        # The logging function is different for OSS vs. internal. Let's just mock
+        # and capture all the CompilationMetric objects logged.
         compilation_events = []
         with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
             self.run_forward_backward()
@@ -118,7 +118,7 @@ class TestDynamoTimed(TestCase):
 
         # Validate utils.compile_times(). Unfortunately, we can't test the output
         # reliably because it depends on whether 'tabulate' is installed. So we'll
-        # inspect the dict it prints instead:
+        # directly inspect the dict it prints instead:
         self.assertExpectedInline(
             pprint.pformat(utils.compilation_time_metrics),
             """\
