@@ -11,6 +11,7 @@ from torch._dynamo.utils import detect_fake_mode
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 def _factory_args(fake_tensor):
     return {
@@ -95,6 +96,15 @@ class BaseChunkingApplier:
             recovered = self.graph.call_function(
                 aten.mul.Tensor, (recovered, meta.scale_by)
             )
+
+        # convert back to the original dtype
+        if meta.need_sum:
+            original_dtype = node.meta["val"].dtype
+            if original_dtype != torch.float32:
+                recovered = self.graph.call_function(
+                    prims.convert_element_type.default,
+                    (recovered, original_dtype)
+                )
 
         assert recovered is not node
         node.replace_all_uses_with(recovered)
@@ -281,13 +291,24 @@ class SubgraphChunkingApplier(BaseChunkingApplier):
     def create_accumulators(self):
         with self.graph.inserting_before(self.source_user):
             for node in self.accumulators:
+                # use fp32 for accumulators
                 fake_tensor = node.meta["val"]
+                if fake_tensor.numel() == 1:
+                    # This tensor maybe fused with mm and becomes a addmm
+                    # if we upcast here, addmm may fail due to incompatible
+                    # dtypes for input arguments.
+                    override_dtype = torch.float32
+                else:
+                    override_dtype = fake_tensor.dtype
+                    
+                kwargs = _factory_args(fake_tensor)
+                kwargs["dtype"] = override_dtype
                 accum = self.graph.call_function(
                     aten.full.default,
                     (fake_tensor.shape, 0),
-                    _factory_args(fake_tensor))
+                    kwargs)
                 # reuse the meta['val']
-                accum.meta = {"val": fake_tensor}
+                accum.meta = {"val": fake_tensor.to(override_dtype)}
                 self.accumulators[node] = accum
         
 
