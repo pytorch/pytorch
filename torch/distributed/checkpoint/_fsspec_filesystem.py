@@ -5,8 +5,10 @@ import io
 import os
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional, TYPE_CHECKING, Union
+from typing import Generator, Optional, Union
 
+import fsspec
+from fsspec import AbstractFileSystem
 from fsspec.core import url_to_fs
 
 from torch.distributed.checkpoint.filesystem import (
@@ -14,10 +16,6 @@ from torch.distributed.checkpoint.filesystem import (
     FileSystemReader,
     FileSystemWriter,
 )
-
-
-if TYPE_CHECKING:
-    from fsspec import AbstractFileSystem
 
 
 __all__ = [
@@ -35,28 +33,9 @@ class FileSystem(FileSystemBase):
         self, path: Union[str, os.PathLike], mode: str
     ) -> Generator[io.IOBase, None, None]:
         assert self.fs is not None
-        # _open only supports binary mode
-        if "b" not in mode:
-            with self.create_stream(path, mode.replace("t", "") + "b") as stream:
-                yield io.TextIOWrapper(stream)
-            return
-
-        # fsspec does not support concurrent transactions, so just
-        # manually handle commit/discard for each file.
-        #
-        # This is safe as long as you don't call `create_stream` on
-        # the same path concurrently
-        assert self.fs is not None
-        with self.fs._open(os.fspath(path), mode, autocommit=False) as stream:
-            try:
+        with self.fs.transaction:
+            with fsspec.open(str(path), mode) as stream:
                 yield stream
-            except:  # noqa: B001,E722
-                if stream.writable():
-                    stream.discard()
-                raise
-            else:
-                if stream.writable():
-                    stream.commit()
 
     def concat_path(
         self, path: Union[str, os.PathLike], suffix: str
@@ -72,7 +51,7 @@ class FileSystem(FileSystemBase):
     ) -> None:
         self.fs.rename(path, new_path)
 
-    def mkdir(self, path: Union[str, os.PathLike]) -> None:
+    def mkdir(self, path: [str, os.PathLike]) -> None:
         self.fs.makedirs(path, exist_ok=True)
 
     @classmethod
