@@ -467,7 +467,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchVmapMode, m) {
   UNARY_POINTWISE_RANDOM_LEADING_FLOAT(normal, float_Tensor);
 
   m.impl("native_dropout", native_dropout_batching_rule); // needs special casing because cuda version doesn't call bernoulli
-  m.impl("native_dropout_backward", native_dropout_backward_batch_rule); // needs special casing because cuda version doesn't call bernoulli
+  m.impl("native_dropout_backward", native_dropout_backward_batch_rule);
 
   UNARY_POINTWISE_RANDOM(_standard_gamma);
   UNARY_POINTWISE_RANDOM(_sample_dirichlet);
