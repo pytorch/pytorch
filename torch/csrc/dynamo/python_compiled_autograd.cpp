@@ -52,6 +52,12 @@ Notes:
 namespace torch::dynamo::autograd {
 using c10::SymInt;
 
+static PyObject* kPyCompiler;
+
+PyObject* current_py_compiler() {
+  return kPyCompiler;
+}
+
 static PyObject* wrap_int_list(const std::vector<int64_t>& inputs) {
   PyObject* pyinput = PyTuple_New(static_cast<Py_ssize_t>(inputs.size()));
   for (const auto i : c10::irange(inputs.size())) {
@@ -88,6 +94,24 @@ static void check(bool result) {
   if (C10_UNLIKELY(!result))
     check(nullptr);
 }
+
+static variable_list validate_outputs(
+    variable_list& outputs,
+    const ivalue_list& saved) {
+  SavedState r;
+  r.stack = saved;
+  std::vector<c10::optional<InputMetadata>> value;
+  r.dequeue(value);
+
+  torch::autograd::validate_outputs(
+      value, outputs, [&](const std::string& msg) {
+        std::ostringstream ss;
+        ss << "[Compiled Autograd Tracing:]" << msg;
+        return ss.str();
+      });
+  return outputs;
+}
+
 struct PythonLogger {
   PythonLogger() = delete;
   explicit PythonLogger(PyObject* logger) : logger_(logger) {
@@ -488,6 +512,91 @@ void set_ivalue_proxies(
   }
 }
 
+template <typename Func>
+static variable_list call_function(
+    PyObject* py_compiler,
+    const char* name,
+    Func fn,
+    const variable_list& inputs,
+    const ivalue_list& saved_state,
+    int64_t num_outputs,
+    const std::string& debug) {
+  // Need this to do PyObject* -> IValue conversion
+  std::vector<at::TypePtr> schema;
+  schema.reserve(saved_state.size());
+  for (const auto& ivalue : saved_state) {
+    schema.emplace_back(ivalue.type());
+  }
+
+  // We are going to bind the following function to Python
+  auto py_func = py::cpp_function(
+      [schema, fn](
+          std::vector<c10::optional<at::Tensor>>& inputs,
+          const py::args& args) -> py::object {
+        // It reconstructs the saved_state from args via the schema
+        std::vector<at::IValue> stack;
+        TORCH_INTERNAL_ASSERT(args.size() == schema.size());
+        auto tuple_args = jit::tuple_slice(args);
+        for (uint64_t idx = 0; idx < schema.size(); idx++) {
+          stack.emplace_back(
+              jit::toIValue(tuple_args[idx], schema[idx], c10::nullopt));
+        }
+        std::vector<at::Tensor> inputs_;
+        for (const auto& inp : inputs) {
+          if (inp.has_value()) {
+            inputs_.emplace_back(*inp);
+          } else {
+            inputs_.emplace_back();
+          }
+        }
+        auto outputs = fn(inputs_, stack);
+        return jit::toPyObject(at::IValue(outputs));
+      });
+
+  // convert ivalue_list -> PyObject*
+  PyObject* py_saved_state =
+      PyTuple_New(static_cast<Py_ssize_t>(schema.size()));
+  for (const auto i : c10::irange(schema.size())) {
+    py::object obj = jit::toPyObject(saved_state[i]);
+    Py_INCREF(obj.ptr());
+    PyTuple_SET_ITEM(py_saved_state, i, obj.ptr());
+  }
+
+  // call the corresponding method on the py_compiler
+  // That method will figure out what to do with the function
+  // (it can either inline it or plop it straight into the FX graph).
+  py::handle handle(py_compiler);
+  py::object stuff = handle.attr(name)(
+      py_func, inputs, py::handle(py_saved_state), num_outputs, debug);
+
+  // Convert the output from PyObject* to vector<Tensor>
+  auto tmp = py::cast<std::vector<std::optional<at::Tensor>>>(stuff);
+  variable_list outputs;
+  for (const auto& t : tmp) {
+    if (t.has_value()) {
+      outputs.emplace_back(t.value());
+    } else {
+      outputs.emplace_back();
+    }
+  }
+  return outputs;
+}
+
+static at::Tensor call_accumulate(
+    PyObject* py_compiler,
+    const at::Tensor& old_var,
+    const at::Tensor& new_var) {
+  if (!old_var.defined()) {
+    return new_var;
+  }
+  if (!new_var.defined()) {
+    return old_var;
+  }
+  py::handle handle(py_compiler);
+  py::object stuff = handle.attr("accumulate")(old_var, new_var);
+  return py::cast<at::Tensor>(stuff);
+}
+
 static TraceState call_begin_capture(
     PyObject* self,
     CacheNode& cache,
@@ -640,6 +749,7 @@ CacheNode* _compiled_autograd_impl(
     TORCH_INTERNAL_ASSERT(the_autograd_compiler != Py_None);
     ClosingTHPObjectPtr py_compiler(
         check(PyObject_CallNoArgs((the_autograd_compiler))));
+    kPyCompiler = py_compiler.get();
 
     TraceState state = call_begin_capture(
         py_compiler, *cache, compiler_call, output_edges.size());
@@ -707,17 +817,42 @@ CacheNode* _compiled_autograd_impl(
           set_node_origin, "OIO", node_name.get(), i, pyobj, nullptr));
 
       SwapSavedVariables saved(compiler_call, state, py_compiler.get(), call);
-      variable_list outputs = call.node->apply_with_saved(inputs, saved);
+      auto saved_state = call.node->retrieve_saved(saved);
+      // std::cout << call.node->name() << std::endl;
+      // std::cout << saved_state.size() << std::endl;
+      // for (const auto& ivalue: saved_state) {
+      //   if (ivalue.isTensor()) {
+      //     std::cout << "tensor" << std::endl;
+      //   } else {
+      //     ivalue.dump();
+      //   }
+      // }
+      auto outputs = call_function(
+          py_compiler,
+          "apply_functional",
+          call.node->get_functional(),
+          inputs,
+          saved_state,
+          call.node->num_outputs(),
+          call.node->name());
+      // variable_list outputs = call.node->apply_with_saved(inputs, saved);
 
       saved.debug_asserts();
       saved.before(call.node->next_edges());
-      validate_outputs(
-          call.node->next_edges(), outputs, [&](const std::string& msg) {
-            std::ostringstream ss;
-            ss << "[Compiled Autograd Tracing: " << call.node->name() << "] "
-               << msg;
-            return ss.str();
-          });
+
+      auto input_metadata = collect_input_metadata(call.node->next_edges());
+      SavedState state;
+      state.enqueue(input_metadata);
+      ivalue_list& input_metadata_state = state.stack;
+      outputs = call_function(
+          py_compiler,
+          "validate_outputs",
+          validate_outputs,
+          outputs,
+          input_metadata_state,
+          outputs.size(),
+          "validate_outputs");
+
       saved.after(call.node->next_edges());
       saved.debug_asserts();
 
@@ -739,13 +874,14 @@ CacheNode* _compiled_autograd_impl(
         auto& output = outputs[i];
         const auto& next = call.node->next_edge(i);
         if (next.is_valid() && output.defined()) {
-          input_buffers.lookup(next.function.get())
-              .add(
-                  next.input_nr, std::move(output), std::nullopt, std::nullopt);
+          auto& buffer = input_buffers.lookup(next.function.get());
+          buffer.buffer[next.input_nr] = call_accumulate(
+              py_compiler, buffer.buffer[next.input_nr], output);
         }
       }
     }
 
+    kPyCompiler = nullptr;
     PyObject* res = check(call_end_capture(py_compiler, state.outputs));
     TORCH_CHECK(PyTuple_Check(res), "Expected end_capture to return tuple");
     TORCH_CHECK(

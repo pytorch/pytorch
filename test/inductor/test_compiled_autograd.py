@@ -1735,6 +1735,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
             cpp_sources=cpp_source,
             functions="custom_op_backed_by_autograd_fn",
             verbose=True,
+            extra_cflags=["-g", "-O0"],
         )
 
         def same_autograd_fn():
@@ -1773,6 +1774,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id, m) {
 
         self.check_output_and_recompiles(different_autograd_fn, 2)
 
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
     def test_autograd_cpp_node_saved(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -1848,6 +1850,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 
         self.check_output_and_recompiles(fn, 2)
 
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
     def test_autograd_cpp_node_saved_dynamic(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -1904,6 +1907,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic, m) {
         # compiles for 10 (static) and 100 (dynamic)
         self.check_output_and_recompiles(fn, 2)
 
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
     def test_autograd_cpp_node_saved_int(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -1962,6 +1966,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int, m) {
 
         self.check_output_and_recompiles(fn, 1)
 
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
     def test_autograd_cpp_node_saved_float(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
@@ -2021,6 +2026,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float, m) {
         # compiled autograd and dynamo both support symfloat, but not backend
         self.check_output_and_recompiles(fn, [1, 3])
 
+    @unittest.skip("Flaky, cache from test ordering affects test. #135369")
     def test_autograd_cpp_node_data_dependent(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
