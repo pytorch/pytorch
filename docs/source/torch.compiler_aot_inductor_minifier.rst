@@ -1,6 +1,11 @@
 AOTInductor Minifier
 ===========================
 
+.. warning::
+
+    AOTInductor and its related features are in prototype status and are
+    subject to backwards compatibility breaking changes.
+
 If you encounter an error while using AOT Inductor APIs such as
 ``torch._inductor.aoti_compile_and_package``, ``torch._indcutor.aoti_load_package``,
 or running the loaded model of ``aoti_load_package`` on some inputs, you can use the AOTInductor Minifier
