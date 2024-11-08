@@ -375,7 +375,6 @@ class AllocateLine(MemoryPlanningLine):
 
         # try to reuse a recently freed buffer
         key = buffer_reuse_key(self.node)
-        # breakpoint()
         if config.allow_buffer_reuse and key in state:
             free_line = state.pop(key)
             free_line.is_reused = True
@@ -999,9 +998,6 @@ class PythonWrapperCodegen(CodeGen):
         python_kernel_name: str,
         cpp_kernel_name: str,
         codegen_args: List[str],
-        cpp_op_schema: str,
-        cpp_kernel_key: str,
-        cpp_kernel_overload_name: str = "",
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -1411,7 +1407,13 @@ class PythonWrapperCodegen(CodeGen):
     def define_subgraph_launcher_fn(self, fn_code: str):
         self.subgraph_definitions.splice(fn_code)
 
-    def define_user_defined_triton_kernel(self, kernel, configs, kwargs):
+    def define_user_defined_triton_kernel(
+        self,
+        kernel,
+        configs,
+        kwargs,
+        restore_value_args,
+    ):
         from torch.utils._triton import patch_triton_dtype_repr
 
         patch_triton_dtype_repr()
@@ -1494,6 +1496,9 @@ class PythonWrapperCodegen(CodeGen):
                 )
             ],
         }
+
+        if restore_value_args:
+            triton_meta["restore_value"] = tuple(restore_value_args)
 
         # Distinguish between different functions using function id
         cache_key: List[Any] = [id(kernel.fn)]

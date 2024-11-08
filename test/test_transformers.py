@@ -2529,9 +2529,9 @@ class TestSDPACudaOnly(NNTestCase):
     def test_cudnn_attention_nonmodulo64seqlen(self, device):
         # see also: https://github.com/pytorch/pytorch/issues/137347
         mask = torch.randint(0, 2, (2, 1, 157, 6404)).to(device="cuda", dtype=torch.bool)
-        q = torch.randn(2, 32, 157, 128, device='cuda', dtype=torch.bfloat16, requires_grad=True)
-        k = torch.randn(2, 32, 6404, 128, device='cuda', dtype=torch.bfloat16, requires_grad=True)
-        v = torch.randn(2, 32, 6404, 128, device='cuda', dtype=torch.bfloat16, requires_grad=True)
+        q = torch.randn(2, 32, 157, 128, device='cuda', dtype=torch.float16, requires_grad=True)
+        k = torch.randn(2, 32, 6404, 128, device='cuda', dtype=torch.float16, requires_grad=True)
+        v = torch.randn(2, 32, 6404, 128, device='cuda', dtype=torch.float16, requires_grad=True)
         q_cpu = q.detach().clone().cpu()
         k_cpu = k.detach().clone().cpu()
         v_cpu = v.detach().clone().cpu()
@@ -2563,6 +2563,36 @@ class TestSDPACudaOnly(NNTestCase):
         torch.testing.assert_close(q.grad, q_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(k.grad, k_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
         torch.testing.assert_close(v.grad, v_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
+
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    def test_cudnn_attention_preserves_query_layout(self, device):
+
+        def test_attention(backend: SDPBackend, permute_order: List[List[int]]):
+            BHSqD = [4, 16, 256, 64]
+            BHSkvD = [4, 16, 512, 64]
+
+            shape_q = [BHSqD[idx] for idx in permute_order]
+            shape_kv = [BHSkvD[idx] for idx in permute_order]
+            reverse = [permute_order.index(idx) for idx in range(4)]
+            q = torch.randn(*shape_q, dtype=torch.bfloat16, device='cuda', requires_grad=True).permute(reverse)
+            k = torch.randn(*shape_kv, dtype=torch.bfloat16, device='cuda', requires_grad=True).permute(reverse)
+            v = torch.randn(*shape_kv, dtype=torch.bfloat16, device='cuda', requires_grad=True).permute(reverse)
+            self.assertEqual(q.shape, BHSqD)
+            self.assertEqual(k.shape, BHSkvD)
+            self.assertEqual(v.shape, BHSkvD)
+
+            with sdpa_kernel(backend):
+                out = F.scaled_dot_product_attention(q, k, v)
+                self.assertTrue(out.permute(permute_order).is_contiguous())
+                out.sum().backward()
+
+        permute_orders = list()
+        permutable = [0, 1, 2]
+        permute_orders = itertools.permutations(permutable)
+
+        for permute_order in permute_orders:
+            test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3])
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
