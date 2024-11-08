@@ -121,13 +121,12 @@ jobs:
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
     {%- endif %}
     steps:
-      !{{ set_runner_specific_vars() }}
-      !{{ checkout(deep_clone=False, directory="pytorch", repository="iremyux/pytorch", branch="nightly-for-win-arm64",) }}
       !{{ checkout(deep_clone=False, directory="builder", repository="iremyux/pytorch-builder", branch="nightly-for-win-arm64") }}
-      - name: Populate binary env
+      - name: Install Git
         shell: cmd
         run: |
-          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+          "${BUILDER_ROOT}/windows/arm64/bootstrap_git.bat"
+      !{{ checkout(deep_clone=False, directory="pytorch", repository="iremyux/pytorch", branch="nightly-for-win-arm64",) }}
       - name: Build PyTorch binary
         shell: cmd
         run: |
