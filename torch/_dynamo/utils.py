@@ -2239,7 +2239,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         # no matter it's lazy module or not, we should copy to fake mode.
         nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
 
-    if node.name in ["interpolate", "is_integer"]:
+    if node.name in ["interpolate", "is_integer", "wrapped_gradient"]:
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
             float(arg)
@@ -2770,6 +2770,21 @@ def is_utils_checkpoint(obj):
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
+
+
+def is_invoke_subgraph(obj):
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
+
+    return obj is invoke_subgraph_placeholder
+
+
+def build_invoke_subgraph_variable(**options):
+    from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
+
+    return TorchHigherOrderOperatorVariable.make(
+        torch._higher_order_ops.invoke_subgraph,
+        **options,
+    )
 
 
 def build_checkpoint_variable(**options):
