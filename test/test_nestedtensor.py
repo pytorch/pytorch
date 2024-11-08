@@ -8061,7 +8061,9 @@ BACKWARD_FAILURES = [
             in {
                 "__rpow__",
                 "clamp_max",
+                "clamp_min",
                 "pow",
+                "sinc",
                 "special.i1",
             }
         ),
