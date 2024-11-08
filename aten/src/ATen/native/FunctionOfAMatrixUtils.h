@@ -15,6 +15,6 @@ using _compute_linear_combination_fn = void(*)(
   int64_t num_summations
 );
 
-DECLARE_DISPATCH(_compute_linear_combination_fn, _compute_linear_combination_stub);
+DECLARE_DISPATCH(_compute_linear_combination_fn, _compute_linear_combination_stub)
 
 }} // namespace at::native

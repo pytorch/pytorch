@@ -227,7 +227,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "nn.functional.avg_pool2d": {i64},
     "nn.functional.avg_pool3d": {i64},
     "nn.functional.local_response_norm": {i64},
-    "nn.functional.rrelu": {f32, f64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
@@ -352,14 +351,11 @@ inductor_expected_failures_single_sample["xpu"] = {
     "nn.functional.conv_transpose3d": {f32, f64},
     # rrelu not supported on XPU now
     "nn.functional.rrelu": {f16, f32, f64},
-    "histc": {i32, i64},
     # not implemented for 'Half'
     "nn.functional.multilabel_margin_loss": {f16},
     "nn.functional.multi_margin_loss": {f16},
-    "nn.functional.avg_pool3d": {f16},
-    "nn.functional.adaptive_max_pool3d": {f16},
-    # not implemented for 'Bool'
-    "nn.functional.unfold": {b8},
+    "sort": {b8},
+    "argsort": {b8},
 }
 
 
@@ -699,7 +695,7 @@ inductor_one_sample["cpu"] = {
     "nn.functional.cosine_similarity": {f16},
     "nn.functional.cross_entropy": {f16, f32, f64},
     "nn.functional.gaussian_nll_loss": {f16},
-    "nn.functional.grid_sample": {f32, f64},
+    "nn.functional.grid_sample": {f32, f64, f16},
     "nn.functional.interpolate.area": {f16},
     "nn.functional.nll_loss": {f16, f32, f64},
     "normal": {f16, f32, f64},

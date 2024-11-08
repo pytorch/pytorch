@@ -326,6 +326,22 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             pairs.append(torch.ones(size))
         return pairs
 
+    def test_itertools_compress(self):
+        def fn():
+            return itertools.compress("ABCDEF", [1, 0, 1, 0, 1, 1])
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertListEqual(list(opt_fn()), list(fn()))
+
+    def test_itertools_compress_tensors(self):
+        def fn():
+            return itertools.compress(
+                [torch.tensor([0]), torch.tensor([1]), torch.tensor([2])], [1, 0, 1]
+            )
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertListEqual(list(opt_fn()), list(fn()))
+
     @make_test
     def test_np_iinfo(a):
         max_dim = np.iinfo(np.int16).max
@@ -937,6 +953,44 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return x + 1
         else:
             return x - 1
+
+    @make_test
+    def test_tensor_size(x):
+        fn = torch.Tensor.size
+        return fn(x + 1)
+
+    @make_test
+    def test_tensor_dim(x):
+        fn = torch.Tensor.dim
+        return fn(x + 1)
+
+    @make_test
+    def test_tensor_is_inference(x):
+        if x.is_inference():
+            return x + 1
+        else:
+            return x - 1
+
+    def test_is_inference_recompilation(self):
+        def fn(x):
+            if x.is_inference():
+                return x + 1
+            else:
+                return x - 1
+
+        with torch.inference_mode():
+            x_inference = torch.randn(2, 2)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+
+        x = torch.randn(2, 2)
+
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        self.assertEqual(fn(x_inference), opt_fn(x_inference))
+        self.assertEqual(cnts.frame_count, 2)  # Recompiles
 
     @make_test
     def test_get_privateuse1_name(x):

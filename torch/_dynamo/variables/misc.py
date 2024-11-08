@@ -8,6 +8,7 @@ import random
 import re
 import sys
 import types
+import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch._C
@@ -26,6 +27,7 @@ from ..source import (
     GetItemSource,
     ODictGetItemSource,
     TypeSource,
+    WeakRefCallSource,
 )
 from ..utils import (
     check_unspec_or_constant_args,
@@ -55,11 +57,10 @@ class NO_SUCH_SUBOBJ:
 
 class SuperVariable(VariableTracker):
     _nonvar_fields = {
-        "specialized",
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, typevar, objvar=None, specialized=False, **kwargs) -> None:
+    def __init__(self, typevar, objvar=None, **kwargs) -> None:
         super().__init__(**kwargs)
         # typevar is the fist argument to super(). In the case where no argument
         # is provided to super(), it is the __class__ object where
@@ -70,7 +71,6 @@ class SuperVariable(VariableTracker):
         # to the current function where super() is called from (self for regular method,
         # cls for a classmethod)
         self.objvar = objvar
-        self.specialized = specialized  # directly get attr from self.typevar if true
 
     def reconstruct(self, codegen):
         codegen.add_push_null(lambda: codegen(variables.BuiltinVariable(super)))
@@ -83,8 +83,6 @@ class SuperVariable(VariableTracker):
 
     def _resolved_getattr_and_source(self, tx: "InstructionTranslator", name):
         assert self.objvar, "1-arg super not implemented"
-        if self.specialized:
-            return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
         # The rest of this function does two things:
@@ -165,7 +163,7 @@ class SuperVariable(VariableTracker):
 
             if (
                 isinstance(objvar, variables.UserDefinedObjectVariable)
-                and isinstance(objvar.mutable_local, AttributeMutationNew)
+                and isinstance(objvar.mutation_type, AttributeMutationNew)
                 and not (args or kwargs)
             ):
                 with do_not_convert_to_tracable_parameter():
@@ -206,12 +204,10 @@ class SuperVariable(VariableTracker):
             and len(kwargs) == 0
             and args[0].is_python_constant()
         ):
-            from .builder import VariableBuilder
-
             key = args[0].as_python_constant()
-            return VariableBuilder(tx, ODictGetItemSource(self.objvar.source, key))(
-                collections.OrderedDict.__getitem__(self.objvar.value, key)
-            )
+            value = collections.OrderedDict.__getitem__(self.objvar.value, key)
+            source = ODictGetItemSource(self.objvar.source, key)
+            return VariableTracker.build(tx, value, source)
         elif inner_fn in (
             collections.OrderedDict.__setitem__,
             object.__setattr__,
@@ -348,21 +344,6 @@ class ClosureVariable(UnknownVariable):
         codegen.append_output(codegen.create_load_closure(self.name))
 
 
-# closure variable created by an inlined function
-class InlinedClosureVariable(UnknownVariable):
-    _nonvar_fields = {
-        "name",
-        *UnknownVariable._nonvar_fields,
-    }
-
-    def __init__(self, name, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self.name = name
-
-    def reconstruct(self, codegen):
-        codegen.append_output(codegen.create_load_closure(self.name))
-
-
 class NewCellVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -387,7 +368,7 @@ class InspectSignatureVariable(VariableTracker):
         if kwargs:
             unimplemented(f"inspect.signature with {kwargs}")
         return InspectSignatureVariable(
-            callable, mutable_local=variables.base.MutableLocal()
+            callable, mutation_type=variables.base.ValueMutationNew()
         )
 
     def __init__(self, inspected: VariableTracker, **kwargs) -> None:
@@ -441,9 +422,11 @@ class InspectSignatureVariable(VariableTracker):
             if self.fn.__kwdefaults__:
                 wrap = functools.partial(wrap_bound_arg, tx=tx)
                 kwdefaults_sources = {
-                    k: None
-                    if self.source is None
-                    else DefaultsSource(self.source, k, is_kw=True)
+                    k: (
+                        None
+                        if self.source is None
+                        else DefaultsSource(self.source, k, is_kw=True)
+                    )
                     for k in self.fn.__kwdefaults__
                 }
                 defaults = {
@@ -479,15 +462,10 @@ class InspectParameterVariable(VariableTracker):
         self.value = value
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        from .builder import SourcelessBuilder, VariableBuilder
-
         try:
             attr_value = getattr(self.value, name)
-            if self.source:
-                attr_source = AttrSource(self.source, name)
-                return VariableBuilder(tx, attr_source)(attr_value)
-            else:
-                return SourcelessBuilder.create(tx, attr_value)
+            source = self.source and AttrSource(self.source, name)
+            return VariableTracker.build(tx, attr_value, source)
         except AttributeError:
             unimplemented(f"getattr({self.value}, {name})")
 
@@ -539,7 +517,7 @@ class InspectBoundArgumentsVariable(VariableTracker):
         self.bound_arguments_var = variables.ConstDictVariable(
             arguments_dict,
             type(bound_arguments.arguments),
-            mutable_local=variables.base.MutableLocal(),
+            mutation_type=variables.base.ValueMutationNew(),
         )
         self.signature = signature
 
@@ -658,11 +636,12 @@ class AutogradFunctionVariable(VariableTracker):
 
         VariableTracker.visit(visit, (args, kwargs))
 
-        if (
-            requires_grad
-            and torch.is_grad_enabled()
-            and config.capture_autograd_function
-        ):
+        if requires_grad and torch.is_grad_enabled():
+            if config.capture_autograd_function:
+                warnings.warn(
+                    "The config.capture_autograd_function flag is deprecated, it's now always true."
+                )
+
             from torch._functorch.autograd_function import (
                 autograd_function_forward_rewritten,
             )
@@ -723,6 +702,9 @@ class AutogradFunctionVariable(VariableTracker):
         ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
         args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
+            sig = inspect.signature(fn)
+            if len(args) - 1 == len(sig._parameters):
+                args = args[1:]  # Don't use context
             return variables.UserFunctionVariable(fn, source=source).call_function(
                 tx, args, kwargs
             )
@@ -917,11 +899,9 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             if self.needs_input_grad is not None:
                 return variables.ConstantVariable.create(self.needs_input_grad)
             if self.source:
-                from .builder import VariableBuilder
+                source = AttrSource(self.source, "needs_input_grad")
+                return VariableTracker.build(tx, self.value.needs_input_grad, source)
 
-                return VariableBuilder(tx, AttrSource(self.source, "needs_input_grad"))(
-                    self.value.needs_input_grad
-                )
         return super().var_getattr(tx, name)
 
 
@@ -946,7 +926,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if name == "queue_callback":
-            if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+            if torch._dynamo.compiled_autograd.in_compiled_autograd_region:
                 assert (
                     tx.one_graph
                 ), "queue_callback() is only supported when Compiled Autograd is enabled with fullgraph=True"
@@ -993,7 +973,7 @@ class GetAttrVariable(VariableTracker):
         self.obj = obj
         self.name = name
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
     @staticmethod
@@ -1126,11 +1106,8 @@ class GetSetDescriptorVariable(VariableTracker):
 
     def var_getattr(self, tx: "InstructionTranslator", name):
         if name == "__get__" and self.source:
-            from .builder import VariableBuilder
-
-            return VariableBuilder(tx, AttrSource(self.source, "__get__"))(
-                self.desc.__get__
-            )
+            source = AttrSource(self.source, "__get__")
+            return VariableTracker.build(tx, self.desc.__get__, source)
         else:
             return super().var_getattr(tx, name)
 
@@ -1170,18 +1147,13 @@ class PythonModuleVariable(VariableTracker):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
-        from .builder import SourcelessBuilder, VariableBuilder
-
         if self.is_torch or name not in self.value.__dict__:
             attr_value = getattr(self.value, name)
         else:
             attr_value = self.value.__dict__[name]
 
-        if self.source:
-            new_source = AttrSource(self.source, name)
-            return VariableBuilder(tx, new_source)(attr_value)
-        else:
-            return SourcelessBuilder.create(tx, attr_value)
+        source = self.source and AttrSource(self.source, name)
+        return VariableTracker.build(tx, attr_value, source)
 
 
 class TypingVariable(VariableTracker):
@@ -1201,6 +1173,19 @@ class TypingVariable(VariableTracker):
                 self.value[args[0].as_python_constant()],
             )
         unimplemented("typing")
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str):
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.side_effects.load_attr(self, name)
+
+        value = getattr(self.value, name)
+        if self.source:
+            attr_source = AttrSource(self.source, name)
+            return VariableBuilder(tx, attr_source)(value)
+        else:
+            return SourcelessBuilder(tx, value)
 
     def as_python_constant(self):
         return self.value
@@ -1337,7 +1322,7 @@ class NullVariable(VariableTracker):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return "NullVariable"
 
     def reconstruct(self, codegen):
@@ -1585,7 +1570,9 @@ class RandomClassVariable(VariableTracker):
         elif kwargs:
             unimplemented("random.Random() with kwargs")
         seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
-        return RandomVariable(seed=seed, mutable_local=variables.base.MutableLocal())
+        return RandomVariable(
+            seed=seed, mutation_type=variables.base.ValueMutationNew()
+        )
 
 
 class RandomVariable(VariableTracker):
@@ -1731,3 +1718,26 @@ class RandomVariable(VariableTracker):
         codegen(self.wrap_state(self.random.getstate()))
         codegen.call_function(1, True)
         codegen.pop_top()
+
+
+class WeakRefVariable(VariableTracker):
+    @staticmethod
+    def build(tx, weakref_value, **options):
+        source = options.get("source", None)
+        referent = weakref_value()
+        source = source and WeakRefCallSource(source)
+        referent_vt = VariableTracker.build(tx, referent, source)
+        options["source"] = source
+        return WeakRefVariable(referent_vt, **options)
+
+    def __init__(self, referent_vt, **options):
+        super().__init__(**options)
+        self.referent_vt = referent_vt
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        return self.referent_vt

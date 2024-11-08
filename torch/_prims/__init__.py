@@ -1773,12 +1773,12 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
     assert dim >= 0
     shape = tensors[0].shape
-    concat_length = 0
+    sym_sum_args = []
     for tensor_idx, tensor in enumerate(tensors):
         assert len(shape) == len(tensor.shape)
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
-                concat_length = concat_length + length
+                sym_sum_args.append(length)
             else:
                 torch._check(
                     length == common_length,
@@ -1788,7 +1788,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
                 )
 
     new_shape = list(tensors[0].shape).copy()
-    new_shape[dim] = concat_length
+    new_shape[dim] = torch.sym_sum(sym_sum_args)
     return TensorMeta(
         tensors[0],
         shape=new_shape,
@@ -1945,16 +1945,19 @@ convert_element_type = _make_prim(
 
 
 def _device_put_meta(
-    a: TensorLikeType, device: Union[str, torch.device]
+    a: TensorLikeType, device: Union[str, torch.device], non_blocking=False
 ) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     assert isinstance(device, (str, torch.device))
+    assert isinstance(non_blocking, bool)
 
     return TensorMeta(a, device=utils.canonicalize_device(device))
 
 
-def _device_put_aten(a: Tensor, device: Union[str, torch.device]) -> Tensor:
-    return a.to(device)
+def _device_put_aten(
+    a: Tensor, device: Union[str, torch.device], non_blocking=False
+) -> Tensor:
+    return a.to(device, non_blocking=non_blocking)
 
 
 _device_put_doc = """
@@ -1962,7 +1965,7 @@ _device_put_doc = """
   """
 
 device_put = _make_prim(
-    schema="device_put(Tensor a, Device device) -> Tensor",
+    schema="device_put(Tensor a, Device device, bool non_blocking=False) -> Tensor",
     meta=_device_put_meta,
     impl_aten=_device_put_aten,
     return_type=RETURN_TYPE.NEW,
@@ -1981,13 +1984,22 @@ _item_doc = """
     Converts a tensor with one element to a Python number.
 """
 
+
+# We can't call into python dispatcher for item again
+# because the current prim decomp calls into python dispatcher
+# again. https://github.com/pytorch/pytorch/issues/136050
+def _item_aten_no_python_dispatcher(*args, **kwargs):
+    with torch._dispatch.python.no_python_dispatcher():
+        return torch.Tensor.item(*args, **kwargs)
+
+
 # TODO: create a new return type for scalars?
 # FIXME: currently returns integers for boolean tensors
 # https://github.com/pytorch/pytorch/issues/78071
 item = _make_prim(
     schema="item(Tensor a) -> Scalar",
     meta=_item_meta,
-    impl_aten=torch.Tensor.item,
+    impl_aten=_item_aten_no_python_dispatcher,
     return_type=RETURN_TYPE.NEW,
     doc=_item_doc,
 )

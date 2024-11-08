@@ -325,11 +325,12 @@ class RMSNorm(Module):
     the paper `Root Mean Square Layer Normalization <https://arxiv.org/pdf/1910.07467.pdf>`__
 
     .. math::
-        y = \frac{x}{\sqrt{\mathrm{RMS}[x] + \epsilon}} * \gamma
+        y = \frac{x}{\mathrm{RMS}[x]} * \gamma \quad
+        \text{where} \quad \text{RMS}(x) = \sqrt{\epsilon + \frac{1}{n} \sum_{i=1}^{n} x_i^2}
 
-    The root mean squared norm is taken over the last ``D`` dimensions, where ``D``
+    The RMS is taken over the last ``D`` dimensions, where ``D``
     is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
-    is ``(3, 5)`` (a 2-dimensional shape), the rms norm is computed over
+    is ``(3, 5)`` (a 2-dimensional shape), the RMS is computed over
     the last 2 dimensions of the input.
 
     Args:
@@ -344,8 +345,7 @@ class RMSNorm(Module):
             normalize over the last dimension which is expected to be of that specific size.
         eps: a value added to the denominator for numerical stability. Default: :func:`torch.finfo(x.dtype).eps`
         elementwise_affine: a boolean value that when set to ``True``, this module
-            has learnable per-element affine parameters initialized to ones (for weights)
-            and zeros (for biases). Default: ``True``.
+            has learnable per-element affine parameters initialized to ones (for weights). Default: ``True``.
 
     Shape:
         - Input: :math:`(N, *)`

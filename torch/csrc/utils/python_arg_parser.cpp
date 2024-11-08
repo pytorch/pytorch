@@ -828,6 +828,18 @@ bool is_tensor_list_and_append_overloaded(
   return true;
 }
 
+static bool is_float_or_symfloat(PyObject* obj) {
+  if (torch::is_symfloat(py::handle(obj))) {
+    return true;
+  }
+
+  if (THPUtils_checkDouble(obj)) {
+    return true;
+  }
+
+  return false;
+}
+
 static bool is_float_or_complex_list(PyObject* obj) {
   auto tuple = six::isTuple(obj);
   if (!(tuple || PyList_Check(obj))) {
@@ -838,7 +850,7 @@ static bool is_float_or_complex_list(PyObject* obj) {
   const auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
   if (size > 0) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
-    if (!THPUtils_checkDouble(iobj) && !PyComplex_Check(iobj)) {
+    if (!is_float_or_symfloat(iobj) && !PyComplex_Check(iobj)) {
       return false;
     }
   }
@@ -934,7 +946,7 @@ auto FunctionParameter::check(
       }
       [[fallthrough]];
     case ParameterType::DOUBLE: {
-      if (THPUtils_checkDouble(obj)) {
+      if (is_float_or_symfloat(obj)) {
         return true;
       }
       if (THPVariable_Check(obj)) {
@@ -1127,7 +1139,7 @@ static inline std::vector<int64_t> parse_intlist_args(
 }
 
 // Parse a string literal to remove quotes and escape sequences
-static std::string parse_string_literal(c10::string_view str) {
+static std::string parse_string_literal(std::string_view str) {
   TORCH_CHECK(str.length() >= 2, "String defaults must be quoted");
 
   if (str.front() == '"') {
@@ -1447,6 +1459,8 @@ static Py_ssize_t find_param(FunctionSignature& signature, PyObject* name) {
   PyObject* value = nullptr;
   Py_ssize_t pos = 0;
 
+  // Note that this dict traversal is NoGil safe as the kwargs dict is only
+  // accessible within this thread.
   while (PyDict_Next(kwargs, &pos, &key, &value)) {
     if (!THPUtils_checkString(key)) {
       throw TypeError("keywords must be strings");
@@ -1518,6 +1532,8 @@ bool FunctionSignature::parse(
       }
       obj = PyTuple_GET_ITEM(args, arg_pos);
     } else if (kwargs) {
+      // Note that this call is NoGil safe as it works on kwargs which are local
+      // to the current function call.
       obj = PyDict_GetItem(kwargs, param.python_name);
       for (PyObject* numpy_name : param.numpy_python_names) {
         if (obj) {

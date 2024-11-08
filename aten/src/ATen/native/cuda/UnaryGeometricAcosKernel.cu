@@ -13,7 +13,7 @@
 namespace at::native {
 
 #if 0 && AT_USE_JITERATOR()
-CONSTEXPR_EXCEPT_WIN_CUDA char acos_name[] = "acos_impl";
+constexpr char acos_name[] = "acos_impl";
 #endif
 void acos_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
@@ -53,6 +53,6 @@ void acos_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda);
+REGISTER_DISPATCH(acos_stub, &acos_kernel_cuda)
 
 } // namespace at::native
