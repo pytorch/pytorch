@@ -6,6 +6,26 @@
 
 namespace {
 
+// This function is used to produce an attn_mask
+// in a standard format that can be consumed by both
+// the math and memory efficient attn_mask implementation
+//  Args:
+//    attn_mask: attn_mask of shape (B, L, S) or (L, S) or (B, N_heads, L, S)
+at::Tensor convert_boolean_attn_mask(
+    const at::Tensor& attn_mask,
+    at::TensorOptions& opt) {
+  // Convert boolean mask to additive mask; need to invert mask to indicate what
+  // to mask *out*.
+  if (attn_mask.dtype() == at::kBool) {
+    return at::where(
+        attn_mask.logical_not(),
+        -std::numeric_limits<double>::infinity(),
+        at::scalar_tensor(0.0, opt));
+  }
+  // Otherwise, attn_mask represents an additive attention tensor
+  return attn_mask;
+}
+
 bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   const auto query_size_last = params.query.sym_size(-1);
   const auto key_size_last = params.key.sym_size(-1);
@@ -28,6 +48,16 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
   return true;
 }
 
+bool check_no_grad(sdp::sdp_params const& params, bool debug) {
+  const bool any_inputs_require_grad = params.query.requires_grad() ||
+      params.key.requires_grad() || params.value.requires_grad();
+  const bool gradmode_enabled = at::GradMode::is_enabled();
+  if (debug && any_inputs_require_grad && any_inputs_require_grad) {
+    TORCH_WARN("Backward or grad to be supported.");
+  }
+  return !any_inputs_require_grad || !gradmode_enabled;
+}
+
 bool use_overrideable_xpu(sdp::sdp_params const& params, bool debug) {
   constexpr auto supported_dtypes = c10::array_of<at::ScalarType>(
       at::kFloat, at::kBFloat16, at::kHalf); // double is not supported
@@ -43,7 +73,8 @@ bool use_overrideable_xpu(sdp::sdp_params const& params, bool debug) {
       sdp::check_attn_mask_shape,
       sdp::check_nonzero_sequence_lengths_dense,
       sdp::check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>,
-      check_head_dim_size_xpu);
+      check_head_dim_size_xpu,
+      check_no_grad);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -145,40 +176,56 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
       "scaled_dot_product_fused_attention_overrideable_xpu: Accept only 4 dims inputs shape of {(B), H, T, K}");
   TORCH_CHECK(
-      key.size(3) == value.size(3),
-      "scaled_dot_product_fused_attention_overrideable_xpu: K/V should have the same head size");
+      (key.size(0) == value.size(0)) && (key.size(1) == value.size(1)) &&
+          (key.size(2) == value.size(2)),
+      "scaled_dot_product_fused_attention_overrideable_xpu: K/V should have the same batch / seq / num_head");
+  TORCH_CHECK(
+      dropout_p == 0.0,
+      "scaled_dot_product_fused_attention_overrideable_xpu: Currently do not support dropout > 0");
+  TORCH_CHECK(
+      !(attn_bias.has_value() && is_causal),
+      "scaled_dot_product_fused_attention_overrideable_xpu: attn_bias cannot present with is_causal");
 
   const int64_t batch_size = query.size(0);
-  const int64_t num_heads = query.size(1);
-  const int64_t num_heads_kv = key.size(1);
+  const int64_t num_head = query.size(1);
+  const int64_t num_head_kv = key.size(1);
   const int64_t head_dim = query.size(3);
+  const int64_t head_dim_v = value.size(3);
   const int64_t seq_len_q = query.size(2);
   const int64_t seq_len_kv = key.size(2);
-  printf("\n 2 \n");
 
   auto opts = query.options();
-  auto output = at::empty({batch_size, num_heads, seq_len_q, head_dim}, opts);
+  auto output = at::empty({batch_size, num_head, seq_len_q, head_dim}, opts);
   // auto logsumexp =
-  //     at::empty({batch_size, num_heads, seq_len_q}, opts.dtype(at::kFloat));
+  //     at::empty({batch_size, num_head, seq_len_q}, opts.dtype(at::kFloat));
   auto logsumexp = at::empty({}, opts.dtype(at::kFloat));
 
-  // need contiguous to get strided layout in broadcast case for large partition
-  // kernel
-  const at::Tensor attn_mask_final = attn_bias.has_value()
-      ? attn_bias.value()
-      : at::ones({batch_size, num_heads, seq_len_q, seq_len_kv}, opts);
-
-  printf("\n 3 \n");
+  std::optional<at::Tensor> attn_mask_fallback;
+  if (attn_bias.has_value()) {
+    attn_mask_fallback = attn_bias;
+  } else {
+    if (is_causal) {
+      auto attn_mask_fallback =
+          at::ones_symint({seq_len_q, seq_len_kv}, opts.dtype(at::kBool))
+              .tril();
+      attn_mask_fallback = convert_boolean_attn_mask(attn_mask_fallback, opts);
+    } else {
+      attn_mask_fallback = std::nullopt;
+    }
+  }
   at::native::onednn::graph::gpu_float_sdpa(
       batch_size,
       seq_len_q,
       seq_len_kv,
-      num_heads,
+      num_head,
+      num_head_kv,
       head_dim,
+      head_dim_v,
       query,
       key,
       value,
-      attn_mask_final,
+      attn_mask_fallback,
+      false, // is_causal fallback with attn_mask for now
       scale.has_value() ? scale.value() : (1.0 / std::sqrt(head_dim)),
       output);
 
@@ -186,7 +233,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   auto philox_seed = at::empty({}, at::dtype(at::kLong));
   auto philox_offset = at::empty({}, at::dtype(at::kLong));
   auto debug_attn_mask = at::empty(
-      {batch_size, num_heads, seq_len_q, seq_len_kv}, at::dtype(at::kFloat));
+      {batch_size, num_head, seq_len_q, seq_len_kv}, at::dtype(at::kFloat));
 
   return std::make_tuple(
       output,
@@ -209,6 +256,7 @@ TORCH_LIBRARY_IMPL(aten, XPU, m) {
   m.impl(
       "_scaled_dot_product_fused_attention_overrideable",
       &_scaled_dot_product_fused_attention_overrideable_xpu);
+  // Backward to be implemented
   // m.impl("_scaled_dot_product_fused_attention_overrideable_backward",
   // &_scaled_dot_product_fused_attention_overrideable_backward_xpu);
 }
