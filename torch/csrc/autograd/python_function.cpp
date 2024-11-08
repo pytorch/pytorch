@@ -421,8 +421,8 @@ ivalue_list PyNode::retrieve_saved(SwapSavedVariables& saved) {
   saved.after(f->output_info);
   saved.after(f->input_info);
 
-  state.enqueue(f->compiled_autograd_symints);
-  state.enqueue(f->saved_variables, shared_from_this());
+  // state.enqueue(f->compiled_autograd_symints);
+  // state.enqueue(f->saved_variables, shared_from_this());
   // state.enqueue(f->needs_input_grad);
   // state.enqueue(f->materialize_non_diff_grads);
   // state.enqueue(f->output_info);
@@ -479,8 +479,8 @@ PyNode::get_functional() {
         }
         f->compiled_autograd_tracing = false;
 
-        state.dequeue(f->compiled_autograd_symints);
-        state.dequeue(f->saved_variables);
+        // state.dequeue(f->compiled_autograd_symints);
+        // state.dequeue(f->saved_variables);
         // state.dequeue(f->needs_input_grad);
         // state.dequeue(f->materialize_non_diff_grads);
         // state.dequeue(f->output_info);
