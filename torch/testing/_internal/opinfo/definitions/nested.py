@@ -1,5 +1,7 @@
 # mypy: ignore-errors
 
+import contextlib
+from abc import ABC, abstractmethod
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
@@ -18,16 +20,12 @@ from torch.testing._internal.opinfo.core import (
 from torch.utils._pytree import tree_map
 
 
-# Represents a rule indicating how to xfail a particular test. It allows granularity
+# Represents a rule matching a particular set of tests. It allows granularity
 # at the device, dtype, op, and individual sample levels. This flexibility allows entire
 # bugs to be represented by a single rule, even if this corresponds with multiple conceptual
 # test cases across multiple ops.
 @dataclass
-class XFailRule:
-    # expected error type
-    error_type: TypeVar = Exception
-    # expected error message
-    error_msg: str = ".*"
+class SampleRule(ABC):
     # function to indicate whether the rule applies; return True if so
     match_fn: Callable[[torch.device, torch.dtype, OpInfo, SampleInput], bool] = None
     # optional name for identifying the rule
@@ -37,8 +35,55 @@ class XFailRule:
         if self.match_fn is None:
             raise ValueError("XFailRule must have match_fn set to be useful")
 
+    # returns (matched, relevant context if matched, or nullcontext otherwise)
     def match(self, device, dtype, op, sample) -> bool:
         return self.match_fn(device, dtype, op, sample)
+
+    # returns a string identifier of the rule type
+    @abstractmethod
+    def type(self) -> str:
+        ...
+
+    # returns an appropriate context that e.g. handles the xfail, skips, etc.
+    @abstractmethod
+    def get_context(self, test_case, device, dtype, op, sample):
+        ...
+
+
+# useful for specifying xfails
+@dataclass
+class XFailRule(SampleRule):
+    # expected error type
+    error_type: TypeVar = Exception
+    # expected error message
+    error_msg: str = ".*"
+
+    @property
+    def type(self) -> str:
+        return "xfail"
+
+    def get_context(self, test_case):
+        return test_case.assertRaisesRegex(
+            # failing within torch.compile wraps within a BackendCompilerFailed
+            (self.error_type, torch._dynamo.exc.BackendCompilerFailed),
+            self.error_msg,
+        )
+
+
+# useful for specifying skips
+@dataclass
+class SkipRule(SampleRule):
+    @property
+    def type(self):
+        return "skip"
+
+    def get_context(self, test_case):
+        @contextlib.contextmanager
+        def skipcontext(test_case=test_case):
+            test_case.skipTest("Skipped!")
+            yield
+
+        return skipcontext()
 
 
 # random integer used for sizes

@@ -145,6 +145,7 @@ class TestPatternMatcherBase(TestCase):
         dtype=None,
         is_dynamic=False,
         quantizer=None,
+        compile_options={},  # noqa: B006
     ):
         counters.clear()
         torch._dynamo.reset()
@@ -188,7 +189,7 @@ class TestPatternMatcherBase(TestCase):
             with torch.no_grad(), maybe_autocast:
                 clone_inputs = self._clone_inputs(inputs)
                 expected = mod(*inputs)
-                actual = torch.compile(mod)(*clone_inputs)
+                actual = torch.compile(mod, **compile_options)(*clone_inputs)
                 torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
                 if matcher_count is not None:
                     self.assertEqual(
@@ -381,6 +382,49 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_count = 1
             matcher_nodes = 1
             self._test_common(mod, (v,), matcher_count, matcher_nodes)
+
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_linear_input_non_contiguous_3D_wo_bias(self):
+        # Activation is 3D, non-contiguous and without Bias
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4096, 1024, bias=False)
+
+            def forward(self, x):
+                x = torch.ops.aten.permute.default(x, [0, 2, 1, 3])
+                x = torch.ops.aten.reshape.default(x, [4, 1, 4096])
+                return self.linear(x)
+
+        mod = M().eval()
+        v = torch.randn(4, 32, 1, 128)
+
+        dtypes = [torch.float]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+
+        for dtype in dtypes:
+            torch._dynamo.reset()
+            autocast_enabled = (
+                True if dtype in [torch.bfloat16, torch.float16] else False
+            )
+            with torch.no_grad(), torch.autocast(
+                device_type="cpu", enabled=autocast_enabled, dtype=dtype
+            ):
+                expected = mod(v)
+                actual, (source_code,) = run_and_get_code(
+                    torch.compile(mod, fullgraph=True),
+                    v,
+                )
+                self.assertIn(
+                    "torch.ops.mkldnn._linear_pointwise.default"
+                    if autocast_enabled
+                    else "torch.ops.mkl._mkl_linear.default",
+                    source_code,
+                )
+                torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
     def test_linear_add_bias(self):
         class M(torch.nn.Module):
@@ -2781,6 +2825,94 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 rtol=0.07,
             )
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    def test_smooth_quant_with_int_mm(self):
+        r"""
+        This testcase check if we can match the SmoothQuant int8 linear pattern from Torchao.
+        The pattern is:
+            (no bias) reshape -> _int_mm -> convert_element_type -> (expand -> mul) -> mul -> reshape
+        or
+            (with bias) pattern_no_bias -> add -> reshape -> reshape
+        """
+        M = 16
+        in_feature = 32
+        out_feature = 64
+        q_min, q_max = -32, 31
+
+        class Mod(torch.nn.Module):
+            def __init__(
+                self, dtype: torch.dtype, has_bias: bool, per_channel_quant: bool
+            ):
+                super().__init__()
+                self.dtype = dtype
+                self.has_bias = has_bias
+                self.b = torch.randint(
+                    q_min, q_max, [in_feature, out_feature], dtype=torch.int8
+                )
+                self.per_channel_quant = per_channel_quant
+                a_scale_per_tensor = torch.rand([1], dtype=dtype) * 0.01 + 0.01
+                a_scale_per_channel = torch.rand([M, 1], dtype=dtype) * 0.01 + 0.01
+                self.a_scale = (
+                    a_scale_per_channel
+                    if self.per_channel_quant
+                    else a_scale_per_tensor
+                )
+                self.b_scale = torch.rand([out_feature]) * 0.01 + 0.01
+                self.b_scale = self.b_scale.to(dtype)
+                self.bias = torch.rand([out_feature], dtype=dtype) if has_bias else None
+
+            def forward(self, a):
+                out_shape = a.shape[:-1] + (self.b.size(-1),)
+                a_reshaped = a.reshape(-1, a.size(-1))
+                c = torch._int_mm(a_reshaped, self.b)
+                c = c.to(self.dtype)
+                c_shape = c.shape
+                a_scale = self.a_scale.expand(c.shape)
+                c = c * a_scale
+                c = c * self.b_scale
+                if self.has_bias:
+                    c = c.reshape([1, *list(c_shape)])
+                    c = c + self.bias
+                    c = c.reshape(c_shape)
+                c = c.reshape(out_shape)
+                return c
+
+        has_bias_list = [True, False]
+        dype_list = (
+            [torch.float, torch.bfloat16]
+            if torch.ops.mkldnn._is_mkldnn_bf16_supported()
+            else [torch.float]
+        )
+        per_channel_list = [True, False]
+        dynamic_list = [True, False]
+        for has_bias, dtype, per_channel_quant, dynamic in itertools.product(
+            has_bias_list, dype_list, per_channel_list, dynamic_list
+        ):
+            mod = Mod(dtype, has_bias, per_channel_quant).eval()
+            a = torch.randint(q_min, q_max, [1, M, in_feature], dtype=torch.int8)
+
+            def matcher_check_fn():
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
+                )
+                if dynamic:
+                    nodes_count = 10 if has_bias else 7
+                else:
+                    nodes_count = 7 if has_bias else 6
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_nodes"],
+                    nodes_count,
+                )
+
+            self._test_common(
+                mod,
+                (a,),
+                matcher_check_fn=matcher_check_fn,
+                check_autocast=dtype,
+                compile_options={"dynamic": dynamic},
+            )
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
@@ -2791,6 +2923,9 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
     test_conv2d_binary_dynamic_shapes = TestPatternMatcher.test_conv2d_binary
     test_conv3d_binary_dynamic_shapes = TestPatternMatcher.test_conv3d_binary
     test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
+    test_linear_input_non_contiguous_3D_wo_bias_dynamic_shapes = (
+        TestPatternMatcher.test_linear_input_non_contiguous_3D_wo_bias
+    )
 
     def test_conv_transpose2d_dynamic_shapes(self):
         # We don't support conv_transpose2d for now.
