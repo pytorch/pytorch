@@ -325,7 +325,10 @@ class DTensor(torch.Tensor):
         ]
         return self.redistribute(device_mesh=self.device_mesh, placements=placements)
 
-    def __coerce_same_metadata_as_tangent__(self, flatten_spec):
+    def __coerce_same_metadata_as_tangent__(self, flatten_spec, expected_type=None):
+        if expected_type is not None:
+            return None
+
         (spec, _) = flatten_spec  # Result of tensor_flatten()
         return self.redistribute(
             device_mesh=self.device_mesh,
@@ -629,7 +632,7 @@ def distribute_tensor(
     Distribute a leaf ``torch.Tensor`` (i.e. nn.Parameter/buffers) to the ``device_mesh`` according
     to the ``placements`` specified. The rank of ``device_mesh`` and ``placements`` must be the
     same. The ``tensor`` to distribute is the logical or "global" tensor, and the API would use
-    the ``tensor`` from first rank of the DeviceMesh dimension as the source of truth to perserve
+    the ``tensor`` from first rank of the DeviceMesh dimension as the source of truth to preserve
     the single-device semantic. If you want to construct a DTensor in the middle of the Autograd
     computation, please use :meth:`DTensor.from_local` instead.
 

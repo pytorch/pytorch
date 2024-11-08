@@ -16,8 +16,9 @@ permissions: read-all
 # When any other step fails, it's job will be retried once by retryBot.
 jobs:
   get-label-type:
+    if: github.repository_owner == 'pytorch'
     name: get-label-type
-    uses: ./.github/workflows/_runner-determinator.yml
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
     with:
       triggering_actor: ${{ github.triggering_actor }}
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
@@ -36,7 +37,7 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT"
+        export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
         export CLANG=1
         .github/scripts/lintrunner.sh
 
@@ -53,7 +54,7 @@ jobs:
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT"
+        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT --all-files"
         .github/scripts/lintrunner.sh
 
   quick-checks:
@@ -215,14 +216,15 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.8
+      - name: Setup Python 3.9
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
           cache: pip
       - name: Install dependencies
         run: |
+          python3 -m pip install --upgrade pip
           pip install pytest-rerunfailures==11.1.* pytest-flakefinder==1.1.* pytest-xdist==3.3.* expecttest==0.2.* fbscribelogger==0.1.* numpy==1.24.*
           pip install torch --pre --index-url https://download.pytorch.org/whl/nightly/cpu/
       - name: Run run_test.py (nonretryable)
@@ -255,11 +257,11 @@ jobs:
           cache: pip
           cache-dependency-path: |
             **/requirements.txt
-      - name: Setup Python 3.8
+      - name: Setup Python 3.9
         if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v4
         with:
-          python-version: '3.8'
+          python-version: '3.9'
           architecture: x64
           check-latest: false
           cache: pip
@@ -270,7 +272,7 @@ jobs:
         run: |
           pip install -r requirements.txt
           # Doesn't really matter what torch version, we just need ANY torch installed
-          pip install 'torch==1.*'
+          pip install 'torch==2.*'
       - name: Run collect_env.py (nonretryable)
         run: |
           # All we need to see is that it passes

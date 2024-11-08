@@ -6,7 +6,6 @@ from collections import Counter
 from typing import Dict
 
 import torch
-from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     compare_results,
     CUSTOM_KEY,
@@ -40,10 +39,6 @@ def _extract_debug_handles(model) -> Dict[str, int]:
     return debug_handle_map
 
 
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
-
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
 class TestNumericDebugger(TestCase):
     def test_simple(self):
@@ -59,15 +54,10 @@ class TestNumericDebugger(TestCase):
                 count += 1
         self.assertEqual(len(unique_ids), count)
 
-    @unittest.skipIf(
-        is_fbcode(),
-        "fbcode changes the code path for `capture_pre_autograd_graph` "
-        "we can enable the test in fbcode after we remove `capture_pre_autograd_graph`",
-    )
     def test_quantize_pt2e_preserve_handle(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         generate_numeric_debug_handle(m)
 
         quantizer = XNNPACKQuantizer().set_global(
@@ -76,7 +66,7 @@ class TestNumericDebugger(TestCase):
         m = prepare_pt2e(m, quantizer)
         debug_handle_map = _extract_debug_handles(m)
         res_counter = Counter(debug_handle_map.values())
-        repeated_debug_handle_ids = [2, 3, 6]
+        repeated_debug_handle_ids = [5, 6, 7]
         # 3 ids were repeated because we copy over the id from node to its output observer
         # torch.ops.aten.conv2d.default, torch.ops.aten.squeeze.dim and torch.ops.aten.conv1d.default
         for dh_id in repeated_debug_handle_ids:
@@ -88,7 +78,7 @@ class TestNumericDebugger(TestCase):
         res_counter = Counter(debug_handle_map.values())
         # same set of ids where repeated, because we copy over the id from observer/fake_quant to
         # dequantize node
-        repeated_debug_handle_ids = [2, 3, 6]
+        repeated_debug_handle_ids = [5, 6, 7]
         for dh_id in repeated_debug_handle_ids:
             self.assertEqual(res_counter[dh_id], 2)
 
@@ -151,7 +141,7 @@ class TestNumericDebugger(TestCase):
     def test_prepare_for_propagation_comparison(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         generate_numeric_debug_handle(m)
         m_logger = prepare_for_propagation_comparison(m)
         ref = m(*example_inputs)
@@ -167,7 +157,7 @@ class TestNumericDebugger(TestCase):
     def test_extract_results_from_loggers(self):
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         generate_numeric_debug_handle(m)
         m_ref_logger = prepare_for_propagation_comparison(m)
 
@@ -191,7 +181,7 @@ class TestNumericDebugger(TestCase):
     def test_added_node_gets_unique_id(self) -> None:
         m = TestHelperModules.Conv2dThenConv1d()
         example_inputs = m.example_inputs()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        m = export_for_training(m, example_inputs).module()
         assert isinstance(m, torch.fx.GraphModule)
         generate_numeric_debug_handle(m)
         ref_handles = _extract_debug_handles(m)

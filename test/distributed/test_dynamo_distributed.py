@@ -32,6 +32,7 @@ from torch.distributed.fsdp.wrap import (
     lambda_auto_wrap_policy,
     transformer_auto_wrap_policy,
 )
+from torch.nn.attention.flex_attention import flex_attention
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -894,9 +895,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
 
-            # TODO: This should be possible to do inside the function, but
-            device = f"cuda:{self.rank}"
-
             @torch.compile()
             def f(x, y):
                 zx = x.shape
@@ -926,8 +924,6 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     def test_compiler_collectives_graph_break_empty_graph_still_collective(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             torch._dynamo.utils.clear_compilation_metrics()
-
-            device = f"cuda:{self.rank}"
 
             @torch.compile()
             def f(x, y):
@@ -1299,6 +1295,118 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
                 self.assertTrue(all("DDPOptimizer" in r.reason for r in break_reasons))
 
     @patch.object(config, "optimize_ddp", True)
+    def test_compiled_flex_attention_full_model_ddp(self):
+        class Model(torch.nn.Module):
+            def __init__(self, S, H, D):
+                super().__init__()
+
+                self.S = S
+                self.H = H
+                self.D = D
+
+                alibi_bias = self.generate_alibi_bias(H)
+                self.register_buffer("alibi_bias", alibi_bias, persistent=True)
+                self.attention = flex_attention
+
+                self.project_qk = torch.nn.Linear(H * D, H * D * 2)
+                self.project_v = torch.nn.Linear(H * D, H * D)
+
+            def forward(self, hidden_states):
+                batch_size, _, _ = hidden_states.size()
+
+                query, key = self.project_qk(hidden_states).chunk(2, dim=2)
+                query = query.view(self.S, batch_size, self.H, self.D)
+                query = query.permute(1, 2, 0, 3)
+
+                key = key.view(self.S, batch_size, self.H, self.D)
+                key = key.permute(1, 2, 0, 3)
+
+                value = self.project_v(hidden_states)
+                value = value.view(self.S, batch_size, self.H, self.D)
+                value = value.permute(1, 2, 0, 3)
+
+                return self.attention(query, key, value, score_mod=self.alibi_score_mod)
+
+            def generate_alibi_bias(self, num_heads):
+                alibi_bias = [-((i + 1) * 8.0) / num_heads for i in range(num_heads)]
+                return torch.tensor(alibi_bias)
+
+            def alibi_score_mod(self, score, b, h, q_idx, kv_idx):
+                bias = (q_idx - kv_idx) * self.alibi_bias[h]
+                return score + bias
+
+        B = 16
+        H = 12
+        S = 512
+        D = 64
+
+        device = "cuda"
+        model = Model(S, H, D)
+        model.to(device)
+        model = torch.compile(model)
+        model = DDP(model, device_ids=self.device_ids)
+
+        hidden_states = torch.randn(B, S, H * D).to(device)
+        attention_scores = model(hidden_states)
+        torch.cuda.synchronize()
+
+    @patch.object(config, "optimize_ddp", True)
+    def test_compiled_flex_attention_local_ddp(self):
+        class Model(torch.nn.Module):
+            def __init__(self, S, H, D):
+                super().__init__()
+
+                self.S = S
+                self.H = H
+                self.D = D
+
+                alibi_bias = self.generate_alibi_bias(H)
+                self.register_buffer("alibi_bias", alibi_bias, persistent=True)
+                self.attention = torch.compile(flex_attention)
+
+                self.project_qk = torch.nn.Linear(H * D, H * D * 2)
+                self.project_v = torch.nn.Linear(H * D, H * D)
+
+            def forward(self, hidden_states):
+                batch_size, _, _ = hidden_states.size()
+
+                query, key = self.project_qk(hidden_states).chunk(2, dim=2)
+                query = query.view(self.S, batch_size, self.H, self.D)
+                query = query.permute(1, 2, 0, 3)
+
+                key = key.view(self.S, batch_size, self.H, self.D)
+                key = key.permute(1, 2, 0, 3)
+
+                value = self.project_v(hidden_states)
+                value = value.view(self.S, batch_size, self.H, self.D)
+                value = value.permute(1, 2, 0, 3)
+
+                return self.attention(query, key, value, score_mod=self.alibi_score_mod)
+
+            def generate_alibi_bias(self, num_heads):
+                alibi_bias = [-((i + 1) * 8.0) / num_heads for i in range(num_heads)]
+                return torch.tensor(alibi_bias)
+
+            def alibi_score_mod(self, score, b, h, q_idx, kv_idx):
+                bias = (q_idx - kv_idx) * self.alibi_bias[h]
+                return score + bias
+
+        B = 16
+        H = 12
+        S = 512
+        D = 64
+
+        device = "cuda"
+        model = Model(S, H, D)
+        model.to(device)
+        model = torch.compile(model)
+        model = DDP(model, device_ids=self.device_ids)
+
+        hidden_states = torch.randn(B, S, H * D).to(device)
+        attention_scores = model(hidden_states)
+        torch.cuda.synchronize()
+
+    @patch.object(config, "optimize_ddp", True)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_graph_split_inductor(self):
         assert config.optimize_ddp
@@ -1553,11 +1661,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         backend = "aot_eager"
         cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
-            "DDPOptimizer backend: Found a higher order op in the graph",
-        ):
-            torch.compile(mod, backend=cnt)(*args)
+        torch.compile(mod, backend=cnt)(*args)
 
     def test_fsdp_orig_params_assert(self):
         # Test with basic FSDP wrapping (outer wrap around whole model)

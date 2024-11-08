@@ -11,7 +11,7 @@ from typing import List, Tuple
 
 import torch
 import torch.library
-from torch._dynamo.testing import make_test_cls_with_patches
+from torch._dynamo.testing import CompileCounterWithBackend, make_test_cls_with_patches
 from torch._inductor import metrics
 from torch._inductor.codegen.common import device_codegens, register_backend_for_device
 from torch._inductor.codegen.cpp import CppScheduling
@@ -251,6 +251,20 @@ class TestInductorDynamic(TestCase):
         opt_f = torch.compile(f, fullgraph=True)
         r = f()
         opt_r = opt_f()
+        self.assertEqual(r, opt_r)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_sym_sum_unbacked(self, device):
+        def f(a):
+            xs = a.tolist()
+            y = sum(xs)
+            return torch.tensor(y)
+
+        splits = torch.randint(10, (100,), device=device)
+
+        opt_f = torch.compile(f, fullgraph=True)
+        r = f(splits)
+        opt_r = opt_f(splits)
         self.assertEqual(r, opt_r)
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
@@ -936,6 +950,74 @@ class TestInductorDynamic(TestCase):
             return torch.zeros(y, device=device)
 
         f(torch.tensor([5] * 320))
+
+    def test_mark_unbacked_slice(self):
+        @torch.compile(backend="inductor", mode="reduce-overhead", fullgraph=True)
+        def f(x):
+            return x.sum()
+
+        x = torch.empty_strided((1, 4), (5, 1), device=GPU_TYPE)
+        torch._dynamo.decorators.mark_unbacked(x, 0)
+        f(x)
+
+    @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
+    def test_unspecialized_float_operations(self):
+        operations = {
+            "multiply": operator.mul,
+            "add": operator.add,
+            "subtract": operator.sub,
+            "divide": operator.truediv,
+        }
+
+        for name, op in operations.items():
+            with self.subTest(operation=name):
+
+                def fn(x, y):
+                    return op(x, y)
+
+                cnt = CompileCounterWithBackend("inductor")
+                fn_opt = torch._dynamo.optimize(cnt)(fn)
+
+                x = torch.arange(3)
+                self.assertEqual(fn(x, 2.0), fn_opt(x, 2.0))
+                self.assertEqual(fn(x, 3.0), fn_opt(x, 3.0))
+                self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_unspecialized_float_fallback_specialization(self):
+        def fn(x, y, z):
+            return (
+                torch.tensor(z),
+                torch.exp(torch.tensor(z)) * (x * y),
+                x.size(0),
+                math.sqrt(x.size(0)),
+                math.floor(math.sqrt(x.size(0))),
+                math.floor(math.sqrt(x.numel())),
+                math.floor(math.sqrt(x.dim())),
+                math.floor(math.sqrt(z)),
+            )
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        x = torch.arange(3)
+        z = 1.3
+
+        self.assertEqual(fn(x, 2.0, z), fn_opt(x, 2.0, z))
+        self.assertEqual(fn(x, 3.0, z), fn_opt(x, 3.0, z))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(specialize_float=False)
+    def test_unspecialized_float_fallback_symint_specialization(self):
+        def fn(x, y):
+            return math.floor(x**2) * y
+
+        cnt = CompileCounterWithBackend("inductor")
+        fn_opt = torch._dynamo.optimize(cnt)(fn)
+        y = torch.arange(3)
+
+        self.assertEqual(fn(2.0, y), fn_opt(2.0, y))
+        self.assertEqual(fn(3.0, y), fn_opt(3.0, y))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_sort_dynamic_shape_with_check(self, device):
         if TEST_WITH_ROCM or torch.device(device).type != GPU_TYPE:

@@ -58,6 +58,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     return false;
   }
 
+  virtual bool supportsCoalescing() const {
+    return false;
+  }
+
   virtual void startCoalescing() {
     TORCH_CHECK(
         false,
@@ -77,7 +81,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // Subclasses must override this method to return the backend name
   virtual const std::string getBackendName() const {
     TORCH_INTERNAL_ASSERT(false, "getBackendName is not implemented.");
-  };
+  }
 
   virtual c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,

@@ -2,8 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import collections
 import logging
-import weakref
-from typing import Any, cast, Deque, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import Any, Deque, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import torch
 from torch.autograd.graph import GradientEdge, Node
@@ -38,7 +37,7 @@ def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Union[Node, None]:
 
 
 def reverse_closure(
-    roots: List[Node], target_nodes: Set[Node]
+    roots: List[Node], target_nodes: Set[Node], reverse_edges_dict
 ) -> Tuple[Set[Node], Set[Node]]:
     """
     This function returns the reverse closure of the given roots,
@@ -56,15 +55,8 @@ def reverse_closure(
             q.append(node)
     while q:
         node = q.popleft()
-        metadata = cast(Dict[str, List], node.metadata)
-        reverse_edges = metadata.get("reverse_edges", [])
-        for holder_ref, idx in reverse_edges:
-            ref = holder_ref()
-            if ref is None:
-                # this reverse graph is no longer alive
-                # raise RuntimeError("Reverse graph is no longer alive")
-                continue
-            fn = ref.node
+        reverse_edges = reverse_edges_dict[node]
+        for fn in reverse_edges:
             if fn in closure or fn is None:
                 continue
             if fn in target_nodes:
@@ -75,38 +67,27 @@ def reverse_closure(
     return closure, visited_target_nodes
 
 
-# Enable weak pointer
-class Holder:
-    def __init__(self, node: Node):
-        self.node = node
-
-
-def construct_reverse_graph(roots: List[Node]) -> List[Holder]:
+def construct_reverse_graph(roots: List[Node]) -> Dict[Node, List[Node]]:
     q: Deque[Node] = collections.deque()
     root_seen: Set[Node] = set()
-    reverse_graph_refs: List[Holder] = []
+    reverse_edges_dict: Dict[Node, List[Node]] = collections.defaultdict(list)
     for node in roots:
         if node is not None and node not in root_seen:
             q.append(node)
             root_seen.add(node)
     while q:
         node = q.popleft()
-        for fn, idx in node.next_functions:
+        for fn, _ in node.next_functions:
             if fn is not None:
-                # Don't necessarily need to store on the graph
-                metadata = cast(Dict[str, List], fn.metadata)
-                reverse_edges = metadata.get("reverse_edges", [])
-                if len(reverse_edges) == 0:
+                if len(reverse_edges_dict[fn]) == 0:
                     q.append(fn)
-                holder = Holder(node)
-                holder_ref = weakref.ref(holder)
-                reverse_graph_refs.append(holder)
-                reverse_edges.append((holder_ref, idx))
-                metadata["reverse_edges"] = reverse_edges
-    return reverse_graph_refs
+                reverse_edges_dict[fn].append(node)
+    return reverse_edges_dict
 
 
-def get_param_groups(inputs: List[Node], params: List[Node]) -> List[Dict[str, Any]]:
+def get_param_groups(
+    inputs: List[Node], params: List[Node], reverse_edges_dict
+) -> List[Dict[str, Any]]:
     """
     Given a list of inputs and a list of parameters, return a list of parameter
     groups, where each group contains the parameters and the intermediates that
@@ -121,10 +102,12 @@ def get_param_groups(inputs: List[Node], params: List[Node]) -> List[Dict[str, A
     """
     # reverse graph that starts with inputs, and goes up to the dOutput or the loss,
     # but omits weights and any subgraphs connecting weights to this closure
-    inputs_closure, _ = reverse_closure(inputs, set())
+    inputs_closure, _ = reverse_closure(inputs, set(), reverse_edges_dict)
     param_groups: Dict[Node, Dict[str, Set]] = dict()  # keyed on intermediates
-    for i, param in enumerate(params):
-        closure, intersected = reverse_closure([param], inputs_closure)
+    for param in params:
+        closure, intersected = reverse_closure(
+            [param], inputs_closure, reverse_edges_dict
+        )
         param_group: Dict[str, Set] = {
             "params": {param},
             "intermediates": intersected,
@@ -157,16 +140,23 @@ def get_param_groups(inputs: List[Node], params: List[Node]) -> List[Dict[str, A
 
 
 def stage_backward_input(
-    stage_outputs: List[torch.Tensor],
+    stage_outputs_or_loss: List[torch.Tensor],
     output_grads: Optional[List[torch.Tensor]],
     input_values: List[torch.Tensor],
     weights: Iterator[Parameter],
 ):
     """
-    compute the gradients for only the stage inputs with respect to the stage outputs
+    Compute the gradients for only the stage inputs with
+    respect to the stage outputs (if non-last stage) or loss (if last stage)
+
+    After computing input gradients, we save the intermediate nodes in `param_groups`
+    for later use in stage_backward_weight. We don't need to save any other intermediate nodes
+    that aren't needed for dW because when we do dW calculation, we start from saved intermediates.
+    Detaching the stage_outputs_or_loss at the end of this function is important as
+    it frees up the memory that the autograd graph is anticipating to be used later (but doesn't actually need).
     """
     stage_output_grad_fns: List[Node] = list(
-        filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs))
+        filter(None, map(_get_grad_fn_or_grad_acc, stage_outputs_or_loss))
     )
     stage_input_grad_fns: List[Node] = list(
         filter(None, map(_get_grad_fn_or_grad_acc, input_values))
@@ -175,10 +165,12 @@ def stage_backward_input(
         filter(None, map(_get_grad_fn_or_grad_acc, weights))
     )
 
-    reverse_graph_refs = construct_reverse_graph(stage_output_grad_fns)
-    param_groups = get_param_groups(stage_input_grad_fns, weight_grad_fns)
-    del reverse_graph_refs
+    reverse_edges_dict = construct_reverse_graph(stage_output_grad_fns)
+    param_groups = get_param_groups(
+        stage_input_grad_fns, weight_grad_fns, reverse_edges_dict
+    )
 
+    handles = []
     for param_group in param_groups:
         for i, intermediate in enumerate(param_group["intermediates"]):
 
@@ -194,18 +186,19 @@ def stage_backward_input(
 
             # These are always "split" nodes that we need to recompute, so
             # save their inputs.
-            intermediate.register_prehook(get_hook(param_group, i))
+            handle = intermediate.register_prehook(get_hook(param_group, i))
+            handles.append(handle)
 
     # Stage 0 inputs do not require grads? Should we skip in that case?
     if all(tensor.requires_grad for tensor in input_values):
         if output_grads is None:
             # In case this is the loss and there are no output_grads, then we just use 1s
             output_grads = [
-                torch.ones_like(stage_output) for stage_output in stage_outputs
+                torch.ones_like(stage_output) for stage_output in stage_outputs_or_loss
             ]
 
         dinputs = torch.autograd.grad(
-            stage_outputs,
+            stage_outputs_or_loss,
             inputs=input_values,
             grad_outputs=output_grads,
             retain_graph=True,
@@ -217,13 +210,24 @@ def stage_backward_input(
                 inp.grad = dinputs[i]
             else:
                 inp.grad += dinputs[i]
+
+        # stage_outputs_or_loss are not used in backwards after this point, so we can safely remove it from the autograd graph
+        # this allows autograd to clear up the graph dedicated for this tensor and free up significant memory
+        for t in stage_outputs_or_loss:
+            t.detach_()
+
     else:
         dinputs = None
+
+    # hooks are no longer necessary, clean up for consistency
+    for handle in handles:
+        handle.remove()
+
     return dinputs, param_groups
 
 
 def stage_backward_weight(
-    weights: Iterator[Parameter], param_groups: List[Dict[str, Any]]
+    weights: Iterator[Parameter], param_groups: List[Dict[str, Any]], retain_graph=False
 ):
     # map weights to param_group_weights
     grad_acc_to_weight = {}
@@ -255,7 +259,11 @@ def stage_backward_weight(
             intermediate_edges,
             weights_edges,
             grad_outputs=sum(param_group["grads"], tuple()),
+            retain_graph=retain_graph,
         )
+        # release grad memory early after use
+        del param_group["grads"]
+
         for grad_acc, dw in zip(param_group["params"], dweights):
             weight, index = grad_acc_to_weight[grad_acc]
             if weight.grad is None:

@@ -37,6 +37,7 @@ std::atomic<int> sighupCount(0);
 std::atomic<int> hookedUpCount(0);
 
 void handleSignal(int signal) {
+  // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
   switch (signal) {
     // TODO: what if the previous handler uses sa_sigaction?
     case SIGHUP:
@@ -107,8 +108,6 @@ FatalSignalHandler& FatalSignalHandler::getInstance() {
   return *handler;
 }
 
-FatalSignalHandler::~FatalSignalHandler() = default;
-
 FatalSignalHandler::FatalSignalHandler()
     : fatalSignalHandlersInstalled(false),
       fatalSignalReceived(false),
@@ -175,7 +174,7 @@ void FatalSignalHandler::stacktraceSignalHandler(bool needsLock) {
       ::getpid(),
       tid,
       c10::get_backtrace());
-  std::cerr << backtrace << std::endl;
+  std::cerr << backtrace << '\n';
   if (needsLock) {
     ul.unlock();
     writingCond.notify_all();
@@ -229,7 +228,7 @@ void FatalSignalHandler::fatalSignalHandler(int signum) {
         if (std::cv_status::timeout == writingCond.wait_until(ul, now + 2s)) {
           if (!signalReceived) {
             std::cerr << "signal lost waiting for stacktrace " << pid << ":"
-                      << tid << std::endl;
+                      << tid << '\n';
             break;
           }
         }

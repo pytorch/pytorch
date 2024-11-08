@@ -33,7 +33,9 @@
 // https://man7.org/linux/man-pages/man1/objcopy.1.html
 // todo: use #embed in C++ 23 once available
 // The constants are NOT readonly because they may be mutated.
+// NOLINTNEXTLINE(*array*)
 extern uint8_t _binary_constants_bin_start[];
+// NOLINTNEXTLINE(*array*)
 extern uint8_t _binary_constants_bin_end[];
 
 #define AOTI_CONST_GPU_ALIGNMENT 64
@@ -56,6 +58,14 @@ CUDAPtr RAII_cudaMalloc(size_t num_bytes) {
 } // anonymous namespace
 
 namespace torch::aot_inductor {
+enum ConstantType : uint8_t {
+  Unknown = 0,
+  Parameter = 1,
+  Buffer = 2,
+  TensorConstant = 3,
+  FoldedConstant = 4,
+};
+
 using ConstantMap = std::unordered_map<std::string, RAIIAtenTensorHandle>;
 
 // valid device strs are: cpu, cuda, cuda:0, cuda:1, ...
@@ -107,10 +117,14 @@ class AOTInductorModelBase {
 #ifdef USE_CUDA
     if (device_idx_ == -1) {
       AOTI_RUNTIME_DEVICE_CHECK(cudaGetDevice(&device_idx_));
+    } else {
+      // If device_idx_ is passed in, we need to set the current device to it
+      AOTI_RUNTIME_DEVICE_CHECK(cudaSetDevice(device_idx_));
     }
 #endif // USE_CUDA
   }
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AOTInductorModelBase() {
 #ifdef USE_CUDA
     if (run_finished_) {
@@ -392,6 +406,10 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).from_folded;
   }
 
+  int32_t constant_type(int64_t idx) const {
+    return constants_info_.at(idx).type;
+  }
+
   const char* get_in_spec() const {
     return in_spec_.c_str();
   }
@@ -473,6 +491,7 @@ class AOTInductorModelBase {
  protected:
   uint8_t* _get_constants_start() {
 #ifndef USE_MMAP_SELF
+    // NOLINTNEXTLINE(*const-cast*)
     return const_cast<uint8_t*>(_binary_constants_bin_start);
 #else
     if (self_mmap) {
@@ -526,6 +545,7 @@ class AOTInductorModelBase {
     int64_t opaque_metadata_size{};
     const char* original_fqn = nullptr;
     bool from_folded{};
+    int32_t type{};
   };
 
   std::vector<ParamInfo> inputs_info_;

@@ -1010,8 +1010,6 @@ aten::ones.names_out
 aten::ones.out
 aten::ormqr
 aten::ormqr.out
-aten::permute_copy
-aten::permute_copy.out
 aten::poisson
 aten::poisson.out
 aten::polygamma
@@ -1283,12 +1281,6 @@ aten::split_copy.Tensor_out
 aten::squeeze_
 aten::squeeze_.dim
 aten::squeeze_.dims
-aten::squeeze_copy
-aten::squeeze_copy.dim
-aten::squeeze_copy.dim_out
-aten::squeeze_copy.dims
-aten::squeeze_copy.dims_out
-aten::squeeze_copy.out
 aten::sspaddmm.out
 aten::t_
 aten::to_mkldnn

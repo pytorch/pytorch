@@ -316,7 +316,7 @@ parseWireSections(const void* data, size_t data_size) {
 
 static const char* kMeta = "meta";
 static const char* kPayload = "payload";
-}; // namespace
+} // namespace
 
 c10::List<at::Tensor> cloneSparseTensors(
     const std::vector<at::Tensor>& tensors) {
@@ -474,9 +474,10 @@ void writeWrappedPayload(
       additionalPayload.end());
 
   // Add size of the additional payload
-  int64_t indexToWrite = originalPayload.size();
+  int64_t indexToWrite = static_cast<int64_t>(originalPayload.size());
   originalPayload.resize(originalPayload.size() + sizeof(int64_t));
-  const int64_t additionalPayloadSize = additionalPayload.size();
+  const int64_t additionalPayloadSize =
+      static_cast<int64_t>(additionalPayload.size());
   torch::utils::THP_encodeBuffer(
       reinterpret_cast<uint8_t*>(originalPayload.data()) + indexToWrite,
       &additionalPayloadSize,
@@ -488,10 +489,9 @@ std::vector<at::IValue> readWrappedPayload(
     std::vector<char>& payload,
     const rpc::Message& message) {
   // Read the additional payload remove it from the payload.
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t additionalPayloadSize;
   TORCH_INTERNAL_ASSERT(payload.size() >= sizeof(int64_t));
   size_t indexToRead = payload.size() - sizeof(int64_t);
+  int64_t additionalPayloadSize = 0;
   torch::utils::THP_decodeBuffer(
       &additionalPayloadSize,
       reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,
