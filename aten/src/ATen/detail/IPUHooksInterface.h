@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/Generator.h>
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
 #include <c10/core/Allocator.h>
@@ -9,7 +8,7 @@
 
 namespace at {
 
-struct TORCH_API IPUHooksInterface: AcceleratorHooksInterface {
+struct TORCH_API IPUHooksInterface : AcceleratorHooksInterface {
   ~IPUHooksInterface() override = default;
 
   void init() const override {
@@ -21,16 +20,14 @@ struct TORCH_API IPUHooksInterface: AcceleratorHooksInterface {
     return false;
   }
 
-  virtual const Generator& getDefaultIPUGenerator(
-      DeviceIndex device_index [[maybe_unused]] = -1) const {
-    AT_ERROR(
-        "Cannot get the default IPU generator: the IPU backend is not "
-        "available.");
+  const Generator& getDefaultGenerator(
+      C10_UNUSED DeviceIndex device_index = -1) const override {
+    TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
   }
 
-  virtual Generator newIPUGenerator(DeviceIndex device_index [[maybe_unused]] = -1) const {
-    AT_ERROR(
-        "Cannot create a new IPU generator: the IPU backend is not available.");
+  Generator getNewGenerator(
+      DeviceIndex device_index [[maybe_unused]] = -1) const override {
+    TORCH_CHECK(false, "Cannot initialize IPU without ATen_ipu library.");
   }
 };
 
