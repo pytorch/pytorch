@@ -145,6 +145,7 @@ __all__ = [
     "SHAPEENV_EVENT_KEY",
     "CURRENT_NODE_KEY",
     "has_free_symbols",
+    "has_free_unbacked_symbols",
     "sym_eq",
     "SymbolicContext",
     "StatelessSymbolicContext",
