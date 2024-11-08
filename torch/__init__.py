@@ -25,6 +25,7 @@ from typing import (
     Any as _Any,
     Callable as _Callable,
     Dict as _Dict,
+    get_origin as _get_origin,
     Optional as _Optional,
     overload as _overload,
     Set as _Set,
@@ -228,7 +229,8 @@ if sys.platform == "win32":
         try:
             ctypes.CDLL("vcruntime140.dll")
             ctypes.CDLL("msvcp140.dll")
-            ctypes.CDLL("vcruntime140_1.dll")
+            if platform.machine() != "ARM64":
+                ctypes.CDLL("vcruntime140_1.dll")
         except OSError:
             print(
                 textwrap.dedent(
@@ -676,6 +678,14 @@ class SymFloat:
 
     def __hash__(self):
         return hash(builtins.float(self))
+
+    def conjugate(self) -> "SymFloat":
+        """Returns the complex conjugate of the float."""
+        return self
+
+    def hex(self) -> str:
+        """Returns the hexadecimal representation of the float."""
+        return self.node.guard_float("", 0).hex()
 
 
 class SymBool:
@@ -2251,9 +2261,9 @@ class _TorchCompileInductorWrapper:
             )
 
     def apply_options(self, options: _Optional[_Dict[str, _Any]]):
-        from torch._inductor.bisect_helper import BisectionManager
+        from torch._inductor.compiler_bisector import CompilerBisector
 
-        if bisect_changes := BisectionManager.get_config_change("inductor"):
+        if bisect_changes := CompilerBisector.get_config_change("inductor"):
             options = {} if options is None else options
             options = (
                 {**bisect_changes} if options is None else {**options, **bisect_changes}  # type: ignore[dict-item]
@@ -2272,13 +2282,18 @@ class _TorchCompileInductorWrapper:
                 raise RuntimeError(
                     f"Unexpected optimization option {key}, known options are {list(current_config.keys())}"
                 )
-            if type(val) is not type(current_config[attr_name]):
-                val_type_str = type(val).__name__
-                expected_type_str = type(current_config[attr_name]).__name__
-                raise RuntimeError(
-                    f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
-                )
-            self.config[attr_name] = val
+            attr_type = config.get_type(attr_name)  # type: ignore[attr-defined]
+            # Subscriptable generic types don't support isinstance so skip the type
+            # check. There doesn't seem to be a good way of checking membership without
+            # 3rd party libraries.
+            if _get_origin(attr_type) is None:
+                if not isinstance(val, attr_type):
+                    val_type_str = type(val).__name__
+                    expected_type_str = type(current_config[attr_name]).__name__
+                    raise RuntimeError(
+                        f"Unexpected type of attr {key}, got {val_type_str} should be {expected_type_str}"
+                    )
+                self.config[attr_name] = val
 
     def __call__(self, model_, inputs_):
         from torch._inductor.compile_fx import compile_fx
@@ -2492,9 +2507,9 @@ def compile(
     if mode is None and options is None:
         mode = "default"
 
-    from torch._inductor.bisect_helper import BisectionManager
+    from torch._inductor.compiler_bisector import CompilerBisector
 
-    if bisect_backend := BisectionManager.get_backend():
+    if bisect_backend := CompilerBisector.get_backend():
         backend = bisect_backend
 
     if backend == "inductor":

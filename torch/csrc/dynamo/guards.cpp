@@ -886,6 +886,11 @@ std::string get_exception_message() {
 }
 
 bool is_immutable_object(py::handle example_value) {
+  static py::object config_module = py::module_::import("torch._dynamo.config");
+  bool is_tensor_immutable =
+      config_module.attr("skip_tensor_guards_with_matching_dict_tags")
+          .cast<bool>();
+
   if (PyTuple_Check(example_value.ptr())) {
     // Check that each element is immutable
     for (Py_ssize_t i = 0; i < PyTuple_Size(example_value.ptr()); ++i) {
@@ -896,10 +901,11 @@ bool is_immutable_object(py::handle example_value) {
     }
     return true;
   }
+
   return PyLong_Check(example_value.ptr()) ||
       PyFloat_Check(example_value.ptr()) || PyBool_Check(example_value.ptr()) ||
       PyUnicode_Check(example_value.ptr()) ||
-      THPVariable_Check(example_value.ptr());
+      (is_tensor_immutable && THPVariable_Check(example_value.ptr()));
 }
 
 bool is_parameter(py::handle tensor) {
@@ -2959,7 +2965,7 @@ class DictGetItemGuardAccessor : public GuardAccessor {
   }
 
   std::string repr() const override {
-    return "DictGetItemGuardAccessor(" + py::str(_key).cast<std::string>() +
+    return "DictGetItemGuardAccessor(" + py::repr(_key).cast<std::string>() +
         ")";
   }
 

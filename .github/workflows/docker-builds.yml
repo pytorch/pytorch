@@ -63,7 +63,6 @@ jobs:
           pytorch-linux-focal-rocm-n-1-py3,
           pytorch-linux-focal-rocm-n-py3,
           pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-clang12,
-          pytorch-linux-focal-py3-clang9-android-ndk-r21e,
           pytorch-linux-jammy-py3.9-gcc11,
           pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
