@@ -83,6 +83,11 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
+try:
+    from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
+except Exception:
+    REMOTE_CACHE_VERSION: Optional[int] = None
+
 
 try:
     import numpy as np
@@ -419,6 +424,7 @@ def dynamo_timed(
                                 fail_type=fail_type,
                                 fail_reason=fail_reason,
                                 remote_cache_time_saved_s=remote_cache_time_saved,
+                                remote_cache_version=REMOTE_CACHE_VERSION,
                                 structured_logging_overhead_s=structured_logging_overhead_s,
                                 is_forward=False,  # is_forward
                                 num_triton_bundles=codecache_metrics.get(
@@ -898,6 +904,7 @@ class CompilationMetrics:
     # a compiled frame
     has_guarded_code: Optional[bool] = None
     remote_cache_time_saved_s: Optional[float] = None
+    remote_cache_version: Optional[int] = None
     structured_logging_overhead_s: Optional[float] = None
     config_suppress_errors: Optional[bool] = None
     config_inline_inbuilt_nn_modules: Optional[bool] = None
