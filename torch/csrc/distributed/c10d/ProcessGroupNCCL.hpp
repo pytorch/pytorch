@@ -127,6 +127,8 @@ constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr const char* EXCEPTION_DUMP = "exception_dump";
 
+constexpr const char* REMOTE_ERROR_SIGNAL = "remote_error";
+
 constexpr const int kWorkStatusUpdatePeriodMs = 30 * 1000; // 30 seconds
 
 constexpr auto kProcessGroupNCCLDefaultTimeout =
@@ -144,6 +146,15 @@ enum ErrorHandlingMode {
   TearDown = 1,
   CleanUpOnly = 2,
   SkipCleanUp = 3
+};
+
+enum ErrorType {
+  NO_ERROR = 0,
+  TIMEOUT = 1,
+  NCCL_ERROR = 2,
+  // TODO, do we need to distinguish between remote timeout or remote NCCL
+  // errors?
+  REMOTE_ERROR = 3,
 };
 
 #define SHOULD_CLEAN_UP(a) (a != NoHandling && a != SkipCleanUp)
@@ -757,6 +768,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // If all comms on this PG are fully initialized, return true.
   bool isInitialized();
 
+  ErrorType getError();
+
   // This method adds a temporary extension for the timeout period,
   // applying to all collectives between the calling of this API and
   // the completion of the first collective on the GPU. While this feature
@@ -958,6 +971,19 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Broadcast flight-recorder dump signal
   void broadcastDumpSignal();
+
+  // A helper function to broadcast a signal (key) from a src rank to all other
+  // ranks using the specified store.
+  void broadcastSignal(
+      c10::intrusive_ptr<Store>& store,
+      const std::string& signal,
+      int srcRank);
+
+  // A helper function to get the src rank of a signal from the Store. This is
+  // nonblocking function returning -1 if the signal is not available yet.
+  int getSignalSrcRank(
+      c10::intrusive_ptr<Store>& store,
+      const std::string& signal);
 
  protected:
   // Function that runs as part of a separate thread aside from watchdog
@@ -1170,6 +1196,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not the workCleanupThread is used to perform async error
   // handling.
   ErrorHandlingMode asyncErrorHandling_ = NoHandling;
+
+  ErrorType error_ = ErrorType::NO_ERROR;
+
+  std::mutex errorMutex_;
 
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;

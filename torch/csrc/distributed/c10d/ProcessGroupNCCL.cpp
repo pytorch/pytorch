@@ -1179,6 +1179,11 @@ bool ProcessGroupNCCL::isInitialized() {
   return initialized;
 }
 
+ErrorType ProcessGroupNCCL::getError() {
+  std::lock_guard<std::mutex> lock(errorMutex_);
+  return error_;
+}
+
 c10::intrusive_ptr<intra_node_comm::IntraNodeComm> ProcessGroupNCCL::
     initIntraNodeComm() {
   using IntraNodeComm = intra_node_comm::IntraNodeComm;
@@ -1948,38 +1953,73 @@ bool ProcessGroupNCCL::verifyWorkTimeoutForTest(
       DistBackendError, "Non c10d::WorkNCCL object returned from collective");
 }
 
-// Broadcast flight-recorder dump signal
-void ProcessGroupNCCL::broadcastDumpSignal() {
+void ProcessGroupNCCL::broadcastSignal(
+    c10::intrusive_ptr<Store>& store,
+    const std::string& signal,
+    int srcRank) {
   try {
-    auto rank = globalRank();
     auto vec = std::vector<uint8_t>(
-        reinterpret_cast<uint8_t*>(&rank),
-        reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
-    globalStore_->set(std::string(EXCEPTION_DUMP), vec);
-    if (!shouldDump_.load()) {
-      LOG(ERROR)
-          << logPrefix()
-          << "Broadcasting flight-recorder dump signal to other processes via TCPStore.";
-    }
-    // signal the monitor thread on PG0 to start dumping
-    shouldDump_.store(true);
-    // Give time for dumping before throwing exception
-    auto start = std::chrono::steady_clock::now();
-    auto status = promiseFlightRecorderDump_.get_future().wait_for(
-        std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
-    if (status == std::future_status::timeout) {
-      LOG(WARNING) << logPrefix() << "timed out after waiting for "
-                   << waitTimeoutDumpInMilSec_ << "ms"
-                   << " flight recorder dumps to finish.";
-    } else if (status == std::future_status::ready) {
-      auto end = std::chrono::steady_clock::now();
-      LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
-                << "ms"
-                << " giving time for flight recorder dumps to finish.";
-    }
+        reinterpret_cast<uint8_t*>(&srcRank),
+        reinterpret_cast<uint8_t*>(&srcRank) + sizeof(srcRank));
+    store->set(signal, vec);
+    LOG(ERROR) << logPrefix() << "Broadcasting signal " << signal
+               << " to other ranks via TCPStore.";
   } catch (const std::exception& e) {
-    LOG(ERROR) << logPrefix() << "Failed to set dump signal in tcpstore. "
-               << "Error: " << e.what();
+    LOG(ERROR) << logPrefix() << "Failed to broadcast signal " << signal
+               << " through TCPStore. Error: " << e.what();
+  }
+}
+
+int ProcessGroupNCCL::getSignalSrcRank(
+    c10::intrusive_ptr<Store>& store,
+    const std::string& signal) {
+  int srcRank = -1;
+  bool signalExists = false;
+  try {
+    signalExists = store->check({signal});
+  } catch (const std::exception& e) {
+    LOG(WARNING) << logPrefix() << "Failed to check the signal " << signal
+                 << " on TCPStore, " << e.what();
+  }
+
+  if (signalExists) {
+    try {
+      auto vec = store->get(std::string(signal));
+      TORCH_CHECK_WITH(
+          DistBackendError,
+          vec.size() == sizeof(int),
+          "Invalid size for the timeout rank ID");
+      std::memcpy(&srcRank, vec.data(), vec.size());
+    } catch (const std::exception& e) {
+      LOG(ERROR) << logPrefix() << "Failed to get source rank of the signal "
+                 << signal << " from TCPStore." << e.what();
+    }
+  }
+  return srcRank;
+}
+
+void ProcessGroupNCCL::broadcastDumpSignal() {
+  // broadcast dump signal to all other global ranks.
+  broadcastSignal(globalStore_, std::string(EXCEPTION_DUMP), globalRank());
+  // signal the local rank to start dumping
+  if (!shouldDump_.load()) {
+    LOG(ERROR) << logPrefix() << "First PG on this rank to signal dumping.";
+  }
+  // signal the monitor thread on PG0 to start dumping
+  shouldDump_.store(true);
+  // Give time for dumping before throwing exception
+  auto start = std::chrono::steady_clock::now();
+  auto status = promiseFlightRecorderDump_.get_future().wait_for(
+      std::chrono::milliseconds(waitTimeoutDumpInMilSec_));
+  if (status == std::future_status::timeout) {
+    LOG(WARNING) << logPrefix() << "timed out after waiting for "
+                 << waitTimeoutDumpInMilSec_ << "ms"
+                 << " flight recorder dumps to finish.";
+  } else if (status == std::future_status::ready) {
+    auto end = std::chrono::steady_clock::now();
+    LOG(INFO) << logPrefix() << "slept for " << computeDeltaMS(start, end)
+              << "ms"
+              << " giving time for flight recorder dumps to finish.";
   }
 }
 
@@ -2046,6 +2086,20 @@ void ProcessGroupNCCL::watchdogHandler() {
       lastStatusUpdateTime = std::chrono::steady_clock::now();
     }
 
+    // Check and set remote error if it has not been set before
+    if (getError() == ErrorType::NO_ERROR) {
+      int remoteErrorRank =
+          getSignalSrcRank(store_, std::string(REMOTE_ERROR_SIGNAL));
+      if (remoteErrorRank != -1) {
+        std::lock_guard<std::mutex> lock(errorMutex_);
+        error_ = ErrorType::REMOTE_ERROR;
+        LOG(ERROR) << c10::str(
+            logPrefix(),
+            " remote error detected by watchdog thread from rank: ",
+            remoteErrorRank);
+      }
+    }
+
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
          /* no increment */) {
       auto& work = *it;
@@ -2058,6 +2112,11 @@ void ProcessGroupNCCL::watchdogHandler() {
       if (!terminateProcessGroup_.load()) {
         work.checkAndSetException();
       }
+      if (work.exception() && getError() == ErrorType::NO_ERROR) {
+        // set the error to the first error found
+        std::lock_guard<std::mutex> lock(errorMutex_);
+        error_ = ErrorType::NCCL_ERROR;
+      }
       // Then check if work has timed out
       // Skip if work has encountered an error
       bool timedout = !work.exception() && work.checkTimeout();
@@ -2066,6 +2125,10 @@ void ProcessGroupNCCL::watchdogHandler() {
       // turned on; otherwise, run() is no-op)
       if (timedout) {
         desyncDebugger_.run();
+        if (getError() == ErrorType::NO_ERROR) {
+          std::lock_guard<std::mutex> lock(errorMutex_);
+          error_ = ErrorType::TIMEOUT;
+        }
       }
 
       // If work hits an exception (either an error or timeout)
@@ -2078,6 +2141,9 @@ void ProcessGroupNCCL::watchdogHandler() {
             pgStatus_->lastEnqueuedSeq,
             ", last completed work: ",
             pgStatus_->lastCompletedSeq);
+
+        // broadcast remote error signal to all other ranks in this specific PG.
+        broadcastSignal(store_, std::string(REMOTE_ERROR_SIGNAL), rank_);
 
         // Print the traceback of the collective at call time
         work.printTraceback();
