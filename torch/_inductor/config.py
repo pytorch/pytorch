@@ -1228,7 +1228,7 @@ class rocm:
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental)
-cpu_backend = "cpp"
+cpu_backend = os.environ.get("TORCHINDUCTOR_CPU_BACKEND", "cpp")
 
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)
 cuda_backend = "triton"
