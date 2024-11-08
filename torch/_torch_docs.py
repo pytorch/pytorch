@@ -1900,7 +1900,7 @@ Example::
 add_docstr(
     torch.chunk,
     r"""
-chunk(input, chunks, dim=0) -> List of Tensors
+chunk(input: Tensor, chunks: int, dim: int = 0) -> Tuple[Tensor, ...]
 
 Attempts to split a tensor into the specified number of chunks. Each chunk is a view of
 the input tensor.
