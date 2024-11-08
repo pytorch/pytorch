@@ -650,7 +650,7 @@ def get_cached_ops():
     return cached_ops
 
 
-# Each OpOverload object contains pointer to a a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
+# Each OpOverload object contains pointer to a specific operator overload, a pointer to the parent `OpOverloadPacket` object.
 # You can obtain an OpOverload object through attribute query on OpOverloadPacket.
 class OpOverload(OperatorBase):
     def __init__(self, overloadpacket, op, op_dk, schema, tags):

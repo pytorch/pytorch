@@ -12,6 +12,7 @@ from torch._higher_order_ops.utils import (
     autograd_not_implemented,
     reenter_make_fx,
     UnsupportedAliasMutationException,
+    validate_subgraph_args_types,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -42,6 +43,7 @@ class WhileLoopOp(HigherOrderOperator):
             raise RuntimeError(
                 f"additional_inputs must be a tuple, got {type(additional_inputs)}"
             )
+
         if not all(
             isinstance(t, (torch.Tensor, int, float, bool)) for t in carried_inputs
         ):
@@ -50,13 +52,7 @@ class WhileLoopOp(HigherOrderOperator):
                 f"{carried_inputs}"
             )
 
-        if not all(
-            isinstance(t, (torch.Tensor, int, float, bool)) for t in additional_inputs
-        ):
-            raise RuntimeError(
-                "additional_inputs must be a tuple of tensors, ints, floats, or bools, got "
-                f"{additional_inputs}"
-            )
+        validate_subgraph_args_types(additional_inputs)
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
@@ -129,7 +125,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     def _validate_input(cond_fn, body_fn, carried_inputs):
         if not callable(cond_fn) or not callable(body_fn):
-            raise RuntimeError("Expect cond_fn and body_fn to be callbale.")
+            raise RuntimeError("Expect cond_fn and body_fn to be callable.")
 
         if not isinstance(carried_inputs, (tuple, list)) or pytree.tree_any(
             lambda t: not isinstance(t, torch.Tensor), carried_inputs

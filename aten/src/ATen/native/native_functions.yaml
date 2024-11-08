@@ -2821,6 +2821,7 @@
     # non-differentiable so NonFunctional doesn't apply
     CompositeExplicitAutograd: full_like
   autogen: full_like.out
+  tags: core
 
 - func: from_file(str filename, bool? shared=None, int? size=0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -3179,6 +3180,7 @@
   device_guard: False
   dispatch:
     CPU, CUDA, MPS: isnan
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_isnan
     SparseCPU, SparseCUDA: isnan_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isnan_sparse_csr
   autogen: isnan.out
@@ -3357,7 +3359,7 @@
   dispatch:
     CUDA: _cslt_compress
 
-- func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False, int alg_id=0, int split_k=1, bool split_k_one_kernel=True) -> Tensor
+- func: _cslt_sparse_mm(Tensor compressed_A, Tensor dense_B, Tensor? bias=None, Tensor? alpha=None, ScalarType? out_dtype=None, bool transpose_result=False, int alg_id=0) -> Tensor
   dispatch:
     CUDA: _cslt_sparse_mm
 
@@ -6488,6 +6490,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA, MPS: where_self_out
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_where_out
 
 - func: where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor
   variants: function
@@ -8015,6 +8018,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: masked_scatter
+  tags: core
 
 - func: masked_scatter_backward(Tensor grad_output, Tensor mask, SymInt[] sizes) -> Tensor
   dispatch:
@@ -13069,6 +13073,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: isinf
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_isinf
     SparseCPU, SparseCUDA: isinf_sparse
     SparseMeta: isinf_sparse_meta
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isinf_sparse_csr
@@ -13084,6 +13089,7 @@
   variants: function, method
   structured_delegate: isposinf.out
   dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_isposinf
     SparseCPU, SparseCUDA: isposinf_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isposinf_sparse_csr
   tags: pointwise
@@ -13101,6 +13107,7 @@
   variants: function, method
   structured_delegate: isneginf.out
   dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_isneginf
     SparseCPU, SparseCUDA: isneginf_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: isneginf_sparse_csr
   tags: pointwise

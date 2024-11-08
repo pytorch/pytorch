@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import os
 from itertools import count
 from typing import Dict, List, Optional, Tuple
 
@@ -97,6 +98,19 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             return DTYPE_TO_CPP[dtype]
         return f"ArrayRefTensor<{DTYPE_TO_CPP[input.get_dtype()]}>"
 
+    def write_header(self):
+        if V.graph.is_const_graph:
+            # We do not write header for constant graph, it will be written by main module.
+            return
+
+        super().write_header()
+        with open(
+            os.path.join(
+                os.path.dirname(__file__), "aoti_runtime", "implementation.cpp"
+            )
+        ) as f:
+            self.header.splice(f.read())
+
     def codegen_input_numel_asserts(self):
         for name, buf in V.graph.graph_inputs.items():
             if isinstance(buf, sympy.Expr):
@@ -107,6 +121,70 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 continue
             numel = buf.get_numel()
             self.prefix.writeline(f"assert_numel({name}, {numel});")
+
+    def generate_kernel_call(
+        self,
+        kernel_name: str,
+        call_args,
+        grid=None,
+        device_index=None,
+        gpu=False,
+        triton=False,
+        arg_types=None,
+        raw_args=None,
+        grid_fn: str = "grid",
+        triton_meta=None,
+        autotune_configs=None,
+        grid_extra_kwargs="",
+    ):
+        """
+        Generates kernel call code.
+
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
+
+        triton: Defines whether the GPU backend uses Triton for codegen.
+                Otherwise it uses the CUDA language for codegen.
+                Only valid when cuda == True.
+        """
+        if gpu:
+            return super().generate_kernel_call(
+                kernel_name,
+                call_args,
+                grid,
+                device_index,
+                gpu,
+                triton,
+                arg_types,
+                raw_args,
+                grid_fn,
+                triton_meta,
+                autotune_configs,
+                grid_extra_kwargs,
+            )
+        else:
+            assert arg_types is not None and len(call_args) == len(
+                arg_types
+            ), "Mismatch call_args and arg_types in generate_kernel_call"
+            new_args = []
+            for idx, arg in enumerate(call_args):
+                if "*" in arg_types[idx]:
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
+                    new_args.append(f"({arg_types[idx]})({var_name})")
+                else:
+                    # arg is a scalar
+                    new_args.append(arg)
+            # debug printer related logic for cpp kernel type.
+            debug_printer_manager = V.graph.wrapper_code.debug_printer
+            debug_printer_manager.set_printer_args(
+                call_args,
+                kernel_name,
+                None,
+                None,
+                "cpp",
+            )
+            with debug_printer_manager:
+                self.writeline(self.wrap_kernel_call(kernel_name, new_args))
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
@@ -760,12 +838,10 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         )
 
     def codegen_reinterpret_view(
-        self, data, size_list, stride_list, offset, writer, dtype=None
+        self, data, size, stride, offset, writer, dtype=None
     ) -> str:
-        dim = str(len(size_list))
+        dim = str(len(size))
         original_offset = offset
-        size = self.codegen_shape_tuple(size_list)
-        stride = self.codegen_shape_tuple(stride_list)
         offset = self.codegen_sizevar(offset)
         call_strs = []
         final_tmp_name = None
@@ -777,15 +853,15 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 f"{data.get_name()}",
                 dim,
                 self.codegen_int_array_var(
-                    size,
+                    self.codegen_shape_tuple(size),
                     writer,
-                    known_statically=self.is_statically_known_list_of_ints(size_list),
+                    known_statically=self.is_statically_known_list_of_ints(size),
                     graph=self.get_codegened_graph(),
                 ),
                 self.codegen_int_array_var(
-                    stride,
+                    self.codegen_shape_tuple(stride),
                     writer,
-                    known_statically=self.is_statically_known_list_of_ints(stride_list),
+                    known_statically=self.is_statically_known_list_of_ints(stride),
                     graph=self.get_codegened_graph(),
                 ),
                 offset,
@@ -815,8 +891,8 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             return tmp_RAIIAtenTensorHandle, call_strs
 
         if (
-            size_list == data.layout.size
-            and stride_list == data.layout.stride
+            size == data.layout.size
+            and stride == data.layout.stride
             and original_offset == data.layout.offset
         ):
             # pure dtypeview
@@ -826,7 +902,7 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 final_tmp_name = tmp_output_name
                 final_tmp_name_is_RAIIAtenTensorHandle = True
             else:
-                return f"{data.get_name()}"
+                return data.get_name()
         else:
             # firstly create reinterpretview
             final_tmp_name, reinterpret_call = create_reinterpret_call()
@@ -846,9 +922,9 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
 
         if (
             self.can_stack_allocate_buffer(data)
-            and self.is_statically_known_list_of_ints(size_list)
-            and self.is_statically_known_list_of_ints(stride_list)
-            and ir.is_contiguous_strides_for_shape(stride_list, size_list)
+            and self.is_statically_known_list_of_ints(size)
+            and self.is_statically_known_list_of_ints(stride)
+            and ir.is_contiguous_strides_for_shape(stride, size)
         ):
             return final_tmp_name
 
@@ -971,3 +1047,47 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             return f"{var_name}, {len(val)}"
 
         return self.val_to_arg_str_for_prim_type(val, type_)
+
+    def codegen_tensor_item(
+        self, dtype: torch.dtype, tensor: str, scalar: str, indented_buffer=None
+    ):
+        dtype_str = str(dtype).split(".")[-1]
+        writer = indented_buffer or self
+
+        if dtype == torch.float16 or dtype == torch.bfloat16:
+            scalar_tmp = f"{scalar}_tmp"
+            writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar_tmp};")
+
+            # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+
+            writer.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar_tmp}));"
+            )
+            writer.writeline(f"float {scalar} = float({scalar_tmp});")
+        else:
+            writer.writeline(f"{DTYPE_TO_CPP[dtype]} {scalar};")
+
+            # need convert_arrayref_tensor_to_tensor for ArrayRefTensors
+            tensor = f"convert_arrayref_tensor_to_tensor({tensor})"
+
+            writer.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_{dtype_str}({tensor}, &{scalar}));"
+            )
+
+    def create_tmp_raii_handle_var(self, base_handle):
+        if base_handle.startswith(
+            (
+                "convert_arrayref_tensor_to_tensor",
+                "wrap_with_raii_handle_if_needed",
+            )
+        ):
+            # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
+            # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
+            tmp_var_name = f"var_{next(self.arg_var_id)}"
+            return (
+                tmp_var_name,
+                f"RAIIAtenTensorHandle {tmp_var_name} = {base_handle};\n",
+            )
+        else:
+            return "", ""

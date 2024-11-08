@@ -541,6 +541,8 @@ def _get_optimization_cflags() -> List[str]:
             cflags.append("ffp-contract=off")
 
         if sys.platform != "darwin":
+            # on macos, unknown argument: '-fno-tree-loop-vectorize'
+            cflags.append("fno-tree-loop-vectorize")
             # https://stackoverflow.com/questions/65966969/why-does-march-native-not-work-on-apple-m1
             # `-march=native` is unrecognized option on M1
             if not config.is_fbcode():
@@ -775,7 +777,7 @@ def _get_torch_related_args(
         if not aot_mode:
             libraries.append("torch_python")
 
-    if _IS_WINDOWS:
+    if _IS_WINDOWS and platform.machine().lower() != "arm64":
         libraries.append("sleef")
 
     return include_dirs, libraries_dirs, libraries
