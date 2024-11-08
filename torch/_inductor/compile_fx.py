@@ -1097,7 +1097,7 @@ def cudagraphify(
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.dynamo_timed(
-                "cudagraphify",
+                "cudagraphify"
             ), dynamo_utils.preserve_rng_state():
                 compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
@@ -1520,9 +1520,7 @@ def compile_fx(
             example_inputs: List[InputType],
             is_inference: bool,
         ) -> CompiledFxGraph:
-            with dynamo_utils.dynamo_timed(
-                "compile_fx.<locals>.fw_compiler_base",
-            ):
+            with dynamo_utils.dynamo_timed("compile_fx.<locals>.fw_compiler_base"):
                 return _fw_compiler_base(model, example_inputs, is_inference)
 
         def _fw_compiler_base(
@@ -1633,9 +1631,7 @@ def compile_fx(
         def bw_compiler(
             model: GraphModule, example_inputs: List[InputType]
         ) -> Union[CompiledFxGraph, str]:
-            with dynamo_utils.dynamo_timed(
-                "compile_fx.<locals>.bw_compiler",
-            ):
+            with dynamo_utils.dynamo_timed("compile_fx.<locals>.bw_compiler"):
                 model_outputs_node = output_node(model)
                 if config.bw_outputs_user_visible:
                     model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)

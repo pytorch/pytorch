@@ -563,7 +563,9 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
     # Attempt local
     path = code_state_path(cache_key)
     if path is not None and os.path.exists(path):
-        with dynamo_timed(name := "pgo.get_local_code_state"):
+        with dynamo_timed(
+            name := "pgo.get_local_code_state", log_pt2_compile_event=True
+        ):
             chromium_log.add_event_data(name, cache_key=cache_key)
             # Read lock not necessary as we always write atomically write to
             # the actual location
@@ -581,7 +583,9 @@ def get_code_state() -> DefaultDict[CodeId, CodeState]:
     # Attempt remote
     remote_cache = get_remote_cache()
     if remote_cache is not None:
-        with dynamo_timed(name := "pgo.get_remote_code_state"):
+        with dynamo_timed(
+            name := "pgo.get_remote_code_state", log_pt2_compile_event=True
+        ):
             chromium_log.add_event_data(name, cache_key=cache_key)
             # TODO: I don't really understand why there's a JSON container format
             try:
@@ -635,7 +639,7 @@ def put_code_state() -> None:
 
 
 def put_local_code_state(cache_key: str) -> None:
-    with dynamo_timed(name := "pgo.put_local_code_state"):
+    with dynamo_timed(name := "pgo.put_local_code_state", log_pt2_compile_event=True):
         chromium_log = get_chromium_event_logger()
         chromium_log.add_event_data(name, cache_key=cache_key)
         assert _CODE_STATE is not None
@@ -673,7 +677,7 @@ def put_local_code_state(cache_key: str) -> None:
 
 
 def put_remote_code_state(cache_key: str) -> None:
-    with dynamo_timed(name := "pgo.put_remote_code_state"):
+    with dynamo_timed(name := "pgo.put_remote_code_state", log_pt2_compile_event=True):
         chromium_log = get_chromium_event_logger()
         chromium_log.add_event_data(name, cache_key=cache_key)
         assert _CODE_STATE is not None
