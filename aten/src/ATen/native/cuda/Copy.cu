@@ -25,6 +25,8 @@
 #include <cuda_fp8.h>
 #endif
 
+#include "tile_op_test.h"
+
 namespace at::native {
 
 void neg_kernel_cuda(TensorIteratorBase &iter);
@@ -153,6 +155,23 @@ void float8_copy_kernel_cuda(TensorIteratorBase &iter) {
 // kernels for equivalent bit lengths
 void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
   ScalarType dtype = iter.dtype(0);
+  const auto& input = iter.tensor(1);
+  const auto& output = iter.tensor(0);
+  auto in_sizes = input.sizes();
+  auto in_strides = input.strides();
+  auto out_sizes = output.sizes();
+  auto out_strides = output.strides();
+
+  bool is_permute_021 = false;
+  if (input.dim() == 3) {
+    is_permute_021 = true;
+    is_permute_021 &= input.dim() == output.dim();
+    is_permute_021 &= input.stride(0) == input.size(1) * input.size(2);
+    is_permute_021 &= input.stride(1) == 1;
+    is_permute_021 &= input.stride(2) == input.size(1);
+    is_permute_021 &= output.is_contiguous();
+  }
+
   if (isQIntType(dtype)) {
     AT_DISPATCH_QINT_TYPES(dtype, "copy_", [&] {
       gpu_kernel(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
@@ -171,6 +190,35 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
     AT_DISPATCH_BIT_TYPES(dtype, "copy_", [&] {
       gpu_kernel_nocast(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
+  } else if (is_permute_021) {
+    printf("[%ld, %ld, %ld],\n", in_sizes[0], in_sizes[1], in_sizes[2]);
+
+    /*
+    printf("input dim:%d\n", in_sizes.size());
+    for (int i = 0; i < in_sizes.size(); i++) {
+      printf("in_size[%d]:%ld\n", i, in_sizes[i]);
+    }
+    for (int i = 0; i < in_strides.size(); i++) {
+      printf("in_strides[%d]:%ld\n", i, in_strides[i]);
+    }
+
+    printf("output dim:%d\n", out_sizes.size());
+    for (int i = 0; i < out_sizes.size(); i++) {
+      printf("out_size[%d]:%ld\n", i, out_sizes[i]);
+    }
+    for (int i = 0; i < out_strides.size(); i++) {
+      printf("out_strides[%d]:%ld\n", i, out_strides[i]);
+    }
+    */
+
+    // TODO: support transpose
+
+    void* dst = iter.data_ptr(0);
+    void* src = iter.data_ptr(1);
+    // printf("input address:0x%x\n", src);
+    // printf("output address:0x%x\n", dst);
+
+    RunTests(input.size(0), input.size(1), input.size(2), src, dst);
   } else {
     AT_DISPATCH_V2(
         dtype, "copy_", AT_WRAP([&] {
