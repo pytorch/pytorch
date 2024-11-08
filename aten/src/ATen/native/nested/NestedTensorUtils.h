@@ -32,7 +32,7 @@ struct NestedTensorImpl;
 // The following functions are used to construct nested tensors from buffers and
 // metadata.
 
-inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_sizes) {
+inline at::Tensor wrap_buffer(const at::Tensor& buffer, const at::Tensor& nested_sizes) {
   TORCH_CHECK(
       buffer.dim() == 1,
       "Expected given buffer to be 1dim, but got ",
@@ -41,19 +41,19 @@ inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_sizes) {
   TORCH_CHECK(
       buffer.is_contiguous(), "Expected given buffer to be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(buffer), std::move(nested_sizes));
+      buffer, nested_sizes);
 }
 
 // TODO: Figure out if we need a non-moving wrap_buffer()
 inline at::Tensor wrap_buffer(
-    at::Tensor buffer,
+    const at::Tensor& buffer,
     at::Tensor nested_sizes,
     at::Tensor nested_strides,
     at::Tensor storage_offsets) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(buffer),
+      buffer,
       std::move(nested_sizes),
       std::move(nested_strides),
       std::move(storage_offsets));
@@ -95,9 +95,9 @@ inline at::Tensor create_nested_view_tensor(
   return at::detail::make_tensor<NestedTensorImpl>(
       c10::TensorImpl::VIEW,
       base,
-      nested_sizes,
-      nested_strides,
-      storage_offsets);
+      std::move(nested_sizes),
+      std::move(nested_strides),
+      std::move(storage_offsets));
 }
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

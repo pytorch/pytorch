@@ -152,7 +152,7 @@ def mps_ops_grad_modifier(ops):
 
     MACOS_12_3_XFAILLIST_GRAD = {
         # Unsupported Border padding mode, forward pass success as fallback to cpu
-        'grid_sampler_2d': [torch.float32],
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],
         # Unimplemented
         'logaddexp2': [torch.float32],
 
@@ -165,7 +165,7 @@ def mps_ops_grad_modifier(ops):
         'masked.log_softmax': [torch.float32, torch.float16],
 
         # Unsupported Border padding mode, forward pass success as fallback to cpu
-        'grid_sampler_2d': [torch.float32],
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],
 
         # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
         # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
@@ -638,7 +638,7 @@ def mps_ops_modifier(ops):
 
     MACOS_AFTER_13_1_XFAILLIST = {
         # before macOS 13.2 it falls back to cpu and pass the forward pass
-        'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+        'grid_sampler_2d': [torch.float32, torch.float16, torch.bfloat16],  # Unsupported Border padding mode
         # inconsistency errors between cpu and mps, max seen atol is 2
         'nn.functional.interpolatebilinear': [torch.uint8],
     }
@@ -8825,7 +8825,8 @@ class TestNNMPS(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/linear.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path)
+            # weights_only=False as this is a legacy use case that loads a module
+            m = torch.load(path, weights_only=False)
         input = torch.randn(2, 3, dtype=torch.float)
         self.assertEqual(m(input).size(), (2, 5))
 
@@ -8842,7 +8843,8 @@ class TestNNMPS(NNTestCase):
         path = download_file('https://download.pytorch.org/test_data/legacy_conv2d.pt')
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', SourceChangeWarning)
-            m = torch.load(path, encoding='utf-8')
+            # weights_only=False as this is a legacy use case that loads a module
+            m = torch.load(path, encoding='utf-8', weights_only=False)
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
