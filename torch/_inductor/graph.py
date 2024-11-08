@@ -131,7 +131,7 @@ else:
         pass
 
 
-def supported_dtype_of_cpp_wrapper(dtype: torch.device, device_type: str) -> bool:
+def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool:
     supported_dtype = {
         torch.float32,
         torch.float64,
@@ -193,17 +193,22 @@ def getattr_recursive(
     return attr_itr
 
 
-def is_user_visible_output(node: torch.fx.Node) -> bool:
-    output_node = node.graph.find_nodes(op="output")[0]
-    return (
-        "user_visible_output_idxs" in output_node.meta
-        and node in output_node.args[0]
-        and output_node.args[0].index(node)
-        in output_node.meta["user_visible_output_idxs"]
-    )
+def get_user_visible_output_strides(g: Graph) -> Dict[Node, Tuple[int, ...]]:
+    ret: Dict[Node, Tuple[int, ...]] = {}
+    output_node = g.find_nodes(op="output")[0]
+
+    if "user_visible_output_idxs" not in output_node.meta:
+        return ret
+
+    for idx, node in enumerate(output_node.args[0]):
+        if idx in output_node.meta["user_visible_output_idxs"]:
+            ret[node] = output_node.meta["original_output_strides"][idx]
+    return ret
 
 
-def mark_nodes_dislike_padding(g: Graph) -> None:
+def mark_nodes_dislike_padding(
+    g: Graph, user_visible_output_strides: Dict[Node, Tuple[int, ...]]
+) -> None:
     """
     Nodes like convolution/convolution_backward want its input to be dense.
     If we pad their inputs, we result in extra calls to copy kernels!  On the other hand, padding usually helps reduction.
@@ -264,7 +269,7 @@ def mark_nodes_dislike_padding(g: Graph) -> None:
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
         # We only want to mark output nodes. So, move it after the above prior nodes process.
-        if not config.pad_outputs and is_user_visible_output(cur):
+        if not config.pad_outputs and cur in user_visible_output_strides:
             cur.meta["dislike_padding"] = True
 
 
@@ -445,7 +450,8 @@ class GraphLowering(torch.fx.Interpreter):
             self.find_nodes_prefer_channels_last() if self.layout_opt else OrderedSet()
         )
         self._warned_fallback = {"aten.convolution_backward"}
-        mark_nodes_dislike_padding(gm.graph)
+        self.user_visible_output_strides = get_user_visible_output_strides(gm.graph)
+        mark_nodes_dislike_padding(gm.graph, self.user_visible_output_strides)
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
@@ -1339,7 +1345,7 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
-        from torch._inductor.bisect_helper import BisectionManager
+        from torch._inductor.compiler_bisector import CompilerBisector
 
         buffer_watermark = len(self.buffers)
         operation_watermark = len(self.operations)
@@ -1359,7 +1365,7 @@ class GraphLowering(torch.fx.Interpreter):
                 and n.target is not operator.getitem
                 and (
                     fallback_node_due_to_unsupported_type(n)
-                    or BisectionManager.disable_subsystem(
+                    or CompilerBisector.disable_subsystem(
                         "inductor", "lowerings", lambda: repr(n)
                     )
                 )
@@ -1429,7 +1435,7 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.resize_as.default,
             ]
             is_output = any(user.op == "output" for user in n.users)
-            is_user_visible = is_user_visible_output(n)
+            is_user_visible = n in self.user_visible_output_strides
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
@@ -1459,16 +1465,7 @@ class GraphLowering(torch.fx.Interpreter):
                 n.meta["val"], torch.Tensor
             ):
                 if is_user_visible:
-                    output_node = n.graph.find_nodes(op="output")[0]
-                    output_idx = output_node.args[0].index(n)
-                    original_output_strides = output_node.meta.get(
-                        "original_output_strides"
-                    )
-                    strides = (
-                        original_output_strides[output_idx]
-                        if original_output_strides is not None
-                        else None
-                    )
+                    strides = self.user_visible_output_strides.get(n)
                 else:
                     strides = n.meta["val"].stride()
 
@@ -1748,7 +1745,7 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):
+            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):  # type: ignore[arg-type]
                 raise CppWrapperCodegenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(
@@ -1949,7 +1946,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def compile_to_module(self) -> ModuleType:
         with dynamo_timed(
-            "GraphLowering.compile_to_module", phase_name="code_gen", fwd_only=False
+            "GraphLowering.compile_to_module",
+            phase_name="code_gen",
+            log_pt2_compile_event=True,
+            fwd_only=False,
         ):
             return self._compile_to_module()
 
@@ -1982,13 +1982,15 @@ class GraphLowering(torch.fx.Interpreter):
                 lambda: {"filename": path},
                 payload_fn=lambda: code,
             )
-
-        mod = PyCodeCache.load_by_key_path(
-            key,
-            path,
-            linemap=linemap,  # type: ignore[arg-type]
-            attrs={**self.constants, **self.torchbind_constants},
-        )
+        with dynamo_timed(
+            "PyCodeCache.load_by_key_path", log_pt2_compile_event=True, fwd_only=False
+        ):
+            mod = PyCodeCache.load_by_key_path(
+                key,
+                path,
+                linemap=linemap,  # type: ignore[arg-type]
+                attrs={**self.constants, **self.torchbind_constants},
+            )
         self.cache_key = key
         self.cache_path = path
         self.cache_linemap = linemap  # type: ignore[assignment]

@@ -24,9 +24,11 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    requires_cuda,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
+    TestCase,
 )
 
 
@@ -184,6 +186,34 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         self._verify_symmetric_memory(symm_mem_0)
         dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_get_signal_pad(self) -> None:
+        self._init_process()
+
+        t = _SymmetricMemory.empty_strided_p2p(*self._get_test_alloc_args())
+        symm_mem = _SymmetricMemory.rendezvous(t)
+        peer_rank = (self.rank + 1) % self.world_size
+
+        signal_pad = symm_mem.get_signal_pad(peer_rank)
+        self.assertEqual(signal_pad.dtype, torch.uint32)
+        self.assertEqual(signal_pad.numel(), symm_mem.signal_pad_size // 4)
+
+        # Only specify sizes
+        signal_pad = symm_mem.get_signal_pad(peer_rank, (8, 8))
+        self.assertEqual(signal_pad.dtype, torch.uint32)
+        self.assertEqual(signal_pad.numel(), 64)
+
+        # Only specify dtype
+        signal_pad = symm_mem.get_signal_pad(peer_rank, dtype=torch.uint64)
+        self.assertEqual(signal_pad.dtype, torch.uint64)
+        self.assertEqual(signal_pad.numel(), symm_mem.signal_pad_size // 8)
+
+        # Specify both sizes and dtype
+        signal_pad = symm_mem.get_signal_pad(peer_rank, (8, 8), dtype=torch.uint64)
+        self.assertEqual(signal_pad.dtype, torch.uint64)
+        self.assertEqual(signal_pad.numel(), 64)
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
@@ -766,6 +796,7 @@ class LoweringTest(MultiProcessTestCase):
 
         torch._inductor.config._collective.auto_select = True
 
+    @skipIfRocm  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
     @fresh_inductor_cache()
     def test_lowering_one_shot_all_reduce(self):
@@ -818,6 +849,33 @@ class LoweringTest(MultiProcessTestCase):
 
         self.assertIn("one_shot_all_reduce", code_3)
         self.assertNotIn("return (buf0", code_3)
+
+
+class SymmMemSingleProcTest(TestCase):
+    @skipIfRocm
+    @requires_cuda
+    def test_memset32(self):
+        t = _SymmetricMemory.empty_strided_p2p(
+            (64,),
+            (1,),
+            dtype=torch.uint32,
+            device=torch.device("cuda:0"),
+            group_name="0",
+        ).fill_(0)
+
+        _SymmetricMemory.memset32(t, offset=32, val=1, count=16)
+        self.assertTrue(t[:32].eq(0).all())
+        self.assertTrue(t[32:48].eq(1).all())
+        self.assertTrue(t[48:].eq(0).all())
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=-1, val=1, count=16)
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=32, val=4294967296, count=16)
+
+        with self.assertRaises(RuntimeError):
+            _SymmetricMemory.memset32(t, offset=32, val=1, count=-1)
 
 
 if __name__ == "__main__":
