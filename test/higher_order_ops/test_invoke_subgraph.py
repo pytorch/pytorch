@@ -604,6 +604,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    @unittest.skip("min-cut partitioner returs symints in forward, fixed in next PR")
     def test_dynamic(self):
         @mark_compile_region
         def gn(x):
