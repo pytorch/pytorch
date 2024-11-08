@@ -46,7 +46,7 @@ class SampleRule(ABC):
 
     # returns an appropriate context that e.g. handles the xfail, skips, etc.
     @abstractmethod
-    def get_context(self, test_case, device, dtype, op, sample):
+    def get_context(self, test_case):
         ...
 
 
