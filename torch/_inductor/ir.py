@@ -4639,9 +4639,6 @@ class ExternKernel(InputsKernel):
 
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None) -> None:
         self.cpp_kernel_name = cpp_kernel_name
-        self.cpp_kernel_overload_name = None
-        self.cpp_kernel_key = None
-        self.cpp_op_schema = None
         if not V.graph.cpp_wrapper or not isinstance(
             self.op_overload, torch._ops.OpOverload
         ):
@@ -4663,19 +4660,6 @@ class ExternKernel(InputsKernel):
                 self.cpp_kernel_name = f"at::_ops::{opname}::call"
             else:
                 self.cpp_kernel_name = kernel._schema.name
-
-        # Set up info for runtime schema lookup
-        # TODO: The logics here may be further simplified.
-        from .codegen.wrapper import get_cpp_op_schema
-
-        self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = (
-            f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"
-        )
-        try:
-            self.cpp_op_schema = get_cpp_op_schema(kernel)
-        except Exception:
-            self.cpp_op_schema = ""
 
     def set_python_kernel_name(self, python_kernel_name: Optional[str]) -> None:
         self.python_kernel_name = python_kernel_name
@@ -6403,9 +6387,6 @@ class FallbackKernel(ExternKernelAlloc):
                 self.python_kernel_name,
                 self.cpp_kernel_name,
                 args,
-                self.cpp_op_schema,
-                self.cpp_kernel_key,
-                self.cpp_kernel_overload_name,
                 self.op_overload,
                 exported_args,
                 [*self.outputs, *self.mutation_outputs],
@@ -7158,17 +7139,12 @@ class _CollectiveKernel(FallbackKernel):
     # This is identical to FallbackKernel.set_cpp_kernel(), minus the
     # part that checks against input aliasing and mutation.
     def set_cpp_kernel_name(self, cpp_kernel_name: Optional[str] = None) -> None:
-        from .codegen.wrapper import get_cpp_op_schema
-
         assert (
             type(self.op_overload) is torch._ops.OpOverload
         ), "Setting cpp kernel needs a valid op_overload"
         kernel = self.op_overload
         self.cpp_kernel_name = kernel._schema.name
-        self.cpp_kernel_overload_name = kernel._schema.overload_name
-        self.cpp_kernel_key = f"{self.cpp_kernel_name.replace('::', '_')}_{self.cpp_kernel_overload_name}"  # type: ignore[union-attr]
 
-        self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.ordered_kwargs_for_cpp_kernel = [
             x.name for x in kernel._schema.arguments if x.kwarg_only
         ]
