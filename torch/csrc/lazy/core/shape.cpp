@@ -1,14 +1,17 @@
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/core/tensor.h>
 
+#include <utility>
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 C10_DEFINE_bool(
     ltc_enable_symbolic_shapes,
     false,
     "Enables calculation of if dims are symbolic");
 
-namespace torch {
-namespace lazy {
+namespace torch::lazy {
 
 Shape::Shape(
     at::ScalarType scalar_type,
@@ -51,12 +54,12 @@ hash_t Shape::hash(bool bakeInSizes) const {
 Shape Shape::with_symbolic_dims(
     std::optional<std::vector<bool>> symbolic_dims) const {
   Shape copy = *this;
-  copy.is_symbolic_ = symbolic_dims;
+  copy.is_symbolic_ = std::move(symbolic_dims);
   return copy;
 }
 
 bool symbolicShapeEnabled() {
-  static bool enabled = std::getenv("LTC_ENABLE_SYMBOLIC_SHAPES") != nullptr;
+  static const bool enabled = c10::utils::has_env("LTC_ENABLE_SYMBOLIC_SHAPES");
   return enabled || FLAGS_ltc_enable_symbolic_shapes;
 }
 
@@ -123,11 +126,11 @@ void applySymbolicShapesOnLT(
     for (size_t i = 0; i < res_symbolic->size(); i++) {
       auto sym_dims = res_symbolic->at(i).symbolicDims();
       if (sym_dims.has_value()) {
-        result_shapes[i] = result_shapes[i].with_symbolic_dims(*sym_dims);
+        result_shapes[i] =
+            result_shapes[i].with_symbolic_dims(std::move(sym_dims));
       }
     }
   }
 }
 
-} // namespace lazy
-} // namespace torch
+} // namespace torch::lazy

@@ -75,7 +75,7 @@ std::vector<at::Tensor> unpack_tensors(
     } else if (
         *ivalue_arg.real_type() ==
         *c10::getTypePtr<std::optional<at::Tensor>>()) {
-      // ivalue is c10::optional<at::Tensor>
+      // ivalue is std::optional<at::Tensor>
       unpack_optional_tensor_ivalue(ivalue, device, inputs);
     }
   }
@@ -166,8 +166,8 @@ std::vector<ParameterMetadata> unpack_input_parameters(
 
 AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     c10::DispatchKey dispatch_key,
-    c10::string_view ns,
-    c10::string_view op_name_with_overload)
+    std::string_view ns,
+    std::string_view op_name_with_overload)
     : dispatch_key_(dispatch_key),
       ns_(std::string(ns)),
       op_name_with_overload_(std::string(op_name_with_overload)),

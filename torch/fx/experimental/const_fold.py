@@ -7,7 +7,12 @@ from torch.fx.node import map_arg
 from torch.fx.passes.split_module import split_module
 
 
-__all__ = ['FoldedGraphModule', 'get_unique_attr_name_in_module', 'split_const_subgraphs']
+__all__ = [
+    "FoldedGraphModule",
+    "get_unique_attr_name_in_module",
+    "split_const_subgraphs",
+]
+
 
 class FoldedGraphModule(torch.fx.GraphModule):
     """
@@ -93,6 +98,8 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
     # Now actually do the swap. Note that we have to keep track of new nodes that are
     # copied into `gm` -- we do this via replacement_mapping.
     call_mod_args = call_mod_node_to_replace.args
+    call_mod_kwargs = call_mod_node_to_replace.kwargs
+
     replacement_mapping: Dict[torch.fx.Node, torch.fx.Node] = {}
     ph_count = 0
 
@@ -103,7 +110,12 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
 
     for inline_node in inline_mod.graph.nodes:
         if inline_node.op == "placeholder":
-            replacement_mapping[inline_node] = call_mod_args[ph_count]
+            replacement_mapping[inline_node] = (
+                call_mod_kwargs[inline_node.name]
+                if inline_node.name in call_mod_kwargs
+                else call_mod_args[ph_count]
+            )
+
             ph_count += 1
             continue
 
@@ -275,13 +287,13 @@ def split_const_subgraphs(
             node.replace_all_uses_with(folded_attrs)
             break
 
-    split.graph.eliminate_dead_code()
-
     # Finally, inline the non-constant submod (if it exists) into the split submod.
     # This is so that the original caller who may have passed in a graph module will
     # get back out a graph module whose graph is traced to the same granularity.
     if hasattr(split, non_const_mod_name):
         _inline_module(split, non_const_mod_name)
+
+    split.graph.eliminate_dead_code()
 
     return FoldedGraphModule(
         split,

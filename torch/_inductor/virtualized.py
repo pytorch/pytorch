@@ -76,7 +76,7 @@ if TYPE_CHECKING:
     from torch._inductor.codegen.cpp_utils import LocalBufferContext
     from torch._inductor.debug import DebugContext
     from torch._inductor.graph import GraphLowering
-    from torch._inductor.ir import InterpreterShim
+    from torch._inductor.loop_body import InterpreterShim
     from torch._subclasses import FakeTensorMode
 
 threadlocal = local()
@@ -90,8 +90,6 @@ class NullHandler:
     attempting to access the global variable before it's set is an error, but with
     NullHandler it won't fail until you try to access an attribute on it.
     """
-
-    pass
 
 
 class Virtualized(Generic[T]):

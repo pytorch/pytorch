@@ -22,17 +22,17 @@
 #include <ATen/ops/tensor.h>
 #endif
 
+#include <tuple>
 #include <utility>
 #include <vector>
 
-namespace at {
-namespace native {
+namespace at::native {
 struct NestedTensorImpl;
 
 // The following functions are used to construct nested tensors from buffers and
 // metadata.
 
-inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_sizes) {
+inline at::Tensor wrap_buffer(const at::Tensor& buffer, const at::Tensor& nested_sizes) {
   TORCH_CHECK(
       buffer.dim() == 1,
       "Expected given buffer to be 1dim, but got ",
@@ -41,19 +41,19 @@ inline at::Tensor wrap_buffer(at::Tensor buffer, at::Tensor nested_sizes) {
   TORCH_CHECK(
       buffer.is_contiguous(), "Expected given buffer to be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(buffer), std::move(nested_sizes));
+      buffer, nested_sizes);
 }
 
 // TODO: Figure out if we need a non-moving wrap_buffer()
 inline at::Tensor wrap_buffer(
-    at::Tensor buffer,
+    const at::Tensor& buffer,
     at::Tensor nested_sizes,
     at::Tensor nested_strides,
     at::Tensor storage_offsets) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(buffer),
+      buffer,
       std::move(nested_sizes),
       std::move(nested_strides),
       std::move(storage_offsets));
@@ -66,8 +66,8 @@ inline at::Tensor get_buffer(const at::Tensor& tensor) {
 /**
  * Create a new nested tensor that is a view of a base nested tensor
  *
- * create_view_tensor calls a specialized constructor that copys the
- * the keys from base onto the new view tensor being created.
+ * create_view_tensor calls a specialized constructor that copies the
+ * keys from base onto the new view tensor being created.
  * The storage is shared between the base and the returned view tensor
  *
  * All callers of this helper must:
@@ -95,9 +95,9 @@ inline at::Tensor create_nested_view_tensor(
   return at::detail::make_tensor<NestedTensorImpl>(
       c10::TensorImpl::VIEW,
       base,
-      nested_sizes,
-      nested_strides,
-      storage_offsets);
+      std::move(nested_sizes),
+      std::move(nested_strides),
+      std::move(storage_offsets));
 }
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -180,7 +180,7 @@ inline void check_numel_equals_buffer_size(const NestedTensorImpl* self_ptr) {
 }
 
 // Helper function to get size / stride / offset for a nested/normal tensor.
-inline IntArrayRef get_size_for_index(const Tensor& tensor, int i) {
+inline IntArrayRef get_size_for_index(const Tensor& tensor, int64_t i) {
   if (tensor.is_nested()) {
     std::vector<IntArrayRef> tensor_sizes =
         NestedTensor_get_sizes(get_nested_tensor_impl(tensor));
@@ -190,7 +190,7 @@ inline IntArrayRef get_size_for_index(const Tensor& tensor, int i) {
   }
 }
 
-inline IntArrayRef get_stride_for_index(const Tensor& tensor, int i) {
+inline IntArrayRef get_stride_for_index(const Tensor& tensor, int64_t i) {
   if (tensor.is_nested()) {
     std::vector<IntArrayRef> tensor_strides =
         NestedTensor_get_strides(get_nested_tensor_impl(tensor));
@@ -200,7 +200,7 @@ inline IntArrayRef get_stride_for_index(const Tensor& tensor, int i) {
   }
 }
 
-inline int64_t get_offset_for_index(const Tensor& tensor, int i) {
+inline int64_t get_offset_for_index(const Tensor& tensor, int64_t i) {
   if (tensor.is_nested()) {
     int64_t* offsets_ptr = get_nested_tensor_impl(tensor)
                                ->get_storage_offsets()
@@ -220,15 +220,17 @@ namespace impl {
 template <typename T>
 struct NestedNode {
   NestedNode() = delete;
-  explicit NestedNode(std::vector<T>&& children)
-      : _is_leaf(false), _children(children) {}
+  explicit NestedNode(std::vector<T> children)
+      : _is_leaf(false), _children(std::move(children)) {}
   explicit NestedNode(TensorList children)
       : _is_leaf(false), _children(children.vec()) {}
-  // NestedNode(NestedNode&) = delete;
-  // NestedNode(const NestedNode&) = delete;
-  // NestedNode& operator=(NestedNode) = delete;
   explicit NestedNode(T payload)
       : _is_leaf(true), _payload(std::move(payload)) {}
+  NestedNode(const NestedNode&) = delete;
+  NestedNode& operator=(const NestedNode&) = delete;
+  NestedNode(NestedNode&&) noexcept = default;
+  NestedNode& operator=(NestedNode&&) noexcept = default;
+  ~NestedNode() = default;
   inline bool is_leaf() const {
     return _is_leaf;
   }
@@ -251,7 +253,7 @@ struct NestedNode {
  private:
   bool _is_leaf;
   std::vector<T> _children;
-  T _payload;
+  T _payload{};
 };
 
 using TensorNode = NestedNode<at::Tensor>;
@@ -265,10 +267,8 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
   static A function_one(F&& fn, const Args&... nested_node) {
     return std::forward<F>(fn)(nested_node...);
   }
-  // NOTE: We must move F to avoid copying objects if it is a lambda with
-  // captures.
   static NestedNode<A> function(
-      F&& fn,
+      const F& fn,
       const NestedNode<Args>&... nested_node) {
     size_t degree = 0;
     bool all_leaf = true;
@@ -292,7 +292,7 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
     // types.
     std::vector<A> result;
     for (size_t i = 0; i < degree; i++) {
-      std::tuple<Args...> children = c10::guts::tuple_map(
+      auto children = c10::guts::tuple_map(
           std::forward_as_tuple(nested_node...), [&i](auto a) {
             static_assert(
                 c10::guts::is_instantiation_of<NestedNode, decltype(a)>::value,
@@ -311,7 +311,7 @@ class _map<F, A, c10::guts::typelist::typelist<Args...>> {
           });
       c10::guts::apply(
           [&result, &fn](Args... filtered) {
-            result.emplace_back(function_one(std::forward<F>(fn), filtered...));
+            result.emplace_back(function_one(fn, filtered...));
           },
           std::move(children));
     }
@@ -446,5 +446,4 @@ inline at::Tensor map_nested_tensor(F&& fn, A... a) {
       std::nullopt);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

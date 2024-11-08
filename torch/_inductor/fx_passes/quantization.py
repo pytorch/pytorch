@@ -668,12 +668,10 @@ def _register_quantized_conv_binary_lowering(
             x,
             x_scale,
             x_zp,
-            accum,
-            accum_scale,
-            accum_zp,
             packed_weight,
             w_scale,
             w_zp,
+            accum,
             b,
             stride,
             padding,
@@ -682,6 +680,8 @@ def _register_quantized_conv_binary_lowering(
             o_inv_scale,
             o_zero_point,
             output_dtype,
+            accum_scale,
+            accum_zp,
             binary_unary_attr.binary_op_name,
             binary_unary_attr.alpha,
             binary_unary_attr.unary_op_name,
@@ -912,31 +912,38 @@ def _register_quantization_binary_fusion():
 
     for int8_mixed_bf16_with_inplace_add in [False, True]:
         # Priority 1 to match: QConv2d Binary or Binary-Unary pattern with int8 output
-        binary_replace_patterns = {
-            BinaryUnaryAttr(
-                "sum", 1.0, "none", [], ""
-            ): generate_pattern_with_output_quant(
-                generate_pattern_with_binary(
-                    aten.add.Tensor,
-                    get_dequantize_qconv_pt2e_pattern(1),
-                    dequantize_accum_pattern,
-                    int8_mixed_bf16_with_inplace_add,
-                ),
-            ),
-            BinaryUnaryAttr(
-                "sum", 1.0, "relu", [], ""
-            ): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(
-                    generate_pattern_with_binary(
-                        aten.add.Tensor,
-                        get_dequantize_qconv_pt2e_pattern(1),
-                        dequantize_accum_pattern,
-                        int8_mixed_bf16_with_inplace_add,
+        swap_binary_inputs_list = [False, True]
+        binary_replace_patterns = {}
+        for swap_inputs in swap_binary_inputs_list:
+            binary_replace_patterns.update(
+                {
+                    BinaryUnaryAttr(
+                        "sum", 1.0, "none", [], ""
+                    ): generate_pattern_with_output_quant(
+                        generate_pattern_with_binary(
+                            aten.add.Tensor,
+                            get_dequantize_qconv_pt2e_pattern(1),
+                            dequantize_accum_pattern,
+                            int8_mixed_bf16_with_inplace_add,
+                            swap_inputs=swap_inputs,
+                        ),
                     ),
-                    aten.relu.default,
-                ),
-            ),
-        }
+                    BinaryUnaryAttr(
+                        "sum", 1.0, "relu", [], ""
+                    ): generate_pattern_with_output_quant(
+                        generate_pattern_with_unary(
+                            generate_pattern_with_binary(
+                                aten.add.Tensor,
+                                get_dequantize_qconv_pt2e_pattern(1),
+                                dequantize_accum_pattern,
+                                int8_mixed_bf16_with_inplace_add,
+                                swap_inputs=swap_inputs,
+                            ),
+                            aten.relu.default,
+                        ),
+                    ),
+                }
+            )
 
         for binary_unary_attr, patterns in binary_replace_patterns.items():
             _register_quantized_conv_binary_lowering(
@@ -947,17 +954,24 @@ def _register_quantization_binary_fusion():
             )
 
         # Priority 2 to match: QConv2d Binary-Unary pattern with fp32/bfloat16 output
-        binary_replace_float_out_patterns = {
-            BinaryUnaryAttr("sum", 1.0, "relu", [], ""): generate_pattern_with_unary(
-                generate_pattern_with_binary(
-                    aten.add.Tensor,
-                    get_dequantize_qconv_pt2e_pattern(1),
-                    KeywordArg("accum_after_dequant"),
-                    int8_mixed_bf16_with_inplace_add,
-                ),
-                aten.relu.default,
-            ),
-        }
+        binary_replace_float_out_patterns = {}
+        for swap_inputs in swap_binary_inputs_list:
+            binary_replace_float_out_patterns.update(
+                {
+                    BinaryUnaryAttr(
+                        "sum", 1.0, "relu", [], ""
+                    ): generate_pattern_with_unary(
+                        generate_pattern_with_binary(
+                            aten.add.Tensor,
+                            get_dequantize_qconv_pt2e_pattern(1),
+                            KeywordArg("accum_after_dequant"),
+                            int8_mixed_bf16_with_inplace_add,
+                            swap_inputs=swap_inputs,
+                        ),
+                        aten.relu.default,
+                    )
+                }
+            )
 
         for (
             binary_unary_attr,
@@ -979,14 +993,21 @@ def _register_quantization_binary_fusion():
                 )
 
         # Priority 3: QConv2d Binary pattern with fp32/bfloat16 output
-        binary_replace_float_out_patterns = {
-            BinaryUnaryAttr("sum", 1.0, "none", [], ""): generate_pattern_with_binary(
-                aten.add.Tensor,
-                get_dequantize_qconv_pt2e_pattern(1),
-                KeywordArg("accum_after_dequant"),
-                int8_mixed_bf16_with_inplace_add,
-            ),
-        }
+        binary_replace_float_out_patterns = {}
+        for swap_inputs in swap_binary_inputs_list:
+            binary_replace_float_out_patterns.update(
+                {
+                    BinaryUnaryAttr(
+                        "sum", 1.0, "none", [], ""
+                    ): generate_pattern_with_binary(
+                        aten.add.Tensor,
+                        get_dequantize_qconv_pt2e_pattern(1),
+                        KeywordArg("accum_after_dequant"),
+                        int8_mixed_bf16_with_inplace_add,
+                        swap_inputs=swap_inputs,
+                    ),
+                }
+            )
 
         for (
             binary_unary_attr,
@@ -1561,6 +1582,27 @@ def _register_woq_mm_int8_pattern3():
     _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
 
 
+def _register_woq_mm_int8_pattern4():
+    _woq_pattern = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(
+            aten.mm.default,
+            KeywordArg("x"),
+            CallFunction(
+                prims.convert_element_type.default,
+                CallFunction(
+                    aten.permute.default,
+                    KeywordArg("weight"),
+                    Arg(),
+                ),
+                Arg(),
+            ),
+        ),
+        KeywordArg("scales"),
+    )
+    _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
+
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
     _register_quantization_binary_fusion()
@@ -1573,6 +1615,7 @@ def _register_woq_lowerings():
     _register_woq_mm_int8_pattern1()
     _register_woq_mm_int8_pattern2()
     _register_woq_mm_int8_pattern3()
+    _register_woq_mm_int8_pattern4()
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
@@ -1887,14 +1930,14 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
             graph.erase_node(conv_node)
             # Erase the dequant pattern
             if dtype == torch.bfloat16:
-                graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined]
-            graph.erase_node(dequant_node)
+                graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined, arg-type]
+            graph.erase_node(dequant_node)  # type: ignore[arg-type]
             # Erase the dequant per channel pattern
             if clone_node is not None:
-                graph.erase_node(clone_node)
+                graph.erase_node(clone_node)  # type: ignore[arg-type]
             if dtype == torch.bfloat16:
-                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined]
-            graph.erase_node(dequant_per_channel)
+                graph.erase_node(weight_to_bf16_node)  # type: ignore[possibly-undefined, arg-type]
+            graph.erase_node(dequant_per_channel)  # type: ignore[arg-type]
             counters["inductor"]["qconv2d_weight_prepack_matcher_count"] += 1
             counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"] += len(
                 match.nodes
@@ -2581,8 +2624,8 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
 
                     new_args = map_arg(new_quant_node.args, maybe_replace_node)
                     new_kwargs = map_arg(new_quant_node.kwargs, maybe_replace_node)
-                    new_quant_node.args = new_args
-                    new_quant_node.kwargs = new_kwargs
+                    new_quant_node.args = new_args  # type: ignore[assignment]
+                    new_quant_node.kwargs = new_kwargs  # type: ignore[assignment]
                     graph_module.graph.erase_node(quant_node)
 
     graph_module.graph.lint()

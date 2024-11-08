@@ -12,6 +12,7 @@ from benchmark_runner import BenchmarkRunner  # type: ignore[import-not-found]
 from benchmark_utils import (  # type: ignore[import-not-found]
     fits_in_memory,
     get_mm_tensors,
+    get_random_between_pow2,
 )
 
 import torch
@@ -95,7 +96,7 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
         if distr_type == "pow2":
             return self.get_random_pow2(min_power2=10, max_power2=17)
         elif distr_type == "uniform-between-pow2":
-            return self.get_random_between_pow2(min_power2=10, max_power2=17)
+            return get_random_between_pow2(min_power2=10, max_power2=17)
         elif distr_type == "uniform":
             return random.randint(1024, 131072)
         print(f"random_type {distr_type} not supported")
@@ -106,7 +107,7 @@ class BenchmarkRunnerMixedMM(BenchmarkRunner):  # type: ignore[misc, no-any-unim
         if pow2:
             return 2 ** random.randint(1, 7)
         else:
-            return self.get_random_between_pow2(1, 7)
+            return get_random_between_pow2(1, 7)
 
     def get_m_k_n(self, dtype: Any) -> Tuple[int, int, int]:
         numel_max = 2**31

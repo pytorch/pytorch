@@ -9,7 +9,7 @@
 #include <c10/util/irange.h>
 #include <caffe2/serialize/in_memory_adapter.h>
 #include <caffe2/serialize/inline_container.h>
-#include <caffe2/serialize/read_adapter_interface.h>
+#include <caffe2/serialize/istream_adapter.h>
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/file_format.h>
@@ -318,9 +318,7 @@ void BytecodeDeserializer::parseMethods(
     method_i_start = 1;
   }
   TORCH_CHECK(
-      // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
       caffe2::serialize::kMinSupportedBytecodeVersion <= bytecode_version_ &&
-          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           bytecode_version_ <= caffe2::serialize::kMaxSupportedBytecodeVersion,
       "Lite Interpreter version number does not match. ",
       "The model version must be between ",
@@ -341,8 +339,7 @@ void BytecodeDeserializer::parseMethods(
     auto element = std::move(vals[i]);
     auto m_tuple = std::move(element.toTupleRef()).elements();
     const std::string& function_name = m_tuple[0].toStringRef();
-    auto codeTableElements =
-        std::move(std::move(m_tuple[1]).toTupleRef()).elements();
+    auto codeTableElements = std::move(m_tuple[1].toTupleRef()).elements();
     IValue* schemaTable = // older files do not store function schema
         (bytecode_version_ > 0x4L ||
          (bytecode_version_ == 0x4L && m_tuple.size() >= 3))
@@ -630,7 +627,7 @@ mobile::Module _load_for_mobile(
     return _load_mobile_from_bytes(
         data, size, device, extra_files, module_load_options);
   }
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  auto rai = std::make_unique<caffe2::serialize::IStreamAdapter>(&in);
   auto module = _load_for_mobile_impl(
       std::move(rai), device, extra_files, module_load_options);
   return module;
@@ -661,7 +658,7 @@ mobile::Module _load_for_mobile(
         data, size, device, extra_files, module_load_options);
   }
 
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  auto rai = std::make_unique<caffe2::serialize::FileAdapter>(filename);
   return _load_for_mobile_impl(
       std::move(rai), device, extra_files, module_load_options);
 }
@@ -691,8 +688,7 @@ void _load_extra_only_for_mobile(
   auto format = getFileFormat(filename);
   switch (format) {
     case FileFormat::ZipFileFormat: {
-      std::unique_ptr<FileAdapter> rai =
-          std::make_unique<FileAdapter>(filename);
+      auto rai = std::make_unique<caffe2::serialize::FileAdapter>(filename);
       auto reader = std::make_unique<PyTorchStreamReader>(std::move(rai));
       BytecodeDeserializer deserializer(std::move(reader));
       deserializer.deserialize_only_extra(device, extra_files);

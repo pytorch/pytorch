@@ -3,33 +3,34 @@
 import unittest
 
 import torch
+import torch.distributed as dist
+import torch.nn.functional as F
 from torch import nn
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, Shard
-from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.experimental.attention import (
+from torch.distributed._tensor import DeviceMesh
+from torch.distributed._tensor.experimental._attention import (
+    _AttentionContextParallel,
     _CausalBehavior,
+    _cp_options,
     _is_causal_behavior,
-    _scaled_dot_product_chunk_flash_attention,
-    _scaled_dot_product_ring_efficient_attention,
-    _scaled_dot_product_ring_flash_attention,
-    attention_context_parallel,
-    AttentionContextParallel,
+    _RotateMethod,
+    context_parallel,
+    context_parallel_unshard,
 )
+from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    TEST_CUDA,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
+    decorateIf,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     skipIfRocm,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -40,137 +41,186 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 
 c10d_functional = torch.ops.c10d_functional
+backends = []
+if PLATFORM_SUPPORTS_FLASH_ATTENTION:
+    backends.append(SDPBackend.FLASH_ATTENTION)
+if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION:
+    backends.append(SDPBackend.EFFICIENT_ATTENTION)
 
 
 class RingAttentionTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
-        return 2
+        return torch.cuda.device_count()
 
     @skip_if_lt_x_gpu(2)
     @skipIfRocm  # Missing _c10d_functional_autograd::all_to_all_single
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        "Does not support flash nor efficient attention",
     )
     @with_comms
+    @decorateIf(
+        unittest.skip, lambda params: params["load_balance"] and not params["is_causal"]
+    )
     @parametrize("is_causal", [True, False])
-    def test_ring_attention_sdpa(self, is_causal: bool) -> None:
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, self.world_size),
-        )
+    @parametrize("compiled", [True, False])
+    @parametrize("backend", backends)
+    @parametrize("load_balance", [True, False])
+    @parametrize("rotater", [_RotateMethod.ALL_TO_ALL, _RotateMethod.ALL_GATHER])
+    def test_ring_attention_sdpa(
+        self,
+        is_causal: bool,
+        compiled: bool,
+        backend: SDPBackend,
+        load_balance: bool,
+        rotater: _RotateMethod,
+    ) -> None:
+        _cp_options.rotate_method = rotater
+        device_mesh = DeviceMesh(self.device_type, torch.arange(0, self.world_size))
         dtype = torch.bfloat16
         bs = 8
-        query_tokens = 8
-        context_tokens = query_tokens if is_causal else 8
+        query_tokens = 64
+        context_tokens = 64
         dim = 32
         nheads = 8
-        query = torch.rand(
+        torch.manual_seed(10)
+        dtype = (
+            torch.bfloat16 if backend == SDPBackend.FLASH_ATTENTION else torch.float32
+        )
+
+        if is_causal and compiled and self.world_size > 2:
+            # TODO: Fix this after we move `wait_tensor` to use `with_effect`.
+            return
+
+        _cp_options.enable_load_balance = load_balance
+
+        q = torch.rand(
             (bs, nheads, self.world_size * query_tokens, dim),
             device=self.device_type,
             dtype=dtype,
             requires_grad=True,
         )
-        key = torch.rand(
+        k = torch.rand(
             (bs, nheads, self.world_size * context_tokens, dim),
             device=self.device_type,
             dtype=dtype,
+            requires_grad=True,
         )
-        value = torch.rand(
+        v = torch.rand(
             (bs, nheads, self.world_size * context_tokens, dim),
             device=self.device_type,
             dtype=dtype,
+            requires_grad=True,
         )
 
-        query_placement = [Shard(2)]
-        dquery = distribute_tensor(query, device_mesh, query_placement)
-        self.assertEqual(query.shape, (bs, nheads, self.world_size * query_tokens, dim))
+        # Ensure all ranks have the same initialization data.
+        with torch.no_grad():
+            dist.broadcast(q, src=0)
+            dist.broadcast(k, src=0)
+            dist.broadcast(v, src=0)
 
-        context_placement = [Shard(2)]
-        dkey = distribute_tensor(key, device_mesh, context_placement)
-        dvalue = distribute_tensor(value, device_mesh, context_placement)
-        for t in [dkey, dvalue]:
-            self.assertEqual(
-                t.shape, (bs, nheads, context_tokens * self.world_size, dim)
+        with sdpa_kernel(backend):
+            out = F.scaled_dot_product_attention(q, k, v, is_causal=is_causal)
+            out.sum().backward()
+
+        cp_q = q.clone().detach()
+        cp_k = k.clone().detach()
+        cp_v = v.clone().detach()
+        # Theoretically, context_parallel() should not be used to shard
+        # parameters because when require_grad is True, resize_ is not
+        # allowed. But requires_grad of cp_q, cp_k, and cp_v are False
+        # now. So we can just use context_parallel() to shard q, k, v.
+        # In reality, context_paralle() should be used to shard the input.
+        with context_parallel(
+            device_mesh, buffers=(cp_q, cp_k, cp_v), buffer_seq_dims=(2, 2, 2)
+        ):
+            cp_q.requires_grad = True
+            cp_k.requires_grad = True
+            cp_v.requires_grad = True
+            with CommDebugMode() as comm_mode:
+                with sdpa_kernel(backend):
+                    if compiled:
+                        fn = torch.compile(
+                            F.scaled_dot_product_attention,
+                            fullgraph=True,
+                            backend="aot_eager",
+                        )
+                    else:
+                        fn = F.scaled_dot_product_attention
+
+                    cp_out = fn(cp_q, cp_k, cp_v, is_causal=is_causal)
+                    cp_out.sum().backward()
+
+                    if not compiled and rotater == _RotateMethod.ALL_TO_ALL:
+                        # Compiler and CommDebugMode do not work well together.
+                        self.assertDictEqual(
+                            comm_mode.get_comm_counts(),
+                            {
+                                c10d_functional.all_to_all_single: self.world_size * 3
+                                - 2
+                            },
+                        )
+
+            # Due to numerical error, we need to choose different atol for different
+            # attention kernels
+            cp_out, cp_dq, cp_dk, cp_dv = context_parallel_unshard(
+                device_mesh,
+                [cp_out, cp_q.grad, cp_k.grad, cp_v.grad],
+                [2, 2, 2, 2],
             )
-            self.assertEqual(t.to_local().shape, (bs, nheads, context_tokens, dim))
-
-        # local tensors
-        out, logsumexp, *others = torch.ops.aten._scaled_dot_product_flash_attention(
-            query, key, value, is_causal=is_causal
-        )
-
-        self.assertEqual(out.shape, (bs, nheads, self.world_size * query_tokens, dim))
-        out.sum().backward()
-        out_grad = query.grad
-        query.grad = None
-        self.assertIsNotNone(out_grad)
-
-        # compute chunked version to compare distributed to chunked implementations
-        # chunked isn't numerically identical to single operator version
-        (
-            out_chunk,
-            logsumexp_chunk,
-            *others,
-        ) = _scaled_dot_product_chunk_flash_attention(
-            query,
-            key,
-            value,
-            size=self.world_size,
-            is_causal=is_causal,
-        )
-
-        out_chunk.sum().backward()
-        self.assertEqual(
-            out_chunk.shape, (bs, nheads, self.world_size * query_tokens, dim)
-        )
-        self.assertEqual(logsumexp_chunk, logsumexp)
-        self.assertEqual(out_chunk, out)
-        out_chunk_grad = query.grad
-        query.grad = None
-        # gradient doesn't match due to numerical issues with chunk size > 1
-        # self.assertEqual(out_chunk_grad, out_grad)
-
-        # parallel behavior
-        with attention_context_parallel(), CommDebugMode() as comm_mode:
-            (
-                out_parallel,
-                logsumexp_parallel,
-                *others,
-            ) = torch.ops.aten._scaled_dot_product_flash_attention(
-                dquery, dkey, dvalue, is_causal=is_causal
+            atol = (
+                1e-08
+                if backend == SDPBackend.EFFICIENT_ATTENTION
+                else 1e-3 * self.world_size
             )
-        self.assertDictEqual(
-            comm_mode.get_comm_counts(),
-            {
-                c10d_functional.all_to_all_single: self.world_size - 1,
-            },
-        )
-        self.assertEqual(out_parallel.placements, (Shard(2),))
-        self.assertEqual(
-            out_parallel._local_tensor.shape, (bs, nheads, query_tokens, dim)
-        )
-        self.assertEqual(
-            out_parallel.shape, (bs, nheads, self.world_size * query_tokens, dim)
-        )
-        out_parallel_tensor = out_parallel.full_tensor()
-        self.assertEqual(out_parallel_tensor, out)
-        logsumexp_parallel_tensor = logsumexp_parallel.full_tensor()
-        self.assertEqual(logsumexp_parallel_tensor, logsumexp)
+            self.assertTrue(torch.allclose(out, cp_out, atol=atol))
 
-        self.assertIsNone(dquery.grad)
-        with attention_context_parallel(), CommDebugMode() as comm_mode:
-            out_parallel.sum().backward()
+            atol = (
+                2e-06
+                if backend == SDPBackend.EFFICIENT_ATTENTION
+                else 8e-3 * self.world_size
+            )
+            self.assertTrue(torch.allclose(q.grad, cp_dq, atol=atol))
+            self.assertTrue(torch.allclose(k.grad, cp_dk, atol=atol))
+            self.assertTrue(torch.allclose(v.grad, cp_dv, atol=atol))
 
-        self.assertDictEqual(
-            comm_mode.get_comm_counts(),
-            {
-                c10d_functional.all_to_all_single: (self.world_size - 1) * 2,
-            },
+            cp_q.grad = None
+            cp_k.grad = None
+            cp_v.grad = None
+            cp_q.requires_grad = False
+            cp_k.requires_grad = False
+            cp_v.requires_grad = False
+
+    def test_is_causal_behavior(self) -> None:
+        _cp_options.enable_load_balance = False
+        self.assertEqual(
+            _is_causal_behavior(rank=0, world_size=4, i=0, is_causal=False),
+            _CausalBehavior.NOT_IS_CAUSAL,
         )
-        out_parallel_grad = dquery.grad.full_tensor()
-        dquery.grad = None
-        self.assertEqual(out_parallel_grad, out_chunk_grad)
+
+        ranks = [
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.SKIP],
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+        ]
+        for rank, iters in enumerate(ranks):
+            for i, behavior in enumerate(iters):
+                self.assertEqual(
+                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
+                    behavior,
+                )
+
+        _cp_options.enable_load_balance = True
+        ranks = [
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
+        ]
+        for rank, iters in enumerate(ranks):
+            for i, behavior in enumerate(iters):
+                self.assertEqual(
+                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
+                    behavior,
+                )
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
@@ -179,7 +229,12 @@ class RingAttentionTest(DTensorTestBase):
     @with_comms
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
     @parametrize("is_causal", [True, False])
-    def test_ring_attention_native_transformer(self, is_causal: bool) -> None:
+    @parametrize("rotater", [_RotateMethod.ALL_GATHER, _RotateMethod.ALL_TO_ALL])
+    def test_ring_attention_native_transformer(
+        self, is_causal: bool, rotater: _RotateMethod
+    ) -> None:
+        _cp_options.enable_load_balance = is_causal
+        _cp_options.rotate_method = rotater
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, self.world_size),
@@ -201,7 +256,7 @@ class RingAttentionTest(DTensorTestBase):
             module=encoder_layer,
             device_mesh=device_mesh,
             parallelize_plan={
-                "self_attn": AttentionContextParallel(),
+                "self_attn": _AttentionContextParallel(),
             },
         )
         model = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
@@ -218,41 +273,42 @@ class RingAttentionTest(DTensorTestBase):
 
         with CommDebugMode() as comm_mode:
             out = model(seq, mask=mask, is_causal=is_causal)
-        self.assertDictEqual(
-            comm_mode.get_comm_counts(),
-            {
-                c10d_functional.all_to_all_single: (self.world_size - 1) * num_layers,
-            },
-        )
+
+        if rotater == _RotateMethod.ALL_TO_ALL:
+            self.assertDictEqual(
+                comm_mode.get_comm_counts(),
+                {
+                    c10d_functional.all_to_all_single: (self.world_size - 1)
+                    * num_layers,
+                },
+            )
+        else:
+            self.assertDictEqual(
+                comm_mode.get_comm_counts(),
+                {
+                    c10d_functional.all_gather_into_tensor: num_layers,
+                },
+            )
 
         with CommDebugMode() as comm_mode:
             out.sum().backward()
-        self.assertDictEqual(
-            comm_mode.get_comm_counts(),
-            {
-                c10d_functional.all_to_all_single: (self.world_size - 1)
-                * 2
-                * num_layers,
-            },
-        )
 
-    def test_is_causal_behavior(self) -> None:
-        # not causal
-        self.assertEqual(
-            _is_causal_behavior(rank=0, world_size=4, i=0, is_causal=False),
-            _CausalBehavior.NOT_IS_CAUSAL,
-        )
-
-        ranks = [
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.SKIP],
-            [_CausalBehavior.IS_CAUSAL, _CausalBehavior.NOT_IS_CAUSAL],
-        ]
-        for rank, iters in enumerate(ranks):
-            for i, behavior in enumerate(iters):
-                self.assertEqual(
-                    _is_causal_behavior(rank=rank, world_size=2, i=i, is_causal=True),
-                    behavior,
-                )
+        if rotater == _RotateMethod.ALL_TO_ALL:
+            self.assertDictEqual(
+                comm_mode.get_comm_counts(),
+                {
+                    c10d_functional.all_to_all_single: (self.world_size * 2 - 1)
+                    * num_layers,
+                },
+            )
+        else:
+            self.assertDictEqual(
+                comm_mode.get_comm_counts(),
+                {
+                    c10d_functional.all_gather_into_tensor: num_layers,
+                    c10d_functional.all_to_all_single: self.world_size * num_layers,
+                },
+            )
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
@@ -260,7 +316,9 @@ class RingAttentionTest(DTensorTestBase):
     )
     @with_comms
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
-    def test_ring_attention_custom_transformer(self) -> None:
+    @parametrize("rotater", [_RotateMethod.ALL_GATHER, _RotateMethod.ALL_TO_ALL])
+    def test_ring_attention_custom_transformer(self, rotater: _RotateMethod) -> None:
+        _cp_options.rotate_method = rotater
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, self.world_size),
@@ -275,7 +333,7 @@ class RingAttentionTest(DTensorTestBase):
             module=model,
             device_mesh=device_mesh,
             parallelize_plan={
-                f"layers.{i}.attention": AttentionContextParallel()
+                f"layers.{i}.attention": _AttentionContextParallel()
                 for i in range(args.n_layers)
             },
         )
@@ -286,118 +344,44 @@ class RingAttentionTest(DTensorTestBase):
 
         with CommDebugMode() as comm_mode:
             out = model(seq)
-        self.assertDictEqual(
-            comm_mode.get_comm_counts(),
-            {
-                c10d_functional.all_to_all_single: (self.world_size - 1)
-                * args.n_layers,
-            },
-        )
+
+        if rotater == _RotateMethod.ALL_TO_ALL:
+            self.assertDictEqual(
+                comm_mode.get_comm_counts(),
+                {
+                    c10d_functional.all_to_all_single: (self.world_size - 1)
+                    * args.n_layers,
+                },
+            )
+        else:
+            self.assertDictEqual(
+                comm_mode.get_comm_counts(),
+                {c10d_functional.all_gather_into_tensor: args.n_layers},
+            )
 
         with CommDebugMode() as comm_mode:
             out.sum().backward()
-        self.assertDictEqual(
-            comm_mode.get_comm_counts(),
-            {
-                c10d_functional.all_to_all_single: (self.world_size - 1)
-                * 2
-                * args.n_layers,
-            },
-        )
 
-    @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
-        "Does not support flash nor efficient attention",
-    )
-    @unittest.skipIf(
-        TEST_CUDA and not TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FLASH_ATTENTION,
-        "Does not support flash attention",
-    )  # On CUDA (not ROCM) platform, the UT is skipped if no FA support (even if ME may get supported)
-    @with_comms
-    @parametrize(
-        "attention_fn",
-        [
-            _scaled_dot_product_ring_flash_attention
-            if PLATFORM_SUPPORTS_FLASH_ATTENTION
-            else None,
-            _scaled_dot_product_ring_efficient_attention
-            if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION
-            else None,
-            # _scaled_dot_product_ring_cudnn_attention, # TODO: not built by default
-        ],
-    )
-    def test_ring_attention_compile(self, attention_fn: object) -> None:
-        if attention_fn is None:
-            self.skipTest("Unsupported on current platform")
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(0, self.world_size),
-        )
-        dtype = torch.bfloat16
-        bs = 8
-        query_tokens = 8
-        context_tokens = 24
-        dim = 32
-        nheads = 8
-        query = torch.rand(
-            (bs, nheads, self.world_size * query_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        key = torch.rand(
-            (bs, nheads, self.world_size * context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-        )
-        value = torch.rand(
-            (bs, nheads, self.world_size * context_tokens, dim),
-            device=self.device_type,
-            dtype=dtype,
-        )
-
-        query_placement = [Shard(2)]
-        dquery = distribute_tensor(query, device_mesh, query_placement)
-        self.assertEqual(query.shape, (bs, nheads, self.world_size * query_tokens, dim))
-
-        context_placement = [Shard(2)]
-        dkey = distribute_tensor(key, device_mesh, context_placement)
-        dvalue = distribute_tensor(value, device_mesh, context_placement)
-
-        # compiled = attention_fn
-        compiled = torch.compile(attention_fn, fullgraph=True, backend="aot_eager")
-
-        out, lse, *args = compiled(
-            device_mesh.get_group(),
-            dquery.to_local(),
-            dkey.to_local(),
-            dvalue.to_local(),
-        )
-        self.assertEqual(out.shape, (bs, nheads, query_tokens, dim))
-        self.assertIsInstance(lse, torch.Tensor)
-
-        (
-            out_chunk,
-            *others,
-        ) = _scaled_dot_product_chunk_flash_attention(
-            query,
-            key,
-            value,
-            size=self.world_size,
-            is_causal=False,
-        )
-        self.assertEqual(
-            out,
-            out_chunk[
-                :, :, self.rank * query_tokens : (self.rank + 1) * query_tokens, :
-            ],
-        )
-
-        out.sum().backward()
+        if rotater == _RotateMethod.ALL_TO_ALL:
+            self.assertDictEqual(
+                comm_mode.get_comm_counts(),
+                {
+                    c10d_functional.all_to_all_single: (self.world_size * 2 - 1)
+                    * args.n_layers,
+                },
+            )
+        else:
+            self.assertDictEqual(
+                comm_mode.get_comm_counts(),
+                {
+                    c10d_functional.all_gather_into_tensor: args.n_layers,
+                    c10d_functional.all_to_all_single: self.world_size * args.n_layers,
+                },
+            )
 
 
-instantiate_parametrized_tests(RingAttentionTest)
+if backends:
+    instantiate_parametrized_tests(RingAttentionTest)
 
 if __name__ == "__main__":
     run_tests()

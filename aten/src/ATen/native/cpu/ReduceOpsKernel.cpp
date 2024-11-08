@@ -62,11 +62,12 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
     auto* result_data_bytes = data[0];
     const auto* self_data_bytes = data[1];
 
-    for (const auto i C10_UNUSED : c10::irange(n)) {
-      f(
-        (scalar_t*)result_data_bytes, result_dim_stride,
-        (scalar_t*)self_data_bytes, self_dim_stride, init_val
-      );
+    for ([[maybe_unused]] const auto i : c10::irange(n)) {
+      f((scalar_t*)result_data_bytes,
+        result_dim_stride,
+        (scalar_t*)self_data_bytes,
+        self_dim_stride,
+        init_val);
       result_data_bytes += strides[0];
       self_data_bytes += strides[1];
     }
@@ -187,11 +188,10 @@ inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat1
   acc_fvec += data_fvec1 * data_fvec1;
 }
 
-// This reduction accumulates results as the type `acc_t`. By default, when
-// `scalar_t` is complex, `acc_t` is the downgraded real number type.
-// Otherwise, `acc_t` and `scalar_t` are the same type.
-template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>::type, typename out_t=typename scalar_value_type<scalar_t>::type>
+template <typename scalar_t, typename out_t=typename scalar_value_type<scalar_t>::type>
 void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
+  // This reduction accumulates results as the type `acc_t`.
+  using acc_t = at::opmath_type<typename scalar_value_type<scalar_t>::type>;
   if (val == 0.0) {
     binary_kernel_reduce(iter, NormZeroOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == 1.0) {
@@ -210,7 +210,7 @@ void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
 static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     const Scalar& p) {
-  double val;
+  double val = 0;
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();
   } else if (p.isFloatingPoint()) {
@@ -258,19 +258,15 @@ static void norm_kernel_tensor_iterator_impl(
         });
       });
   } else {
-    if (iter.dtype(0) == kHalf) {
-      return norm_kernel_cpu_impl<at::Half, float>(iter, val);
-    } else if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
+    if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      return norm_kernel_cpu_impl<at::Half, float, float>(iter, val);
-    } else if(iter.dtype(0) == kBFloat16) {
-      return norm_kernel_cpu_impl<at::BFloat16, float>(iter, val);
+      return norm_kernel_cpu_impl<at::Half, float>(iter, val);
     } else if (iter.input_dtype() == kBFloat16 && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      return norm_kernel_cpu_impl<at::BFloat16, float, float>(iter, val);
+      return norm_kernel_cpu_impl<at::BFloat16, float>(iter, val);
     }
 
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.input_dtype(), "norm_cpu", [&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kHalf, kBFloat16, kComplexHalf, iter.input_dtype(), "norm_cpu", [&] {
       norm_kernel_cpu_impl<scalar_t>(iter, val);
     });
 
@@ -435,21 +431,21 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 }  // anonymous namespace
 
-REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
-REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
+REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl)
+REGISTER_DISPATCH(prod_stub, &prod_kernel_impl)
 // mean implementation for CPU is in aten/src/ATen/native/ReduceOps.cpp
 // but mean_stub must be defined for CPU as well
-REGISTER_DISPATCH(mean_stub, nullptr);
-REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
-REGISTER_DISPATCH(and_stub, &and_kernel_impl);
-REGISTER_DISPATCH(or_stub, &or_kernel_impl);
-REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
-REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
-REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
-REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
+REGISTER_DISPATCH(mean_stub, nullptr)
+REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl)
+REGISTER_DISPATCH(and_stub, &and_kernel_impl)
+REGISTER_DISPATCH(or_stub, &or_kernel_impl)
+REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl)
+REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl)
+REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl)
+REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl)
 
-REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
-REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
-REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
+REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel)
+REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel)
+REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel)
 
 }  // namespace at::native

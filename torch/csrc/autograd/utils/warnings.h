@@ -4,9 +4,7 @@
 #include <mutex>
 #include <vector>
 
-namespace torch {
-namespace autograd {
-namespace utils {
+namespace torch::autograd::utils {
 
 // Warning handler for multi-threaded contexts. Gather warnings from
 // all threads into a single queue, then process together at the end
@@ -23,6 +21,4 @@ class DelayWarningHandler : public at::WarningHandler {
   std::mutex mutex_;
 };
 
-} // namespace utils
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd::utils

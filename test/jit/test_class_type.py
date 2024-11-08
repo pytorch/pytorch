@@ -962,7 +962,6 @@ class TestClassType(JitTestCase):
             def test():
                 if BadBool():
                     print(1)
-                    pass
 
     def test_init_compiled_first(self):
         @torch.jit.script  # noqa: B903

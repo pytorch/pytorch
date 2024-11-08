@@ -1,10 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/NestedTensorImpl.h>
-#include <ATen/native/nested/NestedTensorFactories.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-namespace at {
-namespace native {
+
+namespace at::native {
 
 static TensorOptions verify_empty_parameters(
     const at::Tensor& self,
@@ -90,11 +89,11 @@ Tensor _to_copy_nested(
     bool non_blocking,
     std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
-      !layout.has_value() || self.layout() == layout.value() || layout.value() == Layout::Jagged,
-      "to(options) doesn't generally support converting to a different layout, "
-      "but for NT we support strided -> jagged conversion, you have ",
+      !layout.has_value() || self.layout() == layout.value(),
+      "to(options) doesn't support converting to a different layout, "
+      "but got self.layout being ",
       self.layout(),
-      " and options.layout is set as ",
+      " and options.layout set as ",
       layout.value());
   auto options =
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
@@ -112,13 +111,9 @@ Tensor _to_copy_nested(
        (options.layout() == c10::kStrided));
 
   Tensor r;
-  auto empty_op_layout = (layout.has_value() && layout.value() == Layout::Jagged) ? Layout::Strided : layout;
-  r = at::empty_like(self, dtype, empty_op_layout, device, pin_out, memory_format);
+  r = at::empty_like(self, dtype, layout, device, pin_out, memory_format);
   get_nested_tensor_impl(r)->get_buffer().copy_(
       get_nested_tensor_impl(self)->get_buffer(), non_blocking);
-  if (layout.has_value() && self.layout() != layout.value() && layout.value() == Layout::Jagged) {
-    return at::_nested_strided_to_jagged(r);
-  }
   return r;
 }
 
@@ -197,6 +192,7 @@ std::vector<at::Tensor> NestedTensor_unbind(
   return result_tensors;
 }
 
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, SymInt length) {
   TORCH_CHECK(dim == 0, "narrow(): only dim=0 supported for nested tensors, but got: ", dim);
   TORCH_SYM_CHECK(length.sym_ge(0), "narrow(): length must be non-negative");
@@ -236,18 +232,16 @@ Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, S
 
 Tensor alias_nested(const Tensor& self) {
   auto* nt_impl = get_nested_tensor_impl(self);
-  const at::Tensor& buffer = nt_impl->get_unsafe_storage_as_tensor();
+  auto buffer = nt_impl->get_unsafe_storage_as_tensor();
   const auto& nested_sizes = nt_impl->get_nested_sizes();
   const auto& nested_strides = nt_impl->get_nested_strides();
   const auto& storage_offsets = nt_impl->get_storage_offsets();
   return at::detail::make_tensor<NestedTensorImpl>(
       c10::TensorImpl::VIEW,
       std::move(buffer),
-      std::move(nested_sizes),
-      std::move(nested_strides),
-      std::move(storage_offsets));
+      nested_sizes,
+      nested_strides,
+      storage_offsets);
 }
 
-
-} // namespace native
-} // namespace at
+} // namespace at::native

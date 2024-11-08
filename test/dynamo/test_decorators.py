@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import functools
+import operator
 import os
 import unittest.mock as mock
 from unittest.mock import patch
@@ -8,6 +9,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import IncorrectUsage
+from torch._dynamo.utils import counters
 
 
 def my_custom_function(x):
@@ -244,6 +246,60 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         opt_fn(torch.randn(4))
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_substitute_in_graph(self):
+        counters.clear()
+
+        # NB: Choose another C function for test when we support operator.indexOf
+        #     out of the box
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = operator.indexOf
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 1)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        with self.assertRaisesRegex(TypeError, "Signature mismatch"):
+
+            @torch._dynamo.substitute_in_graph(operator.indexOf)
+            def _(sequence, x):
+                for i, item in enumerate(sequence):
+                    if item is x or item == x:
+                        return i
+                raise ValueError("sequence.index(x): x not in sequence")
+
+        @torch._dynamo.substitute_in_graph(operator.indexOf)
+        def polyfill(a, b):
+            for i, item in enumerate(a):
+                if item is b or item == b:
+                    return i
+            raise ValueError("sequence.index(x): x not in sequence")
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = operator.indexOf
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        fn = polyfill
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        out = fn([1, 2, 3, 4, 5], 3)
+        opt_out = opt_fn([1, 2, 3, 4, 5], 3)
+        self.assertEqual(out, opt_out)
+        self.assertEqual(cnts.frame_count, 0)
+        self.assertEqual(len(counters["graph_break"]), 0)
 
     @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_nested_disable_decorator(self):
@@ -540,6 +596,229 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         x = torch.tensor(1)
 
         self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
+    def test_mark_static_nn_module(self):
+        @torch._dynamo.mark_static
+        class Mock(torch.nn.Module):
+            def __init__(self, c):
+                super().__init__()
+                self.c = c
+
+            def forward(self, x):
+                return x * self.c
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        mod1 = Mock(10)
+        mod2 = Mock(20)
+        mod3 = Mock(30)
+        opt_mod1 = torch.compile(mod1, backend=cnts, fullgraph=True)
+        opt_mod2 = torch.compile(mod2, backend=cnts, fullgraph=True)
+        opt_mod3 = torch.compile(mod3, backend=cnts, fullgraph=True)
+
+        x = torch.randn(4, 4)
+        opt_mod1(x)
+        opt_mod2(x)
+        opt_mod3(x)
+
+        # Must be 3 compilations. If not marked static there would be 2, because self.c would be converted to symints.
+        self.assertEqual(cnts.frame_count, 3)
+
+    def test_set_stance_force_eager(self):
+        @torch.compile(backend="eager")
+        def a(x):
+            if torch._dynamo.is_compiling():
+                return x + 1
+            return x + 2
+
+        @torch.compiler.set_stance("force_eager")
+        def b(x):
+            return a(x)
+
+        def c(x):
+            out0 = a(x)
+            with torch.compiler.set_stance("force_eager"):
+                out1 = a(x)
+            return out0, out1, a(x)
+
+        inp = torch.ones(3)
+        # test that decorating b has no overall side effect
+        self.assertEqual(a(inp), inp + 1)
+
+        self.assertEqual(b(inp), inp + 2)
+        self.assertEqual(c(inp), (inp + 1, inp + 2, inp + 1))
+
+        torch.compiler.set_stance("force_eager")
+        self.assertEqual(a(inp), inp + 2)
+        torch.compiler.set_stance("default")
+        self.assertEqual(a(inp), inp + 1)
+
+    def test_set_stance_eager_on_recompile(self):
+        @torch.compile(backend="eager", dynamic=False)
+        def a(x, n):
+            if torch._dynamo.is_compiling():
+                return x + n + 1
+            return x + n + 2
+
+        inp = torch.ones(3)
+        out1 = a(inp, 1)
+        with torch.compiler.set_stance("eager_on_recompile"):
+            out2 = a(inp, 1)
+            out3 = a(inp, 2)
+
+        self.assertEqual(out1, inp + 2)
+        self.assertEqual(out2, inp + 2)
+        self.assertEqual(out3, inp + 4)
+
+    def test_set_stance_fail_on_recompile(self):
+        @torch.compile(backend="eager", dynamic=False)
+        def a(x, n):
+            if torch._dynamo.is_compiling():
+                return x + n + 1
+            return x + n + 2
+
+        inp = torch.ones(3)
+        out1 = a(inp, 1)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            out2 = a(inp, 1)
+            with self.assertRaisesRegex(RuntimeError, "fail_on_recompile"):
+                a(inp, 2)
+
+        self.assertEqual(out1, inp + 2)
+        self.assertEqual(out2, inp + 2)
+
+    def test_set_stance_fail_on_recompile_with_disable(self):
+        @torch.compiler.disable
+        def inner(x):
+            return x
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return inner(x)
+
+        f(torch.randn(3, 3))
+        # should not raise error
+        with torch.compiler.set_stance("fail_on_recompile"):
+            f(torch.randn(3, 3))
+
+    def test_set_stance_forbid_in_graph(self):
+        @torch.compiler.set_stance("force_eager")
+        def a(x):
+            return x + 1
+
+        @torch.compile(backend="eager")
+        def b(x):
+            return a(x)
+
+        with self.assertRaisesRegex(
+            AssertionError, "Attempt to trace forbidden callable"
+        ):
+            b(torch.ones(3))
+
+        @torch.compile(backend="eager")
+        def c(x):
+            with torch.compiler.set_stance("force_eager"):
+                return x + 1
+
+        with self.assertRaisesRegex(
+            AssertionError, "Attempt to trace forbidden callable"
+        ):
+            c(torch.ones(3))
+
+        @torch.compile(backend="eager")
+        @torch.compiler.set_stance("force_eager")
+        def d(x):
+            return x + 1
+
+        with self.assertRaisesRegex(
+            AssertionError, "Attempt to trace forbidden callable"
+        ):
+            d(torch.ones(3))
+
+        @torch.compile(backend="eager")
+        def e(x):
+            with torch._dynamo.set_stance("force_eager"):
+                return x + 1
+
+        with self.assertRaisesRegex(
+            AssertionError, "Attempt to trace forbidden callable"
+        ):
+            e(torch.ones(3))
+
+        @torch.compile(backend="eager")
+        def f(x):
+            torch._dynamo.eval_frame._set_stance("force_eager")
+            return x + 1
+
+        with self.assertRaisesRegex(
+            AssertionError, "Attempt to trace forbidden callable"
+        ):
+            f(torch.ones(3))
+
+        @torch.compile(backend="eager")
+        def g(x):
+            # cause a skipped frame
+            try:
+                torch._dynamo.graph_break()
+            except Exception:
+                pass
+            # NOTE: torch._dynamo.is_compiling() will get traced
+            # and return true. torch.compiler.is_compiling() is skipped
+            # and will return false.
+            if torch.compiler.is_compiling():
+                raise RuntimeError("Expect this frame to be skipped")
+            # should not be traced, but eval frame callback is still set
+            with torch.compiler.set_stance("force_eager"):
+                return x + 1
+
+        with self.assertRaisesRegex(RuntimeError, "set_stance in a torch.compile"):
+            g(torch.ones(3))
+
+    def test_set_stance_force_backend(self):
+        @torch.compile
+        def a(x):
+            return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compiler.set_stance("default", force_backend=cnts)
+        def b(x):
+            return a(x)
+
+        b(torch.ones(3))
+
+        self.assertEqual(cnts.frame_count, 1)
+
+        @torch.compiler.set_stance("default", force_backend="eager")
+        def c(x):
+            return a(x)
+
+        # just make sure this doesn't crash
+        c(torch.ones(3))
+
+        with self.assertRaisesRegex(RuntimeError, "force_backend"):
+
+            @torch.compiler.set_stance("force_eager", force_backend="eager")
+            def d(x):
+                pass
+
+    def test_set_stance_force_backend_with_disable(self):
+        @torch.compiler.disable
+        def inner(x):
+            return x
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return inner(x)
+
+        f(torch.randn(3, 3))
+
+        def fail_backend(gm, ex):
+            raise RuntimeError("fail!")
+
+        # should not raise error
+        with torch.compiler.set_stance("default", force_backend=fail_backend):
+            f(torch.randn(3, 3))
 
 
 if __name__ == "__main__":

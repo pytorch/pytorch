@@ -4,19 +4,7 @@ import inspect
 import logging
 import weakref
 from contextlib import contextmanager
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Sequence,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -314,32 +302,18 @@ class CustomOpDef:
                 if device_type not in self._backend_fns:
 
                     def backend_impl(*args, **kwargs):
-                        # Checks the assumption that outputs cannot alias
-                        # inputs or other outputs.
-                        storages = {
-                            id(tensor.untyped_storage())
-                            for tensor in iter_tensors(args, kwargs)
-                        }
-
                         result = self._backend_fns[device_type](*args, **kwargs)
 
-                        tuple_result = result
-                        if not isinstance(result, tuple):
-                            tuple_result = (result,)
-                        for tensor in iter_tensors(tuple_result, {}):
-                            key = id(tensor.untyped_storage())
-                            if id(tensor.untyped_storage()) in storages:
-                                fn = self._backend_fns[device_type]
-                                module = inspect.getmodule(fn)
-                                raise RuntimeError(
-                                    f"Tensors returned from custom ops (1) must not "
-                                    f"be inputs to the custom op and (2) may not alias "
-                                    f"any inputs or other returns. Please clone the "
-                                    f"the offending output tensors (e.g. output.clone()) "
-                                    f"or refactor your code. "
-                                    f"Offending op: {self._name} (with implementation in {module})"
-                                )
-                            storages.add(key)
+                        def get_module():
+                            fn = self._backend_fns[device_type]
+                            return inspect.getmodule(fn)
+
+                        utils.check_aliasing_constraint(
+                            self._name,
+                            utils.iter_tensors(args, kwargs),
+                            result,
+                            get_module,
+                        )
                         return result
 
                     if device_type is None:
@@ -355,6 +329,7 @@ class CustomOpDef:
 
                 # Wrap function to choose between the default implementation or the device-specific
                 # implementation depending on if the kernel is disabled.
+                @torch._disable_dynamo
                 def wrapped_fn(*args, **kwargs):
                     if device_type in self._disabled_kernel:
                         return self._init_fn(*args, **kwargs)
@@ -578,6 +553,10 @@ class CustomOpDef:
         self._setup_context_fn = setup_context
 
     def _register_to_dispatcher(self) -> None:
+        if torch._running_with_deploy():
+            utils.warn_deploy(stacklevel=5)
+            return
+
         lib = self._lib
         schema_str = self._name + self._schema
         cpp_schema = _C.parse_schema(schema_str)
@@ -615,19 +594,13 @@ class CustomOpDef:
 
         schema = self._opoverload._schema
         if schema.is_mutable:
+            mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
 
             def adinplaceorview_impl(keyset, *args, **kwargs):
-                for arg, val in utils.zip_schema(schema, args, kwargs):
-                    if not arg.alias_info:
-                        continue
-                    if not arg.alias_info.is_write:
-                        continue
-                    if isinstance(val, Tensor):
-                        torch.autograd.graph.increment_version(val)
-                    elif isinstance(val, (tuple, list)):
-                        for v in val:
-                            if isinstance(v, Tensor):
-                                torch.autograd.graph.increment_version(v)
+                for idx in mutated_idxs:
+                    increment_version(args[idx])
+                for key in mutated_keys:
+                    increment_version(kwargs[key])
                 with _C._AutoDispatchBelowADInplaceOrView():
                     return self._opoverload.redispatch(
                         keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
@@ -761,6 +734,15 @@ class CustomOpDef:
             return register(func)
 
 
+def increment_version(val: Any) -> None:
+    if isinstance(val, Tensor):
+        torch.autograd.graph.increment_version(val)
+    elif isinstance(val, (tuple, list)):
+        for v in val:
+            if isinstance(v, Tensor):
+                torch.autograd.graph.increment_version(v)
+
+
 # NOTE: [Supporting decorator and non-decorator usage]
 #
 # Some APIs may be both used as a decorator and not as a decorator.
@@ -800,21 +782,6 @@ def get_library_allowing_overwrite(
     lib = torch.library.Library(namespace, "FRAGMENT")  # noqa: TOR901
     OPDEF_TO_LIB[qualname] = lib
     return lib
-
-
-def iter_tensors(
-    args: Tuple[Any], kwargs: Dict[str, Any], allowed_nesting: int = 1
-) -> Iterator[Tensor]:
-    def check(arg):
-        if isinstance(arg, Tensor):
-            yield arg
-        elif allowed_nesting > 0 and isinstance(arg, (tuple, list)):
-            yield from iter_tensors(tuple(arg), {}, allowed_nesting - 1)
-
-    for arg in args:
-        yield from check(arg)
-    for kwarg in kwargs.values():
-        yield from check(kwarg)
 
 
 def _maybe_get_opdef(

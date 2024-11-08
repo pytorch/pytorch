@@ -838,6 +838,32 @@ class TestConverter(TestCase):
                 orig_m(*inp),
             )
 
+    def test_convert_if_duplicate_attr_names(self):
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.w = 1
+                self.h = 2
+
+            def forward(self, x: torch.Tensor, y: int):
+                self.w = self.w * 10
+                self.h = self.h * 20
+
+                if y > 10:
+                    res = self.w + x
+                else:
+                    res = self.h + x
+
+                if y < 10:
+                    res = self.w + res
+                else:
+                    res = self.h + res
+
+                return res
+
+        inp = (torch.ones(3), 5)
+        self._check_equal_ts_ep_converter(M(), inp, option=["script"])
+
     def test_ts2ep_converter_contains(self):
         class MIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
@@ -1389,7 +1415,6 @@ class TestConverter(TestCase):
                 torch.ao.quantization.fuse_modules(
                     self, [["conv2", "relu"]], inplace=True
                 )
-                pass
 
         with override_quantized_engine("qnnpack"):
             model = Standalone()
@@ -1410,6 +1435,23 @@ class TestConverter(TestCase):
             orig_out, _ = pytree.tree_flatten(original_ts_model(*inp))
             ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
             self._check_tensor_list_equal(orig_out, ep_out)
+
+    def test_ts2ep_convert_quantized_model_with_opcontext(self):
+        class M(torch.nn.Module):
+            def __init__(self, linear_op):
+                super().__init__()
+                self.linear_op = linear_op
+
+            def forward(self, x):
+                x = torch.ops.prepacked.linear_clamp_run(x, self.linear_op)
+                return x
+
+        linear_op = torch.ops.prepacked.linear_clamp_prepack(
+            torch.randn(10, 10), torch.randn(10)
+        )
+        m = M(linear_op)
+        inp = (torch.randn(1, 10),)
+        self._check_equal_ts_ep_converter(m, inp, ["script"])
 
 
 if __name__ == "__main__":

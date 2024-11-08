@@ -104,3 +104,16 @@ class LearnedHeuristicController:
             if heuristic.check_precondition(self.metadata, self.context):
                 return heuristic.get_decision(self.context, self.metadata.choices)
         return None
+
+    def get_decisions_ranked(self, top_k: int) -> Optional[List[Choice]]:
+        heuristics = self.get_heuristics(self.metadata.name)
+        for heuristic in heuristics:
+            if heuristic.check_precondition(self.metadata, self.context):
+                choices = heuristic.get_decisions_ranked(self.context)
+                if choices is None:
+                    return None
+                avail_choices = [
+                    choice for choice in choices if choice in self.metadata.choices
+                ]
+                return avail_choices[:top_k]
+        return None

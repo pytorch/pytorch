@@ -1,24 +1,27 @@
 # mypy: allow-untyped-defs
+import _operator
+import itertools
+from collections import defaultdict
+from enum import Enum
+from typing import Dict, Set
+
 import torch
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
-from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
-from torch.utils._pytree import tree_map_only
-from torch.utils import _pytree as pytree
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch.utils import _pytree as pytree
+from torch.utils._pytree import tree_map_only
 
-import _operator
-from enum import Enum
-import itertools
-from typing import Set, Dict
-from collections import defaultdict
 
-__all__ = ['reinplace']
+__all__ = ["reinplace"]
+
 
 class _ViewType(Enum):
     NonView = 0
     SingleOutputView = 1
     MultiOutputView = 2
+
 
 def _is_view_op(tgt):
     if tgt is not None and isinstance(tgt, torch._ops.OpOverload):
@@ -26,7 +29,10 @@ def _is_view_op(tgt):
         if len(schema.arguments) > 0:
             first_arg = schema.arguments[0]
             # check if op is a view
-            return first_arg.alias_info is not None and not first_arg.alias_info.is_write
+            return (
+                first_arg.alias_info is not None and not first_arg.alias_info.is_write
+            )
+
 
 def _get_view_type(tgt) -> _ViewType:
     if tgt is not None and isinstance(tgt, torch._ops.OpOverload):
@@ -36,7 +42,7 @@ def _get_view_type(tgt) -> _ViewType:
             # check if op is a view
             if first_arg.alias_info is not None and not first_arg.alias_info.is_write:
                 # check if op is a multi-output view
-                if '*' in first_arg.alias_info.after_set:
+                if "*" in first_arg.alias_info.after_set:
                     return _ViewType.MultiOutputView
                 else:
                     return _ViewType.SingleOutputView
@@ -54,12 +60,11 @@ def _get_view_type(tgt) -> _ViewType:
 #   to sanity check that our aliasing information is correct.
 @compatibility(is_backward_compatible=False)
 class _FunctionalizationMetadataProp(torch.fx.Interpreter):
-
     def run_node(self, node: Node):
         self.node_counter += 1
         result = super().run_node(node)
-        node.meta['fake_result'] = result
-        node.meta['node_idx'] = self.node_counter
+        node.meta["fake_result"] = result
+        node.meta["node_idx"] = self.node_counter
 
         # (1) Update metadata with the list of nodes that are used by this node
         # copy_() doesn't read from its first argument; it writes to it, overwriting previous data.
@@ -69,11 +74,11 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
             node_args = node_args[1:]
 
         # (2) Update metadata to track aliasing information about view tensor nodes.
-        if node.op == 'call_function':
+        if node.op == "call_function":
             view_type = _get_view_type(node.target)
             if view_type == _ViewType.SingleOutputView:
                 assert isinstance(node.args[0], Node)
-                node.meta['view_of'] = node.args[0]
+                node.meta["view_of"] = node.args[0]
             elif view_type == _ViewType.MultiOutputView:
                 self.multi_output_view_nodes[node] = node.args[0]
 
@@ -95,37 +100,51 @@ class _FunctionalizationMetadataProp(torch.fx.Interpreter):
                     # Note: we could also track indexing info here for multi-output views.
                     # I don't think this metadata is strictly needed for de-functionalization.
                     assert isinstance(maybe_base_of_view, Node)
-                    node.meta['view_of'] = maybe_base_of_view
+                    node.meta["view_of"] = maybe_base_of_view
 
-        if 'view_of' in node.meta:
+        if "view_of" in node.meta:
             # We're linking the current node with its first argument as views.
             # Assert here that this is actually the case, and their storages are the same.
-            assert isinstance(node.meta['fake_result'], FakeTensor)
-            assert isinstance(node.meta['view_of'].meta['fake_result'], FakeTensor)
-            view_storage = StorageWeakRef(node.meta['fake_result']._typed_storage())
-            base_storage = StorageWeakRef(node.meta['view_of'].meta['fake_result']._typed_storage())
+            assert isinstance(node.meta["fake_result"], FakeTensor)
+            assert isinstance(node.meta["view_of"].meta["fake_result"], FakeTensor)
+            view_storage = StorageWeakRef(node.meta["fake_result"]._typed_storage())
+            base_storage = StorageWeakRef(
+                node.meta["view_of"].meta["fake_result"]._typed_storage()
+            )
             assert view_storage == base_storage
         return result
-
-
 
     def propagate(self, *args):
         self.multi_output_view_nodes = {}
         self.node_counter = -1
 
         with FakeTensorMode() as mode:
-            fake_args = [mode.from_tensor(a) for a in args]
+            fake_args = [
+                mode.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args
+            ]
             return super().run(*fake_args)
 
+
 def _schemas_match(functional_schema, inplace_schema):
-    names_match = inplace_schema.name.endswith("_") and inplace_schema.name[:-1] == functional_schema.name
-    arg_types_match = len(functional_schema.arguments) == len(inplace_schema.arguments) and all(
-        a1.type == a2.type for a1, a2 in zip(functional_schema.arguments, inplace_schema.arguments))
+    names_match = (
+        inplace_schema.name.endswith("_")
+        and inplace_schema.name[:-1] == functional_schema.name
+    )
+    arg_types_match = len(functional_schema.arguments) == len(
+        inplace_schema.arguments
+    ) and all(
+        a1.type == a2.type
+        for a1, a2 in zip(functional_schema.arguments, inplace_schema.arguments)
+    )
     # for the inplace op, its first argument should be mutable
-    assert inplace_schema.arguments[0].alias_info is not None and inplace_schema.arguments[0].alias_info.is_write
+    assert (
+        inplace_schema.arguments[0].alias_info is not None
+        and inplace_schema.arguments[0].alias_info.is_write
+    )
     # and its remaining arguments shouldn't be.
     assert all(a.alias_info is None for a in inplace_schema.arguments[1:])
     return names_match and arg_types_match
+
 
 # TODO: this should be beefed up to be able to properly re-inplace with:
 # - mutating ops (e.g. _fused_moving_avg_obs_fq_helper)
@@ -143,17 +162,20 @@ def _maybe_get_inplace_op(op):
     op_namespace = op.__module__.split(".")[-1]
     op_base_name = op.overloadpacket.__name__
     maybe_namespace_module = getattr(torch.ops, op_namespace)
-    maybe_inplace_op = None if maybe_namespace_module is None else getattr(maybe_namespace_module, f'{op_base_name}_', None)
+    maybe_inplace_op = (
+        None
+        if maybe_namespace_module is None
+        else getattr(maybe_namespace_module, f"{op_base_name}_", None)
+    )
     if maybe_inplace_op is None:
         return None
 
     inplace_overloads = [
-        getattr(maybe_inplace_op, overload_name) for overload_name in maybe_inplace_op.overloads()
+        getattr(maybe_inplace_op, overload_name)
+        for overload_name in maybe_inplace_op.overloads()
     ]
     inplace_overloads_with_matching_schemas = [
-        f
-        for f in inplace_overloads
-        if _schemas_match(op._schema, f._schema)
+        f for f in inplace_overloads if _schemas_match(op._schema, f._schema)
     ]
     # Just because foo() and foo_() are both existing operators,
     # They aren't guaranteed to have compatible schemas.
@@ -165,12 +187,14 @@ def _maybe_get_inplace_op(op):
     inplace_op = inplace_overloads_with_matching_schemas[0]
     return inplace_op
 
+
 _VIEW_INVERSE_MAP = {
     torch.ops.aten.diagonal_scatter.default: torch.ops.aten.diagonal.default,
     torch.ops.aten.select_scatter.default: torch.ops.aten.select.int,
     torch.ops.aten.slice_scatter.default: torch.ops.aten.slice.Tensor,
     torch.ops.aten.as_strided_scatter.default: torch.ops.aten.as_strided.default,
 }
+
 
 # This function, given a set of set of (aliased) tensor nodes,
 # Returns any nodes in the graph that *use* any of the aliases, that occur *after* op_index
@@ -186,16 +210,20 @@ def _get_all_later_node_usages(tensor_aliases: Set[Node], op_index: int):
         usage_nodes = t.users
         for n in usage_nodes:
             # We only care about usages after the current node
-            if 'node_idx' not in n.meta or n.meta['node_idx'] <= op_index:
+            if "node_idx" not in n.meta or n.meta["node_idx"] <= op_index:
                 continue
             # We also don't care about intermediate view ops.
             # They only matter if their output is then used elsewhere
             # (either in an out-of-place op, or as an output to the function).
             if n in tensor_aliases:
-                if isinstance(n.target, torch._ops.OpOverload) or n.target == _operator.getitem:
+                if (
+                    isinstance(n.target, torch._ops.OpOverload)
+                    or n.target == _operator.getitem
+                ):
                     continue
             nodes_used_after.add(n)
     return nodes_used_after
+
 
 # Given an op that we're trying to re-inplace, "b = foo(a)",
 # And given a {view}_scatter op that shows up later in the graph, "y = {view}_scatter(base, x, args...)"
@@ -204,23 +232,27 @@ def _get_all_later_node_usages(tensor_aliases: Set[Node], op_index: int):
 # (1) The base of "alias", "alias_base", has the same size/stride/offset metadata as "base"
 # (2) The output of running {view}(alias, args...) gives you the same size/stride/offset metadata
 #     as "alias"
-def _get_view_inverse_node_usages(later_node_usages: Set[Node], self_aliases: Set[Node]) -> Set[Node]:
+def _get_view_inverse_node_usages(
+    later_node_usages: Set[Node], self_aliases: Set[Node]
+) -> Set[Node]:
     def matching_view_metadata(a, b):
-        return a.size() == b.size() and \
-            a.stride() == b.stride() and \
-            a.storage_offset() == b.storage_offset()
+        return (
+            a.size() == b.size()
+            and a.stride() == b.stride()
+            and a.storage_offset() == b.storage_offset()
+        )
 
     view_inverse_nodes = set()
     # Go through them in node order, so we can see chains of view_scatter ops.
-    for n in sorted(later_node_usages, key=lambda x: x.meta['node_idx']):
+    for n in sorted(later_node_usages, key=lambda x: x.meta["node_idx"]):
         if n.target not in _VIEW_INVERSE_MAP:
             continue
         base = n.args[0]
         mutated_view = n.args[1]
         assert isinstance(base, Node)
-        assert isinstance(base.meta['fake_result'], FakeTensor)
+        assert isinstance(base.meta["fake_result"], FakeTensor)
         assert isinstance(mutated_view, Node)
-        assert isinstance(mutated_view.meta['fake_result'], FakeTensor)
+        assert isinstance(mutated_view.meta["fake_result"], FakeTensor)
         # Check that this view_inverse op actually corresponds to taking doing the inverse
         # of one of our existing self_alias nodes.
         original_view = _VIEW_INVERSE_MAP[n.target]
@@ -229,18 +261,21 @@ def _get_view_inverse_node_usages(later_node_usages: Set[Node], self_aliases: Se
             # that was created from some op `alias = foo(base, args...)`
             # such that the current _scatter op "inverts" that foo call.
             # We can check that by running the original op again, and checking that the strides match.
-            if 'view_of' not in self_alias.meta:
+            if "view_of" not in self_alias.meta:
                 continue
-            self_alias_base = self_alias.meta['view_of']
+            self_alias_base = self_alias.meta["view_of"]
             try:
                 # The we're trying to re-use the args from the view_scatter call inside of the corresponding
                 # view op, which might throw. This just indicates that view_scatter op isn't a valid inverse
                 # of the current alias we're looking at.
-                view_replay_metadata = original_view(self_alias_base.meta['fake_result'], *n.args[2:], **n.kwargs)
-                expected_metadata = self_alias.meta['fake_result']
+                view_replay_metadata = original_view(
+                    self_alias_base.meta["fake_result"], *n.args[2:], **n.kwargs
+                )
+                expected_metadata = self_alias.meta["fake_result"]
                 # If the alias and its base both have matching metadata, then this view_scatter op is valid to re-inplace.
-                if matching_view_metadata(self_alias_base.meta['fake_result'], base.meta['fake_result']) and \
-                        matching_view_metadata(view_replay_metadata, expected_metadata):
+                if matching_view_metadata(
+                    self_alias_base.meta["fake_result"], base.meta["fake_result"]
+                ) and matching_view_metadata(view_replay_metadata, expected_metadata):
                     view_inverse_nodes.add(n)
             except Exception:
                 continue
@@ -471,26 +506,29 @@ def reinplace(gm, *sample_args):
     # NOTE: later, we'll need to add an optimization for fully recovering performance
     # on programs that mutate inputs.
     input_storages = {
-        StorageWeakRef(
-            node.meta['fake_result']._typed_storage()
-        ) for node in gm.graph.nodes if node.op == 'placeholder'}
-
+        StorageWeakRef(node.meta["fake_result"]._typed_storage())
+        for node in gm.graph.nodes
+        if (
+            node.op == "placeholder"
+            and isinstance(node.meta["fake_result"], torch.Tensor)
+        )
+    }
 
     # We also need to know for a given node, what are all of its aliasing nodes.
     storage_to_nodes: Dict[StorageWeakRef, Set[Node]] = defaultdict(set)
     for n in gm.graph.nodes:
-        if 'fake_result' in n.meta:
+        if "fake_result" in n.meta:
             # Tree-mapping because some ops can return lists of tensors.
             def _add_to_map(x):
                 if isinstance(x, FakeTensor):
                     storage_to_nodes[StorageWeakRef(x._typed_storage())].add(n)
-            pytree.tree_map_(_add_to_map, n.meta['fake_result'])
+
+            pytree.tree_map_(_add_to_map, n.meta["fake_result"])
 
     # inplace-ify functional ops, subject to the constraints written below.
     all_later_view_inverse_nodes_to_delete = set()
-    for idx, node in enumerate(gm.graph.nodes):
-        if node.op == 'call_function':
-
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
             # Today, the re-inplace pass on directly acts on:
             # - functional ops with an inplace variant
             # - {view}_scatter ops that can be potentially removed from the graph.
@@ -513,8 +551,8 @@ def reinplace(gm, *sample_args):
             # (We could potentially swizzle this into larger_tensor.add_(scalar_tensor),
             # this is probably an optimization to revisit later).
             self_arg = node.args[0]
-            self_flattened = pytree.tree_leaves(self_arg.meta['fake_result'])
-            node_flattened = pytree.tree_leaves(node.meta['fake_result'])
+            self_flattened = pytree.tree_leaves(self_arg.meta["fake_result"])
+            node_flattened = pytree.tree_leaves(node.meta["fake_result"])
             self_has_wrong_metadata = False
             if len(self_flattened) == len(node_flattened):
                 for self_meta, node_meta in zip(self_flattened, node_flattened):
@@ -533,8 +571,9 @@ def reinplace(gm, *sample_args):
                 continue
 
             # Step 1b: ensure that the op we're trying to re-inplace isn't a program input
-            self_arg_name = self_arg.name
-            self_arg_storage = StorageWeakRef(self_arg.meta['fake_result']._typed_storage())
+            self_arg_storage = StorageWeakRef(
+                self_arg.meta["fake_result"]._typed_storage()
+            )
             if self_arg_storage in input_storages:
                 # TODO: later, add the optimization for handling `copy_()` calls in the graph.
                 continue
@@ -544,14 +583,20 @@ def reinplace(gm, *sample_args):
                 # so we prevent re-inplacing in this case.
                 continue
 
-            self_arg_storage = StorageWeakRef(self_arg.meta['fake_result']._typed_storage())
+            self_arg_storage = StorageWeakRef(
+                self_arg.meta["fake_result"]._typed_storage()
+            )
             self_aliases = storage_to_nodes[self_arg_storage]
 
             # First, we find all later usages of any of the aliases of self_arg.
-            later_node_usages = _get_all_later_node_usages(self_aliases, node.meta['node_idx'])
+            later_node_usages = _get_all_later_node_usages(
+                self_aliases, node.meta["node_idx"]
+            )
             # Then, we check if any of those later usages are actually view_scatter ops
             # that are safe to fully remove.
-            later_view_inverse_node_usages = _get_view_inverse_node_usages(later_node_usages, self_aliases)
+            later_view_inverse_node_usages = _get_view_inverse_node_usages(
+                later_node_usages, self_aliases
+            )
 
             # Step 2: Check to see if the input to the op is re-used later in the graph.
             # If not (same goes for its aliases), then this op is safe to re-in place.
@@ -567,7 +612,10 @@ def reinplace(gm, *sample_args):
             # we would prefer to remove it from the graph entirely,
             # and instead copy_() the slice directly into the larger tensor.
             # See the description of the algorithm for a full example.
-            if node.target in _VIEW_INVERSE_MAP and node not in all_later_view_inverse_nodes_to_delete:
+            if (
+                node.target in _VIEW_INVERSE_MAP
+                and node not in all_later_view_inverse_nodes_to_delete
+            ):
                 view_op = _VIEW_INVERSE_MAP[node.target]
                 # Before:
                 #   base_updated = torch.ops.aten.slice_scatter.default(base, mutated_slice, args...)
@@ -578,12 +626,22 @@ def reinplace(gm, *sample_args):
                     mutated_slice_node = node.args[1]
                     remaining_slice_args = node.args[2:]
                     slice_node = gm.graph.create_node(
-                        'call_function', view_op, (self_arg,) + tuple(remaining_slice_args), node.kwargs)
-                    copy_node = gm.graph.create_node(
-                        'call_function', torch.ops.aten.copy_.default, (slice_node, mutated_slice_node,), {})
+                        "call_function",
+                        view_op,
+                        (self_arg,) + tuple(remaining_slice_args),
+                        node.kwargs,
+                    )
+                    gm.graph.create_node(
+                        "call_function",
+                        torch.ops.aten.copy_.default,
+                        (
+                            slice_node,
+                            mutated_slice_node,
+                        ),
+                        {},
+                    )
                 # Add the slice_scatter node to our "nodes to delete" list.
                 all_later_view_inverse_nodes_to_delete.add(node)
-
 
             else:
                 # Step 3b: Check to see if this operator has an inplace variant.
@@ -599,22 +657,30 @@ def reinplace(gm, *sample_args):
             # Hmm... morally I think we also want to keep the `fake_result` metadata
             # up to date here, but I'm not sure how easy it is to do.
             # Maybe it's fine to wait until the end of the pass to update it.
-            curr_node_storage = StorageWeakRef(node.meta['fake_result']._typed_storage())
-            storage_to_nodes[self_arg_storage].update(storage_to_nodes[curr_node_storage])
-            storage_to_nodes[curr_node_storage].update(storage_to_nodes[self_arg_storage])
+            curr_node_storage = StorageWeakRef(
+                node.meta["fake_result"]._typed_storage()
+            )
+            storage_to_nodes[self_arg_storage].update(
+                storage_to_nodes[curr_node_storage]
+            )
+            storage_to_nodes[curr_node_storage].update(
+                storage_to_nodes[self_arg_storage]
+            )
 
             # Need to remember the view_scatter view nodes we found so we can remove them alter.
-            all_later_view_inverse_nodes_to_delete.update(later_view_inverse_node_usages)
+            all_later_view_inverse_nodes_to_delete.update(
+                later_view_inverse_node_usages
+            )
 
             # Step 4:
             # Now that we've replaced b = a.foo() with a.foo_(),
             # We need to replace any later usages of "b" with "a"
             for old in itertools.chain([node], later_view_inverse_node_usages):
                 new = old.args[0]
-                nodes_to_update = [n for n in old.users if n.meta['node_idx'] > node.meta['node_idx']]
+                nodes_to_update = [
+                    n for n in old.users if n.meta["node_idx"] > node.meta["node_idx"]
+                ]
                 for node_to_update in nodes_to_update:
-                    new_args = []
-                    args = node_to_update.args
 
                     def replace_arg(a):
                         if a == old:
@@ -622,21 +688,29 @@ def reinplace(gm, *sample_args):
                         return a
 
                     # First, replace usages of "b" with "a"
-                    node_to_update.args = tree_map_only(Node, replace_arg, node_to_update.args)
-                    node_to_update.kwargs = tree_map_only(Node, replace_arg, node_to_update.kwargs)
+                    node_to_update.args = tree_map_only(
+                        Node, replace_arg, node_to_update.args
+                    )
+                    node_to_update.kwargs = tree_map_only(
+                        Node, replace_arg, node_to_update.kwargs
+                    )
 
                     # Second, update our storage_to_nodes data structure.
-                    old_flattened_res = pytree.tree_leaves(old.meta['fake_result'])
-                    node_flattened_res = pytree.tree_leaves(node_to_update.meta['fake_result'])
+                    old_flattened_res = pytree.tree_leaves(old.meta["fake_result"])
+                    node_flattened_res = pytree.tree_leaves(
+                        node_to_update.meta["fake_result"]
+                    )
 
                     old_res_storage = {
-                        StorageWeakRef(
-                            x._typed_storage()
-                        ) for x in old_flattened_res if isinstance(x, FakeTensor)}
+                        StorageWeakRef(x._typed_storage())
+                        for x in old_flattened_res
+                        if isinstance(x, FakeTensor)
+                    }
                     node_res_storage = {
-                        StorageWeakRef(
-                            x._typed_storage()
-                        ) for x in node_flattened_res if isinstance(x, FakeTensor)}
+                        StorageWeakRef(x._typed_storage())
+                        for x in node_flattened_res
+                        if isinstance(x, FakeTensor)
+                    }
 
                     # This will happen if we're updating a view op, e.g.
                     # e.g. replacing
@@ -648,14 +722,18 @@ def reinplace(gm, *sample_args):
                     # We're checking for len(...) == 1 here because all view ops are guaranteed to return either a single tensor,
                     # or multiple tensors that all share the same storage.
                     # We can't just check equality because we might encounter FX nodes that return zero tensor outputs.
-                    if len(old_res_storage) == 1 and len(node_res_storage) == 1 and old_res_storage == node_res_storage:
-                        new_flattened_res = pytree.tree_leaves(new.meta['fake_result'])
+                    if (
+                        len(old_res_storage) == 1
+                        and len(node_res_storage) == 1
+                        and old_res_storage == node_res_storage
+                    ):
+                        new_flattened_res = pytree.tree_leaves(new.meta["fake_result"])
                         new_res_storage = {
-                            StorageWeakRef(
-                                x._typed_storage()
-                            ) for x in new_flattened_res if isinstance(x, FakeTensor)}
+                            StorageWeakRef(x._typed_storage())
+                            for x in new_flattened_res
+                            if isinstance(x, FakeTensor)
+                        }
                         assert len(new_res_storage) == 1
-                        (old_ref,) = old_res_storage
                         (new_ref,) = new_res_storage
                         (node_ref,) = node_res_storage
                         # Technically, "old_ref" and all its aliases will remain
@@ -670,7 +748,6 @@ def reinplace(gm, *sample_args):
     # to the graph are finished.
     for to_delete in all_later_view_inverse_nodes_to_delete:
         gm.graph.erase_node(to_delete)
-
 
     gm.recompile()
     return gm

@@ -1,19 +1,33 @@
 set(PYTORCH_FOUND_HIP FALSE)
 
-if(NOT DEFINED ENV{ROCM_PATH})
-  set(ROCM_PATH /opt/rocm)
-else()
+# If ROCM_PATH is set, assume intention is to compile with
+# ROCm support and error out if the ROCM_PATH does not exist.
+# Else ROCM_PATH does not exist, assume a default of /opt/rocm
+# In the latter case, if /opt/rocm does not exist emit status
+# message and return.
+if(DEFINED ENV{ROCM_PATH})
   set(ROCM_PATH $ENV{ROCM_PATH})
+  if(NOT EXISTS ${ROCM_PATH})
+    message(FATAL_ERROR
+      "ROCM_PATH environment variable is set to ${ROCM_PATH} but does not exist.\n"
+      "Set a valid ROCM_PATH or unset ROCM_PATH environment variable to fix.")
+  endif()
+else()
+  set(ROCM_PATH /opt/rocm)
+  if(NOT EXISTS ${ROCM_PATH})
+    message(STATUS
+        "ROCM_PATH environment variable is not set and ${ROCM_PATH} does not exist.\n"
+        "Building without ROCm support.")
+    return()
+  endif()
 endif()
+
 if(NOT DEFINED ENV{ROCM_INCLUDE_DIRS})
   set(ROCM_INCLUDE_DIRS ${ROCM_PATH}/include)
 else()
   set(ROCM_INCLUDE_DIRS $ENV{ROCM_INCLUDE_DIRS})
 endif()
 
-if(NOT EXISTS ${ROCM_PATH})
-  return()
-endif()
 
 # MAGMA_HOME
 if(NOT DEFINED ENV{MAGMA_HOME})
@@ -30,7 +44,13 @@ endif()
 message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 
 # Add HIP to the CMAKE Module Path
+# needed because the find_package call to this module uses the Module mode search
+# https://cmake.org/cmake/help/latest/command/find_package.html#search-modes
 set(CMAKE_MODULE_PATH ${ROCM_PATH}/lib/cmake/hip ${CMAKE_MODULE_PATH})
+
+# Add ROCM_PATH to CMAKE_PREFIX_PATH, needed because the find_package
+# call to individual ROCM components uses the Config mode search
+list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
@@ -38,70 +58,46 @@ macro(find_package_and_print_version PACKAGE_NAME)
 endmacro()
 
 # Find the HIP Package
-find_package_and_print_version(HIP 1.0)
+# MODULE argument is added for clarity that CMake is searching
+# for FindHIP.cmake in Module mode
+find_package_and_print_version(HIP 1.0 MODULE)
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
-  set(FOUND_ROCM_VERSION_H FALSE)
-
-  set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
-  set(file "${PROJECT_BINARY_DIR}/detect_rocm_version.cc")
 
   # Find ROCM version for checks
-  # ROCM 5.0 and later will have header api for version management
-  if(EXISTS ${ROCM_INCLUDE_DIRS}/rocm_version.h)
-    set(FOUND_ROCM_VERSION_H TRUE)
-    file(WRITE ${file} ""
-      "#include <rocm_version.h>\n"
-      )
-  elseif(EXISTS ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
-    set(FOUND_ROCM_VERSION_H TRUE)
-    file(WRITE ${file} ""
-      "#include <rocm-core/rocm_version.h>\n"
-      )
+  if(EXISTS ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
+    set(ROCM_HEADER_FILE ${ROCM_INCLUDE_DIRS}/rocm-core/rocm_version.h)
   else()
-    message("********************* rocm_version.h couldnt be found ******************\n")
+    message(FATAL_ERROR "********************* rocm_version.h could not be found ******************\n")
   endif()
 
-  if(FOUND_ROCM_VERSION_H)
-    file(APPEND ${file} ""
-      "#include <cstdio>\n"
+  # Read the ROCM headerfile into a variable
+  file(READ ${ROCM_HEADER_FILE} ROCM_HEADER_CONTENT)
 
-      "#ifndef ROCM_VERSION_PATCH\n"
-      "#define ROCM_VERSION_PATCH 0\n"
-      "#endif\n"
-      "#define STRINGIFYHELPER(x) #x\n"
-      "#define STRINGIFY(x) STRINGIFYHELPER(x)\n"
-      "int main() {\n"
-      "  printf(\"%d.%d.%s\", ROCM_VERSION_MAJOR, ROCM_VERSION_MINOR, STRINGIFY(ROCM_VERSION_PATCH));\n"
-      "  return 0;\n"
-      "}\n"
-      )
+  # Below we use a RegEx to find ROCM version numbers.
+  # Note that CMake does not support \s for blank space. That is
+  # why in the regular expressions below we have a blank space in
+  # the square brackets.
+  # There are three steps:
+  # 1. Match regular expression
+  # 2. Strip the non-numerical part of the string
+  # 3. Strip leading and trailing spaces
+  string(REGEX MATCH "ROCM_VERSION_MAJOR[ ]+[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
+  string(REPLACE "ROCM_VERSION_MAJOR" "" TEMP2 ${TEMP1})
+  string(STRIP ${TEMP2} ROCM_VERSION_DEV_MAJOR)
+  string(REGEX MATCH "ROCM_VERSION_MINOR[ ]+[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
+  string(REPLACE "ROCM_VERSION_MINOR" "" TEMP2 ${TEMP1})
+  string(STRIP ${TEMP2} ROCM_VERSION_DEV_MINOR)
+  string(REGEX MATCH "ROCM_VERSION_PATCH[ ]+[0-9]+" TEMP1 ${ROCM_HEADER_CONTENT})
+  string(REPLACE "ROCM_VERSION_PATCH" "" TEMP2 ${TEMP1})
+  string(STRIP ${TEMP2} ROCM_VERSION_DEV_PATCH)
 
-    try_run(run_result compile_result ${PROJECT_RANDOM_BINARY_DIR} ${file}
-      CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${ROCM_INCLUDE_DIRS}"
-      RUN_OUTPUT_VARIABLE rocm_version_from_header
-      COMPILE_OUTPUT_VARIABLE output_var
-      )
-    # We expect the compile to be successful if the include directory exists.
-    if(NOT compile_result)
-      message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
-    endif()
-    message(STATUS "Caffe2: Header version is: " ${rocm_version_from_header})
-    set(ROCM_VERSION_DEV_RAW ${rocm_version_from_header})
-    message("\n***** ROCm version from rocm_version.h ****\n")
-  endif()
+  # Create ROCM_VERSION_DEV_INT which is later used as a preprocessor macros
+  set(ROCM_VERSION_DEV "${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}.${ROCM_VERSION_DEV_PATCH}")
+  math(EXPR ROCM_VERSION_DEV_INT "(${ROCM_VERSION_DEV_MAJOR}*10000) + (${ROCM_VERSION_DEV_MINOR}*100) + ${ROCM_VERSION_DEV_PATCH}")
 
-  string(REGEX MATCH "^([0-9]+)\.([0-9]+)\.([0-9]+).*$" ROCM_VERSION_DEV_MATCH ${ROCM_VERSION_DEV_RAW})
-
-  if(ROCM_VERSION_DEV_MATCH)
-    set(ROCM_VERSION_DEV_MAJOR ${CMAKE_MATCH_1})
-    set(ROCM_VERSION_DEV_MINOR ${CMAKE_MATCH_2})
-    set(ROCM_VERSION_DEV_PATCH ${CMAKE_MATCH_3})
-    set(ROCM_VERSION_DEV "${ROCM_VERSION_DEV_MAJOR}.${ROCM_VERSION_DEV_MINOR}.${ROCM_VERSION_DEV_PATCH}")
-    math(EXPR ROCM_VERSION_DEV_INT "(${ROCM_VERSION_DEV_MAJOR}*10000) + (${ROCM_VERSION_DEV_MINOR}*100) + ${ROCM_VERSION_DEV_PATCH}")
-  endif()
-
+  message("\n***** ROCm version from rocm_version.h ****\n")
   message("ROCM_VERSION_DEV: ${ROCM_VERSION_DEV}")
   message("ROCM_VERSION_DEV_MAJOR: ${ROCM_VERSION_DEV_MAJOR}")
   message("ROCM_VERSION_DEV_MINOR: ${ROCM_VERSION_DEV_MINOR}")
@@ -113,41 +109,9 @@ if(HIP_FOUND)
   message("HIP_VERSION_MINOR: ${HIP_VERSION_MINOR}")
   message("TORCH_HIP_VERSION: ${TORCH_HIP_VERSION}")
 
-  message("\n***** Library versions from dpkg *****\n")
-  execute_process(COMMAND dpkg -l COMMAND grep rocm-dev COMMAND awk "{print $2 \" VERSION: \" $3}")
-  execute_process(COMMAND dpkg -l COMMAND grep rocm-libs COMMAND awk "{print $2 \" VERSION: \" $3}")
-  execute_process(COMMAND dpkg -l COMMAND grep hsakmt-roct COMMAND awk "{print $2 \" VERSION: \" $3}")
-  execute_process(COMMAND dpkg -l COMMAND grep rocr-dev COMMAND awk "{print $2 \" VERSION: \" $3}")
-  execute_process(COMMAND dpkg -l COMMAND grep -w hcc COMMAND awk "{print $2 \" VERSION: \" $3}")
-  execute_process(COMMAND dpkg -l COMMAND grep hip-base COMMAND awk "{print $2 \" VERSION: \" $3}")
-  execute_process(COMMAND dpkg -l COMMAND grep hip_hcc COMMAND awk "{print $2 \" VERSION: \" $3}")
-
+  # Find ROCM components using Config mode
+  # These components will be searced for recursively in ${ROCM_PATH}
   message("\n***** Library versions from cmake find_package *****\n")
-
-  set(CMAKE_HIP_CLANG_FLAGS_DEBUG ${CMAKE_CXX_FLAGS_DEBUG})
-  set(CMAKE_HIP_CLANG_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
-  ### Remove setting of Flags when FindHIP.CMake PR #558 is accepted.###
-
-  set(hip_DIR ${ROCM_PATH}/lib/cmake/hip)
-  set(hsa-runtime64_DIR ${ROCM_PATH}/lib/cmake/hsa-runtime64)
-  set(AMDDeviceLibs_DIR ${ROCM_PATH}/lib/cmake/AMDDeviceLibs)
-  set(amd_comgr_DIR ${ROCM_PATH}/lib/cmake/amd_comgr)
-  set(rocrand_DIR ${ROCM_PATH}/lib/cmake/rocrand)
-  set(hiprand_DIR ${ROCM_PATH}/lib/cmake/hiprand)
-  set(rocblas_DIR ${ROCM_PATH}/lib/cmake/rocblas)
-  set(hipblas_DIR ${ROCM_PATH}/lib/cmake/hipblas)
-  set(hipblaslt_DIR ${ROCM_PATH}/lib/cmake/hipblaslt)
-  set(miopen_DIR ${ROCM_PATH}/lib/cmake/miopen)
-  set(rocfft_DIR ${ROCM_PATH}/lib/cmake/rocfft)
-  set(hipfft_DIR ${ROCM_PATH}/lib/cmake/hipfft)
-  set(hipsparse_DIR ${ROCM_PATH}/lib/cmake/hipsparse)
-  set(rccl_DIR ${ROCM_PATH}/lib/cmake/rccl)
-  set(rocprim_DIR ${ROCM_PATH}/lib/cmake/rocprim)
-  set(hipcub_DIR ${ROCM_PATH}/lib/cmake/hipcub)
-  set(rocthrust_DIR ${ROCM_PATH}/lib/cmake/rocthrust)
-  set(hipsolver_DIR ${ROCM_PATH}/lib/cmake/hipsolver)
-
-
   find_package_and_print_version(hip REQUIRED)
   find_package_and_print_version(hsa-runtime64 REQUIRED)
   find_package_and_print_version(amd_comgr REQUIRED)
@@ -164,28 +128,13 @@ if(HIP_FOUND)
   find_package_and_print_version(hipcub REQUIRED)
   find_package_and_print_version(rocthrust REQUIRED)
   find_package_and_print_version(hipsolver REQUIRED)
+  find_package_and_print_version(hiprtc REQUIRED)
 
-
-  find_library(PYTORCH_HIP_LIBRARIES amdhip64 HINTS ${ROCM_PATH}/lib)
-  # TODO: miopen_LIBRARIES should return fullpath to the library file,
-  # however currently it's just the lib name
-  if(TARGET ${miopen_LIBRARIES})
-    set(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES})
-  else()
-    find_library(PYTORCH_MIOPEN_LIBRARIES ${miopen_LIBRARIES} HINTS ${ROCM_PATH}/lib)
-  endif()
-  # TODO: rccl_LIBRARIES should return fullpath to the library file,
-  # however currently it's just the lib name
-  if(TARGET ${rccl_LIBRARIES})
-    set(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES})
-  else()
-    find_library(PYTORCH_RCCL_LIBRARIES ${rccl_LIBRARIES} HINTS ${ROCM_PATH}/lib)
-  endif()
-  find_library(ROCM_HIPRTC_LIB hiprtc HINTS ${ROCM_PATH}/lib)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCM_PATH}/lib)
 
   # check whether HIP declares new types
+  set(PROJECT_RANDOM_BINARY_DIR "${PROJECT_BINARY_DIR}")
   set(file "${PROJECT_BINARY_DIR}/hip_new_types.cc")
   file(WRITE ${file} ""
     "#include <hip/library_types.h>\n"

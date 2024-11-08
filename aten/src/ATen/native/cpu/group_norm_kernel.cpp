@@ -85,8 +85,8 @@ void GroupNormKernelImplInternal(
 }
 
 template <typename T>
-typename std::enable_if<std::is_same<T, at::opmath_type<T>>::value,
-  std::tuple<T, T>>::type
+std::enable_if_t<std::is_same_v<T, at::opmath_type<T>>,
+  std::tuple<T, T>>
 ColumnwiseMoments(
     const T* X_data,
     int64_t HxW,
@@ -118,8 +118,8 @@ ColumnwiseMoments(
 
 // std::is_same<T, at::BFloat16> || std::is_same<T, at::Half>
 template <typename T>
-typename std::enable_if<!std::is_same<T, at::opmath_type<T>>::value,
-  std::tuple<at::opmath_type<T>, at::opmath_type<T>>>::type
+std::enable_if_t<!std::is_same_v<T, at::opmath_type<T>>,
+  std::tuple<at::opmath_type<T>, at::opmath_type<T>>>
 ColumnwiseMoments(
     const T* X_data,
     int64_t HxW,
@@ -160,7 +160,7 @@ ColumnwiseMoments(
 }
 
 template <typename T, typename opmath_t>
-inline typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+inline std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 CalcMeanVar(
   const T* X_ptr,
   opmath_t* mean_ptr,
@@ -183,7 +183,7 @@ CalcMeanVar(
 
 // std::is_same<T, at::BFloat16> || std::is_same<T, at::Half>
 template <typename T, typename opmath_t>
-inline typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+inline std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 CalcMeanVar(
   const T* X_ptr,
   opmath_t* mean_ptr,
@@ -227,7 +227,7 @@ CalcMeanVar(
 }
 
 template <typename T, typename opmath_t>
-inline typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+inline std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 ApplyScaleBias(
   T* Y_ptr,
   const T* X_ptr,
@@ -246,7 +246,7 @@ ApplyScaleBias(
 
 // std::is_same<T, at::BFloat16> || std::is_same<T, at::Half>
 template <typename T, typename opmath_t>
-inline typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+inline std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 ApplyScaleBias(
   T* Y_ptr,
   const T* X_ptr,
@@ -529,7 +529,7 @@ void GroupNormKernelImpl(
 
 
 template <typename T, typename opmath_t>
-typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 ComputeInternalGradients(
     int64_t N,
     int64_t C,
@@ -556,7 +556,7 @@ ComputeInternalGradients(
 }
 
 template <typename T, typename opmath_t>
-typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 ComputeInternalGradients(
     int64_t N,
     int64_t C,
@@ -603,7 +603,7 @@ ComputeInternalGradients(
 }
 
 template <typename PT, typename opmath_t>
-inline typename std::enable_if<std::is_same<PT, opmath_t>::value, void>::type
+inline std::enable_if_t<std::is_same_v<PT, opmath_t>, void>
 CalcDsDb(
     const opmath_t* ds_ptr,
     const opmath_t* db_ptr,
@@ -626,7 +626,7 @@ CalcDsDb(
 }
 
 template <typename PT, typename opmath_t>
-inline typename std::enable_if<!std::is_same<PT, opmath_t>::value, void>::type
+inline std::enable_if_t<!std::is_same_v<PT, opmath_t>, void>
 CalcDsDb(
     const opmath_t* ds_ptr,
     const opmath_t* db_ptr,
@@ -708,7 +708,7 @@ void GroupNormInputBackward(
 }
 
 template <typename PT, typename opmath_t>
-typename std::enable_if<std::is_same<PT, opmath_t>::value, void>::type
+std::enable_if_t<std::is_same_v<PT, opmath_t>, void>
 GammaBackward(
     int64_t N,
     int64_t C,
@@ -755,7 +755,7 @@ GammaBackward(
 }
 
 template <typename PT, typename opmath_t>
-typename std::enable_if<!std::is_same<PT, opmath_t>::value, void>::type
+std::enable_if_t<!std::is_same_v<PT, opmath_t>, void>
 GammaBackward(
     int64_t N,
     int64_t C,
@@ -817,7 +817,7 @@ GammaBackward(
 }
 
 template <typename PT, typename opmath_t>
-typename std::enable_if<std::is_same<PT, opmath_t>::value, void>::type
+std::enable_if_t<std::is_same_v<PT, opmath_t>, void>
 BetaBackward(int64_t N, int64_t C, const opmath_t* db, PT* dbeta) {
   using Vec = at::vec::Vectorized<PT>;
   constexpr int64_t K = Vec::size();
@@ -841,7 +841,7 @@ BetaBackward(int64_t N, int64_t C, const opmath_t* db, PT* dbeta) {
 }
 
 template <typename PT, typename opmath_t>
-typename std::enable_if<!std::is_same<PT, opmath_t>::value, void>::type
+std::enable_if_t<!std::is_same_v<PT, opmath_t>, void>
 BetaBackward(int64_t N, int64_t C, const opmath_t* db, PT* dbeta) {
   using Vec = at::vec::Vectorized<PT>;
   using fVec = at::vec::Vectorized<opmath_t>;
@@ -937,7 +937,7 @@ void GroupNormBackwardKernelImplInternal(
 }
 
 template <typename T, typename opmath_t>
-inline typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+inline std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 DsDbRowwiseMomentsChannelsLast(
   const T* dY_ptr,
   const T* X_ptr,
@@ -972,7 +972,7 @@ DsDbRowwiseMomentsChannelsLast(
 }
 
 template <typename T, typename opmath_t>
-inline typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+inline std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 DsDbRowwiseMomentsChannelsLast(
   const T* dY_ptr,
   const T* X_ptr,
@@ -1024,10 +1024,10 @@ DsDbRowwiseMomentsChannelsLast(
 }
 
 template <typename T>
-inline typename std::enable_if<std::is_same<T, at::opmath_type<T>>::value,
+inline std::enable_if_t<std::is_same_v<T, at::opmath_type<T>>,
   std::tuple<
   vec::Vectorized<T>,
-  vec::Vectorized<T>>>::type
+  vec::Vectorized<T>>>
 load_util(const T* data_ptr, int64_t n) {
   using Vec = vec::Vectorized<T>;
   auto vec0 = Vec::loadu(data_ptr, n > Vec::size() ? Vec::size() : n);
@@ -1037,11 +1037,11 @@ load_util(const T* data_ptr, int64_t n) {
 }
 
 template <typename T>
-inline typename std::enable_if<!std::is_same<T, at::opmath_type<T>>::value,
+inline std::enable_if_t<!std::is_same_v<T, at::opmath_type<T>>,
   std::tuple<
     vec::Vectorized<at::opmath_type<T>>,
     vec::Vectorized<at::opmath_type<T>>>
-    >::type
+    >
 load_util(const T* data_ptr, int64_t n) {
   using Vec = vec::Vectorized<T>;
   auto vec = Vec::loadu(data_ptr, n);
@@ -1049,7 +1049,7 @@ load_util(const T* data_ptr, int64_t n) {
 }
 
 template <typename T, typename PT, typename opmath_t>
-inline typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+inline std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 ApplyInputGradientsChannelsLastColMov(
   const T* dY_data,
   const T* X_data,
@@ -1097,7 +1097,7 @@ ApplyInputGradientsChannelsLastColMov(
 }
 
 template <typename T, typename PT, typename opmath_t>
-inline typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+inline std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 ApplyInputGradientsChannelsLastColMov(
     const T* dY_data,
     const T* X_data,
@@ -1154,7 +1154,7 @@ ApplyInputGradientsChannelsLastColMov(
 }
 
 template <typename T, typename PT, typename opmath_t>
-inline typename std::enable_if<std::is_same<T, opmath_t>::value, void>::type
+inline std::enable_if_t<std::is_same_v<T, opmath_t>, void>
 ApplyInputGradientsChannelsLastRowMov(
   const T* dY_data,
   const T* X_data,
@@ -1190,7 +1190,7 @@ ApplyInputGradientsChannelsLastRowMov(
 }
 
 template <typename T, typename PT, typename opmath_t>
-inline typename std::enable_if<!std::is_same<T, opmath_t>::value, void>::type
+inline std::enable_if_t<!std::is_same_v<T, opmath_t>, void>
 ApplyInputGradientsChannelsLastRowMov(
     const T* dY_data,
     const T* X_data,
@@ -1237,7 +1237,7 @@ ApplyInputGradientsChannelsLastRowMov(
 
 template <typename T, typename PT, typename opmath_t>
 inline typename std::
-    enable_if<std::is_same<T, opmath_t>::value, std::tuple<opmath_t, opmath_t>>::type
+    enable_if<std::is_same_v<T, opmath_t>, std::tuple<opmath_t, opmath_t>>::type
     CalcInternalGradientsChannelsLast(
     const T* X_data,
     const T* dY_data,
@@ -1292,7 +1292,7 @@ inline typename std::
 
 template <typename T, typename PT, typename opmath_t>
 inline typename std::
-    enable_if<!std::is_same<T, opmath_t>::value, std::tuple<opmath_t, opmath_t>>::type
+    enable_if<!std::is_same_v<T, opmath_t>, std::tuple<opmath_t, opmath_t>>::type
     CalcInternalGradientsChannelsLast(
         const T* X_data,
         const T* dY_data,
@@ -1584,7 +1584,7 @@ void GroupNormBackwardKernelImpl(
 
 } // namespace
 
-REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl);
-REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl);
+REGISTER_DISPATCH(GroupNormKernel, &GroupNormKernelImpl)
+REGISTER_DISPATCH(GroupNormBackwardKernel, &GroupNormBackwardKernelImpl)
 
 } // namespace at::native
