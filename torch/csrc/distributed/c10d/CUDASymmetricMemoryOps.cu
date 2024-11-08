@@ -19,7 +19,6 @@
 
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/CUDASymmetricMemory.hpp>
-#include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 
 #define INT_SWITCH_CASE(name, val, ...) \
   case val: {                           \
@@ -594,22 +593,6 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "two_shot_all_reduce_(Tensor(a!) input, str reduce_op, str group_name) -> Tensor(a!)",
       torch::dispatch(c10::DispatchKey::CUDA, ::two_shot_all_reduce_),
       {at::Tag::pt2_compliant_tag});
-
-  // An mm that supports consuming asynchronous input. It guarantees the
-  // following rasterization order, and that the corresponding signal arrives
-  // before an input chunk is consumed.
-  //
-  // num_chunks = a_chunks_signals.numel()
-  // for chunk_idx in range(a_chunk_pivot, num_chunks + a_chunk_pivot):
-  //     chunk_idx = chunk_idx % num_chunks
-  //     wait_signal(a_chunk_signals, chunk_idx)
-  //     # Compute output tiles that consumes the input chunk
-  m.def(
-      "_async_input_mm(Tensor a, Tensor b, Tensor a_chunk_signals, int a_chunk_pivot) -> Tensor",
-      torch::dispatch(
-          c10::DispatchKey::CUDA, c10d::cuda::detail::async_input_mm),
-      {at::Tag::pt2_compliant_tag});
-
 #endif
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)",
