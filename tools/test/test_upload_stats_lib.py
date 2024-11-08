@@ -14,10 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.upload_metrics import add_global_metric, emit_metric, global_metrics
-from tools.stats.upload_stats_lib import (
-    get_s3_resource,
-    remove_nan_inf,
-)
+from tools.stats.upload_stats_lib import get_s3_resource, remove_nan_inf
 
 
 sys.path.remove(str(REPO_ROOT))
