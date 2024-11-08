@@ -604,6 +604,21 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
+    def test_dynamic(self):
+        @mark_compile_region
+        def gn(x):
+            return torch.sin(x)
+
+        def fn(x):
+            return gn(x)
+
+        x = torch.randn(8, 8, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, 0)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     run_tests()
