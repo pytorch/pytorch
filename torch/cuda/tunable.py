@@ -115,6 +115,7 @@ C++ or Python APIs.
 import concurrent.futures
 import glob
 import multiprocessing as mp
+import os
 import shutil
 import warnings
 from typing import Optional, Tuple
@@ -296,20 +297,34 @@ def _gather_tunableop_results() -> None:
     gemm_lines = set()
     validator_lines = []
 
-    results_filename = get_filename()
+    # Need to allow for the possibility that results filename was
+    # set with the Python API instead of with environment variable.
+    # Also possible that results filename was not set at all.
+    # There are several test cases to check, but ultimately we
+    # need a glob-able expression
+    results_filename = get_filename()  # Note empty string could be returned here
 
-    # Create a filename_pattern that can be used in glob.
-    # Looks complicated, below but need to accommodate the most
-    # use case. Assume filename pattern has an ordinal to the
-    # left of the dot, as in filename1.csv
-    dot_pos = results_filename.find(".")
-    if dot_pos != -1 and dot_pos > 0:
-        # Replace the character just to the left of the dot
-        filename_pattern = (
-            results_filename[: dot_pos - 1] + "?" + results_filename[dot_pos:]
-        )
+    if (
+        results_filename is not None and results_filename != ""
+    ):  # Case were the Python API was used to set the filename
+        dot_pos = results_filename.find(".")
+        if dot_pos != -1 and dot_pos > 0:
+            # Replace the character just to the left of the dot
+            filename_pattern = (
+                results_filename[: dot_pos - 1] + "?" + results_filename[dot_pos:]
+            )
+        else:
+            filename_pattern = ""  # Needed to make linter happy
+    else:  # Case where the environment variable was used to set the filename.
+        results_filename_env = os.getenv("PYTORCH_TUNABLEOP_FILENAME")
+        if results_filename_env is None or results_filename_env == "":
+            filename_pattern = "tunableop_results?.csv"
+        elif "%d" in results_filename_env:
+            filename_pattern = results_filename_env.replace("%d", "?")
+        else:
+            filename_pattern = results_filename_env.replace(".", "?.")
 
-    assert filename_pattern is not None
+    assert "?" in filename_pattern
 
     FirstFile = False
     matching_files = glob.glob(filename_pattern)
