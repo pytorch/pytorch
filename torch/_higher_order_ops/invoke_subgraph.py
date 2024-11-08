@@ -15,6 +15,8 @@ from torch._higher_order_ops.utils import (
     get_dummy_aot_autograd_config,
     prepare_fw_with_masks,
     reenter_make_fx,
+    save_tensors_and_symints_for_backward,
+    saved_tensors_and_symints,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
@@ -185,14 +187,14 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                 operands,
             )
 
-        ctx.save_for_backward(*operands)
+        save_tensors_and_symints_for_backward(ctx, operands)
         return out
 
     @staticmethod
     def backward(ctx, *grad_outs):
         bw_graph = ctx._bw_graph
         identifier = ctx._identifier
-        primals = ctx.saved_tensors
+        primals = saved_tensors_and_symints(ctx)
         num_fw_outs = ctx._num_fw_outs
 
         # While tracing we made the assumption that tangents are contiguous. So,
