@@ -120,25 +120,25 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]", tangents_1: "f32[3, 3]"):
         subgraph1 = self.subgraph1
-        invoke_quant_test_1 = torch.ops.higher_order.invoke_quant_test(subgraph1, (tangents_1, primals_1, primals_2), scheme = 'nf4');  subgraph1 = tangents_1 = primals_1 = primals_2 = None
+        invoke_quant_test_1 = torch.ops.higher_order.invoke_quant_test(subgraph1, (primals_1, primals_2, tangents_1), scheme = 'nf4');  subgraph1 = primals_1 = primals_2 = tangents_1 = None
         getitem_1: "f32[3, 3]" = invoke_quant_test_1[0]
         getitem_2: "f32[3, 3]" = invoke_quant_test_1[1];  invoke_quant_test_1 = None
         return (getitem_1, getitem_2)
 
     class subgraph1(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]", arg2_1: "f32[3, 3]"):
-            mm: "f32[3, 3]" = torch.ops.aten.mm.default(arg1_1, arg2_1)
+            mm: "f32[3, 3]" = torch.ops.aten.mm.default(arg0_1, arg1_1)
             clone: "f32[3, 3]" = torch.ops.aten.clone.default(mm)
             sin: "f32[3, 3]" = torch.ops.aten.sin.default(mm);  mm = None
             cos: "f32[3, 3]" = torch.ops.aten.cos.default(sin);  cos = None
             sin_1: "f32[3, 3]" = torch.ops.aten.sin.default(sin);  sin = None
             neg: "f32[3, 3]" = torch.ops.aten.neg.default(sin_1);  sin_1 = None
-            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, neg);  arg0_1 = neg = None
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg2_1, neg);  arg2_1 = neg = None
             cos_1: "f32[3, 3]" = torch.ops.aten.cos.default(clone);  clone = None
             mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(mul, cos_1);  mul = cos_1 = None
-            t: "f32[3, 3]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+            t: "f32[3, 3]" = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
             mm_1: "f32[3, 3]" = torch.ops.aten.mm.default(t, mul_1);  t = None
-            t_1: "f32[3, 3]" = torch.ops.aten.t.default(arg2_1);  arg2_1 = None
+            t_1: "f32[3, 3]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
             mm_2: "f32[3, 3]" = torch.ops.aten.mm.default(mul_1, t_1);  mul_1 = t_1 = None
             return [mm_2, mm_1]
 """,  # NOQA: B950
