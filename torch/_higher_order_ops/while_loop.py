@@ -124,16 +124,12 @@ def while_loop(cond_fn, body_fn, carried_inputs):
         return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
 
     def _validate_input(cond_fn, body_fn, carried_inputs):
+        from torch._higher_order_ops.utils import validate_subgraph_args_types
+
         if not callable(cond_fn) or not callable(body_fn):
             raise RuntimeError("Expect cond_fn and body_fn to be callable.")
 
-        if not isinstance(carried_inputs, (tuple, list)) or pytree.tree_any(
-            lambda t: not isinstance(t, torch.Tensor), carried_inputs
-        ):
-            raise RuntimeError(
-                "Expect carried_inputs to be a tuple of possibly nested dict/list/tuple that only"
-                f"consists of tensor leaves, but got {carried_inputs}."
-            )
+        validate_subgraph_args_types(carried_inputs)
 
     _validate_input(cond_fn, body_fn, carried_inputs)
 
@@ -158,8 +154,8 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
     carried_vals = carried_inputs
 
-    def _is_boolean_scalar_tensor(pred):
-        return (
+    def _is_valid_cond_fn_output(pred):
+        return isinstance(pred, bool) or (
             isinstance(pred, torch.Tensor)
             and pred.size() == torch.Size([])
             and pred.dtype == torch.bool
@@ -171,9 +167,9 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
         )
 
     while pred := cond_fn(*carried_vals, *additional_inputs):
-        if not _is_boolean_scalar_tensor(pred):
+        if not _is_valid_cond_fn_output(pred):
             raise RuntimeError(
-                f"cond_fn must return a boolean scalar tensor but got {pred}"
+                f"cond_fn must return a boolean scalar tensor or a bool but got {pred}"
             )
         out = body_fn(*carried_vals, *additional_inputs)
         assert isinstance(
@@ -196,8 +192,33 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
     def _trace_while_loop(
         proxy_mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
     ):
-        cond_graph = reenter_make_fx(cond_fn)(*carried_inputs, *additional_inputs)
-        body_graph = reenter_make_fx(body_fn)(*carried_inputs, *additional_inputs)
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import (
+            compute_unbacked_bindings,
+            ShapeEnv,
+        )
+
+        # Create a new FakeTensorMode if we cannot detect one
+        fake_mode = torch._guards.detect_fake_mode()
+        if fake_mode is None:
+            fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+        # We allocate unbacked symints for int inputs since their value
+        # can be iteration dependent and we don't really know the value
+        # of the integer thus unbacked.
+        def symintify_ints(fake_mode, carried_inputs):
+            def _symintify_int(fake_mode, t):
+                if isinstance(t, int):
+                    unbacked_idx = fake_mode.shape_env.create_unbacked_symint()
+                    _ = compute_unbacked_bindings(fake_mode.shape_env, unbacked_idx)
+                    return unbacked_idx
+                return t
+
+            return tuple(_symintify_int(fake_mode, arg) for arg in carried_inputs)
+
+        tracing_carry = symintify_ints(fake_mode, carried_inputs)
+        cond_graph = reenter_make_fx(cond_fn)(*tracing_carry, *additional_inputs)
+        body_graph = reenter_make_fx(body_fn)(*tracing_carry, *additional_inputs)
 
         next_name = None
         i = 0
@@ -224,7 +245,15 @@ def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs
 
         # body_fn return output with the same pytree and tensor meta data as carried_inputs
         # so we could just return the output after one iteration.
-        out = body_fn(*carried_inputs, *additional_inputs)
+        #
+        # We allocate unbacked symints for int outputs since their value
+        # can be iteration dependent and we don't really know the value
+        # of the integer thus unbacked.
+        # Note that a more fine-grained analysis might be possible e.g. to check whether the
+        # the int is replaced with a new expr in body_fn so that we could just return the
+        # integer if it's the original value but it's hard to image such code exist because
+        # it doesn't makes sense to return the same integer input except for testing.
+        out = symintify_ints(fake_mode, body_fn(*carried_inputs, *additional_inputs))
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
