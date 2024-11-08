@@ -625,7 +625,9 @@ void dot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& re
   if (self.is_complex()) {
     if (self.is_conj()) {
       if (other.is_conj()) {
-        dot_out_cuda_impl(self.conj(), other.conj(), result);
+        Tensor temp_result = at::empty({}, result.options());
+        dot_out_cuda_impl(self.conj(), other.conj(), temp_result);
+        result.fill_(temp_result.conj());
       } else {
         vdot_out_cuda_impl(self.conj(), other, result);
       }
@@ -674,6 +676,8 @@ void dot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& re
 }
 
 TORCH_IMPL_FUNC(dot_out_cuda)(const Tensor& self, const Tensor& other, const Tensor& result) {
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
   dot_out_cuda_impl(self, other, result);
 }
 
@@ -732,6 +736,8 @@ void vdot_out_cuda_impl(const Tensor& self, const Tensor& other, const Tensor& r
 }
 
 TORCH_IMPL_FUNC(vdot_out_cuda)(const Tensor& self, const Tensor& other, const Tensor& result) {
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
   vdot_out_cuda_impl(self, other, result);
 }
 

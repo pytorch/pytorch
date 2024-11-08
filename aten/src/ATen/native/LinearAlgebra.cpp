@@ -1974,31 +1974,31 @@ void dot_out_impl(
         ", and the 'other' tensor on ",
         input2_device);
     if (self.is_complex()) {
-    if (self.is_conj()) {
-      if (other.is_conj()) {
-        Tensor temp_result = at::empty({}, result.options());
-        dot_out_impl(self.conj(), other.conj(), temp_result);
-        result.copy_(temp_result.conj());
-      } else {
+      if (self.is_conj()) {
+        if (other.is_conj()) {
+          Tensor temp_result = at::empty({}, result.options());
+          dot_out_impl(self.conj(), other.conj(), temp_result);
+          result.copy_(temp_result.conj());
+        } else {
+          vdot_out_impl(self.conj(), other, result);
+        }
+        return;
+      } else if (other.is_conj()) {
         vdot_out_impl(other.conj(), self, result);
+        return;
       }
-      return;
-    } else if (other.is_conj()) {
-      vdot_out_impl(other.conj(), self, result);
-      return;
-    }
     }
 
     if (self._is_zerotensor() || other._is_zerotensor()) {
-    result.fill_(0);
+      result.fill_(0);
     }
 
     if (use_mkldnn_matmul(self, other, /*result=*/Tensor())) {
-    // mkldnn matmul expect result have sizes info to create ideep tensor
-    auto r = at::empty({1, 1}, self.options());
-    mkldnn_matmul(self, other, r, /*beta=*/0);
-    result.fill_(r);
-    return;
+      // mkldnn matmul expect result have sizes info to create ideep tensor
+      auto r = at::empty({1, 1}, self.options());
+      mkldnn_matmul(self, other, r, /*beta=*/0);
+      result.fill_(r);
+      return;
     }
 
     return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
@@ -2035,26 +2035,26 @@ void vdot_out_impl(
         input2_device);
     // Dispatch to `dot` for real dtypes.
     if (!self.is_complex()) {
-    dot_out_impl(self, other, result);
-    return;
+      dot_out_impl(self, other, result);
+      return;
     }
 
     if (self.is_conj()) {
-    if (other.is_conj()) {
-      vdot_out_impl(other.conj(), self.conj(), result);
-    } else {
-      dot_out_impl(self.conj(), other, result);
-    }
-    return;
+      if (other.is_conj()) {
+        vdot_out_impl(other.conj(), self.conj(), result);
+      } else {
+        dot_out_impl(self.conj(), other, result);
+      }
+      return;
     } else if (other.is_conj()) {
-    Tensor temp_result = at::empty({}, result.options());
-    dot_out_impl(self, other.conj(), result);
-    result.copy_(temp_result.conj());
-    return;
+      Tensor temp_result = at::empty({}, result.options());
+      dot_out_impl(self, other.conj(), temp_result);
+      result.fill_(temp_result.conj());
+      return;
     }
 
     if (self._is_zerotensor() || other._is_zerotensor()) {
-    result.fill_(0);
+      result.fill_(0);
     }
 
     AT_DISPATCH_COMPLEX_TYPES(self.scalar_type(), "vdot", [&] {
@@ -2069,12 +2069,16 @@ void vdot_out_impl(
 
 TORCH_IMPL_FUNC(dot_out_cpu)
 (const Tensor& self, const Tensor& other, const Tensor& result) {
-    dot_out_impl(self, other, result);
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
+  dot_out_impl(self, other, result);
 }
 
 TORCH_IMPL_FUNC(vdot_out_cpu)
 (const Tensor& self, const Tensor& other, const Tensor& result) {
-    vdot_out_impl(self, other, result);
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+           "result dtype ", result.scalar_type(), " does not match input dtype ", self.scalar_type());
+  vdot_out_impl(self, other, result);
 }
 
 static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_out) {
