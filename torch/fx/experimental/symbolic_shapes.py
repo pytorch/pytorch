@@ -5300,14 +5300,6 @@ class ShapeEnv:
         def add_expr(expr: SympyBoolean) -> None:
             expr = canonicalize_bool_expr(expr)
             if isinstance(expr, (sympy.Eq, sympy.Ne)):
-                if not expr.lhs.free_symbols or not expr.rhs.free_symbols:
-                    # We don't want to set replacements when either side doesn't have
-                    # any free symbols since this can be a cause of unsoundness
-                    # when we do a replacement without a guard. eg. eq(u0, 3)
-                    # would result in replacements[u0] = 3, which would end
-                    # result in guards not being added during specialization.
-                    return
-
                 # No need to canonicalize
                 # TODO We could further canonicalize Eq ordering the lhs and rhs somehow
                 # With this, we could remove the need for the commutativity part
@@ -5639,16 +5631,6 @@ class ShapeEnv:
             return
 
         if a in tgt.free_symbols:
-            return
-
-        if not tgt.free_symbols:
-            # We don't want to set replacements when tgt doesn't have
-            # any free symbols since this can be a cause of unsoundness
-            # when we do a replacement without a guard. eg. eq(u0, 3)
-            # would result in replacements[u0] = 3, which would end
-            # result in guards not being added during specialization.
-            # See https://github.com/pytorch/pytorch/pull/138868#discussion_r1823076611
-            # for more information.
             return
 
         # Precondition: a == tgt
@@ -6469,12 +6451,6 @@ class ShapeEnv:
     #   2. Compute the value range of the right-hand side
     #   3. Update the value range of the variable, if better
     def _refine_ranges(self, expr: SympyBoolean) -> None:
-        if isinstance(expr, sympy.core.relational.Equality):
-            # If the expression is eq, this will refine the range
-            # down to the equality and unsoundly set a replacement without
-            # a guard.
-            return None
-
         expr = self.simplify(expr)
 
         for symbol in expr.free_symbols:
