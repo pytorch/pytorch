@@ -339,19 +339,19 @@ class _Executor:
 
     @register(registry)
     def eventSynchronize(self, event):
-        assert self.events.get(event) != None
+        assert self.events.get(event) is not None
         return 0
 
     @register(registry)
     def eventQuery(self, event):
-        assert self.events.get(event) != None
+        assert self.events.get(event) is not None
         return True
 
     @register(registry)
     def eventElapsedTime(self, e1, e2):
         time_1 = self.events[e1][1]
         time_2 = self.events[e2][1]
-        assert time_1 != None and time_2 != None
+        assert time_1 is not None and time_2 is not None
         return time_2 - time_1
 
     @register(registry)
