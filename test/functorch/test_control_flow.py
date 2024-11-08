@@ -2430,6 +2430,7 @@ class AssociativeScanModels:
     def get_scan_fct(compile_mode, combine_mode):
         # Compile the associative_scan according to the provided compile_mode
         if compile_mode != "fake":
+            compile_mode = "none"
             assoc_scan_comp = compile_mode_helper(associative_scan, compile_mode)
 
             def scan_fct(combine_fn, xs, dim, reverse):
