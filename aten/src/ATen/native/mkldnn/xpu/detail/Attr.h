@@ -416,13 +416,8 @@ static inline void construct_attr_by_post_op(
     at::native::onednn::Attr& attr) {
   bool is_none_post_op =
       (binary_post_op == "none" && unary_post_op == "none"); // not post-ops
-  bool is_binary_post_op_only =
-      (binary_post_op != "none" && unary_post_op == "none"); // ex., conv + add
   bool is_unary_post_op_only =
       (binary_post_op == "none" && unary_post_op != "none"); // ex., conv + relu
-  bool is_binary_and_unary_post_op =
-      (binary_post_op != "none" &&
-       unary_post_op != "none"); // ex., conv + add + relu
   TORCH_INTERNAL_ASSERT(
       is_unary_post_op_only || is_none_post_op,
       "Currently, quantization backend for Intel GPU only supports convolution or convolution with unary post operation like ReLU");
