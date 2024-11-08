@@ -265,29 +265,43 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             if var is not None:
                 # optimization for cleaner codegen
                 result[name] = var
+                continue
+
+            # TODO refactor these 3 branches.
+            side_effects = parent.output.side_effects
+            if cell in side_effects:
+                cell_var = side_effects[cell]
+
             elif self.source:
-                side_effects = parent.output.side_effects
-                if cell in side_effects:
-                    cell_var = side_effects[cell]
-                else:
-                    closure_cell = GetItemSource(
-                        AttrSource(self.source, "__closure__"), idx
+                closure_cell = GetItemSource(
+                    AttrSource(self.source, "__closure__"), idx
+                )
+                closure_cell_contents = AttrSource(closure_cell, "cell_contents")
+                try:
+                    contents_var = VariableTracker.build(
+                        parent, cell.cell_contents, closure_cell_contents
                     )
-                    closure_cell_contents = AttrSource(closure_cell, "cell_contents")
-                    try:
-                        contents_var = VariableTracker.build(
-                            parent, cell.cell_contents, closure_cell_contents
-                        )
-                    except ValueError:
-                        # Cell has not yet been assigned
-                        contents_var = variables.DeletedVariable()
-                    cell_var = side_effects.track_cell_existing(
-                        closure_cell, cell, contents_var
-                    )
-                closure_cells[name] = cell_var
+                except ValueError:
+                    # Cell has not yet been assigned
+                    contents_var = variables.DeletedVariable()
+                cell_var = side_effects.track_cell_existing(
+                    closure_cell, cell, contents_var
+                )
 
             else:
-                result[name] = VariableTracker.build(tx, cell.cell_contents)
+                try:
+                    contents_var = VariableTracker.build(parent, cell.cell_contents)
+                except ValueError:
+                    # Cell has not yet been assigned
+                    contents_var = variables.DeletedVariable()
+                cell_var = side_effects.track_cell_existing(None, cell, contents_var)
+                # NOTE: we don't support mutation to this cell because we don't
+                # have a source to materialize the writes.
+                # TODO figure out why we have this branch, and whether we can
+                # remove it.
+                cell_var.mutation_type = None
+
+            closure_cells[name] = cell_var
 
         return result, closure_cells
 

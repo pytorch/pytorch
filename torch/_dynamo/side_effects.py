@@ -147,14 +147,17 @@ class SideEffects:
             self.store_attr_mutations[item] = {}
         self.store_attr_mutations[item][name] = value
 
-    def load_attr(self, item, name, deleted_ok=False):
-        assert self.is_attribute_mutation(item)
+    def load_attr(self, item, name, deleted_ok=False, check=False):
+        if check:
+            assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
             unimplemented("read deleted attribute")
         return result
 
     def store_cell(self, cellvar, value):
+        if cellvar.is_immutable():
+            unimplemented("Dynamo currently doesn't support writing to such cell")
         assert isinstance(cellvar, variables.NewCellVariable)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
@@ -162,7 +165,7 @@ class SideEffects:
     def load_cell(self, cellvar):
         assert isinstance(cellvar, variables.NewCellVariable)
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
-            return self.load_attr(cellvar, "cell_contents")
+            return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
             return cellvar.pre_existing_contents
         unimplemented("cannot read uninitialized cell")
@@ -197,6 +200,8 @@ class SideEffects:
         ) and name in self.store_attr_mutations.get(item, ())
 
     def is_modified(self, item):
+        if item.is_immutable():
+            return False
         if isinstance(item.mutation_type, AttributeMutationNew):
             return True
         if self.is_attribute_mutation(item):

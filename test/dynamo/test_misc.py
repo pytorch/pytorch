@@ -3812,9 +3812,11 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_free_var_and_local_name_collision(self):
         x = 10
+
         def make_func():
             def func():
                 return x
+
             return func
 
         @torch.compile(backend="eager")
@@ -3828,6 +3830,60 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(torch.allclose(torch.ones(1) + 1, res[0]))
         self.assertEqual(0, res[1])
         self.assertEqual(10, res[2])
+
+    def test_writes_to_cells_across_frames1(self):
+        # This regression test was added when Dynamo accidentally had both
+        # unboxed and normal modeling for pre-existing cells, and failed to
+        # account for buffered writes when we read from the unboxed value.
+        x = 0
+
+        def inc_x():
+            nonlocal x
+            x += 1
+
+        class MyObj:
+            def inc_x_then_return_x(self, fn):
+                fn()
+                return x
+
+        @torch.compile(backend="eager")
+        def root(t):
+            obj = MyObj()
+            res = obj.inc_x_then_return_x(inc_x)
+            return t + 1, res
+
+        res = root(torch.zeros(1))
+        self.assertTrue(torch.allclose(res[0], torch.ones(1)))
+        self.assertEqual(res[1], 1)
+        self.assertEqual(x, 1)
+
+    def test_writes_to_cells_across_frames2(self):
+        # This regression test was added when Dynamo didn't fully account for
+        # already established `NewCellVariable` instance for pre-existing cell,
+        # while encountering the same cell again (we should reuse the instance
+        # rather than creating a new one). This caused buffered writes to escape
+        # the newly created `NewCellVariable`.
+        x = 0
+
+        def inc_x_and_get_x(obj):
+            nonlocal x
+            x += 1
+            return obj.get_x()
+
+        class MyObj:
+            def get_x(self):
+                return x
+
+        @torch.compile(backend="eager")
+        def root(t):
+            obj = MyObj()
+            res = inc_x_and_get_x(obj)
+            return t + 1, res
+
+        res = root(torch.zeros(1))
+        self.assertTrue(torch.allclose(res[0], torch.ones(1)))
+        self.assertEqual(res[1], 1)
+        self.assertEqual(x, 1)
 
     def test_top_package_import(self):
         def fn(x):
