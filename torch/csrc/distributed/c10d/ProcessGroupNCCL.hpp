@@ -148,7 +148,7 @@ enum ErrorHandlingMode {
   SkipCleanUp = 3
 };
 
-enum ErrorType {
+enum TORCH_API ErrorType {
   NO_ERROR = 0,
   TIMEOUT = 1,
   NCCL_ERROR = 2,
