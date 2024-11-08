@@ -922,6 +922,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
+      .def_readonly("warp_size", &cudaDeviceProp::warpSize)
 #if !USE_ROCM
       // NVIDA only property
       .def_readonly(
