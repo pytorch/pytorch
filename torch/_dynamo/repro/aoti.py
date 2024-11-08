@@ -260,11 +260,8 @@ def repro_get_args(options, exported_program, config_patches):
 
 
 def repro_run(options, exported_program, config_patches):
-    from torch._inductor import (
-        _aoti_compile_and_package_inner,
-        _flatten_inputs,
-        aoti_load_package,
-    )
+    from torch._inductor import _aoti_compile_and_package_inner, aoti_load_package
+    from torch._inductor.compile_fx import _flatten_inputs
 
     gm, args, kwargs = repro_common(options, exported_program)
 
@@ -333,7 +330,8 @@ def export_for_aoti_minifier(
 
 def repro_minify(options, exported_program, config_patches):
     from functorch.compile import minifier
-    from torch._inductor import _aoti_compile_and_package_inner, _flatten_inputs
+    from torch._inductor import _aoti_compile_and_package_inner
+    from torch._inductor.compile_fx import _flatten_inputs
 
     mod, args, kwargs = repro_common(options, exported_program)
     flat_example_inputs, inductor_configs = _flatten_inputs(

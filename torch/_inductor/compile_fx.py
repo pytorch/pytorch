@@ -82,6 +82,7 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExpr
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
+from typing_extensions import Never, ParamSpec, Protocol, TypedDict, Unpack
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx._lazy_graph_module import _use_lazy_graph_module
@@ -231,9 +232,9 @@ def _unlift_graph(
         elif node_name in graph_signature.inputs_to_buffers:
             buffer_name = graph_signature.inputs_to_buffers[node_name]
             lifted_inputs.append(buffer_name)
-            gm.meta[
-                get_cloned_parameter_buffer_name(buffer_name)
-            ] = clone_preserve_strides(state_dict[buffer_name])
+            gm.meta[get_cloned_parameter_buffer_name(buffer_name)] = (
+                clone_preserve_strides(state_dict[buffer_name])
+            )
         else:
             assert node_name in graph_signature.user_inputs
             lifted_inputs.append(None)
@@ -1245,11 +1246,11 @@ def cudagraphify_impl(
 
     # allocate static tensor inputs
     static_inputs = [
-        x
-        if not isinstance(x, torch.Tensor)
-        else static_input(x)
-        if idx not in static_input_idxs
-        else x.detach()
+        (
+            x
+            if not isinstance(x, torch.Tensor)
+            else static_input(x) if idx not in static_input_idxs else x.detach()
+        )
         for idx, x in enumerate(inputs)
     ]
 
@@ -1480,9 +1481,11 @@ def fw_compiler_freezing(
 def get_cpp_wrapper_config() -> Dict[str, object]:
     return {
         # Set autotune_at_compile_time to True as default if the option is not explicitly set
-        "triton.autotune_at_compile_time": config.triton.autotune_at_compile_time
-        if config.triton.autotune_at_compile_time is not None
-        else True,
+        "triton.autotune_at_compile_time": (
+            config.triton.autotune_at_compile_time
+            if config.triton.autotune_at_compile_time is not None
+            else True
+        ),
         "triton.autotune_cublasLt": False,
         "triton.cudagraphs": False,  # TODO: to be removed
         "triton.store_cubin": True,
@@ -1790,9 +1793,11 @@ def compile_fx(
                     model_outputs_node.meta["user_visible_output_idxs"] = []
 
                 fixed = count_tangents(model)
-                with config.patch(
-                    get_cpp_wrapper_config()
-                ) if config.cpp_wrapper else contextlib.nullcontext():
+                with (
+                    config.patch(get_cpp_wrapper_config())
+                    if config.cpp_wrapper
+                    else contextlib.nullcontext()
+                ):
                     return inner_compile(
                         model,
                         example_inputs,
@@ -1952,3 +1957,90 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
         if device_interface.is_bf16_supported(including_emulation=False):
             return
         warn_and_skip(node.get_device())
+
+    for out in graph.graph_outputs:
+        device = getattr(out, "get_device", lambda: torch.device("meta"))()
+        if (not is_gpu(device.type)) or out.get_dtype() != torch.bfloat16:
+            continue
+        # Print warning and skip frame if attempting to compile for bfloat16
+        # on device without hardware support for dtype
+        device_interface = get_interface_for_device(device.type)
+        if device_interface.is_bf16_supported(including_emulation=False):
+            return
+        warn_and_skip(device)
+
+
+def _flatten_inputs(
+    gm: torch.fx.GraphModule,
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    options: Optional[Dict[str, Any]] = None,
+):
+    """
+    Flatten the inputs to the graph module and return the flat inputs and options.
+    Add "aot_inductor.serialized_in_spec" and "aot_inductor.serialized_out_spec" to the options.
+    """
+    from .compile_fx import graph_returns_tuple
+
+    assert graph_returns_tuple(gm), (
+        "Graph output must be a tuple(). This is so that we can avoid "
+        "pytree processing of the outputs. Please change the module to "
+        "have tuple outputs."
+    )
+
+    # We will serialize the pytree info into the .so as constant strings
+    in_spec = None
+    out_spec = None
+    if isinstance(gm.graph._codegen, torch.fx.graph._PyTreeCodeGen):
+        codegen = gm.graph._codegen
+        gm.graph._codegen = torch.fx.graph.CodeGen()
+        gm.recompile()
+
+        if codegen.pytree_info.in_spec is not None:
+            in_spec = codegen.pytree_info.in_spec
+        if codegen.pytree_info.out_spec is not None:
+            out_spec = codegen.pytree_info.out_spec
+
+    else:
+        if hasattr(gm, "_in_spec"):
+            in_spec = gm._in_spec
+        if hasattr(gm, "_out_spec"):
+            out_spec = gm._out_spec
+
+    serialized_in_spec = pytree.treespec_dumps(in_spec) if in_spec is not None else ""
+    serialized_out_spec = (
+        pytree.treespec_dumps(out_spec) if out_spec is not None else ""
+    )
+
+    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
+        (args, kwargs or {})
+    )
+
+    # Replace non-tensor (constant) inputs with Nones, since these are not being
+    # used anyways by the graph
+    flat_example_inputs = [
+        x[1] if isinstance(x[1], torch.Tensor) else None for x in flat_args_with_path
+    ]
+
+    if in_spec is not None and received_spec != in_spec:
+        raise ValueError(  # noqa: B904
+            "Trying to flatten user inputs with exported input tree spec: \n"
+            f"{in_spec}\n"
+            "but actually got inputs with tree spec of: \n"
+            f"{received_spec}"
+        )
+
+    options = (
+        {
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+        if options is None
+        else {
+            **options,
+            "aot_inductor.serialized_in_spec": serialized_in_spec,
+            "aot_inductor.serialized_out_spec": serialized_out_spec,
+        }
+    )
+    return flat_example_inputs, options
