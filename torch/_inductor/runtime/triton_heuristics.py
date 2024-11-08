@@ -44,6 +44,7 @@ from .runtime_utils import (
     next_power_of_2,
     triton_cache_dir,
     triton_config_to_hashable,
+    triton_hash_to_path_key,
     validate_triton_config,
 )
 
@@ -472,7 +473,9 @@ class CachingAutotuner(KernelInterface):
         if warm_cache_only:
             binary = triton.compile(*compile_args, **compile_kwargs)
             launcher = None
-            TritonBundler.put(binary.hash, self.triton_meta.get("device", 0))
+            TritonBundler.put(
+                triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
+            )
             return binary, launcher
 
         # importing from torch is safe now that precompile has returned
@@ -712,7 +715,9 @@ class CachingAutotuner(KernelInterface):
             launcher.fn = self.fn
             launcher.bin = binary
 
-        TritonBundler.put(binary.hash, self.triton_meta.get("device", 0))
+        TritonBundler.put(
+            triton_hash_to_path_key(binary.hash), self.triton_meta.get("device", 0)
+        )
 
         return binary, launcher
 
