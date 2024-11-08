@@ -168,10 +168,6 @@ file(GLOB flash_attention_cuda_cu "native/transformers/cuda/flash_attn/*.cu")
 file(GLOB flash_attention_cuda_kernels_cu "native/transformers/cuda/flash_attn/kernels/*.cu")
 file(GLOB flash_attention_cuda_cpp "native/transformers/cuda/flash_attn/*.cpp")
 
-add_subdirectory(native/transformers/hip/flash_attn)
-file(GLOB flash_attention_hip_cpp "native/transformers/hip/flash_attn/*.cpp")
-list(APPEND native_transformers_hip_cpp ${flash_attention_hip_cpp})
-
 # flash_attention sources
 file(GLOB flash_attention_hip_hip "native/transformers/hip/flash_attn/*.hip")
 file(GLOB flash_attention_hip_ck_hip "native/transformers/hip/flash_attn/ck/*.hip")
