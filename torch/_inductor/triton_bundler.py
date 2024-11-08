@@ -146,9 +146,7 @@ class TritonBundler:
             return [], None
 
         with dynamo_timed(
-            key="TritonBundler.collect",
-            fwd_only=False,
-            log_pt2_compile_event=True,
+            key="TritonBundler.collect", fwd_only=False, log_pt2_compile_event=True
         ):
             entries = cls._entries
             if entries is not None:
