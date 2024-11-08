@@ -30,24 +30,28 @@ keyword_synonyms: dict[str, list[str]] = {
     "inductor": ["dynamo", "export"],  # not actually synonyms but they interact a lot
 }
 
-not_keyword = [
-    "torch",
-    "test",
-    "tests",
-    "util",
-    "utils",
-    "func",
-    "src",
-    "c",
-    "ns",
-    "tools",
-    "internal",
-]
 
 custom_matchers: dict[str, Callable[[str], bool]] = {
     "nn": lambda x: "nn" in x.replace("onnx", "_"),
     "c10": lambda x: "c10" in x.replace("c10d", "_"),
 }
+
+
+def is_valid_keyword(keyword: str) -> bool:
+    not_keyword = [
+        "torch",
+        "test",
+        "tests",
+        "util",
+        "utils",
+        "func",
+        "src",
+        "c",
+        "ns",
+        "tools",
+        "internal",
+    ]
+    return keyword == "nn" or (keyword not in not_keyword and len(keyword) > 2)
 
 
 @lru_cache(maxsize=1)
@@ -59,7 +63,7 @@ def get_keywords(file: str) -> list[str]:
 
     file_name = Path(file).stem.split("_")
     keywords.extend([sanitize_name(x) for x in file_name])
-    return [kw for kw in keywords if kw not in not_keyword]
+    return [kw for kw in keywords if is_valid_keyword(kw)]
 
 
 def sanitize_name(folder_name: str) -> str:
