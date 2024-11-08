@@ -980,6 +980,16 @@ struct SavedState {
     t = static_cast<size_t>(tmp);
   }
 
+  void enqueue(int t) {
+    enqueue(static_cast<int64_t>(t));
+  }
+  void dequeue(int& t) {
+    int64_t tmp = 0;
+    dequeue(tmp);
+    // safe since it was enqueue'd in lower precision
+    t = static_cast<int>(tmp);
+  }
+
   // TODO: probably wildly inefficient
   template <class T>
   void enqueue(const c10::List<T> t) {

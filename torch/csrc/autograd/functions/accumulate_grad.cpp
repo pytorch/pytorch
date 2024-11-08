@@ -111,6 +111,7 @@ ivalue_list AccumulateGrad::retrieve_saved(SwapSavedVariables& saved) {
 
   SavedState state;
   state.enqueue(variable);
+  state.enqueue(saved.get_curr_node_call().post_acc_grad_hooks);
 
   if (should_visit) {
     saved.after(variable);
@@ -125,7 +126,9 @@ functional_apply_t AccumulateGrad::get_functional() {
     SavedState state;
     state.stack = saved;
     Variable foo;
+    std::vector<int> _;
     state.dequeue(foo);
+    state.dequeue(_);
     if (!(foo.defined() && foo.requires_grad()) || !inputs[0].defined()) {
       return variable_list();
     }
@@ -134,7 +137,6 @@ functional_apply_t AccumulateGrad::get_functional() {
                          .findSchemaOrThrow("inductor::accumulate_grad_", "")
                          .typed<void(const at::Tensor&, const at::Tensor&)>();
     op.call(foo, inputs[0]);
-    // TODO(rzou): tensor_post_acc_grad_hooks
     return variable_list();
   };
 }

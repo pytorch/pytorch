@@ -2501,6 +2501,62 @@ TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
 
         self.assertEqual(found, len(expected_logs))
 
+    def test_backward_hook_relative_ordering_partial(self):
+        # test backward hooks for cases that CA matches eager
+
+        def fn():
+            order = []
+
+            class MyModule(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(10, 10, bias=False)
+
+                def forward(self, x):
+                    return self.linear(x)
+
+            x = torch.randn(10, 10)
+            module = MyModule()
+
+            def make_pre_hook(id):
+                return lambda _: order.append(f"pre_hook_{id}")
+
+            def make_post_hook(id):
+                return lambda _1, _2: order.append(f"post_hook_{id}")
+
+            count = 0
+
+            def register_hooks_on_all_nodes(nodes):
+                nonlocal count
+                for node, _ in nodes:
+                    if node is None:
+                        continue
+                    count += 1
+                    id = f"{node.name()}_{count}"
+                    node.register_prehook(make_pre_hook(id))
+                    node.register_hook(make_post_hook(id))
+                    register_hooks_on_all_nodes(node.next_functions)
+
+            loss = module(x).sum()
+            register_hooks_on_all_nodes(((loss.grad_fn, None),))
+
+            def make_tensor_pre_hook(id):
+                return lambda _: order.append(f"tensor_pre_hook_{id}")
+
+            def make_post_acc_grad_hook(id):
+                return lambda _: order.append(f"post_acc_grad_hook_{id}")
+
+            module.linear.weight.register_hook(make_tensor_pre_hook("weight"))
+
+            module.linear.weight.register_post_accumulate_grad_hook(
+                make_post_acc_grad_hook("weight")
+            )
+
+            loss.backward()
+            yield tuple(order)
+
+        self.check_output_and_recompiles(fn)
+
     @mock.patch(
         "torch._functorch.aot_autograd.AOT_COUNTER", new_callable=itertools.count
     )

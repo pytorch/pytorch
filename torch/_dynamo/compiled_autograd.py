@@ -420,9 +420,13 @@ class AutogradCompilerInstance:
 
         # TODO(xmfan): determine this more reliably
         if debug_name == "torch::autograd::AccumulateGrad":
-            assert len(proxy_stack) == 1
+            assert len(proxy_stack) >= 1
             assert len(proxy_inputs) == 1
+            param = stack[0]
             proxy_param = proxy_stack[0]
+            hook_num = stack[1]
+            hook_indices = stack[2:]
+            assert hook_num == len(hook_indices)
             proxy_grad = proxy_inputs[0]
             proxy_out = self.fx_tracer.create_proxy(
                 "call_function",
@@ -431,6 +435,8 @@ class AutogradCompilerInstance:
                 kwargs={},
             )
             assert num_outputs == 0
+            for idx in hook_indices:
+                self.post_acc_grad_hook(param, idx)
             return []
 
         op = ops.add(debug_name, fn)
