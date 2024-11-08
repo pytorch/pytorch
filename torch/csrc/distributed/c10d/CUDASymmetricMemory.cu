@@ -418,13 +418,13 @@ at::Tensor CUDASymmetricMemory::get_signal_pad(
       std::multiplies<size_t>());
   const auto req_size = (numel + storage_offset) * element_size;
   TORCH_CHECK(
-      req_size <= buffer_size_,
+      req_size <= signal_pad_size,
       "CUDASymmetricMemory::get_signal_pad: the requested size (",
       req_size,
       " bytes) exceeds the allocated size (",
-      buffer_size_,
+      signal_pad_size,
       " bytes)");
-  auto data_ptr = reinterpret_cast<uint8_t*>(buffers_[rank]) +
+  auto data_ptr = reinterpret_cast<uint8_t*>(signal_pads_[rank]) +
       storage_offset * element_size;
   auto device = c10::Device(c10::DeviceType::CUDA, local_device_idx_);
   auto options = at::TensorOptions().dtype(*dtype).device(device);
