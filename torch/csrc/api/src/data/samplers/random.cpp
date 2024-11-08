@@ -16,15 +16,15 @@ void RandomSampler::reset(std::optional<size_t> new_size) {
   // This allocates a new chunk of memory every time (just FYI). It should be
   // amortized over the entire epoch hopefully.
   const auto size = new_size.value_or(static_cast<size_t>(indices_.numel()));
-  indices_ = torch::randperm(size, indices_.options());
+  indices_ = torch::randperm(static_cast<int64_t>(size), indices_.options());
   index_ = 0;
 }
 
-optional<std::vector<size_t>> RandomSampler::next(size_t batch_size) {
+std::optional<std::vector<size_t>> RandomSampler::next(size_t batch_size) {
   AT_ASSERT(index_ <= indices_.numel());
   const size_t remaining_indices = indices_.numel() - index_;
   if (remaining_indices == 0) {
-    return nullopt;
+    return std::nullopt;
   }
   std::vector<size_t> index_batch(std::min(batch_size, remaining_indices));
   auto slice = indices_.slice(/*dim=*/0, index_, index_ + index_batch.size());
@@ -36,14 +36,14 @@ optional<std::vector<size_t>> RandomSampler::next(size_t batch_size) {
   slice = slice.to(torch::kInt64);
   const auto* data = slice.const_data_ptr<int64_t>();
   std::copy(data, data + index_batch.size(), index_batch.begin());
-  index_ += index_batch.size();
+  index_ += static_cast<int64_t>(index_batch.size());
   return index_batch;
 }
 
 void RandomSampler::save(serialize::OutputArchive& archive) const {
   archive.write(
       "index",
-      torch::tensor(static_cast<int64_t>(index_), torch::kInt64),
+      torch::tensor(index_, torch::kInt64),
       /*is_buffer=*/true);
   archive.write(
       "indices",

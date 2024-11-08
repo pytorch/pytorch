@@ -170,7 +170,11 @@ else()
 endif()
 
 # nvToolsExt
-find_path(nvtx3_dir NAMES nvtx3 PATHS "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
+if(USE_SYSTEM_NVTX)
+  find_path(nvtx3_dir NAMES nvtx3)
+else()
+  find_path(nvtx3_dir NAMES nvtx3 PATHS "${PROJECT_SOURCE_DIR}/third_party/NVTX/c/include" NO_DEFAULT_PATH)
+endif()
 find_package_handle_standard_args(nvtx3 DEFAULT_MSG nvtx3_dir)
 if(nvtx3_FOUND)
   add_library(torch::nvtx3 INTERFACE IMPORTED)

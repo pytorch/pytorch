@@ -9,7 +9,7 @@
 
 namespace at::xpu::detail {
 
-void XPUHooks::initXPU() const {
+void XPUHooks::init() const {
   C10_LOG_API_USAGE_ONCE("aten.init.xpu");
   const auto device_count = c10::xpu::device_count_ensure_non_zero();
   c10::xpu::XPUCachingAllocator::init(device_count);
@@ -34,13 +34,12 @@ int32_t XPUHooks::getGlobalIdxFromDevice(const at::Device& device) const {
 #endif
 }
 
-Generator XPUHooks::getXPUGenerator(DeviceIndex device_index) const {
-  return make_generator<at::XPUGeneratorImpl>(device_index);
+const Generator& XPUHooks::getDefaultGenerator(DeviceIndex device_index) const {
+  return at::xpu::detail::getDefaultXPUGenerator(device_index);
 }
 
-const Generator& XPUHooks::getDefaultXPUGenerator(
-    DeviceIndex device_index) const {
-  return at::xpu::detail::getDefaultXPUGenerator(device_index);
+Generator XPUHooks::getNewGenerator(DeviceIndex device_index) const {
+  return make_generator<at::XPUGeneratorImpl>(device_index);
 }
 
 Device XPUHooks::getDeviceFromPtr(void* data) const {

@@ -191,7 +191,7 @@ def debug_insert_nops(
         torch_function_mode_stack=[],
     )
 
-    return GuardedCode(code, CheckFunctionManager(graph).check_fn, CompileId(0, 0))
+    return GuardedCode(code, CheckFunctionManager(graph).guard_manager, CompileId(0, 0))  # type: ignore[arg-type]
 
 
 class CompileCounter:
@@ -246,24 +246,34 @@ class EagerAndRecordGraphs:
         return gm.forward
 
 
-# Equivalent to backend="aot_eager", but also records graphs that
-# we can assert on
-class AOTEagerAndRecordGraphs:
+class AotEagerAndRecordGraphs:
     def __init__(self) -> None:
         self.graphs: List[torch.fx.GraphModule] = []
+        self.fw_graphs: List[torch.fx.GraphModule] = []
+        self.bw_graphs: List[torch.fx.GraphModule] = []
 
     def __call__(
         self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
     ) -> Callable[..., Any]:
-        def save_graph(gm: torch.fx.GraphModule, *args: Any, **kwargs: Any) -> Any:
-            self.graphs.append(gm)
+        self.graphs.append(gm)
+
+        def fw_compiler(
+            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        ) -> Callable[..., Any]:
+            self.fw_graphs.append(gm)
+            return gm.forward
+
+        def bw_compiler(
+            gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
+        ) -> Callable[..., Any]:
+            self.bw_graphs.append(gm)
             return gm.forward
 
         return aot_eager(
             gm,
             example_inputs,
-            fw_compiler=save_graph,
-            bw_compiler=save_graph,
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
         )
 
 
@@ -370,6 +380,11 @@ def rand_strided(
 
 
 _T = TypeVar("_T")
+
+
+def check_dynamic_shape_capture() -> bool:
+    # This also mirrors config from `test/dynamo/test_dynamic_shapes.py:make_dynamic_cls`
+    return not config.assume_static_by_default
 
 
 def _make_fn_with_patches(fn: Callable[..., _T], *patches: Any) -> Callable[..., _T]:

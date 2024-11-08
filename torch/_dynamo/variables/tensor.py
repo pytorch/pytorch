@@ -103,6 +103,7 @@ class TensorVariable(VariableTracker):
         "requires_grad",
         "is_quantized",
         "is_contiguous",
+        "is_nested",
         "is_sparse",
         "class_type",
         "specialized_value",
@@ -128,6 +129,7 @@ class TensorVariable(VariableTracker):
         layout,
         ndim,
         requires_grad,
+        is_nested,
         is_quantized,
         is_sparse,
         class_type,
@@ -149,6 +151,7 @@ class TensorVariable(VariableTracker):
         self.requires_grad = requires_grad
         self.is_quantized = is_quantized
         self.is_contiguous = is_contiguous
+        self.is_nested = is_nested
         self.is_sparse = is_sparse
         self.class_type = class_type
         self.has_grad_fn = has_grad_fn
@@ -175,6 +178,7 @@ class TensorVariable(VariableTracker):
             "layout": value.layout,
             "ndim": int(value.ndim),
             "requires_grad": value.requires_grad,
+            "is_nested": value.is_nested,
             "is_quantized": value.is_quantized,
             "is_sparse": value.is_sparse,
             "class_type": type(value),
@@ -238,9 +242,7 @@ class TensorVariable(VariableTracker):
             # any other attributes on the subclass (that are not methods)
             # are assumed to be constant metadata.
             elif not callable(example_value):
-                from .builder import SourcelessBuilder
-
-                return SourcelessBuilder.create(tx, example_value)
+                return VariableTracker.build(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
             raise NotImplementedError
@@ -277,12 +279,9 @@ class TensorVariable(VariableTracker):
             # Note - at a certain point we may want to handle
             raise NotImplementedError
 
-        from ..guards import GuardBuilder
-        from .builder import VariableBuilder
-
         attr_source = AttrSource(self.source, name)
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
-        return VariableBuilder(tx, attr_source)(real_value)
+        return VariableTracker.build(tx, real_value, attr_source)
 
     def method_attr_ndim(self, tx):
         if self.ndim is not None:
@@ -324,6 +323,10 @@ class TensorVariable(VariableTracker):
     def method_attr_is_sparse(self, tx):
         if self.is_sparse is not None:
             return ConstantVariable.create(self.is_sparse)
+
+    def method_attr_is_nested(self, tx):
+        if self.is_nested is not None:
+            return ConstantVariable.create(self.is_nested)
 
     def method_attr_data(self, tx):
         return variables.TorchInGraphFunctionVariable(
@@ -661,10 +664,12 @@ class TensorVariable(VariableTracker):
             tensortype = next(
                 k for k, v in tensortype_to_dtype.items() if self.dtype in v
             )
-            if self.device.type == "cuda":
-                return ConstantVariable.create(f"torch.cuda.{tensortype.__name__}")
-            else:
+            if self.device.type == "cpu":
                 return ConstantVariable.create(f"torch.{tensortype.__name__}")
+            else:
+                return ConstantVariable.create(
+                    f"torch.{self.device.type}.{tensortype.__name__}"
+                )
         elif (
             dtype is not None
             and fqn(type(dtype.as_python_constant())) == "torch.tensortype"
@@ -695,7 +700,6 @@ class TensorVariable(VariableTracker):
     def method_as_subclass(self, cls):
         if isinstance(cls, TensorSubclassVariable) and cls.source:
             from ..symbolic_convert import InstructionTranslator
-            from .builder import VariableBuilder
             from .torch_function import TensorWithTFOverrideVariable
 
             tx = InstructionTranslator.current_tx()
@@ -705,10 +709,11 @@ class TensorVariable(VariableTracker):
             # defines a constructor, but if only a __torch_function__ impl is defined, this is okay to call.
             # It is up to the user whether this is correct behavior or not.
             py_cls = cls.as_python_constant()
-            torch_fn = VariableBuilder(
+            torch_fn = VariableTracker.build(
                 tx,
+                py_cls.__torch_function__.__func__,
                 AttrSource(AttrSource(cls.source, "__torch_function__"), "__func__"),
-            )(py_cls.__torch_function__.__func__)
+            )
 
             return TensorWithTFOverrideVariable.from_tensor_var(
                 tx, self, py_cls, torch_fn
@@ -750,7 +755,7 @@ class TensorVariable(VariableTracker):
 
     def method_tolist(self):
         from ..symbolic_convert import InstructionTranslator
-        from .builder import SourcelessBuilder
+        from .builder import wrap_fx_proxy
 
         tx = InstructionTranslator.current_tx()
 
@@ -761,7 +766,7 @@ class TensorVariable(VariableTracker):
                 with unittest.mock.patch.object(
                     tx.fake_mode, "allow_scalar_outputs", True
                 ):
-                    return SymNodeVariable.create(
+                    return wrap_fx_proxy(
                         tx,
                         sub_proxy.item(),
                     )
@@ -787,7 +792,7 @@ class TensorVariable(VariableTracker):
 
         tensor = self.as_proxy().node.meta["example_value"]
         out = tolist(tensor, self.as_proxy())
-        return SourcelessBuilder.create(tx, out)
+        return VariableTracker.build(tx, out)
 
     def method_backward(self, *args, **kwargs):
         unimplemented("Tensor.backward")
@@ -857,10 +862,9 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
         if value is not None:
             from .. import polyfills
-            from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder.create(tx, polyfills.addcmul_inplace),
+                VariableTracker.build(tx, polyfills.addcmul_inplace),
                 [self, tensor1, tensor2, value],
                 {},
             )
@@ -1067,7 +1071,7 @@ class TensorVariable(VariableTracker):
             )
 
         handle_variable = variables.RemovableHandleVariable(
-            mutable_local=variables.base.MutableLocal(),
+            mutation_type=variables.base.ValueMutationNew(),
         )
         tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable
@@ -1153,13 +1157,11 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
-    def as_tensor(self, tx):
+    def as_tensor(self, tx, dtype):
         if self._tensor_var is None:
-            from .builder import SourcelessBuilder
-
-            self._tensor_var = SourcelessBuilder.create(
+            self._tensor_var = VariableTracker.build(
                 tx, torch.scalar_tensor
-            ).call_function(tx, [self], {})
+            ).call_function(tx, [self], {"dtype": VariableTracker.build(tx, dtype)})
         return self._tensor_var
 
     def evaluate_expr(self, output_graph=None):
@@ -1362,12 +1364,10 @@ class TensorSubclassVariable(VariableTracker):
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         if len(args) == 1 and isinstance(args[0], TensorVariable):
-            from .builder import VariableBuilder
             from .torch_function import TensorWithTFOverrideVariable
 
-            torch_fn = VariableBuilder(
-                tx, AttrSource(self.source, "__torch_function__")
-            )(self.value.__torch_function__)
+            source = AttrSource(self.source, "__torch_function__")
+            torch_fn = VariableTracker.build(tx, self.value.__torch_function__, source)
 
             return TensorWithTFOverrideVariable.from_tensor_var(
                 tx, args[0], self.value, torch_fn
@@ -1451,6 +1451,6 @@ class DataPtrVariable(VariableTracker):
         self.from_tensor = from_tensor
 
     def reconstruct(self, codegen):
-        codegen(self.from_tensor, allow_cache=False)
+        codegen(self.from_tensor)
         codegen.load_method("data_ptr")
         codegen.call_method(0)

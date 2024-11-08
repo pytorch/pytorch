@@ -806,7 +806,10 @@ def _interpolate_warning(interpolate_mode):
 
 
 def _unsqueeze_helper(g: jit_utils.GraphContext, input, axes_i):
-    if _is_constant(axes_i[0]):
+    if len(axes_i) == 0:
+        # unnecessary unsqueeze if axes length==0
+        return input
+    elif _is_constant(axes_i[0]):
         if g.opset >= 13:
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
             return g.op("Unsqueeze", input, axes)
@@ -1988,7 +1991,7 @@ def _embedding_bag_helper(
 
     # FIXME(justinchuby): We need to handle what happens when we call b.op on a node return
     block_input_iter = utils._add_input_to_block(loop_block)
-    cond = utils._add_input_to_block(loop_block)
+    utils._add_input_to_block(loop_block)
 
     indices_start = loop_context.op(
         "Gather", offsets_starts, block_input_iter, axis_i=0

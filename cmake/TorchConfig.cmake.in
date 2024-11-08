@@ -102,11 +102,8 @@ else()
   append_torchlib_if_found(fmt)
   append_torchlib_if_found(cpuinfo clog)
 
-  if(NOT @USE_INTERNAL_PTHREADPOOL_IMPL@)
-    append_torchlib_if_found(pthreadpool)
-  endif()
-
   append_torchlib_if_found(eigen_blas)
+  append_torchlib_if_found(pthreadpool)
 
   if(@USE_FBGEMM@)
     append_torchlib_if_found(fbgemm)

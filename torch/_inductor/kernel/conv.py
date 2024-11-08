@@ -6,6 +6,7 @@ import logging
 from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
 
 import torch
+from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
 
 from .. import config, ir
 from ..lowering import (
@@ -25,6 +26,7 @@ from ..utils import (
     is_zeros,
     pad_listlike,
     sympy_product,
+    use_ck_conv_template,
     use_triton_template,
 )
 from ..virtualized import V
@@ -659,7 +661,17 @@ def convolution(
                     num_warps=cfg.num_warps,
                     **cfg.kwargs,
                 )
-
+    if use_ck_conv_template(layout):
+        CKGroupedConvFwdTemplate.add_ck_conv_choices(
+            choices,
+            layout,
+            input_nodes=(x, weight) + ((bias,) if bias is not None else tuple()),
+            stride=stride,
+            padding=padding,
+            dilation=dilation,
+            groups=groups,
+            n_spatial_dimensions=ndim,
+        )
     return autotune_select_algorithm("convolution", choices, args, layout)
 
 
