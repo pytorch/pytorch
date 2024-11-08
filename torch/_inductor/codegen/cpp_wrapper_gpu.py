@@ -465,7 +465,8 @@ class CppWrapperGpu(CppWrapperCpu):
             casted = []
             for arg_type, arg in zip(arg_types, call_args):
                 new_arg = arg
-                if arg_type.endswith("*") and arg != "nullptr":
+
+                if str(arg_type).endswith("*") and arg != "nullptr":
                     if config.abi_compatible:
                         new_arg = f"var_{next(self.arg_var_id)}"
                         self.writeline(
@@ -473,6 +474,7 @@ class CppWrapperGpu(CppWrapperCpu):
                         )
                     else:
                         new_arg = f"{arg}.data_ptr()"
+
                 casted.append(f"({arg_type}){new_arg}")
             call_args_str = ", ".join(casted)
             self.writeline(f"kernels.{kernel_name}({call_args_str}, {stream});")

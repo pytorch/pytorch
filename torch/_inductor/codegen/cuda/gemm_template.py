@@ -17,6 +17,7 @@ from ...ir import (
     Layout,
     ReinterpretView,
 )
+from ...utils import is_dynamic
 from ...virtualized import V
 from ..common import IndentedBuffer
 from . import cutlass_utils
@@ -37,9 +38,6 @@ extern "C" {
 PT_EXPORT {{kernel_call_signature}} {
   try {
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
-  int64_t M = {{kernel.size(X, -2)}};
-  int64_t K = {{kernel.size(X, -1)}};
-  int64_t N = {{kernel.size(W, -1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
   static cutlass::KernelHardwareInfo hw_info;
@@ -57,10 +55,6 @@ PT_EXPORT {{kernel_call_signature}} {
   }
   // check for null pointers after workspace size, since querying workspace size doesn't require valid data pointers
 #ifndef CUTLASS_BACKEND_DISABLE_CHECKS
-  {{kernel.check_not_null(X)}}
-  {{kernel.check_not_null(W)}}
-  {{kernel.check_not_null(Bias)}}
-  {{kernel.check_not_null(Y)}}
   {
     auto status = gemm_op.can_implement(arguments);
     CUTLASS_CHECK(status);
@@ -552,7 +546,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 #include "cutlass/util/tensor_view_io.h"
             """
         )
-        if inductor_cuda_config.generate_test_runner:
+        if inductor_cuda_config.generate_test_runner and not is_dynamic(
+            *self.input_nodes, self.output_node
+        ):
             res.splice(GEMM_STANDALONE_RUNNER_ADDITIONAL_INCLUDES)
         return res
 
@@ -838,7 +834,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                         and res.get(filter_res.configuration_name(), None) is None
                     ):
                         res[filter_res.configuration_name()] = filter_res
-        print("Got cutlass configs: total number of ops: %d, ", len(res))
         log.debug("Got cutlass configs: total number of ops: %d, ", len(res))
         return list(res.items())[: inductor_cuda_config.cutlass_max_profiling_configs]
 
@@ -966,7 +961,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         )
         options.update(dict(zip(extra_names, extra_inputs)))
         res = self._template_from_string(self._get_template()).render(**options)
-        if inductor_cuda_config.generate_test_runner:
+        if inductor_cuda_config.generate_test_runner and not is_dynamic(X, W, Y, Bias):
             test_runner_code = self._template_from_string(
                 GEMM_STANDALONE_RUNNER_TEMPLATE
             ).render(**options)

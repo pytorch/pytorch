@@ -1,8 +1,19 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from dataclasses import dataclass
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
-from sympy import Symbol
+from sympy import Expr
 
 from torch import dtype as torch_dtype
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
@@ -35,12 +46,94 @@ def _normalize_idx(index: int, total_length: int) -> int:
     return index if index >= 0 else index + total_length
 
 
+@dataclass(frozen=True)
+class LayoutArg:
+    node: IRNode
+    symbol: Literal["M", "N", "K", "lda", "ldb", "ldc", "ldd"]
+    attr: Literal["size", "stride"]
+    dim: int
+
+    def matches(self, node, attr, dim) -> bool:
+        return self.node == node and self.attr == attr and self.dim == dim
+
+
 class CUDAKernel(Kernel):
     """
     Baseclass for CUDA / Cutlass based Kernels
     """
 
     overrides = OpOverrides  # type: ignore[assignment]
+    layout_args: Dict[str, LayoutArg]
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.layout_args = {}
+
+    def find_layout_arg(self, node: IRNode, attr: str, dim: int):
+        matches = [
+            arg for arg in self.layout_args.values() if arg.matches(node, attr, dim)
+        ]
+        assert len(matches) <= 1, matches
+        return None if len(matches) == 0 else matches[0]
+
+    def add_layout_arg(self, symbol: str, node: IRNode, attr: str, dim: int):
+        # This is confusing what is being represented here?
+        arg = LayoutArg(node, symbol, attr, dim)
+        self.layout_args.setdefault(symbol, arg)
+
+    def init_layout_args(self) -> None:
+        X = self.named_nodes["X"]
+        W = self.named_nodes["W"]
+        Y = self.named_nodes["Y"]
+        Bias = self.named_nodes.get("Bias", None)
+        mdim = _normalize_idx(-2, len(X.get_size()))
+        ndim = _normalize_idx(-1, len(W.get_size()))
+        kdim = _normalize_idx(-1, len(X.get_size()))
+        self.add_layout_arg("M", X, "size", mdim)
+        self.add_layout_arg("N", X, "size", ndim)
+        self.add_layout_arg("K", X, "size", kdim)
+
+        lda_dim = self.find_ld_idx(X)
+        ldb_dim = self.find_ld_idx(W)
+        ldc_dim = self.find_ld_idx(Y)
+        ldd_dim = self.find_ld_idx(Bias) if Bias else None
+        self.add_layout_arg("lda", X, "stride", lda_dim)
+        self.add_layout_arg("ldb", W, "stride", ldb_dim)
+        self.add_layout_arg("ldc", Y, "stride", ldc_dim)
+        if Bias:
+            self.add_layout_arg("ldd", Bias, "stride", ldd_dim)
+
+    def get_layout_args(self) -> Tuple[Union[Expr, int], ...]:
+        X = self.named_nodes["X"]
+        W = self.named_nodes["W"]
+        Y = self.named_nodes["Y"]
+        Bias = self.named_nodes.get("Bias", None)
+        mdim = _normalize_idx(-2, len(X.get_size()))
+        ndim = _normalize_idx(-1, len(W.get_size()))
+        kdim = _normalize_idx(-1, len(X.get_size()))
+
+        def get_ld(node) -> Union[Expr, int]:
+            dim = self.find_ld_idx(node)
+            return node.get_stride()[dim]
+
+        M = X.get_size()[mdim]
+        N = W.get_size()[ndim]
+        K = X.get_size()[kdim]
+        LDA = get_ld(X)
+        LDB = get_ld(W)
+        LDC = get_ld(Y)
+        LDD = get_ld(Bias) if Bias else 0
+        return (M, N, K, LDA, LDB, LDC, LDD)
+
+    @staticmethod
+    def find_ld_idx(node: IRNode) -> int:
+        strides = node.get_stride()
+        # Handle 1D tensor case
+        if V.graph.sizevars.statically_known_equals(strides[-1], 1):
+            return _normalize_idx(-2, len(strides))
+
+        assert V.graph.sizevars.statically_known_equals(strides[-2], 1), strides[-2]
+        return _normalize_idx(-1, len(strides))
 
 
 class CUDATemplateKernel(CUDAKernel):
@@ -148,23 +241,10 @@ class CUDATemplateKernel(CUDAKernel):
 
         arg_defs, *_ = self.args.cpp_argdefs()
 
-        def collect_symbolic_size_and_strides(inp) -> List[str]:
-            if inp is None:
-                return set()
-            sizes = inp.get_size()
-            strides = inp.get_stride()
-            from torch.fx.experimental.symbolic_shapes import free_symbols
-
-            symbols = free_symbols(sizes + strides)
-            return {cexpr(self.rename_indexing(symbol)) for symbol in symbols}
-
-        from functools import reduce
-
-        symbolics = reduce(
-            lambda a, b: a | b,
-            map(lambda b: collect_symbolic_size_and_strides(b), inputs + outputs),
-        )
-        size_args = [f"size_t {s}" for s in sorted(symbolics, key=str)]
+        self.init_layout_args()
+        size_args = [
+            f"const int {s}" for s in ("M", "N", "K", "lda", "ldb", "ldc", "ldd")
+        ]
 
         signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {self._EXTRA_CPP_ARGS})"
         self.signature = signature
@@ -196,19 +276,20 @@ class CUDATemplateKernel(CUDAKernel):
             _, call_args, arg_types = self.args.cpp_argdefs()
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
+
+        layout_args = self.get_layout_args()
+        call_args.extend(layout_args)
+        arg_types.extend("int" for a in layout_args)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
-            else:
-                if isinstance(arg_types[i], torch_dtype):
-                    call_args[i] = (
-                        call_args[i]
-                        if V.graph.cpp_wrapper
-                        else f"c_void_p({call_args[i]}.data_ptr())"
-                    )
-                elif issubclass(arg_types[i], Symbol):
-                    call_args[i] = call_args[i]
+            elif isinstance(arg_types[i], torch_dtype):
+                call_args[i] = (
+                    call_args[i]
+                    if V.graph.cpp_wrapper
+                    else f"c_void_p({call_args[i]}.data_ptr())"
+                )
 
         # workspace_size ptr is NULL to mark this call is not intended for retrieving workspace_size.
         # workspace_size should have already been retrieved prior to this call.
@@ -310,13 +391,18 @@ class CUDATemplateKernel(CUDAKernel):
         if end_index is None:
             end_index = start_index
         end_index = _normalize_idx(end_index, len(node.get_size()))
-
         sizes = node.get_size()[start_index : end_index + 1]
         if len(sizes) == 0:
             return str(default_value)
 
+        sizes = [
+            self.find_layout_arg(node, "size", i).symbol or node.get_size()[i]
+            for i in range(start_index, end_index + 1)
+        ]
+
         val = sympy_product(sizes)
-        return cexpr(self.rename_indexing(val))
+
+        return val
 
     def stride(self, node: IRNode, index: int, default_value: int = 0) -> str:
         """
@@ -335,7 +421,12 @@ class CUDATemplateKernel(CUDAKernel):
             return str(default_value)
 
         stride = node.get_stride()[index]
-        return cexpr(self.rename_indexing(stride))
+
+        if V.graph.sizevars.statically_known_leq(stride, 1):
+            return str(stride)
+
+        layout_arg = self.find_layout_arg(node, "stride", index)
+        return layout_arg.symbol if layout_arg else str(stride)
 
     def row_or_column_stride(self, node: IRNode, default_value: int = 0) -> str:
         """

@@ -299,6 +299,8 @@ def get_max_alignment(inductor_layout: Layout) -> int:
         return isinstance(number, (int, sympy.Integer))
 
     def a_factor_of(x, alignment):
+        if is_static_int(x) and is_static_int(alignment):
+            return x % alignment == 0
         rem = sympy.Mod(x, alignment)
         return V.graph.sizevars.evaluate_expr(sympy.Eq(rem, 0))
 
@@ -314,7 +316,8 @@ def get_max_alignment(inductor_layout: Layout) -> int:
         ):
             continue
         if all(
-            (dim == contiguous_dim) or a_factor_of(size[contiguous_dim], alignment)
+            (dim == contiguous_dim)
+            or a_factor_of(inductor_layout.stride[dim], alignment)
             for dim in range(len(size))
         ):
             return alignment
