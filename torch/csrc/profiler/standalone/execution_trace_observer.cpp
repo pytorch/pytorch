@@ -59,7 +59,7 @@ std::string json_str_escape(const std::string& str);
 
 constexpr size_t kMaxNumElements = 4096;
 
-inline std::string getScalarValue(const c10::IValue& val) {
+static std::string getScalarValue(const c10::IValue& val) {
   if (val.isDouble()) {
     double d_val = val.toDouble();
     if (std::isinf(d_val) || std::isnan(d_val)) {
@@ -80,7 +80,7 @@ inline std::string getScalarValue(const c10::IValue& val) {
   return fmt::format("\"<{}>\"", val.tagKind());
 }
 
-inline int32_t processId() {
+static int32_t processId() {
 #ifndef _WIN32
   return static_cast<int32_t>(getpid());
 #else
@@ -199,7 +199,7 @@ static std::ofstream openOutputFile(const std::string& name) {
 }
 
 #ifdef USE_DISTRIBUTED
-static inline std::string getAttrJson(
+static std::string getAttrJson(
     const std::string& name,
     const std::string& type,
     const std::string& value) {
@@ -267,7 +267,7 @@ static void writeJsonNode(
       additiona_attrs);
 }
 
-inline std::string timeString(const std::time_t timepoint) {
+static std::string timeString(const std::time_t timepoint) {
   std::ostringstream oss;
   oss << std::put_time(std::localtime(&timepoint), "%Y-%m-%d %X"); // NOLINT
   return oss.str();
@@ -331,7 +331,7 @@ static void finalizeExecutionTraceOutput(ExecutionTraceObserver& ob) {
   VLOG(1) << "PyTorch Execution Trace: written to file " << ob.fileName;
 }
 
-inline ExecutionTraceObserver::ID getObjectID(
+static ExecutionTraceObserver::ID getObjectID(
     ExecutionTraceObserver& ob,
     const void* t) {
   const std::lock_guard<std::recursive_mutex> lock(ob.gMutex);
@@ -346,7 +346,7 @@ inline ExecutionTraceObserver::ID getObjectID(
   return iter->second;
 }
 
-inline std::tuple<std::string, std::string, std::string, std::string>
+static std::tuple<std::string, std::string, std::string, std::string>
 convertIValue(
     ExecutionTraceObserver& ob,
     const c10::IValue& val,
@@ -455,7 +455,7 @@ convertIValue(
   }
 }
 
-inline void appendValueInfo(
+static void appendValueInfo(
     ExecutionTraceObserver& ob,
     const c10::IValue& val,
     std::vector<std::string>& shapes,
@@ -470,7 +470,7 @@ inline void appendValueInfo(
   values.push_back(std::get<3>(tuple));
 }
 
-inline void handleKernelBackendInfo(
+static void handleKernelBackendInfo(
     FunctionCallContext& fc,
     const RecordFunction& fn) {
   // triton kernel related information are in kwinputs
@@ -644,7 +644,7 @@ static std::unique_ptr<ObserverContext> onFunctionEnter(
   return nullptr;
 }
 
-inline std::string json_str_escape(const std::string& str) {
+static std::string json_str_escape(const std::string& str) {
   std::ostringstream ostream;
   for (char ch : str) {
     if (ch == '"') {

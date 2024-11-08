@@ -508,6 +508,10 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
           auto scalar_result = std::get<int>(result);
           addressList.push_back(std::to_string(scalar_result));
         }
+        // today we record a lot of metadata in record_param_comms that shows up as inputs.
+        // here we only need the addresses of the first inputs, which are the real tensor inputs
+        // to the collective call. So let's break out of the loop here.
+        break;
       }
       map.emplace(kInTensorsStart, vectorToString(addressList));
       addressList.clear();
@@ -890,16 +894,16 @@ uint64_t computeFlops(
 
 // A function that takes an IValue
 // and returns a conventional string representation of the IValue
-// Currently it returns int representation of the last 8 bits of the address
+// Currently it returns int representation of the last 16 bits of the address
 // value
 int getTensorStartHint(const at::Tensor& t) {
   const auto tensor_impl = t.unsafeGetTensorImpl();
   uintptr_t storage_addr = 0;
   storage_addr = reinterpret_cast<uintptr_t>(tensor_impl->storage().data());
-  int last_8_bits = static_cast<int>(storage_addr & 0xFF);
+  int last_16_bits = static_cast<int>(storage_addr & 0xFFFF);
   // std::vector<std::string> resp = {std::to_string(storage_addr)/*,
   // std::to_string(last_8_bits)*/}; return vectorToString(resp);
-  return last_8_bits;
+  return last_16_bits;
 }
 
 bool checkFunctionOutputsForLogging(
