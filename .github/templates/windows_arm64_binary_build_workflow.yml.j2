@@ -123,7 +123,7 @@ jobs:
     steps:
       !{{ set_runner_specific_vars() }}
       !{{ checkout(deep_clone=False, directory="pytorch", repository="iremyux/pytorch", branch="nightly-for-win-arm64",) }}
-      !{{ checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      !{{ checkout(deep_clone=False, directory="builder", repository="iremyux/pytorch-builder", branch="nightly-for-win-arm64") }}
       - name: Populate binary env
         shell: cmd
         run: |
@@ -164,7 +164,7 @@ jobs:
           name: !{{ config["build_name"] }}
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="iremyux/pytorch-builder", branch="nightly-for-win-arm64") }}
       - name: Populate binary env
         shell: cmd
         run: |
