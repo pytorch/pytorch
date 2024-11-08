@@ -562,6 +562,7 @@ if(USE_CUDA)
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/intra_node_comm.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CudaDMAConnectivity.cpp
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemory.cu
+        ${TORCH_SRC_DIR}/csrc/distributed/c10d/CUDASymmetricMemoryOps.cu
         ${TORCH_SRC_DIR}/csrc/distributed/c10d/ProcessGroupNCCL.cpp
         PROPERTIES COMPILE_FLAGS "-DPYTORCH_C10_DRIVER_API_SUPPORTED=1"
       )
@@ -1034,6 +1035,9 @@ if(USE_XPU)
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
+  if(WIN32)
+    target_compile_options(torch_xpu PRIVATE /permissive-)
+  endif()
 
   # ATen XPU implementation
   set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
