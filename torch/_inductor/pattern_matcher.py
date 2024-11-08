@@ -1429,6 +1429,7 @@ def _serialize_pattern(
 
             aten = torch.ops.aten
             prims = torch.ops.prims
+            quantized_decomposed = torch.ops.quantized_decomposed
 
             """
         ).format(msg=auto_generated_msg)

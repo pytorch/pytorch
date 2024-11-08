@@ -10,6 +10,7 @@ import torch._inductor
 
 aten = torch.ops.aten
 prims = torch.ops.prims
+quantized_decomposed = torch.ops.quantized_decomposed
 
 from torch._inductor.pattern_matcher import (
    Arg,
