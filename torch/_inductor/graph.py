@@ -2034,20 +2034,14 @@ class GraphLowering(torch.fx.Interpreter):
             return self.compile_to_module().call
 
     def get_output_names(self) -> List[str]:
-        return [
-            node.get_name()
-            for node in self.graph_outputs
-            if not isinstance(node, ir.NoneAsConstantBuffer)
-            and not isinstance(node, ir.ShapeAsConstantBuffer)
-        ]
-
-    def get_output_names_with_none(self) -> List[str]:
         names = []
+        shape_counter = itertools.count(0)
+        none_counter = itertools.count(0)
         for node in self.graph_outputs:
             if isinstance(node, ir.NoneAsConstantBuffer):
-                names.append("_")
+                names.append(f"{self.name}_none{next(none_counter)}")
             elif isinstance(node, ir.ShapeAsConstantBuffer):
-                raise NotImplementedError("ShapeAsConstantBuffer is not supported yet")
+                names.append(f"{self.name}_shape{next(shape_counter)}")
             else:
                 names.append(node.get_name())
         return names
