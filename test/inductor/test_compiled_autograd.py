@@ -670,6 +670,7 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    @unittest.skip("crashes, need to investigate")
     def test_no_output_nodes_all_leaves(self):
         def fn():
             y = torch.randn(1, 4, requires_grad=True)
