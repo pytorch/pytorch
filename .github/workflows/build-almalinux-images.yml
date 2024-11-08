@@ -48,8 +48,8 @@ jobs:
         if: env.WITH_PUSH == 'false'
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-            docker-image-name: conda-builder${{ matrix.cuda_version == 'cpu' && '-' || '-cuda' }}${{matrix.cuda_version}}
-            docker-build-dir:  .ci/docker/conda
+            docker-image-name: almalinux-builder${{ matrix.cuda_version == 'cpu' && '-' || '-cuda' }}${{matrix.cuda_version}}
+            docker-build-dir:  .ci/docker/almalinux
             always-rebuild: true
             push: true
       - name: Authenticate if WITH_PUSH
