@@ -992,7 +992,8 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                         and out_tensor in tx.output.graphargs
                         and isinstance(out_tensor, variables.TensorVariable)
                         and isinstance(result_tensor, variables.TensorVariable)
-                        and out_tensor.size != result_tensor.size
+                        and out_tensor._size
+                        != result_tensor._size  # we actually want to compare None values here
                     ):
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.
