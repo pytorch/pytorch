@@ -1047,23 +1047,17 @@ class InstructionTranslatorBase(
                 if isinstance(self, InstructionTranslator):
                     self.output.cleanup()
 
-    def push(self, val: Optional[VariableTracker], name: Any = None):
+    def push(self, val: Optional[VariableTracker]):
         assert val is None or isinstance(
             val, VariableTracker
         ), f"push expects VariableTracker, got {typestr(val)}"
         self.stack.append(val)  # type: ignore[arg-type]
-        if sys.version_info >= (3, 13):
-            self.name_stack.append(name)
-            assert len(self.stack) == len(self.name_stack)
 
     def push_many(self, vals: List[VariableTracker]):
         for val in vals:
             self.push(val)
 
     def pop(self) -> VariableTracker:
-        if sys.version_info >= (3, 13):
-            assert len(self.stack) == len(self.name_stack)
-            self.name_stack.pop()
         return self.stack.pop()
 
     def popn(self, n: int) -> List[VariableTracker]:
@@ -1075,12 +1069,12 @@ class InstructionTranslatorBase(
             self.exec_recorder.add_local_var(name, self.f_locals[name])
 
         try:
-            self.push(self.symbolic_locals[name].unwrap(), name=name)
+            self.push(self.symbolic_locals[name].unwrap())
         except KeyError:
             try:
                 # This happens in dict/list comprehensions
                 new_name = name.replace(".", "implicit")
-                self.push(self.symbolic_locals[new_name], name=new_name)
+                self.push(self.symbolic_locals[new_name])
             except KeyError:
                 unimplemented("undefined LOAD_FAST (implicit)")
 
@@ -1846,10 +1840,8 @@ class InstructionTranslatorBase(
 
     def BUILD_TUPLE(self, inst):
         name_tuple = None
-        if sys.version_info >= (3, 13):
-            name_tuple = tuple(self.name_stack[-inst.argval :])
         items = self.popn(inst.argval)
-        self.push(TupleVariable(items), name=name_tuple)
+        self.push(TupleVariable(items))
 
     def BUILD_SLICE(self, inst):
         items = self.popn(inst.argval)
@@ -2473,19 +2465,10 @@ class InstructionTranslatorBase(
         flags = inst.arg
         fn = self.pop()
         assert isinstance(fn, NestedUserFunctionVariable)
-        attr_names = self.name_stack[-1]
         attr = self.pop()
 
         if flags & 0x08:
-            # 3.13 merged LOAD_CLOSURE into LOAD_FAST, so we won't know if a given LOAD_FAST
-            # is meant to load a closure variable or not. Our workaround is to maintain a stack
-            # of LOAD_FAST variable names and tuples (self.name_stack). So if we are indeed
-            # constructing a closure tuple, we can use self.name_stack to construct the closure
-            # variables here.
-            assert isinstance(attr_names, tuple) and all(
-                isinstance(name, str) for name in attr_names
-            )
-            fn.closure = TupleVariable([self.LOAD_FAST(name) for name in attr_names])
+            fn.closure = attr
         elif flags & 0x04:
             fn.annotations = attr
         elif flags & 0x02:
@@ -2598,8 +2581,6 @@ class InstructionTranslatorBase(
         self.symbolic_globals = symbolic_globals
         self.symbolic_torch_function_state = symbolic_torch_function_state
         self.stack = []
-        # stack of variable names for tracking 3.13 closures
-        self.name_stack: list[Any] = []
         self.instruction_pointer = 0
         self.current_instruction = create_instruction("NOP")
         self.block_stack = []
