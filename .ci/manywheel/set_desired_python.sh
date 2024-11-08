@@ -26,4 +26,4 @@ fi
 
 export DESIRED_PYTHON_BIN_DIR="/opt/python/$DESIRED_PYTHON/bin"
 export PATH="$DESIRED_PYTHON_BIN_DIR:$PATH"
-echo "Will build for Python version: ${DESIRED_PYTHON} with ${python_installation}"
+echo "Will build for Python version: ${DESIRED_PYTHON}"
