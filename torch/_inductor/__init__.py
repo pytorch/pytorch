@@ -4,8 +4,6 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch._inductor.config
 import torch.fx
-import torch.utils._pytree as pytree
-
 
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
@@ -81,6 +79,9 @@ def aoti_compile_and_package(
     """
     from torch.export import ExportedProgram
 
+    from .compile_fx import _flatten_inputs
+    from .debug import aot_inductor_minifier_wrapper
+
     if not isinstance(exported_program, ExportedProgram):
         raise ValueError("Only ExportedProgram is supported")
 
@@ -97,23 +98,28 @@ def aoti_compile_and_package(
             "of setting the aot_inductor.output_path config."
         )
 
+    gm = exported_program.module()
+
+    flat_example_inputs, options = _flatten_inputs(
+        gm, args, kwargs, options=inductor_configs
+    )
+
     # a wrapper around aoti_compile_and_package_inner.
-    return aoti_compile_and_package_debug_wrapper(
+    return aot_inductor_minifier_wrapper(
+        _aoti_compile_and_package_inner,
         exported_program,
-        args,
-        kwargs,
+        gm,
+        flat_example_inputs,
         package_path=package_path,
-        inductor_configs=inductor_configs,
+        inductor_configs=options,
     )
 
 
 def _aoti_compile_and_package_inner(
     gm: torch.fx.GraphModule,
     flat_example_inputs: Tuple[Any],
-    # args: Tuple[Any],
-    # kwargs: Optional[Dict[str, Any]] = None,
     *,
-    inductor_configs: Optional[Dict[str, Any]],
+    inductor_configs: Dict[str, Any],
     load_and_run: bool = False,
     package_path: Optional[str] = None,
 ):
@@ -125,9 +131,8 @@ def _aoti_compile_and_package_inner(
     If `load_and_run` is True, this function will load the compiled model and run it.
     This is for the minifier to check the correctness of the compiled model.
     """
-    from torch._inductor.package import package_aoti
-
     from .compile_fx import compile_fx_aot
+    from .package import package_aoti
 
     aoti_files = compile_fx_aot(
         gm,
@@ -145,47 +150,6 @@ def _aoti_compile_and_package_inner(
         compiled_model = aoti_load_package(package_path)
         aoti_result = compiled_model(*flat_example_inputs)
     return package_path
-
-
-def aoti_compile_and_package_debug_wrapper(
-    exported_program,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
-    *,
-    package_path: Optional[str] = None,
-    inductor_configs: Optional[Dict[str, Any]] = None,
-):
-    gm = exported_program.module()
-
-    flat_example_inputs, options = _flatten_inputs(
-        gm, args, kwargs, options=inductor_configs
-    )
-
-    use_minifier = torch._inductor.config.aot_inductor.dump_aoti_minifier
-
-    try:
-        return _aoti_compile_and_package_inner(
-            gm,
-            flat_example_inputs,
-            load_and_run=use_minifier,
-            package_path=package_path,
-            inductor_configs=options,
-        )
-
-    except Exception as e:
-        if use_minifier:
-            # TODO: check accuracy and re-direct to minifier
-            from torch._dynamo.repro.aoti import dump_to_minify
-
-            exported_program._example_inputs = (args, kwargs)
-
-            dump_to_minify(
-                exported_program,
-                "compile_fx_aot",
-                options=inductor_configs,
-            )
-
-        raise e
 
 
 def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
@@ -209,78 +173,6 @@ def aoti_load_package(path: str) -> Any:  # type: ignore[type-arg]
     return load_package(path)
 
 
-def _flatten_inputs(
-    gm: torch.fx.GraphModule,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
-    *,
-    options: Optional[Dict[str, Any]] = None,
-):
-    from .compile_fx import graph_returns_tuple
-
-    assert graph_returns_tuple(gm), (
-        "Graph output must be a tuple(). This is so that we can avoid "
-        "pytree processing of the outputs. Please change the module to "
-        "have tuple outputs."
-    )
-
-    # We will serialize the pytree info into the .so as constant strings
-    in_spec = None
-    out_spec = None
-    if isinstance(gm.graph._codegen, torch.fx.graph._PyTreeCodeGen):
-        codegen = gm.graph._codegen
-        gm.graph._codegen = torch.fx.graph.CodeGen()
-        gm.recompile()
-
-        if codegen.pytree_info.in_spec is not None:
-            in_spec = codegen.pytree_info.in_spec
-        if codegen.pytree_info.out_spec is not None:
-            out_spec = codegen.pytree_info.out_spec
-
-    else:
-        if hasattr(gm, "_in_spec"):
-            in_spec = gm._in_spec
-        if hasattr(gm, "_out_spec"):
-            out_spec = gm._out_spec
-
-    serialized_in_spec = pytree.treespec_dumps(in_spec) if in_spec is not None else ""
-    serialized_out_spec = (
-        pytree.treespec_dumps(out_spec) if out_spec is not None else ""
-    )
-
-    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
-        (args, kwargs or {})
-    )
-
-    # Replace non-tensor (constant) inputs with Nones, since these are not being
-    # used anyways by the graph
-    flat_example_inputs = [
-        x[1] if isinstance(x[1], torch.Tensor) else None for x in flat_args_with_path
-    ]
-
-    if in_spec is not None and received_spec != in_spec:
-        raise ValueError(  # noqa: B904
-            "Trying to flatten user inputs with exported input tree spec: \n"
-            f"{in_spec}\n"
-            "but actually got inputs with tree spec of: \n"
-            f"{received_spec}"
-        )
-
-    options = (
-        {
-            "aot_inductor.serialized_in_spec": serialized_in_spec,
-            "aot_inductor.serialized_out_spec": serialized_out_spec,
-        }
-        if options is None
-        else {
-            **options,
-            "aot_inductor.serialized_in_spec": serialized_in_spec,
-            "aot_inductor.serialized_out_spec": serialized_out_spec,
-        }
-    )
-    return flat_example_inputs, options
-
-
 def aot_compile(
     gm: torch.fx.GraphModule,
     args: Tuple[Any],
@@ -300,7 +192,7 @@ def aot_compile(
     Returns:
         Path to the generated shared library
     """
-    from .compile_fx import compile_fx_aot
+    from .compile_fx import _flatten_inputs, compile_fx_aot
 
     flat_example_inputs, options = _flatten_inputs(gm, args, kwargs, options=options)
 

@@ -10,7 +10,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Type, Union
+from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Tuple, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -710,3 +710,38 @@ def load_args_and_run_compile_fx_inner(path: str) -> Any:
     with fake_mode, config.patch("save_args", False):
         args, kwargs = tree_map(handle_tensor, (args, kwargs))
         return compile_fx_inner(*args, **kwargs)
+
+
+def aot_inductor_minifier_wrapper(
+    func,
+    exported_program,
+    gm: torch.fx.GraphModule,
+    flat_example_inputs: Tuple[Any],
+    *,
+    inductor_configs: Dict[str, Any],
+    package_path: Optional[str] = None,
+):
+    use_minifier = torch._inductor.config.aot_inductor.dump_aoti_minifier
+    try:
+        return func(
+            gm,
+            flat_example_inputs,
+            inductor_configs=inductor_configs,
+            package_path=package_path,
+            load_and_run=use_minifier,
+        )
+    except Exception as e:
+        if use_minifier:
+            # TODO: check accuracy and re-direct to minifier
+            from torch._dynamo.repro.aoti import dump_to_minify
+
+            # The in_spec and out_spec will be re-created in minifier launcher.
+            inductor_configs.pop("aot_inductor.serialized_in_spec")
+            inductor_configs.pop("aot_inductor.serialized_out_spec")
+
+            dump_to_minify(
+                exported_program,
+                "compile_fx_aot",
+                options=inductor_configs,
+            )
+        raise e
