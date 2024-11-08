@@ -2686,6 +2686,8 @@ class InstructionTranslatorBase(
         inline_depth: int,
         speculation_log: SpeculationLog,
         distributed_state: Optional[DistributedState],
+        # Whether to use the execution recorder.
+        use_recorder: bool = False,
     ) -> None:
         super().__init__()
         self.speculation_log = speculation_log
@@ -2722,7 +2724,7 @@ class InstructionTranslatorBase(
         self.f_code: types.CodeType = f_code
 
         # Execution record for replaying errors
-        if config.replay_record_enabled:
+        if use_recorder and config.replay_record_enabled:
             self.exec_recorder = ExecutionRecorder(
                 code=f_code, code_options=code_options
             )
@@ -2824,6 +2826,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             inline_depth=0,
             speculation_log=speculation_log,
             distributed_state=distributed_state,
+            use_recorder=True,
         )
 
         self._throw_if_in_functorch()
