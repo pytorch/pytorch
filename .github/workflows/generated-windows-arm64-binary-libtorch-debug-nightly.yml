@@ -2,9 +2,7 @@
 
 # Template is at:    .github/templates/windows_arm64_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: windows-arm64-binary-libtorch-debug
-
-on:
+name: windows-arm64-binary-libtorch-debugon:
   push:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
@@ -69,25 +67,14 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Ensure Git is installed
-        shell: powershell
-        run: |
-          if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-            Write-Host "Git is not installed. Installing Git..."
-            Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.46.0.windows.1/Git-2.46.0-64-bit.exe" -OutFile "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe"
-            Start-Process -FilePath "${env:RUNNER_TEMP}\Git-2.46.0-64-bit.exe" -ArgumentList '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-' -NoNewWindow -Wait
-            [System.Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';C:\Program Files\Git\bin', [System.EnvironmentVariableTarget]::Machine)
-          } else {
-            Write-Host "Git is already installed."
-          }
-      - name: Checkout PyTorch
+      - name: Checkout iremyux/pytorch
         uses: malfet/checkout@silent-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
+          ref: nightly-for-win-arm64
+          repository: iremyux/pytorch
           path: pytorch
           quiet-checkout: true
-      - name: Clean PyTorch checkout
+      - name: Clean iremyux/pytorch checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -96,7 +83,6 @@ jobs:
         uses: malfet/checkout@silent-checkout
         with:
           ref: nightly-for-win-arm64
-          submodules: recursive
           repository: iremyux/pytorch-builder
           path: builder
           quiet-checkout: true

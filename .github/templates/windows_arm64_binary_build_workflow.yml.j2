@@ -33,6 +33,35 @@ name: !{{ build_environment }}
           }
 {%- endmacro %}
 
+{%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
+      - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
+        uses: malfet/checkout@silent-checkout
+        with:
+      {%- if branch %}
+          ref: !{{ branch }}
+      {%- elif checkout_pr_head %}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      {%- endif %}
+      {%- if deep_clone %}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+      {%- endif %}
+      {%- if repository != "pytorch/pytorch" %}
+          repository: !{{ repository }}
+      {%- endif %}
+      {%- if directory %}
+          path: !{{ directory }}
+      {%- endif %}
+          quiet-checkout: true
+      - name: Clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }} checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+      {%- if directory%}
+        working-directory: !{{ directory }}
+      {%- endif %}
+{%- endmacro -%}
+
 on:
   push:
     {%- if branches == "nightly" %}
@@ -93,9 +122,8 @@ jobs:
     {%- endif %}
     steps:
       !{{ set_runner_specific_vars() }}
-      !{{ install_git() }}
-      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      !{{ checkout(deep_clone=False, directory="pytorch", repository="iremyux/pytorch", branch="nightly-for-win-arm64",) }}
+      !{{ checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
       - name: Populate binary env
         shell: cmd
         run: |
