@@ -23,7 +23,6 @@ from torch._dynamo.test_case import TestCase
 from torch._dynamo.testing import normalize_gm
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.utils import (
-    _decomp_table_to_post_autograd_aten,
     get_buffer,
     get_param,
     is_buffer,
@@ -1668,7 +1667,7 @@ def forward(self, p_linear_weight, p_linear_bias, x):
                 return torch.ops.aten.chunk.default(x, 3, 0)
 
         ep = torch.export.export(Foo(), (torch.randn(3, 3),))
-        decomp_table = _decomp_table_to_post_autograd_aten()
+        decomp_table = default_decompositions()
         del decomp_table[torch.ops.aten.linear.default]
         ep = ep.run_decompositions(decomp_table)
 
@@ -1680,10 +1679,10 @@ def forward(self, p_linear_weight, p_linear_bias, x):
             """\
 def forward(self, p_linear_weight, p_linear_bias, x):
     linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
-    split = torch.ops.aten.split.Tensor(linear, 1);  linear = None
-    getitem = split[0]
-    getitem_1 = split[1]
-    getitem_2 = split[2];  split = None
+    split_with_sizes = torch.ops.aten.split_with_sizes.default(linear, [1, 1, 1]);  linear = None
+    getitem = split_with_sizes[0]
+    getitem_1 = split_with_sizes[1]
+    getitem_2 = split_with_sizes[2];  split_with_sizes = None
     return (getitem, getitem_1, getitem_2)""",
         )
 
@@ -4603,7 +4602,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 torch.ops.aten._assert_async.msg(torch.tensor(True), "Fail")
                 return x
 
-        decomp_table = {**_decomp_table_to_post_autograd_aten(), **decomposition_table}
+        decomp_table = {**default_decompositions(), **decomposition_table}
 
         ep = export_for_training(M(), (torch.randn(2, 2),)).run_decompositions(
             decomp_table
