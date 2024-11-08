@@ -3,7 +3,7 @@
 from copy import copy
 from dataclasses import dataclass
 from functools import partial
-from typing import Callable, List, TypeVar
+from typing import Callable, TypeVar
 
 import torch
 from torch.fx.experimental.symbolic_shapes import is_nested_int
@@ -39,32 +39,6 @@ class XFailRule:
 
     def match(self, device, dtype, op, sample) -> bool:
         return self.match_fn(device, dtype, op, sample)
-
-
-@dataclass
-class ExtraOpData:
-    """
-    Contains info on top of the typical OpInfo data that is useful for NJT test generation.
-
-    The process that converts the standard op_db -> an NJT-compatible op_db will attach this
-    data onto each associated OpInfo entry.
-    """
-
-    # Indicates whether the associated op is a view op
-    is_view: bool = False
-
-    # Specifies the names of any dim-related args that the op takes in. This is useful
-    # for NJT tests because there is often asymmetry across the supported set of dims for
-    # an op; it may make sense to operate over the batch dim but not the ragged dim, for
-    # example. The length of this list should match the number of relevant overloads.
-    # Each list item of the outer list should specify dim argnames. Ellipses should be used
-    # to indicate multi-dim support for a given overload.
-    #
-    # For example, squeeze() has both a dim and multi-dim overload, where the argname for
-    # each is simply "dim". Its entry should be: [["dim"], ["dim", "..."]].
-    #
-    # If no overload of the op accepts dim-related args, this should be None.
-    dim_args: List[List[str]] = None
 
 
 # random integer used for sizes
@@ -984,127 +958,10 @@ njt_references = {
 }
 
 
-# Mapping of OpInfo full names -> extra data to tack onto the OpInfo entry for use
-# in test generation.
-extra_op_data = {
-    "_segment_reduce.lengths": ExtraOpData(dim_args=[["axis0"]]),
-    "_segment_reduce.offsets": ExtraOpData(dim_args=[["axis0"]]),
-    "all": ExtraOpData(dim_args=[["dim"], ["dim", "..."]]),
-    "any": ExtraOpData(dim_args=[["dim"], ["dim", "..."]]),
-    "argsort": ExtraOpData(dim_args=[["dim"]]),
-    "broadcast_to": ExtraOpData(is_view=True),
-    "cat": ExtraOpData(dim_args=[["dim"]]),
-    "chunk": ExtraOpData(is_view=True, dim_args=[["dim"]]),
-    "conj": ExtraOpData(is_view=True),
-    "contiguous": ExtraOpData(is_view=True),
-    "cummax": ExtraOpData(dim_args=[["dim"]]),
-    "cummin": ExtraOpData(dim_args=[["dim"]]),
-    "cumprod": ExtraOpData(dim_args=[["dim"]]),
-    "cumsum": ExtraOpData(dim_args=[["dim"]]),
-    "cumulative_trapezoid": ExtraOpData(dim_args=[["dim"]]),
-    "diag_embed": ExtraOpData(dim_args=[["dim1", "dim2"]]),
-    "diagonal": ExtraOpData(is_view=True, dim_args=[["dim1", "dim2"]]),
-    "diagonal_copy": ExtraOpData(dim_args=[["dim1", "dim2"]]),
-    "diagonal_scatter": ExtraOpData(dim_args=[["dim1", "dim2"]]),
-    "diff": ExtraOpData(dim_args=[["dim"]]),
-    "expand": ExtraOpData(is_view=True),
-    "expand_as": ExtraOpData(is_view=True),
-    "fft.fft": ExtraOpData(dim_args=[["dim"]]),
-    "fft.hfft": ExtraOpData(dim_args=[["dim"]]),
-    "fft.ifft": ExtraOpData(dim_args=[["dim"]]),
-    "fft.ihfft": ExtraOpData(dim_args=[["dim"]]),
-    "fft.irfft": ExtraOpData(dim_args=[["dim"]]),
-    "fft.rfft": ExtraOpData(dim_args=[["dim"]]),
-    "flatten": ExtraOpData(is_view=True, dim_args=[["start_dim", "end_dim"]]),
-    "flip": ExtraOpData(dim_args=[["dims", "..."]]),
-    "gather": ExtraOpData(dim_args=[["dim"]]),
-    "imag": ExtraOpData(is_view=True),
-    "index_add": ExtraOpData(dim_args=[["dim"]]),
-    "index_copy": ExtraOpData(dim_args=[["dim"]]),
-    "index_fill": ExtraOpData(dim_args=[["dim"]]),
-    "index_reduce.amax": ExtraOpData(dim_args=[["dim"]]),
-    "index_reduce.amin": ExtraOpData(dim_args=[["dim"]]),
-    "index_reduce.mean": ExtraOpData(dim_args=[["dim"]]),
-    "index_reduce.prod": ExtraOpData(dim_args=[["dim"]]),
-    "index_select": ExtraOpData(dim_args=[["dim"]]),
-    "kthvalue": ExtraOpData(dim_args=[["dim"]]),
-    "linalg.cross": ExtraOpData(dim_args=[["dim"]]),
-    "linalg.diagonal": ExtraOpData(is_view=True, dim_args=[["dim1", "dim2"]]),
-    "linalg.tensorsolve": ExtraOpData(dim_args=[["dims", "..."]]),
-    "linalg.vecdot": ExtraOpData(dim_args=[["dim"]]),
-    "log_softmax": ExtraOpData(dim_args=[["dim"]]),
-    "logcumsumexp": ExtraOpData(dim_args=[["dim"]]),
-    "max.reduction_with_dim": ExtraOpData(dim_args=[["dim"]]),
-    "median": ExtraOpData(dim_args=[["dim"]]),
-    "min.reduction_with_dim": ExtraOpData(dim_args=[["dim"]]),
-    "mode": ExtraOpData(dim_args=[["dim"]]),
-    "movedim": ExtraOpData(
-        dim_args=[["source", "destination"], ["source", "...", "destination", "..."]]
-    ),
-    "nanmedian": ExtraOpData(dim_args=[["dim"]]),
-    "narrow": ExtraOpData(is_view=True, dim_args=[["dim"]]),
-    "narrow_copy": ExtraOpData(dim_args=[["dim"]]),
-    "nn.functional.cosine_similarity": ExtraOpData(dim_args=[["dim"]]),
-    "nn.functional.glu": ExtraOpData(dim_args=[["dim"]]),
-    "permute": ExtraOpData(is_view=True, dim_args=[["dims", "..."]]),
-    "positive": ExtraOpData(is_view=True),
-    "prod": ExtraOpData(dim_args=[["dim"]]),
-    "ravel": ExtraOpData(is_view=True),
-    "real": ExtraOpData(is_view=True),
-    "renorm": ExtraOpData(dim_args=[["dim"]]),
-    "reshape": ExtraOpData(is_view=True),
-    "reshape_as": ExtraOpData(is_view=True),
-    "roll": ExtraOpData(dim_args=[["dims", "..."]]),
-    "rot90": ExtraOpData(dim_args=[["dims", "..."]]),
-    "scatter": ExtraOpData(dim_args=[["dim"]]),
-    "scatter_add": ExtraOpData(dim_args=[["dim"]]),
-    "scatter_reduce.amax": ExtraOpData(dim_args=[["dim"]]),
-    "scatter_reduce.amin": ExtraOpData(dim_args=[["dim"]]),
-    "scatter_reduce.mean": ExtraOpData(dim_args=[["dim"]]),
-    "scatter_reduce.prod": ExtraOpData(dim_args=[["dim"]]),
-    "scatter_reduce.sum": ExtraOpData(dim_args=[["dim"]]),
-    "select": ExtraOpData(is_view=True, dim_args=[["dim"]]),
-    "select_scatter": ExtraOpData(dim_args=[["dim"]]),
-    "slice": ExtraOpData(is_view=True, dim_args=[["dim"]]),
-    "slice_scatter": ExtraOpData(dim_args=[["dim"]]),
-    "softmax": ExtraOpData(dim_args=[["dim"]]),
-    "sort": ExtraOpData(dim_args=[["dim"]]),
-    "split": ExtraOpData(is_view=True, dim_args=[["dim"]]),
-    "split_with_sizes": ExtraOpData(is_view=True, dim_args=[["dim"]]),
-    "split_with_sizes_copy": ExtraOpData(dim_args=[["dim"]]),
-    "squeeze": ExtraOpData(is_view=True, dim_args=[["dim"], ["dim", "..."]]),
-    "squeeze_copy": ExtraOpData(dim_args=[["dim"], ["dim", "..."]]),
-    "stack": ExtraOpData(dim_args=[["dim"]]),
-    "t": ExtraOpData(is_view=True),
-    "tensor_split": ExtraOpData(is_view=True, dim_args=[["dim"]]),
-    "tensordot": ExtraOpData(dim_args=[["dims", "..."]]),
-    "tile": ExtraOpData(dim_args=[["dims", "..."]]),
-    "topk": ExtraOpData(dim_args=[["dim"]]),
-    "transpose": ExtraOpData(is_view=True, dim_args=[["dim0", "dim1"]]),
-    "transpose_copy": ExtraOpData(dim_args=[["dim0", "dim1"]]),
-    "trapezoid": ExtraOpData(dim_args=[["dim"]]),
-    "trapz": ExtraOpData(dim_args=[["dim"]]),
-    "unbind": ExtraOpData(is_view=True, dim_args=[["dim"]]),
-    "unflatten": ExtraOpData(is_view=True, dim_args=[["dim"]]),
-    "unfold": ExtraOpData(is_view=True, dim_args=[["dimension"]]),
-    "unfold_copy": ExtraOpData(dim_args=[["dimension"]]),
-    "unsafe_chunk": ExtraOpData(dim_args=[["dim"]]),
-    "unsafe_split": ExtraOpData(dim_args=[["dim"]]),
-    "unsqueeze": ExtraOpData(is_view=True, dim_args=[["dim"]]),
-    "unsqueeze_copy": ExtraOpData(dim_args=[["dim"]]),
-    "view": ExtraOpData(is_view=True),
-    "view_as": ExtraOpData(is_view=True),
-    "view_as_complex": ExtraOpData(is_view=True),
-    "view_as_real": ExtraOpData(is_view=True),
-}
-
-
 # Translates an OpInfo entry to one that operates on NJTs.
 def translate_opinfo(op):
     new_op = copy(op)
     new_op.supports_njt = True
-    # add some extra info for use in generating tests on the right subset of ops
-    new_op._extra_op_data = extra_op_data.get(op.full_name, ExtraOpData())
 
     if op.full_name in njt_sample_inputs:
         new_op.sample_inputs_func = njt_sample_inputs[op.full_name]

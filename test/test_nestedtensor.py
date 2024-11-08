@@ -8333,7 +8333,7 @@ COMPILE_BACKWARD_FAILURES = [
         ),
         name="crazy_aot_autograd_bug1_backward",
     ),
-    # clone() -> contiguous format on an non-contiguous NJT with holes currently uses
+    # clone() -> preserve format on an non-contiguous NJT with holes currently uses
     # unbind(), leading to data-dependent error in torch.compile
     XFailRule(
         error_type=torch._dynamo.exc.Unsupported,
@@ -8353,11 +8353,6 @@ COMPARE_TENSOR_COMPONENT_EQUALITY = {
     # masked_select is expected to output a different shape
     "masked_select",
 }
-
-# TODO: remove this
-logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
 
 
 # OpInfo-based NJT tests. These tests utilize an NJT-specific op_db generated from the standard
