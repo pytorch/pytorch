@@ -66,7 +66,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.opinfo.core import BinaryUfuncInfo, ReductionOpInfo
 from torch.testing._internal.opinfo.definitions.nested import njt_op_db, XFailRule
-from torch.utils._pytree import tree_flatten, tree_map
+from torch.utils._pytree import tree_flatten
 from torch.utils.checkpoint import checkpoint, create_selective_checkpoint_contexts
 
 
@@ -8123,16 +8123,6 @@ BACKWARD_FAILURES = [
             and sample.kwargs.get("memory_format", None) == torch.contiguous_format
         ),
     ),
-    # Bad bug! Silently incorrect clone() backward
-    # XFailRule(
-    #     error_type=AssertionError,
-    #     error_msg="Tensor-likes are not close!",
-    #     match_fn=lambda device, dtype, op, sample: (
-    #         op.full_name == "clone" and
-    #         "noncontig_holes" in sample.name and
-    #         sample.kwargs.get("memory_format", None) == torch.preserve_format
-    #     ),
-    # ),
     # some min / max ops use masked_fill_ underneath sometimes, which isn't implemented
     XFailRule(
         error_type=NotImplementedError,
@@ -8209,6 +8199,96 @@ COMPILE_FORWARD_FAILURES = [
 ]
 
 COMPILE_BACKWARD_FAILURES = [
+    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
+    # for these binary ops
+    XFailRule(
+        error_type=torch._dynamo.exc.BackendCompilerFailed,
+        error_msg="NotImplementedError: non-strided meta tensors not supported yet",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name
+            in {
+                "__rpow__",
+                "clamp_max",
+                "clamp_min",
+                "float_power",
+                "pow",
+                "sinc",
+            }
+            and "noncontig_holes" not in sample.name
+            and (
+                "(NT, T) broadcasting 1 over ragged" in sample.name
+                or "(NT, T) broadcasting all 1s" in sample.name
+                or "(NT, T) mixed broadcasting" in sample.name
+            )
+        ),
+    ),
+    # Bug: Something is wrongly creating an empty tensor with the jagged layout on the C++ side
+    # for this op when cached seqlen metadata is present
+    XFailRule(
+        error_type=torch._dynamo.exc.BackendCompilerFailed,
+        error_msg="NotImplementedError: non-strided meta tensors not supported yet",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name
+            in {
+                "special.i1",
+                "special.i1e",
+                "sinc",
+            }
+            and "with_seqlen_cache" in sample.name
+        ),
+    ),
+    # in compile, these complex ops use view_as_real(), which isn't implemented
+    XFailRule(
+        error_type=torch._dynamo.exc.BackendCompilerFailed,
+        error_msg="NotImplementedError: aten.view_as_real.default",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name in {"cdouble", "cfloat", "chalf"}
+            and "with_seqlen_cache" in sample.name
+        ),
+    ),
+    # torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default
+    # from item call in clone() -> unbind()
+    XFailRule(
+        error_type=torch._dynamo.exc.Unsupported,
+        error_msg="Backend compiler failed with a fake tensor exception",
+        match_fn=lambda device, dtype, op, sample: (
+            (
+                (
+                    isinstance(op, BinaryUfuncInfo)
+                    and
+                    # don't include unimplemented ops
+                    op.full_name
+                    not in {
+                        "__rsub__",
+                        "complex",
+                        "floor_divide",
+                        "polar",
+                        "rsub",
+                    }
+                )
+                or op.full_name
+                in {
+                    "__rpow__",
+                    "clamp_max",
+                    "clamp_min",
+                    "float_power",
+                    "pow",
+                    "sinc",
+                }
+            )
+            and "(NT, T) broadcasting all 1s" in sample.name
+            and "noncontig_holes" in sample.name
+        ),
+    ),
+    # ditto
+    XFailRule(
+        error_type=torch._dynamo.exc.Unsupported,
+        error_msg="Backend compiler failed with a fake tensor exception",
+        match_fn=lambda device, dtype, op, sample: (
+            op.full_name == "nn.functional.rms_norm"
+            and sample.input._lengths is not None
+        ),
+    ),
     *COMPILE_FORWARD_FAILURES,
     *BACKWARD_FAILURES,
 ]
@@ -8229,25 +8309,6 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
             return tuple(torch.ones_like(c) for c in out_val)
         else:
             return (torch.ones_like(out_val),)
-
-    @dtypes(torch.float32)
-    def test_blah(self, device, dtype):
-        nt = torch.nested.nested_tensor(
-            [
-                torch.randn(2, 5),
-                torch.randn(3, 5),
-                torch.randn(4, 5),
-            ],
-            device=device,
-            dtype=dtype,
-            layout=torch.jagged,
-        )
-
-        new_offsets = torch.tensor(
-            [0, 1, 5, nt._values.shape[0]], dtype=torch.int64, device=device
-        )
-        nt2 = torch.nested.nested_tensor_from_jagged(nt.values(), new_offsets)
-        self.assertEqual(nt, nt2)
 
     # Returns a context manager xfailing for expected errors.
     def maybe_xfail(self, xfail_rules, device, dtype, op, sample):
@@ -8310,20 +8371,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                         grad_outputs=self._gen_grad_outputs(out_ref),
                     )
 
-                    # assertEqual() doesn't take into account lengths, so hack around this
-                    # by comparing unbound components and shapes
-                    self.assertEqualIgnoringNestedInts(grads, grads_ref)
-
-                    def _get_njt_shapes(x):
-                        return (
-                            x.shape
-                            if isinstance(x, torch.Tensor) and x.is_nested
-                            else None
-                        )
-
-                    grads_njt_shapes = tree_map(_get_njt_shapes, grads)
-                    grads_ref_njt_shapes = tree_map(_get_njt_shapes, grads_ref)
-                    self.assertEqual(grads_njt_shapes, grads_ref_njt_shapes)
+                    self.assertEqualNoncontigAware(grads, grads_ref)
 
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     @ops([op for op in njt_op_db if op.supports_njt], allowed_dtypes=(torch.float32,))
@@ -8408,7 +8456,10 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                 out_ref = f(sample.input, *sample.args, **sample.kwargs)
                 out_compile = compiled_f(sample.input, *sample.args, **sample.kwargs)
 
-                self.assertEqual(out_compile, out_ref)
+                if op.full_name in COMPARE_TENSOR_COMPONENT_EQUALITY:
+                    self.assertEqualIgnoringNestedInts(out_compile, out_ref)
+                else:
+                    self.assertEqual(out_compile, out_ref)
 
                 inps, _ = tree_flatten((sample.input, sample.args, sample.kwargs))
                 g_inps = [
@@ -8429,20 +8480,7 @@ class TestNestedTensorOpInfo(NestedTensorTestCase):
                         grad_outputs=self._gen_grad_outputs(out_ref),
                     )
 
-                    # assertEqual() doesn't take into account lengths, so hack around this
-                    # by comparing unbound components and shapes
-                    self.assertEqualIgnoringNestedInts(grads_compile, grads_ref)
-
-                    def _get_njt_shapes(x):
-                        return (
-                            x.shape
-                            if isinstance(x, torch.Tensor) and x.is_nested
-                            else None
-                        )
-
-                    grads_compile_njt_shapes = tree_map(_get_njt_shapes, grads_compile)
-                    grads_ref_njt_shapes = tree_map(_get_njt_shapes, grads_ref)
-                    self.assertEqual(grads_compile_njt_shapes, grads_ref_njt_shapes)
+                    self.assertEqualNoncontigAware(grads_compile, grads_ref)
 
 
 instantiate_parametrized_tests(TestNestedTensor)
