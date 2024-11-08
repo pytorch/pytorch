@@ -6834,7 +6834,7 @@ class InvokeSubgraph(ExternKernel):
         )
 
         def create_layout(output):
-            if isinstance(output, (NoneAsConstantBuffer, ShapeAsConstantBuffer)):
+            if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
                 # Send a dummy layout
                 return FixedLayout(
                     device=device,
