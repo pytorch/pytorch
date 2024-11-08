@@ -2291,8 +2291,7 @@ def native_batch_norm_backward(
     mean = save_mean_cast
     invstd = save_invstd_cast
     if train:
-        assert mean is not None and invstd is not None
-
+        assert save_mean_cast is not None and save_invstd_cast is not None
     else:
         assert running_mean_cast is not None and running_var_cast is not None
         mean = running_mean_cast
