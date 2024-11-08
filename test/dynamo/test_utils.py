@@ -160,7 +160,7 @@ compile_fx.<locals>.bw_compiler       0.0000""",  # noqa: B950
             self.run_forward_backward()
             events = [arg[0][0] for arg in log_event.call_args_list]
 
-        # We expect log for the forward and a log for the backward.
+        # We expect a log for the forward and a log for the backward.
         self.assertTrue(len(events) == 2)
         self.assertTrue(all(isinstance(e, utils.CompilationMetrics) for e in events))
 
