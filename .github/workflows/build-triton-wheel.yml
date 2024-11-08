@@ -216,7 +216,7 @@ jobs:
       fail-fast: false
       matrix:
         py_vers: [ "3.9", "3.10", "3.11", "3.12, "3.13" ]
-    timeout-minutes: 90
+    timeout-minutes: 40
     env:
       DOCKER_IMAGE: pytorch/conda-builder:cpu
       PY_VERS: ${{ matrix.py_vers }}
