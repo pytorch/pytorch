@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import torch._inductor.config
 import torch.fx
 
+
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
 
@@ -99,6 +100,7 @@ def aoti_compile_and_package(
         )
 
     gm = exported_program.module()
+    assert isinstance(gm, torch.fx.GraphModule)
 
     flat_example_inputs, options = _flatten_inputs(
         gm, args, kwargs, options=inductor_configs
@@ -116,8 +118,8 @@ def aoti_compile_and_package(
 
 
 def _aoti_compile_and_package_inner(
-    gm: torch.fx.GraphModule,
-    flat_example_inputs: Tuple[Any],
+    gm: torch.nn.Module,
+    flat_example_inputs: List[Any],
     *,
     inductor_configs: Dict[str, Any],
     load_and_run: bool = False,
@@ -133,6 +135,8 @@ def _aoti_compile_and_package_inner(
     """
     from .compile_fx import compile_fx_aot
     from .package import package_aoti
+
+    assert isinstance(gm, torch.fx.GraphModule)
 
     aoti_files = compile_fx_aot(
         gm,

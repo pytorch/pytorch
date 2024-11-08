@@ -24,6 +24,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import Never, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -82,7 +83,6 @@ from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExpr
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
-from typing_extensions import Never, ParamSpec, Protocol, TypedDict, Unpack
 
 from .._dynamo.backends.common import aot_autograd
 from ..fx._lazy_graph_module import _use_lazy_graph_module
@@ -264,9 +264,9 @@ def _unlift_graph(
         elif node_name in graph_signature.inputs_to_buffers:
             buffer_name = graph_signature.inputs_to_buffers[node_name]
             lifted_inputs.append(buffer_name)
-            gm.meta[get_cloned_parameter_buffer_name(buffer_name)] = (
-                clone_preserve_strides(state_dict[buffer_name])
-            )
+            gm.meta[
+                get_cloned_parameter_buffer_name(buffer_name)
+            ] = clone_preserve_strides(state_dict[buffer_name])
         else:
             assert node_name in graph_signature.user_inputs
             lifted_inputs.append(None)
@@ -535,7 +535,8 @@ class _CompileFxCallableEx(Protocol):
         gm: GraphModule,
         example_inputs: Sequence[InputType],
         **kwargs: Unpack[_CompileFxKwargsEx],
-    ) -> Union[CompiledFxGraph, str]: ...
+    ) -> Union[CompiledFxGraph, str]:
+        ...
 
 
 def compile_fx_inner(
@@ -1148,7 +1149,9 @@ def cudagraphify_impl(
         (
             x
             if not isinstance(x, torch.Tensor)
-            else static_input(x) if idx not in static_input_idxs else x.detach()
+            else static_input(x)
+            if idx not in static_input_idxs
+            else x.detach()
         )
         for idx, x in enumerate(inputs)
     ]
@@ -1820,11 +1823,11 @@ def _check_triton_bf16_support(graph: GraphLowering) -> None:
 
 def _flatten_inputs(
     gm: torch.fx.GraphModule,
-    args: Tuple[Any],
+    args: Union[List[Any], Tuple[Any, ...]],
     kwargs: Optional[Dict[str, Any]] = None,
     *,
     options: Optional[Dict[str, Any]] = None,
-):
+) -> Tuple[List[Any], Dict[str, Any]]:
     """
     Flatten the inputs to the graph module and return the flat inputs and options.
     Add "aot_inductor.serialized_in_spec" and "aot_inductor.serialized_out_spec" to the options.

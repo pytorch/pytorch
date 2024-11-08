@@ -10,7 +10,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, IO, Iterator, List, Optional, Type, Union
 from unittest.mock import patch
 
 import torch
@@ -713,14 +713,14 @@ def load_args_and_run_compile_fx_inner(path: str) -> Any:
 
 
 def aot_inductor_minifier_wrapper(
-    func,
-    exported_program,
-    gm: torch.fx.GraphModule,
-    flat_example_inputs: Tuple[Any],
+    func: Callable[..., str],
+    exported_program: torch.export.ExportedProgram,
+    gm: torch.nn.Module,
+    flat_example_inputs: List[Any],
     *,
     inductor_configs: Dict[str, Any],
     package_path: Optional[str] = None,
-):
+) -> str:
     use_minifier = torch._inductor.config.aot_inductor.dump_aoti_minifier
     try:
         return func(
