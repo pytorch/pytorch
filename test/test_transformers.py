@@ -1784,7 +1784,6 @@ class TestSDPAFailureModes(NNTestCase):
             self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value))
 
     @onlyCUDA
-    @skipIfRocm  # Missing EFFICIENT_ATTENTION
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_fused_kernels_nested_broadcasting_error_cases(self, device):
         # one of k,v needs to be broadcasted and other has non consistent seq_len dim
@@ -2485,7 +2484,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-    @skipIfRocm  # No cuDNN Attention
+    @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
     def test_fused_attention_different_dk_dv(self, device):
         dtype = torch.bfloat16
@@ -2526,7 +2525,7 @@ class TestSDPACudaOnly(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
                 o = torch.nn.functional.scaled_dot_product_attention(q, k, v)
 
-    @skipIfRocm  # No cuDNN Attention
+    @skipIfRocm(msg="No cuDNN on ROCm")
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_trivial_output_transpose(self, device):
         # see also: https://github.com/pytorch/pytorch/issues/134001
@@ -2713,8 +2712,6 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("type", ["dense", "nested"])
     @parametrize("is_contiguous", [True, False])
     def test_scaled_dot_product_attention_fused_kernels_packed(self, device, type: str, is_contiguous: bool):
-        if TEST_WITH_ROCM and type == 'nested':
-            self.skipTest("ROCM does not support efficient attention on nested tensors, for now")
         make_tensor = partial(rand_sdpa_tensor, type=type, device=device, dtype=torch.float16, packed=True)
 
         batch_size, seq_len, num_heads, head_dim = 32, 64, 16, 64
@@ -2743,7 +2740,6 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=2e-3, rtol=1e-2)
 
-    @skipIfRocm  # Missing nested and EFFICIENT_ATTENTION
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("type", ["dense", "nested"])
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
@@ -2910,7 +2906,6 @@ class TestSDPACudaOnly(NNTestCase):
             atol = 9e-4 if dtype == torch.float16 else 9e-3
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=atol, rtol=rtol)
 
-    @skipIfRocm  # Missing nested and EFFICIENT_ATTENTION
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("type", ["dense", "nested"])
     def test_fused_sdp_choice(self, device, type: str):
@@ -3598,7 +3593,6 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(torch.float16), atol=1e-3, rtol=1e-2)
 
-    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
                  PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
@@ -3624,6 +3618,9 @@ class TestSDPACudaOnly(NNTestCase):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=dtype)
         batch, num_heads, head_dim = 32, 8, 64
         head_dim_v = 32 if is_efficient else head_dim
+        if TEST_WITH_ROCM and head_dim != head_dim_v:
+            unittest.skip("Efficient Attention on ROCM does not support head_dim != head_dim_v for now.")
+            return
         seq_lens_q = (torch.randint(low=1, high=5, size=(1,)).item()
                       if expand_q_batch
                       else torch.randint(low=1, high=32, size=(batch,)).tolist())
@@ -3687,7 +3684,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1.5e-3, rtol=1e-2)
 
-    @skipIfRocm  # Nested tensor
+    @skipIfRocm(msg="Efficient Attention on ROCM does not support head_dim != head_dim_v for now.")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_fused_kernels_nested_broadcasting_query_dense(self, device):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float32)
@@ -3722,7 +3719,6 @@ class TestSDPACudaOnly(NNTestCase):
 
         self.assertEqual(actual.contiguous(), math_ref.contiguous(), atol=1e-3, rtol=1e-2)
 
-    @skipIfRocm  # Nested tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
     @parametrize("batch_size", [8, 32])
     @parametrize("max_seq_len_q", [32, 256])
