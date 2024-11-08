@@ -96,6 +96,16 @@ class TestDynamoTimed(TestCase):
         loss = loss_fn(output, target)
         loss.backward()
 
+    def warmup(self):
+        # Helper to make sure any process-global lru_caches (e.g., torch_key())
+        # have already executed. Just compile something.
+        @torch.compile
+        def add(x, y):
+            return x + y
+
+        add(torch.rand([10]), torch.rand([10]))
+        utils.reset_frame_count()
+
     @config.patch("log_compilation_metrics", True)
     # We can't easily test that timing is actually accurate. Mock time to always
     # return the same value; all durations will be zero.
@@ -109,6 +119,8 @@ class TestDynamoTimed(TestCase):
         same thing multiple times, we may as well compile once and just check all
         the things that are affected by dynamo_timed.
         """
+        self.warmup()
+
         # The logging function is different for OSS vs. internal. Let's just mock
         # and capture all the CompilationMetric objects logged.
         compilation_events = []
@@ -133,12 +145,11 @@ class TestDynamoTimed(TestCase):
  '_recursive_post_grad_passes': [0.0, 0.0],
  '_recursive_pre_grad_passes': [0.0],
  'async_compile.wait': [0.0, 0.0],
- 'compile_file': [0.0, 0.0, 0.0, 0.0],
+ 'compile_file': [0.0, 0.0],
  'compile_fx.<locals>.bw_compiler': [0.0],
  'compile_fx.<locals>.fw_compiler_base': [0.0],
  'compile_fx_inner': [0.0, 0.0],
- 'create_aot_dispatcher_function': [0.0],
- 'inductor_codecache_torch_key': [0.0]}""",  # noqa: B950
+ 'create_aot_dispatcher_function': [0.0]}""",  # noqa: B950
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -172,7 +183,7 @@ class TestDynamoTimed(TestCase):
         self.assertExpectedInline(
             pprint.pformat(compilation_events[0]),
             """\
-CompilationMetrics(compile_id='0/0',
+CompilationMetrics(compile_id='1/0',
                    frame_key='1',
                    co_name='forward',
                    co_filename=None,
@@ -229,7 +240,7 @@ CompilationMetrics(compile_id='0/0',
         self.assertExpectedInline(
             pprint.pformat(compilation_events[1]),
             """\
-CompilationMetrics(compile_id='0/0',
+CompilationMetrics(compile_id='1/0',
                    frame_key=None,
                    co_name=None,
                    co_filename=None,
