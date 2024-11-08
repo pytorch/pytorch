@@ -1,12 +1,10 @@
 # Owner(s): ["module: dynamo"]
-import contextlib
 import pprint
 from unittest import mock
 
 import torch
 from torch._dynamo import config, utils
 from torch._inductor.test_case import TestCase
-from torch._inductor.utils import clear_inductor_caches
 
 
 class TestUtils(TestCase):
@@ -88,13 +86,6 @@ class TestDynamoTimed(TestCase):
     """
     Test utilities surrounding dynamo_timed.
     """
-
-    def setUp(self):
-        super().setUp()
-        utils.reset_frame_count()
-        torch._dynamo.reset()
-        clear_inductor_caches()
-        torch._inductor.codecache.torch_key.cache_clear()
 
     def run_forward_backward(self):
         model = torch.compile(TestModel())
