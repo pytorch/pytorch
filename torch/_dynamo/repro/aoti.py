@@ -304,7 +304,7 @@ def repro_minify(options, exported_program, config_patches):
         assert isinstance(gm, torch.fx.GraphModule)
         # update serialized_in_spec and serialized_out_spec
         flat_example_inputs, local_config_patches = _flatten_inputs(
-            gm, flat_example_inputs, options=config_patches
+            gm, tuple_inputs, options=config_patches
         )
 
         try:
