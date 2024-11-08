@@ -1581,6 +1581,7 @@ def parallel_num_threads():
         threads = torch.get_num_threads()
     return threads
 
+
 @functools.lru_cache(None)
 def get_backend_num_stages():
     from .runtime.triton_helpers import get_backend_options
