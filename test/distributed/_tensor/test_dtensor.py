@@ -28,7 +28,6 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -539,11 +538,9 @@ class DTensorTest(DTensorTestBase):
         buffer.seek(0)
         reloaded_st = torch.load(buffer, weights_only=False)
         self.assertEqual(sharded_tensor, reloaded_st)
-        # Test weights_only load
-        with safe_globals([DTensor, DeviceMesh, Shard, DTensorSpec, TensorMeta]):
-            buffer.seek(0)
-            reloaded_st = torch.load(buffer, weights_only=True)
-            self.assertEqual(sharded_tensor, reloaded_st)
+        buffer.seek(0)
+        reloaded_st = torch.load(buffer, weights_only=True)
+        self.assertEqual(sharded_tensor, reloaded_st)
 
 
 class DTensorMeshTest(DTensorTestBase):
