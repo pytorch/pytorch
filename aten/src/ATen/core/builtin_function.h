@@ -22,7 +22,7 @@ struct BuiltinOpFunction : public Function {
     TORCH_INTERNAL_ASSERT(schema_.returns().size() == 1);
   }
 
-  c10::string_view doc_string() const override {
+  std::string_view doc_string() const override {
     return doc_string_;
   }
 
