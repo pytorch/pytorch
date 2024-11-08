@@ -32,7 +32,7 @@ on:
       - 'torch/csrc/inductor/**'
       - 'test/cpp/aoti_abi_check/**'
       - 'test/cpp/aoti_inference/**'
-      # from "module: inductor" in .github/labeler.yml 
+      # from "module: inductor" in .github/labeler.yml
       - 'test/inductor/**'
   push:
     branches:
