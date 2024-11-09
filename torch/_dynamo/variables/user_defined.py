@@ -40,10 +40,12 @@ from ..source import (
 )
 from ..utils import (
     build_checkpoint_variable,
+    build_invoke_subgraph_variable,
     check_constant_args,
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
+    is_invoke_subgraph,
     is_namedtuple_cls,
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
@@ -941,8 +943,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 for k, v in self.value.keywords.items()
             }
             partial_kwargs.update(kwargs)
+
+            # TODO(dynamo-team) - Consider calling VariableBuilder directly here
             if is_utils_checkpoint(self.value.func):
                 return build_checkpoint_variable().call_function(
+                    tx, partial_args, partial_kwargs
+                )
+            elif is_invoke_subgraph(self.value.func):
+                return build_invoke_subgraph_variable().call_function(
                     tx, partial_args, partial_kwargs
                 )
             return variables.TorchInGraphFunctionVariable(
@@ -1150,7 +1158,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             if isinstance(subobj, types.MethodType):
                 if dynamic_subobj.__self__ is not self.value:
-                    unimplemented("__self__ mismatch for bound method")
+                    if not isinstance(dynamic_subobj.__func__, types.FunctionType):
+                        unimplemented(
+                            f"Found a method whose __func__ is not of FunctionType - {dynamic_subobj}"
+                        )
+
+                    from .builder import SourcelessUserDefinedObjectBuilder
+
+                    # This means that we are calling a method of some other object here.
+                    object_vt = SourcelessUserDefinedObjectBuilder.create(
+                        tx, dynamic_subobj.__self__
+                    )
+                    return variables.UserMethodVariable(
+                        dynamic_subobj.__func__, object_vt
+                    )
                 func = subobj.__func__
             else:
                 assert isinstance(subobj, types.FunctionType)
