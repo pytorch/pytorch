@@ -15,6 +15,7 @@ coverage.xml
 .hypothesis
 .mypy_cache
 .additional_ci_files
+.lintrunner.private.toml
 /.extracted_scripts/
 **/.pytorch_specified_test_cases.csv
 **/.pytorch-disabled-tests.json

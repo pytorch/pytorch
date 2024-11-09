@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/DeprecatedTypeProperties.h>
+#include <c10/core/ScalarType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Half.h>
@@ -100,13 +100,6 @@ namespace detail {
 
 inline at::ScalarType scalar_type(at::ScalarType s) {
   return s;
-}
-
-C10_DEPRECATED_MESSAGE(
-    "passing at::DeprecatedTypeProperties to an AT_DISPATCH macro is deprecated, "
-    "pass an at::ScalarType instead")
-inline at::ScalarType scalar_type(const at::DeprecatedTypeProperties& t) {
-  return t.scalarType();
 }
 
 } // namespace detail
