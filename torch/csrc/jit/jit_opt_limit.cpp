@@ -7,6 +7,7 @@
 #include <ATen/core/function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
+#include <c10/util/env.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/jit_opt_limit.h>
 
@@ -48,9 +49,9 @@ static std::unordered_map<std::string, int64_t> parseJITOptLimitOption(
 }
 
 bool opt_limit(const char* pass_name) {
-  static const char* opt_limit = std::getenv("PYTORCH_JIT_OPT_LIMIT");
+  static const auto opt_limit = c10::utils::get_env("PYTORCH_JIT_OPT_LIMIT");
   // if nothing is provided, let's allow everything
-  if (!opt_limit) {
+  if (!opt_limit.has_value()) {
     return true;
   }
 
