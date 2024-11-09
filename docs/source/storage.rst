@@ -15,17 +15,15 @@ actual data and the rest serving as metadata.
 Untyped Storage API
 -------------------
 
-An untyped storage is a fundamental concept in PyTorch, representing a contiguous, one-dimensional array of bytes.
-It serves as the underlying data container for tensors.
 A :class:`torch.UntypedStorage` is a contiguous, one-dimensional array of elements. Its length is equal to the number of
-bytes of the tensor.
+bytes of the tensor. The storage serves as the underlying data container for tensors.
 In general, a tensor created in PyTorch using regular constructors such as :func:`~torch.zeros`, :func:`~torch.zeros_like`
 or :func:`~torch.Tensor.new_zeros` will produce tensors where there is a one-to-one correspondence between the tensor
 storage and the tensor itself.
 
-But a storage also allows multiple tensors to share the same storage.
-For instance, any view of a tensor (obtained through :meth:`~torch.Tensor.view` or some but not all kinds of indexing
-like integers and slices) will point to the same underlying tensor as the original one.
+However, a storage is allowed to be shared by multiple tensors.
+For instance, any view of a tensor (obtained through :meth:`~torch.Tensor.view` or some, but not all, kinds of indexing
+like integers and slices) will point to the same underlying storage as the original tensor.
 When serializing and deserializing tensors that share a common storage, the relationship is preserved, and the tensors
 continue to point to the same storage. Interestingly, deserializing multiple tensors that point to a single storage
 can be faster than deserializing multiple independent tensors.
@@ -76,12 +74,14 @@ the following example shows:
     >>> t.set_(s1, storage_offset=t.storage_offset(), stride=t.stride(), size=t.size())
     tensor([0., 0., 0.])
 
-Other than their ``data_ptr``, untyped storage also have other attributes such as :attr:`~torch.UntypedStorage.filename`
+Other than ``data_ptr``, untyped storage also have other attributes such as :attr:`~torch.UntypedStorage.filename`
 (in case the storage points to a file on disk), :attr:`~torch.UntypedStorage.device` or
 :attr:`~torch.UntypedStorage.is_cuda` for device checks. A storage can also be manipulated in-place or
 out-of-place with methods like :attr:`~torch.UntypedStorage.copy_`, :attr:`~torch.UntypedStorage.fill_` or
 :attr:`~torch.UntypedStorage.pin_memory`. FOr more information, check the API
-reference below. Keep in mind that modifying storages is a low-level API and comes with some risks.
+reference below. Keep in mind that modifying storages is a low-level API and comes with risks!
+Most of these APIs also exist on the tensor level: if present, they should be prioritized over their storage
+counterparts.
 
 .. autoclass:: torch.UntypedStorage
    :members:
@@ -103,10 +103,11 @@ whereas the storage of the gradient can be obtained through ``tensor.grad.untype
 There are also special cases where tensors do not have a typical storage, or no storage at all:
   - Tensors on ``"meta"`` device: Tensors on the ``"meta"`` device are used for shape inference
     and do not hold actual data.
-  - Fake Tensors: Another internal tool used by PyTorch's compiler are
-    `FakeTensor <https://pytorch.org/docs/stable/torch.compiler_fake_tensor.html>`_ which are based on a similar idea.
+  - Fake Tensors: Another internal tool used by PyTorch's compiler is
+    `FakeTensor <https://pytorch.org/docs/stable/torch.compiler_fake_tensor.html>`_ which is based on a similar idea.
 
-Tensor subclasses or tensor-like object may also display unusual behaviours.
+Tensor subclasses or tensor-like objects can also display unusual behaviours. In general, we do not
+expect many use cases to require operating at the Storage level!
 
 Legacy Typed Storage
 --------------------
