@@ -2174,7 +2174,12 @@ class Scheduler:
                 # dead code
                 log.debug("removed dead operation: %s", node.get_name())
                 V.graph.removed_operations.add(node.get_name())
-
+                for read in node.read_writes.reads:
+                    if read.name in self.name_to_buf:
+                        users = self.name_to_buf[read.name].users
+                        self.name_to_buf[read.name].users = [
+                            u for u in users if u.node.get_name() != node.get_name()
+                        ]
         self.nodes = list(reversed(updated_nodes))
 
         # Prune any WeakDeps no longer needed
