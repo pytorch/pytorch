@@ -2978,3 +2978,26 @@ class SourcelessBuilder:
 
 
 SourcelessBuilder._type_handlers = SourcelessBuilder.make_type_handlers()
+
+
+class SourcelessUserDefinedObjectBuilder:
+    """
+    SourceLessBuilder does not return a UserDefinedObjectVariable, but in some
+    cases it might be ok to return UserDefinedObjects. In such case, use this
+    builder.
+    """
+
+    def __init__(self) -> None:
+        raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", value) -> VariableTracker:
+        value_type = type(value)
+        if issubclass(value_type, MutableMapping):
+            return MutableMappingVariable(value, mutation_type=ValueMutationNew())
+        elif isinstance(value, torch.nn.Module):
+            return UnspecializedNNModuleVariable(
+                value, mutation_type=ValueMutationNew()
+            )
+        else:
+            return UserDefinedObjectVariable(value, mutation_type=ValueMutationNew())
