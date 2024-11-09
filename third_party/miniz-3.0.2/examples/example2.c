@@ -13,7 +13,7 @@
 #endif
 
 #include <stdio.h>
-#include "miniz_zip.h"
+#include "miniz.h"
 
 typedef unsigned char uint8;
 typedef unsigned short uint16;
