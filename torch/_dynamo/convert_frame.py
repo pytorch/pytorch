@@ -696,7 +696,7 @@ def _compile(
                 dynamo_timed(
                     "_compile.compile_inner",
                     phase_name="entire_frame_compile",
-                    dynamo_compile_column="dynamo_cumulative_compile_time_us",
+                    dynamo_compile_column_us="dynamo_cumulative_compile_time_us",
                 )
             )
             stack.enter_context(

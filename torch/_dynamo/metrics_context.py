@@ -42,6 +42,12 @@ class MetricsContext:
         if self._level == 0:
             self._on_exit(self._metrics)
 
+    def in_progress(self) -> bool:
+        """
+        True if we've entered the context.
+        """
+        return self._level > 0
+
     def increment(self, metric: str, value: int) -> None:
         """
         Increment a metric by a given amount.
@@ -52,31 +58,29 @@ class MetricsContext:
             self._metrics[metric] = 0
         self._metrics[metric] += value
 
-    def set(self, metric: str, value: Any, overwrite: bool = False) -> None:
+    def set(self, metric: str, value: Any) -> None:
         """
-        Set a metric to a given value. If overwrite=False (the default), raise if the
-        metric has been assigned previously in the current context.
+        Set a metric to a given value. Raises if the metric has been assigned previously
+        in the current context.
         """
         if self._level == 0:
             raise RuntimeError(f"Cannot set {metric} outside of a MetricsContext")
-        if not overwrite and metric in self._metrics:
+        if metric in self._metrics:
             raise RuntimeError(
                 f"Metric '{metric}' has already been set in the current context"
             )
         self._metrics[metric] = value
 
-    def update(self, values: Dict[str, Any], overwrite: bool = False) -> None:
+    def update(self, values: Dict[str, Any]) -> None:
         """
-        Set multiple metrics directly. This method does NOT increment. If overwrite=False
-        (the default), raise if any metric has been assigned previously in the current
-        context.
+        Set multiple metrics directly. This method does NOT increment. Raises if any
+        metric has been assigned previously in the current context.
         """
         if self._level == 0:
             raise RuntimeError("Cannot update metrics outside of a MetricsContext")
-        if not overwrite:
-            existing = self._metrics.keys() & values.keys()
-            if existing:
-                raise RuntimeError(
-                    f"Metric(s) {existing} have already been set in the current context"
-                )
+        existing = self._metrics.keys() & values.keys()
+        if existing:
+            raise RuntimeError(
+                f"Metric(s) {existing} have already been set in the current context"
+            )
         self._metrics.update(values)

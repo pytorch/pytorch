@@ -141,10 +141,10 @@ log = logging.getLogger(__name__)
 # profiling compilation time by function
 compilation_time_metrics: Dict[str, List[float]] = {}
 
-# This supports calculate_time_spent(), which reports cumulative times (in seconds)
+# This supports calculate_time_spent(), which reports cumulative times
 # across the process for any "phase" populated by dynamo_timed. Reset if
 # reset_frame_count() is called.
-cumulative_time_spent_s: Dict[str, float] = collections.defaultdict(float)
+cumulative_time_spent_ns: Dict[str, float] = collections.defaultdict(float)
 
 timer_counter = itertools.count()
 
@@ -220,7 +220,7 @@ def increment_frame() -> None:
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def reset_frame_count() -> None:
     global curr_frame
-    cumulative_time_spent_s.clear()
+    cumulative_time_spent_ns.clear()
     compilation_time_metrics.clear()
     curr_frame = 0
 
@@ -237,7 +237,7 @@ def increment_op_count(cnt: int) -> None:
 # For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
 def calculate_time_spent() -> Dict[str, float]:
     total_by_key = {}
-    for phase, timing in cumulative_time_spent_s.items():
+    for phase, timing in cumulative_time_spent_ns.items():
         total_by_key[phase] = timing / 1e9
 
     total_by_key["total_wall_time"] = total_by_key.get(
@@ -279,7 +279,7 @@ def print_time_report() -> None:
 # To record execution time, MetricsContext works with dynamo_timed:
 #    def foo(...):
 #        # Updates the "metric_us" field.
-#        with dynamo_timed("metric", dynamo_compile_column="metric_us")
+#        with dynamo_timed("metric", dynamo_compile_column_us="metric_us")
 #            ...
 #
 _METRICS_CONTEXT: MetricsContext
@@ -298,7 +298,7 @@ def dynamo_timed(
     # TODO(masnesral): fwd_only is ignored. Remove it.
     fwd_only: bool = True,
     metadata: Optional[Dict[str, object]] = None,
-    dynamo_compile_column: Optional[str] = None,
+    dynamo_compile_column_us: Optional[str] = None,
 ) -> Generator[Any, None, None]:
     """
     dynamo_timed is a context manager
@@ -329,13 +329,13 @@ def dynamo_timed(
     - phase_name: Optional override for the event name.
     - log_pt2_compile_event: Whether to log a pt2 compile event internally.
     - metadata: Extra metadata to put in pt2_compile_events.
-    - dynamo_compile_column: If provided, updates the specified CompilationMetrics
+    - dynamo_compile_column_us: If provided, updates the specified CompilationMetrics
       field to be logged to dyname_compile column. We expect all columns to be _us;
       therefore, the field name must end with "_us".
     """
     # We're standardizing on microseconds for dynamo_compile timings.
-    if dynamo_compile_column is not None:
-        assert dynamo_compile_column.endswith("_us")
+    if dynamo_compile_column_us is not None:
+        assert dynamo_compile_column_us.endswith("_us")
 
     if phase_name:
         event_name = phase_name
@@ -362,20 +362,21 @@ def dynamo_timed(
             yield
     finally:
         end_ns = time.time_ns()
-        time_spent = end_ns - start_ns
-        compilation_time_metrics[key].append(time_spent / 1e9)
+        time_spent_ns = end_ns - start_ns
+        compilation_time_metrics[key].append(time_spent_ns / 1e9)
         chromium_log.log_event_end(
             event_name, end_ns, {}, start_ns, log_pt2_compile_event
         )
-        if dynamo_compile_column:
+        if dynamo_compile_column_us:
             metrics_context = get_metrics_context()
-            metrics_context.increment(dynamo_compile_column, time_spent // 1000)
+            if metrics_context.in_progress():
+                metrics_context.increment(dynamo_compile_column_us, time_spent_ns // 1000)
             # TODO: the events that we capture in calculate_time_spent() seem a little
             # arbitrary. Currently, it's only those fields that are present in
             # CompilationMetrics (but note that we accumulate by the associated event
             # name, not the field name in CompilationMetrics). Do we want to keep it
             # this way?
-            cumulative_time_spent_s[event_name] += time_spent
+            cumulative_time_spent_ns[event_name] += time_spent_ns
 
 
 @overload

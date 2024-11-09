@@ -51,9 +51,9 @@ class TestMetricsContext(TestCase):
 
         self.assertEqual(self.metrics, {"m1": 1, "m2": 2, "m3": 3, "m4": 4})
 
-    def test_set_overwrite(self):
+    def test_set_disallow_overwrite(self):
         """
-        Validate the set overwrite flag.
+        Validate set won't overwrite.
         """
         with MetricsContext(self._on_exit) as context:
             context.set("m1", 1)
@@ -62,15 +62,9 @@ class TestMetricsContext(TestCase):
 
         self.assertEqual(self.metrics, {"m1": 1})
 
-        with MetricsContext(self._on_exit) as context:
-            context.set("m1", 1, overwrite=False)
-            context.set("m1", 2, overwrite=True)
-
-        self.assertEqual(self.metrics, {"m1": 2})
-
-    def test_update_overwrite(self):
+    def test_update_disallow_overwrite(self):
         """
-        Validate the update overwrite flag.
+        Validate update won't overwite.
         """
         with MetricsContext(self._on_exit) as context:
             context.update({"m1": 1, "m2": 2})
@@ -78,12 +72,6 @@ class TestMetricsContext(TestCase):
                 context.update({"m1": 7, "m3": 3})
 
         self.assertEqual(self.metrics, {"m1": 1, "m2": 2})
-
-        with MetricsContext(self._on_exit) as context:
-            context.update({"m1": 1, "m2": 2}, overwrite=False)
-            context.update({"m1": 7, "m3": 3}, overwrite=True)
-
-        self.assertEqual(self.metrics, {"m1": 7, "m2": 2, "m3": 3})
 
 
 if __name__ == "__main__":

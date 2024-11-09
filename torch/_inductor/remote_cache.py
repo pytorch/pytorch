@@ -45,14 +45,14 @@ remote_fx_cache_get_timed = functools.partial(
     "FbRemoteFxGraphCache.get",
     phase_name="remote_fx_graph_cache_get",
     log_pt2_compile_event=False,
-    dynamo_compile_column="remote_fx_graph_cache_get_time_us",
+    dynamo_compile_column_us="remote_fx_graph_cache_get_time_us",
 )
 remote_fx_cache_put_timed = functools.partial(
     dynamo_timed,
     "FbRemoteFxGraphCache.put",
     phase_name="remote_fx_graph_cache_put",
     log_pt2_compile_event=False,
-    dynamo_compile_column="remote_fx_graph_cache_put_time_us",
+    dynamo_compile_column_us="remote_fx_graph_cache_put_time_us",
 )
 
 

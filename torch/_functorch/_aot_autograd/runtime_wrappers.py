@@ -2009,7 +2009,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     ), get_metrics_context(), dynamo_timed(
                         "backward._backward_impl",
                         phase_name="entire_backward_compile",
-                        dynamo_compile_column="backward_cumulative_compile_time_us",
+                        dynamo_compile_column_us="backward_cumulative_compile_time_us",
                     ):
                         fail_type: Optional[str] = None
                         fail_reason: Optional[str] = None
