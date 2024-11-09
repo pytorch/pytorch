@@ -3963,7 +3963,7 @@ class TestCudaMallocAsync(TestCase):
         memory_usage = []
         tensor = torch.randn(8192, 8192).cuda()
         
-        for i in range(100)
+        for i in range(100):
             t = tensor.t()
             sliced_t = tensor[:4096, :4096].clone()
             tensor[:4096, :4096] = sliced_t
