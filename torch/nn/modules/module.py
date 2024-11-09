@@ -126,6 +126,7 @@ _global_is_full_backward_hook: Optional[bool] = None
 _global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks_always_called: Dict[int, bool] = OrderedDict()
+_global_forward_hooks_with_kwargs: Dict[int, bool] = OrderedDict()
 
 _EXTRA_STATE_KEY_SUFFIX = "_extra_state"
 
@@ -243,6 +244,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
 def register_module_forward_hook(
     hook: Callable[..., None],
     *,
+    with_kwargs: bool = False,
     always_call: bool = False,
 ) -> RemovableHandle:
     r"""Register a global forward hook for all the modules.
@@ -280,6 +282,8 @@ def register_module_forward_hook(
         _global_forward_hooks, extra_dict=_global_forward_hooks_always_called
     )
     _global_forward_hooks[handle.id] = hook
+    if with_kwargs:
+        _global_forward_hooks_with_kwargs[handle.id] = True
     if always_call:
         _global_forward_hooks_always_called[handle.id] = True
     return handle
@@ -1797,7 +1801,7 @@ class Module:
                     if hook_id in self._forward_hooks_always_called or hook_id in _global_forward_hooks_always_called:
                         called_always_called_hooks.add(hook_id)
 
-                    if hook_id in self._forward_hooks_with_kwargs:
+                    if hook_id in self._forward_hooks_with_kwargs or hook_id in _global_forward_hooks_with_kwargs:
                         hook_result = hook(self, args, kwargs, result)
                     else:
                         hook_result = hook(self, args, result)
@@ -1828,6 +1832,8 @@ class Module:
 
             return result
 
+        from torch.compiler import is_compiling
+
         # This is technically not behavior equivalent when compiling, but it's
         # incredibly unlikely we will ever support throwing an exception in NN
         # module, and then catching it here, and then reraising it, and then
@@ -1835,7 +1841,7 @@ class Module:
         # The reraise here just gunks up our exception handling for no good
         # reason.  Don't try to run the always called hooks in event of
         # exception.
-        if torch.compiler.is_compiling():
+        if is_compiling():
             return inner()
 
         try:
