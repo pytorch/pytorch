@@ -21,6 +21,7 @@ import torch.utils._pytree as pytree
 
 from torch import distributed as dist
 from torch._C._functorch import _add_batch_dim, get_unwrapped, is_batchedtensor
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.testing import make_test_cls_with_patches, rand_strided
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.scan import scan
@@ -188,7 +189,6 @@ class FakeTensorTest(TestCase):
         out = torch._subclasses.fake_utils.try_convert_fake_to_real([x[0:10]])
 
         self.assertEqual(torch.ones([10]), out[0])
-
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
@@ -430,6 +430,16 @@ class FakeTensorTest(TestCase):
 
         self.assertTrue(out[1].is_contiguous())
         self.checkMetaProps(out[0], out[1])
+
+    def test_split_return_self(self):
+        def fn(x):
+            return torch.functional.split(x, 0)[0]
+
+        with FakeTensorMode(), enable_python_dispatcher():
+            out_fake = fn(torch.empty((0,)))
+
+        out_eager = fn(torch.empty((0,)))
+        self.checkMetaProps(out_fake, out_eager)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):
