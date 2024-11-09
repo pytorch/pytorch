@@ -1350,6 +1350,11 @@ test_executorch() {
 
   pushd /executorch
 
+  # NB: Clean ExecuTorch checkout dir to remove all existing build artifacts. Without
+  # this step, ExecuTorch codegen won't run correctly and we end up with missing ops.
+  # This looks like a bug from ExecuTorch build
+  git clean -fx .
+
   export PYTHON_EXECUTABLE=python
   export EXECUTORCH_BUILD_PYBIND=ON
   export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
