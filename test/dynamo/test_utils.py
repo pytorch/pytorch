@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import dataclasses
 import pprint
 from unittest import mock
 
@@ -96,6 +97,16 @@ class TestDynamoTimed(TestCase):
         loss = loss_fn(output, target)
         loss.backward()
 
+    def warmup(self):
+        # Helper to make sure any process-global lru_caches (e.g., torch_key())
+        # have already executed. Just compile something.
+        @torch.compile
+        def add(x, y):
+            return x + y
+
+        add(torch.rand([10]), torch.rand([10]))
+        utils.reset_frame_count()
+
     @config.patch("log_compilation_metrics", True)
     # We can't easily test that timing is actually accurate. Mock time to always
     # return the same value; all durations will be zero.
@@ -109,6 +120,8 @@ class TestDynamoTimed(TestCase):
         same thing multiple times, we may as well compile once and just check all
         the things that are affected by dynamo_timed.
         """
+        self.warmup()
+
         # The logging function is different for OSS vs. internal. Let's just mock
         # and capture all the CompilationMetric objects logged.
         compilation_events = []
@@ -133,12 +146,11 @@ class TestDynamoTimed(TestCase):
  '_recursive_post_grad_passes': [0.0, 0.0],
  '_recursive_pre_grad_passes': [0.0],
  'async_compile.wait': [0.0, 0.0],
- 'compile_file': [0.0, 0.0, 0.0, 0.0],
+ 'compile_file': [0.0, 0.0],
  'compile_fx.<locals>.bw_compiler': [0.0],
  'compile_fx.<locals>.fw_compiler_base': [0.0],
  'compile_fx_inner': [0.0, 0.0],
- 'create_aot_dispatcher_function': [0.0],
- 'inductor_codecache_torch_key': [0.0]}""",  # noqa: B950
+ 'create_aot_dispatcher_function': [0.0]}""",  # noqa: B950
         )
 
         # Now validate utils.calculate_time_spent(). Formatting the return
@@ -170,116 +182,116 @@ class TestDynamoTimed(TestCase):
         # First event is for the forward. Formatting makes reading diffs
         # much easier.
         self.assertExpectedInline(
-            pprint.pformat(compilation_events[0]),
+            pprint.pformat(dataclasses.asdict(compilation_events[0])),
             """\
-CompilationMetrics(compile_id='0/0',
-                   frame_key='1',
-                   co_name='forward',
-                   co_filename=None,
-                   co_firstlineno=None,
-                   cache_size=0,
-                   accumulated_cache_size=0,
-                   guard_count=33,
-                   shape_env_guard_count=0,
-                   graph_op_count=1,
-                   graph_node_count=5,
-                   graph_input_count=3,
-                   start_time=0.0001,
-                   entire_frame_compile_time_s=0.0,
-                   backend_compile_time_s=0.0,
-                   inductor_compile_time_s=0.0,
-                   code_gen_time_s=0.0,
-                   fail_type=None,
-                   fail_reason=None,
-                   fail_user_frame_filename=None,
-                   fail_user_frame_lineno=None,
-                   non_compliant_ops=set(),
-                   compliant_custom_ops=set(),
-                   restart_reasons=set(),
-                   dynamo_time_before_restart_s=0.0,
-                   has_guarded_code=True,
-                   remote_cache_time_saved_s=0,
-                   structured_logging_overhead_s=0.0,
-                   config_suppress_errors=False,
-                   config_inline_inbuilt_nn_modules=True,
-                   specialize_float=True,
-                   dynamo_config=None,
-                   is_forward=True,
-                   num_triton_bundles=None,
-                   remote_fx_graph_cache_get_time_ms=None,
-                   remote_fx_graph_cache_put_time_ms=None,
-                   start_time_us=100,
-                   duration_us=0,
-                   dynamo_cumulative_compile_time_us=0,
-                   aot_autograd_cumulative_compile_time_us=0,
-                   inductor_cumulative_compile_time_us=0,
-                   inductor_code_gen_cumulative_compile_time_us=0,
-                   triton_compile_time_us=None,
-                   runtime_cudagraphify_time_us=None,
-                   runtime_triton_autotune_time_us=None,
-                   dynamo_compile_time_before_restart_us=0,
-                   cuda_synchronize_time_us=None,
-                   distributed_ephemeral_timeout_us=0,
-                   structured_logging_overhead_us=0,
-                   remote_fx_graph_cache_get_time_us=None,
-                   remote_fx_graph_cache_put_time_us=None)""",  # noqa: B950
+{'accumulated_cache_size': 0,
+ 'aot_autograd_cumulative_compile_time_us': 0,
+ 'backend_compile_time_s': 0.0,
+ 'cache_size': 0,
+ 'co_filename': None,
+ 'co_firstlineno': None,
+ 'co_name': 'forward',
+ 'code_gen_time_s': 0.0,
+ 'compile_id': '1/0',
+ 'compliant_custom_ops': set(),
+ 'config_inline_inbuilt_nn_modules': True,
+ 'config_suppress_errors': False,
+ 'cuda_synchronize_time_us': None,
+ 'distributed_ephemeral_timeout_us': 0,
+ 'duration_us': 0,
+ 'dynamo_compile_time_before_restart_us': 0,
+ 'dynamo_config': None,
+ 'dynamo_cumulative_compile_time_us': 0,
+ 'dynamo_time_before_restart_s': 0.0,
+ 'entire_frame_compile_time_s': 0.0,
+ 'fail_reason': None,
+ 'fail_type': None,
+ 'fail_user_frame_filename': None,
+ 'fail_user_frame_lineno': None,
+ 'frame_key': '1',
+ 'graph_input_count': 3,
+ 'graph_node_count': 5,
+ 'graph_op_count': 1,
+ 'guard_count': 33,
+ 'has_guarded_code': True,
+ 'inductor_code_gen_cumulative_compile_time_us': 0,
+ 'inductor_compile_time_s': 0.0,
+ 'inductor_cumulative_compile_time_us': 0,
+ 'is_forward': True,
+ 'non_compliant_ops': set(),
+ 'num_triton_bundles': None,
+ 'remote_cache_time_saved_s': 0,
+ 'remote_fx_graph_cache_get_time_ms': None,
+ 'remote_fx_graph_cache_get_time_us': None,
+ 'remote_fx_graph_cache_put_time_ms': None,
+ 'remote_fx_graph_cache_put_time_us': None,
+ 'restart_reasons': set(),
+ 'runtime_cudagraphify_time_us': None,
+ 'runtime_triton_autotune_time_us': None,
+ 'shape_env_guard_count': 0,
+ 'specialize_float': True,
+ 'start_time': 0.0001,
+ 'start_time_us': 100,
+ 'structured_logging_overhead_s': 0.0,
+ 'structured_logging_overhead_us': 0,
+ 'triton_compile_time_us': None}""",  # noqa: B950
         )
 
         # Second event is for the backward
         self.assertExpectedInline(
-            pprint.pformat(compilation_events[1]),
+            pprint.pformat(dataclasses.asdict(compilation_events[1])),
             """\
-CompilationMetrics(compile_id='0/0',
-                   frame_key=None,
-                   co_name=None,
-                   co_filename=None,
-                   co_firstlineno=None,
-                   cache_size=None,
-                   accumulated_cache_size=None,
-                   guard_count=None,
-                   shape_env_guard_count=None,
-                   graph_op_count=None,
-                   graph_node_count=None,
-                   graph_input_count=None,
-                   start_time=None,
-                   entire_frame_compile_time_s=None,
-                   backend_compile_time_s=None,
-                   inductor_compile_time_s=0.0,
-                   code_gen_time_s=0.0,
-                   fail_type=None,
-                   fail_reason=None,
-                   fail_user_frame_filename=None,
-                   fail_user_frame_lineno=None,
-                   non_compliant_ops=None,
-                   compliant_custom_ops=None,
-                   restart_reasons=None,
-                   dynamo_time_before_restart_s=None,
-                   has_guarded_code=None,
-                   remote_cache_time_saved_s=None,
-                   structured_logging_overhead_s=0.0,
-                   config_suppress_errors=None,
-                   config_inline_inbuilt_nn_modules=None,
-                   specialize_float=None,
-                   dynamo_config=None,
-                   is_forward=False,
-                   num_triton_bundles=None,
-                   remote_fx_graph_cache_get_time_ms=None,
-                   remote_fx_graph_cache_put_time_ms=None,
-                   start_time_us=100,
-                   duration_us=0,
-                   dynamo_cumulative_compile_time_us=None,
-                   aot_autograd_cumulative_compile_time_us=None,
-                   inductor_cumulative_compile_time_us=0,
-                   inductor_code_gen_cumulative_compile_time_us=0,
-                   triton_compile_time_us=None,
-                   runtime_cudagraphify_time_us=None,
-                   runtime_triton_autotune_time_us=None,
-                   dynamo_compile_time_before_restart_us=None,
-                   cuda_synchronize_time_us=None,
-                   distributed_ephemeral_timeout_us=None,
-                   structured_logging_overhead_us=0,
-                   remote_fx_graph_cache_get_time_us=None,
-                   remote_fx_graph_cache_put_time_us=None)""",  # noqa: B950
+{'accumulated_cache_size': None,
+ 'aot_autograd_cumulative_compile_time_us': None,
+ 'backend_compile_time_s': None,
+ 'cache_size': None,
+ 'co_filename': None,
+ 'co_firstlineno': None,
+ 'co_name': None,
+ 'code_gen_time_s': 0.0,
+ 'compile_id': '1/0',
+ 'compliant_custom_ops': None,
+ 'config_inline_inbuilt_nn_modules': None,
+ 'config_suppress_errors': None,
+ 'cuda_synchronize_time_us': None,
+ 'distributed_ephemeral_timeout_us': None,
+ 'duration_us': 0,
+ 'dynamo_compile_time_before_restart_us': None,
+ 'dynamo_config': None,
+ 'dynamo_cumulative_compile_time_us': None,
+ 'dynamo_time_before_restart_s': None,
+ 'entire_frame_compile_time_s': None,
+ 'fail_reason': None,
+ 'fail_type': None,
+ 'fail_user_frame_filename': None,
+ 'fail_user_frame_lineno': None,
+ 'frame_key': None,
+ 'graph_input_count': None,
+ 'graph_node_count': None,
+ 'graph_op_count': None,
+ 'guard_count': None,
+ 'has_guarded_code': None,
+ 'inductor_code_gen_cumulative_compile_time_us': 0,
+ 'inductor_compile_time_s': 0.0,
+ 'inductor_cumulative_compile_time_us': 0,
+ 'is_forward': False,
+ 'non_compliant_ops': None,
+ 'num_triton_bundles': None,
+ 'remote_cache_time_saved_s': None,
+ 'remote_fx_graph_cache_get_time_ms': None,
+ 'remote_fx_graph_cache_get_time_us': None,
+ 'remote_fx_graph_cache_put_time_ms': None,
+ 'remote_fx_graph_cache_put_time_us': None,
+ 'restart_reasons': None,
+ 'runtime_cudagraphify_time_us': None,
+ 'runtime_triton_autotune_time_us': None,
+ 'shape_env_guard_count': None,
+ 'specialize_float': None,
+ 'start_time': None,
+ 'start_time_us': 100,
+ 'structured_logging_overhead_s': 0.0,
+ 'structured_logging_overhead_us': 0,
+ 'triton_compile_time_us': None}""",  # noqa: B950
         )
 
 
