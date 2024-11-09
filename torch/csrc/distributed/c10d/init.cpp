@@ -398,7 +398,7 @@ static PyObject* reduceopmeta___instancecheck__(
     Py_RETURN_TRUE;
   }
   if (std::string_view(args->ob_type->tp_name).find("RedOpType") !=
-      c10::string_view::npos) {
+      std::string_view::npos) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
@@ -1122,7 +1122,23 @@ This class does not support ``__members__`` property.)");
           "stream_write_value32",
           &SymmetricMemory::stream_write_value32,
           py::arg("addr"),
-          py::arg("val"));
+          py::arg("val"))
+      // Util functions that are often used together with symmetric memory but
+      // not necessarily directly on symmetric memory.
+      .def_static(
+          "memset32",
+          [](at::Tensor& input, int64_t offset, int64_t val, int64_t count) {
+            // The range of `val` is checked inside the op
+            auto op = c10::Dispatcher::singleton()
+                          .findSchemaOrThrow("symm_mem::memset32_", "")
+                          .typed<at::Tensor(
+                              at::Tensor&, int64_t, int64_t, int64_t)>();
+            return op.call(input, offset, val, count);
+          },
+          py::arg("input"),
+          py::arg("offset"),
+          py::arg("val"),
+          py::arg("count") = 1);
 
   auto store =
       py::class_<::c10d::Store, c10::intrusive_ptr<::c10d::Store>, PythonStore>(
