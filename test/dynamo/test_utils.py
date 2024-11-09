@@ -4,7 +4,9 @@ import pprint
 from unittest import mock
 
 import torch
-from torch._dynamo import config, utils
+import torch._dynamo.config as dynamo_config
+import torch._inductor.config as inductor_config
+from torch._dynamo import utils
 from torch._inductor.test_case import TestCase
 
 
@@ -107,7 +109,13 @@ class TestDynamoTimed(TestCase):
         add(torch.rand([10]), torch.rand([10]))
         utils.reset_frame_count()
 
-    @config.patch("log_compilation_metrics", True)
+    @dynamo_config.patch("log_compilation_metrics", True)
+    @inductor_config.patch(
+        {
+            "bundle_triton_into_fx_graph_cache": False,
+            "bundled_autotune_remote_cache": False,
+        }
+    )
     # We can't easily test that timing is actually accurate. Mock time to always
     # return the same value; all durations will be zero.
     @mock.patch("time.time", return_value=0.001)

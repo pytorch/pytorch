@@ -370,7 +370,9 @@ def dynamo_timed(
         if dynamo_compile_column_us:
             metrics_context = get_metrics_context()
             if metrics_context.in_progress():
-                metrics_context.increment(dynamo_compile_column_us, time_spent_ns // 1000)
+                metrics_context.increment(
+                    dynamo_compile_column_us, time_spent_ns // 1000
+                )
             # TODO: the events that we capture in calculate_time_spent() seem a little
             # arbitrary. Currently, it's only those fields that are present in
             # CompilationMetrics (but note that we accumulate by the associated event
