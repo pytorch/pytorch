@@ -34,19 +34,24 @@ def print_non_selected_nodes(graph: Graph, filter_set: Set):
             shape = list(fake_tensor.shape) if fake_tensor is not None else "?"
             print(f"  {idx:3}: {shape} {node.format_node()}")
 
+def get_tangent_nodes(graph: Graph):
+    tangents = []
+    for node in graph.nodes:
+        if node.op == "placeholder" and "tangent" in node.name:
+            tangents.append(node)
+    return tangents
+
+
 def get_tangent_node(graph: Graph) -> Node:
     """
     Return the single tangent node. Raise CantChunk if the graph has
     more than one tangents.
     """
-    tangents = []
-    for node in graph.nodes:
-        if node.op == "placeholder" and "tangent" in node.name:
-            tangents.append(node)
-
+    tangents = get_tangent_nodes(graph)
     if len(tangents) != 1:
         raise CantChunk("Can chunk only if there is a single tangent")
     return tangents[0]
+
 
 # Right now only allow matmul/addmm as the source nodes for chunking.
 # May extend it to more ops.
@@ -130,7 +135,10 @@ class Collector:
                 and output_size / input_size > config.AutoChunker.amplify_ratio_threshold
             ):
                 source_users.append((node, output_size / input_size))
-    
+            else:
+                # print(f"{node.format_node()} {output_size=} {input_size=} {compute_tensor_size(node.args[argidx])=}")
+                pass
+   
         source_users = sorted(source_users, key=lambda x: x[1], reverse=True)
         return tuple(map(lambda x: x[0], source_users))
 

@@ -792,7 +792,7 @@ class AutoChunker:
 
     # Apply auto chunker if an op amplifies input by more than amplify_threshold
     # times.
-    amplify_ratio_threshold = 16
+    amplify_ratio_threshold = 8
 
     num_chunk = int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS")) if os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS") is not None else  None  # If not None, use this to force number of chunks
 

@@ -12,7 +12,7 @@ import torch.utils._pytree as pytree
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
 from torch.fx.experimental.symbolic_shapes import (
-    _guard_sizes_oblivious,
+    guard_size_oblivious,
     statically_known_true,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -576,6 +576,29 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         node.replace_all_uses_with(repl)
         match.erase_nodes()
 
+def _is_identity_view_sizes(old_sizes, new_sizes):
+    """
+    Return true if view a tensor with size old_sizes to new_sizes does not
+    change anything. Can handle -1 in new_sizes.
+    """
+    num_neg1 = 0
+
+    if len(old_sizes) != len(new_sizes):
+        return False
+
+    for lhs_item, rhs_item in zip(old_sizes, new_sizes):
+        if guard_size_oblivious(lhs_item == rhs_item):
+            continue
+
+        if not guard_size_oblivious(rhs_item == -1):
+            return False
+
+        num_neg1 += 1
+
+        if num_neg1 > 1:
+            return False
+    return True
+
 
 @register_graph_pattern(
     CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
@@ -585,7 +608,7 @@ def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
-    if _guard_sizes_oblivious(size, arg_size):
+    if _is_identity_view_sizes(arg_size, size):
         node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
         match.erase_nodes()
 
@@ -604,7 +627,7 @@ def pointless_view_pair(match: Match, arg, size1, size2):
     """
     node = match.output_node()
     arg_size = list(arg.meta["val"].shape)
-    if _guard_sizes_oblivious(arg_size, size2):
+    if _is_identity_view_sizes(arg_size, size2):
         node.replace_all_uses_with(arg)
         match.erase_nodes()
 

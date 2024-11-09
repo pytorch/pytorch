@@ -18,7 +18,7 @@ from .collector import get_args_of_node_type
 from .collector import Collector, CantChunk
 from .partitioner import Partitioner
 from .propagator import Propagator, format_node_with_chunking_meta
-from .collector import get_fake_tensor_from_node, maybe_permuted
+from .collector import get_fake_tensor_from_node, maybe_permuted, get_tangent_nodes
 from .applier import ChunkingApplier
 
 aten = torch.ops.aten
@@ -38,6 +38,11 @@ class AutoChunker:
             # Don't chunk a graph produced by the chunker
             return gm
 
+        if len(get_tangent_nodes(gm.graph)) == 0:
+            # no tangents. Can be the optimizer graph
+            # skip
+            return gm
+
         log.debug("Joint graph before chunking:\n%s", gm.print_readable(False))
 
         chunking_subgraph_nodes = Collector.collect_chunking_subgraph_nodes(graph)
@@ -49,7 +54,7 @@ class AutoChunker:
 
         Propagator.add_chunking_meta(chunking_subgraph)
 
-        newgm = ChunkingApplier(gm, chunking_subgraph, config.AutoChunker.num_chunk or 2).apply()
+        newgm = ChunkingApplier(gm, chunking_subgraph, config.AutoChunker.num_chunk or 8).apply()
 
         metrics.num_auto_chunking += 1
         return newgm

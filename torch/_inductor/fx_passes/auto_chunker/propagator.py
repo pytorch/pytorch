@@ -485,3 +485,20 @@ def propagate_fma(fma_node):
         copy_chunking_meta(fma_node, mul_meta)
         return True
     return False
+
+@register_propagate_rule([
+    aten.view.default,
+])
+def propagate_view(view_node):
+    """
+    Only certain kinds of views can be chunked. E.g. if the view just removes some size==1 dimension.
+    Or if the input node is not chunked.
+    """
+
+    arg = view_node.args[0]
+    arg_meta = get_chunking_meta(arg)
+    assert arg_meta is not None
+    if arg_meta.chunk_dim is None:
+        copy_chunking_meta(view_node, arg_meta)
+        return True
+    return False

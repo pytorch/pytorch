@@ -344,8 +344,7 @@ class GraphLowering(torch.fx.Interpreter):
         name: Optional[str] = None,
     ) -> None:
         super().__init__(gm)
-        print("Post grad graph:\n")
-        gm.print_readable()
+        # print("Post grad graph:\n"); gm.print_readable()
 
         self.example_inputs = example_inputs
         self.layout_opt = (
