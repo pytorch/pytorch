@@ -1142,7 +1142,7 @@ def _compile(
                     structured_logging_overhead_s
                 ),
             }
-            metrics_context.update(metrics)
+            metrics_context.update_outer(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()
             # === END WARNING WARNING WARNING ===
 

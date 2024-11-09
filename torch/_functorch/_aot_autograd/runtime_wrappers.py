@@ -2030,6 +2030,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             fail_type = type(e).__qualname__
                             fail_reason = str(e)
                         finally:
+                            # TODO(masnesral): Populating time fields should be automatic.
                             end_ns = time.time_ns()
                             metrics = {
                                 "compile_id": str(
@@ -2045,7 +2046,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                                     torch._logging.get_structured_logging_overhead(),
                                 ),
                             }
-                            get_metrics_context().update(metrics)
+                            get_metrics_context().update_outer(metrics)
 
                 if (
                     torch._functorch.config.donated_buffer

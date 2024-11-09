@@ -84,3 +84,12 @@ class MetricsContext:
                 f"Metric(s) {existing} have already been set in the current context"
             )
         self._metrics.update(values)
+
+    def update_outer(self, values: Dict[str, Any]) -> None:
+        """
+        Update, but only when at the outermost context.
+        """
+        if self._level == 0:
+            raise RuntimeError("Cannot update metrics outside of a MetricsContext")
+        if self._level == 1:
+            self.update(values)
