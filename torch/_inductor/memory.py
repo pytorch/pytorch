@@ -6,6 +6,8 @@ import heapq
 import logging
 from typing import Callable, Dict, List, Set, Tuple, TYPE_CHECKING, TypedDict, Union
 
+from numpy import percentile
+
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
 
@@ -411,6 +413,7 @@ def topological_sort_lpmf(
         elif buf_name in name_to_freeable_input_buf:
             output_memory += name_to_freeable_input_buf[buf_name].mpi_buffer.size_free
     max_memory = max(live_memory, output_memory)
+    memory_gap = max_memory - live_memory
 
     # compute the amount of memory that is allocated when a node is scheduled
     # and the amount of memory that can be freed when a node is scheduled
@@ -427,16 +430,30 @@ def topological_sort_lpmf(
     # schedule nodes one at a time
     schedule: List[BaseSchedulerNode] = []
     num_iters: int = 0
+    size_threshold = percentile([node.mpi_node.size for node in nodes], 95)
     while num_iters < len(nodes) and nodes_to_schedule:
         # select a node to schedule:
-        selected_node = min(
-            nodes_to_schedule,
-            key=lambda node: (
-                max(live_memory + node.mpi_node.size, max_memory),
-                node.mpi_node.size - node_info[node]["memory_to_free"],
-                node.mpi_node.index,
-            ),
-        )
+        if min(node.mpi_node.size for node in nodes_to_schedule) > size_threshold:
+            selected_node = min(
+                nodes_to_schedule,
+                key=lambda node: min(
+                    (
+                        succ_node.mpi_node.index
+                        for succ_node in node.mpi_node.succ_nodes
+                    ),
+                    default=len(nodes),
+                ),
+            )
+        else:
+            selected_node = min(
+                nodes_to_schedule,
+                key=lambda node: (
+                    node.mpi_node.size if node.mpi_node.size > memory_gap else 0,
+                    node.mpi_node.size - node_info[node]["memory_to_free"],
+                    node.mpi_node.index,
+                ),
+            )
+
         nodes_to_schedule.remove(selected_node)
         schedule.append(selected_node)
         num_iters += 1
@@ -445,6 +462,7 @@ def topological_sort_lpmf(
         live_memory += selected_node.mpi_node.size
         max_memory = max(max_memory, live_memory)
         live_memory -= node_info[selected_node]["memory_to_free"]
+        memory_gap = max_memory - live_memory
 
         # update successor nodes and nodes_to_schedule
         for succ_node in selected_node.mpi_node.succ_nodes:
@@ -597,6 +615,8 @@ def reorder_for_peak_memory(
     """
 
     torch_log.info("Reordering for peak memory -- %d nodes", len(nodes))
+    if len(nodes) == 0:
+        return []
 
     @dataclasses.dataclass
     class PeakMemoryResult:
@@ -628,7 +648,8 @@ def reorder_for_peak_memory(
 
     # other methods
     for method in methods:
-        try:
+        # try:
+        if True:
             if method == topological_sort_lpmf:
                 order = method(
                     nodes, name_to_freeable_input_buf, name_to_buf, graph_outputs
@@ -643,8 +664,8 @@ def reorder_for_peak_memory(
                 PeakMemoryResult(order, peak_memory, method.__name__)
             )
             torch_log.info("%s peak memory: %d", method.__name__, peak_memory)
-        except Exception as e:
-            torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
+        # except Exception as e:
+        #     torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
 
     signpost_event(
         category="inductor",
