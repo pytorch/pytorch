@@ -398,7 +398,6 @@ def _single_tensor_adam(
         else:
             device_beta1 = beta1
 
-        print(device_beta1)
         # Decay the first and second moment running average coefficient
         exp_avg.lerp_(grad, 1 - device_beta1)
 
