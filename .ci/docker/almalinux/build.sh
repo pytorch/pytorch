@@ -48,10 +48,10 @@ esac
     --progress plain \
     --build-arg "BASE_TARGET=${BASE_TARGET}" \
     --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
-    --build-arg "DEVTOOLSET_VERSION=9" \
+    --build-arg "DEVTOOLSET_VERSION=11" \
     -t ${DOCKER_IMAGE_NAME} \
     $@ \
-    -f "${TOPDIR}/.ci/docker/conda/Dockerfile" \
+    -f "${TOPDIR}/.ci/docker/almalinux/Dockerfile" \
     ${TOPDIR}/.ci/docker/
 )
 
