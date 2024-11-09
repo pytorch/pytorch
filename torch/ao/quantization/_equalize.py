@@ -128,7 +128,8 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
             "module type not supported:", type(module1), " ", type(module2)
         )
 
-    bias = get_module_bias(module1) if has_bias(module1) else None
+    conv1_has_bias = has_bias(module1)
+    bias = None
 
     weight1 = get_module_weight(module1)
     weight2 = get_module_weight(module2)
@@ -139,6 +140,9 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
         number input channels of second arg"
         )
 
+    if conv1_has_bias:
+        bias = get_module_bias(module1)
+
     weight1_range = channel_range(weight1, output_axis)
     weight2_range = channel_range(weight2, input_axis)
 
@@ -147,7 +151,7 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     scaling_factors = torch.sqrt(weight1_range / weight2_range)
     inverse_scaling_factors = torch.reciprocal(scaling_factors)
 
-    if bias is not None:
+    if conv1_has_bias:
         bias = bias * inverse_scaling_factors
 
     # formatting the scaling (1D) tensors to be applied on the given argument tensors
@@ -164,7 +168,7 @@ def cross_layer_equalization(module1, module2, output_axis=0, input_axis=1):
     weight2 = weight2 * scaling_factors
 
     set_module_weight(module1, weight1)
-    if bias is not None:
+    if conv1_has_bias:
         set_module_bias(module1, bias)
     set_module_weight(module2, weight2)
 
