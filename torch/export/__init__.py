@@ -614,3 +614,95 @@ def register_dataclass(
     return register_dataclass_as_pytree_node(
         cls, serialized_type_name=serialized_type_name
     )
+
+
+def _compile_cache(name, mode="strict", dynamic=True, _patch=None):
+    import os
+    from torch.utils._pytree import tree_map, tree_leaves
+    from functools import wraps
+    import pathlib
+
+    def decorator(orig_fn):
+        sticky_cache = os.environ.get("TORCH_COMPILE_STICKY_CACHE", "fallback")
+        folder_path = os.environ.get(
+            "TORCH_COMPILE_STICKY_CACHE_FOLDER", os.path.expandvars("/tmp/$USER/")
+        )
+        folder_path = pathlib.Path(folder_path)
+        package_path = str(folder_path / f"{name}.pt2")
+
+        if sticky_cache == "runtime":
+            fn = None
+
+            @wraps(orig_fn)
+            def save_fn(*args, **kwargs):
+                nonlocal fn
+                if fn is None:
+                    fn = torch._inductor.aoti_load_package(package_path)
+                return fn(*args, **kwargs)
+
+            save_fn._orig_fn = orig_fn
+            return save_fn
+
+        elif sticky_cache == "compile":
+
+            fn = None
+
+            @wraps(orig_fn)
+            def save_fn(*args, **kwargs):
+                nonlocal fn
+                if fn is None:
+                    if dynamic:
+
+                        def mark_dynamic_all(x):
+                            if isinstance(x, torch.Tensor):
+                                for dim in range(x.dim()):
+                                    torch._dynamo.mark_dynamic(x, dim)
+                            return x
+
+                        args, kwargs = tree_map(mark_dynamic_all, (args, kwargs))
+                    all_args_kwargs = tree_leaves((args, kwargs))
+                    assert all(
+                        isinstance(x, torch.Tensor) for x in all_args_kwargs
+                    ), "All args/kwargs to aot_compile_sticky_cache must be tensors"
+
+                    options = {
+                        "post_grad_custom_pre_pass": (
+                            _patch if _patch else None
+                        ),
+                    }
+
+                    nonlocal orig_fn
+                    if not isinstance(orig_fn, torch.nn.Module):
+                        orig_fn = torch._export.wrappers.ExportWrapper(orig_fn)
+
+                    if mode == "default":
+                        if dynamic:
+                            raise NotImplementedError("Dynamic shape NYI for default mode.")
+                        ep = torch.export.export(orig_fn, args, kwargs, strict=False)
+                        torch._inductor.aot_compile(ep.module(), options=options)
+                    elif mode == "draft":
+                        raise NotImplementedError("draft mode NYI.")
+                    elif mode == "strict":
+                        ep = torch.export.export(orig_fn, args, kwargs, strict=True)
+                        torch._inductor.aoti_compile_and_package(
+                            ep, 
+                            *ep.example_inputs, 
+                            package_path=package_path, 
+                            inductor_configs=options
+                        )
+                    else:
+                        raise ValueError(f"Unknown mode {mode}")
+                    fn = torch._inductor.aoti_load_package(package_path)
+                return fn(*args, **kwargs)
+
+            save_fn._orig_fn = orig_fn
+            return save_fn
+        elif sticky_cache == "jit":
+            new_fn = torch.compile(orig_fn, dynamic=dynamic)
+            new_fn._orig_fn = orig_fn
+            return new_fn
+        else:
+            orig_fn._orig_fn = orig_fn
+            return orig_fn
+
+    return decorator

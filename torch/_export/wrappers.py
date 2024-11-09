@@ -12,6 +12,15 @@ from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_ten
 from torch.utils import _pytree as pytree
 
 
+class ExportWrapper(torch.nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+    
+    def forward(self, *args, **kwargs):
+        return self.fn(*args, **kwargs)
+
+        
 class ExportTracepoint(HigherOrderOperator):
     def __init__(self):
         super().__init__("_export_tracepoint")

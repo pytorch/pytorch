@@ -5740,6 +5740,17 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
         )
         self.assertTrue(torch.allclose(core_aten_ep.module()(*inp), m(*inp)))
 
+    def test_compile_cache(self):
+        import os
+        os.environ["TORCH_COMPILE_STICKY_CACHE"] = "compile"
+
+        @torch.export._compile_cache("add")
+        def add(x, y):
+            return x + y
+
+        a, b = (torch.randn(3, 2), torch.randn(3, 2))
+        self.assertEqual(add(a, b), a + b)
+
     def test_nonzero_2(self):
         class Module(torch.nn.Module):
             def forward(self, x):
