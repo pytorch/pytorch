@@ -3139,27 +3139,6 @@ else:
         x[1] = True
         self.assertEqual(x, torch.tensor([False, True], dtype=torch.bool, device=device))
 
-    # FIXME: move to shape ops test suite
-    def test_unfold_all_devices_and_dtypes(self, device):
-        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
-
-            if dt == torch.bool:
-                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
-                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
-            else:
-                x = torch.empty((0, 1, 3, 0), dtype=dt, device=device)
-                self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
-
-    # FIXME: move to shape ops test suite
-    def test_unfold_scalars(self, device):
-        x = torch.tensor(0.5, device=device)
-        # unfold on a 0-dimensional tensor should always return a 1-d dimensional
-        # tensor of shape [size] (i.e., the second parameter to unfold)
-
-        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 1))
-        self.assertEqual(torch.empty(0, device=device), x.unfold(0, 0, 2))
-        self.assertEqual(torch.tensor([0.5], device=device), x.unfold(0, 1, 1))
-
     # FIXME: move to data movement test suite
     def test_copy_all_dtypes_and_devices(self, device):
         from copy import copy
