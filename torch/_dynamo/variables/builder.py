@@ -36,7 +36,6 @@ import sympy
 
 import torch
 from torch import SymInt
-from torch._dynamo.utils import clone_input
 from torch._guards import GuardSource, TracingContext
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
@@ -100,12 +99,15 @@ from ..trace_rules import (
 from ..utils import (
     _extract_tensor_dict,
     build_checkpoint_variable,
+    build_invoke_subgraph_variable,
+    clone_input,
     common_constant_types,
     get_fake_value,
     get_locals_to_steal,
     get_static_address_type,
     is_frozen_dataclass,
     is_function_or_wrapper,
+    is_invoke_subgraph,
     is_lru_cache_wrapped_function,
     is_namedtuple,
     is_parameter_freezing,
@@ -196,6 +198,7 @@ from .misc import (
     SavedTensorBox,
     TorchVersionVariable,
     TypingVariable,
+    WeakRefVariable,
 )
 from .nn_module import (
     FSDPManagedNNModuleVariable,
@@ -227,7 +230,6 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
-    WeakRefVariable,
 )
 
 
@@ -483,7 +485,7 @@ class VariableBuilder:
 
     def wrap_weakref(self, value: weakref.ReferenceType):
         self.install_guards(GuardBuilder.TYPE_MATCH)
-        return WeakRefVariable(value, source=self.source)
+        return WeakRefVariable.build(self.tx, value, source=self.source)
 
     def wrap_removable_handle(self, value):
         # This means that the removable handle was created in some other frame.
@@ -697,6 +699,8 @@ class VariableBuilder:
             return LoggingLoggerVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
+        elif is_invoke_subgraph(value):
+            return build_invoke_subgraph_variable(source=self.source)
         elif isinstance(value, functools.partial):
             func_src = AttrSource(self.get_source(), "func")
             func_obj = VariableBuilder(self.tx, func_src)(value.func)
@@ -841,6 +845,10 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return HFPretrainedConfigVariable(value)
         elif isinstance(value, HigherOrderOperator):
+            if value is torch._higher_order_ops.invoke_subgraph:
+                unimplemented(
+                    "Directly using invoke_subgraph is not supported. Use mark_compile_region"
+                )
             self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH)
             return TorchHigherOrderOperatorVariable.make(value, source=self.source)
         elif isinstance(value, torch.cuda.StreamContext):
@@ -1702,7 +1710,6 @@ class VariableBuilder:
 
         grapharg = GraphArg(source, value, False, fake_tensor_value)
         tensor_proxy.node.meta["grapharg"] = grapharg
-        self.tx.output.add_symbol_bindings(grapharg)
         return tensor_variable
 
     def wrap_numpy_ndarray(self, value):
@@ -1895,6 +1902,7 @@ class VariableBuilder:
             torch._dynamo.config.specialize_float
             or is_constant_source(self.get_source())
             or math.isnan(value)
+            or math.isinf(value)
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
@@ -2281,6 +2289,11 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         # tensor, the stored example value will update too!)
         example_value = _clone_input(example_value, tx.fake_mode)
         set_example_value(proxy.node, example_value)
+        # We bind the unbacked symints in sizes/trdies of tensor lazily.
+        # So that subgraphs can access the unbacked symbol's proxy in parent graph
+        # when lifting unbacked symbols of input tensors to subgraph inputs.
+        # We do it lazily because the tensor may not be used in subgraphs.
+        tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
         specialized_props = target_cls.specialize(example_value)
         # TODO: not sure about this fake mode test
         if (
@@ -2368,6 +2381,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        tx.output.current_tracer.track_unbacked_symbols(example_value, proxy)
         set_example_value(proxy.node, example_value)
         return SymNodeVariable(proxy, example_value, **options)
     elif (
@@ -2650,7 +2664,7 @@ def _automatic_dynamic(
             log.debug("automatic dynamic %s marked dynamic", name)
             mark_size = [auto_unset] * e.dim()
             mark_size[i] = auto_dynamic
-            frame_state_entry |= FrameStateSizeEntry(size=mark_size)
+            frame_state_entry |= FrameStateSizeEntry.make_size(size=mark_size)
 
         # NB: both static and dynamic have precedence over
         automatic_dynamic_size = (
@@ -2964,3 +2978,26 @@ class SourcelessBuilder:
 
 
 SourcelessBuilder._type_handlers = SourcelessBuilder.make_type_handlers()
+
+
+class SourcelessUserDefinedObjectBuilder:
+    """
+    SourceLessBuilder does not return a UserDefinedObjectVariable, but in some
+    cases it might be ok to return UserDefinedObjects. In such case, use this
+    builder.
+    """
+
+    def __init__(self) -> None:
+        raise AssertionError("Use SourcelessUserDefinedObjectBuilder.create()")
+
+    @staticmethod
+    def create(tx: "InstructionTranslator", value) -> VariableTracker:
+        value_type = type(value)
+        if issubclass(value_type, MutableMapping):
+            return MutableMappingVariable(value, mutation_type=ValueMutationNew())
+        elif isinstance(value, torch.nn.Module):
+            return UnspecializedNNModuleVariable(
+                value, mutation_type=ValueMutationNew()
+            )
+        else:
+            return UserDefinedObjectVariable(value, mutation_type=ValueMutationNew())
