@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import platform
-import shutil
 from glob import glob
 
 from setuptools import distutils  # type: ignore[import]
