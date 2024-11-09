@@ -71,7 +71,7 @@ from typing import (
 import torch.fx
 from torch import Tensor
 from torch._dynamo.mutation_guard import GenerationTracker
-from torch._dynamo.utils import counters, preserve_rng_state
+from torch._dynamo.utils import counters, dynamo_timed, preserve_rng_state
 from torch._inductor.compile_fx import (
     align_inputs_from_check_idxs,
     copy_misaligned_inputs,
@@ -2030,7 +2030,13 @@ class CUDAGraphTreeManager:
             if self.path_state == ExecutionState.EXECUTION:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-            return self.run_eager(new_inputs, function_id)
+            with dynamo_timed(
+                "CUDAGraphTreeManager.run_eager",
+                log_pt2_compile_event=True,
+            ):
+                out = self.run_eager(new_inputs, function_id)
+
+            return out
 
         assert not isinstance(self.current_node, CUDAWarmupNode)
         child_nodes = (
@@ -2096,7 +2102,13 @@ class CUDAGraphTreeManager:
                 self.apply_checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
-        return self.record_function(new_inputs, function_id)
+        with dynamo_timed(
+            "CUDAGraphTreeManager.record_function",
+            log_pt2_compile_event=True,
+        ):
+            out = self.record_function(new_inputs, function_id)
+
+        return out
 
     def shutdown(self) -> None:
         """
