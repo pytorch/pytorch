@@ -57,12 +57,11 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
 
 DimList = List
-_TensorLike = Union["MetaTensorDesc", torch.Tensor]
 _TensorLikeT = TypeVar("_TensorLikeT", "MetaTensorDesc", torch.Tensor)
 _T = TypeVar("_T")
 
 
-def safe_is_leaf(t: _TensorLike) -> bool:
+def safe_is_leaf(t: Union[MetaTensorDesc, torch.Tensor]) -> bool:
     try:
         return t.is_leaf
     except RuntimeError:
@@ -76,12 +75,10 @@ def safe_grad(t: _TensorLikeT) -> Optional[_TensorLikeT]:
         return t.grad
 
 
-def expect_safe_grad(t: _TensorLikeT) -> _TensorLikeT:
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", "The .grad attribute of a Tensor")
-        grad = t.grad
-        assert grad is not None
-        return grad
+def _expect_safe_grad(t: _TensorLikeT) -> _TensorLikeT:
+    grad = safe_grad(t)
+    assert grad is not None
+    return grad
 
 
 def assert_eq(a: _T, b: _T) -> None:
@@ -90,7 +87,7 @@ def assert_eq(a: _T, b: _T) -> None:
 
 def assert_metadata_eq(
     assert_eq: Callable[[object, object], None],
-    m1: _TensorLike,
+    m1: Union[MetaTensorDesc, torch.Tensor],
     m2: torch.Tensor,
     *,
     skip_symbolic: bool = False,
@@ -114,7 +111,7 @@ def assert_metadata_eq(
         assert_eq(m1.is_neg, m2.is_neg())
         assert_eq(m1.grad is not None, safe_grad(m2) is not None)
         if m1.grad is not None:
-            go(m1.grad, expect_safe_grad(m2))
+            go(m1.grad, _expect_safe_grad(m2))
         # TODO: move "assert_eq(m1.layout, m2.layout)" out of sparse
         #       branches (but not ready for prime time yet)...
         if m1.is_sparse:
@@ -178,7 +175,7 @@ def _checked_cast_fake_tensor(t: torch.Tensor) -> FakeTensor:
     return _checked_cast(FakeTensor, t)
 
 
-def _default_callable(t: Callable[[], torch.Tensor]) -> FakeTensor:
+def _identity_callable(t: Callable[[], torch.Tensor]) -> FakeTensor:
     return _checked_cast_fake_tensor(t())
 
 
@@ -760,7 +757,7 @@ class MetaConverter:
         shape_env: Optional[ShapeEnv] = None,
         callback: Callable[
             [Callable[[], torch.Tensor]], FakeTensor
-        ] = _default_callable,
+        ] = _identity_callable,
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
     ) -> FakeTensor:
@@ -1057,7 +1054,9 @@ class MetaConverter:
                 # TODO: Change this logic to use view replay for consistency?
                 # It's likely there is no view func available.
                 with maybe_suppress():
-                    return _checked_cast_fake_tensor(base.as_strided(sizes, strides, storage_offset))
+                    return _checked_cast_fake_tensor(
+                        base.as_strided(sizes, strides, storage_offset)
+                    )
 
             from torch._dynamo.source import EphemeralSource
             from torch.fx.experimental.symbolic_shapes import (
@@ -1455,14 +1454,14 @@ class MetaConverter:
                         elif is_c_of_r(base.dtype, t.dtype):
                             base = _checked_cast_fake_tensor(torch.view_as_real(base))
                         elif is_c_of_r(t.dtype, base.dtype):
-                            base = typing.cast(
-                                "FakeTensor", torch.view_as_complex(base)
+                            base = _checked_cast_fake_tensor(
+                                torch.view_as_complex(base)
                             )
                         else:
                             # This is not guaranteed to succeed.  If it fails, it
                             # means there is another dtype-converting view function
                             # that hasn't been handled here
-                            base = typing.cast("FakeTensor", base.view(t.dtype))
+                            base = _checked_cast_fake_tensor(base.view(t.dtype))
 
                         # This is very tricky.  Naively, you might expect this
                         # to hold:
@@ -1504,8 +1503,8 @@ class MetaConverter:
                                 # NB: Can't have a non-leaf without requiring grad!
                                 assert t.requires_grad
                                 with torch.no_grad():
-                                    mid = typing.cast(
-                                        "FakeTensor", base.view(base.shape)
+                                    mid = _checked_cast_fake_tensor(
+                                        base.view(base.shape)
                                     )
                                 mid.requires_grad = t.requires_grad
                                 with torch.enable_grad():
@@ -1688,7 +1687,7 @@ class MetaConverter:
         *,
         callback: Callable[
             [Callable[[], torch.Tensor]], FakeTensor
-        ] = _default_callable,
+        ] = _identity_callable,
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
         # Controls whether or not we should dump the tensor metadata to structured logs
