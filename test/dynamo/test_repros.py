@@ -2225,6 +2225,75 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_m(x)
         self.assertTrue(same(ref, res))
 
+    def test_out_root_cell_shape_change(self):
+        @torch.compile(backend="eager")
+        def fn():
+            out = torch.empty(0)
+
+            def run():
+                x = torch.zeros(3, 5)
+                torch.sigmoid(x, out=out)
+                return out.size()
+
+            return run()
+
+        res = fn()
+        self.assertEqual((3, 5), res)
+
+    def test_out_nested_cell_shape_change(self):
+        @torch.compile(backend="eager")
+        def fn():
+            def run():
+                x = torch.zeros(3, 5)
+                out = torch.empty(0)
+
+                def capture():
+                    return out  # Force `out` to be a nested cell
+
+                torch.sigmoid(x, out=out)
+                return out.size()
+
+            return run()
+
+        res = fn()
+        self.assertEqual((3, 5), res)
+
+    def test_out_root_cell_tuple_shape_change(self):
+        @torch.compile(backend="eager")
+        def fn():
+            out1 = torch.empty(0)
+            out2 = torch.empty(0, dtype=torch.long)
+
+            def run():
+                x = torch.zeros(3, 5)
+                torch.sort(x, out=(out1, out2))
+                return out1.size(), out2.size()
+
+            return run()
+
+        res = fn()
+        self.assertEqual(((3, 5), (3, 5)), res)
+
+    def test_out_nested_cell_tuple_shape_change(self):
+        @torch.compile(backend="eager")
+        def fn():
+            def run():
+                x = torch.zeros(3, 5)
+                out1 = torch.empty(0)
+                out2 = torch.empty(0, dtype=torch.long)
+
+                def capture():
+                    # Force `out1` and `out2` to be nested cells
+                    return out1, out2
+
+                torch.sort(x, out=(out1, out2))
+                return out1.size(), out2.size()
+
+            return run()
+
+        res = fn()
+        self.assertEqual(((3, 5), (3, 5)), res)
+
     def test_slice_into_list_mutable(self):
         class Mod(torch.nn.Module):
             def forward(self, listy):
