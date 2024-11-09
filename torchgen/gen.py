@@ -53,6 +53,7 @@ from torchgen.model import (
     BackendMetadata,
     BaseOperatorName,
     DEFAULT_KERNEL_NAMESPACE,
+    dispatch_device_map,
     DispatchKey,
     FRAGMENT_NAMESPACES,
     FunctionSchema,
@@ -141,6 +142,25 @@ ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
 
 _GLOBAL_PARSE_NATIVE_YAML_CACHE: dict[str, ParsedYaml] = {}
 _GLOBAL_PARSE_TAGS_YAML_CACHE: dict[str, set[str]] = {}
+
+
+def file_manager_from_dispatch_key(
+    dispatch_key: DispatchKey,
+    device_fms: dict[str, FileManager],
+    default_fm: FileManager,
+) -> FileManager:
+    fm = device_fms.get(
+        next(
+            (
+                device
+                for check, device in dispatch_device_map.items()
+                if check(dispatch_key)
+            ),
+            "",
+        ),
+        default_fm,
+    )
+    return fm
 
 
 def parse_native_yaml_struct(
@@ -1716,7 +1736,7 @@ def gen_aggregated_headers(
     selector: SelectiveBuilder,
     backend_indices: dict[DispatchKey, BackendIndex],
     cpu_fm: FileManager,
-    cuda_fm: FileManager,
+    device_fms: dict[str, FileManager],
     functions_keys: set[DispatchKey],
     dispatch_keys: Sequence[DispatchKey],
     rocm: bool,
@@ -1796,7 +1816,7 @@ def gen_aggregated_headers(
     )
 
     for dispatch_key in dispatch_keys:
-        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
+        fm = file_manager_from_dispatch_key(dispatch_key, device_fms, cpu_fm)
         if dispatch_key in functions_keys:
             inl_headers = f"#include <ATen/{dispatch_key}Functions_inl.h>"
 
@@ -1836,7 +1856,7 @@ def gen_per_operator_headers(
     selector: SelectiveBuilder,
     backend_indices: dict[DispatchKey, BackendIndex],
     cpu_fm: FileManager,
-    cuda_fm: FileManager,
+    device_fms: dict[str, FileManager],
     ops_fm: FileManager,
     functions_keys: set[DispatchKey],
     dispatch_keys: Sequence[DispatchKey],
@@ -1984,7 +2004,7 @@ def gen_per_operator_headers(
                 },
             )
 
-        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
+        fm = file_manager_from_dispatch_key(dispatch_key, device_fms, cpu_fm)
         inl_headers = f"#include <ATen/{dispatch_key}Functions_inl.h>"
 
         fm.write_with_template(
@@ -2033,7 +2053,7 @@ def gen_headers(
     backend_indices: dict[DispatchKey, BackendIndex],
     core_fm: FileManager,
     cpu_fm: FileManager,
-    cuda_fm: FileManager,
+    device_fms: dict[str, FileManager],
     ops_fm: FileManager,
     dispatch_keys: Sequence[DispatchKey],
     functions_keys: set[DispatchKey],
@@ -2048,7 +2068,7 @@ def gen_headers(
             selector=selector,
             backend_indices=backend_indices,
             cpu_fm=cpu_fm,
-            cuda_fm=cuda_fm,
+            device_fms=device_fms,
             ops_fm=ops_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
@@ -2063,7 +2083,7 @@ def gen_headers(
             selector=selector,
             backend_indices=backend_indices,
             cpu_fm=cpu_fm,
-            cuda_fm=cuda_fm,
+            device_fms=device_fms,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
             rocm=rocm,
@@ -2171,9 +2191,9 @@ def gen_source_files(
     backend_indices: dict[DispatchKey, BackendIndex],
     aoti_fm: FileManager,
     core_fm: FileManager,
-    cpu_fm: FileManager,
     cpu_vec_fm: FileManager,
-    cuda_fm: FileManager,
+    cpu_fm: FileManager,
+    device_fms: dict[str, FileManager],
     dispatch_keys: Sequence[DispatchKey],
     functions_keys: set[DispatchKey],
     rocm: bool,
@@ -2195,8 +2215,7 @@ def gen_source_files(
 #include <ATen/hip/HIPContext.h>"""
 
     for dispatch_key in dispatch_keys:
-        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
-
+        fm = file_manager_from_dispatch_key(dispatch_key, device_fms, cpu_fm)
         if per_operator_headers:
 
             def operator_headers() -> list[str]:
@@ -2752,6 +2771,12 @@ def main() -> None:
         action="store_true",
         help="Generate MPS registration code when set",
     )
+    parser.add_argument(
+        "--xpu",
+        action="store_true",
+        help="Generate XPU registration code when set",
+    )
+
     # TODO: --op-registration-whitelist will be removed when all call-sites
     # for gen.py are moved over to using the operator YAML file for mobile
     # custom build.
@@ -2833,6 +2858,19 @@ def main() -> None:
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
+    xpu_in_whitelist = (
+        options.backend_whitelist and str(DispatchKey.XPU) in options.backend_whitelist
+    )
+    # Only generate RegisterXPU.cpp when there is "--xpu" with torhgen/gen.py
+    # Before this change, torchgen always generates RegisterXPU.cpp for out-of-tree
+    # torch-xpu-ops native_functions.yaml which use --backend_whitelist=XPU and without "--xpu".
+    # After this change is landed, we will add --xpu in torch-xpu-ops and remove the check of "xpu_in_whitelist".
+    if (not options.xpu) and (not xpu_in_whitelist):
+        ignore_keys.add(DispatchKey.XPU)
+
+        if DispatchKey.XPU in dispatch_keys:
+            del dispatch_keys[dispatch_keys.index(DispatchKey.XPU)]
+
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
     native_functions, backend_indices = (
@@ -2877,6 +2915,9 @@ def main() -> None:
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
     aoti_fm = make_file_manager(options=options, install_dir=aoti_install_dir)
+    device_fms = {"cuda": cuda_fm}
+    if options.xpu:
+        device_fms["xpu"] = make_file_manager(options=options)
 
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
@@ -2891,6 +2932,9 @@ def main() -> None:
     }
     if options.mps:
         functions_keys.add(DispatchKey.MPS)
+
+    if options.xpu:
+        functions_keys.add(DispatchKey.XPU)
 
     if options.backend_whitelist:
         dispatch_keys = [
@@ -2921,9 +2965,9 @@ def main() -> None:
             backend_indices=backend_indices,
             aoti_fm=aoti_fm,
             core_fm=core_fm,
-            cpu_fm=cpu_fm,
             cpu_vec_fm=cpu_vec_fm,
-            cuda_fm=cuda_fm,
+            cpu_fm=cpu_fm,
+            device_fms=device_fms,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
             rocm=options.rocm,
@@ -2944,7 +2988,7 @@ def main() -> None:
             backend_indices=backend_indices,
             core_fm=core_fm,
             cpu_fm=cpu_fm,
-            cuda_fm=cuda_fm,
+            device_fms=device_fms,
             ops_fm=ops_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
@@ -2964,9 +3008,8 @@ def main() -> None:
             (cpu_fm, ""),
             (cpu_vec_fm, "cpu_vec_"),
             (core_fm, "core_"),
-            (cuda_fm, "cuda_"),
             (ops_fm, "ops_"),
-        ]:
+        ] + [(device_fm, f"{device}_") for device, device_fm in device_fms.items()]:
             varname = prefix + depfile_stem
             path = depfile_path.parent / (prefix + depfile_name)
             fm.write_outputs(varname, str(path))

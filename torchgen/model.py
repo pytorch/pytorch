@@ -346,6 +346,9 @@ def is_ufunc_dispatch_key(dk: DispatchKey) -> bool:
     return dk in UFUNC_DISPATCH_KEYS
 
 
+dispatch_device_map = {is_cuda_dispatch_key: "cuda", is_xpu_dispatch_key: "xpu"}
+
+
 # This is oddly named ScalarType and not DType for symmetry with C++
 class ScalarType(Enum):
     Byte = auto()
