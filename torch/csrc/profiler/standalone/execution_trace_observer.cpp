@@ -55,6 +55,11 @@ namespace torch::profiler::impl {
 //******************************************************************************
 // JSON output utility functions. To be merged with PyTorch profiler.
 //******************************************************************************
+template <typename T>
+static std::string vectorToString(const std::vector<T>& v) {
+  return fmt::format("[{}]", fmt::join(v, ","));
+}
+
 static std::string json_str_escape(const std::string& str);
 
 constexpr size_t kMaxNumElements = 4096;

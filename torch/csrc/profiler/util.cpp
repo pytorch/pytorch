@@ -503,7 +503,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
         auto [is_list, result] = findStartAddrForTensors(val);
         if (is_list) {
           auto list_result = std::get<std::vector<int>>(result);
-          addressList.push_back(vectorToString(list_result));
+          addressList.push_back(format_list(list_result, truncate));
         } else {
           auto scalar_result = std::get<int>(result);
           addressList.push_back(std::to_string(scalar_result));
@@ -514,7 +514,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
         // of the loop here.
         break;
       }
-      map.emplace(kInTensorsStart, vectorToString(addressList));
+      map.emplace(kInTensorsStart, format_list(addressList, false));
       addressList.clear();
     }
 
@@ -528,13 +528,13 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
         auto [is_list, result] = findStartAddrForTensors(val);
         if (is_list) {
           auto list_result = std::get<std::vector<int>>(result);
-          addressList.push_back(vectorToString(list_result));
+          addressList.push_back(format_list(list_result, truncate));
         } else {
           auto scalar_result = std::get<int>(result);
           addressList.push_back(std::to_string(scalar_result));
         }
       }
-      map.emplace(kOutTensorsStart, vectorToString(addressList));
+      map.emplace(kOutTensorsStart, format_list(addressList, false));
       addressList.clear();
     }
   }
@@ -902,8 +902,6 @@ int getTensorStartHint(const at::Tensor& t) {
   uintptr_t storage_addr = 0;
   storage_addr = reinterpret_cast<uintptr_t>(tensor_impl->storage().data());
   int last_16_bits = static_cast<int>(storage_addr & 0xFFFF);
-  // std::vector<std::string> resp = {std::to_string(storage_addr)/*,
-  // std::to_string(last_8_bits)*/}; return vectorToString(resp);
   return last_16_bits;
 }
 

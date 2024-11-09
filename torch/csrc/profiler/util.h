@@ -108,7 +108,6 @@ bool checkFunctionInputsForLogging(
     const at::RecordFunction& fn,
     const char* fn_name);
 template <typename T>
-const std::string vectorToString(const std::vector<T>& v);
 std::pair<bool, std::variant<int, std::vector<int>>> findStartAddrForTensors(
     const c10::IValue& val);
 uint64_t TORCH_API computeFlops(
@@ -165,20 +164,6 @@ struct HashCombine {
     return c10::get_hash(i);
   }
 };
-
-template <typename T>
-const std::string vectorToString(const std::vector<T>& v) {
-  std::ostringstream oss;
-  oss << "[";
-  for (size_t i = 0; i < v.size(); ++i) {
-    oss << v[i];
-    if (i != v.size() - 1) {
-      oss << ", ";
-    }
-  }
-  oss << "]";
-  return oss.str();
-}
 
 #ifdef USE_DISTRIBUTED
 constexpr auto kCommsName = "Collective name";
