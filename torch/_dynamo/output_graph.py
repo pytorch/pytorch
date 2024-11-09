@@ -2109,7 +2109,7 @@ class SubgraphTracer(fx.Tracer):
         # So we are a bit more strict about what sources can become inputs
         # in export
         if self.is_export and self.parent is None:
-            if not is_from_local_source(source, allow_cell_or_freevar=False):
+            if not is_from_local_source(source, only_allow_input=True):
                 self.output_graph.source_to_user_stacks.setdefault(source, []).append(
                     TracingContext.extract_stack()
                 )
