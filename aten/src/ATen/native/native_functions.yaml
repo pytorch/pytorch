@@ -1791,7 +1791,7 @@
   variants: function, method
   structured_delegate: cos.out
   dispatch:
-    NestedTensorCPU, NestedTensorCUDA: cos_nested
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_cos
   tags: [core, pointwise]
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
@@ -5321,7 +5321,7 @@
   dispatch:
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sin_sparse_csr
     SparseCPU, SparseCUDA: sin_sparse
-    NestedTensorCPU, NestedTensorCUDA: sin_nested
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_sin
   tags: [core, pointwise]
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
@@ -5819,6 +5819,7 @@
   structured_delegate: sqrt.out
   variants: function, method
   dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_sqrt
     SparseCPU, SparseCUDA: sqrt_sparse
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sqrt_sparse_csr
   tags: [core, pointwise]
