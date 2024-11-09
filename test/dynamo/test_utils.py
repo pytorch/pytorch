@@ -109,7 +109,12 @@ class TestDynamoTimed(TestCase):
         add(torch.rand([10]), torch.rand([10]))
         utils.reset_frame_count()
 
-    @dynamo_config.patch("log_compilation_metrics", True)
+    @dynamo_config.patch(
+        {
+            "log_compilation_metrics": True,
+            "inline_inbuilt_nn_modules": False,
+        }
+    )
     @inductor_config.patch(
         {
             "bundle_triton_into_fx_graph_cache": False,
@@ -202,7 +207,7 @@ class TestDynamoTimed(TestCase):
  'code_gen_time_s': 0.0,
  'compile_id': '1/0',
  'compliant_custom_ops': set(),
- 'config_inline_inbuilt_nn_modules': True,
+ 'config_inline_inbuilt_nn_modules': False,
  'config_suppress_errors': False,
  'cuda_synchronize_time_us': None,
  'distributed_ephemeral_timeout_us': 0,
@@ -217,10 +222,10 @@ class TestDynamoTimed(TestCase):
  'fail_user_frame_filename': None,
  'fail_user_frame_lineno': None,
  'frame_key': '1',
- 'graph_input_count': 3,
- 'graph_node_count': 5,
+ 'graph_input_count': 1,
+ 'graph_node_count': 3,
  'graph_op_count': 1,
- 'guard_count': 33,
+ 'guard_count': 8,
  'has_guarded_code': True,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
