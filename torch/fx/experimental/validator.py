@@ -533,7 +533,7 @@ try:
             ), f"expected boolean expression. Got: {z3expr}"
             return z3expr
 
-        def add_source_expr(self, e: Union[z3.BoolRef]) -> None:
+        def add_source_expr(self, e: z3.BoolRef) -> None:
             if e not in self._source_exprs:
                 log.debug("add source guard: %s", z3str(e))
             self._source_exprs.add(e)
