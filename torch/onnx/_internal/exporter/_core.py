@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import dataclasses
 import datetime
 import inspect
 import itertools
@@ -171,6 +172,50 @@ class TorchTensor(ir.Tensor):
 #     GRADIENT_TO_USER_INPUT = auto()
 #     USER_INPUT_MUTATION = auto()
 #     TOKEN = auto()
+
+@dataclasses.dataclass
+class _NodeNameToIrObjectsMapping:
+    """A mapping of FX node names to their produced ONNX ``Value`` or ``Graph``.
+
+    This class is used to store the mapping of FX node names to their produced ONNX ``Value`` or ``Graph``.
+    The mapping is scoped to a specific graph or subgraph.
+    """
+    scope: str
+    node_name_to_values: dict[str, ir.Value | Sequence[ir.Value]] = dataclasses.field(
+        default_factory=dict
+    )
+    node_name_to_graphs: dict[str, ir.Graph] = dataclasses.field(default_factory=dict)
+
+class _ScopedNodeNameToIrObjectsMappings:
+    def __init__(self) -> None:
+        self._scoped_node_name_to_ir_objects: list[_NodeNameToIrObjectsMapping] = []
+
+    def get(self, node_name: str) -> tuple[str, ir.Value | Sequence[ir.Value] | None]:
+        for mapping in reversed(self._scoped_node_name_to_ir_objects):
+            if node_name in mapping.node_name_to_values:
+                return mapping.scope, mapping.node_name_to_values[node_name]
+        return "", None
+
+    def get_value(self, node_name: str) -> ir.Value | Sequence[ir.Value] | None:
+        return self.get(node_name)[1]
+
+    def get_graph(self, node_name: str) -> ir.Graph | None:
+        return self._scoped_node_name_to_ir_objects[-1].node_name_to_graphs.get(node_name)
+
+    def enter_scope(self, scope: str) -> None:
+        self._scoped_node_name_to_ir_objects.append(_NodeNameToIrObjectsMapping(scope))
+
+    def exit_scope(self) -> None:
+        self._scoped_node_name_to_ir_objects.pop()
+
+    def add_value(self, node_name: str, value: ir.Value | Sequence[ir.Value]) -> None:
+        self._scoped_node_name_to_ir_objects[-1].node_name_to_values[node_name] = value
+
+    def add_graph(self, node_name: str, graph: ir.Graph) -> None:
+        self._scoped_node_name_to_ir_objects[-1].node_name_to_graphs[node_name] = graph
+
+    def __len__(self) -> int:
+        return len(self._scoped_node_name_to_ir_objects)
 
 
 def _set_shape_types(
@@ -686,10 +731,24 @@ def _add_nodes(
     model: ir.Model,
     *,
     current_graph: ir.Graph,
+    scoped_node_name_to_ir_objects_mappings: _ScopedNodeNameToIrObjectsMappings,
     lower: Literal["at_conversion", "post_conversion", "none"],
     registry: _registration.ONNXRegistry,
 ) -> dict[str, ir.Value | Sequence[ir.Value]]:
-    node_name_to_values: dict[str, ir.Value | Sequence[ir.Value]] = {}
+    """Add nodes to the ONNX graph.
+
+    Args:
+        graph_module: The FX graph module to translate.
+        model: The ONNX model at construction.
+        current_graph: The ONNX graph at construction.
+        namespaces: The namespaces of the nodes.
+        lower: The lowering strategy to use.
+        registry: The registry of all aten to ONNX decomposition functions.
+
+    Returns:
+        A mapping of FX node names to their produced ONNX ``Value``.
+    """
+    scoped_node_name_to_values: list[dict[str, ir.Value | Sequence[ir.Value]]] = [{}]
     constant_farm: dict[Any, ir.Value] = {}
     opset = _get_onnxscript_opset(registry.opset_version)
     node_name_to_local_functions: dict[str, ir.Function] = {}
@@ -956,6 +1015,7 @@ def _exported_program_to_onnx_program(
     # NOTE: Function domains are added when translating nodes when lower="at_conversion"
 
     # 1. Add all nodes to the graph and create a dictionary of values
+    scoped_node_name_to_ir_objects_mappings = _ScopedNodeNameToIrObjectsMappings
     values = _add_nodes(exported_program.graph_module, model, lower=lower, registry=registry)
 
     # 2. Add user inputs and all parameters/buffers to the graph.
