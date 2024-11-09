@@ -1912,6 +1912,30 @@ class TestSDPAFailureModes(NNTestCase):
                 self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
                     q, k, v, None, 0.0, is_causal=True))
 
+    @onlyCUDA
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support flash attention"
+    )
+    def test_mem_eff_stride_zero_aligned(self, device):
+        dtype = torch.bfloat16
+        q_shape = SdpaShape(2, 1, 8192, 8)
+        kv_shape = SdpaShape(2, 1, 8192, 8)
+        make_q = partial(torch.rand, q_shape, device=device, dtype=dtype)
+        make_kv = partial(torch.rand, kv_shape, device=device, dtype=dtype)
+        q, k, v = make_q(), make_kv(), make_kv()
+        base = torch.randn(2, 1, 8192, device="cuda", dtype=dtype)
+
+        # Use as_strided to create the mask with proper striding
+        mask = torch.as_strided(
+            base,
+            size=(2, 1, 8192, 8192),
+            stride=(8192, 0, 1, 0),  # This creates a similar broadcast-like pattern
+        )
+        # import fbvscode; fbvscode.set_trace()
+        with sdpa_kernel(backends=SDPBackend.EFFICIENT_ATTENTION):
+            torch.nn.functional.scaled_dot_product_attention(q, k, v, mask, 0.0, False)
+
+
 def _get_block_size_n(device, head_dim, is_dropout, is_causal):
     # This should match the block sizes in the CUDA kernel
     assert head_dim <= 256

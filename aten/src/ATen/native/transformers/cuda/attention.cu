@@ -1330,7 +1330,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       ASSIGN_CHECK_OVERFLOW(p.bias_strideH, bias->stride(1));
       ASSIGN_CHECK_OVERFLOW(p.bias_strideM, bias->stride(2));
       TORCH_CHECK(
-          bias->stride(3) == 1,
+          bias->stride(3) == 1 || bias->stride(3) == 0,
           "attn_bias: wrong alignment (last dimension must be contiguous)");
     }
 

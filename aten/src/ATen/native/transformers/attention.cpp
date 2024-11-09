@@ -558,12 +558,16 @@ std::optional<Tensor> convert_boolean_attn_mask_cudnn(const std::optional<Tensor
 
 template<int alignment>
 bool aligned_tensor(const at::Tensor& tensor){
+  bool nonzero_stride = false;
   for(const auto i : c10::irange(tensor.dim() - 1)){
+    nonzero_stride = nonzero_stride || tensor.sym_stride(i) != 0;
     if(tensor.sym_stride(i) % alignment != 0){
       return false;
     }
   }
-  return tensor.sym_stride(-1) == 1;
+  bool aligned_last_dim = tensor.sym_stride(-1) == 1 || tensor.sym_stride(-1) == 0;
+  // Guard against all 0 strides
+  return aligned_last_dim && nonzero_stride;
 }
 
 template <int alignment>

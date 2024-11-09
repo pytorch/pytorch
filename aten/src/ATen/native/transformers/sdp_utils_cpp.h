@@ -512,7 +512,7 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
     qkv_strides_equal_1 = qkv_strides_equal_1 || params.query.sym_size(-1) == 1;
   }
   bool mask_stride_equal_1 = params.attn_mask.has_value()
-      ? params.attn_mask.value().sym_stride(-1) == 1
+      ? params.attn_mask.value().sym_stride(-1) == 1 || params.attn_mask.value().sym_stride(-1) == 0
       : true;
   if (!(qkv_strides_equal_1 && mask_stride_equal_1)) {
     if (debug) {
