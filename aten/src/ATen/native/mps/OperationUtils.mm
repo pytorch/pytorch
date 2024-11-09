@@ -848,7 +848,7 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   static auto fast_math = []() {
     auto const val = c10::utils::get_env("PYTORCH_MPS_FAST_MATH");
-    return val && value != "0";
+    return val.has_value() && val != "0";
   }();
   NSError* error = nil;
   MTLCompileOptions* options = compile_options;
