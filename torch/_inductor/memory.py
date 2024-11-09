@@ -648,8 +648,7 @@ def reorder_for_peak_memory(
 
     # other methods
     for method in methods:
-        # try:
-        if True:
+        try:
             if method == topological_sort_lpmf:
                 order = method(
                     nodes, name_to_freeable_input_buf, name_to_buf, graph_outputs
@@ -664,8 +663,8 @@ def reorder_for_peak_memory(
                 PeakMemoryResult(order, peak_memory, method.__name__)
             )
             torch_log.info("%s peak memory: %d", method.__name__, peak_memory)
-        # except Exception as e:
-        #     torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
+        except Exception as e:
+            torch_log.error("Failed to reorder for %s: %s", method.__name__, e)
 
     signpost_event(
         category="inductor",
