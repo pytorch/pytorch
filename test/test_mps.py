@@ -85,7 +85,6 @@ def mps_ops_grad_modifier(ops):
         '_segment_reduce': [torch.float16, torch.float32],
         '_chunk_cat': [torch.float16, torch.float32],
         'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
-        'unfold': [torch.float16, torch.float32],
         'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'special_modified_bessel_i0': [torch.float16, torch.float32],
