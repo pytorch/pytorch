@@ -1933,8 +1933,8 @@ class TestSDPAFailureModes(NNTestCase):
     )
     def test_mem_eff_stride_zero_aligned(self, device, strides: Tuple[int]):
         dtype = torch.bfloat16
-        q_shape = SdpaShape(2, 1, 8192, 8)
-        kv_shape = SdpaShape(2, 1, 8192, 8)
+        q_shape = SdpaShape(2, 32, 8192, 8)
+        kv_shape = SdpaShape(2, 32, 8192, 8)
         make_q = partial(torch.rand, q_shape, device=device, dtype=dtype)
         make_kv = partial(torch.rand, kv_shape, device=device, dtype=dtype)
         q, k, v = make_q(), make_kv(), make_kv()
