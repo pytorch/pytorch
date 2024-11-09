@@ -93,7 +93,7 @@ class FailureReport:
             op = self.data["op"]
             op_profiles = self.data["op_profiles"]
 
-            def get_sorted_strides(strides):
+            def get_sorted_strides(strides: List[int]) -> List[int]:
                 strides = [(s, idx) for idx, s in enumerate(strides)]
                 strides.sort()
                 return [idx for _, idx in strides]
@@ -254,7 +254,8 @@ class TensorMetadata:
     device: torch.device
     layout: torch.layout
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
+        assert isinstance(other, TensorMetadata)
         return (
             len(self.shape) == len(other.shape)
             and self.dtype == other.dtype
@@ -262,7 +263,7 @@ class TensorMetadata:
             and self.layout == other.layout
         )
 
-    def __hash__(self):
+    def __hash__(self: "TensorMetadata") -> int:
         return hash(
             (
                 ("shape", hash(len(self.shape))),
@@ -275,54 +276,10 @@ class TensorMetadata:
 
 @dataclass(frozen=True)
 class OpProfile:
-    flat_args_profile: Tuple[TensorMetadata]
+    flat_args_profile: Tuple[TensorMetadata, ...]
     args_spec: str
-    flat_out_profile: Tuple[TensorMetadata]
+    flat_out_profile: Tuple[TensorMetadata, ...]
     out_spec: str
-
-
-def compare_profile(t1, t2):
-    if t1 is None and t2 is None:
-        return True
-    elif t1 is None or t2 is None:
-        return False
-
-    return (
-        len(t1["shape"]) == len(t2["shape"])
-        and t1["dtype"] == t2["dtype"]
-        and t1["device"] == t2["device"]
-    )
-
-
-def profile_matches(profile1, profile2):
-    def compare_profile(t1, t2):
-        if t1 is None and t2 is None:
-            return True
-        elif t1 is None or t2 is None:
-            return False
-
-        return (
-            len(t1.shape) == len(t2.shape)
-            and t1.dtype == t2.dtype
-            and t1.device == t2.device
-        )
-
-    return (
-        profile1["args_spec"] == profile2["args_spec"]
-        and profile1["out_spec"] == profile2["out_spec"]
-        and all(
-            compare_profile(p1, p2)
-            for p1, p2 in zip(
-                profile1["flat_args_profile"], profile2["flat_args_profile"]
-            )
-        )
-        and all(
-            compare_profile(p1, p2)
-            for p1, p2 in zip(
-                profile1["flat_out_profile"], profile2["flat_out_profile"]
-            )
-        )
-    )
 
 
 def draft_export(

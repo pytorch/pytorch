@@ -2787,7 +2787,7 @@ def inferred_fake_kernel_from_real_out(
 
     fake_flat_out = [make_fake(t) for t in real_flat_out]
 
-    def maybe_get_tensor_meta(tensor):
+    def maybe_get_tensor_meta(tensor: torch.Tensor) -> Dict[str, Any]:
         if not isinstance(tensor, torch.Tensor):
             return None
         return {
@@ -2798,7 +2798,7 @@ def inferred_fake_kernel_from_real_out(
             "layout": tensor.layout,
         }
 
-    def get_profile():
+    def get_profile() -> Dict[str, Any]:
         return {
             "flat_args_profile": [maybe_get_tensor_meta(arg) for arg in flat_args],
             "args_spec": pytree.treespec_dumps(args_spec),

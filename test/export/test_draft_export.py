@@ -3,9 +3,9 @@ import copy
 from enum import Enum
 from functools import wraps
 
-import torch
-
 from parameterized import parameterized_class
+
+import torch
 from torch._export.serde.report import deserialize_report, serialize_report
 from torch.export import Dim
 from torch.export._draft_export import draft_export, FailureType
