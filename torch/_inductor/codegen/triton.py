@@ -726,6 +726,29 @@ class TritonCSEVariable(CSEVariable):
                 # those reads should subsequently be masked,
                 self.mask_vars.update({f"{arg.name[0]}mask"})
 
+def maybe_upcast_float32(convert_output: bool = True):
+    """
+    Codegen helper to upcast arguments to float32, depending on the config and dtype.
+    This decorates tl.math/libdevice codegen functions.
+    """
+
+    def decorator(func: Callable) -> Callable:
+        def wrapped(*args, **kwargs) -> str:
+            # Optionally upcast args to float32.
+            dtype = args[0].dtype
+            needs_upcast = not config.triton.codegen_upcast_to_fp32 and dtype in (torch.float16, torch.bfloat16)
+            upcast_string = ".to(tl.float32)" if needs_upcast else ""
+            upcast_args = [f"{arg}{upcast_string}" for arg in args]
+
+            # Call the original function, optionally downcasting the result.
+            result = func(*upcast_args, **kwargs)
+            orig_dtype = triton_type(dtype)
+            downcast_string = f".to({orig_dtype})" if convert_output and needs_upcast else ""
+            return f"{result}{downcast_string}"
+        return wrapped
+
+    return decorator
+
 
 class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
@@ -831,41 +854,42 @@ class TritonOverrides(OpOverrides):
         return cls._shaped_constant(value, dtype, shape=[])
 
     @staticmethod
+    @maybe_upcast_float32()
     def abs(x):
         return f"tl_math.abs({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_abs(x):
         return f"libdevice.abs({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def exp(x):
         return f"tl_math.exp({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_exp(x):
         return f"libdevice.exp({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def exp2(x):
         return f"libdevice.exp2({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def expm1(x):
         return f"libdevice.expm1({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def sqrt(x):
-        if config.triton.codegen_upcast_to_fp32:
-            return f"libdevice.sqrt({x})"
-        else:
-            needs_upcast = x.dtype in (torch.float16, torch.bfloat16)
-            orig_dtype = triton_type(x.dtype)
-            upcast_string = ".to(tl.float32)" if needs_upcast else ""
-            downcast_string = f".to({orig_dtype})" if needs_upcast else ""
-            return f"libdevice.sqrt({x}{upcast_string}){downcast_string}"
+        return f"libdevice.sqrt({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_sqrt(x):
         return f"libdevice.sqrt({x})"
 
@@ -910,18 +934,22 @@ class TritonOverrides(OpOverrides):
         return f"tl.inline_asm_elementwise('{asm}', '{constraints}', [{input_refs}], dtype={triton_type}, is_pure={is_pure}, pack={pack})"  # noqa: B950
 
     @staticmethod
+    @maybe_upcast_float32()
     def cos(x):
         return f"tl_math.cos({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_cos(x):
         return f"libdevice.cos({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def sin(x):
         return f"tl_math.sin({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_sin(x):
         return f"libdevice.sin({x})"
 
@@ -934,70 +962,87 @@ class TritonOverrides(OpOverrides):
         raise NotImplementedError("ops.masked not implemented outside a kernel")
 
     @staticmethod
+    @maybe_upcast_float32()
     def lgamma(x):
         return f"libdevice.lgamma({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def erf(x):
         return f"libdevice.erf({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def cosh(x):
         return f"libdevice.cosh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def sinh(x):
         return f"libdevice.sinh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def acos(x):
         return f"libdevice.acos({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def acosh(x):
         return f"libdevice.acosh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def asin(x):
         return f"libdevice.asin({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def asinh(x):
         return f"libdevice.asinh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def atan2(x, y):
         return f"libdevice.atan2({x}, {y})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def atan(x):
         return f"libdevice.atan({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def atanh(x):
         return f"libdevice.atanh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def copysign(x, y):
         return f"libdevice.copysign({x}, {y})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def erfc(x):
         return f"libdevice.erfc({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def erfinv(x):
         return f"libdevice.erfinv({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def hypot(x, y):
         return f"libdevice.hypot({x}, {y})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def log10(x):
         return f"libdevice.log10({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def log2(x):
         return f"libdevice.log2({x})"
 
@@ -1065,22 +1110,27 @@ class TritonOverrides(OpOverrides):
         raise NotImplementedError("ops.load_seed not implemented outside a kernel")
 
     @staticmethod
+    @maybe_upcast_float32()
     def rsqrt(x):
         return f"libdevice.rsqrt({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def log1p(x):
         return f"libdevice.log1p({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def tan(x):
         return f"libdevice.tan({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def tanh(x):
         return f"libdevice.tanh({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def sigmoid(x):
         return f"tl.sigmoid({x})"
 
@@ -1090,30 +1140,37 @@ class TritonOverrides(OpOverrides):
         return f"libdevice.signbit({x}) if ({x}).dtype is tl.float32 else {x} < 0"
 
     @staticmethod
+    @maybe_upcast_float32()
     def fmod(a, b):
         return f"libdevice.fmod({a}, {b})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def pow(a, b):
         return f"libdevice.pow({a}, {b})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def log(x):
         return f"tl_math.log({x})"
 
     @staticmethod
+    @maybe_upcast_float32()
     def libdevice_log(x):
         return f"libdevice.log({x})"
 
     @staticmethod
+    @maybe_upcast_float32(convert_output=False)
     def isinf(x):
         return f"libdevice.isinf({x}).to(tl.int1)"
 
     @staticmethod
+    @maybe_upcast_float32(convert_output=False)
     def isnan(x):
         return f"libdevice.isnan({x}).to(tl.int1)"
 
     @staticmethod
+    @maybe_upcast_float32()
     def round(x):
         return f"libdevice.nearbyint({x})"
 
@@ -1139,6 +1196,7 @@ class TritonOverrides(OpOverrides):
         return f"{sub}.to({x}.dtype)"
 
     @staticmethod
+    @maybe_upcast_float32()
     def trunc(x):
         return f"libdevice.trunc({x})"
 
@@ -1149,6 +1207,7 @@ class TritonOverrides(OpOverrides):
         return f"{a} // {b}"
 
     @staticmethod
+    @maybe_upcast_float32()
     def ceil(x):
         return f"libdevice.ceil({x})"
 
