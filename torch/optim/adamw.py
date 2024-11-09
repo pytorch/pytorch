@@ -22,6 +22,7 @@ from .optimizer import (
     _use_grad_for_differentiable,
     _view_as_real,
     DeviceDict,
+    DeviceDtypeDict,
     Optimizer,
     ParamsT,
 )
@@ -350,7 +351,7 @@ def _single_tensor_adamw(
     # Note: ensure type declaration is under conditional check for isinstance
     # or else torchscript will get cranky about the DeviceDict type.
     if isinstance(beta1, Tensor):
-        beta1_dict: Optional[DeviceDict] = {}
+        beta1_dict: Optional[DeviceDtypeDict] = {}
     else:
         beta1_dict = None
 
@@ -384,11 +385,15 @@ def _single_tensor_adamw(
 
         device = param.device
 
-        if beta1_dict is not None:
-            if device not in beta1_dict:
-                beta1_dict[device] = beta1.to(device=device, non_blocking=True)  # type: ignore[union-attr]
+        device = param.device
+        dtype = param.dtype
 
-            device_beta1: Union[float, Tensor] = beta1_dict[device]
+        if beta1_dict is not None:
+            key = (device, dtype)
+            if key not in beta1_dict:
+                beta1_dict[key] = beta1.to(device=device, dtype=dtype, non_blocking=True)  # type: ignore[union-attr]
+
+            device_beta1: Union[float, Tensor] = beta1_dict[key]
         else:
             device_beta1 = beta1
 
