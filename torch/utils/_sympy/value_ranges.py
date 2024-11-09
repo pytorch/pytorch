@@ -514,6 +514,8 @@ class SymPyValueRangeAnalysis:
     @classmethod
     def bitwise_and(cls, a, b):
         a, b = ValueRanges.wrap(a), ValueRanges.wrap(b)
+        if a.is_bool and b.is_bool:
+            return cls.and_(a, b)
         if a.is_bool:
             a = cls._bool_to_int(a)
         if b.is_bool:
@@ -531,6 +533,8 @@ class SymPyValueRangeAnalysis:
     @classmethod
     def bitwise_or(cls, a, b):
         a, b = ValueRanges.wrap(a), ValueRanges.wrap(b)
+        if a.is_bool and b.is_bool:
+            return cls.or_(a, b)
         if a.is_bool:
             a = cls._bool_to_int(a)
         if b.is_bool:

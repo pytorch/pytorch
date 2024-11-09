@@ -1233,6 +1233,8 @@ def make_opaque_bitwise_fn(name, real_op_name):
 
         @classmethod
         def eval(cls, a, b):
+            if a.is_Boolean and b.is_Boolean:
+                return getattr(operator, real_op_name)(a, b)
             if a.is_Boolean:
                 a = sympy.Integer(1 if a else 0)
             if b.is_Boolean:

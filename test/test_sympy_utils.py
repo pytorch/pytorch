@@ -293,7 +293,7 @@ class TestValueRanges(TestCase):
                 else:
                     self.assertEqual(len(unique), 2)
 
-    @parametrize("fn", BINARY_BOOL_OPS)
+    @parametrize("fn", BINARY_BOOL_OPS + BITWISE_OPS)
     def test_binary_bool_ref_range(self, fn):
         vals = [sympy.false, sympy.true]
         for a, b in itertools.product(generate_range(vals), repeat=2):
