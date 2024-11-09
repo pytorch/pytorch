@@ -40,7 +40,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.comment = "//"
         self.namespace = "at::"
         self.none_str = "nullptr"
-        self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
         self.supports_intermediate_hooks = False
@@ -1708,9 +1707,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         python_kernel_name: str,
         cpp_kernel_name: str,
         codegen_args: List[str],
-        cpp_op_schema: str,
-        cpp_kernel_key: str,
-        cpp_kernel_overload_name: str = "",
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -1746,7 +1742,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             assert output_args is not None
 
             return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
-                cpp_kernel_key,
                 op_overload,
                 raw_args,
                 output_args,
@@ -1758,9 +1753,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 python_kernel_name,
                 cpp_kernel_name,
                 codegen_args,
-                cpp_op_schema,
-                cpp_kernel_key,
-                cpp_kernel_overload_name,
                 op_overload,
                 raw_args,
                 output_args,
@@ -1902,9 +1894,6 @@ if (custom_op_wrapper.get() == NULL) {
         python_kernel_name: str,
         cpp_kernel_name: str,
         codegen_args: List[str],
-        cpp_op_schema: str,
-        cpp_kernel_key: str,
-        cpp_kernel_overload_name: str = "",
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         output_args: Optional[List[str]] = None,
@@ -1976,7 +1965,6 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
         self,
-        cpp_kernel_key,
         op_overload,
         raw_args,  # contains both args and flatten kwargs
         output_args: Optional[List[str]] = None,
@@ -2005,8 +1993,6 @@ reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_
             f"{len(tensor_call_args)}, "
             f"std::vector<AtenTensorHandle>{{{tensor_call_args_str}}}.data());"
         )
-
-        self.extern_call_ops.add(cpp_kernel_key)
 
     def generate_reset_kernel_saved_flags(self):
         pass
