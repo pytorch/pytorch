@@ -12,6 +12,7 @@ from typing import (
     ClassVar,
     ContextManager,
     Dict,
+    Generic,
     List,
     NewType,
     Optional,
@@ -50,8 +51,6 @@ if TYPE_CHECKING:
     from torch._guards import Source
 
     # Import here to avoid cycle
-    from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
-
     # Import the following modules during type checking to enable code intelligence features,
     # Do not import unconditionally, as they import sympy and importing sympy is very slow
     from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymbolicContext
@@ -59,6 +58,7 @@ if TYPE_CHECKING:
 DimList = List
 _TensorLikeT = TypeVar("_TensorLikeT", "MetaTensorDesc", torch.Tensor)
 _T = TypeVar("_T")
+_TensorT = TypeVar("_TensorT", bound=torch.Tensor)
 
 
 def safe_is_leaf(t: Union[MetaTensorDesc, torch.Tensor]) -> bool:
@@ -93,8 +93,11 @@ def assert_metadata_eq(
     skip_symbolic: bool = False,
     skip_leaf: bool = False,
 ) -> None:
-    if isinstance(m1, torch.Tensor):
-        m1 = MetaTensorDescriber().describe_tensor(m1)
+    m1 = (
+        MetaTensorDescriber().describe_tensor(m1)
+        if isinstance(m1, torch.Tensor)
+        else m1
+    )
 
     def go(m1: MetaTensorDesc, m2: torch.Tensor) -> None:
         assert_eq(m1.dtype, m2.dtype)
@@ -164,32 +167,12 @@ def is_sparse_any(t: object) -> TypeGuard[torch.Tensor]:
 
 
 def _checked_cast(ty: Type[_T], obj: object) -> _T:
-    assert isinstance(obj, ty)
+    assert isinstance(obj, ty), f"expected {ty} but got {type(obj)}"
     return obj
-
-
-# Same as _checked_cast(FakeTensor, t) but avoids circular import issue w/ FakeTensor
-def _checked_cast_fake_tensor(t: torch.Tensor) -> FakeTensor:
-    from torch._subclasses.fake_tensor import FakeTensor
-
-    return _checked_cast(FakeTensor, t)
-
-
-def _identity_callable(t: Callable[[], torch.Tensor]) -> FakeTensor:
-    return _checked_cast_fake_tensor(t())
 
 
 def _get_real_storage(base: torch.UntypedStorage) -> torch.UntypedStorage:
     return base.real_storage  # type: ignore[attr-defined]
-
-
-def _backward_error(t: FakeTensor) -> FakeTensor:
-    errfn = torch._C._functions.DelayedError(
-        "Internal error: Tried to backward() through example input",
-        1,
-    )
-    err = errfn(t)
-    return typing.cast("FakeTensor", err)
 
 
 def _set_real_storage(
@@ -493,7 +476,7 @@ class MetaStorageDesc:
 
 
 @dataclass(frozen=True)
-class MetaTensorDesc:
+class MetaTensorDesc(Generic[_TensorT]):
     id: MetaTensorId
     ndim: int
     dtype: torch.dtype
@@ -574,15 +557,15 @@ class MetaTensorDesc:
 
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
     type: Optional[Type] = None  # is_traceable_wrapper_subclass
-    fake_mode: Optional[FakeTensorMode] = None
+    fake_mode: Optional[torch._subclasses.fake_tensor.FakeTensorMode] = None
     view_func: Optional[
         Callable[
             [
                 torch.Tensor,
                 Callable[[int], int],
-                Callable[[torch.Tensor], FakeTensor],
+                Callable[[torch.Tensor], _TensorT],
             ],
-            FakeTensor,
+            _TensorT,
         ]
     ] = None
     # level looks serializable, but actually it is meaningless without
@@ -681,7 +664,7 @@ def _safe_clone(src: torch.Tensor) -> Optional[torch.Tensor]:
 # share storage because this is how we correlate shared storages to the same
 # meta storages. This class will hold weak references to cached tenosrs
 # and tensor storages.
-class MetaConverter:
+class MetaConverter(Generic[_TensorT]):
     def __init__(self, *, copy_data: bool = False) -> None:
         # Maps MetaStorageId to UntypedStorage
         self.storage_memo: weakref.WeakValueDictionary[
@@ -690,7 +673,7 @@ class MetaConverter:
         # Maps MetaTensorId to torch.Tensor (typically a meta tensor or
         # FakeTensor)
         self.tensor_memo: weakref.WeakValueDictionary[
-            MetaTensorId, FakeTensor
+            MetaTensorId, _TensorT
         ] = weakref.WeakValueDictionary()
         self.hit = 0
         self.miss = 0
@@ -709,12 +692,12 @@ class MetaConverter:
     def get_tensor_memo(self, t: MetaTensorDesc) -> Optional[torch.Tensor]:
         return self.tensor_memo.get(t.id, None)
 
-    def _checked_get_tensor_memo(self, t: MetaTensorDesc) -> FakeTensor:
+    def _checked_get_tensor_memo(self, t: MetaTensorDesc) -> _TensorT:
         r = self.tensor_memo.get(t.id, None)
         assert r is not None
         return r
 
-    def set_tensor_memo(self, t: MetaTensorDesc, v: FakeTensor) -> None:
+    def set_tensor_memo(self, t: MetaTensorDesc, v: _TensorT) -> None:
         self.tensor_memo[t.id] = v
 
     def get_storage_memo(self, s: MetaStorageDesc) -> Optional[torch.UntypedStorage]:
@@ -726,7 +709,7 @@ class MetaConverter:
     def meta_storage(
         self,
         s: MetaStorageDesc,
-        callback: Callable[[Callable[[], torch.Tensor]], FakeTensor],
+        callback: Callable[[Callable[[], torch.Tensor]], _TensorT],
     ) -> torch.UntypedStorage:
         # If we are fakeifying a tensor that has a secretly-zero-sized storage,
         # Need to make sure to resize the meta storage too.
@@ -745,6 +728,24 @@ class MetaConverter:
         else:
             return memo
 
+    @classmethod
+    def _checked_cast_tensor_t(cls, t: torch.Tensor) -> _TensorT:
+        # TODO: how to check _TensorT?
+        return typing.cast(_TensorT, t)
+
+    @classmethod
+    def _identity_callable(cls, t: Callable[[], torch.Tensor]) -> _TensorT:
+        return cls._checked_cast_tensor_t(t())
+
+    @classmethod
+    def _backward_error(cls, t: _TensorT) -> _TensorT:
+        errfn = torch._C._functions.DelayedError(
+            "Internal error: Tried to backward() through example input",
+            1,
+        )
+        err = errfn(t)
+        return typing.cast(_TensorT, err)
+
     # This function assumes that it's possible to do the conversion
     # NB: name here is used in a conventional way by Dynamo; it corresponds
     # precisely to the Source.name() of the tensor we're fakeifying and
@@ -754,13 +755,11 @@ class MetaConverter:
     def meta_tensor(
         self,
         t: MetaTensorDesc,
-        shape_env: Optional[ShapeEnv] = None,
-        callback: Callable[
-            [Callable[[], torch.Tensor]], FakeTensor
-        ] = _identity_callable,
-        source: Optional[Source] = None,
-        symbolic_context: Optional[SymbolicContext] = None,
-    ) -> FakeTensor:
+        shape_env: Optional[ShapeEnv],
+        callback: Callable[[Callable[[], torch.Tensor]], _TensorT],
+        source: Optional[Source],
+        symbolic_context: Optional[SymbolicContext],
+    ) -> _TensorT:
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -809,8 +808,10 @@ class MetaConverter:
 
         def sym_sizes_strides_storage_offset(
             t: MetaTensorDesc,
-            src: Source,
-            symbolic_context: Optional[SymbolicContext] = symbolic_context,
+            src: torch._guards.Source,
+            symbolic_context: Optional[
+                torch.fx.experimental.symbolic_shapes.SymbolicContext
+            ] = symbolic_context,
         ) -> Tuple[Tuple[int, ...], Tuple[int, ...], int]:
             assert t.stride is not None
             if shape_env is not None:
@@ -845,8 +846,10 @@ class MetaConverter:
 
         def empty_create(
             inner_t: MetaTensorDesc,
-            inner_src: Source,
-            symbolic_context: Optional[SymbolicContext] = symbolic_context,
+            inner_src: torch._guards.Source,
+            symbolic_context: Optional[
+                torch.fx.experimental.symbolic_shapes.SymbolicContext
+            ] = symbolic_context,
         ) -> torch.Tensor:
             (
                 inner_sizes,
@@ -866,10 +869,11 @@ class MetaConverter:
             t: MetaTensorDesc,
             outer_size: Tuple[int, ...],
             outer_stride: Tuple[int, ...],
-            symbolic_context: Optional[SymbolicContext] = symbolic_context,
-            callback: Callable[[Callable[[], torch.Tensor]], FakeTensor] = callback,
-            source: Optional[Source] = source,
-        ) -> FakeTensor:
+            symbolic_context: Optional[
+                torch.fx.experimental.symbolic_shapes.SymbolicContext
+            ] = symbolic_context,
+            source: Optional[torch._guards.Source] = source,
+        ) -> _TensorT:
             from torch._dynamo.source import AttrSource
             from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
 
@@ -898,30 +902,35 @@ class MetaConverter:
                 t: MetaTensorDesc,
                 outer_size: Optional[Tuple[int, ...]],
                 outer_stride: Optional[Tuple[int, ...]],
-                symbolic_context: Optional[SubclassSymbolicContext],
-                callback: Callable[[Callable[[], torch.Tensor]], FakeTensor],
-                source: Source,
-            ) -> FakeTensor:
+                symbolic_context: Optional[
+                    torch.fx.experimental.symbolic_shapes.SymbolicContext
+                ],
+                callback: Callable[[Callable[[], torch.Tensor]], _TensorT],
+                source: torch._guards.Source,
+            ) -> _TensorT:
                 # We are hitting plain meta_desc tensor so actually
                 # create a tensor here.
                 if t.attrs is None:
                     return self.meta_tensor(
                         t,
-                        shape_env=shape_env,
-                        callback=callback,
-                        source=source,
-                        symbolic_context=symbolic_context,
+                        shape_env,
+                        callback,
+                        source,
+                        symbolic_context,
                     )
 
                 inner_tensors = {}
                 for attr, meta_tensor_desc in t.attrs.items():
                     current_context = None
                     if symbolic_context is not None:
+                        assert isinstance(symbolic_context, SubclassSymbolicContext)
                         if (
                             current_context_ := symbolic_context.inner_contexts[attr]
                         ) is not None:
-                            assert isinstance(current_context_, SubclassSymbolicContext)
-                            current_context = current_context_
+                            current_context = _checked_cast(
+                                torch.fx.experimental.symbolic_shapes.SymbolicContext,
+                                current_context_,
+                            )
 
                     current_source = AttrSource(source, attr)
                     new_empty_tensor = _empty_create_subclass(
@@ -964,10 +973,10 @@ class MetaConverter:
         # don't want to over-specialize during view replay.
         def all_dynamic_symbolic_context(
             t: MetaTensorDesc,
-            source: Source,
-            shape_env: Optional[ShapeEnv],
-            callback: Callable[[Callable[[], torch.Tensor]], FakeTensor],
-        ) -> SymbolicContext:
+            source: torch._guards.Source,
+            shape_env: Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv],
+            callback: Callable[[Callable[[], torch.Tensor]], _TensorT],
+        ) -> torch.fx.experimental.symbolic_shapes.SymbolicContext:
             from torch._dynamo.source import AttrSource
             from torch.fx.experimental.symbolic_shapes import (
                 DimDynamic,
@@ -975,18 +984,22 @@ class MetaConverter:
                 SubclassSymbolicContext,
             )
 
-            view_base_context: Optional[SymbolicContext] = None
+            view_base_context: Optional[
+                torch.fx.experimental.symbolic_shapes.SymbolicContext
+            ] = None
             if t.is_view:
                 assert t.base is not None
                 view_base_context = all_dynamic_symbolic_context(
                     t.base, AttrSource(source, "_base"), shape_env, callback
                 )
 
-            t_symbolic_context: SymbolicContext
+            t_symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
             t_dynamic_sizes = [DimDynamic.DYNAMIC] * t.ndim
             if t.is_traceable_wrapper_subclass:
                 assert t.attrs is not None
-                inner_contexts: Dict[str, SymbolicContext] = {}
+                inner_contexts: Dict[
+                    str, torch.fx.experimental.symbolic_shapes.SymbolicContext
+                ] = {}
                 for attr, inner in t.attrs.items():
                     assert isinstance(attr, str)
                     inner_contexts[attr] = all_dynamic_symbolic_context(
@@ -1038,10 +1051,12 @@ class MetaConverter:
         #     Then view replay is done, swapping in the fake offsets so the view replay output
         #     is fully fake with no invalid specialization.
         def view_from_base(
-            base: FakeTensor,
+            base: _TensorT,
             t: MetaTensorDesc,
-            shape_env: Optional[ShapeEnv] = shape_env,
-        ) -> FakeTensor:
+            shape_env: Optional[
+                torch.fx.experimental.symbolic_shapes.ShapeEnv
+            ] = shape_env,
+        ) -> _TensorT:
             # fake-ify t's metadata according to the outer symbolic context
             (sizes, strides, storage_offset) = sym_sizes_strides_storage_offset(
                 t, source
@@ -1054,7 +1069,7 @@ class MetaConverter:
                 # TODO: Change this logic to use view replay for consistency?
                 # It's likely there is no view func available.
                 with maybe_suppress():
-                    return _checked_cast_fake_tensor(
+                    return self._checked_cast_tensor_t(
                         base.as_strided(sizes, strides, storage_offset)
                     )
 
@@ -1108,7 +1123,7 @@ class MetaConverter:
                 #   want a view of values with the offsets closed over. As the offsets component
                 #   is needed to describe the output view, it's important that it's fakeified
                 #   correctly.
-                fake_t = empty_create_subclass(
+                fake_t: _TensorT = empty_create_subclass(
                     t, outer_size=sizes, outer_stride=strides
                 )
                 attrs, _ = fake_t.__tensor_flatten__()  # type: ignore[attr-defined]
@@ -1119,9 +1134,11 @@ class MetaConverter:
                 visited_t: torch.Tensor,
                 # These arguments are never passed, we just use them to close
                 # over these relevant values
-                shape_env: Optional[ShapeEnv] = shape_env,
-                callback: Callable[[Callable[[], torch.Tensor]], FakeTensor] = callback,
-            ) -> FakeTensor:
+                shape_env: Optional[
+                    torch.fx.experimental.symbolic_shapes.ShapeEnv
+                ] = shape_env,
+                callback: Callable[[Callable[[], torch.Tensor]], _TensorT] = callback,  # type: ignore[assignment]
+            ) -> torch.Tensor:
                 # It's possible to close over an undefined tensor (e.g. NJT's lengths).
                 if visited_t is None:
                     return None
@@ -1148,8 +1165,8 @@ class MetaConverter:
                     visited_desc,
                     shape_env,
                     callback,
-                    source=temp_source,
-                    symbolic_context=all_dynamic_symbolic_context(
+                    temp_source,
+                    all_dynamic_symbolic_context(
                         visited_desc, temp_source, shape_env, callback
                     ),
                 )
@@ -1193,6 +1210,9 @@ class MetaConverter:
                         # Pray that sparse clone doesn't lose information
                         assert t.data is not None
                         with torch.no_grad(), no_dispatch():
+                            assert isinstance(
+                                r, torch._subclasses.fake_tensor.FakeTensor
+                            )
                             r.real_tensor = _safe_clone(t.data)
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     # Note [is_coalesced is dispatched]
@@ -1208,7 +1228,7 @@ class MetaConverter:
                         # but clone is fine for now for sparse tensors.
                         # (DelayedError does not work for sparse because it causes
                         # the Fake sparse tensor to "lose" its fakeness)
-                        r = _checked_cast_fake_tensor(r.clone())
+                        r = self._checked_cast_tensor_t(r.clone())
                         with torch.enable_grad():
                             r._coalesced_(bool(t.is_coalesced))
                 elif is_sparse_compressed_layout(t.layout):
@@ -1245,12 +1265,15 @@ class MetaConverter:
                         # Pray sparse clone doesn't lose information
                         assert t.data is not None
                         with torch.no_grad(), no_dispatch():
+                            assert isinstance(
+                                r, torch._subclasses.fake_tensor.FakeTensor
+                            )
                             r.real_tensor = _safe_clone(t.data)
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
-                        r = _backward_error(r)
+                        r = self._backward_error(r)
                 elif t.is_nested and not t.is_traceable_wrapper_subclass:
                     # TODO: Handle this better in Dynamo?
                     # There are checks there now, but this can still be triggered by a dense
@@ -1262,9 +1285,11 @@ class MetaConverter:
                     )
                 elif t.is_mkldnn:
                     is_leaf = t.is_leaf
-                    sizes, strides, _storage_offset = sym_sizes_strides_storage_offset(
-                        t, source
-                    )
+                    (
+                        sizes,
+                        strides,
+                        _storage_offset,
+                    ) = sym_sizes_strides_storage_offset(t, source)
                     # TODO: This doesn't seem right, where's the MKLDNN'ness
                     # lol
                     r = callback(
@@ -1276,6 +1301,9 @@ class MetaConverter:
                         with torch.no_grad(), no_dispatch():
                             assert t.size is not None
                             assert t.stride is not None
+                            assert isinstance(
+                                r, torch._subclasses.fake_tensor.FakeTensor
+                            )
                             r.real_tensor = torch.empty_strided(
                                 t.size, t.stride, dtype=t.dtype, device=t.device
                             )
@@ -1285,7 +1313,7 @@ class MetaConverter:
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
-                        r = _backward_error(r)
+                        r = self._backward_error(r)
                 elif t.is_functorch_wrapped:
                     if t.is_view:
                         from torch._dynamo.exc import unimplemented
@@ -1296,10 +1324,10 @@ class MetaConverter:
 
                     # Wraps a functorch tensor class (BatchedTensor, GradTrackingTensor)
                     # in a FakeTensor
-                    def _to_fake_tensor(t: MetaTensorDesc) -> FakeTensor:
+                    def _to_fake_tensor(t: MetaTensorDesc) -> _TensorT:
                         # TODO: why aren't the recursive calls going to
                         # meta_tensor
-                        r: FakeTensor
+                        r: _TensorT
                         if t.is_batchedtensor:
                             assert t.unwrapped is not None
                             assert t.level is not None
@@ -1314,7 +1342,7 @@ class MetaConverter:
                             with torch._functorch.pyfunctorch.temporarily_restore_interpreter_stack(
                                 t.functorch_stack
                             ):
-                                r = _checked_cast_fake_tensor(
+                                r = self._checked_cast_tensor_t(
                                     _add_batch_dim(ft, bdim, lvl)
                                 )
                         elif t.is_gradtrackingtensor:
@@ -1330,7 +1358,7 @@ class MetaConverter:
                                 with torch._functorch.pyfunctorch.temporarily_restore_interpreter_stack(
                                     t.functorch_stack
                                 ):
-                                    r = _checked_cast_fake_tensor(
+                                    r = self._checked_cast_tensor_t(
                                         torch._C._functorch._wrap_for_grad(ft, lvl),
                                     )
 
@@ -1338,22 +1366,22 @@ class MetaConverter:
                             if t.requires_grad and safe_is_leaf(r):
                                 r.requires_grad = True
                             elif t.requires_grad and not is_leaf:
-                                r = _backward_error(r)
+                                r = self._backward_error(r)
                         elif t.is_functional:
                             assert t.unwrapped is not None
                             assert t.current_level is not None
                             ft = self.meta_tensor(
                                 t.unwrapped,
-                                shape_env=shape_env,
-                                callback=callback,
+                                shape_env,
+                                callback,
                                 # NB: reuse these exactly, we treat the
                                 # functional tensor as "invisible".
                                 # TODO: Actually this all probably doesn't
                                 # work, take a closer look.
-                                source=source,
-                                symbolic_context=symbolic_context,
+                                source,
+                                symbolic_context,
                             )
-                            r = _checked_cast_fake_tensor(
+                            r = self._checked_cast_tensor_t(
                                 _wrap_functional_tensor(ft, t.current_level),
                             )
                             # TODO: is_leaf/requires_grad?
@@ -1389,12 +1417,12 @@ class MetaConverter:
                     assert not t.is_functorch_wrapped  # handled above
                     unwrapped = self.meta_tensor(
                         t.unwrapped,
-                        shape_env=shape_env,
-                        callback=callback,
-                        source=source,
-                        symbolic_context=symbolic_context,
+                        shape_env,
+                        callback,
+                        source,
+                        symbolic_context,
                     )
-                    r = _checked_cast_fake_tensor(
+                    r = self._checked_cast_tensor_t(
                         torch._to_functional_tensor(unwrapped)
                     )
                     torch._mirror_autograd_meta_to(t.autograd_meta_from, r)  # type: ignore[attr-defined]
@@ -1424,8 +1452,8 @@ class MetaConverter:
                         t.base,
                         shape_env,
                         callback,
-                        source=torch._dynamo.source.AttrSource(source, "_base"),
-                        symbolic_context=base_symbolic_context,
+                        torch._dynamo.source.AttrSource(source, "_base"),
+                        base_symbolic_context,
                     )
 
                     def is_c_of_r(
@@ -1452,16 +1480,16 @@ class MetaConverter:
                         if base.dtype == t.dtype:
                             pass
                         elif is_c_of_r(base.dtype, t.dtype):
-                            base = _checked_cast_fake_tensor(torch.view_as_real(base))
+                            base = self._checked_cast_tensor_t(torch.view_as_real(base))
                         elif is_c_of_r(t.dtype, base.dtype):
-                            base = _checked_cast_fake_tensor(
+                            base = self._checked_cast_tensor_t(
                                 torch.view_as_complex(base)
                             )
                         else:
                             # This is not guaranteed to succeed.  If it fails, it
                             # means there is another dtype-converting view function
                             # that hasn't been handled here
-                            base = _checked_cast_fake_tensor(base.view(t.dtype))
+                            base = self._checked_cast_tensor_t(base.view(t.dtype))
 
                         # This is very tricky.  Naively, you might expect this
                         # to hold:
@@ -1503,7 +1531,7 @@ class MetaConverter:
                                 # NB: Can't have a non-leaf without requiring grad!
                                 assert t.requires_grad
                                 with torch.no_grad():
-                                    mid = _checked_cast_fake_tensor(
+                                    mid = self._checked_cast_tensor_t(
                                         base.view(base.shape)
                                     )
                                 mid.requires_grad = t.requires_grad
@@ -1554,6 +1582,9 @@ class MetaConverter:
                             with torch.no_grad(), no_dispatch():
                                 assert t.size is not None
                                 assert t.stride is not None
+                                assert isinstance(
+                                    r, torch._subclasses.fake_tensor.FakeTensor
+                                )
                                 r.real_tensor = torch.empty_strided(
                                     t.size, t.stride, dtype=t.dtype, device=t.device
                                 )
@@ -1572,7 +1603,7 @@ class MetaConverter:
                             # the metadata of the inner tensor.
                             # So instead, we now have a dedicated fn to set autograd history,
                             # without inadvertently changing other metadata.
-                            r = _backward_error(r)
+                            r = self._backward_error(r)
 
                     s = t.storage
                     assert s is not None
@@ -1586,6 +1617,9 @@ class MetaConverter:
                         # You're normal and happy, install the fresh storage into the memo
                         self.set_storage_memo(s, r.untyped_storage())
                         if self.copy_data:
+                            assert isinstance(
+                                r, torch._subclasses.fake_tensor.FakeTensor
+                            )
                             assert r.real_tensor is not None
                             _set_real_storage(
                                 r.untyped_storage(), r.real_tensor.untyped_storage()
@@ -1633,6 +1667,9 @@ class MetaConverter:
                                 r.set_(r_s, storage_offset, sizes, strides)
                             if self.copy_data:
                                 with torch.no_grad(), no_dispatch():
+                                    assert isinstance(
+                                        r, torch._subclasses.fake_tensor.FakeTensor
+                                    )
                                     assert r.real_tensor is not None
                                     assert t.stride is not None
                                     r.real_tensor.set_(
@@ -1651,8 +1688,8 @@ class MetaConverter:
                         t.grad,
                         shape_env,
                         callback,
-                        source=AttrSource(source, "grad"),
-                        symbolic_context=symbolic_context,
+                        AttrSource(source, "grad"),
+                        symbolic_context,
                     )
                 torch._C._set_conj(r, t.is_conj)
                 torch._C._set_neg(r, t.is_neg)
@@ -1672,6 +1709,7 @@ class MetaConverter:
 
             # See Note: [Creating symbolic nested int]
             if t.nested_int is not None:
+                assert isinstance(r, torch._subclasses.fake_tensor.FakeTensor)
                 r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
                     nt_tensor_id=t.nested_int
                 )
@@ -1685,16 +1723,19 @@ class MetaConverter:
         t: torch.Tensor,
         shape_env: Optional[ShapeEnv] = None,
         *,
-        callback: Callable[
-            [Callable[[], torch.Tensor]], FakeTensor
-        ] = _identity_callable,
+        callback: Optional[Callable[[Callable[[], torch.Tensor]], _TensorT]] = None,
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
         # Controls whether or not we should dump the tensor metadata to structured logs
         # when source is not None.  Because we refakify after Dynamo is done,
         # we don't want to dump info again from AOTAutograd, it is redundant.
         trace: bool = True,
-    ) -> FakeTensor:
+    ) -> _TensorT:
+        callback_: Callable[[Callable[[], torch.Tensor]], _TensorT]
+        if callback is None:
+            callback_ = self._identity_callable
+        else:
+            callback_ = callback
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
 
@@ -1757,10 +1798,10 @@ class MetaConverter:
 
             r = self.meta_tensor(
                 t_desc,
-                shape_env=shape_env,
-                callback=callback,
-                source=source,
-                symbolic_context=symbolic_context,
+                shape_env,
+                callback_,
+                source,
+                symbolic_context,
             )
 
         if type(t) is torch.nn.Parameter:
