@@ -957,6 +957,19 @@ def configure_extension_build():
 
     cmake_cache_vars = get_cmake_cache_vars()
 
+    if (
+        not str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
+        and IS_LINUX
+        and platform.processor() == "aarch64"
+        and cmake_cache_vars()["USE_CUDA"]
+    ):
+        print_box(
+            """
+            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
+            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+            """
+        )
+
     ################################################################################
     # Configure compile flags
     ################################################################################
@@ -1167,18 +1180,6 @@ def main():
         install_requires.append(f"{LIBTORCH_PKG_NAME}=={get_torch_version()}")
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
-    if (
-        use_prioritized_text == ""
-        and platform.system() == "Linux"
-        and platform.processor() == "aarch64"
-        and cmake.get_cmake_cache_variables()["USE_CUDA"]
-    ):
-        print_box(
-            """
-            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
-            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-            """
-        )
     if use_prioritized_text == "1" or use_prioritized_text == "True":
         gen_linker_script(
             filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
