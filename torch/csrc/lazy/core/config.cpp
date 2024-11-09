@@ -1,7 +1,6 @@
 #include <c10/util/env.h>
 #include <torch/csrc/lazy/core/config.h>
 
-// NOLINTBEGIN(misc-use-internal-linkage)
 C10_DEFINE_bool(torch_lazy_ir_debug, false, "Enable lazy tensor IR debugging");
 
 C10_DEFINE_bool(
