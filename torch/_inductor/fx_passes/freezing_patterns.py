@@ -64,6 +64,10 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
     constant_fold(gm)
     fake_tensor_prop(gm, aot_example_inputs, True)
 
+    print("=" * 20)
+    print("[info] freezing_passes: gm.graph =")
+    print(gm.graph)
+    print("=" * 20)
     for pattern in pass_patterns:
         pattern.apply(gm.graph)  # type: ignore[arg-type]
 
