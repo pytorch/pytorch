@@ -1916,22 +1916,39 @@ class TestSDPAFailureModes(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support flash attention"
     )
-    def test_mem_eff_stride_zero_aligned(self, device):
+    @parametrize(
+        "strides",
+        [
+            (8192, 0, 1, 0),
+            (65536, 0, 8, 0),
+            (32768, 0, 4, 0),
+            (16384, 0, 2, 0),
+            (8192, 1, 0, 0),
+            (0, 8192, 1, 0),
+            (8192, 0, 0, 1),
+            (0, 16384, 2, 0),
+            (131072, 0, 16, 0),
+            (32768, 16384, 8, 1)
+        ],
+    )
+    def test_mem_eff_stride_zero_aligned(self, device, strides: Tuple[int]):
         dtype = torch.bfloat16
         q_shape = SdpaShape(2, 1, 8192, 8)
         kv_shape = SdpaShape(2, 1, 8192, 8)
         make_q = partial(torch.rand, q_shape, device=device, dtype=dtype)
         make_kv = partial(torch.rand, kv_shape, device=device, dtype=dtype)
         q, k, v = make_q(), make_kv(), make_kv()
-        base = torch.randn(2, 1, 8192, device="cuda", dtype=dtype)
 
-        # Use as_strided to create the mask with proper striding
+        numel = zip(strides, q_shape)
+        numel = [x[0] * x[1] for x in numel]
+        numel = sum(numel)
+        base = torch.randn(numel, device="cuda", dtype=dtype)
+
         mask = torch.as_strided(
             base,
             size=(2, 1, 8192, 8192),
-            stride=(8192, 0, 1, 0),  # This creates a similar broadcast-like pattern
+            stride=strides,
         )
-        # import fbvscode; fbvscode.set_trace()
         with sdpa_kernel(backends=SDPBackend.EFFICIENT_ATTENTION):
             torch.nn.functional.scaled_dot_product_attention(q, k, v, mask, 0.0, False)
 
