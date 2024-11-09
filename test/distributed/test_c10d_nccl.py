@@ -2868,6 +2868,80 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                 "TORCH_NCCL_ASYNC_ERROR_HANDLING"
             ] = prev_nccl_async_error_handling
 
+    @requires_nccl()
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
+    @skip_if_rocm_multiprocess
+    @skip_if_lt_x_gpu(3)
+    def test_restart_pg_after_error(self):
+        # test the barrier behavior in the non blocking wait setting
+        prev_nccl_async_error_handling = os.environ.get(
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING", None
+        )
+        # avoid watchdog thread interference
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank % torch.cuda.device_count()}")
+        # initialize pg for the first time
+        c10d.init_process_group(
+            "nccl",
+            timeout=timedelta(seconds=2),
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        nccl_backend = pg._get_backend(torch.device(device))
+        self.assertEqual(nccl_backend.get_error(), ErrorType.NO_ERROR)
+        barrier_work = nccl_backend.barrier()
+        barrier_work.wait()
+        barrier_result = barrier_work.get_future_result().wait()
+        self.assertEqual(nccl_backend.get_error(), ErrorType.NO_ERROR)
+        if self.rank == 0:
+            work = nccl_backend.allreduce(torch.rand(10).cuda(self.rank))
+            work.wait()
+            result = work.get_future_result().wait()
+            self.assertEqual(nccl_backend.get_error(), ErrorType.TIMEOUT)
+            # we need a brand new fileStore for the new PG
+            # the new file name is shared through the old fileStore
+            new_file_name = tempfile.NamedTemporaryFile(delete=False).name
+            store.set("file", new_file_name)
+        else:
+            # other ranks not exiting before rank 0 timeout, this is to avoid
+            # nccl error happening before rank 0 timeouts
+            time.sleep(4)
+            self.assertEqual(nccl_backend.get_error(), ErrorType.REMOTE_ERROR)
+            new_file_name = store.get("file").decode()
+
+        # all ranks restart using a new store after detecting the timeout error
+        dist.destroy_process_group()
+
+        new_store = c10d.FileStore(new_file_name, self.world_size)
+        # re-initialize pg
+        c10d.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=new_store,
+        )
+
+        new_pg = c10d.distributed_c10d._get_default_group()
+        new_nccl_backend = new_pg._get_backend(torch.device(device))
+        t = torch.rand(5, 5, device=device)
+        dist.all_reduce(t)
+        self.assertEqual(new_nccl_backend.get_error(), ErrorType.NO_ERROR)
+        torch.cuda.synchronize()
+        dist.destroy_process_group()
+
+        # give some time for other ranks to exit first before destroying FileStore
+        if self.rank == 0:
+            time.sleep(4)
+            os.remove(new_file_name)
+
+        if prev_nccl_async_error_handling is not None:
+            os.environ[
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING"
+            ] = prev_nccl_async_error_handling
+
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["TORCH_NCCL_BLOCKING_WAIT"] = val
         store = c10d.FileStore(self.file_name, self.world_size)
