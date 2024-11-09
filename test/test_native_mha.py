@@ -277,8 +277,8 @@ class TestMHADeviceType(TestCase):
     def test_native_multihead_self_attention(self, device, dtype, use_nt,
                                              need_weights, average_attn_weights, use_padding, pad_all, fused):
         if TEST_WITH_ROCM:
-            if use_nt:
-                self.skipTest("ROCM does not support nested tensors for Flash Attention for now.")
+            if use_nt and use_padding and pad_all:
+                self.skipTest("Large numerical errors on ROCM to investigate.")
             if use_padding and not pad_all and fused:
                 self.skipTest("Large numerical errors on ROCM to investigate.")
         for need_weights in (False, not pad_all):
