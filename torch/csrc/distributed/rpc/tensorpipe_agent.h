@@ -65,14 +65,14 @@ struct TORCH_API TransportRegistration {
   std::string address;
 };
 
-C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
+TORCH_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct TORCH_API ChannelRegistration {
   std::shared_ptr<tensorpipe::channel::Context> channel;
   int64_t priority;
 };
 
-C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+TORCH_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 
