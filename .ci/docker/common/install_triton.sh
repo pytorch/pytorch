@@ -16,7 +16,7 @@ if [ -n "${XPU_VERSION}" ]; then
   TRITON_REPO="https://github.com/intel/intel-xpu-backend-for-triton"
   TRITON_TEXT_FILE="triton-xpu"
 else
-  TRITON_REPO="https://github.com/openai/triton"
+  TRITON_REPO="https://github.com/ROCm/triton"
   TRITON_TEXT_FILE="triton"
 fi
 
