@@ -508,9 +508,10 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
           auto scalar_result = std::get<int>(result);
           addressList.push_back(std::to_string(scalar_result));
         }
-        // today we record a lot of metadata in record_param_comms that shows up as inputs.
-        // here we only need the addresses of the first inputs, which are the real tensor inputs
-        // to the collective call. So let's break out of the loop here.
+        // today we record a lot of metadata in record_param_comms that shows up
+        // as inputs. here we only need the addresses of the first inputs, which
+        // are the real tensor inputs to the collective call. So let's break out
+        // of the loop here.
         break;
       }
       map.emplace(kInTensorsStart, vectorToString(addressList));

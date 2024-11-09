@@ -121,7 +121,7 @@ template <typename T>
 class TORCH_API GlobalStateManager {
  public:
   static GlobalStateManager& singleton() {
-     /* library-local */ static GlobalStateManager singleton_;
+    /* library-local */ static GlobalStateManager singleton_;
     return singleton_;
   }
 
