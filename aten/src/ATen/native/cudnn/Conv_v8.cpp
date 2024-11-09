@@ -258,12 +258,12 @@ static int getLRUCacheLimit() {
   // 0 is used to indicate no limit
   // negative values are used to indicate no caching
   static int limit = [&] {
-    const char* val = getenv("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT");
+    const auto val = c10::utils::get_env("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT");
     if (!val) {
       return DEFAULT_LIMIT;
     }
     try {
-      return std::stoi(val);
+      return std::stoi(val.value());
     } catch (std::invalid_argument const& e) {
       TORCH_WARN(
           "invalid TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT,",
