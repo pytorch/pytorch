@@ -113,6 +113,7 @@ class TestFxGraphCache(TestCase):
         PatchCaches.tearDown()
 
     def reset(self):
+        PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
 
@@ -177,10 +178,7 @@ class TestFxGraphCache(TestCase):
                 )
 
             # A second call should hit. (First reset so in-memory guards
-            # don't prevent compilation). Remove on-disk artifacts to simulate
-            # case where the module source does not exist on disk (as can be
-            # the case with remote caching).
-            PyCodeCache.cache_clear(purge=True)
+            # don't prevent compilation).
             self.reset()
 
             # Clean triton kernels
@@ -1119,6 +1117,7 @@ class TestAutotuneCache(TestCase):
         PatchCaches.tearDown()
 
     def reset(self):
+        PyCodeCache.cache_clear(purge=True)
         torch._dynamo.reset()
         clear_inductor_caches()
 
@@ -1315,6 +1314,8 @@ class TestUtils(TestCase):
         self.assertEqual(res1, res2)
         self.assertNotEqual(cache_dir1, cache_dir2)
 
+    # This combination of settings exposed a bug where we cleared the
+    # PyCodeCache disk artifacts while they were still needed:
     @requires_cuda
     @config.patch(
         {
