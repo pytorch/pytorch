@@ -30,7 +30,7 @@ import sympy
 import torch
 import torch._inductor.metrics as metrics
 import torch._logging
-from torch._dynamo.utils import preserve_rng_state
+from torch._dynamo.utils import identity, preserve_rng_state
 from torch._inductor.runtime.hints import (
     AutotuneHint,
     DeviceProperties,
@@ -55,6 +55,7 @@ from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
 from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
 from ..utils import (
     cache_on_self,
+    DelayReplaceLine,
     get_bounds_index_expr,
     get_fused_kernel_name,
     get_kernel_metadata,
@@ -240,7 +241,7 @@ class BlockPtrOptions:
 
         # Reshape to add singletons.
         pre_broadcast_shape = [
-            sympy.Integer(1) if is_broadcasting else dim
+            sympy.S.One if is_broadcasting else dim
             for dim, is_broadcasting in zip(
                 self.broadcast_shape, self.broadcasting_dims
             )
@@ -341,7 +342,7 @@ class BlockPtrOptions:
             and V.kernel.numels[-1] != 1
         ):
             # Need to expand rank by 1 to match rank when self.inside_reduction=True
-            final_shape.append(sympy.Integer(1))
+            final_shape.append(sympy.S.One)
 
         return BlockPtrOptions(
             params=params,
@@ -374,9 +375,7 @@ class BlockPtrOptions:
         f = V.kernel.index_to_str
         offsets = [*self.offsets]
         if not roffset:
-            offsets = [
-                self.replace_roffset(offset, sympy.Integer(0)) for offset in offsets
-            ]
+            offsets = [self.replace_roffset(offset, sympy.S.Zero) for offset in offsets]
         args = [
             (
                 f"{name} + ({f(self.constant_offset)})"
@@ -407,9 +406,7 @@ class BlockPtrOptions:
             idx
             for idx in range(len(self.shape))
             if (
-                not sizevars.statically_known_equals(
-                    self.strides[idx], sympy.Integer(0)
-                )
+                not sizevars.statically_known_equals(self.strides[idx], sympy.S.Zero)
                 and not sizevars.statically_known_multiple_of(
                     self.shape[idx], self.block_shape[idx]
                 )
@@ -436,7 +433,7 @@ class BlockPtrOptions:
         advance = [
             (
                 self.replace_roffset(offset, rblock)
-                - self.replace_roffset(offset, sympy.Integer(0))
+                - self.replace_roffset(offset, sympy.S.Zero)
             )
             for offset in self.offsets
         ]
@@ -1384,6 +1381,7 @@ class TritonKernel(SIMDKernel):
         self.min_elem_per_thread = min_elem_per_thread
         self.block_ptr_id = itertools.count()
         self.helper_functions = HelperFunctions()
+        self._load_counts: collections.Counter[str] = collections.Counter()
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints: OrderedSet[AutotuneHint] = OrderedSet()
@@ -1653,7 +1651,7 @@ class TritonKernel(SIMDKernel):
                     Compute the cumulative size of each dimension's slice.
                     This proceeds from the last dim up to the second.
                     """
-                    numels = [sympy.Integer(1)]
+                    numels = [sympy.S.One]
                     for dim in dims[:0:-1]:
                         numel = dim * numels[0]
                         numels.insert(0, numel)
@@ -1678,10 +1676,10 @@ class TritonKernel(SIMDKernel):
                 # Provide default values for unmatched dims and strides.
                 for dim in dims[1:]:
                     if dim not in match:
-                        match[dim] = sympy.Integer(1)
+                        match[dim] = sympy.S.One
                 for stride in strides[1:]:
                     if stride not in match:
-                        match[stride] = sympy.Integer(0)
+                        match[stride] = sympy.S.Zero
 
                 sizevars = V.graph.sizevars
 
@@ -1724,9 +1722,6 @@ class TritonKernel(SIMDKernel):
                     for numel in slice_numels
                 ):
                     return None
-
-                def identity(expr: sympy.Expr) -> sympy.Expr:
-                    return expr
 
                 # Compute the ND block shape from the linear block size.
                 # Use CielDiv to round leading dimensions up to 1.
@@ -1787,7 +1782,7 @@ class TritonKernel(SIMDKernel):
                     # For example xindex * 5 + rindex * 3 is partitioned to
                     # (xindex * 5, rindex * 3).
                     symbol = tree.symbol()
-                    subexpr = sympy.Integer(0) + sum(
+                    subexpr = sympy.S.Zero + sum(
                         expr for expr in index_terms if symbol in expr.free_symbols
                     )
 
@@ -1939,6 +1934,9 @@ class TritonKernel(SIMDKernel):
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
+        load_counts = self._load_counts
+        load_counts[name] += 1
+        make_line: Callable[[str], Union[str, DelayReplaceLine]] = identity
         indirect_indexing = self.is_indirect_indexing(index)
         original_index = index
         indexing = self.indexing(index, block_ptr=True)
@@ -1963,18 +1961,17 @@ class TritonKernel(SIMDKernel):
         elif not is_coalesced:
             ep = ", eviction_policy='evict_last'"
         elif self.inside_reduction and self.range_trees[-1].is_loop:
-            if name in self.args.inplace_buffers:
-                names: OrderedSet[str] = OrderedSet(
-                    self.args.inplace_buffers[name].other_names
-                )
-            else:
-                names = OrderedSet([name])
-            last_use = len(names & self.last_usage) > 0
-            evict_last = not last_use and (has_rindex or indirect_indexing)
-            if evict_last:
-                ep = ", eviction_policy='evict_last'"
-            else:
-                ep = ", eviction_policy='evict_first'"
+
+            def decide_later():
+                if load_counts[name] > expected_count and (
+                    has_rindex or indirect_indexing
+                ):
+                    return "evict_last"
+                return "evict_first"
+
+            expected_count = load_counts[name]
+            ep = ", eviction_policy='<EP>'"
+            make_line = functools.partial(DelayReplaceLine, "<EP>", decide_later)
         else:
             ep = ""
 
@@ -2022,7 +2019,9 @@ class TritonKernel(SIMDKernel):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
-        result_var = self.cse.generate(load_buffer, line, dtype=dtype)
+        result_var = self.cse.generate(load_buffer, make_line(line), dtype=dtype)
+        if result_var.use_count > 1:
+            load_counts[name] -= 1  # don't double count cache hit
         assert isinstance(result_var, TritonCSEVariable)
         result_var.mask_vars = indexing.mask_vars  # type: ignore[assignment]
 
