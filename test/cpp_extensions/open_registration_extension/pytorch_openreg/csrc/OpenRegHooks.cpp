@@ -186,7 +186,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   void destroyEvent(void* event, const c10::DeviceIndex device_index)
       const noexcept override {
     py::gil_scoped_acquire acquire;
-    get_method("destroyEvent")(event, device_index);
+    get_method("destroyEvent")((int64_t)event, device_index);
   }
 
   /**
@@ -201,7 +201,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
       const c10::DeviceIndex device_index,
       const c10::EventFlag flag) const override {
     py::gil_scoped_acquire acquire;
-    get_method("record")(event, stream, device_index, flag);
+    get_method("record")((int64_t)event, stream, device_index, (int64_t)flag);
   }
 
   /**
@@ -214,7 +214,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   void block(void* event, const c10::Stream& stream) const override {
     py::gil_scoped_acquire acquire;
-    get_method("block")(event, stream);
+    get_method("block")((int64_t)event, stream);
   }
 
   /**
@@ -225,7 +225,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   bool queryEvent(void* event) const override {
     py::gil_scoped_acquire acquire;
-    return get_method("queryEvent")(event).cast<bool>();
+    return get_method("queryEvent")((int64_t)event).cast<bool>();
   }
 
   /**
@@ -261,7 +261,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    */
   void synchronizeEvent(void* event) const override {
     py::gil_scoped_acquire acquire;
-    get_method("synchronizeEvent")(event);
+    get_method("synchronizeEvent")((int64_t)event);
   }
 
   /**
@@ -281,7 +281,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   double elapsedTime(void* event1, void* event2, const c10::DeviceIndex device_index)
       const override {
     py::gil_scoped_acquire acquire;
-    return get_method("elapsedTime")(event1, event2, device_index).cast<double>();
+    return get_method("elapsedTime")((int64_t)event1, (int64_t)event2, device_index).cast<double>();
   }
 };
 
