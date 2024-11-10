@@ -73,8 +73,9 @@ class SIMDKernelFeatures:
         reduction_numel: sympy.Expr = sympy.S.One,
     ):
         self.node_schedule = node_schedule
-        self.numel = V.graph.sizevars.simplify(numel)  # numel excludes reduction_numel
-        self.reduction_numel = V.graph.sizevars.simplify(reduction_numel)
+        # numel excludes reduction_numel
+        self.numel: sympy.Expr = V.graph.sizevars.simplify(numel)
+        self.reduction_numel: sympy.Expr = V.graph.sizevars.simplify(reduction_numel)
 
     @cache_on_self
     def is_reduction(self) -> bool:
