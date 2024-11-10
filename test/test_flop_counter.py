@@ -810,6 +810,30 @@ class TestFlopCounter(TestCase):
         self.assertEqual(called, 1)
         self.assertExpectedInline(get_total_flops(mode), """9001""")
 
+    @skipIfNoTorchVision
+    def test_inference_mode(self):
+        def get_flops(model):
+            with FlopCounterMode(model) as mode:
+                a = T(1, 3, 224, 224)
+                model(a).sum()
+            return mode
+
+        resnet18 = torchvision_models.resnet18()
+
+        mode_standard = get_flops(resnet18)
+
+        with torch.inference_mode():
+            mode_inference = get_flops(resnet18)
+
+        self.assertEqual(get_total_flops(mode_standard), get_total_flops(mode_inference))
+
+        layer1_conv_flops_standard = mode_standard.flop_counts["ResNet.layer1"][
+            torch.ops.aten.convolution
+        ]
+        layer1_conv_flops_inference = mode_inference.flop_counts["ResNet.layer1"][
+            torch.ops.aten.convolution
+        ]
+        self.assertEqual(layer1_conv_flops_standard, layer1_conv_flops_inference)
 
 if __name__ == "__main__":
     run_tests()
