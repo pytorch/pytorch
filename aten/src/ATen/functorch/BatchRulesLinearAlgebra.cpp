@@ -536,10 +536,10 @@ _scaled_dot_product_flash_attention_batch_rule(
 }
 
 fourOutputs _scaled_dot_product_efficient_attention_batch_rule(
-  const Tensor& query, optional<int64_t> query_bdim,
-  const Tensor& key, optional<int64_t> key_bdim,
-  const Tensor& value, optional<int64_t> value_bdim,
-  const std::optional<Tensor>& attn_bias, optional<int64_t> attn_bias_bdim,
+  const Tensor& query, std::optional<int64_t> query_bdim,
+  const Tensor& key, std::optional<int64_t> key_bdim,
+  const Tensor& value, std::optional<int64_t> value_bdim,
+  const std::optional<Tensor>& attn_bias, std::optional<int64_t> attn_bias_bdim,
   bool compute_log_sumexp,
   double dropout_p,
   bool is_causal,
