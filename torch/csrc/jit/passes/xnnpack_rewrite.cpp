@@ -20,6 +20,98 @@ namespace torch::jit {
 
 namespace {
 
+void replaceConv1dStrPaddingWithIntPadding(std::shared_ptr<Graph>& graph) {
+  std::string conv_1d_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:str, %dilation:int[], %groups:int):
+        %res = aten::conv1d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+        return (%res) )";
+
+  std::string int_padding_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:str, %dilation:int[], %groups:int):
+      %zero : int = prim::Constant[value=0]()
+      %one : int = prim::Constant[value=1]()
+      %two : int = prim::Constant[value=2]()
+      %same : str = prim::Constant[value="same"]()
+      %stride_w : int = prim::ListUnpack(%stride)
+      %dilation_w : int = prim::ListUnpack(%dilation)
+
+      # Check if padding is "same" and stride > 1
+      %cond_padding_same : bool = aten::eq(%padding, %same)
+      %stride_gt_one : bool = aten::gt(%stride_w, %one)
+      %invalid_config : bool = aten::__and__(%cond_padding_same, %stride_gt_one)
+
+      # Throw exception if invalid config
+      %err_msg : str = prim::Constant[value="SAME padding with stride > 1 is not supported"]()
+      %result = prim::If(%invalid_config)
+        block0():
+          %none: NoneType = prim::Constant()
+          prim::RaiseException(%err_msg, %none)
+          -> (%none)
+        block1():
+          # Get input size and kernel size
+          %input_size : int = aten::size(%input, %two)
+          %kernel_size_w : int = aten::size(%weight, %two)
+
+          # Calculate effective kernel size
+          %kernel_minus_one : int = aten::sub(%kernel_size_w, %one)
+          %dilated_kernel : int = aten::mul(%kernel_minus_one, %dilation_w)
+          %effective_kernel_size_w : int = aten::add(%dilated_kernel, %one)
+
+          # Calculate padding (assuming stride=1)
+          %pad_total_w : int = aten::sub(%effective_kernel_size_w, %one)
+          %pad_w : int = aten::floordiv(%pad_total_w, %two)
+
+          %padding_final : int[] = prim::If(%cond_padding_same)
+            block0():
+                %constructed_pad : int[] = prim::ListConstruct(%pad_w)
+                -> (%constructed_pad)
+            block1():
+                %zero_pad : int[] = prim::ListConstruct(%zero)
+                -> (%zero_pad)
+
+          %output = aten::conv1d(%input, %weight, %bias, %stride, %padding_final, %dilation, %groups)
+          -> (%output)
+
+      return (%result)
+  )";
+
+  std::vector<std::pair<std::string, std::string>> value_mappings(
+      {{"zero", "res"},
+       {"one", "res"},
+       {"two", "res"},
+       {"same", "res"},
+       {"stride_w", "res"},
+       {"dilation_w", "res"},
+       {"cond_padding_same", "res"},
+       {"stride_gt_one", "res"},
+       {"invalid_config", "res"},
+       {"result", "res"},
+       {"input_size", "res"},
+       {"kernel_size_w", "res"},
+       {"kernel_minus_one", "res"},
+       {"dilated_kernel", "res"},
+       {"effective_kernel_size_w", "res"},
+       {"pad_total_w", "res"},
+       {"pad_w", "res"},
+       {"padding_final", "res"},
+       {"constructed_pad", "res"},
+       {"zero_pad", "res"},
+       {"output", "res"}});
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(
+      conv_1d_pattern, int_padding_pattern, value_mappings);
+
+  auto filter_padding =
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
+        auto* node = match.nodes_map.at(vmap.at("res")->node());
+        return node->schema().overload_name() == "padding";
+      };
+
+  rewriter.runOnGraph(graph, filter_padding);
+}
+
 void replaceConv1dWithConv2d(std::shared_ptr<Graph>& graph) {
   std::string conv_1d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
@@ -62,7 +154,15 @@ void replaceConv1dWithConv2d(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(
       conv_1d_pattern, conv_2d_pattern, value_mappings);
-  rewriter.runOnGraph(graph);
+
+  auto filter_padding =
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
+        auto* node = match.nodes_map.at(vmap.at("res")->node());
+        return node->schema().overload_name() != "padding";
+      };
+
+  rewriter.runOnGraph(graph, filter_padding);
 }
 
 } // namespace
@@ -70,6 +170,7 @@ void replaceConv1dWithConv2d(std::shared_ptr<Graph>& graph) {
 void transformConv1dToConv2d(std::shared_ptr<Graph>& graph) {
   // Replace _convolution with conv1d and conv2d
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
+  replaceConv1dStrPaddingWithIntPadding(graph);
   replaceConv1dWithConv2d(graph);
 }
 

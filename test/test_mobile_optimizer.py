@@ -4,7 +4,7 @@ import unittest
 import torch
 import torch.nn as nn
 import torch.utils.bundled_inputs
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfNoXNNPACK
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfNoXNNPACK, parametrize, instantiate_parametrized_tests
 from torch.testing._internal.jit_utils import get_forward, get_forward_graph
 from torch.utils.mobile_optimizer import (LintCode,
                                           generate_mobile_module_lints,
@@ -614,6 +614,31 @@ class TestOptimizer(TestCase):
                 ["pqr"],
             )
 
+    @parametrize("dilation", (1, 2))
+    @parametrize("padding", ("same", "valid"))
+    @skipIfNoXNNPACK
+    def test_conv1d_with_same_padding(self, dilation, padding):
+        class Conv1dTestModuleSamePadding(torch.nn.Module):
+            def __init__(self, dilation, padding):
+                super().__init__()
+                self.dilation = dilation
+                self.padding = padding
+
+            def forward(self, input, weight):
+                x = torch.nn.functional.conv1d(input, weight, dilation=self.dilation, padding=self.padding)
+                return x
+        test_module = Conv1dTestModuleSamePadding(dilation, padding)
+        test_module(torch.rand(1, 5, 30), torch.rand(6, 5, 7))
+        test_module.eval()
+        scripted_module = torch.jit.script(test_module)
+        opt_module = optimize_for_mobile(scripted_module)
+        input = (torch.rand(1, 5, 30), torch.rand(6, 5, 7))
+        FileCheck().check_not("Tensor = aten::conv1d") \
+                   .check_count("prepacked::conv2d_clamp_run", 1, exactly=True) \
+                   .run(opt_module.graph)
+        torch.testing.assert_close(scripted_module(*input), opt_module(*input), rtol=1e-2, atol=1e-3)
+
+instantiate_parametrized_tests(TestOptimizer)
 
 if __name__ == '__main__':
     run_tests()
