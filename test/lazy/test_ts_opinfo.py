@@ -54,13 +54,7 @@ def init_lists():
     SKIP_RUNTIME_ERROR_LIST = {
         "index_select",  # Empty output_sizes is not supported
         "clone",  # is clone decomposed?
-        # General ASAN Failure due to related to generating bool values.
-        # https://github.com/pytorch/pytorch/issues/74519
-        # https://github.com/pytorch/pytorch/issues/63034
-        "nonzero",  # ASAN failure (paste: P501906539)
-        "all",  # ASAN failure
-        "any",  # ASAN failure
-        "logdet",  # ASAN failure
+        "all"
     }
     SKIP_INCORRECT_RESULTS_LIST = {
         "squeeze",  # Value out of range
