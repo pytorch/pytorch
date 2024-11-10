@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/macros/Macros.h>
 #include <c10/util/ConstexprCrc.h>
 #include <c10/util/IdWrapper.h>
 #include <c10/util/string_view.h>
@@ -92,7 +93,7 @@ inline constexpr uint64_t type_index_impl() {
 } // namespace detail
 
 template <typename T>
-inline constexpr type_index get_type_index() {
+C10_HOST inline constexpr type_index get_type_index() {
 #if defined(__CUDA_ARCH__)
   static_assert(false && sizeof(T), " Don't call me from device code");
 #endif
