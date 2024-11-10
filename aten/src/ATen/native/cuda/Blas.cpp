@@ -179,8 +179,8 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 }
 
 static bool getDisableAddmmCudaLt() {
-    static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
-    if (env_value != nullptr && strcmp(env_value, "1") == 0) {
+    static const auto env_value = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
+    if (env_value == "1") {
       return true;
     }
     return false;
