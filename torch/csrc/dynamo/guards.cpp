@@ -1597,6 +1597,9 @@ class GuardAccessor {
       py::function clone_filter_fn) {
     GuardManager* cloned_mgr = clone_guard_manager(
         get_guard_manager().get(), cloned_root, clone_filter_fn);
+    if (cloned_mgr == nullptr) {
+      return nullptr;
+    }
     DerivedGuardAccessor* cloned_accessor =
         new DerivedGuardAccessor(cloned_mgr);
     static_cast<DerivedGuardAccessor*>(this)->clone_fields(cloned_accessor);
@@ -1716,15 +1719,21 @@ class GuardManager {
     }
 
     for (const auto& accessor : _accessors) {
-      cloned_mgr->_accessors.emplace_back(std::unique_ptr<GuardAccessor>(
-          accessor->clone(cloned_root, clone_filter_fn)));
+      GuardAccessor* cloned_accessor =
+          accessor->clone(cloned_root, clone_filter_fn);
+      if (cloned_accessor != nullptr) {
+        cloned_mgr->_accessors.emplace_back(
+            std::unique_ptr<GuardAccessor>(cloned_accessor));
+      }
     }
   }
 
   virtual GuardManager* clone(
       RootGuardManager* cloned_root,
       py::function clone_filter_fn) {
-    // Use clone_filter_fn
+    if (!py::cast<bool>(clone_filter_fn(this))) {
+      return nullptr;
+    }
     GuardManager* cloned_mgr = new GuardManager(cloned_root, _source, _is_dict);
     clone_common(cloned_root, cloned_mgr, clone_filter_fn);
     return cloned_mgr;
@@ -2141,6 +2150,9 @@ class RootGuardManager : public GuardManager {
 
   RootGuardManager* clone(py::function clone_filter_fn) {
     // Use clone_filter_fn
+    if (!py::cast<bool>(clone_filter_fn(this))) {
+      return nullptr;
+    }
     RootGuardManager* cloned_root = new RootGuardManager();
     clone_common(cloned_root, cloned_root, clone_filter_fn);
     for (const auto& guard : _epilogue_lambda_guards) {
@@ -2456,7 +2468,9 @@ class DictGuardManager : public GuardManager {
   GuardManager* clone_dict_guard_manager(
       RootGuardManager* cloned_root,
       py::function clone_filter_fn) {
-    // Use clone_filter_fn
+    if (!py::cast<bool>(clone_filter_fn(this))) {
+      return nullptr;
+    }
     T* cloned_mgr = new T(
         cloned_root,
         get_source(),

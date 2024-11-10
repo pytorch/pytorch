@@ -128,7 +128,7 @@ from .utils import (
 )
 
 
-guard_manager_testing_hook_fn : Optional[Callable[[Any, Any], Any]] = None
+guard_manager_testing_hook_fn: Optional[Callable[[Any, Any], Any]] = None
 
 try:
     import numpy as np
@@ -259,8 +259,9 @@ class GuardManagerWrapper:
             body.writeline("TREE_GUARD_MANAGER:", skip_prefix=True)
             body.writeline("RootGuardManager")
             self.construct_manager_string(self.root, body)
-            for guard in self.root.get_epilogue_lambda_guards():
-                body.writelines(self.get_guard_lines(guard))
+            if hasattr(self.root, "get_epilogue_lambda_guards"):
+                for guard in self.root.get_epilogue_lambda_guards():
+                    body.writelines(self.get_guard_lines(guard))
             return body.getvalue()
 
     def check(self, x):
