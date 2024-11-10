@@ -177,6 +177,18 @@ class FakeProcessGroup : public Backend {
     return c10::make_intrusive<FakeWork>();
   }
 
+  void startCoalescing() override {
+  // No-op
+  }
+
+  c10::intrusive_ptr<Work> endCoalescing(OpType /* optype */) {
+    return c10::make_intrusive<FakeWork>();
+  }
+
+  c10::intrusive_ptr<Work> endCoalescing() override {
+    return c10::make_intrusive<FakeWork>();
+  }
+
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& /* opts */ = BarrierOptions()) override {
     return c10::make_intrusive<FakeWork>();

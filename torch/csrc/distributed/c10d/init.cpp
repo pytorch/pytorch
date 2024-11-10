@@ -3402,6 +3402,17 @@ such as `dist.all_reduce(tensor, async_op=True)`.
               }),
               py::arg("rank"),
               py::arg("world_size"));
+  auto fakeWork =
+	  intrusive_ptr_no_gil_destructor_class_<::c10d::FakeWork>(
+		  module, "FakeWork")
+		  .def(py::init<>())
+		  .def(
+			  "wait",
+			  &::c10d::FakeWork::wait,
+			  py::arg("timeout"))
+		  .def(
+			  "getFuture",
+			  &::c10d::FakeWork::getFuture);
 
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
