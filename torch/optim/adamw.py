@@ -635,10 +635,10 @@ def _multi_tensor_adamw(
             torch._foreach_addcdiv_(device_params, device_exp_avgs, exp_avg_sq_sqrt)
         else:
             bias_correction1 = [
-                1 - beta1 ** _get_value(step) for step in device_state_steps
+                1 - _get_value(beta1) ** _get_value(step) for step in device_state_steps
             ]
             bias_correction2 = [
-                1 - beta2 ** _get_value(step) for step in device_state_steps
+                1 - _get_value(beta2) ** _get_value(step) for step in device_state_steps
             ]
 
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])

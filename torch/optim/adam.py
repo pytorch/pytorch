@@ -511,7 +511,11 @@ def _multi_tensor_adam(
 
     # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
     # treating it as a scalar.
-    beta1_dict: Optional[DeviceDict] = {} if isinstance(beta1, Tensor) else None
+    beta1_dict: Optional[DeviceDict] = (  # type: ignore[attr-defined]
+        {beta1.device: beta1}
+        if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
+        else None
+    )
 
     for (
         device_params_,
@@ -641,10 +645,10 @@ def _multi_tensor_adam(
             torch._foreach_addcdiv_(device_params, device_exp_avgs, exp_avg_sq_sqrt)
         else:
             bias_correction1 = [
-                1 - beta1 ** _get_value(step) for step in device_state_steps
+                1 - _get_value(beta1) ** _get_value(step) for step in device_state_steps
             ]
             bias_correction2 = [
-                1 - beta2 ** _get_value(step) for step in device_state_steps
+                1 - _get_value(beta2) ** _get_value(step) for step in device_state_steps
             ]
 
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
