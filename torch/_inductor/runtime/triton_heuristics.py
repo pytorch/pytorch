@@ -1809,29 +1809,42 @@ def template(num_stages, num_warps, triton_meta, filename=None, inductor_meta=No
     )
 
 
+def _pop_config_kwargs(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract triton.Config options that should become kwargs"""
+    popped = {}
+    for key in ("num_warps", "num_stages", "num_ctas", "maxnreg"):
+        val = config.pop(key, None)
+        if val is not None:
+            popped[key] = val
+    return popped
+
+
+def fixed_config(config, filename, triton_meta, inductor_meta):
+    """
+    Used when the configuration is already decided at compile time
+    """
+    config = {**config}
+    return cached_autotune(
+        None,
+        [triton.Config(config, **_pop_config_kwargs(config))],
+        triton_meta=triton_meta,
+        inductor_meta=inductor_meta,
+        heuristic_type=HeuristicType.FIXED,
+        filename=filename,
+    )
+
+
 def user_autotune(
     configs, triton_meta, filename=None, inductor_meta=None, custom_kernel=False
 ):
     """
     Compile a user defined triton kernel
     """
-    defaults = inspect.signature(triton.Config).parameters
-    default_num_stages = defaults["num_stages"].default
-    default_num_warps = defaults["num_warps"].default
-
     if len(configs) == 0:
-        configs = [
-            triton.Config(
-                {}, num_stages=default_num_stages, num_warps=default_num_warps
-            )
-        ]
+        configs = [triton.Config({})]
     else:
         configs = [
-            triton.Config(
-                c.get("kwargs", {}),
-                num_stages=c.get("num_stages", default_num_stages),
-                num_warps=c.get("num_warps", default_num_warps),
-            )
+            triton.Config(c.get("kwargs", {}), **_pop_config_kwargs({**c}))
             for c in configs
         ]
     return cached_autotune(
