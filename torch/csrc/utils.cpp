@@ -105,7 +105,7 @@ void THPUtils_setError(const char* format, ...) {
 
 void THPUtils_addPyMethodDefs(
     std::vector<PyMethodDef>& vector,
-    PyMethodDef* methods) {
+    const PyMethodDef* methods) {
   if (!vector.empty()) {
     // remove nullptr terminator
     vector.pop_back();
