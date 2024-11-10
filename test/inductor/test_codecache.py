@@ -177,11 +177,13 @@ class TestFxGraphCache(TestCase):
                 )
 
             # A second call should hit. (First reset so in-memory guards
-            # don't prevent compilation).
+            # don't prevent compilation). Remove on-disk artifacts to simulate
+            # case where the module source does not exist on disk (as can be
+            # the case with remote caching).
+            PyCodeCache.cache_clear(purge=True)
             self.reset()
 
-            # Clean PyCodeCache and triton kernels
-            PyCodeCache.cache_clear(purge=True)
+            # Clean triton kernels
             shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
             a1 = a_orig.clone().requires_grad_(grad)
@@ -1312,6 +1314,22 @@ class TestUtils(TestCase):
 
         self.assertEqual(res1, res2)
         self.assertNotEqual(cache_dir1, cache_dir2)
+
+    @requires_cuda
+    @config.patch(
+        {
+            "coordinate_descent_tuning": True,
+            "force_disable_caches": True,
+        }
+    )
+    def test_force_disable_coordinate_descent(self):
+        def fn():
+            inp = torch.randn(32, 50, 768, device="cuda")
+            weight = torch.randn(768, 768, device="cuda")
+            layer = torch.nn.LayerNorm(768, device="cuda")
+            return layer(inp @ weight)
+
+        torch.compile(fn)()
 
 
 if __name__ == "__main__":
