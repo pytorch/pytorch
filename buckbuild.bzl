@@ -2040,7 +2040,7 @@ def define_buck_targets(
                 ("", "torch/csrc/utils/*.h"),
                 ("", "aten/src/ATen/quantized/*.h"),
             ] + ([
-                ("third_party/miniz-2.1.0", "*.h"),
+                ("third_party/miniz-3.0.2", "*.h"),
             ] if NOT_OSS else []),
             exclude = [
                 "torch/csrc/jit/serialization/mobile_bytecode_generated.h",
