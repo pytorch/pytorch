@@ -25,7 +25,7 @@
 #include <cuda_fp8.h>
 #endif
 
-#include "tile_op_test.h"
+#include "permute_last2dim.h"
 
 namespace at::native {
 
@@ -191,34 +191,19 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
       gpu_kernel_nocast(iter, [] GPU_LAMBDA(scalar_t x) { return x; });
     });
   } else if (is_permute_021) {
-    //printf("[%ld, %ld, %ld],\n", in_sizes[0], in_sizes[1], in_sizes[2]);
-
-    /*
-    printf("input dim:%d\n", in_sizes.size());
-    for (int i = 0; i < in_sizes.size(); i++) {
-      printf("in_size[%d]:%ld\n", i, in_sizes[i]);
-    }
-    for (int i = 0; i < in_strides.size(); i++) {
-      printf("in_strides[%d]:%ld\n", i, in_strides[i]);
-    }
-
-    printf("output dim:%d\n", out_sizes.size());
-    for (int i = 0; i < out_sizes.size(); i++) {
-      printf("out_size[%d]:%ld\n", i, out_sizes[i]);
-    }
-    for (int i = 0; i < out_strides.size(); i++) {
-      printf("out_strides[%d]:%ld\n", i, out_strides[i]);
-    }
-    */
-
-    // TODO: support transpose
-
     void* dst = iter.data_ptr(0);
     void* src = iter.data_ptr(1);
-    // printf("input address:0x%x\n", src);
-    // printf("output address:0x%x\n", dst);
 
-    RunTests(input.size(0), input.size(1), input.size(2), src, dst);
+    int M = input.size(0);
+    int N = input.size(1);
+    int K = input.size(2);
+
+    auto stream = at::cuda::getCurrentHIPStream();
+    int big_tile_wg = M * ((N + BIG_TILE_SIZE - 1) / BIG_TILE_SIZE) * ((K + BIG_TILE_SIZE - 1) / BIG_TILE_SIZE);
+    const dim3 grid_dim(big_tile_wg, 1, 1);
+    const dim3 block_dim(256, 1, 1);
+
+    transpose_tile_big_kernel<EL_TYPE, 256><<<grid_dim, block_dim, 0, stream>>>(src, dst, N, K);
   } else {
     AT_DISPATCH_V2(
         dtype, "copy_", AT_WRAP([&] {
