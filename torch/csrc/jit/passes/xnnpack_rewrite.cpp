@@ -118,6 +118,13 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   // Replace _convolution with conv2d
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
+  auto filter_padding =
+      [](const Match& match,
+         const std::unordered_map<std::string, Value*>& vmap) {
+        auto* node = match.nodes_map.at(vmap.at("res")->node());
+        return node->schema().overload_name() != "padding";
+      };
+
   std::string conv_2d_pattern = R"(
     graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
         %res = aten::conv2d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
@@ -140,7 +147,7 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   SubgraphRewriter rewriter;
   rewriter.RegisterRewritePattern(
       conv_2d_pattern, prepacked_ops_conv2d_pattern, value_mappings);
-  rewriter.runOnGraph(graph);
+  rewriter.runOnGraph(graph, filter_padding);
 
   std::string conv_2d_transpose_pattern = R"(
       graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[],
@@ -165,7 +172,7 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
       conv_2d_transpose_pattern,
       prepacked_ops_conv2d_transpose_pattern,
       value_mappings);
-  transpose_rewriter.runOnGraph(graph);
+  transpose_rewriter.runOnGraph(graph, filter_padding);
 }
 
 void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {

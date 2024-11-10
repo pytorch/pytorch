@@ -614,6 +614,23 @@ class TestOptimizer(TestCase):
                 ["pqr"],
             )
 
+    @skipIfNoXNNPACK
+    def test_conv2d_with_same_padding(self):
+        class Conv2dTestModuleSamePadding(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, input, weight):
+                x = torch.nn.functional.conv2d(input, weight, padding='same')
+                return x
+        test_module = Conv2dTestModuleSamePadding()
+        test_module(torch.rand(1, 5, 30, 30), torch.rand(6, 5, 7, 7))
+        test_module.eval()
+        scripted_module = torch.jit.script(test_module, (torch.rand(1, 6, 30), torch.rand(6, 5, 7, 7)))
+        opt_module = optimize_for_mobile(scripted_module)
+        input = (torch.rand(1, 5, 30, 30), torch.rand(6, 5, 7, 7))
+        torch.testing.assert_close(scripted_module(*input), opt_module(*input), rtol=1e-2, atol=1e-3)
+
 
 if __name__ == '__main__':
     run_tests()
