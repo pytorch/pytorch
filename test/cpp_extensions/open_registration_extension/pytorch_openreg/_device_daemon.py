@@ -1,4 +1,6 @@
+import ctypes
 import logging
+import time
 
 import torch
 
@@ -95,6 +97,7 @@ class Driver:
         # Allocated memory belongs to which device
         self.memory_belong = {}
         self.host_allocator = Allocator()
+        self.event_belong = {}
 
         # Constant properties of our device
         self.num_devices = 2
@@ -207,12 +210,53 @@ class Driver:
     def synchronizeStream(self, stream):
         self.run_on_executor(stream.device_index, "synchronizeStream", stream.stream_id)
 
+    @register(registry)
+    def record(self, event, stream, device_index, flags):
+        event_ptr = ctypes.cast(event, ctypes.POINTER(ctypes.c_int64))
+        # Create event if needed
+        if event_ptr.contents.value == 0:
+            event_ptr.contents.value = self.run_on_executor(
+                stream.device_index, "eventCreateWithFlags", flags
+            )
+            self.event_belong[event_ptr.contents.value] = stream.device_index
+
+        # Record event
+        self.run_on_executor(
+            stream.device_index,
+            "eventRecord",
+            event_ptr.contents.value,
+            stream.stream_id,
+        )
+
+    @register(registry)
+    def destroyEvent(self, event, device_index):
+        self.run_on_executor(device_index, "eventDestroy", event)
+        self.event_belong.pop(event)
+
+    @register(registry)
+    def synchronizeEvent(self, event):
+        self.run_on_executor(self.event_belong[event], "eventSynchronize", event)
+
+    @register(registry)
+    def queryEvent(self, event):
+        return self.run_on_executor(self.event_belong[event], "eventQuery", event)
+
+    @register(registry)
+    def elapsedTime(self, e1, e2, device_index):
+        return self.run_on_executor(device_index, "eventElapsedTime", e1, e2)
+
+    @register(registry)
+    def block(self, event, stream):
+        self.run_on_executor(stream.device_index, "block", event, stream.stream_id)
+
 
 class _Executor:
     def __init__(self, id):
         self.id = id
         self.allocator = Allocator()
         self.stream = 0
+        self.event_incr_id = 0
+        self.events = {}
 
     def run_forever(self, req_queue, ans_queue):
         # Serve all requests
@@ -273,6 +317,45 @@ class _Executor:
 
     @register(registry)
     def synchronizeStream(self, stream):
+        # no-op
+        pass
+
+    @register(registry)
+    def eventCreateWithFlags(self, flags):
+        self.event_incr_id += 1
+        self.events[self.event_incr_id] = [flags, None]
+        return self.event_incr_id
+
+    @register(registry)
+    def eventRecord(self, event, stream):
+        # Only flags == 1 enables timing
+        if self.events[event][0] == 1:
+            self.events[event][1] = time.time() * 1000
+        return 0
+
+    @register(registry)
+    def eventDestroy(self, event):
+        self.events.pop(event)
+
+    @register(registry)
+    def eventSynchronize(self, event):
+        assert self.events.get(event) is not None
+        return 0
+
+    @register(registry)
+    def eventQuery(self, event):
+        assert self.events.get(event) is not None
+        return True
+
+    @register(registry)
+    def eventElapsedTime(self, e1, e2):
+        time_1 = self.events[e1][1]
+        time_2 = self.events[e2][1]
+        assert time_1 is not None and time_2 is not None
+        return time_2 - time_1
+
+    @register(registry)
+    def block(self, event, stream):
         # no-op
         pass
 
