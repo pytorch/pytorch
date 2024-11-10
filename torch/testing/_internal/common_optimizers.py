@@ -532,6 +532,16 @@ def optim_inputs_func_adam(device, dtype=None):
             },
             desc="Tensor lr, Tensor betas, with capturable and amsgrad",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={
+                "lr": torch.tensor(0.001),
+                "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                "amsgrad": False,
+                "capturable": True,
+            },
+            desc="Tensor lr, Tensor betas, with capturable",
+        ),
     ]
     mps_supported_configs = [
         OptimizerInput(
@@ -555,6 +565,26 @@ def optim_inputs_func_adam(device, dtype=None):
                 params=None,
                 kwargs={"weight_decay": 0.1, "amsgrad": True},
                 desc="amsgrad",
+            ),
+            OptimizerInput(
+                params=None,
+                kwargs={
+                    "lr": torch.tensor(0.001),
+                    "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                    "amsgrad": True,
+                    "capturable": False,
+                },
+                desc="Tensor lr, Tensor betas, with amsgrad",
+            ),
+            OptimizerInput(
+                params=None,
+                kwargs={
+                    "lr": torch.tensor(0.001),
+                    "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                    "amsgrad": False,
+                    "capturable": False,
+                },
+                desc="Tensor lr, Tensor betas",
             ),
         ]
         + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
