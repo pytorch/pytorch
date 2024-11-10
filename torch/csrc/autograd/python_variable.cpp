@@ -254,7 +254,7 @@ void activateGPUTrace() {
   c10::impl::GPUTrace::set_trace(getPyInterpreter());
 }
 
-PyObject* THPVariable_Wrap_impl(at::TensorBase&& var) {
+PyObject* THPVariable_Wrap(at::TensorBase&& var) {
   if (!var.defined()) {
     Py_RETURN_NONE;
   }
@@ -320,11 +320,7 @@ PyObject* THPVariable_Wrap_impl(at::TensorBase&& var) {
 }
 
 PyObject* THPVariable_Wrap(const at::TensorBase& var) {
-  return THPVariable_Wrap_impl(at::Tensor(var));
-}
-
-PyObject* THPVariable_Wrap(at::TensorBase&& var) {
-  return THPVariable_Wrap_impl(std::move(var));
+  return static_cast<PyObject* (*)(at::TensorBase&&)>(THPVariable_Wrap)(at::Tensor(var));
 }
 
 bool isResurrectable(THPVariable* self) {
