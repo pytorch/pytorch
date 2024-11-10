@@ -61,7 +61,7 @@ std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
     }
   }
   return stack;
-};
+}
 
 bool MTensorNodeArgValid(Value* value) {
   auto tensor_type = value->type()->cast<TensorType>();
@@ -320,7 +320,7 @@ struct DtypePropagationPass {
   }
   std::unique_ptr<OperatorMap<DtypePropRule>> dtype_prop_registry_;
   std::shared_ptr<Graph> graph_;
-};
+}
 
 } // anonymous namespace
 
