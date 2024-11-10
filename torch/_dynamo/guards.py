@@ -128,6 +128,8 @@ from .utils import (
 )
 
 
+guard_manager_testing_hook_fn : Optional[Callable[[Any, Any], Any]] = None
+
 try:
     import numpy as np
 except ModuleNotFoundError:
@@ -155,8 +157,11 @@ class GuardManagerWrapper:
     the check_nopybind from C++.
     """
 
-    def __init__(self):
-        self.root = RootGuardManager()
+    def __init__(self, root=None):
+        if root is None:
+            self.root = RootGuardManager()
+        else:
+            self.root = root
 
         self.closure_vars = None
         self.args = None
@@ -2217,6 +2222,11 @@ class CheckFunctionManager:
                     CompileContext.current_compile_id(),
                 )
                 raise AssertionError(f"Guard check failed: {reasons}")
+
+            if guard_manager_testing_hook_fn is not None:
+                guard_manager_testing_hook_fn(
+                    self.guard_manager, output_graph.local_scope
+                )
 
             if guards_log.isEnabledFor(logging.DEBUG):
                 latency = profile_guard_manager(
