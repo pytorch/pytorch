@@ -548,7 +548,7 @@ struct TraceKeyCacheState {
 // `PyEval_SetProfile`.
 struct ThreadLocalResults;
 struct TraceContext {
-  PyObject_HEAD;
+  PyObject_HEAD
   ThreadLocalResults* thread_local_results_;
 };
 
