@@ -352,8 +352,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     # rrelu not supported on XPU now
     "nn.functional.rrelu": {f16, f32, f64},
     # not implemented for 'Half'
-    "nn.functional.multilabel_margin_loss": {f16},
-    "nn.functional.multi_margin_loss": {f16},
     "sort": {b8},
     "argsort": {b8},
 }
