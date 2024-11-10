@@ -69,6 +69,18 @@ class Adam(Optimizer):
             or (isinstance(betas[0], Tensor) and isinstance(betas[1], Tensor))
         ):
             raise ValueError("betas must be either both floats or both Tensors")
+        if isinstance(betas[0], Tensor) and not capturable and foreach:
+            raise ValueError(
+                "betas[0] as a Tensor is not supported for capturable=False and foreach=True"
+            )
+            if betas[0].numel() != 1:
+                raise ValueError("Tensor betas[0] must be 1-element")
+        if isinstance(betas[1], Tensor) and not capturable and foreach:
+            raise ValueError(
+                "betas[1] as a Tensor is not supported for capturable=False and foreach=True"
+            )
+            if betas[1].numel() != 1:
+                raise ValueError("Tensor betas[1] must be 1-element")
 
         defaults = dict(
             lr=lr,
@@ -495,6 +507,20 @@ def _multi_tensor_adam(
             "lr as a Tensor is not supported for capturable=False and foreach=True"
         )
 
+    if isinstance(beta1, Tensor) and not capturable:
+        raise ValueError(
+            "beta1 as a Tensor is not supported for capturable=False and foreach=True"
+        )
+        if beta1.numel() != 1:
+            raise ValueError("Tensor beta1 must be 1-element")
+
+    if isinstance(beta2, Tensor) and not capturable:
+        raise ValueError(
+            "beta2 as a Tensor is not supported for capturable=False and foreach=True"
+        )
+        if beta2.numel() != 1:
+            raise ValueError("Tensor beta2 must be 1-element")
+
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
@@ -650,10 +676,10 @@ def _multi_tensor_adam(
             torch._foreach_addcdiv_(device_params, device_exp_avgs, exp_avg_sq_sqrt)
         else:
             bias_correction1 = [
-                1 - _get_value(beta1) ** _get_value(step) for step in device_state_steps
+                1 - beta1 ** _get_value(step) for step in device_state_steps
             ]
             bias_correction2 = [
-                1 - _get_value(beta2) ** _get_value(step) for step in device_state_steps
+                1 - beta2 ** _get_value(step) for step in device_state_steps
             ]
 
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
