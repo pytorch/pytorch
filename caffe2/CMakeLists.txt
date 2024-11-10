@@ -685,7 +685,8 @@ list(APPEND Caffe2_CPU_SRCS ${TORCH_SRCS})
 if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
   if(CAN_COMPILE_METAL)
-      list(APPEND Caffe2_CPU_SRCS aten/src/ATen/metallib_dummy.cpp)
+      file(TOUCH ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
+      list(APPEND Caffe2_CPU_SRCS ${CMAKE_BINARY_DIR}/aten/src/ATen/metallib_dummy.cpp)
   endif()
 endif()
 
@@ -1034,6 +1035,9 @@ if(USE_XPU)
   add_library(torch_xpu ${Caffe2_XPU_SRCS})
   torch_compile_options(torch_xpu)  # see cmake/public/utils.cmake
   target_compile_definitions(torch_xpu PRIVATE USE_XPU)
+  if(WIN32)
+    target_compile_options(torch_xpu PRIVATE /permissive-)
+  endif()
 
   # ATen XPU implementation
   set(TORCH_XPU_OPS_DIR ${TORCH_ROOT}/third_party/torch-xpu-ops)
@@ -1084,12 +1088,12 @@ if(USE_XPU)
     target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
     if(MSVC)
       # Windows
-      target_link_libraries(torch_xpu PRIVATE
-      "-WHOLEARCHIVE:\"$<TARGET_FILE:torch_xpu_ops>\"")
+      target_link_options(torch_xpu PRIVATE
+      "-WHOLEARCHIVE:$<TARGET_FILE:torch_xpu_ops>")
     else()
       # Linux
-      target_link_libraries(torch_xpu PRIVATE
-        "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
+      target_link_options(torch_xpu PRIVATE
+          "-Wl,--whole-archive,$<TARGET_FILE:torch_xpu_ops>,--no-whole-archive")
     endif()
 
     # Set cached ${ATen_XPU_INCLUDE_DIRS} to torch

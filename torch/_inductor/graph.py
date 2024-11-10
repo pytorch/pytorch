@@ -97,7 +97,6 @@ from .runtime import autotune_cache
 from .runtime.autotune_cache import AutotuneCacheBundler
 from .scheduler import BaseSchedulerNode
 from .sizevars import SizeVarAllocator
-from .triton_bundler import TritonBundler
 from .utils import (
     convert_shape_to_inductor,
     gather_origins,
@@ -132,7 +131,7 @@ else:
         pass
 
 
-def supported_dtype_of_cpp_wrapper(dtype: torch.device, device_type: str) -> bool:
+def supported_dtype_of_cpp_wrapper(dtype: torch.dtype, device_type: str) -> bool:
     supported_dtype = {
         torch.float32,
         torch.float64,
@@ -1746,7 +1745,7 @@ class GraphLowering(torch.fx.Interpreter):
             ):
                 dtype = may_get_constant_buffer_dtype(value)
 
-            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):
+            if not supported_dtype_of_cpp_wrapper(dtype, self.device_type):  # type: ignore[arg-type]
                 raise CppWrapperCodegenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(
@@ -1966,7 +1965,6 @@ class GraphLowering(torch.fx.Interpreter):
 
         inductor_meta = autotune_cache.inductor_meta_from_config()
         AutotuneCacheBundler.begin_compile(inductor_meta, code=code)
-        TritonBundler.begin_compile()
 
         try:
             linemap = [(line_no, node.stack_trace) for line_no, node in linemap]  # type: ignore[misc]
@@ -1984,13 +1982,15 @@ class GraphLowering(torch.fx.Interpreter):
                 lambda: {"filename": path},
                 payload_fn=lambda: code,
             )
-
-        mod = PyCodeCache.load_by_key_path(
-            key,
-            path,
-            linemap=linemap,  # type: ignore[arg-type]
-            attrs={**self.constants, **self.torchbind_constants},
-        )
+        with dynamo_timed(
+            "PyCodeCache.load_by_key_path", log_pt2_compile_event=True, fwd_only=False
+        ):
+            mod = PyCodeCache.load_by_key_path(
+                key,
+                path,
+                linemap=linemap,  # type: ignore[arg-type]
+                attrs={**self.constants, **self.torchbind_constants},
+            )
         self.cache_key = key
         self.cache_path = path
         self.cache_linemap = linemap  # type: ignore[assignment]
