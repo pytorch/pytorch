@@ -54,7 +54,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         self.comment = "//"
         self.namespace = "at::"
         self.none_str = "nullptr"
-        self.extern_call_ops = set()
         self.size = "sizes()"
         self.stride = "strides()"
         self.supports_intermediate_hooks = False
@@ -121,6 +120,70 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 continue
             numel = buf.get_numel()
             self.prefix.writeline(f"assert_numel({name}, {numel});")
+
+    def generate_kernel_call(
+        self,
+        kernel_name: str,
+        call_args,
+        grid=None,
+        device_index=None,
+        gpu=False,
+        triton=False,
+        arg_types=None,
+        raw_args=None,
+        grid_fn: str = "grid",
+        triton_meta=None,
+        autotune_configs=None,
+        grid_extra_kwargs="",
+    ):
+        """
+        Generates kernel call code.
+
+        gpu: Defines whether the backend is GPU. Otherwise the backend is CPU.
+
+        triton: Defines whether the GPU backend uses Triton for codegen.
+                Otherwise it uses the CUDA language for codegen.
+                Only valid when cuda == True.
+        """
+        if gpu:
+            return super().generate_kernel_call(
+                kernel_name,
+                call_args,
+                grid,
+                device_index,
+                gpu,
+                triton,
+                arg_types,
+                raw_args,
+                grid_fn,
+                triton_meta,
+                autotune_configs,
+                grid_extra_kwargs,
+            )
+        else:
+            assert arg_types is not None and len(call_args) == len(
+                arg_types
+            ), "Mismatch call_args and arg_types in generate_kernel_call"
+            new_args = []
+            for idx, arg in enumerate(call_args):
+                if "*" in arg_types[idx]:
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"auto* {var_name} = get_data_ptr_wrapper({arg});")
+                    new_args.append(f"({arg_types[idx]})({var_name})")
+                else:
+                    # arg is a scalar
+                    new_args.append(arg)
+            # debug printer related logic for cpp kernel type.
+            debug_printer_manager = V.graph.wrapper_code.debug_printer
+            debug_printer_manager.set_printer_args(
+                call_args,
+                kernel_name,
+                None,
+                None,
+                "cpp",
+            )
+            with debug_printer_manager:
+                self.writeline(self.wrap_kernel_call(kernel_name, new_args))
 
     def write_wrapper_decl(self):
         inputs_len = len(V.graph.graph_inputs.keys())
@@ -708,9 +771,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         python_kernel_name: str,
         cpp_kernel_name: str,
         codegen_args: List[str],
-        cpp_op_schema: str,
-        cpp_kernel_key: str,
-        cpp_kernel_overload_name: str = "",
         op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
@@ -744,7 +804,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             assert outputs is not None
 
             return self.generate_extern_kernel_alloc_and_find_schema_if_needed_with_proxy_executor(
-                cpp_kernel_key,
                 op_overload,
                 raw_args,
                 output_args,
@@ -756,9 +815,6 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
                 python_kernel_name,
                 cpp_kernel_name,
                 codegen_args,
-                cpp_op_schema,
-                cpp_kernel_key,
-                cpp_kernel_overload_name,
                 op_overload,
                 raw_args,
                 output_args,
