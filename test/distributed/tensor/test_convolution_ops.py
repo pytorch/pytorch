@@ -159,21 +159,20 @@ class DistConvolutionOpsTest(DTensorTestBase):
         bias_mse_abs = torch.mean(bias_diff_abs * bias_diff_abs).item()
         weight_mse_rel = torch.mean(weight_diff_rel * weight_diff_rel).item()
         bias_mse_rel = torch.mean(bias_diff_rel * bias_diff_rel).item()
-        abs_value = 1e-4 if TEST_HPU else 1e-6
         self.assertTrue(
-            weight_mse_abs <= (abs_value),
+            weight_mse_abs <= (1e-6),
             f"Too large absolute mse for weight tensor, expected less equal 1e-6, got {weight_mse_abs}",
         )
         self.assertTrue(
-            bias_mse_abs <= (abs_value),
+            bias_mse_abs <= (1e-6),
             f"Too large absolute mse for bias tensor, expected less equal 1e-6, got {bias_mse_abs}",
         )
         self.assertTrue(
-            weight_mse_rel <= (abs_value),
+            weight_mse_rel <= (1e-6),
             f"Too large relative mse for weight tensor, expected less equal 1e-6, got {weight_mse_rel}",
         )
         self.assertTrue(
-            bias_mse_rel <= (abs_value),
+            bias_mse_rel <= (1e-6),
             f"Too large relative mse for bias tensor, expected less equal 1e-6, got {bias_mse_rel}",
         )
 
