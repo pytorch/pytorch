@@ -36,7 +36,7 @@ class AdamW(Optimizer):
         self,
         params: ParamsT,
         lr: Union[float, Tensor] = 1e-3,
-        betas: Tuple[float, float] = (0.9, 0.999),
+        betas: Tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 1e-2,
         amsgrad: bool = False,
@@ -64,6 +64,12 @@ class AdamW(Optimizer):
             raise ValueError(f"Invalid beta parameter at index 1: {betas[1]}")
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
+        if not (
+            (isinstance(betas[0], float) and isinstance(betas[1], float))
+            or (isinstance(betas[0], Tensor) and isinstance(betas[1], Tensor))
+        ):
+            raise ValueError("betas must be either both floats or both Tensors")
+
         defaults = dict(
             lr=lr,
             betas=betas,

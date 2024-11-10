@@ -636,6 +636,24 @@ def optim_error_inputs_func_adam(device, dtype):
                 error_type=ValueError,
                 error_regex="lr as a Tensor is not supported for capturable=False and foreach=True",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(0.9, torch.tensor(0.99))),
+                    desc="betas must be either both floats or both Tensors",
+                ),
+                error_type=ValueError,
+                error_regex="betas must be either both floats or both Tensors",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, betas=(torch.tensor(0.9), 0.99)),
+                    desc="betas must be either both floats or both Tensors",
+                ),
+                error_type=ValueError,
+                error_regex="betas must be either both floats or both Tensors",
+            ),
         ]
     if _get_device_type(device) == "cuda":
         sample_tensor = torch.empty((), device=device, dtype=dtype)
