@@ -30,9 +30,10 @@ class Linear(nn.Linear, ReferenceQuantizedModule):
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
         weight_qparams: Optional[Dict[str, Any]] = None,
-    ):
+        bias_qparams: Optional[Dict[str, Any]] = None):
         super().__init__(in_features, out_features, bias_, device, dtype)
         self._init_weight_qparams(weight_qparams, device)
+        self._init_bias_qparams(bias_qparams, device)
 
     def _get_name(self):
         return "QuantizedLinear(Reference)"
@@ -53,7 +54,7 @@ class Linear(nn.Linear, ReferenceQuantizedModule):
         return result
 
     @classmethod
-    def from_float(cls, float_linear, weight_qparams):
+    def from_float(cls, float_linear, weight_qparams, bias_qparams = None):
         qref_linear = Linear(
             float_linear.in_features,
             float_linear.out_features,
@@ -61,6 +62,7 @@ class Linear(nn.Linear, ReferenceQuantizedModule):
             device=float_linear.weight.device,
             dtype=float_linear.weight.dtype,
             weight_qparams=weight_qparams,
+            bias_qparams=bias_qparams
         )
         qref_linear.weight = torch.nn.Parameter(float_linear.weight.detach())
         if float_linear.bias is not None:

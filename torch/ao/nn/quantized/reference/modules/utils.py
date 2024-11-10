@@ -10,6 +10,15 @@ __all__ = [
 
 
 class ReferenceQuantizedModule(torch.nn.Module):
+    def _init_bias_qparams(self, bias_qparams, device):
+        if bias_qparams is None:
+            bias_qparams = torch.tensor(1, dtype=torch.float, device=device)
+
+        b_scale_tensor = bias_qparams.clone().detach() \
+            if isinstance(bias_qparams, torch.Tensor) \
+            else torch.tesnor(bias_qparams, dtype=torch.float, device=device)
+        self.register_buffer("bias_scale", b_scale_tensor)
+
     def _init_weight_qparams(self, weight_qparams, device):
         if weight_qparams is None:
             weight_qparams = {
@@ -145,6 +154,9 @@ class ReferenceQuantizedModule(torch.nn.Module):
                 self.weight_zero_point,
                 self.weight_axis_int,
             )
+
+    def get_quantized_bias(self):
+        return torch.quantize_per_tensor(self.bias, self.bias_scale, torch.tensor(0, dtype=torch.int), torch.qint32)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super()._save_to_state_dict(destination, prefix, keep_vars)

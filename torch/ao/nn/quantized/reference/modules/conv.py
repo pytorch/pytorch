@@ -30,7 +30,7 @@ class _ConvNd(torch.nn.modules.conv._ConvNd, ReferenceQuantizedModule):
     _IS_REFERENCE = True
 
     @staticmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams, bias_qparams = None):
         qref_conv = cls(
             float_conv.in_channels,
             float_conv.out_channels,
@@ -110,8 +110,8 @@ class Conv1d(_ConvNd, nn.Conv1d):
         return "QuantizedConv1d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
-        return _ConvNd.from_float(cls, float_conv, weight_qparams)
+    def from_float(cls, float_conv, weight_qparams, bias_qparams = None):
+        return _ConvNd.from_float(cls, float_conv, weight_qparams, bias_qparams)
 
 
 class Conv2d(_ConvNd, nn.Conv2d):
@@ -129,6 +129,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         device=None,
         dtype=None,
         weight_qparams: Optional[Dict[str, Any]] = None,
+        bias_qparams: Optional[Dict[str, Any]] = None
     ):
         nn.Conv2d.__init__(
             self,
@@ -145,6 +146,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
             dtype,
         )
         self._init_weight_qparams(weight_qparams, device)
+        self._init_bias_qparams(bias_qparams, device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -173,8 +175,8 @@ class Conv2d(_ConvNd, nn.Conv2d):
         return "QuantizedConv2d(Reference)"
 
     @classmethod
-    def from_float(cls, float_conv, weight_qparams):
-        return _ConvNd.from_float(cls, float_conv, weight_qparams)
+    def from_float(cls, float_conv, weight_qparams, bias_qparams = None):
+        return _ConvNd.from_float(cls, float_conv, weight_qparams, bias_qparams)
 
 
 class Conv3d(_ConvNd, nn.Conv3d):
@@ -248,7 +250,7 @@ class _ConvTransposeNd(_ConvNd, torch.nn.modules.conv._ConvTransposeNd):
     """
 
     @staticmethod
-    def from_float(cls, float_conv, weight_qparams):
+    def from_float(cls, float_conv, weight_qparams, bias_qparams = None):
         qref_conv = cls(
             float_conv.in_channels,
             float_conv.out_channels,
@@ -263,7 +265,7 @@ class _ConvTransposeNd(_ConvNd, torch.nn.modules.conv._ConvTransposeNd):
             device=float_conv.weight.device,
             dtype=float_conv.weight.dtype,
             weight_qparams=weight_qparams,
-        )
+            bias_qparams=bias_qparams)
         qref_conv.weight = torch.nn.Parameter(float_conv.weight.detach())
         if float_conv.bias is not None:
             qref_conv.bias = torch.nn.Parameter(float_conv.bias.detach())
