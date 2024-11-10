@@ -225,6 +225,9 @@ exclude_patterns = [
     '**/generated/**',
     '**/*pb.h',
     '**/*inl.h',
+    'aten/src/ATen/cpu/FlushDenormal.cpp',
+    'aten/src/ATen/cpu/Utils.cpp',
+    'aten/src/ATen/cpu/vml.h',
     'aten/src/ATen/CPUFixedAllocator.h',
     'aten/src/ATen/Parallel*.h',
     'c10/xpu/**/*.h',
@@ -424,6 +427,7 @@ exclude_patterns = [
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     '.ci/docker/common/install_rocm_drm.sh',
     '.lintrunner.toml',
+    '.ci/magma/package_files/*.patch',
 ]
 command = [
     'python3',
