@@ -181,7 +181,7 @@ class TestFxGraphCache(TestCase):
             self.reset()
 
             # Clean PyCodeCache and triton kernels
-            PyCodeCache.cache_clear()
+            PyCodeCache.cache_clear(purge=True)
             shutil.rmtree(os.path.join(cache_dir(), "triton"), ignore_errors=True)
 
             a1 = a_orig.clone().requires_grad_(grad)
