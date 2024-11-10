@@ -1,8 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/Resize.h>
-#include <torch/library.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <torch/library.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 
 #include <ATen/Functions.h>
@@ -449,37 +449,64 @@ Tensor& tensordot_out(
   return result;
 }
 
-
 TORCH_LIBRARY_IMPL(aten, XPU, m) {
   m.impl("addmv.out", TORCH_FN(addmv_out));
   m.impl("tensordot.out", TORCH_FN(tensordot_out));
 }
 } // namespace xpu
 
-TORCH_IMPL_FUNC(addmm_out_xpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+TORCH_IMPL_FUNC(addmm_out_xpu)
+(const Tensor& self,
+ const Tensor& mat1,
+ const Tensor& mat2,
+ const Scalar& beta,
+ const Scalar& alpha,
+ const Tensor& result) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   xpu::addmm_out(self, mat1, mat2, beta, alpha, const_cast<Tensor&>(result));
 }
 
-TORCH_IMPL_FUNC(mm_out_xpu)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
+TORCH_IMPL_FUNC(mm_out_xpu)
+(const Tensor& self, const Tensor& mat2, const Tensor& result) {
   xpu::mm_out(self, mat2, const_cast<Tensor&>(result));
 }
 
-TORCH_IMPL_FUNC(bmm_out_xpu)(const Tensor& self, const Tensor& batch2, const Tensor &result) {
+TORCH_IMPL_FUNC(bmm_out_xpu)
+(const Tensor& self, const Tensor& batch2, const Tensor& result) {
   xpu::bmm_out(self, batch2, const_cast<Tensor&>(result));
 }
 
-TORCH_IMPL_FUNC(addmm_activation_out_xpu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor& result) {
+TORCH_IMPL_FUNC(addmm_activation_out_xpu)
+(const Tensor& self,
+ const Tensor& mat1,
+ const Tensor& mat2,
+ const Scalar& beta,
+ const Scalar& alpha,
+ bool use_gelu,
+ const Tensor& result) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  xpu::_addmm_activation_out(self, mat1, mat2, beta, alpha, use_gelu, const_cast<Tensor&>(result));
+  xpu::_addmm_activation_out(
+      self, mat1, mat2, beta, alpha, use_gelu, const_cast<Tensor&>(result));
 }
 
-TORCH_IMPL_FUNC(baddbmm_out_xpu)(const Tensor& self, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+TORCH_IMPL_FUNC(baddbmm_out_xpu)
+(const Tensor& self,
+ const Tensor& batch1,
+ const Tensor& batch2,
+ const Scalar& beta,
+ const Scalar& alpha,
+ const Tensor& result) {
   xpu::baddbmm_out(
       self, batch1, batch2, beta, alpha, const_cast<Tensor&>(result));
 }
 
-TORCH_IMPL_FUNC(addmv_out_xpu)(const Tensor &self, const Tensor &mat, const Tensor &vec, const Scalar& beta, const Scalar& alpha, const Tensor& result) {
+TORCH_IMPL_FUNC(addmv_out_xpu)
+(const Tensor& self,
+ const Tensor& mat,
+ const Tensor& vec,
+ const Scalar& beta,
+ const Scalar& alpha,
+ const Tensor& result) {
   xpu::addmv_out(self, mat, vec, beta, alpha, const_cast<Tensor&>(result));
 }
 
