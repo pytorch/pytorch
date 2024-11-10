@@ -320,7 +320,7 @@ struct DtypePropagationPass {
   }
   std::unique_ptr<OperatorMap<DtypePropRule>> dtype_prop_registry_;
   std::shared_ptr<Graph> graph_;
-}
+};
 
 } // anonymous namespace
 
