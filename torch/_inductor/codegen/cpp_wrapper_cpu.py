@@ -457,6 +457,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                         self.prefix.writeline(
                             f"auto {input_key} = std::move(inputs[{idx}]);"
                         )
+                # debug printing for all input args to AOTI model
+                debug_printer_manager = V.graph.wrapper_code.debug_printer
+                debug_printer_manager.codegen_model_inputs_value_print(
+                    input_args_to_print=[
+                        input_key
+                        for input_key in V.graph.graph_inputs.keys()
+                        if input_key.startswith("arg")
+                    ]
+                )
 
             assert all(
                 isinstance(v, torch.Tensor) for v in list(V.graph.constants.values())
