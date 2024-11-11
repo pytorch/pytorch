@@ -18,7 +18,7 @@ static int active_dynamo_threads = 0;
 
 static Py_tss_t eval_frame_callback_key = Py_tss_NEEDS_INIT;
 
-static PyObject* eval_frame_callback_get(void) {
+inline static PyObject* eval_frame_callback_get(void) {
   void* result = PyThread_tss_get(&eval_frame_callback_key);
   if (unlikely(result == NULL)) {
     return (PyObject*)Py_None;
@@ -27,7 +27,7 @@ static PyObject* eval_frame_callback_get(void) {
   }
 }
 
-static void eval_frame_callback_set(PyObject* obj) {
+inline static void eval_frame_callback_set(PyObject* obj) {
   PyThread_tss_set(&eval_frame_callback_key, obj);
 }
 
@@ -186,7 +186,7 @@ static PyObject* dynamo_custom_eval_frame_shim(THP_EVAL_API_FRAME_OBJECT* frame,
 }
 #endif
 
-static PyObject* dynamo_eval_frame_default(
+inline static PyObject* dynamo_eval_frame_default(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag) {
@@ -205,7 +205,7 @@ static PyObject* dynamo_eval_frame_default(
 #endif
 }
 
-static void enable_eval_frame_shim(PyThreadState* tstate) {
+inline static void enable_eval_frame_shim(PyThreadState* tstate) {
 #if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       &dynamo_custom_eval_frame_shim) {
@@ -222,7 +222,7 @@ static void enable_eval_frame_shim(PyThreadState* tstate) {
 #endif
 }
 
-static void enable_eval_frame_default(PyThreadState* tstate) {
+inline static void enable_eval_frame_default(PyThreadState* tstate) {
 #if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       previous_eval_frame) {
@@ -240,13 +240,13 @@ static void enable_eval_frame_default(PyThreadState* tstate) {
 }
 
 
-static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
+inline static const char* get_frame_name(THP_EVAL_API_FRAME_OBJECT* frame) {
   // Returns the C string name of the current frame.
   DEBUG_CHECK(PyUnicode_Check(F_CODE(frame)->co_name));
   return PyUnicode_AsUTF8(F_CODE(frame)->co_name);
 }
 
-static PyObject* dynamo_call_callback(
+static inline PyObject* dynamo_call_callback(
     PyObject* callable,
     THP_EVAL_API_FRAME_OBJECT* _frame,
     PyObject* locals,
@@ -277,7 +277,7 @@ static PyObject* dynamo_call_callback(
   return res;
 }
 
-static void clear_old_frame_if_python_312_plus(
+static inline void clear_old_frame_if_python_312_plus(
   PyThreadState* tstate,
   THP_EVAL_API_FRAME_OBJECT* frame) {
 #if IS_PYTHON_3_12_PLUS
@@ -288,7 +288,7 @@ static void clear_old_frame_if_python_312_plus(
 #endif
 }
 
-static PyObject* dynamo_eval_custom_code_impl(
+inline static PyObject* dynamo_eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
@@ -467,7 +467,7 @@ static PyObject* dynamo_eval_custom_code_impl(
 }
 
 // This wrapper function adds a profiler event
-static PyObject* dynamo_eval_custom_code(
+inline static PyObject* dynamo_eval_custom_code(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
@@ -725,8 +725,8 @@ typedef struct THPPyInterpreterFrame {
   _PyInterpreterFrame* frame; // Borrowed reference
 } THPPyInterpreterFrame;
 
-static void enable_eval_frame_shim(PyThreadState* tstate) {}
-static void enable_eval_frame_default(PyThreadState* tstate) {}
+inline static void enable_eval_frame_shim(PyThreadState* tstate) {}
+inline static void enable_eval_frame_default(PyThreadState* tstate) {}
 
 static struct PyGetSetDef THPPyInterpreterFrame_properties[] = {NULL};
 

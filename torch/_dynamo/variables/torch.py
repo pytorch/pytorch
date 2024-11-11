@@ -467,7 +467,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.numel)
         def handle_numel(self, tx: "InstructionTranslator", input):
-            if isinstance(input, TensorVariable) and input.valid_size():
+            if isinstance(input, TensorVariable) and input.size is not None:
                 return ConstantVariable.create(product(input.size))
             elif isinstance(input, TensorVariable):
                 # Workaround dynamic shapes issue
@@ -992,8 +992,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                         and out_tensor in tx.output.graphargs
                         and isinstance(out_tensor, variables.TensorVariable)
                         and isinstance(result_tensor, variables.TensorVariable)
-                        and out_tensor._size
-                        != result_tensor._size  # we actually want to compare None values here
+                        and out_tensor.size != result_tensor.size
                     ):
                         # It's hard to get out variants with resizing on graph inputs work
                         # properly across dynamo/aot/inductor, just fall back.

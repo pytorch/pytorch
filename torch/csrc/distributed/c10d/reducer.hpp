@@ -103,7 +103,7 @@ class TORCH_API Reducer {
   // been applied.
   void set_optimizer_in_backward() {
     optim_in_backward_ = true;
-  }
+  };
 
   // Runs allreduce or installed communication hook given GradBucket instance.
   c10::intrusive_ptr<c10::ivalue::Future> run_comm_hook(

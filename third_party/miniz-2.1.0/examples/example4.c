@@ -1,6 +1,6 @@
 // example4.c - Uses tinfl.c to decompress a zlib stream in memory to an output file
 // Public domain, May 15 2011, Rich Geldreich, richgel99@gmail.com. See "unlicense" statement at the end of tinfl.c.
-#include "miniz.h"
+#include "miniz_tinfl.h"
 #include <stdio.h>
 #include <limits.h>
 
@@ -47,7 +47,7 @@ int main(int argc, char *argv[])
   file_loc = ftell(pInfile);
   fseek(pInfile, 0, SEEK_SET);
 
-  if ((file_loc < 0) || ((mz_uint64)file_loc > INT_MAX))
+  if ((file_loc < 0) || (file_loc > INT_MAX))
   {
      // This is not a limitation of miniz or tinfl, but this example.
      printf("File is too large to be processed by this example.\n");

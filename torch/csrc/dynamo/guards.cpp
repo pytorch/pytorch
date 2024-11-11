@@ -756,7 +756,7 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
 }
 
 template <typename T>
-static void unwrap_size_tuple(PyObject* obj, T& output) {
+inline static void unwrap_size_tuple(PyObject* obj, T& output) {
   TORCH_CHECK(PyTuple_CheckExact(obj));
   size_t len = PyTuple_GET_SIZE(obj);
   output.reserve(len);
@@ -768,7 +768,7 @@ static void unwrap_size_tuple(PyObject* obj, T& output) {
 }
 
 template <typename T>
-static void _parse_empty_strided_args(
+inline static void _parse_empty_strided_args(
     PyObject* args,
     T& sizes,
     T& strides,
@@ -783,7 +783,7 @@ static void _parse_empty_strided_args(
   dtype = reinterpret_cast<THPDtype*>(py_dtype)->scalar_type;
 }
 
-static PyObject* _empty_strided_device(
+inline static PyObject* _empty_strided_device(
     PyObject* dummy,
     PyObject* args,
     c10::DeviceType device_type) {

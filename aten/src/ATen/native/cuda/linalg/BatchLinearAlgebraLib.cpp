@@ -238,9 +238,16 @@ void ldl_solve_cusolver(
 
 #if defined(USE_LINALG_SOLVER)
 
+inline static Tensor column_major_identity_matrix_like(const Tensor& self) {
+  auto size = self.sizes();
+  auto size_slice = IntArrayRef(size.data(), size.size()-1);
+  return at::ones(size_slice, self.options()).diag_embed().mT();
+}
+
+
 // call cusolver gesvd function to calculate svd
 template<typename scalar_t>
-static void apply_svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+inline static void apply_svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
   const Tensor& infos, bool full_matrices, bool compute_uv,
   const bool calculate_all_batches,
   const std::vector<int64_t>& batches
@@ -312,7 +319,7 @@ static void apply_svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Ten
 }
 
 // We'll copy A inside svd_cusolver_gesvd
-static void svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+inline static void svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
   const Tensor& infos, bool full_matrices, bool compute_uv,
   const bool calculate_all_batches = true,
   const std::vector<int64_t>& batches = {}
@@ -349,7 +356,7 @@ static void svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Tensor& S
 
 // call cusolver gesvdj function to calculate svd
 template<typename scalar_t>
-static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+inline static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
   const Tensor& infos, bool full_matrices, bool compute_uv) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   int m = cuda_int_cast(A.size(-2), "m");
@@ -423,7 +430,7 @@ static void apply_svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const Te
 // wrapper around apply_svd_cusolver_gesvdj that handles dtype dispatch
 // note that gesvdj returns V, which is what we want
 // Need to pass a copy of A, since A will be rewritten inside the function call
-static void svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& infos, bool full_matrices, bool compute_uv) {
+inline static void svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& infos, bool full_matrices, bool compute_uv) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "svd_cuda_gesvdj", [&] {
     apply_svd_cusolver_gesvdj<scalar_t>(A, U, S, V, infos, full_matrices, compute_uv);
   });
@@ -431,7 +438,7 @@ static void svd_cusolver_gesvdj(const Tensor& A, const Tensor& U, const Tensor& 
 
 // call cusolver gesvdj batched function to calculate svd
 template<typename scalar_t>
-static void apply_svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+inline static void apply_svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
   const Tensor& infos, bool compute_uv
 ) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -474,7 +481,7 @@ static void apply_svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, c
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyGesvdjInfo(gesvdj_params));
 }
 
-static void svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& infos, bool full_matrices, bool compute_uv) {
+inline static void svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V, const Tensor& infos, bool full_matrices, bool compute_uv) {
   auto m = A.size(-2);
   auto n = A.size(-1);
   auto k = std::min(m, n);
@@ -513,7 +520,7 @@ static void svd_cusolver_gesvdjBatched(const Tensor& A, const Tensor& U, const T
 }
 
 template<typename scalar_t>
-static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
+inline static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
     const Tensor& infos, bool full_matrices, bool compute_uv) {
 #ifndef CUDART_VERSION
   TORCH_CHECK(false, "gesvda: Batched version is supported only with cuBLAS backend.")
@@ -570,7 +577,7 @@ static void apply_svd_cusolver_gesvdaStridedBatched(const Tensor& A, const Tenso
 }
 
 // We'll copy A inside svd_cusolver_gesvdaStridedBatched
-static void svd_cusolver_gesvdaStridedBatched(
+inline static void svd_cusolver_gesvdaStridedBatched(
     const Tensor& A, const Tensor& U, const Tensor& S, const Tensor& V,
     const Tensor& infos, bool full_matrices, bool compute_uv) {
   // We need to pass a copy of A, as it will be overwritten
@@ -709,7 +716,7 @@ void svd_cusolver(const Tensor& A,
 
 // Implementation of Cholesky decomposition using looped cusolverDn<T>potrf or cusolverDnXpotrf (64-bit)
 template<typename scalar_t>
-static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_working_copy, bool upper, const Tensor& infos) {
+inline static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_working_copy, bool upper, const Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const int64_t n = self_working_copy.size(-1);
@@ -778,7 +785,7 @@ static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_working_copy
 // Warning: cusolverDn<T>potrfBatched doesn't work quite well when matrix size or batch size is zero.
 // If you write your own C++ extension and use this function, make sure you do a zero numel check for the input.
 template<typename scalar_t>
-static void apply_cholesky_cusolver_potrfBatched(const Tensor& self_working_copy, bool upper, const Tensor& infos) {
+inline static void apply_cholesky_cusolver_potrfBatched(const Tensor& self_working_copy, bool upper, const Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const int n = cuda_int_cast(self_working_copy.size(-1), "n");
@@ -813,7 +820,7 @@ void cholesky_helper_cusolver(const Tensor& input, bool upper, const Tensor& inf
 
 
 template<typename scalar_t>
-static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, const Tensor& A_column_major_copy, bool upper, Tensor& infos) {
+inline static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, const Tensor& A_column_major_copy, bool upper, Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const int64_t n = self_working_copy.size(-2);
@@ -869,7 +876,7 @@ static void apply_cholesky_cusolver_potrs(Tensor& self_working_copy, const Tenso
 // This code path is only dispatched to if MAGMA is not linked in the pytorch build.
 // cusolverDn<t>potrsBatched only supports nrhs == 1
 template<typename scalar_t>
-static void apply_cholesky_cusolver_potrsBatched(Tensor& self_working_copy, const Tensor& A_column_major_copy, bool upper, Tensor& infos) {
+inline static void apply_cholesky_cusolver_potrsBatched(Tensor& self_working_copy, const Tensor& A_column_major_copy, bool upper, Tensor& infos) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   const auto uplo = upper ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
   const int64_t n = self_working_copy.size(-2);
@@ -1140,7 +1147,7 @@ void ormqr_cusolver(const Tensor& input, const Tensor& tau, const Tensor& other,
   For further details, please see the cuSOLVER documentation for ORGQR and UNGQR.
 */
 template <typename scalar_t>
-static void apply_orgqr(Tensor& self, const Tensor& tau) {
+inline static void apply_orgqr(Tensor& self, const Tensor& tau) {
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.const_data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
