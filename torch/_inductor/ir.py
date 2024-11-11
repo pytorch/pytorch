@@ -6819,11 +6819,9 @@ class InvokeSubgraph(ExternKernel):
         # Find the device - operands could be integers from shapes, so we can't
         # use operands[0]
         device = None
-        dtype = None
         for operand in operands:
             if not isinstance(operand, ShapeAsConstantBuffer):
                 device = operand.get_device()
-                dtype = operand.get_dtype()
                 break
         assert device is not None
 
@@ -6833,25 +6831,15 @@ class InvokeSubgraph(ExternKernel):
             layout=MultiOutputLayout(device=device),
         )
 
-        def create_layout(output):
-            if isinstance(output, (ShapeAsConstantBuffer, NoneAsConstantBuffer)):
-                # Send a dummy layout
-                return FixedLayout(
-                    device=device,
-                    dtype=dtype,
-                    size=(),
-                )
-            return FixedLayout(
-                device=output.get_device(),
-                dtype=output.get_dtype(),
-                size=output.get_size(),
-                stride=output.get_stride(),
-                offset=output.get_layout().offset,
-            )
-
         outputs = [
             MultiOutput(
-                create_layout(output),
+                FixedLayout(
+                    device=output.get_device(),
+                    dtype=output.get_dtype(),
+                    size=output.get_size(),  # type: ignore[arg-type]
+                    stride=output.get_stride(),
+                    offset=output.get_layout().offset,  # type: ignore[union-attr]
+                ),
                 invoke_subgraph,
                 [(list, i)],
             )

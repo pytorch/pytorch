@@ -162,77 +162,6 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
 
-    def test_diamond(self):
-        @mark_compile_region
-        def gn(x):
-            return torch.sin(x)
-
-        def fn(x):
-            a = gn(x)
-            b = gn(x)
-            return torch.sin(a) + torch.cos(b)
-
-        x = torch.randn(8, requires_grad=True)
-        ref = fn(x)
-
-        x_clone = x.clone().detach().requires_grad_(True)
-        res = torch.compile(fn, fullgraph=True)(x_clone)
-
-        # Run backward
-        ref.sum().backward()
-        res.sum().backward()
-
-        self.assertEqual(ref, res)
-        self.assertEqual(x.grad, x_clone.grad)
-
-    def test_dropout(self):
-        @mark_compile_region
-        def gn(x):
-            return torch.nn.functional.dropout(torch.sin(x), p=0.5)
-
-        @mark_compile_region
-        def hn(x):
-            return torch.sin(x)
-
-        def fn(x):
-            return gn(x) + hn(x)
-
-        x = torch.randn(8, requires_grad=True)
-        # Difficult to check the results here because we random does not match
-        # between eager and Triton.
-        res = torch.compile(fn, backend="inductor", fullgraph=True)(x)
-
-    def test_symint_from_fwd_to_bwd(self):
-        @mark_compile_region
-        def gn(x, y):
-            a = torch.sum(x, (1,), keepdim=True).view(y.shape[1], y.shape[0])
-            return torch.matmul(a, y)
-
-        def fn(x, y):
-            return gn(x, y)
-
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-
-        x = torch.randn(64, 1, requires_grad=True)
-        y = torch.randn(8, 8, requires_grad=True)
-        ref = fn(x, y)
-        res = opt_fn(x, y)
-        self.assertEqual(ref, res)
-
-        x = torch.randn(256, 1, requires_grad=True)
-        y = torch.randn(16, 16, requires_grad=True)
-        ref = fn(x, y)
-        res = opt_fn(x, y)
-        self.assertEqual(ref, res)
-        res.sum().backward()
-
-        x = torch.randn(16, 1, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
-        ref = fn(x, y)
-        res = opt_fn(x, y)
-        self.assertEqual(ref, res)
-        res.sum().backward()
-
     def test_dedupe(self):
         @mark_compile_region
         def gn(x, y):
@@ -297,25 +226,19 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f32[8]", primals_2: "f32[8]"):
-        ___forward_invoke_subgraph_0_post_graph = self.___forward_invoke_subgraph_0_post_graph
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, '___forward_invoke_subgraph_0', (primals_1, primals_2));  repeated_subgraph0 = None
+        getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
 
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph, '___forward_invoke_subgraph_0_post_graph', (primals_1, primals_2));  ___forward_invoke_subgraph_0_post_graph = primals_1 = None
-        getitem: "f32[8]" = invoke_subgraph[1]
-        getitem_1: "f32[8]" = invoke_subgraph[2]
-        getitem_2: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+        repeated_subgraph0_1 = self.repeated_subgraph0
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, '___forward_invoke_subgraph_0', (getitem, primals_2));  repeated_subgraph0_1 = None
+        getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return (getitem_1, primals_1, primals_2, getitem)
 
-        ___forward_invoke_subgraph_0_post_graph_1 = self.___forward_invoke_subgraph_0_post_graph
-
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(___forward_invoke_subgraph_0_post_graph_1, '___forward_invoke_subgraph_0_post_graph', (getitem_2, primals_2));  ___forward_invoke_subgraph_0_post_graph_1 = getitem_2 = primals_2 = None
-        getitem_3: "f32[8]" = invoke_subgraph_1[1]
-        getitem_4: "f32[8]" = invoke_subgraph_1[2]
-        getitem_5: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return (getitem_5, getitem, getitem_1, getitem_3, getitem_4)
-
-    class ___forward_invoke_subgraph_0_post_graph(torch.nn.Module):
-        def forward(self, primals_0: "f32[8]", primals_1: "f32[8]"):
-            mul: "f32[8]" = torch.ops.aten.mul.Tensor(primals_0, primals_1)
-            return (mul, primals_0, primals_1)
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[8]", arg1_1: "f32[8]"):
+            mul: "f32[8]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            return (mul,)
 """,
         )
 
@@ -473,16 +396,11 @@ class GraphModule(torch.nn.Module):
             return gn(x)
 
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-        # requires_grad is False deliberately to force None the joint_graph
-        # outputs
-        x = torch.randn(8, 8, requires_grad=False)
+        x = torch.randn(8, 8, requires_grad=True)
 
         ref = mod(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
-
-        ref.sum().backward()
-        res.sum().backward()
 
     def test_fail_with_direct_invoke_subgraph(self):
         from torch._higher_order_ops import invoke_subgraph
