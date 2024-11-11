@@ -75,6 +75,7 @@ inductor_decompositions = get_decompositions(
         aten.native_group_norm,
         aten.native_layer_norm,
         aten.nll_loss2d_backward,
+        aten.permute_copy,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -231,7 +232,7 @@ def bmm(
     self: torch.Tensor,
     batch2: torch.Tensor,
 ) -> torch.Tensor:
-    if config.coordinate_descent_tuning:
+    if config.coordinate_descent_tuning and self.device.type != "cpu":
         if guard_size_oblivious(self.shape[1] == 1) or guard_size_oblivious(
             batch2.shape[2] == 1
         ):
@@ -285,7 +286,7 @@ def mm(
 ) -> torch.Tensor:
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
-    if config.coordinate_descent_tuning:
+    if config.coordinate_descent_tuning and self.device.type != "cpu":
         if guard_size_oblivious(self.shape[0] == 1) or guard_size_oblivious(
             input2.shape[1] == 1
         ):

@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import builtins
 import collections
 import functools
 import inspect
@@ -34,7 +35,7 @@ from ..utils import (
     istype,
     make_cell,
 )
-from .base import MutableLocal, typestr, VariableTracker
+from .base import typestr, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 
 
@@ -220,9 +221,11 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         )
         if fn.__kwdefaults__:
             kwdefaults_sources = {
-                k: None
-                if self.source is None
-                else DefaultsSource(self.source, k, is_kw=True)
+                k: (
+                    None
+                    if self.source is None
+                    else DefaultsSource(self.source, k, is_kw=True)
+                )
                 for k in fn.__kwdefaults__
             }
             fake_func.__kwdefaults__ = {
@@ -241,63 +244,55 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         for idx, name, cell in zip(
             itertools.count(), self.fn.__code__.co_freevars, closure
         ):
-            if name == "__class__":
-                source = AttrSource(self.source, "__class__") if self.source else None
-                result[name] = variables.UserDefinedClassVariable(
-                    cell.cell_contents,
-                    source=source,
-                )
-            else:
-                var = tx.match_nested_cell(name, cell)
-                if var is not None:
-                    # optimization for cleaner codegen
-                    result[name] = var
-                elif self.source:
-                    side_effects = parent.output.side_effects
-                    if cell in side_effects:
-                        out = side_effects[cell]
-                    else:
-                        closure_cell = GetItemSource(
-                            AttrSource(self.source, "__closure__"), idx
-                        )
-                        closure_cell_contents = AttrSource(
-                            closure_cell, "cell_contents"
-                        )
-                        try:
-                            contents_var = VariableTracker.build(
-                                parent, cell.cell_contents, closure_cell_contents
-                            )
-                        except ValueError:
-                            # Cell has not yet been assigned
-                            contents_var = variables.DeletedVariable()
-
-                        if (
-                            closure_cell_contents.name()
-                            not in tx.mutated_closure_cell_contents
-                        ):
-                            # Optimistically don't allocate the cell, to
-                            # reduce the number of side effects.  This is
-                            # important for cond, as without it, any accesses
-                            # to closures create side effects and cond doesn't
-                            # support side effects.  If we're wrong and this
-                            # closure cell gets written to, we will restart
-                            # the analysis with this cell's name in the
-                            # mutated list here
-                            result[name] = contents_var
-                            continue
-
-                        # cells are written to with "cell_contents",
-                        # so the source should just be the closure_cell, not its contents
-                        out = side_effects.track_cell_existing(closure_cell, cell)
-                        side_effects.store_cell(
-                            out,
-                            contents_var,
-                        )
-
-                    result[name] = out
-
+            var = tx.match_nested_cell(name, cell)
+            if var is not None:
+                # optimization for cleaner codegen
+                result[name] = var
+            elif self.source:
+                side_effects = parent.output.side_effects
+                if cell in side_effects:
+                    out = side_effects[cell]
                 else:
-                    result[name] = VariableTracker.build(tx, cell.cell_contents)
+                    closure_cell = GetItemSource(
+                        AttrSource(self.source, "__closure__"), idx
+                    )
+                    closure_cell_contents = AttrSource(closure_cell, "cell_contents")
+                    try:
+                        contents_var = VariableTracker.build(
+                            parent, cell.cell_contents, closure_cell_contents
+                        )
+                    except ValueError:
+                        # Cell has not yet been assigned
+                        contents_var = variables.DeletedVariable()
+
+                    if id(cell) not in tx.mutated_closure_cell_ids:
+                        # Optimistically don't allocate the cell, to
+                        # reduce the number of side effects.  This is
+                        # important for cond, as without it, any accesses
+                        # to closures create side effects and cond doesn't
+                        # support side effects.  If we're wrong and this
+                        # closure cell gets written to, we will restart
+                        # the analysis with this cell's name in the
+                        # mutated list here
+                        result[name] = contents_var
+                        # Map the variable to the original cell so we can
+                        # look it up later, see
+                        # `InliningInstructionTranslator.STORE_DEREF`.
+                        tx.contents_var_to_mutated_cell[contents_var] = cell
+                        continue
+
+                    # cells are written to with "cell_contents",
+                    # so the source should just be the closure_cell, not its contents
+                    out = side_effects.track_cell_existing(closure_cell, cell)
+                    side_effects.store_cell(
+                        out,
+                        contents_var,
+                    )
+
+                result[name] = out
+
+            else:
+                result[name] = VariableTracker.build(tx, cell.cell_contents)
 
         return result, closure_cells
 
@@ -467,7 +462,6 @@ def invoke_and_store_as_constant(tx: "InstructionTranslator", fn, name, args, kw
 
 class NestedUserFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
-        "closure_scope",
         "f_globals",
         *BaseUserFunctionVariable._nonvar_fields,
     }
@@ -481,7 +475,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         kwdefaults,
         annotations,
         closure,
-        closure_scope,
         wrapped_reconstructible=None,
         **kwargs,
     ) -> None:
@@ -496,9 +489,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.kwdefaults = kwdefaults
         self.annotations = annotations
         self.closure = closure
-        if closure is None:
-            closure_scope = None
-        self.closure_scope = closure_scope
         # Either a source or a VT with .can_reconstruct() == True
         self.wrapped_reconstructible: Optional[
             Union[Source, VariableTracker]
@@ -678,7 +668,7 @@ class SkipFunctionVariable(VariableTracker):
                 **{k: v.as_python_constant() for k, v in kwargs.items()},
             )
             return self.fold_through_function_to_wrapper().get(self.value)(
-                value, mutable_local=MutableLocal()
+                value, mutation_type=ValueMutationNew()
             )
         elif (
             self.value is functools.wraps
@@ -1010,6 +1000,38 @@ class PolyfilledFunctionVariable(VariableTracker):
             )
             return VariableTracker.build(tx, result)
 
+        # Special case for sum on tuple/list of ints
+        if (
+            self.fn is builtins.sum
+            and len(args) == 1
+            and not kwargs
+            and isinstance(args[0], (variables.ListVariable, variables.TupleVariable))
+            and all(
+                (isinstance(x, variables.ConstantVariable) and isinstance(x.value, int))
+                or (isinstance(x, variables.SymNodeVariable) and x.python_type() is int)
+                for x in args[0].items
+            )
+        ):
+            return variables.SymNodeVariable.create(
+                tx,
+                tx.output.create_proxy(
+                    "call_function",
+                    torch.sym_sum,
+                    (tuple(a.as_proxy() for a in args[0].items),),
+                    {},
+                ),
+                sym_num=torch.sym_sum(
+                    [
+                        (
+                            x.value
+                            if isinstance(x, variables.ConstantVariable)
+                            else x.sym_num
+                        )
+                        for x in args[0].items
+                    ]
+                ),
+            )
+
         traceable_function_variable = VariableTracker.build(tx, self.traceable_fn)
         return traceable_function_variable.call_function(tx, args, kwargs)
 
@@ -1191,8 +1213,7 @@ class TMADescriptorVariable(VariableTracker):
         **kwargs,
     ):
         assert isinstance(data_ptr, variables.DataPtrVariable)
-
-        super().__init__(**kwargs),
+        super().__init__(**kwargs)
         self.data_ptr = data_ptr
         self.dims = dims
         self.block_dims = block_dims
@@ -1224,8 +1245,8 @@ class CreateTMADescriptorVariable(VariableTracker):
         rank: int,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs),
         assert rank in (1, 2)
+        super().__init__(**kwargs)
         self.rank = rank
 
     def call_function(
@@ -1259,9 +1280,9 @@ class CreateTMADescriptorVariable(VariableTracker):
             ]
             block_dims = [
                 kwargs["block_dim1"] if "block_dim1" in kwargs else args[3],
-                kwargs["block_dim2"] if "block_dim2" in kwargs else args[4],
+                kwargs["block_dim0"] if "block_dim0" in kwargs else args[4],
             ]
-        element_size = kwargs["ptr"] if "ptr" in kwargs else args[-1]
+        element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
 
         return TMADescriptorVariable(
             data_ptr=ptr,

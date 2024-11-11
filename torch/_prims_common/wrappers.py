@@ -59,7 +59,9 @@ def _maybe_convert_to_dtype(a, dtype):
     if a is None:
         return None
 
-    raise ValueError(f"Received type {type(a)} that is neither a tensor or a number!")
+    raise ValueError(
+        f"Received unsupported type {type(a)}. Expected TensorLike, Number, or Sequence."
+    )
 
 
 def _maybe_convert_to_type(a: NumberType, typ: type) -> NumberType:

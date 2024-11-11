@@ -520,44 +520,32 @@ def meta__cslt_sparse_mm(
     alpha: Optional[Tensor] = None,
     out_dtype: Optional[torch.dtype] = None,
     transpose_result: bool = False,
-    alg_id: int = 0,
-    split_k: int = 1,
-    split_k_one_kernel: bool = False,
 ):
     assert dense_B.dtype in {
         torch.float32,
         torch.float16,
         torch.bfloat16,
         torch.int8,
-        torch.float8_e4m3fn,
-    }, "_cslt_sparse_mm only supports fp16, bf16, int8, and fp8e4m3"
+    }, "_cslt_sparse_mm only supports fp16, bf16, and int8"
     assert compressed_A.dtype == dense_B.dtype, "inputs must have the same dtype"
     assert len(dense_B.shape) == 2, "_cslt_sparse_mm only supports 2d inputs"
 
-    is_8bit_input_type = compressed_A.dtype in [torch.int8, torch.float8_e4m3fn]
-    compression_factor = 10 if is_8bit_input_type else 9
+    is_int8_input_type = compressed_A.dtype == torch.int8
+    compression_factor = 10 if is_int8_input_type else 9
     k = dense_B.size(0)
     n = dense_B.size(1)
     m = (compressed_A.numel() * 16) // (compression_factor * k)
     if bias is not None:
         assert m == bias.size(0)
 
-    if is_8bit_input_type:
-        assert not dense_B.is_contiguous()
-
     if out_dtype is not None:
-        assert (
-            is_8bit_input_type
-            and out_dtype
-            in {
-                torch.float16,
-                torch.bfloat16,
-                torch.int32,
-                torch.float8_e4m3fn,
-            }
-        ), "out_dtype is not supported for {compressed_A.dtype} x {dense_B.dtype} -> {out_dtype} matmul!"
+        assert is_int8_input_type and out_dtype in {
+            torch.float16,
+            torch.bfloat16,
+            torch.int32,
+        }, "out_dtype is only supported for i8i8->fp16, bf16, or i32 matmul"
     output_shape = (n, m) if transpose_result else (m, n)
-    result = torch.empty(output_shape, dtype=out_dtype, device=compressed_A.device)
+    result = dense_B.new_empty(output_shape, dtype=out_dtype)
     return result
 
 
@@ -731,8 +719,18 @@ def sym_constrain_range_for_size(size, min=None, max=None):
     # Avoid importing sympy at a module level
     from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
 
+    if min is None and max is None:
+        torch._check_is_size(size)
+        return
+
     if isinstance(size, (SymFloat, SymBool)):
         raise ValueError("Constraining SymFloat or Symbool is nyi")
+    if type(size) is int:
+        if min is not None:
+            torch._check(size >= min)
+        if max is not None:
+            torch._check(size <= max)
+        return
     _constrain_range_for_size(size, min=min, max=max)
 
 
@@ -2133,6 +2131,12 @@ def _compute_reduction_shape(self, dims, keepdim):
 def device_hint(tensor) -> "str":
     if isinstance(tensor, torch._subclasses.FakeTensor):
         return tensor.fake_device.type
+    elif (
+        hasattr(tensor, "device")
+        and hasattr(tensor.device, "type")
+        and tensor.device.type != "meta"
+    ):
+        return tensor.device.type
     else:
         return "cuda"  # default to cuda
 
@@ -3705,7 +3709,7 @@ def meta_masked_scatter_(self, mask, source):
     torch._check(
         self.dtype == source.dtype,
         lambda: "masked_scatter: expected self and source to have same "
-        "dtypes but got {self.dtype} and {source.dtype}",
+        f"dtypes but got {self.dtype} and {source.dtype}",
     )
     return self
 
