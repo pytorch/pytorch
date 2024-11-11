@@ -28,8 +28,8 @@ env:
   SKIP_ALL_TESTS: 1
   BUILDER_ROOT: /builder
   PYTORCH_ROOT: /pytorch
-  DOWNLOADS_DIR: /downloads
-  DEPENDENCIES_DIR: /dependencies
+  DOWNLOADS_DIR: c:\temp\downloads
+  DEPENDENCIES_DIR: c:\temp\dependencies
 concurrency:
   group: windows-arm64-binary-libtorch-debug-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

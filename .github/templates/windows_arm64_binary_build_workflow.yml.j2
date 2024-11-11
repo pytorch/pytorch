@@ -74,8 +74,8 @@ env:
   SKIP_ALL_TESTS: 1
   BUILDER_ROOT: /builder
   PYTORCH_ROOT: /pytorch
-  DOWNLOADS_DIR: /downloads
-  DEPENDENCIES_DIR: /dependencies
+  DOWNLOADS_DIR: c:\temp\downloads
+  DEPENDENCIES_DIR: c:\temp\dependencies
 !{{ common.concurrency(build_environment) }}
 
 jobs:
