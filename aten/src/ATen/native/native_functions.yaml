@@ -641,6 +641,7 @@
     CPU: addmv_out_cpu
     CUDA: addmv_out_cuda
     MPS: addmv_out_mps
+    XPU: addmv_out_xpu
     SparseCsrCPU: addmv_out_sparse_compressed
     SparseCsrCUDA: addmv_out_sparse_compressed_cuda
 
@@ -1061,6 +1062,7 @@
     CPU: baddbmm_out_cpu
     CUDA: baddbmm_out_cuda
     MPS: baddbmm_out_mps
+    XPU: baddbmm_out_xpu
     SparseCsrCUDA: baddbmm_out_sparse_csr_cuda
 
 - func: bartlett_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -1358,6 +1360,7 @@
     CPU: bmm_out_cpu
     CUDA: bmm_out_cuda
     MPS: bmm_out_mps
+    XPU: bmm_out_xpu
     SparseCPU: bmm_out_sparse_cpu
     SparseCUDA: bmm_out_sparse_cuda
     SparseCsrCUDA: bmm_out_sparse_csr_cuda
@@ -4130,6 +4133,7 @@
     CPU: mm_out_cpu
     CUDA: mm_out_cuda
     MPS: mm_out_mps
+    XPU: mm_out_xpu
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: _sparse_csr_mm_out
 
@@ -6993,6 +6997,7 @@
     CPU: addmm_out_cpu
     CUDA: addmm_out_cuda
     MPS: addmm_out_mps
+    XPU: addmm_out_xpu
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
     SparseCsrCPU: addmm_out_sparse_compressed_cpu
@@ -7021,6 +7026,7 @@
   dispatch:
     CPU: addmm_activation_out_cpu
     CUDA: addmm_activation_out_cuda
+    XPU: addmm_activation_out_xpu
 
 - func: _addmm_activation(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool use_gelu=False) -> Tensor
   structured_delegate: _addmm_activation.out
@@ -8655,18 +8661,18 @@
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
   dispatch:
-    CPU, CUDA: addbmm_
+    CPU, CUDA, XPU: addbmm_
     MPS: addbmm_mps_
 
 - func: addbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: addbmm_out
+    CPU, CUDA, XPU: addbmm_out
     MPS: addbmm_out_mps
 
 - func: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: method, function
   dispatch:
-    CPU, CUDA: addbmm
+    CPU, CUDA, XPU: addbmm
     MPS: addbmm_mps
 
 - func: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
