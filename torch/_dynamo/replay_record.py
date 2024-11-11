@@ -1,7 +1,7 @@
 import dataclasses
 from dataclasses import field
-from types import FunctionType, ModuleType
-from typing import Any, BinaryIO, Dict, IO
+from types import CellType, CodeType, ModuleType
+from typing import Any, BinaryIO, Dict, IO, Tuple
 from typing_extensions import Self
 
 from torch.utils._import_utils import import_dill
@@ -28,7 +28,8 @@ class DummyModule:
 
 @dataclasses.dataclass
 class ExecutionRecord:
-    func: FunctionType
+    code: CodeType
+    closure: Tuple[CellType]
     globals: Dict[str, Any] = field(default_factory=dict)
     locals: Dict[str, Any] = field(default_factory=dict)
     builtins: Dict[str, Any] = field(default_factory=dict)
@@ -48,7 +49,8 @@ class ExecutionRecord:
 class ExecutionRecorder:
     LOCAL_MOD_PREFIX = "___local_mod_"
 
-    func: FunctionType
+    code: CodeType
+    closure: Tuple[CellType]
     globals: Dict[str, Any] = field(default_factory=dict)
     locals: Dict[str, Any] = field(default_factory=dict)
     builtins: Dict[str, Any] = field(default_factory=dict)
@@ -81,7 +83,8 @@ class ExecutionRecorder:
 
     def get_record(self) -> ExecutionRecord:
         return ExecutionRecord(
-            self.func,
+            self.code,
+            self.closure,
             ExecutionRecorder._resolve_modules(self.globals),
             ExecutionRecorder._resolve_modules(self.locals),
             self.builtins.copy(),
