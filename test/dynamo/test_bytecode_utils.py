@@ -122,7 +122,7 @@ def fn():
                 z *= 3
             return z
 
-        opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(opt_f(None, torch.ones(2)), 6)
 
         if sys.version_info >= (3, 11):
@@ -226,7 +226,7 @@ def fn():
             dummy_fn.__code__ = code
             self.assertEqual(dummy_fn(), test[3])
 
-            dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
+            dummy_opt = torch.compile(dummy_opt, backend="eager")
             self.assertEqual(dummy_opt(), test[3])
 
     def test_exception_table_encode_varint(self):
